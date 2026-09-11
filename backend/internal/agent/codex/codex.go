@@ -136,7 +136,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.SetModelInventory(newModelInventory(models))
 	}
 	wire.suppressUserInput = true
-	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model, Version: wire.agentVersion}
+	initMsg := &agent.InitMessage{SessionID: wire.threadID, ReportedModel: wire.reportedModel, ReportedEffort: wire.reportedEffort, Version: wire.agentVersion}
 	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
 		_ = cmd.Process.Kill()
@@ -229,7 +229,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
-	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, suppressUserInput: true}
+	wire := &wireFormat{threadID: opts.ResumeSessionID, requestedEffort: opts.Effort, suppressUserInput: true}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
@@ -289,16 +289,18 @@ func modelsForModelInfo(models []string, modelInfo []codex.ModelInfo) []agent.Mo
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
-// protocol. It holds per-session state: the thread ID, a request ID counter,
-// accumulated token usage from thread/tokenUsage/updated, and the reasoning
-// effort level.
+// protocol. It holds per-session state: the thread ID and resolved settings, a
+// request ID counter, accumulated token usage from thread/tokenUsage/updated,
+// and the requested reasoning effort level.
 type wireFormat struct {
 	threadID          string
-	effort            string // Reasoning effort (e.g. "none", "low", "medium", "high").
+	requestedEffort   string // Requested effort sent with each turn/start request.
 	suppressUserInput bool
 	nextID            atomic.Int64
 	mu                sync.Mutex
 	agentVersion      string
+	reportedModel     string      // Resolved by thread/start.
+	reportedEffort    string      // Resolved by thread/start.
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
 }
 
@@ -323,7 +325,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		ThreadID: w.threadID,
 		Input:    input,
 		Summary:  codex.ReasoningSummaryAuto,
-		Effort:   codex.ReasoningEffort(w.effort),
+		Effort:   codex.ReasoningEffort(w.requestedEffort),
 	})
 	if err != nil {
 		return fmt.Errorf("marshal turn/start params: %w", err)
@@ -451,7 +453,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{effort: opts.Effort}
+	w := &wireFormat{requestedEffort: opts.Effort}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
@@ -507,6 +509,10 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 	w.threadID = result.Thread.ID
 	w.agentVersion = result.Thread.CLIVersion
+	w.reportedModel = result.Model
+	if result.ReasoningEffort != nil {
+		w.reportedEffort = string(*result.ReasoningEffort)
+	}
 	return w, models, records.Reader(), nil
 }
 

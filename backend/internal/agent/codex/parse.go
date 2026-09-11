@@ -48,14 +48,15 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 	if probe.Type != "" {
 		switch probe.Type {
 		case "caic_session":
-			var m agent.MetaSessionMessage
-			if err := json.Unmarshal(line, &m); err != nil {
+			m, err := agent.DecodeV1MetaSessionMessage(line)
+			if err != nil {
 				return nil, err
 			}
 			return []agent.Message{&agent.InitMessage{
-				SessionID: m.SessionID,
-				Model:     m.Model,
-				Version:   m.AgentVersion,
+				SessionID:      m.SessionID,
+				ReportedModel:  m.ReportedModel,
+				ReportedEffort: m.ReportedEffort,
+				Version:        m.AgentVersion,
 			}}, nil
 		case "caic_diff_stat":
 			var m agent.DiffStatMessage
@@ -92,9 +93,11 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			return nil, fmt.Errorf("thread/started params: %w", err)
 		}
 		return []agent.Message{&agent.InitMessage{
-			SessionID: p.Thread.ID,
-			Cwd:       p.Thread.CWD,
-			Version:   p.Thread.CLIVersion,
+			SessionID:      p.Thread.ID,
+			Cwd:            p.Thread.CWD,
+			ReportedModel:  p.Thread.Model,
+			Version:        p.Thread.CLIVersion,
+			ReportedEffort: string(p.Thread.ReasoningEffort),
 		}}, nil
 
 	case codex.MethodTurnStarted:
@@ -205,10 +208,10 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			detail += " (" + string(p.Reason) + ")"
 		}
 		return []agent.Message{&agent.SystemMessage{
-			MessageType: "system",
-			Subtype:     "model_rerouted",
-			Detail:      detail,
-			Model:       p.ToModel,
+			MessageType:   "system",
+			Subtype:       agent.SystemSubtypeModelRerouted,
+			Detail:        detail,
+			ReportedModel: p.ToModel,
 		}}, nil
 
 	default:

@@ -242,8 +242,10 @@ export default function TaskInfo(props: Props) {
                   <Field label="State" value={data.recorded.state} />
                   <Field label="Started" value={formatTime(data.recorded.startedAt)} />
                   <Field label="Harness" value={data.recorded.harness} />
-                  <Field label="Model" value={data.recorded.model} code />
-                  <Field label="Effort" value={data.recorded.effort} />
+				  <Field label="Requested model" value={data.recorded.requestedModel} code />
+				  <Field label="Requested effort" value={data.recorded.requestedEffort} />
+				  <Field label="Reported model" value={data.recorded.reportedModel} code />
+				  <Field label="Reported effort" value={data.recorded.reportedEffort} />
                   <Field label="Agent version" value={data.recorded.agentVersion} code />
                   <Field label="Session ID" value={data.recorded.sessionID} code />
                 </div>

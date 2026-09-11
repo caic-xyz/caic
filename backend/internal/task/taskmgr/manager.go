@@ -900,7 +900,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			}
 			parentTaskID = parsed
 		}
-		t, err := task.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.Model, lt.Effort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
+		t, err := task.NewTask(taskID, agent.Prompt{Text: lt.Prompt}, lt.Harness, lt.RequestedModel, lt.RequestedEffort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
 		if err != nil {
 			m.log.Warn("skipping purged task with invalid metadata", "task", lt.TaskID, "err", err)
 			continue
@@ -919,8 +919,8 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.Sudo = lt.Sudo
 		t.GitHubToken = lt.GitHubToken
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
-		if lt.SessionID != "" || lt.AgentVersion != "" {
-			t.SetSessionMetadata(lt.SessionID, "", lt.AgentVersion)
+		if lt.SessionID != "" || lt.ReportedModel != "" || lt.ReportedEffort != "" || lt.AgentVersion != "" {
+			t.SetSessionMetadata(lt.SessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion)
 		}
 		if lt.State == taskslog.StateRunning {
 			t.SetState(taskslog.StateFailed)
@@ -1431,7 +1431,7 @@ func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
 	if t.GetSessionID() != "" {
 		sessionID = ""
 	}
-	t.SetSessionMetadata(sessionID, lt.Model, lt.AgentVersion)
+	t.SetSessionMetadata(sessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion)
 }
 
 // importInstance investigates a single runtime instance and registers it as a task.
@@ -1621,7 +1621,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		rt = c.ID.RuntimeName()
 	}
 
-	t, err := task.NewTask(taskID, agent.Prompt{Text: prompt}, lt.Harness, lt.Model, lt.Effort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
+	t, err := task.NewTask(taskID, agent.Prompt{Text: prompt}, lt.Harness, lt.RequestedModel, lt.RequestedEffort, lt.BaseImage, lt.ContainerPlatform, lt.Title)
 	if err != nil {
 		return nil, fmt.Errorf("import task %q: %w", taskID.String(), err)
 	}
@@ -1932,7 +1932,7 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 		// ContextWindow is restored from caic_model_info in the durable task log.
 		// A bounded relay tail can start after that record, leaving the replayed
 		// usage with the same token counts but no context-window metadata.
-		return ok && av.Usage == bv.Usage && av.Model == bv.Model
+		return ok && av.Usage == bv.Usage && av.ReportedModel == bv.ReportedModel
 	case *agent.ResultMessage:
 		bv, ok := b.(*agent.ResultMessage)
 		if !ok {

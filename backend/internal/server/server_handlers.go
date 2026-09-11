@@ -147,10 +147,10 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 	repoPrefs := make([]v1.RepoPrefsResp, len(recent))
 	for i, r := range recent {
 		repoPrefs[i] = v1.RepoPrefsResp{
-			Path:       r.Path,
-			BaseBranch: r.BaseBranch,
-			Harness:    r.Harness,
-			Model:      r.Model,
+			Path:           r.Path,
+			BaseBranch:     r.BaseBranch,
+			Harness:        r.Harness,
+			RequestedModel: r.Model,
 		}
 	}
 	cacheMappings := make([]v1.CacheMappingResp, len(prefs.Settings.CacheMappings))

@@ -178,10 +178,10 @@ func TestHandshake(t *testing.T) {
 		t.Parallel()
 		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
 {"id":2,"result":{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.3-codex"}],"nextCursor":null}}
-{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"},"model":"gpt-5.6","reasoningEffort":"medium"}}
 `
 		var stdin bytes.Buffer
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,6 +190,12 @@ func TestHandshake(t *testing.T) {
 		}
 		if w.agentVersion != "0.133.0" {
 			t.Errorf("agentVersion = %q, want 0.133.0", w.agentVersion)
+		}
+		if w.reportedModel != "gpt-5.6" {
+			t.Errorf("model = %q, want gpt-5.6", w.reportedModel)
+		}
+		if w.reportedEffort != "medium" {
+			t.Errorf("reportedEffort = %q, want medium", w.reportedEffort)
 		}
 		wantModels := []string{"gpt-5.4", "gpt-5.3-codex"}
 		if got := modelIDs(models); !slices.Equal(got, wantModels) {
@@ -229,8 +235,8 @@ func TestHandshake(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if w.threadID != "thread_1" || w.agentVersion != "0.133.0" || len(models) != 1 {
-			t.Fatalf("v2 handshake = thread=%q version=%q models=%v", w.threadID, w.agentVersion, models)
+		if w.threadID != "thread_1" || w.agentVersion != "0.133.0" || w.reportedModel != "" || w.reportedEffort != "" || len(models) != 1 {
+			t.Fatalf("v2 handshake = thread=%q model=%q effort=%q version=%q models=%v", w.threadID, w.reportedModel, w.reportedEffort, w.agentVersion, models)
 		}
 	})
 }

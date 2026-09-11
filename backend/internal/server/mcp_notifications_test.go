@@ -24,43 +24,43 @@ func TestNotificationFeed(t *testing.T) {
 		}{
 			{
 				name:     "OpenCodeDeepSeek",
-				task:     v1.Task{Harness: v1.HarnessOpenCode, Model: "deepseek/deepseek-v3"},
+				task:     v1.Task{Harness: v1.HarnessOpenCode, ReportedModel: "deepseek/deepseek-v3"},
 				provider: agent.QuotaProviderDeepSeek,
 				want:     true,
 			},
 			{
 				name:     "PiXiaomi",
-				task:     v1.Task{Harness: v1.HarnessPi, Model: "xiaomi/mimo-v2.5"},
+				task:     v1.Task{Harness: v1.HarnessPi, ReportedModel: "xiaomi/mimo-v2.5"},
 				provider: agent.QuotaProviderXiaomi,
 				want:     true,
 			},
 			{
 				name:     "PiCodex",
-				task:     v1.Task{Harness: v1.HarnessPi, Model: "codex/gpt-5"},
+				task:     v1.Task{Harness: v1.HarnessPi, ReportedModel: "codex/gpt-5"},
 				provider: agent.QuotaProviderCodex,
 				want:     true,
 			},
 			{
 				name:     "PiOpenRouter",
-				task:     v1.Task{Harness: v1.HarnessPi, Model: "openrouter/anthropic/claude-opus"},
+				task:     v1.Task{Harness: v1.HarnessPi, ReportedModel: "openrouter/anthropic/claude-opus"},
 				provider: agent.QuotaProviderOpenRouter,
 				want:     true,
 			},
 			{
 				name:     "AggregatorDoesNotUseUnderlyingModelProvider",
-				task:     v1.Task{Harness: v1.HarnessOpenCode, Model: "openrouter/anthropic/claude-opus"},
+				task:     v1.Task{Harness: v1.HarnessOpenCode, ReportedModel: "openrouter/anthropic/claude-opus"},
 				provider: agent.QuotaProviderAnthropic,
 				want:     false,
 			},
 			{
 				name:     "NoOpenCodeQuotaProvider",
-				task:     v1.Task{Harness: v1.HarnessOpenCode, Model: "opencode/deepseek-v4-flash-free"},
+				task:     v1.Task{Harness: v1.HarnessOpenCode, ReportedModel: "opencode/deepseek-v4-flash-free"},
 				provider: agent.QuotaProvider("opencode"),
 				want:     false,
 			},
 			{
 				name:     "NoPiQuotaProvider",
-				task:     v1.Task{Harness: v1.HarnessPi, Model: "pi/model"},
+				task:     v1.Task{Harness: v1.HarnessPi, ReportedModel: "pi/model"},
 				provider: agent.QuotaProvider("pi"),
 				want:     false,
 			},
@@ -68,7 +68,7 @@ func TestNotificationFeed(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 				if got := taskUsesProvider(&tt.task, tt.provider); got != tt.want {
-					t.Errorf("taskUsesProvider(%q, %q) = %t, want %t", tt.task.Model, tt.provider, got, tt.want)
+					t.Errorf("taskUsesProvider(%q, %q) = %t, want %t", tt.task.ReportedModel, tt.provider, got, tt.want)
 				}
 			})
 		}

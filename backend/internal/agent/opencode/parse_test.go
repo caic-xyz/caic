@@ -1058,8 +1058,8 @@ func assertInitMessage(t *testing.T, input []byte, wantSessionID, wantModel, wan
 	if init.SessionID != wantSessionID {
 		t.Errorf("SessionID = %q, want %q", init.SessionID, wantSessionID)
 	}
-	if init.Model != wantModel {
-		t.Errorf("Model = %q, want %q", init.Model, wantModel)
+	if init.ReportedModel != wantModel {
+		t.Errorf("Model = %q, want %q", init.ReportedModel, wantModel)
 	}
 	if init.Version != wantVersion {
 		t.Errorf("Version = %q, want %q", init.Version, wantVersion)

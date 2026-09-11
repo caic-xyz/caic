@@ -863,7 +863,7 @@ data class RepoPrefsResp(
     val path: String,
     val baseBranch: String? = null,
     val harness: String? = null,
-    val model: String? = null,
+    val requestedModel: String? = null,
 )
 
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
@@ -1167,9 +1167,10 @@ data class Task(
     @SerialName("parentTaskID") val parentTaskID: String? = null,
     /** Per-task harness/agent metadata. */
     val harness: Harness,
-    val model: String? = null,
-    /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. */
-    val effort: String? = null,
+    val requestedModel: String? = null,
+    val requestedEffort: String? = null,
+    val reportedModel: String? = null,
+    val reportedEffort: String? = null,
     val agentVersion: String? = null,
     @SerialName("sessionID") val sessionID: String? = null,
     /** When the task was created. */
@@ -1242,8 +1243,10 @@ data class TaskInfoRecorded(
     val startedAt: Instant? = null,
     val stateUpdatedAt: Instant? = null,
     val harness: Harness,
-    val model: String? = null,
-    val effort: String? = null,
+    val requestedModel: String? = null,
+    val requestedEffort: String? = null,
+    val reportedModel: String? = null,
+    val reportedEffort: String? = null,
     val agentVersion: String? = null,
     @SerialName("sessionID") val sessionID: String? = null,
     val baseImage: String? = null,
@@ -1322,9 +1325,9 @@ data class CreateTaskReq(
  */
 @Serializable
 data class EventInit(
-    val model: String,
+    val reportedModel: String,
     /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
-    val effort: String? = null,
+    val reportedEffort: String? = null,
     val agentVersion: String,
     @SerialName("sessionID") val sessionID: String,
     val tools: List<String>? = null,
@@ -1423,7 +1426,7 @@ data class EventUsage(
     val cacheCreationInputTokens: Int,
     val cacheReadInputTokens: Int,
     val reasoningOutputTokens: Int? = null,
-    val model: String,
+    val reportedModel: String,
 )
 
 /** EventResult is emitted when the task reaches a terminal state. */

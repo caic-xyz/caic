@@ -119,9 +119,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
-		SessionID: hs.wire.sessionID,
-		Model:     hs.currentModel,
-		Version:   hs.agentVersion,
+		SessionID:     hs.wire.sessionID,
+		ReportedModel: hs.currentModel,
+		Version:       hs.agentVersion,
 	}
 	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
@@ -186,10 +186,10 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 //
 // TODO: Trim CaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
 type CaicInit struct {
-	Type      string `json:"type"` // always "caic_init"
-	SessionID string `json:"session_id"`
-	Model     string `json:"model,omitzero"`
-	Version   string `json:"version,omitzero"`
+	Type          string `json:"type"` // always "caic_init"
+	SessionID     string `json:"session_id"`
+	ReportedModel string `json:"model,omitzero"`
+	Version       string `json:"version,omitzero"`
 }
 
 // maxAccumulatedOutputBytes bounds synthetic final-message state. Streaming

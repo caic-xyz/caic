@@ -462,7 +462,13 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 	switch kind {
 	case logControlMeta:
 		var m MetaMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if p.version == LogVersionV1 {
+			var err error
+			m, err = DecodeV1MetaMessage(line)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s: %w", token, err)
+			}
+		} else if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if err := m.Validate(); err != nil {
@@ -495,16 +501,22 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{&m}, nil
 	case logControlSession:
 		var m MetaSessionMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if p.version == LogVersionV1 {
+			var err error
+			m, err = DecodeV1MetaSessionMessage(line)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s: %w", token, err)
+			}
+		} else if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		return []Message{&InitMessage{SessionID: m.SessionID, Model: m.Model, Version: m.AgentVersion}}, nil
+		return []Message{&InitMessage{SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion}}, nil
 	case logControlLegacyInit:
 		var m legacyInitLogRecord
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		return []Message{&InitMessage{SessionID: m.SessionID, Model: m.Model, Version: m.Version}}, nil
+		return []Message{&InitMessage{SessionID: m.SessionID, ReportedModel: m.Model, Version: m.Version}}, nil
 	case logControlModelInfo:
 		var m modelInfoLogRecord
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -856,6 +868,7 @@ type SlogWriter struct {
 	buf []byte
 }
 
+// Write buffers p until complete lines can be logged.
 func (w *SlogWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {

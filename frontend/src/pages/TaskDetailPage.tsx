@@ -40,7 +40,7 @@ export default function TaskDetailPage() {
               ciStatus={t()?.ciStatus}
               ciChecks={t()?.ciChecks}
               harness={t()?.harness ?? ""}
-              model={t()?.model}
+			  model={t()?.reportedModel || t()?.requestedModel}
               costUSD={t()?.costUSD}
               cumulativeInputTokens={t()?.cumulativeInputTokens}
               cumulativeOutputTokens={t()?.cumulativeOutputTokens}

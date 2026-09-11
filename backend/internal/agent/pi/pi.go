@@ -605,7 +605,7 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 	if ev.Message.Provider != "" {
 		model = ev.Message.Provider + "/" + model
 	}
-	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, Model: model}}, nil
+	return []agent.Message{&agent.InitMessage{SessionID: w.sessionID, ReportedModel: model}}, nil
 }
 
 // handleError converts an error delta into a ResultMessage.

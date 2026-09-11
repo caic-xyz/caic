@@ -33,6 +33,10 @@ const (
 	messageTypeProvisioningLogRecord = "caic_log"
 )
 
+// SystemSubtypeModelRerouted identifies a system message reporting that the
+// harness changed the active model.
+const SystemSubtypeModelRerouted = "model_rerouted"
+
 // DiffFileStat describes changes to a single file.
 type DiffFileStat struct {
 	Path    string `json:"path"`
@@ -75,26 +79,32 @@ func NativeDuration(message Message) (time.Duration, bool) {
 }
 
 // InitMessage is emitted when a session starts.
+//
+// Its JSON encoding is persisted in task logs. Keep JSON field names and their
+// meanings backward-compatible with logs written by released binaries.
 type InitMessage struct {
-	SessionID string   `json:"session_id"`
-	Cwd       string   `json:"cwd"`
-	Tools     []string `json:"tools"`
-	Model     string   `json:"model"`
-	Version   string   `json:"claude_code_version"`
-	Effort    string   `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
+	SessionID      string   `json:"session_id"`
+	Cwd            string   `json:"cwd"`
+	Tools          []string `json:"tools"`
+	ReportedModel  string   `json:"model"`
+	ReportedEffort string   `json:"reported_effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
+	Version        string   `json:"claude_code_version"`
 }
 
 // Type implements Message.
 func (m *InitMessage) Type() string { return "init" }
 
 // SystemMessage is a generic system message (status, compact_boundary, etc.).
+//
+// Its JSON encoding is persisted in task logs. Keep JSON field names and their
+// meanings backward-compatible with logs written by released binaries.
 type SystemMessage struct {
-	MessageType string `json:"type"`
-	Subtype     string `json:"subtype"`
-	SessionID   string `json:"session_id"`
-	UUID        string `json:"uuid"`
-	Detail      string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for model_rerouted).
-	Model       string `json:"model,omitempty"`  // Active model after model_rerouted; used to update task.reportedModel.
+	MessageType   string `json:"type"`
+	Subtype       string `json:"subtype"`
+	SessionID     string `json:"session_id"`
+	UUID          string `json:"uuid"`
+	Detail        string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for SystemSubtypeModelRerouted).
+	ReportedModel string `json:"model,omitempty"`  // Active model after SystemSubtypeModelRerouted; used to update task.reportedModel.
 }
 
 // Type implements Message.
@@ -326,9 +336,12 @@ func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
 }
 
 // UsageMessage reports token consumption for a single API call.
+//
+// Its JSON encoding is persisted in task logs. Keep JSON field names and their
+// meanings backward-compatible with logs written by released binaries.
 type UsageMessage struct {
 	Usage         Usage  `json:"usage"`
-	Model         string `json:"model,omitempty"`
+	ReportedModel string `json:"model,omitempty"`
 	ContextWindow int    `json:"context_window,omitempty"` // Non-zero when the backend reports the active context window size.
 }
 
@@ -726,6 +739,9 @@ func (v LogVersion) Validate() error {
 
 // MetaMessage is written as the first line of a JSONL log file. It captures
 // task-level metadata so logs can be reloaded on restart.
+//
+// Its serialized task-log schema must remain backward-readable; API DTOs may
+// evolve independently.
 type MetaMessage struct {
 	MessageType       string           `json:"type"`
 	Version           int              `json:"version"`
@@ -733,8 +749,8 @@ type MetaMessage struct {
 	Title             string           `json:"title,omitempty"`
 	Repos             []MetaRepo       `json:"repos"`
 	Harness           harness.Name     `json:"harness"`
-	Model             string           `json:"model,omitempty"`
-	Effort            string           `json:"effort,omitempty"`
+	RequestedModel    string           `json:"model,omitempty"`
+	RequestedEffort   string           `json:"effort,omitempty"`
 	StartedAt         time.Time        `json:"started_at"`
 	ForgeIssue        int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
 	ForkedFromTaskID  string           `json:"forked_from_task_id,omitempty"`
@@ -774,11 +790,15 @@ func (m *MetaMessage) Validate() error {
 
 // MetaSessionMessage records the backend-native session identifier needed to
 // resume a stateful harness after server restart.
+//
+// Its serialized task-log schema must remain backward-readable; API DTOs may
+// evolve independently.
 type MetaSessionMessage struct {
-	MessageType  string `json:"type"`
-	SessionID    string `json:"session_id"`
-	Model        string `json:"model,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
+	MessageType    string `json:"type"`
+	SessionID      string `json:"session_id"`
+	ReportedModel  string `json:"model,omitempty"`
+	ReportedEffort string `json:"reported_effort,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
 }
 
 // Type implements Message.
@@ -835,14 +855,15 @@ func AppendNativeRecord(log LogSink, version LogVersion, data []byte) error {
 
 // WriteMetaSession appends a caic_session control record for init metadata.
 func WriteMetaSession(log LogSink, init *InitMessage) error {
-	if init.SessionID == "" && init.Model == "" && init.Version == "" {
+	if init.SessionID == "" && init.ReportedModel == "" && init.ReportedEffort == "" && init.Version == "" {
 		return nil
 	}
 	return log.AppendMessage(&MetaSessionMessage{
-		MessageType:  messageTypeSession,
-		SessionID:    init.SessionID,
-		Model:        init.Model,
-		AgentVersion: init.Version,
+		MessageType:    messageTypeSession,
+		SessionID:      init.SessionID,
+		ReportedModel:  init.ReportedModel,
+		ReportedEffort: init.ReportedEffort,
+		AgentVersion:   init.Version,
 	})
 }
 
@@ -892,6 +913,10 @@ func (m *MetaPRMessage) Type() string { return messageTypePR }
 // MarshalMessage serializes a Message to JSON. For RawMessage, returns the
 // original bytes to preserve unknown fields. For typed messages, uses
 // json.Marshal.
+//
+// Typed message JSON is a durable task-log schema when written through a
+// LogSink. Keep JSON tags and their meanings backward-compatible with logs
+// written by released binaries; rename Go fields without renaming their tags.
 func MarshalMessage(m Message) ([]byte, error) {
 	if rm, ok := m.(*RawMessage); ok {
 		return rm.Raw, nil
@@ -907,8 +932,11 @@ func MarshalLogMessage(version LogVersion, m Message) ([]byte, error) {
 	if _, ok := m.(*RawMessage); ok {
 		return nil, errors.New("raw messages must be appended as native records")
 	}
+	if version == LogVersionV1 {
+		return marshalV1LogMessage(m)
+	}
 	data, err := MarshalMessage(m)
-	if err != nil || version == LogVersionV1 {
+	if err != nil {
 		return data, err
 	}
 	var fields map[string]json.RawMessage

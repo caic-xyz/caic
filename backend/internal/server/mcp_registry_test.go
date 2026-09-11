@@ -66,13 +66,13 @@ func TestVoiceTaskSummaryLineIncludesAgentConfiguration(t *testing.T) {
 	t.Parallel()
 
 	got := voiceTaskSummaryLine(1, &v1.Task{
-		Title:   "Fix the parser",
-		State:   v1.TaskStateRunning,
-		Harness: v1.HarnessCodex,
-		Model:   "gpt-5.4",
-		Effort:  "high",
+		Title:          "Fix the parser",
+		State:          v1.TaskStateRunning,
+		Harness:        v1.HarnessCodex,
+		ReportedModel:  "gpt-5.4",
+		ReportedEffort: "high",
 	})
-	want := "- Task #1: Fix the parser (running, harness: codex, model: gpt-5.4, effort: high)"
+	want := "- Task #1: Fix the parser (running, harness: codex, requested model: default, requested effort: default, reported model: gpt-5.4, reported effort: high)"
 	if got != want {
 		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
 	}
@@ -86,7 +86,7 @@ func TestVoiceTaskSummaryLineMarksUnspecifiedConfigurationAsDefault(t *testing.T
 		State:   v1.TaskStateRunning,
 		Harness: v1.HarnessClaude,
 	})
-	want := "- Task #1: Fix the parser (running, harness: claude, model: default, effort: default)"
+	want := "- Task #1: Fix the parser (running, harness: claude, requested model: default, requested effort: default, reported model: default, reported effort: default)"
 	if got != want {
 		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
 	}
@@ -155,11 +155,11 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		if created.Harness != harness.Pi {
 			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 		}
-		if got := created.GetModel(); got != "" {
+		if got := created.RequestedModel; got != "" {
 			t.Fatalf("created model = %q, want empty", got)
 		}
-		if created.Effort != "" {
-			t.Fatalf("created effort = %q, want empty", created.Effort)
+		if created.RequestedEffort != "" {
+			t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
 		}
 		prefs := s.prefs.Get(userIDFromCtx(t.Context()))
 		if model, ok := prefs.Models[string(harness.Pi)]; !ok || model != "" {
@@ -195,11 +195,11 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		if created.Harness != harness.Pi {
 			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 		}
-		if got := created.GetModel(); got != "" {
+		if got := created.RequestedModel; got != "" {
 			t.Fatalf("created model = %q, want empty", got)
 		}
-		if created.Effort != "" {
-			t.Fatalf("created effort = %q, want empty", created.Effort)
+		if created.RequestedEffort != "" {
+			t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
 		}
 	})
 
@@ -239,11 +239,11 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		if created.Harness != harness.Pi {
 			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 		}
-		if got := created.GetModel(); got != "" {
+		if got := created.RequestedModel; got != "" {
 			t.Fatalf("created model = %q, want empty", got)
 		}
-		if created.Effort != "" {
-			t.Fatalf("created effort = %q, want empty", created.Effort)
+		if created.RequestedEffort != "" {
+			t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
 		}
 	})
 
@@ -273,11 +273,11 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		if created.Harness != harness.Pi {
 			t.Fatalf("created harness = %q, want %q", created.Harness, harness.Pi)
 		}
-		if got := created.GetModel(); got != "" {
+		if got := created.RequestedModel; got != "" {
 			t.Fatalf("created model = %q, want empty", got)
 		}
-		if created.Effort != "" {
-			t.Fatalf("created effort = %q, want empty", created.Effort)
+		if created.RequestedEffort != "" {
+			t.Fatalf("created effort = %q, want empty", created.RequestedEffort)
 		}
 	})
 }

@@ -1451,7 +1451,7 @@ describe("App repo chips: No repository", () => {
       kind: "snapshot",
       snapshot: [makeTask({
         harness: "pi",
-        model: "openai-codex/gpt-5.5",
+		reportedModel: "openai-codex/gpt-5.5",
         repos: [{ name: "repos/a", branch: "fork-source" }],
       })],
     });

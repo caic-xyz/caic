@@ -64,13 +64,13 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			Kind: v1.EventKindInit,
 			Ts:   ts,
 			Init: &v1.EventInit{
-				Model:        m.Model,
-				Effort:       m.Effort,
-				AgentVersion: m.Version,
-				SessionID:    m.SessionID,
-				Tools:        m.Tools,
-				Cwd:          m.Cwd,
-				Harness:      string(tt.harness),
+				ReportedModel:  m.ReportedModel,
+				ReportedEffort: m.ReportedEffort,
+				AgentVersion:   m.Version,
+				SessionID:      m.SessionID,
+				Tools:          m.Tools,
+				Cwd:            m.Cwd,
+				Harness:        string(tt.harness),
 			},
 		}}
 	case *agent.SystemMessage:
@@ -183,7 +183,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				CacheCreationInputTokens: m.Usage.CacheCreationInputTokens,
 				CacheReadInputTokens:     m.Usage.CacheReadInputTokens,
 				ReasoningOutputTokens:    m.Usage.ReasoningOutputTokens,
-				Model:                    m.Model,
+				ReportedModel:            m.ReportedModel,
 			},
 		}}
 	case *agent.ResultMessage:

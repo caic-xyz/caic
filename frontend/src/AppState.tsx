@@ -901,8 +901,8 @@ function createAppStore() {
       const resp = await forkTask(id, {
         prompt: { text },
         harness: h !== (sourceTask?.harness ?? "") ? h as Harness : undefined,
-        model: m !== (sourceTask?.model ?? "") ? m : undefined,
-        effort: e !== (sourceTask?.effort ?? "") ? e : undefined,
+		model: m !== (sourceTask?.requestedModel ?? "") ? m : undefined,
+		effort: e !== (sourceTask?.requestedEffort ?? "") ? e : undefined,
         extraRepos: extras.length > 0 ? extras.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined,
         tailscale: forkTailscale(),
         usb: forkUSB(),

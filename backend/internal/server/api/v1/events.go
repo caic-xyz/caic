@@ -81,13 +81,13 @@ type EventMessage struct {
 // EventInit is emitted once at the start of a session. It includes a Harness
 // field so the client knows which backend produced the stream.
 type EventInit struct {
-	Model        string   `json:"model"`
-	Effort       string   `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
-	AgentVersion string   `json:"agentVersion"`
-	SessionID    string   `json:"sessionID"`
-	Tools        []string `json:"tools,omitzero"`
-	Cwd          string   `json:"cwd"`
-	Harness      string   `json:"harness"`
+	ReportedModel  string   `json:"reportedModel"`
+	ReportedEffort string   `json:"reportedEffort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
+	AgentVersion   string   `json:"agentVersion"`
+	SessionID      string   `json:"sessionID"`
+	Tools          []string `json:"tools,omitzero"`
+	Cwd            string   `json:"cwd"`
+	Harness        string   `json:"harness"`
 }
 
 // EventText is an assistant text block.
@@ -180,7 +180,7 @@ type EventUsage struct {
 	CacheCreationInputTokens int    `json:"cacheCreationInputTokens"`
 	CacheReadInputTokens     int    `json:"cacheReadInputTokens"`
 	ReasoningOutputTokens    int    `json:"reasoningOutputTokens,omitempty"`
-	Model                    string `json:"model"`
+	ReportedModel            string `json:"reportedModel"`
 }
 
 // EventResult is emitted when the task reaches a terminal state.

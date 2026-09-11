@@ -372,7 +372,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		t.Parallel()
 		startupA := &agent.RawMessage{MessageType: "startup_a", Raw: []byte(`{"startup":"a"}`)}
 		startupB := &agent.RawMessage{MessageType: "startup_b", Raw: []byte(`{"startup":"b"}`)}
-		init := &agent.InitMessage{SessionID: "session", Model: "gpt-5.6-sol"}
+		init := &agent.InitMessage{SessionID: "session", ReportedModel: "gpt-5.6-sol"}
 		prompt := &agent.UserInputMessage{Text: "repair the pull request"}
 		thinking := &agent.ThinkingMessage{Text: "Inspecting repository"}
 		status := &agent.TextMessage{Text: "The pull request contains a binary."}
@@ -503,14 +503,14 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		merged := mergeLogAndRelayMessages(
 			harness.Pi,
 			[]agent.Message{
-				&agent.InitMessage{Model: "openai-codex/gpt-5.5"},
+				&agent.InitMessage{ReportedModel: "openai-codex/gpt-5.5"},
 				&agent.TextMessage{Text: "before"},
 				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}, ContextWindow: 272000},
 				&agent.ThinkingDeltaMessage{Text: "overlap"},
 			},
 			[]agent.Message{
 				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1}},
-				&agent.InitMessage{Model: "openai-codex/gpt-5.5"},
+				&agent.InitMessage{ReportedModel: "openai-codex/gpt-5.5"},
 				&agent.ThinkingDeltaMessage{Text: "overlap"},
 				&agent.TextMessage{Text: "after"},
 			},
@@ -1095,14 +1095,17 @@ func TestManager(t *testing.T) {
 		t.Run("valid_fills_missing_session", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested")
-			lt := &taskslog.LoadedTask{SessionID: "thread-1", Model: "reported", AgentVersion: "1.2.3"}
+			lt := &taskslog.LoadedTask{SessionID: "thread-1", RequestedModel: "requested", ReportedModel: "reported", AgentVersion: "1.2.3"}
 			applyLoadedSessionMetadata(tk, lt)
 			if got := tk.GetSessionID(); got != "thread-1" {
 				t.Errorf("SessionID = %q, want thread-1", got)
 			}
+			if tk.RequestedModel != "requested" {
+				t.Errorf("requested Model = %q, want requested", tk.RequestedModel)
+			}
 			snap := tk.Snapshot()
-			if snap.Model != "reported" {
-				t.Errorf("Model = %q, want reported", snap.Model)
+			if snap.RequestedModel != "requested" || snap.ReportedModel != "reported" {
+				t.Errorf("settings = (%q, %q), want (requested, reported)", snap.RequestedModel, snap.ReportedModel)
 			}
 			if snap.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
@@ -2227,8 +2230,8 @@ func TestManager(t *testing.T) {
 					MaxCPUs:           4,
 					CacheMounts:       []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
 					Mounts:            []runtime.Mount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
-					Model:             "model-1",
-					Effort:            "high",
+					RequestedModel:    "model-1",
+					RequestedEffort:   "high",
 					AgentVersion:      "1.2.3",
 					ForgePR:           42,
 					ForgeOwner:        "acme",
@@ -2260,8 +2263,8 @@ func TestManager(t *testing.T) {
 			if tk.RuntimeName != "docker" {
 				t.Errorf("RuntimeName = %q, want docker", tk.RuntimeName)
 			}
-			if tk.Model != "model-1" || tk.Effort != "high" {
-				t.Errorf("model/effort = %q/%q, want model-1/high", tk.Model, tk.Effort)
+			if tk.RequestedModel != "model-1" || tk.RequestedEffort != "high" {
+				t.Errorf("model/effort = %q/%q, want model-1/high", tk.RequestedModel, tk.RequestedEffort)
 			}
 			if tk.BaseImage != "ghcr.io/caic/base:v1" || tk.ContainerPlatform != "linux/amd64" || tk.MaxCPUs != 4 {
 				t.Errorf("launch config = image %q platform %q cpus %d", tk.BaseImage, tk.ContainerPlatform, tk.MaxCPUs)

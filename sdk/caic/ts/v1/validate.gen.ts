@@ -61,8 +61,8 @@ function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueV
 export function validateEventInit(raw: ValidatorInput): EventInit {
   const obj = asObject(raw, "EventInit");
   return {
-    model: asString(obj["model"], "EventInit.model"),
-    effort: (obj["effort"] === undefined || obj["effort"] === null ? undefined : asString(obj["effort"], "EventInit.effort")),
+    reportedModel: asString(obj["reportedModel"], "EventInit.reportedModel"),
+    reportedEffort: (obj["reportedEffort"] === undefined || obj["reportedEffort"] === null ? undefined : asString(obj["reportedEffort"], "EventInit.reportedEffort")),
     agentVersion: asString(obj["agentVersion"], "EventInit.agentVersion"),
     sessionID: asString(obj["sessionID"], "EventInit.sessionID"),
     tools: (obj["tools"] === undefined || obj["tools"] === null ? undefined : validateArray(obj["tools"], "EventInit.tools", (v) => asString(v, "EventInit.tools[i]")) as string[]),
@@ -169,7 +169,7 @@ export function validateEventUsage(raw: ValidatorInput): EventUsage {
     cacheCreationInputTokens: asNumber(obj["cacheCreationInputTokens"], "EventUsage.cacheCreationInputTokens"),
     cacheReadInputTokens: asNumber(obj["cacheReadInputTokens"], "EventUsage.cacheReadInputTokens"),
     reasoningOutputTokens: (obj["reasoningOutputTokens"] === undefined || obj["reasoningOutputTokens"] === null ? undefined : asNumber(obj["reasoningOutputTokens"], "EventUsage.reasoningOutputTokens")),
-    model: asString(obj["model"], "EventUsage.model"),
+    reportedModel: asString(obj["reportedModel"], "EventUsage.reportedModel"),
   };
 }
 
@@ -520,8 +520,10 @@ export function validateTask(raw: ValidatorInput): Task {
     forkedFromTaskID: (obj["forkedFromTaskID"] === undefined || obj["forkedFromTaskID"] === null ? undefined : asString(obj["forkedFromTaskID"], "Task.forkedFromTaskID")),
     parentTaskID: (obj["parentTaskID"] === undefined || obj["parentTaskID"] === null ? undefined : asString(obj["parentTaskID"], "Task.parentTaskID")),
     harness: (asString(obj["harness"], "Task.harness") as Harness),
-    model: (obj["model"] === undefined || obj["model"] === null ? undefined : asString(obj["model"], "Task.model")),
-    effort: (obj["effort"] === undefined || obj["effort"] === null ? undefined : asString(obj["effort"], "Task.effort")),
+    requestedModel: (obj["requestedModel"] === undefined || obj["requestedModel"] === null ? undefined : asString(obj["requestedModel"], "Task.requestedModel")),
+    requestedEffort: (obj["requestedEffort"] === undefined || obj["requestedEffort"] === null ? undefined : asString(obj["requestedEffort"], "Task.requestedEffort")),
+    reportedModel: (obj["reportedModel"] === undefined || obj["reportedModel"] === null ? undefined : asString(obj["reportedModel"], "Task.reportedModel")),
+    reportedEffort: (obj["reportedEffort"] === undefined || obj["reportedEffort"] === null ? undefined : asString(obj["reportedEffort"], "Task.reportedEffort")),
     agentVersion: (obj["agentVersion"] === undefined || obj["agentVersion"] === null ? undefined : asString(obj["agentVersion"], "Task.agentVersion")),
     sessionID: (obj["sessionID"] === undefined || obj["sessionID"] === null ? undefined : asString(obj["sessionID"], "Task.sessionID")),
     startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "Task.startedAt") as ISOTimestamp),

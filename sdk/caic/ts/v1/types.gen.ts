@@ -95,9 +95,9 @@ export const ToolOutputMarkdown: ToolOutputContentType = "markdown";
  * field so the client knows which backend produced the stream.
  */
 export interface EventInit {
-  model: string;
+  reportedModel: string;
   /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. */
-  effort?: string;
+  reportedEffort?: string;
   agentVersion: string;
   sessionID: string;
   tools?: string[];
@@ -195,7 +195,7 @@ export interface EventUsage {
   cacheCreationInputTokens: number /* int */;
   cacheReadInputTokens: number /* int */;
   reasoningOutputTokens?: number /* int */;
-  model: string;
+  reportedModel: string;
 }
 
 /** EventResult is emitted when the task reaches a terminal state. */
@@ -626,7 +626,7 @@ export interface RepoPrefsResp {
   path: string;
   baseBranch?: string;
   harness?: string;
-  model?: string;
+  requestedModel?: string;
 }
 
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
@@ -922,9 +922,10 @@ export interface Task {
   parentTaskID?: string;
   /** Per-task harness/agent metadata. */
   harness: Harness;
-  model?: string;
-  /** Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. */
-  effort?: string;
+  requestedModel?: string;
+  requestedEffort?: string;
+  reportedModel?: string;
+  reportedEffort?: string;
   agentVersion?: string;
   sessionID?: string;
   /** When the task was created. */
@@ -993,8 +994,10 @@ export interface TaskInfoRecorded {
   startedAt?: ISOTimestamp;
   stateUpdatedAt?: ISOTimestamp;
   harness: Harness;
-  model?: string;
-  effort?: string;
+  requestedModel?: string;
+  requestedEffort?: string;
+  reportedModel?: string;
+  reportedEffort?: string;
   agentVersion?: string;
   sessionID?: string;
   baseImage?: string;

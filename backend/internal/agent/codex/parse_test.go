@@ -18,7 +18,7 @@ func TestParseMessage(t *testing.T) {
 	t.Parallel()
 	t.Run("ThreadStarted", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53","cliVersion":"1.0","createdAt":1771690198,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"fix","source":"user","status":{"type":"idle"},"updatedAt":1771690200}}}`
+		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53","cliVersion":"1.0","createdAt":1771690198,"cwd":"/repo","model":"gpt-5.6-terra","modelProvider":"openai","reasoningEffort":"high","path":"/repo","preview":"fix","source":"user","status":{"type":"idle"},"updatedAt":1771690200}}}`
 		msgs, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
@@ -39,6 +39,24 @@ func TestParseMessage(t *testing.T) {
 		if init.Version != "1.0" {
 			t.Errorf("Version = %q, want 1.0", init.Version)
 		}
+		if init.ReportedModel != "gpt-5.6-terra" || init.ReportedEffort != "high" {
+			t.Errorf("model/effort = %q/%q, want gpt-5.6-terra/high", init.ReportedModel, init.ReportedEffort)
+		}
+	})
+	t.Run("ThreadStartedMissingSettings", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"thread","model":null,"reasoningEffort":null}}}`
+		msgs, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		init, ok := msgs[0].(*agent.InitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
+		}
+		if init.ReportedModel != "" || init.ReportedEffort != "" {
+			t.Errorf("model/effort = %q/%q, want empty", init.ReportedModel, init.ReportedEffort)
+		}
 	})
 	t.Run("CaicSession", func(t *testing.T) {
 		t.Parallel()
@@ -57,8 +75,8 @@ func TestParseMessage(t *testing.T) {
 		if init.SessionID != "thread-1" {
 			t.Errorf("SessionID = %q, want thread-1", init.SessionID)
 		}
-		if init.Model != "gpt-5.4" || init.Version != "1.2.3" {
-			t.Errorf("model/version = %q/%q, want gpt-5.4/1.2.3", init.Model, init.Version)
+		if init.ReportedModel != "gpt-5.4" || init.ReportedEffort != "" || init.Version != "1.2.3" {
+			t.Errorf("model/effort/version = %q/%q/%q, want gpt-5.4/empty/1.2.3", init.ReportedModel, init.ReportedEffort, init.Version)
 		}
 	})
 	t.Run("TurnStarted", func(t *testing.T) {
@@ -971,7 +989,7 @@ func TestWireFormat(t *testing.T) {
 	})
 	t.Run("WritePromptEffort", func(t *testing.T) {
 		t.Parallel()
-		w := &wireFormat{threadID: "t1", effort: "high"}
+		w := &wireFormat{threadID: "t1", requestedEffort: "high"}
 		var buf bytes.Buffer
 		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
 			t.Fatal(err)

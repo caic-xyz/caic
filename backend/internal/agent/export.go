@@ -22,8 +22,12 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 		fmt.Fprintf(&b, "- **Title**: %s\n", meta.Title)
 	}
 	fmt.Fprintf(&b, "- **Harness**: %s\n", meta.Harness)
-	if meta.Model != "" {
-		fmt.Fprintf(&b, "- **Model**: %s\n", meta.Model)
+	reportedModel, reportedEffort := discussionReportedSettings(msgs)
+	if reportedModel != "" {
+		fmt.Fprintf(&b, "- **Model**: %s\n", reportedModel)
+	}
+	if reportedEffort != "" {
+		fmt.Fprintf(&b, "- **Effort**: %s\n", reportedEffort)
 	}
 	for _, r := range meta.Repos {
 		branch := r.Branch
@@ -97,6 +101,25 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 	}
 
 	return b.String()
+}
+
+func discussionReportedSettings(msgs []Message) (model, effort string) {
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *InitMessage:
+			if m.ReportedModel != "" {
+				model = m.ReportedModel
+			}
+			if m.ReportedEffort != "" {
+				effort = m.ReportedEffort
+			}
+		case *SystemMessage:
+			if m.ReportedModel != "" {
+				model = m.ReportedModel
+			}
+		}
+	}
+	return model, effort
 }
 
 // renderMsg writes a single message to the markdown builder.

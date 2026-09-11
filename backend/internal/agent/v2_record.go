@@ -80,6 +80,14 @@ type v2MetaEnvelope struct {
 	Type logRecordType `json:"t"`
 }
 
+func (m *v2MetaEnvelope) Validate() error {
+	if m.Type != logRecordMeta {
+		return fmt.Errorf("unexpected record type %q", m.Type)
+	}
+	m.MessageType = messageTypeMeta
+	return m.MetaMessage.Validate()
+}
+
 // parseV2Record validates and decodes one canonical v2 physical record.
 // Agent records use the zero-copy fast path; control records use the general
 // decoder and update parser state before the resulting messages are returned.
@@ -213,7 +221,7 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 		return field == "variables"
 	case logControlSession:
 		switch field {
-		case "agent_version", "model", "session_id":
+		case "agent_version", "model", "reported_effort", "session_id":
 			return true
 		}
 	case logControlModelInfo:
@@ -261,14 +269,10 @@ func parseV2Control(p *LogRecordParser, kind logControlKind, token logRecordType
 	if err := decoder.Decode(&envelope); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", token, err)
 	}
-	if envelope.Type != logRecordMeta {
-		return nil, fmt.Errorf("decode %s: unexpected record type %q", token, envelope.Type)
-	}
-	m := envelope.MetaMessage
-	m.MessageType = messageTypeMeta
-	if err := m.Validate(); err != nil {
+	if err := envelope.Validate(); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", token, err)
 	}
+	m := envelope.MetaMessage
 	if LogVersion(m.Version) != p.version {
 		return nil, fmt.Errorf(
 			"decode %s: header version %d does not match parser version %d",

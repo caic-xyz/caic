@@ -646,7 +646,7 @@ type mcpTaskForkArgs struct {
 	TaskNumber int    `json:"task_number"       jsonschema_description:"The task number to fork, e.g. 1 for task #1"`
 	Prompt     string `json:"prompt"            jsonschema_description:"The initial prompt for the forked task"`
 	Harness    string `json:"harness,omitempty" jsonschema_description:"Override harness (optional, inherits from source if omitted)"`
-	Model      string `json:"model,omitempty"   jsonschema_description:"Override model (optional, inherits from source if omitted)"`
+	Model      string `json:"model,omitempty"   jsonschema_description:"Model override (optional, inherits from source if omitted)"`
 }
 
 func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
@@ -869,8 +869,8 @@ func buildTaskCreateSchema() *jsonschema.Schema {
 	props := orderedmap.New[string, *jsonschema.Schema]()
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The task description/prompt for the coding agent"})
 	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (one or more). Read caic://repos first if you need the current repository list.", Items: &jsonschema.Schema{Type: "string"}, MinItems: &minOne})
-	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly requested a model; omitted means the selected harness default."})
-	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly requested effort; omitted means the selected harness default."})
+	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly chose a model; omitted means the selected harness default."})
+	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly chose an effort; omitted means the selected harness default."})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Agent harness override (optional). Omit to use the saved default harness."})
 	props.Set("runtimeName", &jsonschema.Schema{Type: "string", Description: "Runtime backend name (optional). Use docker or podman when multiple runtimes are available."})
 	props.Set("display", &jsonschema.Schema{Type: "boolean", Description: "Enable virtual display (VNC) for this task"})
@@ -886,7 +886,7 @@ func buildTaskForkSchema() *jsonschema.Schema {
 	props.Set("task_number", &jsonschema.Schema{Type: "integer", Description: "The task number to fork, e.g. 1 for task #1"})
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked task"})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Override harness (optional, inherits from source if omitted)"})
-	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Override model (optional, inherits from source if omitted)"})
+	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional, inherits from source if omitted)"})
 	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
 	mcp.AddHeaderToProperty(schema, "task_number", "Task-Number")
 	return schema
@@ -938,7 +938,7 @@ func voiceTaskSummaryLine(num int, t *v1.Task) string {
 }
 
 func taskAgentConfiguration(t *v1.Task) string {
-	return fmt.Sprintf("harness: %s, model: %s, effort: %s", t.Harness, configuredOrDefault(t.Model), configuredOrDefault(t.Effort))
+	return fmt.Sprintf("harness: %s, requested model: %s, requested effort: %s, reported model: %s, reported effort: %s", t.Harness, configuredOrDefault(t.RequestedModel), configuredOrDefault(t.RequestedEffort), configuredOrDefault(t.ReportedModel), configuredOrDefault(t.ReportedEffort))
 }
 
 func configuredOrDefault(value string) string {

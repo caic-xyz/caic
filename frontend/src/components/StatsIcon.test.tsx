@@ -33,7 +33,7 @@ const turns: TurnTiming[] = [{
       cacheCreationInputTokens: 2_000,
       cacheReadInputTokens: 7_000,
       reasoningOutputTokens: 200,
-      model: "test-model",
+      reportedModel: "test-model",
     },
   },
   waitMs: 3_000,

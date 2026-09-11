@@ -336,6 +336,33 @@ func TestReadLogAuthority(t *testing.T) {
 			})
 		}
 	})
+	t.Run("V2Settings", func(t *testing.T) {
+		t.Parallel()
+		for _, compressed := range []bool{false, true} {
+			t.Run(map[bool]string{false: "plain", true: "compressed"}[compressed], func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				name := "a.jsonl"
+				line := `{"t":"caic_meta","version":2,"prompt":"task","repos":[],"harness":"codex","model":"gpt-5.6","effort":"high"}`
+				if compressed {
+					name += logCompressedExt
+					writeCompressedLogFile(t, dir, name, seqOf(line))
+				} else {
+					writeLogFile(t, dir, name, line)
+				}
+				meta, _, err := decodeAuthorityMeta([]byte(line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if meta.RequestedModel != "gpt-5.6" || meta.RequestedEffort != "high" {
+					t.Fatalf("v2 settings = %q/%q", meta.RequestedModel, meta.RequestedEffort)
+				}
+				if _, err := readLogAuthority(filepath.Join(dir, name)); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	})
 	t.Run("DeepNestedNativeRecordDoesNotUseGoroutineStack", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -491,9 +518,9 @@ func TestLoadLogHeader(t *testing.T) {
 		name := "task-a.jsonl"
 		path := filepath.Join(dir, name)
 		writeLogFile(t, dir, name,
-			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: "claude",
+			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: "claude", RequestedModel: "requested",
 				Repos: []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}}}),
-			mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "sess-1", Model: "claude-sonnet-4-6", AgentVersion: "2.1.0"}),
+			mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "sess-1", ReportedModel: "claude-sonnet-4-6", AgentVersion: "2.1.0"}),
 			mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "org", ForgeRepo: "repo", ForgePR: 7}),
 			mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 4, Deleted: 1}}, Ts: 1767225600.5}),
 			claudeAssistant(t, map[string]any{"type": "text", "text": "hello"}),
@@ -516,7 +543,7 @@ func TestLoadLogHeader(t *testing.T) {
 		if len(first.Repos) != 1 || first.Repos[0].Name != "org/repo" {
 			t.Fatalf("fixture did not populate Repos: %+v", first.Repos)
 		}
-		if first.SessionID != "sess-1" || first.Model != "claude-sonnet-4-6" || first.AgentVersion != "2.1.0" {
+		if first.SessionID != "sess-1" || first.RequestedModel != "requested" || first.ReportedModel != "claude-sonnet-4-6" || first.AgentVersion != "2.1.0" {
 			t.Fatalf("fixture did not populate session metadata: %+v", first)
 		}
 		if first.ForgePR != 7 {

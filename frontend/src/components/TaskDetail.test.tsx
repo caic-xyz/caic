@@ -100,7 +100,7 @@ function resultEvent(ts: number): EventMessage {
         outputTokens: 0,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
-        model: "test",
+        reportedModel: "test",
       },
     },
   };
@@ -268,7 +268,7 @@ describe("TaskDetail", () => {
       const usage = (ts: number): EventMessage => ({
         kind: "usage",
         ts,
-        usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
+        usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
       });
       const events: EventMessage[] = [
         { kind: "thinkingDelta", ts: 1_000, thinkingDelta: { text: "first thought" } },
@@ -424,7 +424,7 @@ describe("TaskDetail", () => {
       firstResult.result.duration = 2;
       secondResult.result.duration = 3;
       const events: EventMessage[] = [
-        { kind: "init", ts: 1_000, init: { model: "test", agentVersion: "test", sessionID: "session-one", tools: [], cwd: "", harness: "test" } },
+        { kind: "init", ts: 1_000, init: { reportedModel: "test", agentVersion: "test", sessionID: "session-one", tools: [], cwd: "", harness: "test" } },
         { kind: "text", ts: 2_000, text: { text: "first response" } },
         firstResult,
         { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
@@ -514,7 +514,7 @@ describe("TaskDetail", () => {
   it("shows zero instead of an implausible reconstructed setup duration", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({ kind: "log", ts: 1_500, log: { line: "starting runtime" } });
-      handlers.onMessage({ kind: "init", ts: 46 * 60 * 60 * 1000, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onMessage({ kind: "init", ts: 46 * 60 * 60 * 1000, init: { reportedModel: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -531,7 +531,7 @@ describe("TaskDetail", () => {
   it("collapses setup logs after the agent session starts", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({ kind: "log", ts: 1_500, log: { line: "starting runtime" } });
-      handlers.onMessage({ kind: "init", ts: 6_500, init: { model: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onMessage({ kind: "init", ts: 6_500, init: { reportedModel: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -778,7 +778,7 @@ describe("SSE connection", () => {
     const cb = capturedCb.value;
     cb({ kind: "thinking", ts: 1, thinking: { text: "planning tool 1" } });
     cb({ kind: "toolUse", ts: 2, toolUse: { toolUseID: "t1", name: "Read", input: {} } });
-    cb({ kind: "usage", ts: 3, usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "m" } });
+    cb({ kind: "usage", ts: 3, usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "m" } });
     cb({ kind: "thinking", ts: 4, thinking: { text: "planning tool 2" } });
     cb({ kind: "toolUse", ts: 5, toolUse: { toolUseID: "t2", name: "Bash", input: {} } });
     cb(resultEvent(6));
@@ -830,7 +830,7 @@ describe("SSE connection", () => {
         outputTokens: 0,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
-        model: "",
+        reportedModel: "",
       },
     });
     cb({
@@ -842,7 +842,7 @@ describe("SSE connection", () => {
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         reasoningOutputTokens: 50,
-        model: "",
+        reportedModel: "",
       },
     });
     cb({
@@ -853,7 +853,7 @@ describe("SSE connection", () => {
         outputTokens: 0,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
-        model: "claude",
+        reportedModel: "claude",
       },
     });
     cb({
@@ -864,7 +864,7 @@ describe("SSE connection", () => {
         outputTokens: 40,
         cacheCreationInputTokens: 200,
         cacheReadInputTokens: 700,
-        model: "codex",
+        reportedModel: "codex",
       },
     });
     vi.advanceTimersByTime(100);

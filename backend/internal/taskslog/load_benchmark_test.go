@@ -295,10 +295,10 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	session := benchmarkJSONLine(b, agent.MetaSessionMessage{
-		MessageType:  "caic_session",
-		SessionID:    "benchmark-session",
-		Model:        "claude-sonnet-4-6",
-		AgentVersion: "2.1.0",
+		MessageType:   "caic_session",
+		SessionID:     "benchmark-session",
+		ReportedModel: "claude-sonnet-4-6",
+		AgentVersion:  "2.1.0",
 	})
 	records := benchmarkAdoptionRecords(header)
 	written, err := writeBenchmarkRecord(bw, header)

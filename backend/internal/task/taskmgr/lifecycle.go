@@ -281,8 +281,8 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	}
 
 	forkHarness := source.Harness
-	forkModel := source.Model
-	forkEffort := source.Effort
+	forkModel := source.RequestedModel
+	forkEffort := source.RequestedEffort
 	if p.Harness != "" {
 		forkHarness = p.Harness
 		backend, ok := r.manager.Backends[forkHarness]

@@ -249,7 +249,7 @@ export default function StatsIcon(props: { events: readonly EventMessage[]; stat
                                 >⚠</span>
                               </Show>
                             </td>
-                            <td class={`${styles.perfTd} ${styles.modelCell}`}>{r.usage.model || "—"}</td>
+							<td class={`${styles.perfTd} ${styles.modelCell}`}>{r.usage.reportedModel || "—"}</td>
                             <td class={styles.perfTd}>
                               {r.duration > 0 ? formatDuration(r.duration) : "—"}
                               <span class={styles.perfSub}> API {r.durationAPI > 0 ? formatDuration(r.durationAPI) : "—"} · wait {p.waitMs !== null && p.waitMs > 0 ? formatTimingDuration(p.waitMs) : "—"}</span>

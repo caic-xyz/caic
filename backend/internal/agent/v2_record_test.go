@@ -228,6 +228,22 @@ func TestV2AgentRecord(t *testing.T) {
 		if !ok || parsedMeta.MessageType != "caic_meta" || parsedMeta.Version != 2 {
 			t.Fatalf("meta message = %#v", msgs.Messages[0].Message)
 		}
+		msgs, err = parseV2Record(p, []byte(`{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude","model":"gpt-5.6","effort":"high"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsedMeta, ok = msgs.Messages[0].Message.(*MetaMessage)
+		if !ok || parsedMeta.RequestedModel != "gpt-5.6" || parsedMeta.RequestedEffort != "high" {
+			t.Fatalf("v2 meta settings = %#v", msgs.Messages[0].Message)
+		}
+		msgs, err = parseV2Record(p, []byte(`{"t":"session","session_id":"s","model":"gpt-5.6","agent_version":"1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		init, ok := msgs.Messages[0].Message.(*InitMessage)
+		if !ok || init.ReportedModel != "gpt-5.6" {
+			t.Fatalf("v2 session = %#v", msgs.Messages[0].Message)
+		}
 		if _, err := parseV2Record(p, []byte(`{"t":"caic_meta","type":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"claude"}`)); err == nil {
 			t.Fatal("v2 meta accepted the V1 type field")
 		}

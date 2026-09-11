@@ -1014,8 +1014,8 @@ func TestHandleCreateTask(t *testing.T) {
 		if resp.ID == 0 {
 			t.Error("response has zero 'id' field")
 		}
-		if resp.Model != "m1" {
-			t.Errorf("model = %q, want m1", resp.Model)
+		if resp.RequestedModel != "m1" || resp.ReportedModel != "" {
+			t.Errorf("settings = (%q, %q), want (m1, empty)", resp.RequestedModel, resp.ReportedModel)
 		}
 	})
 
@@ -1682,8 +1682,8 @@ func TestLoadPurgedTasks(t *testing.T) {
 			if j.NumTurns != 3 {
 				t.Errorf("NumTurns = %d, want 3", j.NumTurns)
 			}
-			if j.Model != "claude-opus-4-6" {
-				t.Errorf("Model = %q, want %q", j.Model, "claude-opus-4-6")
+			if j.ReportedModel != "claude-opus-4-6" {
+				t.Errorf("Model = %q, want %q", j.ReportedModel, "claude-opus-4-6")
 			}
 			if j.AgentVersion != "2.0" {
 				t.Errorf("AgentVersion = %q, want %q", j.AgentVersion, "2.0")

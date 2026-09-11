@@ -90,7 +90,7 @@ func testParseFn(line []byte) ([]Message, error) {
 			}
 			return []Message{&InitMessage{
 				SessionID: w.SessionID, Cwd: w.Cwd, Tools: w.Tools,
-				Model: w.Model, Version: w.Version,
+				ReportedModel: w.Model, Version: w.Version,
 			}}, nil
 		}
 		var m SystemMessage
@@ -401,17 +401,39 @@ func TestAppendNativeRecord(t *testing.T) {
 func TestWriteMetaSession(t *testing.T) {
 	t.Parallel()
 
+	t.Run("V2PreservesDurableSettings", func(t *testing.T) {
+		t.Parallel()
+		buf := &testLogSink{Version: LogVersionV2}
+		if err := WriteMetaSession(buf, &InitMessage{ReportedModel: "m", ReportedEffort: "medium", Version: "1.2.3"}); err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw["model"] != "m" || raw["reported_effort"] != "medium" || raw["reported_model"] != nil {
+			t.Fatalf("v2 session settings = %#v", raw)
+		}
+	})
+
 	t.Run("VersionWithoutSession", func(t *testing.T) {
 		t.Parallel()
 		buf := &testLogSink{Version: LogVersionV1}
-		if err := WriteMetaSession(buf, &InitMessage{Model: "m", Version: "1.2.3"}); err != nil {
+		if err := WriteMetaSession(buf, &InitMessage{ReportedModel: "m", ReportedEffort: "medium", Version: "1.2.3"}); err != nil {
 			t.Fatal(err)
 		}
-		var got MetaSessionMessage
-		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &got); err != nil {
+		var raw map[string]any
+		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &raw); err != nil {
 			t.Fatal(err)
 		}
-		if got.MessageType != "caic_session" || got.SessionID != "" || got.Model != "m" || got.AgentVersion != "1.2.3" {
+		if raw["model"] != "m" || raw["reported_model"] != nil || raw["reported_effort"] != nil {
+			t.Fatalf("v1 session settings = %#v", raw)
+		}
+		got, err := DecodeV1MetaSessionMessage(bytes.TrimSpace(buf.Bytes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.MessageType != "caic_session" || got.SessionID != "" || got.ReportedModel != "m" || got.ReportedEffort != "" || got.AgentVersion != "1.2.3" {
 			t.Fatalf("MetaSessionMessage = %+v", got)
 		}
 	})
@@ -426,6 +448,89 @@ func TestWriteMetaSession(t *testing.T) {
 			t.Fatalf("buffer length = %d, want 0", buf.Len())
 		}
 	})
+}
+
+func TestMarshalLogMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("V2MetaPreservesDurableSettings", func(t *testing.T) {
+		t.Parallel()
+		data, err := MarshalLogMessage(LogVersionV2, &MetaMessage{
+			MessageType:     messageTypeMeta,
+			Version:         int(LogVersionV2),
+			Prompt:          "test",
+			Harness:         "codex",
+			RequestedModel:  "gpt-5.6",
+			RequestedEffort: "high",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw["model"] != "gpt-5.6" || raw["effort"] != "high" || raw["requested_model"] != nil || raw["requested_effort"] != nil {
+			t.Fatalf("v2 header settings = %#v", raw)
+		}
+	})
+
+	t.Run("V1MetaPreservesLegacySettings", func(t *testing.T) {
+		t.Parallel()
+		data, err := MarshalLogMessage(LogVersionV1, &MetaMessage{
+			MessageType:     messageTypeMeta,
+			Version:         int(LogVersionV1),
+			Prompt:          "test",
+			Harness:         "codex",
+			RequestedModel:  "gpt-5.6",
+			RequestedEffort: "high",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw["model"] != "gpt-5.6" || raw["effort"] != "high" || raw["requested_model"] != nil || raw["requested_effort"] != nil {
+			t.Fatalf("v1 header settings = %#v", raw)
+		}
+		decoded, err := DecodeV1MetaMessage(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decoded.RequestedModel != "gpt-5.6" || decoded.RequestedEffort != "high" {
+			t.Fatalf("decoded settings = %q/%q", decoded.RequestedModel, decoded.RequestedEffort)
+		}
+	})
+}
+
+func TestMarshalMessagePreservesDurableReportedModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		msg  Message
+	}{
+		{"init", &InitMessage{ReportedModel: "gpt-5.6"}},
+		{"system", &SystemMessage{ReportedModel: "gpt-5.6"}},
+		{"usage", &UsageMessage{ReportedModel: "gpt-5.6"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := MarshalMessage(tc.msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatal(err)
+			}
+			if raw["model"] != "gpt-5.6" || raw["reported_model"] != nil {
+				t.Fatalf("serialized model = %#v", raw)
+			}
+		})
+	}
 }
 
 func TestReadMessages(t *testing.T) {
@@ -885,7 +990,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []TimedMessage{{Message: &InitMessage{SessionID: "legacy", Model: "m", Version: "0.9"}}}
+		want := []TimedMessage{{Message: &InitMessage{SessionID: "legacy", ReportedModel: "m", Version: "0.9"}}}
 		if !record.Control || !reflect.DeepEqual(record.Messages, want) {
 			t.Fatalf("legacy record = %#v, want messages %#v", record, want)
 		}

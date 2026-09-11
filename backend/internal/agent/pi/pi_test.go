@@ -316,7 +316,7 @@ func TestPiWireFormat(t *testing.T) {
 		if !ok {
 			t.Fatalf("message type = %T, want *agent.InitMessage", msgs[0])
 		}
-		if init.SessionID != "ses-1" || init.Model != "openai/gpt-5" || init.Version != "" {
+		if init.SessionID != "ses-1" || init.ReportedModel != "openai/gpt-5" || init.Version != "" {
 			t.Fatalf("InitMessage = %+v", init)
 		}
 	})

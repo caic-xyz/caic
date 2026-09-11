@@ -12,22 +12,22 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   // Create task.
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await page.getByTestId("submit-task").click();
+  await expect(page).toHaveURL(/\/task\//);
 
-  // Open task detail (scope to task list card, not the prompt input).
-  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
+  const messages = page.getByTestId("task-message-area");
 
   // The widget card should appear with the title.
-  await expect(page.getByText("light_refraction_in_water").first()).toBeVisible({ timeout: 15_000 });
+  await expect(messages.getByText("light_refraction_in_water", { exact: true })).toBeVisible({ timeout: 15_000 });
 
   // A sandboxed iframe should be present (the widget renderer).
-  const iframe = page.locator("iframe[title='light_refraction_in_water']");
+  const iframe = messages.locator("iframe[title='light_refraction_in_water']");
   await expect(iframe).toBeVisible({ timeout: 10_000 });
 
   // The completion checkmark should appear once the widget finishes.
-  await expect(page.getByText("\u2713").first()).toBeVisible({ timeout: 10_000 });
+  await expect(messages.getByText("\u2713", { exact: true })).toBeVisible({ timeout: 10_000 });
 
   // Wait for the result message.
-  await expect(page.locator("strong", { hasText: "Done" })).toBeVisible({
+  await expect(messages.locator("strong", { hasText: "Done" })).toBeVisible({
     timeout: 10_000,
   });
 });

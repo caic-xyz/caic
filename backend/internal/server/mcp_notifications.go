@@ -127,7 +127,7 @@ func taskUsesProvider(task *v1.Task, provider agent.QuotaProvider) bool {
 	case v1.HarnessOpenCode, v1.HarnessPi:
 		// These harnesses select the billing provider through the task model.
 	}
-	addModelProviderCandidate(candidates, task.Model)
+	addModelProviderCandidate(candidates, task.ReportedModel)
 	_, ok := candidates[provider]
 	return ok
 }

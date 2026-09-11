@@ -20,11 +20,11 @@ func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()
 	gt := apiconv.NewToolTimingTracker(harness.Claude, nil)
 	msg := &agent.InitMessage{
-		Model:     "claude-opus-4-6",
-		Version:   "2.1.34",
-		SessionID: "sess-1",
-		Tools:     []string{"Bash", "Read"},
-		Cwd:       "/home/user",
+		ReportedModel: "claude-opus-4-6",
+		Version:       "2.1.34",
+		SessionID:     "sess-1",
+		Tools:         []string{"Bash", "Read"},
+		Cwd:           "/home/user",
 	}
 	now := time.Now()
 	events := gt.ConvertMessage(msg, now)
@@ -41,8 +41,8 @@ func TestGenericConvertInitHasHarness(t *testing.T) {
 	if ev.Init.Harness != "claude" {
 		t.Errorf("harness = %q, want %q", ev.Init.Harness, "claude")
 	}
-	if ev.Init.Model != "claude-opus-4-6" {
-		t.Errorf("model = %q, want %q", ev.Init.Model, "claude-opus-4-6")
+	if ev.Init.ReportedModel != "claude-opus-4-6" {
+		t.Errorf("model = %q, want %q", ev.Init.ReportedModel, "claude-opus-4-6")
 	}
 	if ev.Init.AgentVersion != "2.1.34" {
 		t.Errorf("version = %q, want %q", ev.Init.AgentVersion, "2.1.34")
@@ -146,8 +146,8 @@ func TestGenericConvertTextAndUsage(t *testing.T) {
 
 	textMsg := &agent.TextMessage{Text: "hello"}
 	usageMsg := &agent.UsageMessage{
-		Usage: agent.Usage{InputTokens: 200, OutputTokens: 100},
-		Model: "gemini-2.5-pro",
+		Usage:         agent.Usage{InputTokens: 200, OutputTokens: 100},
+		ReportedModel: "gemini-2.5-pro",
 	}
 
 	now := time.Now()
@@ -164,8 +164,8 @@ func TestGenericConvertTextAndUsage(t *testing.T) {
 	if events[1].Kind != v1.EventKindUsage {
 		t.Errorf("event[1].kind = %q, want %q", events[1].Kind, v1.EventKindUsage)
 	}
-	if events[1].Usage.Model != "gemini-2.5-pro" {
-		t.Errorf("model = %q, want %q", events[1].Usage.Model, "gemini-2.5-pro")
+	if events[1].Usage.ReportedModel != "gemini-2.5-pro" {
+		t.Errorf("model = %q, want %q", events[1].Usage.ReportedModel, "gemini-2.5-pro")
 	}
 }
 

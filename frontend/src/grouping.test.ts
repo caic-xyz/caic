@@ -21,7 +21,7 @@ function textDeltaEvent(text: string): EventMessage {
 function usageEvent(): EventMessage {
   return {
     kind: "usage", ts: 0,
-    usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
+    usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
   };
 }
 
@@ -32,7 +32,7 @@ function resultEvent(): EventMessage {
       subtype: "success", isError: false, result: "done",
       totalCostUSD: 0.01, duration: 1.0, durationAPI: 0.9,
       numTurns: 1,
-      usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
+      usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
     },
   };
 }
@@ -536,10 +536,10 @@ describe("groupMessages", () => {
 describe("groupSessions", () => {
   it("splits on init events", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("session 1"),
       resultEvent(),
-      { kind: "init", ts: 2, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 2, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("session 2"),
     ];
     const sessions = groupSessions(msgs);
@@ -552,7 +552,7 @@ describe("groupSessions", () => {
 
   it("splits on compact_boundary system events", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("before compact"),
       resultEvent(),
       { kind: "system", ts: 2, system: { subtype: "compact_boundary" } },
@@ -581,7 +581,7 @@ describe("groupSessions", () => {
     // It must appear in the same session as the init, not as a phantom "Compacted session".
     const msgs: EventMessage[] = [
       { kind: "userInput", ts: 0, userInput: { text: "hello" } },
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("response"),
     ];
     const sessions = groupSessions(msgs);
@@ -596,11 +596,11 @@ describe("groupSessions", () => {
     // After a session result, the user types a message, then a new init arrives.
     // The userInput should appear in session 2 (the one it triggered), not session 1.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
-      { kind: "init", ts: 3, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 3, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("session 2 response"),
     ];
     const sessions = groupSessions(msgs);
@@ -615,11 +615,11 @@ describe("groupSessions", () => {
     // After carrying the userInput into the next session, the resulting turn should have
     // textCount > 0 (agent replied), so turnSummary does not return "empty turn".
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("first response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
-      { kind: "init", ts: 3, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 3, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("second response"),
       resultEvent(),
     ];
@@ -631,7 +631,7 @@ describe("groupSessions", () => {
 
   it("userInput before compact_boundary is carried into the compacted session", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("first response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "continue" } },
@@ -648,11 +648,11 @@ describe("groupSessions", () => {
     // Claude Code re-invocations within the same conversation reuse the same sessionID.
     // Only a different sessionID or compact_boundary should create a new top-level group.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("first response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
-      { kind: "init", ts: 3, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 3, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("second response"),
       resultEvent(),
     ];
@@ -663,7 +663,7 @@ describe("groupSessions", () => {
 
   it("boundary event alone produces a session with empty turns", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
@@ -672,7 +672,7 @@ describe("groupSessions", () => {
 
   it("session toolCount and textCount aggregate turns", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       toolUseEvent("t1", "Read"),
       resultEvent(),
       textDeltaEvent("text"),
@@ -694,7 +694,7 @@ describe("groupSessions", () => {
     secondResult.result.duration = 3;
 
     const sessions = groupSessions([
-      { kind: "init", ts: 1_000, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1_000, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("first response"),
       firstResult,
       { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
@@ -782,7 +782,7 @@ describe("groupTurns", () => {
         subtype: "success", isError: false, result: "done",
         totalCostUSD: 0.01, duration, durationAPI: duration * 0.9,
         numTurns: 1,
-        usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
+        usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
       },
     });
     const events: EventMessage[] = [
@@ -913,10 +913,10 @@ describe("buildPastSessionItems", () => {
     // Past sessions are memoized via createMemo in TaskDetail. If keys change
     // identity between calls, the keyed Match components remount and cause flickering.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("session 1"),
       resultEvent(),
-      { kind: "init", ts: 2, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 2, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("session 2"),
     ];
     const sessions = groupSessions(msgs);
@@ -932,7 +932,7 @@ describe("buildPastSessionItems", () => {
     // When a past session is collapsed (sessionElided), its key must not change
     // across recomputation frames, otherwise the elided row remounts.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 10, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      { kind: "init", ts: 10, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
       textDeltaEvent("text"),
       resultEvent(),
     ];

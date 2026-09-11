@@ -537,7 +537,7 @@ public struct RepoPrefsResp: Codable {
     public let path: String
     public let baseBranch: String?
     public let harness: String?
-    public let model: String?
+    public let requestedModel: String?
 }
 
 /// CacheMappingResp represents a directory mapping for cache/state sharing.
@@ -817,9 +817,10 @@ public struct Task: Codable {
     public let parentTaskID: String?
     /// Per-task harness/agent metadata.
     public let harness: Harness
-    public let model: String?
-    /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
-    public let effort: String?
+    public let requestedModel: String?
+    public let requestedEffort: String?
+    public let reportedModel: String?
+    public let reportedEffort: String?
     public let agentVersion: String?
     public let sessionID: String?
     /// When the task was created.
@@ -886,8 +887,10 @@ public struct TaskInfoRecorded: Codable {
     public let startedAt: ISOTimestamp?
     public let stateUpdatedAt: ISOTimestamp?
     public let harness: Harness
-    public let model: String?
-    public let effort: String?
+    public let requestedModel: String?
+    public let requestedEffort: String?
+    public let reportedModel: String?
+    public let reportedEffort: String?
     public let agentVersion: String?
     public let sessionID: String?
     public let baseImage: String?
@@ -963,9 +966,9 @@ public struct CreateTaskReq: Codable {
 /// EventInit is emitted once at the start of a session. It includes a Harness
 /// field so the client knows which backend produced the stream.
 public struct EventInit: Codable {
-    public let model: String
+    public let reportedModel: String
     /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
-    public let effort: String?
+    public let reportedEffort: String?
     public let agentVersion: String
     public let sessionID: String
     public let tools: [String]?
@@ -1059,7 +1062,7 @@ public struct EventUsage: Codable {
     public let cacheCreationInputTokens: Int
     public let cacheReadInputTokens: Int
     public let reasoningOutputTokens: Int?
-    public let model: String
+    public let reportedModel: String
 }
 
 /// EventResult is emitted when the task reaches a terminal state.

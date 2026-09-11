@@ -709,36 +709,25 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if discriminator != "caic_meta" {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("wrong %s discriminator %q", key, discriminator)
 	}
-	h, err := stringField(obj, "harness")
-	if err != nil || h == "" {
-		if err == nil {
-			err = errors.New("harness is empty")
-		}
+	parser, err := agent.NewLogRecordParser(authority.Version, func([]byte) ([]agent.Message, error) {
+		return nil, errors.New("unexpected native metadata header")
+	})
+	if err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
-	authority.Harness = harness.Name(h)
-	if authority.Version == agent.LogVersionV2 {
-		delete(obj.fields, "t")
-		obj.fields["type"] = []byte(`"caic_meta"`)
-		line, err = json.Marshal(obj.fields)
-		if err != nil {
-			return agent.MetaMessage{}, logAuthority{}, err
-		}
-	}
-	var meta agent.MetaMessage
-	if authority.Version == agent.LogVersionV2 {
-		decoder := json.NewDecoder(bytes.NewReader(line))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&meta); err != nil {
-			return agent.MetaMessage{}, logAuthority{}, err
-		}
-	} else if err := json.Unmarshal(line, &meta); err != nil {
+	record, err := parser.ParseRecord(line)
+	if err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
-	if err := meta.Validate(); err != nil {
-		return agent.MetaMessage{}, logAuthority{}, err
+	if !record.Control || len(record.Messages) != 1 {
+		return agent.MetaMessage{}, logAuthority{}, errors.New("metadata header did not produce one control message")
 	}
-	return meta, authority, nil
+	meta, ok := record.Messages[0].Message.(*agent.MetaMessage)
+	if !ok {
+		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("metadata header message = %T, want *agent.MetaMessage", record.Messages[0].Message)
+	}
+	authority.Harness = meta.Harness
+	return *meta, authority, nil
 }
 
 func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.MetaMessage, error) {
@@ -840,7 +829,8 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 
 // LoadedTask holds the data reconstructed from a single task log file.
 //
-// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
+// Its JSON form is durable header-cache metadata, separate from HTTP DTOs.
+// Preserve established disk keys such as model and effort across Go renames.
 type LoadedTask struct {
 	TaskID            string               `json:"task_id"` // Task ID parsed from log filename; empty if unparseable.
 	Prompt            string               `json:"prompt"`
@@ -868,9 +858,11 @@ type LoadedTask struct {
 	MaxCPUs           int                  `json:"max_cpus"`
 	CacheMounts       []runtime.CacheMount `json:"cache_mounts"`
 	Mounts            []runtime.Mount      `json:"mounts"`
-	Model             string               `json:"model"`
-	Effort            string               `json:"effort"`
-	SessionID         string               `json:"session_id"` // Backend-native session/thread ID required to resume stateful harnesses.
+	RequestedModel    string               `json:"model"`           // User-requested model.
+	RequestedEffort   string               `json:"effort"`          // User-requested reasoning effort.
+	ReportedModel     string               `json:"reported_model"`  // Model resolved by the harness.
+	ReportedEffort    string               `json:"reported_effort"` // Reasoning effort resolved by the harness.
+	SessionID         string               `json:"session_id"`      // Backend-native session/thread ID required to resume stateful harnesses.
 	AgentVersion      string               `json:"agent_version"`
 	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by Store.Load.
 	DiffCreated       bool                 `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
@@ -1105,8 +1097,11 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	if lt.SessionID == "" {
 		lt.SessionID = src.SessionID
 	}
-	if lt.Model == "" {
-		lt.Model = src.Model
+	if lt.ReportedModel == "" {
+		lt.ReportedModel = src.ReportedModel
+	}
+	if lt.ReportedEffort == "" {
+		lt.ReportedEffort = src.ReportedEffort
 	}
 	if lt.AgentVersion == "" {
 		lt.AgentVersion = src.AgentVersion
@@ -1280,7 +1275,7 @@ func parseInventoryNativeMetadata(raw []byte) ([]agent.Message, error) {
 		case "system":
 			var init tailInit
 			if json.Unmarshal(raw, &init) == nil && init.Subtype == "init" {
-				return []agent.Message{&agent.InitMessage{Model: init.Model, Version: init.Version}}, nil
+				return []agent.Message{&agent.InitMessage{ReportedModel: init.Model, Version: init.Version}}, nil
 			}
 		case "result":
 			var result tailResult
@@ -1376,8 +1371,8 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		Repos:             repos,
 		LogVersion:        agent.LogVersion(meta.Version),
 		Harness:           meta.Harness,
-		Model:             meta.Model,
-		Effort:            meta.Effort,
+		RequestedModel:    meta.RequestedModel,
+		RequestedEffort:   meta.RequestedEffort,
 		StartedAt:         meta.StartedAt,
 		LastStateUpdateAt: modified,
 		State:             StateRunning,
@@ -1604,8 +1599,11 @@ func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.TimedMessage) {
 		if init.SessionID != "" {
 			lt.SessionID = init.SessionID
 		}
-		if init.Model != "" {
-			lt.Model = init.Model
+		if init.ReportedModel != "" {
+			lt.ReportedModel = init.ReportedModel
+		}
+		if init.ReportedEffort != "" {
+			lt.ReportedEffort = init.ReportedEffort
 		}
 		if init.Version != "" {
 			lt.AgentVersion = init.Version
@@ -1623,8 +1621,11 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
 		if init.SessionID != "" {
 			lt.SessionID = init.SessionID
 		}
-		if init.Model != "" {
-			lt.Model = init.Model
+		if init.ReportedModel != "" {
+			lt.ReportedModel = init.ReportedModel
+		}
+		if init.ReportedEffort != "" {
+			lt.ReportedEffort = init.ReportedEffort
 		}
 		if init.Version != "" {
 			lt.AgentVersion = init.Version

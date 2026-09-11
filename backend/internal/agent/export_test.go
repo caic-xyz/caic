@@ -230,6 +230,25 @@ func TestRenderDiscussion(t *testing.T) {
 			assertContains(t, md, "**PR**: octo/app#42")
 		})
 
+		t.Run("reported_settings", func(t *testing.T) {
+			t.Parallel()
+			meta := &MetaMessage{
+				Prompt:          "task",
+				Harness:         harness.Codex,
+				RequestedModel:  "requested-model",
+				RequestedEffort: "low",
+			}
+			md := RenderDiscussion(meta, nil, nil, []Message{
+				&InitMessage{ReportedModel: "reported-model", ReportedEffort: "high"},
+				&SystemMessage{Subtype: SystemSubtypeModelRerouted, ReportedModel: "rerouted-model"},
+			})
+			assertContains(t, md, "**Model**: rerouted-model")
+			assertContains(t, md, "**Effort**: high")
+			if strings.Contains(md, "requested-model") || strings.Contains(md, "**Effort**: low") {
+				t.Fatalf("exported requested settings:\n%s", md)
+			}
+		})
+
 		t.Run("with_flags", func(t *testing.T) {
 			t.Parallel()
 			line := `{"type":"caic_meta","version":1,"prompt":"test","harness":"pi","repos":[],"started_at":"2025-01-15T10:00:00Z","tailscale":true,"display":true}`

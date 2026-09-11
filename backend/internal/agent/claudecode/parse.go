@@ -310,11 +310,11 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 			return nil, err
 		}
 		return []agent.Message{&agent.InitMessage{
-			SessionID: w.SessionID,
-			Cwd:       w.Cwd,
-			Tools:     w.Tools,
-			Model:     w.Model,
-			Version:   w.Version,
+			SessionID:     w.SessionID,
+			Cwd:           w.Cwd,
+			Tools:         w.Tools,
+			ReportedModel: w.Model,
+			Version:       w.Version,
 		}}, nil
 	}
 	if subtype == "thinking_tokens" {
@@ -387,8 +387,8 @@ func parseAssistant(line []byte) ([]agent.Message, error) {
 		usage := toAgentUsage(&u)
 		usage.ReasoningOutputTokens = assistantThinkingTokens(line)
 		msgs = append(msgs, &agent.UsageMessage{
-			Usage: usage,
-			Model: w.Message.Model,
+			Usage:         usage,
+			ReportedModel: w.Message.Model,
 		})
 	}
 	if len(msgs) == 0 {

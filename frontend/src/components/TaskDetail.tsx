@@ -186,9 +186,13 @@ export default function TaskDetail(props: Props) {
     if (event.key !== "Tab" || !event.shiftKey) return;
     event.preventDefault();
     event.stopPropagation();
-    const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
-      .find((candidate) => candidate.dataset.taskId === props.taskId);
-    card?.focus();
+    // Task updates can replace the card while this handler runs. Focus the
+    // current card after Solid has applied that update.
+    requestAnimationFrame(() => {
+      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
+        .find((candidate) => candidate.dataset.taskId === props.taskId);
+      card?.focus();
+    });
   }
 
   onMount(() => {
@@ -1057,8 +1061,8 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
       <Match when={ev().init} keyed>
         {(init) => (
           <div class={styles.systemInit}>
-            Session started &middot; {init.model}
-            {init.effort ? <>{' · '}{init.effort} effort</> : null}
+			Session started &middot; {init.reportedModel}
+			{init.reportedEffort ? <>{' · '}{init.reportedEffort} effort</> : null}
             {' · '}{init.agentVersion} &middot; {init.sessionID}
           </div>
         )}
@@ -1126,7 +1130,7 @@ function usageMetaParts(u: EventUsage): string[] {
     tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
   }
   if (tokenParts.length === 0) return [];
-  return u.model ? [u.model, ...tokenParts] : tokenParts;
+	return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
 }
 
 function MessageItem(props: { ev: EventMessage }) {

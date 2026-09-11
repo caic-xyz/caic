@@ -100,8 +100,8 @@ type Task struct {
 	ID                ksid.ID
 	InitialPrompt     agent.Prompt         // Initial prompt text and optional images.
 	Harness           harness.Name         // Agent harness ("claude", "codex", etc.).
-	Model             string               // User-requested model; passed to agent CLI.
-	Effort            string               // Thinking effort; passed to agent CLI. Empty = default.
+	RequestedModel    string               // User-requested model; passed to agent CLI.
+	RequestedEffort   string               // Thinking effort; passed to agent CLI. Empty = default.
 	RuntimeName       runtime.Name         // Runtime backend used for this task.
 	BaseImage         string               // Custom runtime base image; empty means use the default.
 	ContainerPlatform string               // Container CPU architecture; empty means use the host default.
@@ -143,7 +143,8 @@ type Task struct {
 	state                 taskslog.State
 	stateUpdatedAt        time.Time // UTC timestamp of the last state transition.
 	sessionID             string    // Agent session ID, captured from InitMessage.
-	reportedModel         string    // Model reported by InitMessage (may differ from Model).
+	reportedModel         string    // Model reported by InitMessage (may differ from RequestedModel).
+	reportedEffort        string    // Thinking effort reported by InitMessage (may differ from RequestedEffort).
 	agentVersion          string    // Agent version, captured from InitMessage.
 	reportedContextWindow int       // Context window size reported by the agent (0 = unknown).
 	planFile              string    // Path to plan file inside instance, captured from Write tool_use.
@@ -202,8 +203,8 @@ func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, bas
 		timelineID:        rand.Text(),
 		InitialPrompt:     prompt,
 		Harness:           h,
-		Model:             model,
-		Effort:            effort,
+		RequestedModel:    model,
+		RequestedEffort:   effort,
 		BaseImage:         baseImage,
 		ContainerPlatform: containerPlatform,
 		StartedAt:         time.Now().UTC(),
@@ -630,8 +631,8 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 		Title:             t.Title(),
 		Repos:             metaRepos,
 		Harness:           t.Harness,
-		Model:             t.Model,
-		Effort:            t.Effort,
+		RequestedModel:    t.RequestedModel,
+		RequestedEffort:   t.RequestedEffort,
 		StartedAt:         t.StartedAt,
 		ForgeIssue:        t.ForgeIssue,
 		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
@@ -764,7 +765,7 @@ func (t *Task) GetSessionID() string {
 }
 
 // SetSessionMetadata records persisted agent session metadata.
-func (t *Task) SetSessionMetadata(sessionID, model, agentVersion string) {
+func (t *Task) SetSessionMetadata(sessionID, model, effort, agentVersion string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if sessionID != "" {
@@ -773,20 +774,12 @@ func (t *Task) SetSessionMetadata(sessionID, model, agentVersion string) {
 	if model != "" && t.reportedModel == "" {
 		t.reportedModel = model
 	}
+	if effort != "" && t.reportedEffort == "" {
+		t.reportedEffort = effort
+	}
 	if agentVersion != "" {
 		t.agentVersion = agentVersion
 	}
-}
-
-// GetModel returns the agent-reported model if available, otherwise the
-// user-requested model. Read under the mutex.
-func (t *Task) GetModel() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.reportedModel != "" {
-		return t.reportedModel
-	}
-	return t.Model
 }
 
 // GetPlanFile returns the plan file path under the mutex.
@@ -961,7 +954,10 @@ type Snapshot struct {
 	RelayOffset        int64
 	Title              string
 	SessionID          string
-	Model              string
+	RequestedModel     string
+	RequestedEffort    string
+	ReportedModel      string
+	ReportedEffort     string
 	AgentVersion       string
 	ContextWindowLimit int // Non-zero when reported by the agent at runtime.
 	InPlanMode         bool
@@ -1010,10 +1006,6 @@ type quotaWindowKey struct {
 func (t *Task) Snapshot() Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	model := t.reportedModel
-	if model == "" {
-		model = t.Model
-	}
 	return Snapshot{
 		State:              t.state,
 		StateUpdatedAt:     t.stateUpdatedAt,
@@ -1033,7 +1025,10 @@ func (t *Task) Snapshot() Snapshot {
 		RelayOffset:        t.RelayOffset,
 		Title:              t.title,
 		SessionID:          t.sessionID,
-		Model:              model,
+		RequestedModel:     t.RequestedModel,
+		RequestedEffort:    t.RequestedEffort,
+		ReportedModel:      t.reportedModel,
+		ReportedEffort:     t.reportedEffort,
 		AgentVersion:       t.agentVersion,
 		ContextWindowLimit: t.reportedContextWindow,
 		InPlanMode:         t.inPlanMode,
@@ -1174,8 +1169,11 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			if m.AgentVersion != "" {
 				t.agentVersion = m.AgentVersion
 			}
-			if m.Model != "" && t.reportedModel == "" {
-				t.reportedModel = m.Model
+			if m.ReportedModel != "" && t.reportedModel == "" {
+				t.reportedModel = m.ReportedModel
+			}
+			if m.ReportedEffort != "" && t.reportedEffort == "" {
+				t.reportedEffort = m.ReportedEffort
 			}
 		case *agent.InitMessage:
 			if m.SessionID != "" {
@@ -1184,14 +1182,17 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			if m.Version != "" {
 				t.agentVersion = m.Version
 			}
-			if m.Model != "" {
-				t.reportedModel = m.Model
+			if m.ReportedModel != "" {
+				t.reportedModel = m.ReportedModel
+			}
+			if m.ReportedEffort != "" {
+				t.reportedEffort = m.ReportedEffort
 			}
 		case *agent.SystemMessage:
 			switch m.Subtype {
-			case "model_rerouted":
-				if m.Model != "" {
-					t.reportedModel = m.Model
+			case agent.SystemSubtypeModelRerouted:
+				if m.ReportedModel != "" {
+					t.reportedModel = m.ReportedModel
 				}
 			case "context_cleared", "compact_boundary":
 				if m.Subtype == "context_cleared" {
@@ -1761,8 +1762,11 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		if meta.AgentVersion != "" {
 			t.agentVersion = meta.AgentVersion
 		}
-		if meta.Model != "" && t.reportedModel == "" {
-			t.reportedModel = meta.Model
+		if meta.ReportedModel != "" && t.reportedModel == "" {
+			t.reportedModel = meta.ReportedModel
+		}
+		if meta.ReportedEffort != "" && t.reportedEffort == "" {
+			t.reportedEffort = meta.ReportedEffort
 		}
 		return stateChanged, generateTitle
 	}
@@ -1787,18 +1791,16 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		if init.Version != "" {
 			t.agentVersion = init.Version
 		}
-		if init.Model != "" {
-			t.reportedModel = init.Model
+		if init.ReportedModel != "" {
+			t.reportedModel = init.ReportedModel
 		}
-		// Inject the user-requested thinking effort into the init message
-		// so the frontend can display it. The agent CLI doesn't report it.
-		if init.Effort == "" && t.Effort != "" {
-			init.Effort = t.Effort
+		if init.ReportedEffort != "" {
+			t.reportedEffort = init.ReportedEffort
 		}
 	}
 	// Track model rerouting (codex): update reportedModel to the active model.
-	if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "model_rerouted" && sm.Model != "" {
-		t.reportedModel = sm.Model
+	if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == agent.SystemSubtypeModelRerouted && sm.ReportedModel != "" {
+		t.reportedModel = sm.ReportedModel
 	}
 	// Track plan mode and plan file from tool_use events.
 	if tu, ok := m.(*agent.ToolUseMessage); ok {
@@ -2058,8 +2060,10 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 		MaxCPUs:           t.MaxCPUs,
 		CacheMounts:       slices.Clone(t.CacheMounts),
 		Mounts:            slices.Clone(t.Mounts),
-		Model:             snapshot.Model,
-		Effort:            t.Effort,
+		RequestedModel:    t.RequestedModel,
+		RequestedEffort:   t.RequestedEffort,
+		ReportedModel:     snapshot.ReportedModel,
+		ReportedEffort:    snapshot.ReportedEffort,
 		SessionID:         snapshot.SessionID,
 		AgentVersion:      snapshot.AgentVersion,
 		DiffCreated:       t.DiffCreated(),

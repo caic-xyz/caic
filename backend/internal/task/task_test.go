@@ -137,7 +137,7 @@ func TestTask(t *testing.T) {
 		tk.ContainerPlatform = "linux/amd64"
 		tk.SetTitle("title")
 		tk.Repos = []taskslog.RepoMount{{Name: "org/repo", Branch: "caic-1", GitRoot: "/host/checkout"}}
-		tk.SetSessionMetadata("session-1", "reported", "1.2.3")
+		tk.SetSessionMetadata("session-1", "reported", "", "1.2.3")
 		tk.SetState(taskslog.StatePurged)
 		result := &taskslog.Result{State: taskslog.StatePurged, AgentResult: "done"}
 		parentID := ksid.NewID()
@@ -147,8 +147,8 @@ func TestTask(t *testing.T) {
 		if summary.LogVersion != agent.LogVersionV1 || summary.State != taskslog.StatePurged || summary.LastTrailer != result {
 			t.Fatalf("terminal summary = %#v", summary)
 		}
-		if summary.SessionID != "session-1" || summary.Model != "reported" || summary.AgentVersion != "1.2.3" {
-			t.Errorf("session summary = (%q, %q, %q)", summary.SessionID, summary.Model, summary.AgentVersion)
+		if summary.SessionID != "session-1" || summary.RequestedModel != "requested" || summary.ReportedModel != "reported" || summary.AgentVersion != "1.2.3" {
+			t.Errorf("session summary = (%q, %q, %q, %q)", summary.SessionID, summary.RequestedModel, summary.ReportedModel, summary.AgentVersion)
 		}
 		if got := summary.ParentTaskID; got != parentID.String() {
 			t.Errorf("ParentTaskID = %q, want %q", got, parentID)
@@ -2300,23 +2300,45 @@ func TestTask(t *testing.T) {
 		})
 	})
 
-	t.Run("GetModel", func(t *testing.T) {
+	t.Run("SnapshotSettings", func(t *testing.T) {
 		t.Parallel()
-		t.Run("FallbackToModel", func(t *testing.T) {
+		t.Run("RequestedOnly", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "gpt-4", "")
-			if got := tk.GetModel(); got != "gpt-4" {
-				t.Errorf("GetModel = %q, want %q", got, "gpt-4")
+			snap := tk.Snapshot()
+			if snap.RequestedModel != "gpt-4" || snap.ReportedModel != "" {
+				t.Errorf("settings = (%q, %q), want (gpt-4, empty)", snap.RequestedModel, snap.ReportedModel)
 			}
 		})
-		t.Run("UsesReportedModel", func(t *testing.T) {
+		t.Run("Reported", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "gpt-4", "")
-			tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1", Model: "claude-3-opus"}, false)
-			if got := tk.GetModel(); got != "claude-3-opus" {
-				t.Errorf("GetModel = %q, want %q", got, "claude-3-opus")
+			tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1", ReportedModel: "claude-3-opus"}, false)
+			snap := tk.Snapshot()
+			if snap.RequestedModel != "gpt-4" || snap.ReportedModel != "claude-3-opus" {
+				t.Errorf("settings = (%q, %q), want (gpt-4, claude-3-opus)", snap.RequestedModel, snap.ReportedModel)
 			}
 		})
+	})
+
+	t.Run("ReportedEffort", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-5", "high")
+		tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1", ReportedEffort: "medium"}, false)
+		snap := tk.Snapshot()
+		if snap.RequestedEffort != "high" || snap.ReportedEffort != "medium" {
+			t.Errorf("settings = (%q, %q), want (high, medium)", snap.RequestedEffort, snap.ReportedEffort)
+		}
+	})
+
+	t.Run("UnreportedEffortIsNotAddedToInit", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-5", "high")
+		init := &agent.InitMessage{SessionID: "s1"}
+		tk.addMessage(t.Context(), init, false)
+		if init.ReportedEffort != "" {
+			t.Errorf("InitMessage.Effort = %q, want empty", init.ReportedEffort)
+		}
 	})
 
 	t.Run("AgentVersion", func(t *testing.T) {
@@ -2439,13 +2461,13 @@ func TestTask(t *testing.T) {
 	t.Run("SetSessionMetadata", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "requested", "")
-		tk.SetSessionMetadata("session-1", "reported", "2.0.0")
+		tk.SetSessionMetadata("session-1", "reported", "", "2.0.0")
 		if got := tk.GetSessionID(); got != "session-1" {
 			t.Errorf("SessionID = %q, want session-1", got)
 		}
 		snap := tk.Snapshot()
-		if snap.Model != "reported" {
-			t.Errorf("Model = %q, want reported", snap.Model)
+		if snap.RequestedModel != "requested" || snap.ReportedModel != "reported" {
+			t.Errorf("settings = (%q, %q), want (requested, reported)", snap.RequestedModel, snap.ReportedModel)
 		}
 		if snap.AgentVersion != "2.0.0" {
 			t.Errorf("AgentVersion = %q, want 2.0.0", snap.AgentVersion)

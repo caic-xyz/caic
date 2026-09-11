@@ -48,7 +48,7 @@ func (t *testTask) logHeader() *agent.MetaMessage {
 	for i, repo := range t.Repos {
 		repos[i] = agent.MetaRepo{Name: repo.Name, BaseBranch: repo.BaseBranch, Branch: repo.Branch, ContainerPath: repo.ContainerPath}
 	}
-	return &agent.MetaMessage{MessageType: "caic_meta", Prompt: t.InitialPrompt.Text, Repos: repos, Harness: t.Harness, Model: t.Model, Effort: t.Effort}
+	return &agent.MetaMessage{MessageType: "caic_meta", Prompt: t.InitialPrompt.Text, Repos: repos, Harness: t.Harness, RequestedModel: t.Model, RequestedEffort: t.Effort}
 }
 
 type testTaskLog struct {
@@ -186,7 +186,7 @@ func TestStore(t *testing.T) {
 		if err := json.Unmarshal([]byte(entries[0]), &meta); err != nil {
 			t.Fatal(err)
 		}
-		if meta.Version != int(agent.LogVersionV2) || meta.Prompt != "test prompt" || meta.Model != "model-1" || meta.Effort != "high" {
+		if meta.Version != int(agent.LogVersionV2) || meta.Prompt != "test prompt" || meta.RequestedModel != "model-1" || meta.RequestedEffort != "high" {
 			t.Fatalf("unexpected metadata: %+v", meta)
 		}
 		if len(meta.Repos) != 1 || meta.Repos[0].ContainerPath != "~/src/org/repo" {
@@ -829,7 +829,7 @@ func TestStore(t *testing.T) {
 			})
 			v1Lines := []string{
 				v1Meta,
-				mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "session-1", Model: "model-1", AgentVersion: "agent-1"}),
+				`{"type":"caic_session","session_id":"session-1","model":"model-1","agent_version":"agent-1"}`,
 				mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "owner", ForgeRepo: "repo", ForgePR: 7}),
 				mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 2, Deleted: 1}}, Ts: 2_000_000_000}),
 				`{"type":"assistant","text":"conversation"}`,
@@ -866,8 +866,8 @@ func TestStore(t *testing.T) {
 					}
 					v1 := load(t, "v1.jsonl", v1Lines)
 					v2 := load(t, "v2.jsonl", v2Lines)
-					if v2.SessionID != v1.SessionID || v2.Model != v1.Model || v2.AgentVersion != v1.AgentVersion {
-						t.Fatalf("session metadata v2 = (%q, %q, %q), v1 = (%q, %q, %q)", v2.SessionID, v2.Model, v2.AgentVersion, v1.SessionID, v1.Model, v1.AgentVersion)
+					if v2.SessionID != v1.SessionID || v2.RequestedModel != v1.RequestedModel || v2.AgentVersion != v1.AgentVersion {
+						t.Fatalf("session metadata v2 = (%q, %q, %q), v1 = (%q, %q, %q)", v2.SessionID, v2.RequestedModel, v2.AgentVersion, v1.SessionID, v1.RequestedModel, v1.AgentVersion)
 					}
 					if v2.ForgeOwner != v1.ForgeOwner || v2.ForgeRepo != v1.ForgeRepo || v2.ForgePR != v1.ForgePR {
 						t.Fatalf("PR metadata v2 = (%q, %q, %d), v1 = (%q, %q, %d)", v2.ForgeOwner, v2.ForgeRepo, v2.ForgePR, v1.ForgeOwner, v1.ForgeRepo, v1.ForgePR)
@@ -952,8 +952,8 @@ func TestStore(t *testing.T) {
 					}
 					v1 := load(t, "v1.jsonl", v1Lines)
 					v2 := load(t, "v2.jsonl", v2Lines)
-					if v2.Model != v1.Model || v2.AgentVersion != v1.AgentVersion {
-						t.Fatalf("native init metadata v2 = (%q, %q), v1 = (%q, %q)", v2.Model, v2.AgentVersion, v1.Model, v1.AgentVersion)
+					if v2.RequestedModel != v1.RequestedModel || v2.AgentVersion != v1.AgentVersion {
+						t.Fatalf("native init metadata v2 = (%q, %q), v1 = (%q, %q)", v2.RequestedModel, v2.AgentVersion, v1.RequestedModel, v1.AgentVersion)
 					}
 					if v2.LastTrailer == nil || v1.LastTrailer == nil || v2.LastTrailer.CostUSD != v1.LastTrailer.CostUSD || v2.LastTrailer.Duration != v1.LastTrailer.Duration || v2.LastTrailer.NumTurns != v1.LastTrailer.NumTurns || v2.LastTrailer.Usage != v1.LastTrailer.Usage {
 						t.Fatalf("native result backfill v2 = %#v, v1 = %#v", v2.LastTrailer, v1.LastTrailer)
@@ -1250,7 +1250,7 @@ func TestStore(t *testing.T) {
 			meta := mustJSON(t, agent.MetaMessage{
 				MessageType: "caic_meta", Version: 1, Prompt: "feat task",
 				Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude",
-				Model: "model-1", Effort: "high",
+				RequestedModel: "model-1", RequestedEffort: "high",
 				Tailscale: true, USB: true, Display: true, Sudo: true, GitHubToken: true,
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
@@ -1273,11 +1273,11 @@ func TestStore(t *testing.T) {
 			if !lt.Display {
 				t.Error("Display = false, want true")
 			}
-			if lt.Model != "model-1" {
-				t.Errorf("Model = %q, want model-1", lt.Model)
+			if lt.RequestedModel != "model-1" {
+				t.Errorf("Model = %q, want model-1", lt.RequestedModel)
 			}
-			if lt.Effort != "high" {
-				t.Errorf("Effort = %q, want high", lt.Effort)
+			if lt.RequestedEffort != "high" {
+				t.Errorf("Effort = %q, want high", lt.RequestedEffort)
 			}
 			if !lt.Sudo {
 				t.Error("Sudo = false, want true")
@@ -1345,10 +1345,10 @@ func TestStore(t *testing.T) {
 				Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Codex,
 			})
 			session := mustJSON(t, agent.MetaSessionMessage{
-				MessageType:  "caic_session",
-				SessionID:    "thread-1",
-				Model:        "gpt-5.4",
-				AgentVersion: "1.2.3",
+				MessageType:   "caic_session",
+				SessionID:     "thread-1",
+				ReportedModel: "gpt-5.4",
+				AgentVersion:  "1.2.3",
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
 			writeLogFile(t, dir, "session.jsonl", meta, session, trailer)
@@ -1364,8 +1364,8 @@ func TestStore(t *testing.T) {
 			if lt.SessionID != "thread-1" {
 				t.Errorf("SessionID = %q, want thread-1", lt.SessionID)
 			}
-			if lt.Model != "gpt-5.4" {
-				t.Errorf("Model = %q, want gpt-5.4", lt.Model)
+			if lt.ReportedModel != "gpt-5.4" {
+				t.Errorf("ReportedModel = %q, want gpt-5.4", lt.ReportedModel)
 			}
 			if lt.AgentVersion != "1.2.3" {
 				t.Errorf("AgentVersion = %q, want 1.2.3", lt.AgentVersion)
@@ -1580,8 +1580,8 @@ func TestStore(t *testing.T) {
 			if lt.SessionID != "ses-legacy" {
 				t.Errorf("SessionID = %q, want ses-legacy", lt.SessionID)
 			}
-			if lt.Model != "m" || lt.AgentVersion != "v" {
-				t.Errorf("model/version = %q/%q, want m/v", lt.Model, lt.AgentVersion)
+			if lt.ReportedModel != "m" || lt.AgentVersion != "v" {
+				t.Errorf("reported model/version = %q/%q, want m/v", lt.ReportedModel, lt.AgentVersion)
 			}
 		})
 		t.Run("ContextClearedResetsPlanState", func(t *testing.T) {

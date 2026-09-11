@@ -154,12 +154,16 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 		repos = nil
 	}
 
+	model := snap.ReportedModel
+	if model == "" {
+		model = snap.RequestedModel
+	}
 	var contextWindowLimit int
 	if snap.ContextWindowLimit == 0 {
 		if primary := t.Primary(); primary != nil {
 			if _, ok := taskMgr.Checkouts.Checkout(primary.Name); ok {
 				if b := taskMgr.Backends[t.Harness]; b != nil {
-					contextWindowLimit = b.ContextWindowLimit(snap.Model)
+					contextWindowLimit = b.ContextWindowLimit(model)
 				}
 			}
 		}
@@ -240,8 +244,10 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 			StartedAt:                t.StartedAt,
 			StateUpdatedAt:           snap.StateUpdatedAt,
 			Harness:                  harnessName,
-			Model:                    snap.Model,
-			Effort:                   t.Effort,
+			RequestedModel:           snap.RequestedModel,
+			RequestedEffort:          snap.RequestedEffort,
+			ReportedModel:            snap.ReportedModel,
+			ReportedEffort:           snap.ReportedEffort,
 			AgentVersion:             snap.AgentVersion,
 			SessionID:                snap.SessionID,
 			BaseImage:                t.BaseImage,

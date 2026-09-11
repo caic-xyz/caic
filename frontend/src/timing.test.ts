@@ -23,7 +23,7 @@ function result(ts: number, duration: number): EventMessage {
         outputTokens: 1,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
-        model: "test",
+        reportedModel: "test",
       },
     },
   };

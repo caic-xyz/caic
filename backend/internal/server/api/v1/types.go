@@ -304,17 +304,19 @@ type Task struct {
 	ForkedFromTaskID                   ksid.ID      `json:"forkedFromTaskID,omitempty"`
 	ParentTaskID                       ksid.ID      `json:"parentTaskID,omitempty"`
 	// Per-task harness/agent metadata.
-	Harness       Harness         `json:"harness"`
-	Model         string          `json:"model,omitempty"`
-	Effort        string          `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
-	AgentVersion  string          `json:"agentVersion,omitempty"`
-	SessionID     string          `json:"sessionID,omitempty"`
-	StartedAt     time.Time       `json:"startedAt,omitzero"`     // When the task was created.
-	TurnStartedAt time.Time       `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
-	InPlanMode    bool            `json:"inPlanMode,omitempty"`
-	PlanContent   string          `json:"planContent,omitempty"`
-	Runtime       RuntimeInstance `json:"runtime"`
-	RateLimit     TaskRateLimit   `json:"rateLimit,omitzero"` // Current quota block resolved by the backend.
+	Harness         Harness         `json:"harness"`
+	RequestedModel  string          `json:"requestedModel,omitempty"`
+	RequestedEffort string          `json:"requestedEffort,omitempty"`
+	ReportedModel   string          `json:"reportedModel,omitempty"`
+	ReportedEffort  string          `json:"reportedEffort,omitempty"`
+	AgentVersion    string          `json:"agentVersion,omitempty"`
+	SessionID       string          `json:"sessionID,omitempty"`
+	StartedAt       time.Time       `json:"startedAt,omitzero"`     // When the task was created.
+	TurnStartedAt   time.Time       `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
+	InPlanMode      bool            `json:"inPlanMode,omitempty"`
+	PlanContent     string          `json:"planContent,omitempty"`
+	Runtime         RuntimeInstance `json:"runtime"`
+	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"` // Current quota block resolved by the backend.
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
@@ -342,8 +344,10 @@ type TaskInfoRecorded struct {
 	StartedAt                time.Time            `json:"startedAt,omitzero"`
 	StateUpdatedAt           time.Time            `json:"stateUpdatedAt,omitzero"`
 	Harness                  Harness              `json:"harness"`
-	Model                    string               `json:"model,omitempty"`
-	Effort                   string               `json:"effort,omitempty"`
+	RequestedModel           string               `json:"requestedModel,omitempty"`
+	RequestedEffort          string               `json:"requestedEffort,omitempty"`
+	ReportedModel            string               `json:"reportedModel,omitempty"`
+	ReportedEffort           string               `json:"reportedEffort,omitempty"`
 	AgentVersion             string               `json:"agentVersion,omitempty"`
 	SessionID                string               `json:"sessionID,omitempty"`
 	BaseImage                string               `json:"baseImage,omitempty"`
@@ -841,10 +845,10 @@ func (r *SignalProcessReq) Validate() error {
 
 // RepoPrefsResp holds per-repository preferences.
 type RepoPrefsResp struct {
-	Path       string `json:"path"`
-	BaseBranch string `json:"baseBranch,omitempty"`
-	Harness    string `json:"harness,omitempty"`
-	Model      string `json:"model,omitempty"`
+	Path           string `json:"path"`
+	BaseBranch     string `json:"baseBranch,omitempty"`
+	Harness        string `json:"harness,omitempty"`
+	RequestedModel string `json:"requestedModel,omitempty"`
 }
 
 // CacheMappingResp represents a directory mapping for cache/state sharing.

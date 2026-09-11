@@ -104,7 +104,7 @@ func snapshotHandoffPromptInput(source *Task) handoffPromptInput {
 
 	model := source.reportedModel
 	if model == "" {
-		model = source.Model
+		model = source.RequestedModel
 	}
 	messages := make([]agent.Message, len(source.timeline))
 	for i, entry := range source.timeline {

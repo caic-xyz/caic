@@ -188,8 +188,8 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.InitMessage", msgs[0])
 		}
-		if m.Model != "claude-opus-4-6" {
-			t.Errorf("model = %q, want %q", m.Model, "claude-opus-4-6")
+		if m.ReportedModel != "claude-opus-4-6" {
+			t.Errorf("model = %q, want %q", m.ReportedModel, "claude-opus-4-6")
 		}
 		if len(m.Tools) != 2 {
 			t.Errorf("tools = %v, want 2 items", m.Tools)
@@ -222,8 +222,8 @@ func TestParseMessage(t *testing.T) {
 		if um.Usage.ReasoningOutputTokens != 3 {
 			t.Errorf("reasoning output tokens = %d, want 3", um.Usage.ReasoningOutputTokens)
 		}
-		if um.Model != "claude-opus-4-6" {
-			t.Errorf("model = %q, want %q", um.Model, "claude-opus-4-6")
+		if um.ReportedModel != "claude-opus-4-6" {
+			t.Errorf("model = %q, want %q", um.ReportedModel, "claude-opus-4-6")
 		}
 	})
 	t.Run("AssistantToolUse", func(t *testing.T) {
@@ -1203,8 +1203,8 @@ func TestParseMessage(t *testing.T) {
 		if m.SessionID != "s1" {
 			t.Errorf("session_id = %q, want %q", m.SessionID, "s1")
 		}
-		if m.Model != "m" {
-			t.Errorf("model = %q, want %q", m.Model, "m")
+		if m.ReportedModel != "m" {
+			t.Errorf("model = %q, want %q", m.ReportedModel, "m")
 		}
 	})
 }

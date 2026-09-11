@@ -44,14 +44,15 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 	if probe.Type != "" {
 		switch probe.Type {
 		case "caic_session":
-			var m agent.MetaSessionMessage
-			if err := json.Unmarshal(line, &m); err != nil {
+			m, err := agent.DecodeV1MetaSessionMessage(line)
+			if err != nil {
 				return nil, err
 			}
 			return []agent.Message{&agent.InitMessage{
-				SessionID: m.SessionID,
-				Model:     m.Model,
-				Version:   m.AgentVersion,
+				SessionID:      m.SessionID,
+				ReportedModel:  m.ReportedModel,
+				ReportedEffort: m.ReportedEffort,
+				Version:        m.AgentVersion,
 			}}, nil
 		case "caic_init":
 			var ci CaicInit
@@ -59,9 +60,9 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 				return nil, err
 			}
 			return []agent.Message{&agent.InitMessage{
-				SessionID: ci.SessionID,
-				Model:     ci.Model,
-				Version:   ci.Version,
+				SessionID:     ci.SessionID,
+				ReportedModel: ci.ReportedModel,
+				Version:       ci.Version,
 			}}, nil
 		case "caic_diff_stat":
 			var m agent.DiffStatMessage

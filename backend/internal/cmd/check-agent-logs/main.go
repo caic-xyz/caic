@@ -590,7 +590,13 @@ func checkOpenCodeInjection(typ string, data []byte) (string, error) {
 	var dst any
 	switch typ {
 	case "caic_session":
-		dst = &agent.MetaSessionMessage{}
+		// caic_session is a v1 control record and retains its legacy field names.
+		dst = &struct {
+			Type         string `json:"type"`
+			SessionID    string `json:"session_id"`
+			Model        string `json:"model,omitempty"`
+			AgentVersion string `json:"agent_version,omitempty"`
+		}{}
 	case "caic_init":
 		dst = &caicopencode.CaicInit{}
 	case "caic_diff_stat":

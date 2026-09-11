@@ -415,7 +415,7 @@ RepoPrefsResp holds per-repository preferences.
 | `path` | `string` |  | yes |
 | `baseBranch` | `string` |  |  |
 | `harness` | `string` |  |  |
-| `model` | `string` |  |  |
+| `requestedModel` | `string` |  |  |
 
 ### CacheMappingResp
 
@@ -730,8 +730,10 @@ Task is the JSON representation sent to the frontend.
 | `forkedFromTaskID` | `string` |  |  |
 | `parentTaskID` | `string` |  |  |
 | `harness` | `Harness` | Per-task harness/agent metadata. | yes |
-| `model` | `string` |  |  |
-| `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
+| `requestedModel` | `string` |  |  |
+| `requestedEffort` | `string` |  |  |
+| `reportedModel` | `string` |  |  |
+| `reportedEffort` | `string` |  |  |
 | `agentVersion` | `string` |  |  |
 | `sessionID` | `string` |  |  |
 | `startedAt` | `ISOTimestamp` | When the task was created. |  |
@@ -812,8 +814,10 @@ TaskInfoRecorded holds caic-recorded task launch configuration and metadata.
 | `startedAt` | `ISOTimestamp` |  |  |
 | `stateUpdatedAt` | `ISOTimestamp` |  |  |
 | `harness` | `Harness` |  | yes |
-| `model` | `string` |  |  |
-| `effort` | `string` |  |  |
+| `requestedModel` | `string` |  |  |
+| `requestedEffort` | `string` |  |  |
+| `reportedModel` | `string` |  |  |
+| `reportedEffort` | `string` |  |  |
 | `agentVersion` | `string` |  |  |
 | `sessionID` | `string` |  |  |
 | `baseImage` | `string` |  |  |
@@ -907,8 +911,8 @@ field so the client knows which backend produced the stream.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `model` | `string` |  | yes |
-| `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. |  |
+| `reportedModel` | `string` |  | yes |
+| `reportedEffort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. |  |
 | `agentVersion` | `string` |  | yes |
 | `sessionID` | `string` |  | yes |
 | `tools` | `string[]` |  |  |
@@ -1029,7 +1033,7 @@ or reasoning summaries (Codex). Zero when the harness does not report it.
 | `cacheCreationInputTokens` | `int` |  | yes |
 | `cacheReadInputTokens` | `int` |  | yes |
 | `reasoningOutputTokens` | `int` |  |  |
-| `model` | `string` |  | yes |
+| `reportedModel` | `string` |  | yes |
 
 ### EventResult
 
