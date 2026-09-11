@@ -145,6 +145,109 @@ object CheckStatusSerializer : KSerializer<CheckStatus> {
     }
 }
 
+@Serializable(with = ErrorCodeSerializer::class)
+sealed interface ErrorCode {
+    val value: String
+    @Serializable
+    data object BadRequest : ErrorCode {
+        override val value = "BAD_REQUEST"
+    }
+    @Serializable
+    data object UnknownHarness : ErrorCode {
+        override val value = "UNKNOWN_HARNESS"
+    }
+    @Serializable
+    data object UnknownRepository : ErrorCode {
+        override val value = "UNKNOWN_REPOSITORY"
+    }
+    @Serializable
+    data object UnsupportedModel : ErrorCode {
+        override val value = "UNSUPPORTED_MODEL"
+    }
+    @Serializable
+    data object InvalidOauthState : ErrorCode {
+        override val value = "INVALID_OAUTH_STATE"
+    }
+    @Serializable
+    data object UnknownCache : ErrorCode {
+        override val value = "UNKNOWN_CACHE"
+    }
+    @Serializable
+    data object UnknownRuntime : ErrorCode {
+        override val value = "UNKNOWN_RUNTIME"
+    }
+    @Serializable
+    data object Unauthorized : ErrorCode {
+        override val value = "UNAUTHORIZED"
+    }
+    @Serializable
+    data object Forbidden : ErrorCode {
+        override val value = "FORBIDDEN"
+    }
+    @Serializable
+    data object NotFound : ErrorCode {
+        override val value = "NOT_FOUND"
+    }
+    @Serializable
+    data object OauthGrantNotFound : ErrorCode {
+        override val value = "OAUTH_GRANT_NOT_FOUND"
+    }
+    @Serializable
+    data object OauthProviderUnavailable : ErrorCode {
+        override val value = "OAUTH_PROVIDER_UNAVAILABLE"
+    }
+    @Serializable
+    data object Conflict : ErrorCode {
+        override val value = "CONFLICT"
+    }
+    @Serializable
+    data object RepositoryPathConflict : ErrorCode {
+        override val value = "REPOSITORY_PATH_CONFLICT"
+    }
+    @Serializable
+    data object InternalError : ErrorCode {
+        override val value = "INTERNAL_ERROR"
+    }
+    @Serializable
+    data object UpdateCheckFailed : ErrorCode {
+        override val value = "UPDATE_CHECK_FAILED"
+    }
+    @Serializable
+    data object UpdateUnavailable : ErrorCode {
+        override val value = "UPDATE_UNAVAILABLE"
+    }
+    @Serializable
+    data class Other(override val value: String) : ErrorCode
+}
+
+object ErrorCodeSerializer : KSerializer<ErrorCode> {
+    override val descriptor = PrimitiveSerialDescriptor("ErrorCode", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ErrorCode) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ErrorCode {
+        val v = decoder.decodeString()
+        return when (v) {
+            "BAD_REQUEST" -> ErrorCode.BadRequest
+            "UNKNOWN_HARNESS" -> ErrorCode.UnknownHarness
+            "UNKNOWN_REPOSITORY" -> ErrorCode.UnknownRepository
+            "UNSUPPORTED_MODEL" -> ErrorCode.UnsupportedModel
+            "INVALID_OAUTH_STATE" -> ErrorCode.InvalidOauthState
+            "UNKNOWN_CACHE" -> ErrorCode.UnknownCache
+            "UNKNOWN_RUNTIME" -> ErrorCode.UnknownRuntime
+            "UNAUTHORIZED" -> ErrorCode.Unauthorized
+            "FORBIDDEN" -> ErrorCode.Forbidden
+            "NOT_FOUND" -> ErrorCode.NotFound
+            "OAUTH_GRANT_NOT_FOUND" -> ErrorCode.OauthGrantNotFound
+            "OAUTH_PROVIDER_UNAVAILABLE" -> ErrorCode.OauthProviderUnavailable
+            "CONFLICT" -> ErrorCode.Conflict
+            "REPOSITORY_PATH_CONFLICT" -> ErrorCode.RepositoryPathConflict
+            "INTERNAL_ERROR" -> ErrorCode.InternalError
+            "UPDATE_CHECK_FAILED" -> ErrorCode.UpdateCheckFailed
+            "UPDATE_UNAVAILABLE" -> ErrorCode.UpdateUnavailable
+            else -> ErrorCode.Other(v)
+        }
+    }
+}
+
 @Serializable(with = EventKindSerializer::class)
 sealed interface EventKind {
     val value: String
@@ -770,26 +873,6 @@ object VoiceGatewayModeSerializer : KSerializer<VoiceGatewayMode> {
             else -> VoiceGatewayMode.Other(v)
         }
     }
-}
-
-object ErrorCodes {
-    const val BadRequest = "BAD_REQUEST"
-    const val UnknownHarness = "UNKNOWN_HARNESS"
-    const val UnknownRepository = "UNKNOWN_REPOSITORY"
-    const val UnsupportedModel = "UNSUPPORTED_MODEL"
-    const val InvalidOauthState = "INVALID_OAUTH_STATE"
-    const val UnknownCache = "UNKNOWN_CACHE"
-    const val UnknownRuntime = "UNKNOWN_RUNTIME"
-    const val Unauthorized = "UNAUTHORIZED"
-    const val Forbidden = "FORBIDDEN"
-    const val NotFound = "NOT_FOUND"
-    const val OauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND"
-    const val OauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE"
-    const val Conflict = "CONFLICT"
-    const val RepositoryPathConflict = "REPOSITORY_PATH_CONFLICT"
-    const val InternalError = "INTERNAL_ERROR"
-    const val UpdateCheckFailed = "UPDATE_CHECK_FAILED"
-    const val UpdateUnavailable = "UPDATE_UNAVAILABLE"
 }
 
 typealias DiffStat = List<DiffFileStat>
@@ -1890,7 +1973,7 @@ data class WebFetchReq(val url: String)
 data class WebFetchResp(val title: String, val content: String)
 
 @Serializable
-data class ErrorDetails(val code: String, val message: String)
+data class ErrorDetails(val code: ErrorCode, val message: String)
 
 @Serializable
 data class ErrorResponse(val error: ErrorDetails, val details: Map<String, JsonElement>? = null)

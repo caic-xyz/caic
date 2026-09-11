@@ -156,6 +156,30 @@ CheckStatus is the status of a CI check run.
 | `in_progress` |  |
 | `completed` |  |
 
+### ErrorCode
+
+ErrorCode is a machine-readable API error identifier.
+
+| Value | Description |
+|-------|-------------|
+| `BAD_REQUEST` |  |
+| `UNKNOWN_HARNESS` |  |
+| `UNKNOWN_REPOSITORY` |  |
+| `UNSUPPORTED_MODEL` |  |
+| `INVALID_OAUTH_STATE` |  |
+| `UNKNOWN_CACHE` |  |
+| `UNKNOWN_RUNTIME` |  |
+| `UNAUTHORIZED` |  |
+| `FORBIDDEN` |  |
+| `NOT_FOUND` |  |
+| `OAUTH_GRANT_NOT_FOUND` |  |
+| `OAUTH_PROVIDER_UNAVAILABLE` |  |
+| `CONFLICT` |  |
+| `REPOSITORY_PATH_CONFLICT` |  |
+| `INTERNAL_ERROR` |  |
+| `UPDATE_CHECK_FAILED` |  |
+| `UPDATE_UNAVAILABLE` |  |
+
 ### EventKind
 
 EventKind identifies the type of SSE event.

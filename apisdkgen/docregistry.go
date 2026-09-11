@@ -17,8 +17,8 @@ import (
 )
 
 // docRegistry holds parsed documentation extracted from Go source files.
-type docRegistry struct {
-	cfg        *apispec.Config
+type docRegistry[C ~string] struct {
+	cfg        *apispec.Config[C]
 	typeDoc    map[string]string            // Go type name → doc comment text
 	typeFile   map[string]string            // Go type name → source filename (e.g. "events.go")
 	fieldDoc   map[string]map[string]string // Go type name → Go field name → doc comment text
@@ -26,9 +26,92 @@ type docRegistry struct {
 	aliasNames map[string]struct{}          // set of alias type names for all target languages
 }
 
+// addConfiguredErrorCodeAlias makes the API-owned error-code type available to
+// SDK generation even when it is declared outside the DTO source directory.
+func (d *docRegistry[C]) addConfiguredErrorCodeAlias() error {
+	if len(d.cfg.ErrorCodes) == 0 {
+		return nil
+	}
+	t := reflect.TypeFor[C]()
+	if t.Kind() != reflect.String || t.PkgPath() == "" {
+		return fmt.Errorf("error-code type %s must be a named string type", t)
+	}
+	constants := make([]aliasConstant, len(d.cfg.ErrorCodes))
+	for i := range d.cfg.ErrorCodes {
+		code := d.cfg.ErrorCodes[i].Code
+		constants[i] = aliasConstant{
+			name:  t.Name() + snakeToPascal(string(code)),
+			value: string(code),
+		}
+	}
+	for i := range d.aliases {
+		if d.aliases[i].name == t.Name() {
+			d.aliases[i].constants = constants
+			return nil
+		}
+	}
+	if d.aliasNames == nil {
+		d.aliasNames = map[string]struct{}{}
+	}
+	d.aliases = append(d.aliases, aliasInfo{name: t.Name(), constants: constants})
+	d.aliasNames[t.Name()] = struct{}{}
+	if d.typeDoc == nil {
+		d.typeDoc = map[string]string{}
+	}
+	if d.typeDoc[t.Name()] == "" {
+		d.typeDoc[t.Name()] = "ErrorCode is a machine-readable API error identifier."
+	}
+	slices.SortFunc(d.aliases, func(a, b aliasInfo) int {
+		return strings.Compare(a.name, b.name)
+	})
+	return nil
+}
+
+func (d *docRegistry[C]) errorCodeTypeName() string {
+	if len(d.cfg.ErrorCodes) == 0 {
+		return ""
+	}
+	return reflect.TypeFor[C]().Name()
+}
+
+func (d *docRegistry[C]) tsErrorCodeType() string {
+	if name := d.errorCodeTypeName(); name != "" {
+		return name
+	}
+	return "string"
+}
+
+func (d *docRegistry[C]) kotlinErrorCodeType() string {
+	if name := d.errorCodeTypeName(); name != "" {
+		return name
+	}
+	return "String"
+}
+
+func (d *docRegistry[C]) kotlinUnknownErrorCode(value string) string {
+	if name := d.errorCodeTypeName(); name != "" {
+		return fmt.Sprintf("%s.Other(%q)", name, value)
+	}
+	return fmt.Sprintf("%q", value)
+}
+
+func (d *docRegistry[C]) swiftErrorCodeType() string {
+	if name := d.errorCodeTypeName(); name != "" {
+		return name
+	}
+	return "String"
+}
+
+func (d *docRegistry[C]) swiftUnknownErrorCode(value string) string {
+	if name := d.errorCodeTypeName(); name != "" {
+		return fmt.Sprintf("%s.other(%q)", name, value)
+	}
+	return fmt.Sprintf("%q", value)
+}
+
 // discoverSSEStructs returns structs reachable from SSE route responses and
 // named-event payloads in dependency order.
-func (d *docRegistry) discoverSSEStructs() []sdkType {
+func (d *docRegistry[C]) discoverSSEStructs() []sdkType {
 	seeds := make([]reflect.Type, 0, len(d.cfg.Routes))
 	for i := range d.cfg.Routes {
 		r := &d.cfg.Routes[i]
@@ -52,7 +135,7 @@ func (d *docRegistry) discoverSSEStructs() []sdkType {
 
 // discoverKotlinStructs walks the API struct types reachable from route
 // types and returns them in dependency order (leaves first).
-func (d *docRegistry) discoverKotlinStructs() []sdkType {
+func (d *docRegistry[C]) discoverKotlinStructs() []sdkType {
 	seeds := sdkSeedTypes(d.cfg)
 	order := walkSDKTypes(d.cfg, seeds)
 	result := make([]sdkType, len(order))
@@ -62,7 +145,7 @@ func (d *docRegistry) discoverKotlinStructs() []sdkType {
 	return result
 }
 
-func (d *docRegistry) writeKotlinClient(outDir string) error {
+func (d *docRegistry[C]) writeKotlinClient(outDir string) error {
 	var b strings.Builder
 	errorModel := clientErrorModel(d.cfg)
 
@@ -92,8 +175,9 @@ import kotlin.coroutines.resumeWithException
 
 class ApiException(
     val statusCode: Int,
-    val code: String,
-    message: String,
+`)
+	fmt.Fprintf(&b, "    val code: %s,\n", d.kotlinErrorCodeType())
+	b.WriteString(`    message: String,
     val details: Map<String, kotlinx.serialization.json.JsonElement>? = null,
 ) : Exception(message)
 
@@ -141,8 +225,9 @@ class ApiClient(
 	fmt.Fprintf(&b, "                                cont.resumeWithException(\n                                    ApiException(resp.code, %s, %s, %s)\n                                )\n", errorModel.KTCodeExpr, errorModel.KTMessageExpr, errorModel.KTDetailsExpr)
 	b.WriteString(`                            } catch (_: Exception) {
                                 cont.resumeWithException(
-                                    ApiException(resp.code, "UNKNOWN", responseBody)
-                                )
+`)
+	fmt.Fprintf(&b, "                                    ApiException(resp.code, %s, responseBody)\n", d.kotlinUnknownErrorCode("UNKNOWN"))
+	b.WriteString(`                                )
                             }
                             return
                         }
@@ -312,7 +397,7 @@ class ApiClient(
 
 // discoverSwiftStructs walks the API struct types reachable from route types
 // and returns them in dependency order, annotated with Swift section comments.
-func (d *docRegistry) discoverSwiftStructs() []sdkType {
+func (d *docRegistry[C]) discoverSwiftStructs() []sdkType {
 	seeds := sdkSeedTypes(d.cfg)
 	order := walkSDKTypes(d.cfg, seeds)
 	result := make([]sdkType, len(order))
@@ -322,7 +407,7 @@ func (d *docRegistry) discoverSwiftStructs() []sdkType {
 	return result
 }
 
-func (d *docRegistry) writeSwiftClient(outDir string) error {
+func (d *docRegistry[C]) writeSwiftClient(outDir string) error {
 	var b strings.Builder
 	errorModel := clientErrorModel(d.cfg)
 
@@ -331,8 +416,9 @@ import Foundation
 
 public struct ApiError: Error {
     public let statusCode: Int
-    public let code: String
-    public let message: String
+`)
+	fmt.Fprintf(&b, "    public let code: %s\n", d.swiftErrorCodeType())
+	b.WriteString(`    public let message: String
     public let details: [String: JSONValue]?
 }
 
@@ -372,8 +458,9 @@ public final class ApiClient {
 	fmt.Fprintf(&b, "            if let errResp = try? decoder.decode(%s.self, from: data) {\n", errorModel.TypeName)
 	fmt.Fprintf(&b, "                throw ApiError(statusCode: httpResponse.statusCode, code: %s,\n                               message: %s, details: %s)\n", errorModel.SwiftCodeExpr, errorModel.SwiftMessageExpr, errorModel.SwiftDetailsExpr)
 	b.WriteString(`            }
-            throw ApiError(statusCode: httpResponse.statusCode, code: "UNKNOWN",
-                           message: String(data: data, encoding: .utf8) ?? "", details: nil)
+`)
+	fmt.Fprintf(&b, "            throw ApiError(statusCode: httpResponse.statusCode, code: %s,\n", d.swiftUnknownErrorCode("UNKNOWN"))
+	b.WriteString(`                           message: String(data: data, encoding: .utf8) ?? "", details: nil)
         }
         return try decoder.decode(T.self, from: data)
     }
@@ -391,8 +478,9 @@ public final class ApiClient {
                     if let httpResponse = response as? HTTPURLResponse,
                        !(200..<300).contains(httpResponse.statusCode) {
                         continuation.finish(throwing: ApiError(
-                            statusCode: httpResponse.statusCode, code: "HTTP_ERROR",
-                            message: "SSE connection failed with status \(httpResponse.statusCode)",
+`)
+	fmt.Fprintf(&b, "                            statusCode: httpResponse.statusCode, code: %s,\n", d.swiftUnknownErrorCode("HTTP_ERROR"))
+	b.WriteString(`                            message: "SSE connection failed with status \(httpResponse.statusCode)",
                             details: nil))
                         return
                     }
@@ -480,7 +568,7 @@ public final class ApiClient {
 
 // discoverTSStructs walks route types and ErrorResponse, and annotates
 // each struct with its source file for section grouping.
-func (d *docRegistry) discoverTSStructs() []sdkType {
+func (d *docRegistry[C]) discoverTSStructs() []sdkType {
 	seeds := sdkSeedTypes(d.cfg)
 	order := walkSDKTypes(d.cfg, seeds)
 	result := make([]sdkType, len(order))
@@ -491,7 +579,7 @@ func (d *docRegistry) discoverTSStructs() []sdkType {
 }
 
 // goTypeToTS maps a Go reflect.Type to its TypeScript type string.
-func (d *docRegistry) goTypeToTS(t reflect.Type) (string, error) {
+func (d *docRegistry[C]) goTypeToTS(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -550,7 +638,7 @@ func (d *docRegistry) goTypeToTS(t reflect.Type) (string, error) {
 }
 
 // emitTSStruct writes a TypeScript interface to b.
-func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) error {
+func (d *docRegistry[C]) emitTSStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatBlockDoc(doc, ""))
 	}
@@ -601,7 +689,7 @@ func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) error {
 }
 
 // generateTSTypes generates TypeScript DTO definitions from the Go DTO structs.
-func (d *docRegistry) generateTSTypes(outDir string) error {
+func (d *docRegistry[C]) generateTSTypes(outDir string) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return err
 	}
@@ -642,7 +730,7 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 			if _, ok := seen[a.name]; ok {
 				continue
 			}
-			emitTSAlias(&b, *a)
+			emitTSAlias(&b, *a, a.name == d.errorCodeTypeName())
 			seen[a.name] = struct{}{}
 		}
 
@@ -670,7 +758,7 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 		if _, ok := seen[a.name]; ok {
 			continue
 		}
-		emitTSAlias(&b, a)
+		emitTSAlias(&b, a, a.name == d.errorCodeTypeName())
 		seen[a.name] = struct{}{}
 	}
 
@@ -710,7 +798,7 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 
 // tsFieldValidator returns a TypeScript expression that validates a value
 // at the given pathExpr. pathLit is a string literal for error messages.
-func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
+func (d *docRegistry[C]) tsFieldValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return d.tsFieldValidator(t.Elem(), pathExpr, pathLit)
 	}
@@ -759,7 +847,7 @@ func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string)
 
 // tsFieldOptValidator is like tsFieldValidator but wraps the result to
 // return undefined when the value is null/undefined.
-func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
+func (d *docRegistry[C]) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
 	inner, err := d.tsFieldValidator(t, pathExpr, pathLit)
 	if err != nil {
 		return "", err
@@ -771,7 +859,7 @@ func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit stri
 // dispatch. Fields without omitempty are base fields extracted before the switch
 // (except "kind", which is always the discriminator). Fields with omitempty or
 // pointer types are variant fields dispatched by their json name.
-func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) error {
+func (d *docRegistry[C]) emitTSDiscriminator(b *strings.Builder, t reflect.Type) error {
 	name := t.Name()
 	fmt.Fprintf(b, "export function validate%s(raw: ValidatorInput): %s {\n", name, name)
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
@@ -850,7 +938,7 @@ func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) er
 }
 
 // emitTSValidator writes a validateXxx(raw: ValidatorInput): Xxx function for a struct.
-func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) error {
+func (d *docRegistry[C]) emitTSValidator(b *strings.Builder, t reflect.Type) error {
 	name := t.Name()
 	fmt.Fprintf(b, "export function validate%s(raw: ValidatorInput): %s {\n", name, name)
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
@@ -900,7 +988,7 @@ func removeGeneratedFile(path string) error {
 }
 
 // generateTSValidate generates TypeScript runtime validators for SSE DTO structs.
-func (d *docRegistry) generateTSValidate(outDir string) error {
+func (d *docRegistry[C]) generateTSValidate(outDir string) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return err
 	}
@@ -1029,7 +1117,7 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 }
 
 // generateTS generates the TypeScript API client as a createApiClient factory.
-func (d *docRegistry) generateTS(outDir string) error {
+func (d *docRegistry[C]) generateTS(outDir string) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return err
 	}
@@ -1055,6 +1143,9 @@ func (d *docRegistry) generateTS(outDir string) error {
 		}
 	}
 	types[errorModel.TypeName] = struct{}{}
+	if name := d.errorCodeTypeName(); name != "" {
+		types[name] = struct{}{}
+	}
 	if d.cfg.MCPProtocolVersion != "" {
 		for _, name := range []string{"ClientCapabilities", "Implementation", "RequestMeta", "ServerDiscoverResult"} {
 			types[name] = struct{}{}
@@ -1080,8 +1171,9 @@ func (d *docRegistry) generateTS(outDir string) error {
 	b.WriteString(`export class APIError extends Error {
   constructor(
     public status: number,
-    public code: string,
-    public details?: Record<string, unknown>,
+`)
+	fmt.Fprintf(&b, "    public code: %s,\n", d.tsErrorCodeType())
+	b.WriteString(`    public details?: Record<string, unknown>,
   ) {
     super(code);
   }
@@ -1168,7 +1260,7 @@ function makeRequester(fetchFn: FetchFn) {
 }
 
 // generateKotlin generates Types.kt and ApiClient.kt in outDir.
-func (d *docRegistry) generateKotlin(outDir string) error {
+func (d *docRegistry[C]) generateKotlin(outDir string) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return err
 	}
@@ -1178,7 +1270,7 @@ func (d *docRegistry) generateKotlin(outDir string) error {
 	return d.writeKotlinClient(outDir)
 }
 
-func (d *docRegistry) goTypeToKotlin(t reflect.Type) (string, error) {
+func (d *docRegistry[C]) goTypeToKotlin(t reflect.Type) (string, error) {
 	// Unwrap pointer — nullability is handled by the caller.
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -1234,7 +1326,7 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) (string, error) {
 }
 
 // parseStructFields extracts kotlinField entries from a reflect.Type.
-func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
+func (d *docRegistry[C]) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 	fields := make([]kotlinField, 0, t.NumField())
 	for sf := range t.Fields() {
 		if !sf.IsExported() {
@@ -1283,7 +1375,7 @@ func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 }
 
 // emitKotlinStruct writes a @Serializable Kotlin DTO class to b.
-func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error {
+func (d *docRegistry[C]) emitKotlinStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatBlockDoc(doc, ""))
 	}
@@ -1331,7 +1423,7 @@ func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error
 	return nil
 }
 
-func (d *docRegistry) writeKotlinTypes(outDir string) error {
+func (d *docRegistry[C]) writeKotlinTypes(outDir string) error {
 	var b strings.Builder
 	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
 	b.WriteString("@file:UseSerializers(InstantSerializer::class)\n\n")
@@ -1387,13 +1479,9 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 		b.WriteString("    }\n")
 		b.WriteString("}\n\n")
 	}
-
-	// Error codes.
-	b.WriteString("object ErrorCodes {\n")
-	for _, e := range d.cfg.ErrorCodes {
-		fmt.Fprintf(&b, "    const val %s = %q\n", snakeToPascal(e.Code), e.Code)
+	if len(d.cfg.ErrorCodes) == 0 {
+		b.WriteString("object ErrorCodes {\n}\n\n")
 	}
-	b.WriteString("}\n\n")
 
 	// Structs: auto-discovered from route types and their transitive fields.
 	kcStructs := d.discoverKotlinStructs()
@@ -1421,7 +1509,7 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 }
 
 // generateMarkdownDoc generates API.md from the route table.
-func (d *docRegistry) generateMarkdownDoc(outDir string) error {
+func (d *docRegistry[C]) generateMarkdownDoc(outDir string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n", d.cfg.APIDocTitle)
 	b.WriteString("<!-- Code generated by gen-api-sdk; DO NOT EDIT. -->\n\n")
@@ -1508,7 +1596,7 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 	return os.WriteFile(filepath.Join(outDir, "API.md"), []byte(b.String()), 0o600)
 }
 
-func (d *docRegistry) writeDocAlias(b *strings.Builder, a *aliasInfo) {
+func (d *docRegistry[C]) writeDocAlias(b *strings.Builder, a *aliasInfo) {
 	if len(a.constants) == 0 {
 		return
 	}
@@ -1528,7 +1616,7 @@ func enumValueDescription(c aliasConstant) string {
 	return strings.ReplaceAll(strings.Join(strings.Fields(c.doc), " "), "|", `\|`)
 }
 
-func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) error {
+func (d *docRegistry[C]) writeDocType(b *strings.Builder, t reflect.Type) error {
 	fmt.Fprintf(b, "### %s\n\n", t.Name())
 	if typeDoc := d.typeDoc[t.Name()]; typeDoc != "" {
 		fmt.Fprintf(b, "%s\n\n", typeDoc)
@@ -1567,7 +1655,7 @@ func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) error {
 }
 
 // goTypeToSwift maps a Go reflect.Type to its Swift type string.
-func (d *docRegistry) goTypeToSwift(t reflect.Type) (string, error) {
+func (d *docRegistry[C]) goTypeToSwift(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -1614,7 +1702,7 @@ func (d *docRegistry) goTypeToSwift(t reflect.Type) (string, error) {
 }
 
 // emitSwiftStruct writes a public Codable struct to b.
-func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error {
+func (d *docRegistry[C]) emitSwiftStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatSwiftDoc(doc, ""))
 	}
@@ -1672,7 +1760,7 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error 
 	return nil
 }
 
-func (d *docRegistry) writeSwiftTypes(outDir string) error {
+func (d *docRegistry[C]) writeSwiftTypes(outDir string) error {
 	var b strings.Builder
 	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\nimport Foundation\n\n")
 	b.WriteString("/// ISO 8601 timestamp string (e.g. \"2026-04-13T12:00:00Z\").\n")
@@ -1739,13 +1827,9 @@ public enum JSONValue: Codable, Equatable {
 		b.WriteString("    }\n")
 		b.WriteString("}\n\n")
 	}
-
-	// Error codes.
-	b.WriteString("public enum ErrorCodes {\n")
-	for _, e := range d.cfg.ErrorCodes {
-		fmt.Fprintf(&b, "    public static let %s = %q\n", snakeToCamel(e.Code), e.Code)
+	if len(d.cfg.ErrorCodes) == 0 {
+		b.WriteString("public enum ErrorCodes {\n}\n\n")
 	}
-	b.WriteString("}\n\n")
 
 	// Structs.
 	swStructs := d.discoverSwiftStructs()
@@ -1776,7 +1860,7 @@ public enum JSONValue: Codable, Equatable {
 }
 
 // generateSwift generates Types.swift and ApiClient.swift in outDir.
-func (d *docRegistry) generateSwift(outDir string) error {
+func (d *docRegistry[C]) generateSwift(outDir string) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return err
 	}
@@ -1796,15 +1880,6 @@ func snakeToPascal(s string) string {
 		}
 	}
 	return strings.Join(parts, "")
-}
-
-// snakeToCamel converts SCREAMING_SNAKE_CASE to camelCase ("BAD_REQUEST" → "badRequest").
-func snakeToCamel(s string) string {
-	pascal := snakeToPascal(s)
-	if pascal == "" {
-		return ""
-	}
-	return strings.ToLower(pascal[:1]) + pascal[1:]
 }
 
 func kotlinPropertyName(fieldName, jsonName string) string {
@@ -1966,7 +2041,7 @@ type docRouteGroup struct {
 }
 
 // emitTSAlias writes a type alias with its const values.
-func emitTSAlias(b *strings.Builder, a aliasInfo) {
+func emitTSAlias(b *strings.Builder, a aliasInfo, open bool) {
 	if len(a.constants) > 0 {
 		// Emit union type for exhaustiveness checking.
 		fmt.Fprintf(b, "export type %s =\n", a.name)
@@ -1976,7 +2051,11 @@ func emitTSAlias(b *strings.Builder, a aliasInfo) {
 			}
 			fmt.Fprintf(b, "  | %q", c.value)
 		}
-		b.WriteString(";\n")
+		if open {
+			b.WriteString("\n  | (string & {});\n")
+		} else {
+			b.WriteString(";\n")
+		}
 	} else {
 		fmt.Fprintf(b, "export type %s = string;\n", a.name)
 	}

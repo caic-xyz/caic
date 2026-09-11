@@ -398,7 +398,7 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 	if apiErr, ok := errors.AsType[*api.Error](err); ok {
 		return mcp.ToolErrorWithMeta[T](apiErr.Error(), mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
 	}
-	return mcp.ToolError[T](err.Error())
+	return mcp.ToolErrorWithMeta[T](err.Error(), mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeInternalError)})
 }
 
 // taskCreateToolError adds a recovery step only when the rejected task-create
@@ -417,7 +417,7 @@ func (m *mcpRegistry) taskCreateToolError(ctx context.Context, args mcpTaskCreat
 		message = repositoryRecoveryMessage(ctx, message, "task_create")
 	case api.CodeUnknownHarness:
 		if args.Harness == "" {
-			return mcp.ToolError[mcpTaskCreatedOutput](apiErr.Error())
+			return mcp.ToolErrorWithMeta[mcpTaskCreatedOutput](apiErr.Error(), mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeConflict)})
 		}
 		args.Harness = ""
 		message += ". Omit harness to use caic's default harness, then retry task_create."
@@ -499,15 +499,15 @@ type mcpTaskCreateArgs struct {
 
 func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] { //nolint:gocritic // MCP tool handlers receive decoded argument values by API contract.
 	if args.Prompt == "" {
-		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: prompt")
+		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: prompt"})
 	}
 	if len(args.Repos) == 0 {
-		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repos")
+		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: repos"})
 	}
 	apiHarness, err := m.resolveTaskCreateHarness(ctx, args.Harness)
 	if err != nil {
 		if args.Harness == "" {
-			return mcp.ToolError[mcpTaskCreatedOutput](err.Error())
+			return domainToolError[mcpTaskCreatedOutput](err)
 		}
 		return m.taskCreateToolError(ctx, args, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
 	}
@@ -555,7 +555,11 @@ func (m *mcpRegistry) resolveTaskCreateHarness(ctx context.Context, harness stri
 	}
 	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
 	if prefs.Harness != "" {
-		return apiconv.ParseHarness(prefs.Harness)
+		apiHarness, err := apiconv.ParseHarness(prefs.Harness)
+		if err != nil {
+			return "", &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: err.Error()}
+		}
+		return apiHarness, nil
 	}
 	return m.firstHarness(ctx)
 }
@@ -566,7 +570,7 @@ func (m *mcpRegistry) firstHarness(ctx context.Context) (v1.Harness, error) {
 		return "", fmt.Errorf("list available harnesses: %w", err)
 	}
 	if harnesses == nil || len(*harnesses) == 0 {
-		return "", errors.New("no available harnesses")
+		return "", &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no available harnesses"}
 	}
 	return (*harnesses)[0].Name, nil
 }
@@ -576,12 +580,12 @@ type mcpTaskNumberArgs struct {
 }
 
 func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	if args.TaskNumber == 0 {
-		return mcp.ToolError[mcp.TextOutput]("Missing required integer: task_number")
+	if args.TaskNumber < 1 {
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task_number must be a positive integer"})
 	}
 	t, ok := m.taskByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"})
 	}
 	lines := []string{
 		fmt.Sprintf("## Task #%d: %s", args.TaskNumber, taskTitle(&t)),
@@ -640,7 +644,7 @@ type mcpTaskPushBranchArgs struct {
 func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcpTaskPushBranchArgs) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	targetRaw := args.Target
 	if targetRaw == "main" || targetRaw == "master" {
@@ -671,7 +675,7 @@ func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcp
 func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	_, err := m.taskSvc.stopTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
@@ -683,7 +687,7 @@ func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs
 func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	_, err := m.taskSvc.purgeTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
@@ -695,7 +699,7 @@ func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArg
 func (m *mcpRegistry) handleTaskRevive(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	_, err := m.taskSvc.reviveTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
@@ -772,10 +776,10 @@ func (m *mcpRegistry) forkWithoutModelValid(source *taskpkg.Task, harnessOverrid
 func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcpTaskForkOutput]("Unknown task number")
+		return domainToolError[mcpTaskForkOutput](taskNumberError(args.TaskNumber))
 	}
 	if args.Prompt == "" {
-		return mcp.ToolError[mcpTaskForkOutput]("Missing required parameter: prompt")
+		return domainToolError[mcpTaskForkOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: prompt"})
 	}
 	var harness v1.Harness
 	if args.Harness != "" {
@@ -828,7 +832,7 @@ type mcpCloneRepoArgs struct {
 
 func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs) mcp.ToolResult[mcp.TextOutput] {
 	if args.URL == "" {
-		return mcp.ToolError[mcp.TextOutput]("Missing required parameter: url")
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: url"})
 	}
 	req := &v1.CloneRepoReq{URL: args.URL, Path: args.Path}
 	if err := req.Validate(); err != nil {
@@ -851,7 +855,7 @@ func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs
 func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	var message agent.Message
 	var historyErr error
@@ -879,7 +883,7 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNu
 		}
 	}
 	if historyErr != nil {
-		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history is unavailable: %v", num, historyErr))
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: fmt.Sprintf("Task #%d history is unavailable: %v", num, historyErr)})
 	}
 	if message == nil {
 		return mcp.TextToolResult(fmt.Sprintf("No messages from task #%d yet.", num))
@@ -901,7 +905,7 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNu
 	case *agent.TextMessage:
 		return mcp.TextToolResult(fmt.Sprintf("Last message from task #%d: %s", num, message.Text))
 	default:
-		return mcp.ToolError[mcp.TextOutput](fmt.Sprintf("Task #%d history returned an unsupported message", num))
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: fmt.Sprintf("Task #%d history returned an unsupported message", num)})
 	}
 }
 
@@ -912,7 +916,7 @@ type mcpTaskFixPRArgs struct {
 func (m *mcpRegistry) handleTaskFixPR(ctx context.Context, args mcpTaskFixPRArgs) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	_, err := m.ci.fixPR(ctx, &v1.BotFixPRReq{TaskID: entry.Task().ID.String()})
 	if err != nil {
@@ -927,7 +931,7 @@ type mcpBotFixCIArgs struct {
 
 func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
 	if args.Repo == "" {
-		return mcp.ToolError[mcpTaskCreatedOutput]("Missing required parameter: repo")
+		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: repo"})
 	}
 	resp, err := m.ci.fixCI(ctx, &v1.BotFixCIReq{Repo: args.Repo})
 	if err != nil {
@@ -953,10 +957,10 @@ type mcpTaskInputArgs struct {
 func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, field, format string) mcp.ToolResult[mcp.TextOutput] {
 	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
 	if !ok {
-		return mcp.ToolError[mcp.TextOutput]("Unknown task number")
+		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
 	if args.Message == "" {
-		return mcp.ToolError[mcp.TextOutput]("Missing required parameter: " + field)
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: " + field})
 	}
 	_, err := m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
 	if err != nil {
@@ -983,6 +987,13 @@ func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *taskmgr
 	}
 	entry, ok := m.taskSvc.taskMgr.GetEntry(t.ID.String())
 	return num, entry, ok
+}
+
+func taskNumberError(num int) *api.Error {
+	if num < 1 {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task_number must be a positive integer"}
+	}
+	return &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
 }
 
 // Static schema builders. Dynamic repos, harnesses, and preferences are read on

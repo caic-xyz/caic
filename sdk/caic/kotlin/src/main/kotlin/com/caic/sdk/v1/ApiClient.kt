@@ -24,7 +24,7 @@ import kotlin.coroutines.resumeWithException
 
 class ApiException(
     val statusCode: Int,
-    val code: String,
+    val code: ErrorCode,
     message: String,
     val details: Map<String, kotlinx.serialization.json.JsonElement>? = null,
 ) : Exception(message)
@@ -70,7 +70,7 @@ class ApiClient(
                                 )
                             } catch (_: Exception) {
                                 cont.resumeWithException(
-                                    ApiException(resp.code, "UNKNOWN", responseBody)
+                                    ApiException(resp.code, ErrorCode.Other("UNKNOWN"), responseBody)
                                 )
                             }
                             return

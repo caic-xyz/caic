@@ -183,7 +183,7 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 		}
 		if err != nil {
 			t.SetStateIf(taskslog.StateStarting, prevState)
-			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
+			return internalErr(err, "read plan from instance")
 		}
 	}
 	h, err := r.agentRuntime.RestartSession(r.ctx, t, prompt) //nolint:contextcheck // session setup must finish during shutdown
@@ -291,7 +291,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p ForkParams) (string, error) { //
 	forkEffort := source.RequestedEffort
 	sourceBackend, sourceHarnessAvailable := r.manager.Backends[forkHarness]
 	if p.Harness == "" && !sourceHarnessAvailable {
-		return "", badRequestf("unknown harness: %s", string(source.Harness))
+		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(source.Harness)}
 	}
 	if p.Harness != "" {
 		forkHarness = p.Harness
@@ -401,18 +401,18 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	case taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StatePulling, taskslog.StatePushing:
 		// Syncable states; continue below.
 	}
+	if target == SyncTargetDefault && force {
+		return nil, badRequestf("force is not supported for default-branch sync")
+	}
 	checkout := r.agentRuntime.Checkout
 	if checkout == nil {
-		return nil, badRequestf("task has no checkout")
+		return nil, conflict("task has no checkout")
 	}
 	branch := ""
 	if primary := t.Primary(); primary != nil {
 		branch = primary.Branch
 	}
 	if target == SyncTargetDefault {
-		if force {
-			return nil, badRequestf("force is not supported for default-branch sync")
-		}
 		message := t.Title()
 		if message == "" {
 			message = t.InitialPrompt.Text

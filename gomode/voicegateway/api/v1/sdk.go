@@ -12,8 +12,8 @@ import (
 )
 
 // SDKAPI returns the SDK generation specification for the voice gateway API.
-func SDKAPI() apispec.Config {
-	return apispec.Config{
+func SDKAPI() apispec.Config[voiceapi.ErrorCode] {
+	return apispec.Config[voiceapi.ErrorCode]{
 		Routes: sdkRoutes(),
 		SDKPackagePaths: map[string]struct{}{
 			reflect.TypeFor[StatusResp]().PkgPath():             {},
@@ -58,11 +58,11 @@ func SDKAPI() apispec.Config {
 				DocType:   "Record<string, JSONValue>",
 			},
 		},
-		ErrorCodes: []apispec.ErrorCode{
-			{Code: "BAD_REQUEST", Status: 400},
-			{Code: "VOICE_BRIDGE_UNAVAILABLE", Status: 400},
-			{Code: "UNAUTHORIZED", Status: 401},
-			{Code: "VOICE_OFFER_FAILED", Status: 500},
+		ErrorCodes: []apispec.ErrorCodeSpec[voiceapi.ErrorCode]{
+			{Code: voiceapi.CodeBadRequest, Status: 400},
+			{Code: voiceapi.CodeVoiceBridgeUnavailable, Status: 503},
+			{Code: voiceapi.CodeUnauthorized, Status: 401},
+			{Code: voiceapi.CodeVoiceOfferFailed, Status: 500},
 		},
 	}
 }

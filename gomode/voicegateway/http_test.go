@@ -134,7 +134,7 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
+		assertErrorResponse(t, w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 	})
 
 	t.Run("offer reports unavailable typed nil bridge", func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestNewHandler(t *testing.T) {
 		body := `{"sdp":"offer","service":` + service + `}`
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(body))
 		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
+		assertErrorResponse(t, w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 	})
 
 	t.Run("offer succeeds with trusted service", func(t *testing.T) {
@@ -260,6 +260,16 @@ func TestNewEmbeddedHandler(t *testing.T) {
 		if resp.Issue != voicev1.VoiceRTCConnectivityIssueVoiceBridgeUnavailable || resp.Side != voicev1.VoiceRTCConnectivitySideServer {
 			t.Fatalf("resp = %+v, want unavailable bridge", resp)
 		}
+	})
+
+	t.Run("close reports unavailable bridge", func(t *testing.T) {
+		t.Parallel()
+
+		handler := NewEmbeddedHandler(func() MediaBridge { return nil })
+		w := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/session-1", http.NoBody)
+		handler.ServeHTTP(w, req)
+		assertErrorResponse(t, w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 	})
 
 	t.Run("health is standalone only", func(t *testing.T) {

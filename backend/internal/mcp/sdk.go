@@ -12,8 +12,8 @@ import (
 )
 
 // SDKAPI returns the SDK generation specification for the MCP API.
-func SDKAPI() apispec.Config {
-	return apispec.Config{
+func SDKAPI() apispec.Config[string] {
+	return apispec.Config[string]{
 		Routes: []apispec.Route{
 			{
 				Name:       "mcp",

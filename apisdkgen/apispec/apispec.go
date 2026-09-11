@@ -21,7 +21,7 @@ type ClientErrorModel struct {
 }
 
 // Config holds configuration for SDK code generation.
-type Config struct {
+type Config[C ~string] struct {
 	Routes             []Route
 	SDKPackagePaths    map[string]struct{}
 	ExtraSeeds         []reflect.Type
@@ -36,12 +36,12 @@ type Config struct {
 	SectionComments    map[string]string
 	SpecialTypes       []SpecialType
 	Discriminated      []string // Type names using kind-based dispatch in TS validators
-	ErrorCodes         []ErrorCode
+	ErrorCodes         []ErrorCodeSpec[C]
 }
 
-// ErrorCode describes an API error code for docs and generated constants.
-type ErrorCode struct {
-	Code   string
+// ErrorCodeSpec describes an API error code for docs and generated constants.
+type ErrorCodeSpec[C ~string] struct {
+	Code   C
 	Status int
 }
 

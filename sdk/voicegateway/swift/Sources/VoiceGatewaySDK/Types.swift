@@ -37,6 +37,29 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
+public struct ErrorCode: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let BadRequest = ErrorCode("BAD_REQUEST")
+    public static let VoiceBridgeUnavailable = ErrorCode("VOICE_BRIDGE_UNAVAILABLE")
+    public static let Unauthorized = ErrorCode("UNAUTHORIZED")
+    public static let VoiceOfferFailed = ErrorCode("VOICE_OFFER_FAILED")
+
+    public static func other(_ value: String) -> ErrorCode { ErrorCode(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct InterruptSource: Codable, Equatable, Hashable {
     public let value: String
 
@@ -286,13 +309,6 @@ public struct VoiceRTCSignalingState: Codable, Equatable, Hashable {
     }
 }
 
-public enum ErrorCodes {
-    public static let badRequest = "BAD_REQUEST"
-    public static let voiceBridgeUnavailable = "VOICE_BRIDGE_UNAVAILABLE"
-    public static let unauthorized = "UNAUTHORIZED"
-    public static let voiceOfferFailed = "VOICE_OFFER_FAILED"
-}
-
 /// VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.
 public struct VoiceRTCOfferReq: Codable {
     /// SDP is the browser/client WebRTC offer session description from RTCSessionDescription.sdp after createOffer and setLocalDescription.
@@ -388,7 +404,7 @@ public struct StatusResp: Codable {
 }
 
 public struct ErrorDetails: Codable {
-    public let code: String
+    public let code: ErrorCode
     public let message: String
 }
 

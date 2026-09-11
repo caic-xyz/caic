@@ -34,7 +34,7 @@ var swiftReservedWords = map[string]struct{}{
 
 // loadDocsInDir parses Go source files in dir and extracts documentation
 // comments, source file tracking, and alias type definitions.
-func loadDocsInDir(dir string) (*docRegistry, error) {
+func loadDocsInDir[C ~string](dir string) (*docRegistry[C], error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func loadDocsInDir(dir string) (*docRegistry, error) {
 		}
 		files = append(files, f)
 	}
-	reg := &docRegistry{
+	reg := &docRegistry[C]{
 		typeDoc:  map[string]string{},
 		typeFile: map[string]string{},
 		fieldDoc: map[string]map[string]string{},

@@ -6,6 +6,20 @@ export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 //////////
 // source: types.go
 
+export type ErrorCode =
+  | "BAD_REQUEST"
+  | "VOICE_BRIDGE_UNAVAILABLE"
+  | "UNAUTHORIZED"
+  | "VOICE_OFFER_FAILED"
+  | (string & {});
+/**
+ * Supported values.
+ */
+export const ErrorCodeBadRequest: ErrorCode = "BAD_REQUEST";
+export const ErrorCodeVoiceBridgeUnavailable: ErrorCode = "VOICE_BRIDGE_UNAVAILABLE";
+export const ErrorCodeUnauthorized: ErrorCode = "UNAUTHORIZED";
+export const ErrorCodeVoiceOfferFailed: ErrorCode = "VOICE_OFFER_FAILED";
+
 export type InterruptSource =
   | "user"
   | "tool";
@@ -269,7 +283,7 @@ export interface StatusResp {
 }
 
 export interface ErrorDetails {
-  code: string;
+  code: ErrorCode;
   message: string;
 }
 

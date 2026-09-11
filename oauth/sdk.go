@@ -11,8 +11,8 @@ import (
 // SDKAPI returns the SDK generation specification for OAuth types.
 //
 //nolint:gosec // G101 false positive on RegisterRequest string literals
-func SDKAPI() apispec.Config {
-	return apispec.Config{
+func SDKAPI() apispec.Config[string] {
+	return apispec.Config[string]{
 		// No routes — the OAuth endpoints are RFC-defined and don't follow
 		// the REST route convention. This SDK is purely for DTO type generation.
 		SDKPackagePaths: map[string]struct{}{

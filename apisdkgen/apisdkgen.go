@@ -2,7 +2,8 @@
 // reference documents from Go DTO types and route definitions.
 //
 // SDK specifications are defined by each package in an exported SDKAPI()
-// function returning an apispec.Config. The gen-api-sdk command discovers
+// function returning an apispec.Config with that API's error-code type. The
+// gen-api-sdk command discovers
 // these specs and produces output in sdk/<pkg>/<lang>/.
 package apisdkgen
 
@@ -23,9 +24,14 @@ type OutputConfig struct {
 
 // API describes one API surface to generate.
 type API struct {
-	SourceDir string
-	Output    OutputConfig
-	Config    apispec.Config
+	generate func() error
+}
+
+// NewAPI constructs an SDK generation target from a typed API specification.
+func NewAPI[C ~string](sourceDir string, output OutputConfig, config apispec.Config[C]) API {
+	return API{generate: func() error {
+		return generateAPI(sourceDir, output, config)
+	}}
 }
 
 // Generate writes configured SDK outputs for one API surface.
@@ -33,35 +39,45 @@ func Generate(api *API) error {
 	if api == nil {
 		return errors.New("api is nil")
 	}
-	docs, err := loadDocsInDir(api.SourceDir)
+	if api.generate == nil {
+		return errors.New("api has no generator")
+	}
+	return api.generate()
+}
+
+func generateAPI[C ~string](sourceDir string, output OutputConfig, config apispec.Config[C]) error {
+	docs, err := loadDocsInDir[C](sourceDir)
 	if err != nil {
 		return fmt.Errorf("loading docs: %w", err)
 	}
-	docs.cfg = &api.Config
+	docs.cfg = &config
+	if err := docs.addConfiguredErrorCodeAlias(); err != nil {
+		return fmt.Errorf("configuring error-code type: %w", err)
+	}
 
-	if api.Output.TypeScriptDir != "" {
-		if err := docs.generateTSTypes(api.Output.TypeScriptDir); err != nil {
+	if output.TypeScriptDir != "" {
+		if err := docs.generateTSTypes(output.TypeScriptDir); err != nil {
 			return err
 		}
-		if err := docs.generateTS(api.Output.TypeScriptDir); err != nil {
+		if err := docs.generateTS(output.TypeScriptDir); err != nil {
 			return err
 		}
-		if err := docs.generateTSValidate(api.Output.TypeScriptDir); err != nil {
-			return err
-		}
-	}
-	if api.Output.KotlinDir != "" {
-		if err := docs.generateKotlin(api.Output.KotlinDir); err != nil {
+		if err := docs.generateTSValidate(output.TypeScriptDir); err != nil {
 			return err
 		}
 	}
-	if api.Output.SwiftDir != "" {
-		if err := docs.generateSwift(api.Output.SwiftDir); err != nil {
+	if output.KotlinDir != "" {
+		if err := docs.generateKotlin(output.KotlinDir); err != nil {
 			return err
 		}
 	}
-	if api.Output.MarkdownDir != "" {
-		if err := docs.generateMarkdownDoc(api.Output.MarkdownDir); err != nil {
+	if output.SwiftDir != "" {
+		if err := docs.generateSwift(output.SwiftDir); err != nil {
+			return err
+		}
+	}
+	if output.MarkdownDir != "" {
+		if err := docs.generateMarkdownDoc(output.MarkdownDir); err != nil {
 			return err
 		}
 	}

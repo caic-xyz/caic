@@ -28,11 +28,22 @@ All errors return:
 | HTTP | Code |
 |------|------|
 | 400 | `BAD_REQUEST` |
-| 400 | `VOICE_BRIDGE_UNAVAILABLE` |
+| 503 | `VOICE_BRIDGE_UNAVAILABLE` |
 | 401 | `UNAUTHORIZED` |
 | 500 | `VOICE_OFFER_FAILED` |
 
 ## Types
+
+### ErrorCode
+
+ErrorCode is a machine-readable API error identifier.
+
+| Value | Description |
+|-------|-------------|
+| `BAD_REQUEST` |  |
+| `VOICE_BRIDGE_UNAVAILABLE` |  |
+| `UNAUTHORIZED` |  |
+| `VOICE_OFFER_FAILED` |  |
 
 ### InterruptSource
 

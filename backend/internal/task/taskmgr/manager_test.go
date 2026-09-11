@@ -1680,7 +1680,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_empty_prompt_no_container", func(t *testing.T) {
 			t.Parallel()
 			// Empty prompt triggers the plan-file fallback; with no instance,
-			// agent.ReadPlan fails and Restart returns KindBadRequest.
+			// agent.ReadPlan fails and Restart returns KindInternal.
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateWaiting)
@@ -1691,8 +1691,8 @@ func TestManager(t *testing.T) {
 			if !ok {
 				t.Fatalf("err %v is not a *Error", err)
 			}
-			if te.Kind != KindBadRequest {
-				t.Errorf("Kind = %v, want KindBadRequest (err=%v)", te.Kind, err)
+			if te.Kind != KindInternal {
+				t.Errorf("Kind = %v, want KindInternal (err=%v)", te.Kind, err)
 			}
 		})
 		t.Run("error_wrong_state", func(t *testing.T) {
@@ -2543,8 +2543,9 @@ func TestManager(t *testing.T) {
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID.String(), e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
-			if err == nil {
-				t.Fatal("expected error for provisioning task without instance")
+			te, ok := errors.AsType[*Error](err)
+			if !ok || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
 		t.Run("error_force_not_supported", func(t *testing.T) {
@@ -3211,7 +3212,7 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
 		})
-		t.Run("error_unavailable_source_harness_is_generic", func(t *testing.T) {
+		t.Run("error_unavailable_source_harness_has_code", func(t *testing.T) {
 			t.Parallel()
 			e := forkSetup(t, "bogus", defaultBackends)
 			_, err := e.Lifecycle.Fork(t.Context(), ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
@@ -3219,8 +3220,8 @@ func TestManager(t *testing.T) {
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
 			}
-			if te.Code != "" {
-				t.Errorf("Code = %q, want generic bad request", te.Code)
+			if te.Code != CodeUnknownHarness {
+				t.Errorf("Code = %q, want %q", te.Code, CodeUnknownHarness)
 			}
 		})
 	})

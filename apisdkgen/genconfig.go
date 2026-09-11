@@ -10,7 +10,7 @@ import (
 )
 
 // lookupSpecial returns the matching SpecialType entry for t, or nil.
-func lookupSpecial(c *apispec.Config, t reflect.Type) *apispec.SpecialType {
+func lookupSpecial[C ~string](c *apispec.Config[C], t reflect.Type) *apispec.SpecialType {
 	for i := range c.SpecialTypes {
 		if c.SpecialTypes[i].Type == t {
 			return &c.SpecialTypes[i]
@@ -19,12 +19,12 @@ func lookupSpecial(c *apispec.Config, t reflect.Type) *apispec.SpecialType {
 	return nil
 }
 
-func isSDKPkg(c *apispec.Config, pkgPath string) bool {
+func isSDKPkg[C ~string](c *apispec.Config[C], pkgPath string) bool {
 	_, ok := c.SDKPackagePaths[pkgPath]
 	return ok
 }
 
-func clientErrorModel(c *apispec.Config) apispec.ClientErrorModel {
+func clientErrorModel[C ~string](c *apispec.Config[C]) apispec.ClientErrorModel {
 	m := c.ErrorModel
 	if m.TypeName == "" {
 		m.TypeName = "ErrorResponse"
@@ -61,7 +61,7 @@ func clientErrorModel(c *apispec.Config) apispec.ClientErrorModel {
 
 // walkSDKTypes traverses struct types reachable from seeds in post-order
 // (leaves first), returning only configured SDK package struct types.
-func walkSDKTypes(c *apispec.Config, seeds []reflect.Type) []reflect.Type {
+func walkSDKTypes[C ~string](c *apispec.Config[C], seeds []reflect.Type) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 
@@ -99,7 +99,7 @@ func walkSDKTypes(c *apispec.Config, seeds []reflect.Type) []reflect.Type {
 
 // collectNamedSlices returns named slice types from SDK packages that appear
 // as fields in the given struct types.
-func collectNamedSlices(c *apispec.Config, structs []sdkType) []reflect.Type {
+func collectNamedSlices[C ~string](c *apispec.Config[C], structs []sdkType) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 	for _, ks := range structs {
@@ -123,7 +123,7 @@ func collectNamedSlices(c *apispec.Config, structs []sdkType) []reflect.Type {
 
 // routeSeedTypes returns the set of request and response types from the
 // route table, used to seed type discovery for SDK generation.
-func routeSeedTypes(c *apispec.Config) []reflect.Type {
+func routeSeedTypes[C ~string](c *apispec.Config[C]) []reflect.Type {
 	var seeds []reflect.Type
 	for i := range c.Routes {
 		r := &c.Routes[i]
@@ -140,7 +140,7 @@ func routeSeedTypes(c *apispec.Config) []reflect.Type {
 	return seeds
 }
 
-func hasSSERoutes(c *apispec.Config) bool {
+func hasSSERoutes[C ~string](c *apispec.Config[C]) bool {
 	for i := range c.Routes {
 		if c.Routes[i].IsSSE {
 			return true
@@ -149,7 +149,7 @@ func hasSSERoutes(c *apispec.Config) bool {
 	return false
 }
 
-func sdkSeedTypes(c *apispec.Config) []reflect.Type {
+func sdkSeedTypes[C ~string](c *apispec.Config[C]) []reflect.Type {
 	seeds := routeSeedTypes(c)
 	seeds = append(seeds, c.ExtraSeeds...)
 	return seeds
@@ -158,7 +158,7 @@ func sdkSeedTypes(c *apispec.Config) []reflect.Type {
 // tsPrimitiveValidator returns the validator expression for a primitive/special type.
 // For special types with a tsValidate template, it formats the expression using
 // pathExpr and pathLit. Otherwise it falls back to kind-based validation.
-func tsPrimitiveValidator(c *apispec.Config, t reflect.Type, pathExpr, pathLit string) (string, error) {
+func tsPrimitiveValidator[C ~string](c *apispec.Config[C], t reflect.Type, pathExpr, pathLit string) (string, error) {
 	if m := lookupSpecial(c, t); m != nil && m.TSValidate != "" {
 		return fmt.Sprintf(m.TSValidate, pathExpr, pathLit), nil
 	}
@@ -176,7 +176,7 @@ func tsPrimitiveValidator(c *apispec.Config, t reflect.Type, pathExpr, pathLit s
 
 // tsElemValidatorFunc returns a function expression (v: unknown) => validated
 // for use as the element validator callback in validateArray/validateRecord.
-func tsElemValidatorFunc(c *apispec.Config, t reflect.Type, pathLit string) (string, error) {
+func tsElemValidatorFunc[C ~string](c *apispec.Config[C], t reflect.Type, pathLit string) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return tsElemValidatorFunc(c, t.Elem(), pathLit)
 	}
@@ -191,7 +191,7 @@ func tsElemValidatorFunc(c *apispec.Config, t reflect.Type, pathLit string) (str
 }
 
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
-func goTypeToDoc(c *apispec.Config, t reflect.Type) (string, error) {
+func goTypeToDoc[C ~string](c *apispec.Config[C], t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return goTypeToDoc(c, t.Elem())
 	}

@@ -108,6 +108,42 @@ public struct CheckStatus: Codable, Equatable, Hashable {
     }
 }
 
+public struct ErrorCode: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let BadRequest = ErrorCode("BAD_REQUEST")
+    public static let UnknownHarness = ErrorCode("UNKNOWN_HARNESS")
+    public static let UnknownRepository = ErrorCode("UNKNOWN_REPOSITORY")
+    public static let UnsupportedModel = ErrorCode("UNSUPPORTED_MODEL")
+    public static let InvalidOauthState = ErrorCode("INVALID_OAUTH_STATE")
+    public static let UnknownCache = ErrorCode("UNKNOWN_CACHE")
+    public static let UnknownRuntime = ErrorCode("UNKNOWN_RUNTIME")
+    public static let Unauthorized = ErrorCode("UNAUTHORIZED")
+    public static let Forbidden = ErrorCode("FORBIDDEN")
+    public static let NotFound = ErrorCode("NOT_FOUND")
+    public static let OauthGrantNotFound = ErrorCode("OAUTH_GRANT_NOT_FOUND")
+    public static let OauthProviderUnavailable = ErrorCode("OAUTH_PROVIDER_UNAVAILABLE")
+    public static let Conflict = ErrorCode("CONFLICT")
+    public static let RepositoryPathConflict = ErrorCode("REPOSITORY_PATH_CONFLICT")
+    public static let InternalError = ErrorCode("INTERNAL_ERROR")
+    public static let UpdateCheckFailed = ErrorCode("UPDATE_CHECK_FAILED")
+    public static let UpdateUnavailable = ErrorCode("UPDATE_UNAVAILABLE")
+
+    public static func other(_ value: String) -> ErrorCode { ErrorCode(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct EventKind: Codable, Equatable, Hashable {
     public let value: String
 
@@ -447,26 +483,6 @@ public struct VoiceGatewayMode: Codable, Equatable, Hashable {
         var c = encoder.singleValueContainer()
         try c.encode(value)
     }
-}
-
-public enum ErrorCodes {
-    public static let badRequest = "BAD_REQUEST"
-    public static let unknownHarness = "UNKNOWN_HARNESS"
-    public static let unknownRepository = "UNKNOWN_REPOSITORY"
-    public static let unsupportedModel = "UNSUPPORTED_MODEL"
-    public static let invalidOauthState = "INVALID_OAUTH_STATE"
-    public static let unknownCache = "UNKNOWN_CACHE"
-    public static let unknownRuntime = "UNKNOWN_RUNTIME"
-    public static let unauthorized = "UNAUTHORIZED"
-    public static let forbidden = "FORBIDDEN"
-    public static let notFound = "NOT_FOUND"
-    public static let oauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND"
-    public static let oauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE"
-    public static let conflict = "CONFLICT"
-    public static let repositoryPathConflict = "REPOSITORY_PATH_CONFLICT"
-    public static let internalError = "INTERNAL_ERROR"
-    public static let updateCheckFailed = "UPDATE_CHECK_FAILED"
-    public static let updateUnavailable = "UPDATE_UNAVAILABLE"
 }
 
 /// DiffStat summarises the changes in a branch relative to its base.
@@ -1513,7 +1529,7 @@ public struct WebFetchResp: Codable {
 }
 
 public struct ErrorDetails: Codable {
-    public let code: String
+    public let code: ErrorCode
     public let message: String
 }
 

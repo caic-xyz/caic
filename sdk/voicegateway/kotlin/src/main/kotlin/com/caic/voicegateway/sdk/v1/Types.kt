@@ -21,6 +21,44 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
+@Serializable(with = ErrorCodeSerializer::class)
+sealed interface ErrorCode {
+    val value: String
+    @Serializable
+    data object BadRequest : ErrorCode {
+        override val value = "BAD_REQUEST"
+    }
+    @Serializable
+    data object VoiceBridgeUnavailable : ErrorCode {
+        override val value = "VOICE_BRIDGE_UNAVAILABLE"
+    }
+    @Serializable
+    data object Unauthorized : ErrorCode {
+        override val value = "UNAUTHORIZED"
+    }
+    @Serializable
+    data object VoiceOfferFailed : ErrorCode {
+        override val value = "VOICE_OFFER_FAILED"
+    }
+    @Serializable
+    data class Other(override val value: String) : ErrorCode
+}
+
+object ErrorCodeSerializer : KSerializer<ErrorCode> {
+    override val descriptor = PrimitiveSerialDescriptor("ErrorCode", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ErrorCode) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ErrorCode {
+        val v = decoder.decodeString()
+        return when (v) {
+            "BAD_REQUEST" -> ErrorCode.BadRequest
+            "VOICE_BRIDGE_UNAVAILABLE" -> ErrorCode.VoiceBridgeUnavailable
+            "UNAUTHORIZED" -> ErrorCode.Unauthorized
+            "VOICE_OFFER_FAILED" -> ErrorCode.VoiceOfferFailed
+            else -> ErrorCode.Other(v)
+        }
+    }
+}
+
 @Serializable(with = InterruptSourceSerializer::class)
 sealed interface InterruptSource {
     val value: String
@@ -496,13 +534,6 @@ object VoiceRTCSignalingStateSerializer : KSerializer<VoiceRTCSignalingState> {
     }
 }
 
-object ErrorCodes {
-    const val BadRequest = "BAD_REQUEST"
-    const val VoiceBridgeUnavailable = "VOICE_BRIDGE_UNAVAILABLE"
-    const val Unauthorized = "UNAUTHORIZED"
-    const val VoiceOfferFailed = "VOICE_OFFER_FAILED"
-}
-
 /** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */
 @Serializable
 data class VoiceRTCOfferReq(
@@ -606,7 +637,7 @@ data class StatusResp(
 )
 
 @Serializable
-data class ErrorDetails(val code: String, val message: String)
+data class ErrorDetails(val code: ErrorCode, val message: String)
 
 @Serializable
 data class ErrorResponse(val error: ErrorDetails, val details: Map<String, JsonElement>? = null)

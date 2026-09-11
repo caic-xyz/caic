@@ -418,6 +418,46 @@ export const CheckStatusQueued: CheckStatus = "queued";
 export const CheckStatusInProgress: CheckStatus = "in_progress";
 export const CheckStatusCompleted: CheckStatus = "completed";
 
+export type ErrorCode =
+  | "BAD_REQUEST"
+  | "UNKNOWN_HARNESS"
+  | "UNKNOWN_REPOSITORY"
+  | "UNSUPPORTED_MODEL"
+  | "INVALID_OAUTH_STATE"
+  | "UNKNOWN_CACHE"
+  | "UNKNOWN_RUNTIME"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "OAUTH_GRANT_NOT_FOUND"
+  | "OAUTH_PROVIDER_UNAVAILABLE"
+  | "CONFLICT"
+  | "REPOSITORY_PATH_CONFLICT"
+  | "INTERNAL_ERROR"
+  | "UPDATE_CHECK_FAILED"
+  | "UPDATE_UNAVAILABLE"
+  | (string & {});
+/**
+ * Supported values.
+ */
+export const ErrorCodeBadRequest: ErrorCode = "BAD_REQUEST";
+export const ErrorCodeUnknownHarness: ErrorCode = "UNKNOWN_HARNESS";
+export const ErrorCodeUnknownRepository: ErrorCode = "UNKNOWN_REPOSITORY";
+export const ErrorCodeUnsupportedModel: ErrorCode = "UNSUPPORTED_MODEL";
+export const ErrorCodeInvalidOauthState: ErrorCode = "INVALID_OAUTH_STATE";
+export const ErrorCodeUnknownCache: ErrorCode = "UNKNOWN_CACHE";
+export const ErrorCodeUnknownRuntime: ErrorCode = "UNKNOWN_RUNTIME";
+export const ErrorCodeUnauthorized: ErrorCode = "UNAUTHORIZED";
+export const ErrorCodeForbidden: ErrorCode = "FORBIDDEN";
+export const ErrorCodeNotFound: ErrorCode = "NOT_FOUND";
+export const ErrorCodeOauthGrantNotFound: ErrorCode = "OAUTH_GRANT_NOT_FOUND";
+export const ErrorCodeOauthProviderUnavailable: ErrorCode = "OAUTH_PROVIDER_UNAVAILABLE";
+export const ErrorCodeConflict: ErrorCode = "CONFLICT";
+export const ErrorCodeRepositoryPathConflict: ErrorCode = "REPOSITORY_PATH_CONFLICT";
+export const ErrorCodeInternalError: ErrorCode = "INTERNAL_ERROR";
+export const ErrorCodeUpdateCheckFailed: ErrorCode = "UPDATE_CHECK_FAILED";
+export const ErrorCodeUpdateUnavailable: ErrorCode = "UPDATE_UNAVAILABLE";
+
 export type Forge =
   | "github"
   | "gitlab";
@@ -1355,7 +1395,7 @@ export interface WebFetchResp {
 }
 
 export interface ErrorDetails {
-  code: string;
+  code: ErrorCode;
   message: string;
 }
 

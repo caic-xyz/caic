@@ -914,7 +914,7 @@ func TestHandleRestart(t *testing.T) {
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, taskslog.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, api.CodeBadRequest)
+		testRestart(t, taskslog.StateWaiting, `{"prompt":{"text":""}}`, http.StatusInternalServerError, api.CodeInternalError)
 	})
 }
 

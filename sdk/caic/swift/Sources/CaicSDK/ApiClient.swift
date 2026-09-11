@@ -3,7 +3,7 @@ import Foundation
 
 public struct ApiError: Error {
     public let statusCode: Int
-    public let code: String
+    public let code: ErrorCode
     public let message: String
     public let details: [String: JSONValue]?
 }
@@ -44,7 +44,7 @@ public final class ApiClient {
                 throw ApiError(statusCode: httpResponse.statusCode, code: errResp.error.code,
                                message: errResp.error.message, details: nil)
             }
-            throw ApiError(statusCode: httpResponse.statusCode, code: "UNKNOWN",
+            throw ApiError(statusCode: httpResponse.statusCode, code: ErrorCode.other("UNKNOWN"),
                            message: String(data: data, encoding: .utf8) ?? "", details: nil)
         }
         return try decoder.decode(T.self, from: data)
@@ -63,7 +63,7 @@ public final class ApiClient {
                     if let httpResponse = response as? HTTPURLResponse,
                        !(200..<300).contains(httpResponse.statusCode) {
                         continuation.finish(throwing: ApiError(
-                            statusCode: httpResponse.statusCode, code: "HTTP_ERROR",
+                            statusCode: httpResponse.statusCode, code: ErrorCode.other("HTTP_ERROR"),
                             message: "SSE connection failed with status \(httpResponse.statusCode)",
                             details: nil))
                         return

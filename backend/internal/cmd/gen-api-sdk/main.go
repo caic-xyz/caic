@@ -22,51 +22,51 @@ func main() {
 
 func mainImpl() error {
 	apis := []apisdkgen.API{
-		{
-			SourceDir: ".",
-			Output: outputConfig(
+		apisdkgen.NewAPI(
+			".",
+			outputConfig(
 				"../../../../../sdk/caic",
 				"../../../../../sdk/caic/kotlin/src/main/kotlin/com/caic/sdk/v1",
 				"../../../../../sdk/caic/swift/Sources/CaicSDK",
 			),
-			Config: v1.SDKAPI(),
-		},
-		{
-			SourceDir: "../../../../../gomode/voicegateway/api/v1",
-			Output: outputConfig(
+			v1.SDKAPI(),
+		),
+		apisdkgen.NewAPI(
+			"../../../../../gomode/voicegateway/api/v1",
+			outputConfig(
 				"../../../../../sdk/voicegateway",
 				"../../../../../sdk/voicegateway/kotlin/src/main/kotlin/com/caic/voicegateway/sdk/v1",
 				"../../../../../sdk/voicegateway/swift/Sources/VoiceGatewaySDK",
 			),
-			Config: voicev1.SDKAPI(),
-		},
-		{
-			SourceDir: "../../../mcp",
-			Output: outputConfig(
+			voicev1.SDKAPI(),
+		),
+		apisdkgen.NewAPI(
+			"../../../mcp",
+			outputConfig(
 				"../../../../../sdk/mcp",
 				"../../../../../sdk/mcp/kotlin/src/main/kotlin/com/fghbuild/mcp/sdk/v1",
 				"../../../../../sdk/mcp/swift/Sources/MCPSDK",
 			),
-			Config: mcp.SDKAPI(),
-		},
-		{
-			SourceDir: "../../../../../gomode",
-			Output: outputConfig(
+			mcp.SDKAPI(),
+		),
+		apisdkgen.NewAPI(
+			"../../../../../gomode",
+			outputConfig(
 				"../../../../../sdk/gomode",
 				"../../../../../sdk/gomode/kotlin/src/main/kotlin/com/fghbuild/gomode/sdk/v1",
 				"../../../../../sdk/gomode/swift/Sources/GoModeSDK",
 			),
-			Config: gomode.SDKAPI(),
-		},
-		{
-			SourceDir: "../../../../../oauth",
-			Output: outputConfig(
+			gomode.SDKAPI(),
+		),
+		apisdkgen.NewAPI(
+			"../../../../../oauth",
+			outputConfig(
 				"../../../../../sdk/oauth",
 				"../../../../../sdk/oauth/kotlin/src/main/kotlin/com/caic/oauth/sdk/v1",
 				"../../../../../sdk/oauth/swift/Sources/OAuthSDK",
 			),
-			Config: oauth.SDKAPI(),
-		},
+			oauth.SDKAPI(),
+		),
 	}
 	for i := range apis {
 		if err := apisdkgen.Generate(&apis[i]); err != nil {

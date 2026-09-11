@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -378,160 +379,204 @@ func TestCaicToolRegistryHandleBotFixCIUnknownRepository(t *testing.T) {
 	}
 }
 
-func TestCaicToolRegistryHandleTaskCreateSelectionErrors(t *testing.T) {
+func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		args     mcpTaskCreateArgs
-		want     string
-		wantCode api.ErrorCode
-	}{
-		{
-			name:     "unknown harness",
-			args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "mistyped"},
-			want:     `unsupported harness "mistyped". Omit harness to use caic's default harness, then retry task_create.`,
-			wantCode: api.CodeUnknownHarness,
-		},
-		{
-			name:     "unsupported model",
-			args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
-			want:     "unsupported model for claude: mistyped. Omit model to use the selected harness's default model, then retry task_create.",
-			wantCode: api.CodeUnsupportedModel,
-		},
-		{
-			name:     "unknown runtime",
-			args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", RuntimeName: "mistyped"},
-			want:     "unknown runtime: mistyped. Omit runtimeName to use caic's default runtime, then retry task_create.",
-			wantCode: api.CodeUnknownRuntime,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	t.Run("selection", func(t *testing.T) {
+		t.Parallel()
 
-			s := newMCPTaskCreateTestRouter(t)
-			c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-			result := c.handleTaskCreate(t.Context(), tt.args)
-			if !result.IsError {
-				t.Fatal("handleTaskCreate() did not return a tool error")
-			}
-			output, ok := result.Structured.(mcp.ErrorOutput)
-			if !ok {
-				t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
-			}
-			if output.Error != tt.want {
-				t.Errorf("error = %q, want %q", output.Error, tt.want)
-			}
-			if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(tt.wantCode) {
-				t.Errorf("error code metadata = %q, want %q", got, tt.wantCode)
-			}
+		tests := []struct {
+			name     string
+			args     mcpTaskCreateArgs
+			want     string
+			wantCode api.ErrorCode
+		}{
+			{
+				name:     "unknown harness",
+				args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "mistyped"},
+				want:     `unsupported harness "mistyped". Omit harness to use caic's default harness, then retry task_create.`,
+				wantCode: api.CodeUnknownHarness,
+			},
+			{
+				name:     "unsupported model",
+				args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
+				want:     "unsupported model for claude: mistyped. Omit model to use the selected harness's default model, then retry task_create.",
+				wantCode: api.CodeUnsupportedModel,
+			},
+			{
+				name:     "unknown runtime",
+				args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", RuntimeName: "mistyped"},
+				want:     "unknown runtime: mistyped. Omit runtimeName to use caic's default runtime, then retry task_create.",
+				wantCode: api.CodeUnknownRuntime,
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				s := newMCPTaskCreateTestRouter(t)
+				c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+				result := c.handleTaskCreate(t.Context(), tt.args)
+				if !result.IsError {
+					t.Fatal("handleTaskCreate() did not return a tool error")
+				}
+				output, ok := result.Structured.(mcp.ErrorOutput)
+				if !ok {
+					t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+				}
+				if output.Error != tt.want {
+					t.Errorf("error = %q, want %q", output.Error, tt.want)
+				}
+				if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(tt.wantCode) {
+					t.Errorf("error code metadata = %q, want %q", got, tt.wantCode)
+				}
+			})
+		}
+	})
+
+	t.Run("unsafe recovery", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+			Prompt:  "do the task",
+			Repos:   []string{"myrepo"},
+			Harness: "mistyped",
+			Model:   "pi-default",
 		})
-	}
-}
-
-func TestCaicToolRegistryHandleTaskCreateDoesNotSuggestUnsafeRecovery(t *testing.T) {
-	t.Parallel()
-
-	s := newMCPTaskCreateTestRouter(t)
-	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
-		Prompt:  "do the task",
-		Repos:   []string{"myrepo"},
-		Harness: "mistyped",
-		Model:   "pi-default",
+		if !result.IsError {
+			t.Fatal("handleTaskCreate() did not return a tool error")
+		}
+		output, ok := result.Structured.(mcp.ErrorOutput)
+		if !ok {
+			t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+		}
+		if output.Error != `unsupported harness "mistyped"` {
+			t.Errorf("error = %q, want unadvised unknown-harness error", output.Error)
+		}
+		if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownHarness) {
+			t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownHarness)
+		}
 	})
-	if !result.IsError {
-		t.Fatal("handleTaskCreate() did not return a tool error")
-	}
-	output, ok := result.Structured.(mcp.ErrorOutput)
-	if !ok {
-		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
-	}
-	if output.Error != `unsupported harness "mistyped"` {
-		t.Errorf("error = %q, want unadvised unknown-harness error", output.Error)
-	}
-	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownHarness) {
-		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownHarness)
-	}
-}
 
-func TestCaicToolRegistryHandleTaskCreateDoesNotSuggestRuntimeRecoveryWithoutDefault(t *testing.T) {
-	t.Parallel()
+	t.Run("runtime recovery without default", func(t *testing.T) {
+		t.Parallel()
 
-	s := newMCPTaskCreateTestRouter(t)
-	s.taskMgr.Runtimes = &runtime.Router{}
-	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
-		Prompt:      "do the task",
-		Repos:       []string{"myrepo"},
-		Harness:     "claude",
-		RuntimeName: "mistyped",
+		s := newMCPTaskCreateTestRouter(t)
+		s.taskMgr.Runtimes = &runtime.Router{}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+			Prompt:      "do the task",
+			Repos:       []string{"myrepo"},
+			Harness:     "claude",
+			RuntimeName: "mistyped",
+		})
+		if !result.IsError {
+			t.Fatal("handleTaskCreate() did not return a tool error")
+		}
+		output, ok := result.Structured.(mcp.ErrorOutput)
+		if !ok {
+			t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+		}
+		if output.Error != "unknown runtime: mistyped" {
+			t.Errorf("error = %q, want unadvised unknown-runtime error", output.Error)
+		}
+		if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownRuntime) {
+			t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRuntime)
+		}
 	})
-	if !result.IsError {
-		t.Fatal("handleTaskCreate() did not return a tool error")
-	}
-	output, ok := result.Structured.(mcp.ErrorOutput)
-	if !ok {
-		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
-	}
-	if output.Error != "unknown runtime: mistyped" {
-		t.Errorf("error = %q, want unadvised unknown-runtime error", output.Error)
-	}
-	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeUnknownRuntime) {
-		t.Errorf("error code metadata = %q, want %q", got, api.CodeUnknownRuntime)
-	}
+
+	t.Run("invalid default harness", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+			p.Harness = "mistyped"
+		}); err != nil {
+			t.Fatal(err)
+		}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+		if !result.IsError {
+			t.Fatal("handleTaskCreate() did not return a tool error")
+		}
+		output, ok := result.Structured.(mcp.ErrorOutput)
+		if !ok {
+			t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+		}
+		if output.Error != `unsupported harness "mistyped"` {
+			t.Errorf("error = %q, want default-resolution error", output.Error)
+		}
+		if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeConflict) {
+			t.Errorf("error code metadata = %q, want %q", got, api.CodeConflict)
+		}
+	})
+
+	t.Run("unavailable default harness", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+			p.Harness = string(harness.Codex)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+		if !result.IsError {
+			t.Fatal("handleTaskCreate() did not return a tool error")
+		}
+		output, ok := result.Structured.(mcp.ErrorOutput)
+		if !ok {
+			t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
+		}
+		if output.Error != "unknown harness: codex" {
+			t.Errorf("error = %q, want unavailable-default error", output.Error)
+		}
+		if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(api.CodeConflict) {
+			t.Errorf("error code metadata = %q, want %q", got, api.CodeConflict)
+		}
+	})
 }
 
-func TestCaicToolRegistryHandleTaskCreateDefaultResolutionFailureIsGeneric(t *testing.T) {
+func TestCaicToolRegistryToolErrorCodes(t *testing.T) {
 	t.Parallel()
 
 	s := newMCPTaskCreateTestRouter(t)
-	if err := s.prefs.Update("default", func(p *preferences.Preferences) {
-		p.Harness = "mistyped"
-	}); err != nil {
-		t.Fatal(err)
-	}
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
-	if !result.IsError {
-		t.Fatal("handleTaskCreate() did not return a tool error")
-	}
-	output, ok := result.Structured.(mcp.ErrorOutput)
-	if !ok {
-		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
-	}
-	if output.Error != `unsupported harness "mistyped"` {
-		t.Errorf("error = %q, want generic default-resolution error", output.Error)
-	}
-	if result.Meta != nil {
-		t.Errorf("metadata = %#v, want no selection-code metadata", result.Meta)
-	}
+	t.Run("malformed task request", func(t *testing.T) {
+		t.Parallel()
+
+		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Repos: []string{"myrepo"}})
+		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
+	})
+	t.Run("invalid task number", func(t *testing.T) {
+		t.Parallel()
+
+		result := c.handleTaskGetDetail(t.Context(), mcpTaskNumberArgs{TaskNumber: -1})
+		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
+	})
+	t.Run("missing task", func(t *testing.T) {
+		t.Parallel()
+
+		result := c.handleTaskGetDetail(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		assertMCPToolErrorCode(t, result, api.CodeNotFound)
+	})
+	t.Run("unclassified failure", func(t *testing.T) {
+		t.Parallel()
+
+		result := domainToolError[mcp.TextOutput](errors.New("backend failure"))
+		assertMCPToolErrorCode(t, result, api.CodeInternalError)
+	})
 }
 
-func TestCaicToolRegistryHandleTaskCreateUnavailableDefaultHarnessIsGeneric(t *testing.T) {
-	t.Parallel()
-
-	s := newMCPTaskCreateTestRouter(t)
-	if err := s.prefs.Update("default", func(p *preferences.Preferences) {
-		p.Harness = string(harness.Codex)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+func assertMCPToolErrorCode[T any](t *testing.T, result mcp.ToolResult[T], want api.ErrorCode) {
 	if !result.IsError {
-		t.Fatal("handleTaskCreate() did not return a tool error")
+		t.Fatal("tool result is not an error")
 	}
-	output, ok := result.Structured.(mcp.ErrorOutput)
-	if !ok {
-		t.Fatalf("result type = %T, want mcp.ErrorOutput", result.Structured)
-	}
-	if output.Error != "unknown harness: codex" {
-		t.Errorf("error = %q, want generic unavailable-default error", output.Error)
-	}
-	if result.Meta != nil {
-		t.Errorf("metadata = %#v, want no selection-code metadata", result.Meta)
+	if got := result.Meta[mcp.ToolErrorCodeMetaKey]; got != string(want) {
+		t.Errorf("error code metadata = %q, want %q", got, want)
 	}
 }
 

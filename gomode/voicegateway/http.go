@@ -126,7 +126,7 @@ func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	bridge := h.mediaBridge()
 	if bridge == nil {
-		writeError(w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
+		writeError(w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 		return
 	}
 	sdpAnswer, sessionID, err := bridge.HandleOffer(r.Context(), req.SDP)
@@ -161,7 +161,7 @@ func (h *handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 	bridge := h.mediaBridge()
 	if bridge == nil {
-		writeError(w, http.StatusBadRequest, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
+		writeError(w, http.StatusServiceUnavailable, voiceapi.CodeVoiceBridgeUnavailable, "voice bridge unavailable")
 		return
 	}
 	sessionID := r.PathValue("sessionID")

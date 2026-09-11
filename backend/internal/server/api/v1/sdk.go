@@ -15,8 +15,8 @@ import (
 )
 
 // SDKAPI returns the SDK generation specification for the caic API.
-func SDKAPI() apispec.Config {
-	return apispec.Config{
+func SDKAPI() apispec.Config[api.ErrorCode] {
+	return apispec.Config[api.ErrorCode]{
 		Routes: sdkRoutes(),
 		SDKPackagePaths: map[string]struct{}{
 			reflect.TypeFor[StatusResp]().PkgPath():        {},
@@ -66,24 +66,24 @@ func SDKAPI() apispec.Config {
 			},
 		},
 		Discriminated: []string{"EventMessage", "TaskListEvent"},
-		ErrorCodes: []apispec.ErrorCode{
-			{Code: string(api.CodeBadRequest), Status: 400},
-			{Code: string(api.CodeUnknownHarness), Status: 400},
-			{Code: string(api.CodeUnknownRepository), Status: 400},
-			{Code: string(api.CodeUnsupportedModel), Status: 400},
-			{Code: string(api.CodeInvalidOAuthState), Status: 400},
-			{Code: string(api.CodeUnknownCache), Status: 400},
-			{Code: string(api.CodeUnknownRuntime), Status: 400},
-			{Code: string(api.CodeUnauthorized), Status: 401},
-			{Code: string(api.CodeForbidden), Status: 403},
-			{Code: string(api.CodeNotFound), Status: 404},
-			{Code: string(api.CodeOAuthGrantNotFound), Status: 404},
-			{Code: string(api.CodeOAuthProviderUnavailable), Status: 404},
-			{Code: string(api.CodeConflict), Status: 409},
-			{Code: string(api.CodeRepositoryPathConflict), Status: 409},
-			{Code: string(api.CodeInternalError), Status: 500},
-			{Code: string(api.CodeUpdateCheckFailed), Status: 500},
-			{Code: string(api.CodeUpdateUnavailable), Status: 500},
+		ErrorCodes: []apispec.ErrorCodeSpec[api.ErrorCode]{
+			{Code: api.CodeBadRequest, Status: 400},
+			{Code: api.CodeUnknownHarness, Status: 400},
+			{Code: api.CodeUnknownRepository, Status: 400},
+			{Code: api.CodeUnsupportedModel, Status: 400},
+			{Code: api.CodeInvalidOAuthState, Status: 400},
+			{Code: api.CodeUnknownCache, Status: 400},
+			{Code: api.CodeUnknownRuntime, Status: 400},
+			{Code: api.CodeUnauthorized, Status: 401},
+			{Code: api.CodeForbidden, Status: 403},
+			{Code: api.CodeNotFound, Status: 404},
+			{Code: api.CodeOAuthGrantNotFound, Status: 404},
+			{Code: api.CodeOAuthProviderUnavailable, Status: 404},
+			{Code: api.CodeConflict, Status: 409},
+			{Code: api.CodeRepositoryPathConflict, Status: 409},
+			{Code: api.CodeInternalError, Status: 500},
+			{Code: api.CodeUpdateCheckFailed, Status: 500},
+			{Code: api.CodeUpdateUnavailable, Status: 500},
 		},
 	}
 }

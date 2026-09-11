@@ -47,10 +47,26 @@ type TestDocProviderQuota struct {
 	AuthKind TestDocAuthKind `json:"authKind"`
 }
 
+type TestGeneratedErrorCode string
+
+const (
+	TestGeneratedCodeBadRequest TestGeneratedErrorCode = "BAD_REQUEST"
+	TestGeneratedCodeUnknown    TestGeneratedErrorCode = "UNKNOWN"
+)
+
+type TestGeneratedErrorDetails struct {
+	Code    TestGeneratedErrorCode `json:"code"`
+	Message string                 `json:"message"`
+}
+
+type TestGeneratedErrorResponse struct {
+	Error TestGeneratedErrorDetails `json:"error"`
+}
+
 func TestGenConfigGoTypeToDoc(t *testing.T) {
 	t.Parallel()
 
-	cfg := &apispec.Config{
+	cfg := &apispec.Config[string]{
 		SpecialTypes: []apispec.SpecialType{
 			{Type: reflect.TypeFor[json.RawMessage](), DocType: "JSONValue"},
 			{Type: reflect.TypeFor[any](), DocType: "JSONValue"},
@@ -80,6 +96,79 @@ func TestGenConfigGoTypeToDoc(t *testing.T) {
 	}
 }
 
+func TestDocRegistryGenerateTSTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("configured error code type", func(t *testing.T) {
+		t.Parallel()
+
+		errorResponseType := reflect.TypeFor[TestGeneratedErrorResponse]()
+		cfg := apispec.Config[TestGeneratedErrorCode]{
+			SDKPackagePaths: map[string]struct{}{errorResponseType.PkgPath(): {}},
+			ExtraSeeds:      []reflect.Type{errorResponseType},
+			ErrorModel:      apispec.ClientErrorModel{TypeName: errorResponseType.Name()},
+			ErrorCodes: []apispec.ErrorCodeSpec[TestGeneratedErrorCode]{
+				{Code: TestGeneratedCodeBadRequest, Status: 400},
+				{Code: TestGeneratedCodeUnknown, Status: 500},
+			},
+		}
+		tsDir := t.TempDir()
+		kotlinDir := t.TempDir()
+		swiftDir := t.TempDir()
+		api := NewAPI(".", OutputConfig{
+			TypeScriptDir: tsDir,
+			KotlinDir:     kotlinDir,
+			SwiftDir:      swiftDir,
+		}, cfg)
+		if err := Generate(&api); err != nil {
+			t.Fatal(err)
+		}
+
+		files := []struct {
+			dir   string
+			name  string
+			wants []string
+		}{
+			{dir: tsDir, name: "types.gen.ts", wants: []string{
+				"export type TestGeneratedErrorCode =\n  | \"BAD_REQUEST\"\n  | \"UNKNOWN\"\n  | (string & {});",
+				"code: TestGeneratedErrorCode;",
+			}},
+			{dir: tsDir, name: "api.gen.ts", wants: []string{
+				"import type { TestGeneratedErrorCode, TestGeneratedErrorResponse } from \"./types.gen\";",
+				"public code: TestGeneratedErrorCode,",
+			}},
+			{dir: kotlinDir, name: "Types.kt", wants: []string{
+				"sealed interface TestGeneratedErrorCode {",
+				"data class TestGeneratedErrorDetails(val code: TestGeneratedErrorCode, val message: String)",
+			}},
+			{dir: kotlinDir, name: "ApiClient.kt", wants: []string{
+				"val code: TestGeneratedErrorCode,",
+				"TestGeneratedErrorCode.Other(\"UNKNOWN\")",
+			}},
+			{dir: swiftDir, name: "Types.swift", wants: []string{
+				"public struct TestGeneratedErrorCode: Codable, Equatable, Hashable {",
+				"public let code: TestGeneratedErrorCode",
+			}},
+			{dir: swiftDir, name: "ApiClient.swift", wants: []string{
+				"public let code: TestGeneratedErrorCode",
+				"TestGeneratedErrorCode.other(\"UNKNOWN\")",
+			}},
+		}
+		for _, file := range files {
+			data, err := fs.ReadFile(os.DirFS(file.dir), file.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(data)
+			for _, want := range file.wants {
+				if !strings.Contains(text, want) {
+					t.Errorf("%s does not contain %q:\n%s", file.name, want, text)
+				}
+			}
+		}
+	})
+}
+
 func TestDocRegistryGenerateMarkdownDoc(t *testing.T) {
 	t.Parallel()
 
@@ -87,8 +176,8 @@ func TestDocRegistryGenerateMarkdownDoc(t *testing.T) {
 		t.Parallel()
 		outDir := t.TempDir()
 		quotaType := reflect.TypeFor[TestDocProviderQuota]()
-		docs := &docRegistry{
-			cfg: &apispec.Config{
+		docs := &docRegistry[string]{
+			cfg: &apispec.Config[string]{
 				APIDocTitle:     "Test API",
 				SDKPackagePaths: map[string]struct{}{quotaType.PkgPath(): {}},
 				Routes: []apispec.Route{{
@@ -147,7 +236,7 @@ const (
 		if err := os.WriteFile(filepath.Join(dir, "types.go"), []byte(source), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		docs, err := loadDocsInDir(dir)
+		docs, err := loadDocsInDir[string](dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,8 +253,8 @@ func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
 	t.Parallel()
 
 	outDir := t.TempDir()
-	docs := &docRegistry{
-		cfg: &apispec.Config{
+	docs := &docRegistry[string]{
+		cfg: &apispec.Config[string]{
 			Routes: []apispec.Route{
 				{
 					Name:       "mcp",
@@ -213,7 +302,7 @@ func TestDocRegistryEmitKotlinStruct(t *testing.T) {
 	t.Run("path only request", func(t *testing.T) {
 		t.Parallel()
 
-		docs := &docRegistry{}
+		docs := &docRegistry[string]{}
 		var b strings.Builder
 		if err := docs.emitKotlinStruct(&b, reflect.TypeFor[TestPathOnlyRequest]()); err != nil {
 			t.Fatal(err)
@@ -228,8 +317,8 @@ func TestDocRegistryEmitKotlinStruct(t *testing.T) {
 	t.Run("field docs", func(t *testing.T) {
 		t.Parallel()
 
-		docs := &docRegistry{
-			cfg: &apispec.Config{},
+		docs := &docRegistry[string]{
+			cfg: &apispec.Config[string]{},
 			fieldDoc: map[string]map[string]string{
 				"TestKotlinDocumentedFields": {
 					"Name": "Name is the display name.",
@@ -257,8 +346,8 @@ func TestDocRegistryGenerateTSNamedEvents(t *testing.T) {
 	t.Parallel()
 
 	outDir := t.TempDir()
-	docs := &docRegistry{
-		cfg: &apispec.Config{
+	docs := &docRegistry[string]{
+		cfg: &apispec.Config[string]{
 			Routes: []apispec.Route{
 				{
 					Name:  "events",
@@ -329,8 +418,8 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		docs := &docRegistry{
-			cfg: &apispec.Config{},
+		docs := &docRegistry[string]{
+			cfg: &apispec.Config[string]{},
 		}
 		if err := docs.generateTSValidate(outDir); err != nil {
 			t.Fatal(err)
@@ -345,8 +434,8 @@ func TestDocRegistryGenerateTSValidate(t *testing.T) {
 
 		outDir := t.TempDir()
 		eventType := reflect.TypeFor[TestSDKEvent]()
-		docs := &docRegistry{
-			cfg: &apispec.Config{
+		docs := &docRegistry[string]{
+			cfg: &apispec.Config[string]{
 				Routes: []apispec.Route{{Name: "events", Resp: eventType, IsSSE: true}},
 				SDKPackagePaths: map[string]struct{}{
 					eventType.PkgPath(): {},
