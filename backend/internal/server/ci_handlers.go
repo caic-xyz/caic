@@ -60,12 +60,12 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	}
 	checkout, ok := h.checkouts.Checkout(ciPrimaryName)
 	if !ok || checkout.Repository == nil {
-		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no repo info found"})
+		writeError(r.Context(), w, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no repo info found"})
 		return
 	}
 	f := h.forgeMgr.ForgeForInfo(r.Context(), checkout.Repository)
 	if f == nil {
-		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no forge token configured for this repo"})
+		writeError(r.Context(), w, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no forge token configured for this repo"})
 		return
 	}
 
@@ -116,16 +116,16 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownRepository, Message: "unknown repository: " + req.Repo}
 	}
 	if checkout.Repository == nil {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no repository metadata configured for this path"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no repository metadata configured for this path"}
 	}
 	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no forge token configured for this repo"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no forge token configured for this repo"}
 	}
 
 	state, ok := h.repoStatus.StatusFor(req.Repo)
 	if !ok || state.Status != forge.CIStatusFailure {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no CI failure on default branch"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no CI failure on default branch"}
 	}
 
 	// Convert stored DTO checks back to forge.Check for ci.FailureSummary.
@@ -178,19 +178,19 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	t := entry.Task()
 	snap := t.Snapshot()
 	if snap.ForgePR == 0 {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task has no associated PR"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no associated PR"}
 	}
 	primary := t.Primary()
 	if primary == nil {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task has no primary repo"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no primary repo"}
 	}
 	checkout, ok := h.checkouts.Checkout(primary.Name)
 	if !ok || checkout.Repository == nil {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repo not found"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "repo not found"}
 	}
 	f := h.forgeMgr.ForgeForInfo(ctx, checkout.Repository)
 	if f == nil {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "no forge token configured for this repo"}
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no forge token configured for this repo"}
 	}
 
 	checks := snap.CIChecks
