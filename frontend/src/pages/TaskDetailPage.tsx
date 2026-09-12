@@ -51,10 +51,13 @@ export default function TaskDetailPage() {
               sudoPassword={t()?.runtime.sudoPassword}
               supportsImages={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages}
               supportsCompact={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact}
+              rateLimit={t()?.rateLimit}
+              now={s.now()}
               onStop={s.handleStop}
               onPurge={s.handlePurge}
               onRevive={s.handleRevive}
               onFork={s.handleFork}
+              onQuotaRecovery={s.handleQuotaRecovery}
               parentTaskID={t()?.parentTaskID}
               childTasks={s.tasks()
                 .filter((candidate) => candidate.parentTaskID === taskId)

@@ -63,6 +63,7 @@ const baseProps = {
   branch: "feature-branch",
   baseBranch: "main",
   harness: "claude",
+  now: Date.parse("2026-07-08T12:00:00Z"),
   onClose: () => {},
   onStop: () => {},
   onPurge: () => {},
@@ -142,6 +143,45 @@ describe("TaskDetail", () => {
     renderTaskDetail({ childTasks: [{ id: "untitled-child", title: "" }] });
 
     expect(screen.getByRole("link", { name: "Child: untitled-child" })).toHaveAttribute("href", "/task/@untitled-child");
+  });
+
+  it("offers quota recovery without replacing the normal task actions", async () => {
+    const user = userEvent.setup();
+    const onQuotaRecovery = vi.fn();
+    const onFork = vi.fn();
+    renderTaskDetail({
+      taskState: "waiting",
+      rateLimit: {
+        blocked: true,
+        window: "5h",
+        resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+      },
+      onQuotaRecovery,
+      onFork,
+    });
+
+    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent("5h quota resets in 42m");
+    await user.click(screen.getByTestId("quota-recovery-detail-action"));
+    expect(onQuotaRecovery).toHaveBeenCalledWith("abc");
+
+    await user.click(screen.getByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
+    expect(onFork).toHaveBeenCalledWith("abc");
+  });
+
+  it("shows quota status without an unavailable recovery action when there is no repository", () => {
+    renderTaskDetail({
+      repo: "",
+      rateLimit: {
+        blocked: true,
+        window: "5h",
+        resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+      },
+      onQuotaRecovery: vi.fn(),
+    });
+
+    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent("Agent quota exhausted");
+    expect(screen.queryByTestId("quota-recovery-detail-action")).not.toBeInTheDocument();
   });
 
   it("diff link href ends with /diff", () => {

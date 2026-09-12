@@ -51,6 +51,7 @@ function taskListProps(tasks: Task[]): Omit<TaskListProps, "selectedId"> {
     onPurge: () => undefined,
     onRevive: () => undefined,
     onFork: () => undefined,
+    onQuotaRecovery: () => undefined,
     onError: () => undefined,
     supportsCompact: () => false,
     actionId: () => null,

@@ -28,6 +28,7 @@ export interface TaskListProps {
   onPurge: (id: string) => void;
   onRevive: (id: string) => void;
   onFork: (id: string) => void;
+  onQuotaRecovery: (id: string) => void;
   onError: (message: string) => void;
   supportsCompact: (harness: string) => boolean;
   actionId: Accessor<string | null>;
@@ -313,6 +314,7 @@ export default function TaskList(props: TaskListProps) {
       onRevive={() => props.onRevive(t().id)}
       purgeModifierActive={purgeModifierActive()}
       onFork={() => props.onFork(t().id)}
+      onQuotaRecovery={() => props.onQuotaRecovery(t().id)}
       onError={props.onError}
       supportsCompact={props.supportsCompact(t().harness)}
       actionLoading={props.actionId() === t().id}

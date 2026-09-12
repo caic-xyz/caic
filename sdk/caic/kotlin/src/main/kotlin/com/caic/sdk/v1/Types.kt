@@ -635,6 +635,44 @@ object ProviderAuthKindSerializer : KSerializer<ProviderAuthKind> {
     }
 }
 
+@Serializable(with = ProviderFetchStatusSerializer::class)
+sealed interface ProviderFetchStatus {
+    val value: String
+    @Serializable
+    data object Error : ProviderFetchStatus {
+        override val value = "error"
+    }
+    @Serializable
+    data object Fresh : ProviderFetchStatus {
+        override val value = "fresh"
+    }
+    @Serializable
+    data object Stale : ProviderFetchStatus {
+        override val value = "stale"
+    }
+    @Serializable
+    data object Unknown : ProviderFetchStatus {
+        override val value = "unknown"
+    }
+    @Serializable
+    data class Other(override val value: String) : ProviderFetchStatus
+}
+
+object ProviderFetchStatusSerializer : KSerializer<ProviderFetchStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("ProviderFetchStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ProviderFetchStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ProviderFetchStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "error" -> ProviderFetchStatus.Error
+            "fresh" -> ProviderFetchStatus.Fresh
+            "stale" -> ProviderFetchStatus.Stale
+            "unknown" -> ProviderFetchStatus.Unknown
+            else -> ProviderFetchStatus.Other(v)
+        }
+    }
+}
+
 @Serializable(with = QuotaProviderSerializer::class)
 sealed interface QuotaProvider {
     val value: String
@@ -1069,6 +1107,8 @@ data class HarnessInfo(
     val models: List<Model>,
     val supportsImages: Boolean,
     val supportsCompact: Boolean,
+    /** Shared quota source; empty when harness usage cannot be inferred. */
+    val quotaGroup: QuotaProvider? = null,
 )
 
 /** WellKnownCache describes a single well-known cache. */
@@ -1204,6 +1244,7 @@ data class RuntimeInstance(
 @Serializable
 data class TaskRateLimit(
     val blocked: Boolean,
+    val quotaGroup: QuotaProvider? = null,
     val window: String? = null,
     val resetsAt: Instant? = null,
 )
@@ -1941,6 +1982,7 @@ data class ProviderQuota(
     val authKind: ProviderAuthKind,
     /** link to provider's usage/billing page */
     val usageUrl: String,
+    val fetchStatus: ProviderFetchStatus,
     val rateLimits: List<QuotaRateLimit>? = null,
     val balance: QuotaBalance? = null,
     val extraUsage: QuotaExtraUsage? = null,

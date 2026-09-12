@@ -522,6 +522,19 @@ export type ProviderAuthKind =
 export const ProviderAuthKindOAuth: ProviderAuthKind = "oauth";
 export const ProviderAuthKindAPIKey: ProviderAuthKind = "apikey";
 
+export type ProviderFetchStatus =
+  | "error"
+  | "fresh"
+  | "stale"
+  | "unknown";
+/**
+ * Supported values.
+ */
+export const ProviderFetchStatusError: ProviderFetchStatus = "error";
+export const ProviderFetchStatusFresh: ProviderFetchStatus = "fresh";
+export const ProviderFetchStatusStale: ProviderFetchStatus = "stale";
+export const ProviderFetchStatusUnknown: ProviderFetchStatus = "unknown";
+
 export type QuotaProvider =
   | "anthropic"
   | "claudecode"
@@ -785,6 +798,8 @@ export interface HarnessInfo {
   models: Model[];
   supportsImages: boolean;
   supportsCompact: boolean;
+  /** Shared quota source; empty when harness usage cannot be inferred. */
+  quotaGroup?: QuotaProvider;
 }
 
 /** WellKnownCache describes a single well-known cache. */
@@ -915,6 +930,7 @@ export interface RuntimeInstance {
 /** TaskRateLimit is the current quota block resolved by the backend for one task. */
 export interface TaskRateLimit {
   blocked: boolean;
+  quotaGroup?: QuotaProvider;
   window?: string;
   resetsAt?: ISOTimestamp;
 }
@@ -1358,6 +1374,7 @@ export interface ProviderQuota {
   authKind: ProviderAuthKind;
   /** link to provider's usage/billing page */
   usageUrl: string;
+  fetchStatus: ProviderFetchStatus;
   rateLimits?: QuotaRateLimit[];
   balance?: QuotaBalance;
   extraUsage?: QuotaExtraUsage;

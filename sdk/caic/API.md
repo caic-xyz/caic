@@ -291,6 +291,18 @@ ProviderAuthKind identifies a provider authentication method.
 | `oauth` |  |
 | `apikey` |  |
 
+### ProviderFetchStatus
+
+ProviderFetchStatus describes whether provider quota data is current enough
+to support availability claims.
+
+| Value | Description |
+|-------|-------------|
+| `error` | ProviderFetchStatusError means the latest provider refresh failed. |
+| `fresh` | ProviderFetchStatusFresh means the snapshot is within the provider cache TTL. |
+| `stale` | ProviderFetchStatusStale means the snapshot is older than the provider cache TTL. |
+| `unknown` | ProviderFetchStatusUnknown means the provider has no timestamped snapshot. |
+
 ### QuotaProvider
 
 QuotaProvider identifies a monitored quota source.
@@ -563,6 +575,7 @@ HarnessInfo is the JSON representation of an available harness.
 | `models` | `Model[]` |  | yes |
 | `supportsImages` | `boolean` |  | yes |
 | `supportsCompact` | `boolean` |  | yes |
+| `quotaGroup` | `QuotaProvider` | Shared quota source; empty when harness usage cannot be inferred. |  |
 
 ### WellKnownCache
 
@@ -716,6 +729,7 @@ TaskRateLimit is the current quota block resolved by the backend for one task.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `blocked` | `boolean` |  | yes |
+| `quotaGroup` | `QuotaProvider` |  |  |
 | `window` | `string` |  |  |
 | `resetsAt` | `ISOTimestamp` |  |  |
 
@@ -1544,6 +1558,7 @@ ProviderQuota is the quota data for one provider.
 | `logoUrl` | `string` | absolute URL path to provider SVG, e.g. "/logos/anthropic.svg" | yes |
 | `authKind` | `ProviderAuthKind` |  | yes |
 | `usageUrl` | `string` | link to provider's usage/billing page | yes |
+| `fetchStatus` | `ProviderFetchStatus` |  | yes |
 | `rateLimits` | `QuotaRateLimit[]` |  |  |
 | `balance` | `QuotaBalance` |  |  |
 | `extraUsage` | `QuotaExtraUsage` |  |  |

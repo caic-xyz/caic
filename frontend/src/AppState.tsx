@@ -13,6 +13,7 @@ import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { requestNotificationPermission, notifyServiceEvent, notifyWaiting, dismissNotification } from "./gomode/notifications";
 import { QuotaRecoveryTracker } from "./quota";
+import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
@@ -833,6 +834,7 @@ function createAppStore() {
 
   // Fork dialog state.
   const [forkTaskId, setForkTaskId] = createSignal<string | null>(null);
+  const [forkQuotaRecovery, setForkQuotaRecovery] = createSignal(false);
   const [forkPrompt, setForkPrompt] = createSignal("");
   const [forkHandoffLoading, setForkHandoffLoading] = createSignal(false);
   const [forkHandoffError, setForkHandoffError] = createSignal("");
@@ -845,19 +847,27 @@ function createAppStore() {
   const [forkDisplay, setForkDisplay] = createSignal(false);
   const [forkSudo, setForkSudo] = createSignal(false);
   const [forkGitHubToken, setForkGitHubToken] = createSignal(false);
+  let forkDialogGeneration = 0;
+  let forkTargetTouched = false;
   // Fork dialog harness/model/effort selection, mirroring selectHarness/selectModel/selectEffort.
-  const selectForkHarness = (harness: string) => {
+  const applyForkHarness = (harness: string) => {
     const model = selectedModelForHarness(harness);
     setForkHarness(harness);
     setForkModel(model);
     setForkEffort(selectedEffortForModel(harness, model));
   };
+  const selectForkHarness = (harness: string) => {
+    forkTargetTouched = true;
+    applyForkHarness(harness);
+  };
   const selectForkModel = (model: string) => {
+    forkTargetTouched = true;
     setForkModel(model);
     setPrefModel(forkHarness(), model);
     setForkEffort(selectedEffortForModel(forkHarness(), model));
   };
   const selectForkEffort = (effort: string) => {
+    forkTargetTouched = true;
     setForkEffort(effort);
     setPrefEffort(forkHarness(), forkModel(), effort);
   };
@@ -871,38 +881,91 @@ function createAppStore() {
   };
   const forkAvailableRecent = () => repos().slice(0, recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
   const forkAvailableRest = () => repos().slice(recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
+  const forkTargets = () => {
+    const source = tasks().find((task) => task.id === forkTaskId());
+    return quotaRecoveryTargets(
+      harnesses(),
+      usage(),
+      source?.rateLimit?.quotaGroup,
+      selectedHarness(),
+      now(),
+    );
+  };
+  const forkHarnesses = () => forkQuotaRecovery()
+    ? forkTargets().map((target) => target.harness)
+    : harnesses();
+  const forkHarnessLabel = (harness: HarnessInfo) => {
+    if (!forkQuotaRecovery()) return harness.name;
+    const target = forkTargets().find((candidate) => candidate.harness.name === harness.name);
+    return target ? `${harness.name} — ${target.label}` : harness.name;
+  };
+  const forkSelectedTargetLabel = () => forkTargets()
+    .find((target) => target.harness.name === forkHarness())?.label ?? "Quota status unknown";
 
-  function handleFork(id: string) {
+  createEffect(() => {
+    if (!forkQuotaRecovery() || forkTargetTouched) return;
+    const recommended = forkTargets().find((target) => target.recommended)?.harness.name;
+    if (recommended && recommended !== forkHarness()) applyForkHarness(recommended);
+  });
+
+  function openFork(id: string, quotaRecovery: boolean): number {
+    forkDialogGeneration++;
     const task = tasks().find((t) => t.id === id);
     const harness = task?.harness ?? selectedHarness();
-    const model = selectedModelForHarness(harness);
+    forkTargetTouched = false;
     setForkTaskId(id);
+    setForkQuotaRecovery(quotaRecovery);
     setForkPrompt("");
     setForkHandoffLoading(false);
     setForkHandoffError("");
-    setForkHarness(harness);
-    setForkModel(model);
-    setForkEffort(selectedEffortForModel(harness, model));
+    applyForkHarness(harness);
     setForkExtraRepos([]);
     setForkTailscale(task?.runtime?.tailscale === "true" || task?.runtime?.tailscale?.startsWith("https://") || false);
     setForkUSB(task?.runtime?.usb ?? false);
     setForkDisplay(task?.runtime?.display ?? false);
     setForkSudo(task?.runtime?.sudo ?? false);
     setForkGitHubToken(task?.gitHubToken ?? false);
+    return forkDialogGeneration;
+  }
+
+  function handleFork(id: string) {
+    openFork(id, false);
+  }
+
+  function handleQuotaRecovery(id: string) {
+    const task = tasks().find((candidate) => candidate.id === id);
+    if (task?.rateLimit?.blocked !== true) return;
+    const generation = openFork(id, true);
+    void generateForkHandoffFor(id, generation);
+  }
+
+  function closeFork() {
+    forkDialogGeneration++;
+    setForkTaskId(null);
+    setForkQuotaRecovery(false);
   }
 
   async function generateForkHandoff() {
     const id = forkTaskId();
-    if (!id || forkHandoffLoading()) return;
+    if (!id) return;
+    await generateForkHandoffFor(id, forkDialogGeneration);
+  }
+
+  async function generateForkHandoffFor(id: string, generation: number) {
+    if (forkHandoffLoading()) return;
     setForkHandoffLoading(true);
     setForkHandoffError("");
     try {
       const resp = await getTaskHandoff(id);
-      if (forkTaskId() === id) setForkPrompt(resp.prompt);
+      if (forkTaskId() === id && forkDialogGeneration === generation) {
+        setForkPrompt(resp.prompt);
+      }
     } catch (e) {
-      if (forkTaskId() === id) setForkHandoffError(e instanceof Error ? e.message : "Could not generate handoff");
+      if (forkTaskId() === id && forkDialogGeneration === generation) {
+        setForkHandoffError(e instanceof Error ? e.message : "Could not generate handoff");
+      }
     } finally {
-      if (forkTaskId() === id) setForkHandoffLoading(false);
+      if (forkTaskId() === id && forkDialogGeneration === generation) setForkHandoffLoading(false);
     }
   }
 
@@ -910,7 +973,7 @@ function createAppStore() {
     const id = forkTaskId();
     const text = forkPrompt().trim();
     if (!id || !text) return;
-    setForkTaskId(null);
+    closeFork();
     try {
       const h = forkHarness();
       const m = forkModel();
@@ -920,8 +983,8 @@ function createAppStore() {
       const resp = await forkTask(id, {
         prompt: { text },
         harness: h !== (sourceTask?.harness ?? "") ? h as Harness : undefined,
-		model: m !== (sourceTask?.requestedModel ?? "") ? m : undefined,
-		effort: e !== (sourceTask?.requestedEffort ?? "") ? e : undefined,
+        model: m !== (sourceTask?.requestedModel ?? "") ? m : undefined,
+        effort: e !== (sourceTask?.requestedEffort ?? "") ? e : undefined,
         extraRepos: extras.length > 0 ? extras.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined,
         tailscale: forkTailscale(),
         usb: forkUSB(),
@@ -1108,7 +1171,7 @@ function createAppStore() {
     gitHubTokenAvailable, gitHubTokenEnabled, setGitHubTokenEnabled,
     voiceGatewayAvailable,
     // sidebar + actions
-    sidebarOpen, setSidebarOpen, now, actionId, handleStop, handlePurge, handleRevive, handleFork,
+    sidebarOpen, setSidebarOpen, now, actionId, handleStop, handlePurge, handleRevive, handleFork, handleQuotaRecovery,
     navigateToTask, navigateToDiff, fixCI,
     // input drafts
     inputDraft, setInputDraft, inputImages, setInputImages,
@@ -1117,7 +1180,8 @@ function createAppStore() {
     // clone dialog
     cloneOpen, setCloneOpen, cloning, cloneError, setCloneError, submitClone,
     // fork dialog
-    forkTaskId, setForkTaskId, forkPrompt, setForkPrompt, forkHandoffLoading, forkHandoffError, generateForkHandoff,
+    forkTaskId, forkQuotaRecovery, closeFork, forkPrompt, setForkPrompt, forkHandoffLoading, forkHandoffError, generateForkHandoff,
+    forkHarnesses, forkHarnessLabel, forkSelectedTargetLabel,
     forkHarness, setForkHarness: selectForkHarness,
     forkModel, setForkModel: selectForkModel, forkEffort, setForkEffort: selectForkEffort, forkExtraRepos, setForkExtraRepos,
     forkTailscale, setForkTailscale, forkUSB, setForkUSB, forkDisplay, setForkDisplay,

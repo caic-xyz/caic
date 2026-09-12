@@ -31,7 +31,10 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
   const repositoryFilter = page.getByRole("combobox", { name: "Manage repositories" });
   await expect(repositoryFilter).toBeFocused();
   await expect(addRepository).toHaveCSS("box-shadow", /rgb/);
-  const repository = page.getByRole("option", { selected: false }).first();
+  const repository = page
+    .getByRole("listbox", { name: "Manage repositories" })
+    .getByRole("option", { selected: false })
+    .first();
   const repositoryName = await repository.textContent();
   if (!repositoryName) throw new Error("Repository option has no label");
   await page.keyboard.type(repositoryName);

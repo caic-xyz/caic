@@ -7,7 +7,7 @@ import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid"
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn } from "@sdk/types.gen";
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn, TaskRateLimit } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "../gomode/HostMode";
@@ -17,6 +17,7 @@ import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContex
 import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
 import { formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import { formatQuotaCountdown } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration } from "../timing";
 import type { ToolCall } from "../grouping";
 import { Marked } from "marked";
@@ -79,10 +80,13 @@ interface Props {
   sudoPassword?: string;
   supportsImages?: boolean;
   supportsCompact?: boolean;
+  rateLimit?: TaskRateLimit;
+  now: number;
   onStop: (id: string) => void;
   onPurge: (id: string) => void;
   onRevive: (id: string) => void;
   onFork?: (id: string) => void;
+  onQuotaRecovery?: (id: string) => void;
   parentTaskID?: string;
   childTasks: { id: string; title: string }[];
   onClose: () => void;
@@ -767,6 +771,25 @@ export default function TaskDetail(props: Props) {
             {(child) => <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>Child: {child.title || child.id}</A>}
           </For>
         </nav>
+      </Show>
+      <Show when={props.rateLimit?.blocked}>
+        <section class={styles.quotaRecovery} aria-labelledby="quota-recovery-title" data-testid="quota-recovery-detail">
+          <div>
+            <h4 id="quota-recovery-title" class={styles.quotaRecoveryTitle}>Agent quota exhausted</h4>
+            <p class={styles.quotaRecoveryText}>
+              {props.rateLimit?.window || "Current"} quota resets in {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this task unchanged and continue its workspace in a new agent.
+            </p>
+          </div>
+          <Show when={props.onQuotaRecovery && props.repo}>
+            <Button
+              type="button"
+              onClick={() => props.onQuotaRecovery?.(props.taskId)}
+              data-testid="quota-recovery-detail-action"
+            >
+              Continue in new agent
+            </Button>
+          </Show>
+        </section>
       </Show>
       <Show when={props.error} keyed>
         {(error) => (

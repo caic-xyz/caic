@@ -43,6 +43,7 @@ export function HarnessControls(props: {
   onHarnessCommit?: () => void;
   // Disambiguates aria-labels when two instances coexist, e.g. "Fork ".
   labelPrefix?: string;
+  harnessOptionLabel?: (harness: HarnessInfo) => string;
 }) {
   const label = (name: string) => `${props.labelPrefix ?? ""}${name}`;
   const moveHarness = (delta: number) => {
@@ -80,7 +81,7 @@ export function HarnessControls(props: {
           }}
         >
           <For each={props.harnesses}>
-            {(h) => <option value={h.name} selected={h.name === props.harness}>{h.name}</option>}
+            {(h) => <option value={h.name} selected={h.name === props.harness}>{props.harnessOptionLabel?.(h) ?? h.name}</option>}
           </For>
         </ControlSelect>
       </Show>

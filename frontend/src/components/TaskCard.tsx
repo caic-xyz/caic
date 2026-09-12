@@ -86,6 +86,7 @@ export interface TaskCardProps {
   onDiffClick?: () => void;
   supportsCompact?: boolean;
   onFork?: () => void;
+  onQuotaRecovery?: () => void;
   onError: (message: string) => void;
   /** Task number for voice mode display. Shown only when voice is connected. */
   voiceNumber?: number;
@@ -613,6 +614,22 @@ export default function TaskCard(props: TaskCardProps) {
             </Show>
           </span>
         </div>
+      </Show>
+
+      <Show when={props.rateLimit?.blocked && props.repos?.[0]?.name ? props.onQuotaRecovery : undefined} keyed>
+        {(recover) => (
+          <button
+            type="button"
+            class={styles.quotaRecovery}
+            data-testid="quota-recovery-card"
+            onClick={(event) => {
+              event.stopPropagation();
+              recover();
+            }}
+          >
+            Continue in new agent
+          </button>
+        )}
       </Show>
 
       {/* Line 4 (optional): diff */}

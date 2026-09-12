@@ -96,7 +96,7 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 	}
 	mergedQuotas := h.quotaTracker.Merge(providerQuotas, now)
 	for i := range mergedQuotas {
-		out, err := apiconv.ProviderQuota(&mergedQuotas[i])
+		out, err := apiconv.ProviderQuota(&mergedQuotas[i], now)
 		if err != nil {
 			h.log.ErrorContext(ctx, "convert provider quota", "provider", mergedQuotas[i].Provider, "err", err)
 			continue

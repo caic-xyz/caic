@@ -130,10 +130,11 @@ var claudeEffortOptions = []string{
 // New creates a Claude Code backend descriptor.
 func New() *Backend {
 	b := &Backend{
-		HarnessID:     harness.Claude,
-		Images:        true,
-		Compact:       true,
-		ContextWindow: 180_000,
+		HarnessID:       harness.Claude,
+		QuotaProviderID: agent.QuotaProviderClaudeCode,
+		Images:          true,
+		Compact:         true,
+		ContextWindow:   180_000,
 	}
 	b.SetModelInventory(claudeModelInventory())
 	return b

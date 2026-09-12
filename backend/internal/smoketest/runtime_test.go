@@ -103,6 +103,16 @@ func TestFakeAgentTimingMessagesParse(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:  "rate limit",
+			input: `{"type":"rate_limit","status":"rejected","resets_at":"2026-09-11T13:00:00Z","rate_limit_type":"five_hour","utilization":1,"quota_provider":"claudecode","quota_label":"Claude Code","quota_window":"5h"}`,
+			check: func(t *testing.T, msg agent.Message) {
+				rateLimit, ok := msg.(*agent.RateLimitMessage)
+				if !ok || rateLimit.Status != agent.RateLimitStatusRejected || rateLimit.QuotaWindow != "5h" {
+					t.Fatalf("message = %#v, want rejected 5h rate limit", msg)
+				}
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

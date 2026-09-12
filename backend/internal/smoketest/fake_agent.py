@@ -548,6 +548,24 @@ def emit_lifecycle_turn(turns: int) -> None:
     emit_result(turns, LIFECYCLE_RESULT)
 
 
+def emit_quota_recovery_turn(turns: int) -> None:
+    """Emit an active quota block for the guided recovery e2e flow."""
+    emit_text("The current harness cannot continue until its quota resets.")
+    emit(
+        {
+            "type": "rate_limit",
+            "status": "rejected",
+            "resets_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600)),
+            "rate_limit_type": "five_hour",
+            "utilization": 1,
+            "quota_provider": "claudecode",
+            "quota_label": "Claude Code",
+            "quota_window": "5h",
+        }
+    )
+    emit_result(turns, "Quota exhausted")
+
+
 def main() -> None:
     # Model the agent handshake so setup timing is visible and non-zero in e2e.
     time.sleep(0.12)
@@ -576,6 +594,9 @@ def main() -> None:
         # Exact keyword triggers (for e2e tests).
         if line == "FAKE_LIFECYCLE" or line.startswith("FAKE_LIFECYCLE "):
             emit_lifecycle_turn(turns)
+            continue
+        if line == "FAKE_QUOTA_RECOVERY" or line.startswith("FAKE_QUOTA_RECOVERY "):
+            emit_quota_recovery_turn(turns)
             continue
         if "FAKE_PLAN" in line:
             emit_plan_turn(turns)

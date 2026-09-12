@@ -158,6 +158,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onPurge={s.handlePurge}
           onRevive={s.handleRevive}
           onFork={s.handleFork}
+          onQuotaRecovery={s.handleQuotaRecovery}
           onError={s.showWarning}
           supportsCompact={(harness) => s.harnesses().find((candidate) => candidate.name === harness)?.supportsCompact ?? false}
           actionId={s.actionId}

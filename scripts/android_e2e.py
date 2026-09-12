@@ -58,7 +58,22 @@ def build_backend(tmp_dir):
     return binary
 
 
-def start_backend(tmp_dir, binary, port):
+def backend_environment(visual_fixtures: bool) -> dict[str, str]:
+    """Return a backend environment with an explicit E2E fixture mode."""
+    env = os.environ.copy()
+    if visual_fixtures:
+        env["CAIC_E2E_VISUALS"] = "1"
+    else:
+        env.pop("CAIC_E2E_VISUALS", None)
+    return env
+
+
+def start_backend(
+    tmp_dir: str,
+    binary: str,
+    port: int,
+    visual_fixtures: bool,
+):
     log_path = os.path.join(tmp_dir, "caic-e2e.log")
     config_path = os.path.join(tmp_dir, "config.toml")
 
@@ -71,6 +86,7 @@ def start_backend(tmp_dir, binary, port):
         [binary, "-config-dir", tmp_dir],
         stdout=log,
         stderr=log,
+        env=backend_environment(visual_fixtures),
     )
     return proc, log, log_path
 
@@ -408,7 +424,7 @@ def main():
         print("Building fake backend...")
         binary = build_backend(tmp_dir)
 
-        proc, log, log_path = start_backend(tmp_dir, binary, port)
+        proc, log, log_path = start_backend(tmp_dir, binary, port, args.screenshots)
         try:
             print(f"Waiting for fake backend on :{port}...")
             if not wait_for_backend(port):

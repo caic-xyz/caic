@@ -17,6 +17,13 @@
   font-weight: 600;
 }
 
+.recoveryIntro {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
 .forkRow {
   display: flex;
   flex-wrap: wrap;
@@ -66,6 +73,12 @@
   color: var(--color-danger);
   font-size: 0.85rem;
   margin: 0;
+}
+
+.targetStatus {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  margin: -0.5rem 0 0;
 }
 
 .forkActions {

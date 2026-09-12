@@ -360,6 +360,29 @@ public struct ProviderAuthKind: Codable, Equatable, Hashable {
     }
 }
 
+public struct ProviderFetchStatus: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Error = ProviderFetchStatus("error")
+    public static let Fresh = ProviderFetchStatus("fresh")
+    public static let Stale = ProviderFetchStatus("stale")
+    public static let Unknown = ProviderFetchStatus("unknown")
+
+    public static func other(_ value: String) -> ProviderFetchStatus { ProviderFetchStatus(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct QuotaProvider: Codable, Equatable, Hashable {
     public let value: String
 
@@ -660,6 +683,8 @@ public struct HarnessInfo: Codable {
     public let models: [Model]
     public let supportsImages: Bool
     public let supportsCompact: Bool
+    /// Shared quota source; empty when harness usage cannot be inferred.
+    public let quotaGroup: QuotaProvider?
 }
 
 /// WellKnownCache describes a single well-known cache.
@@ -788,6 +813,7 @@ public struct RuntimeInstance: Codable {
 /// TaskRateLimit is the current quota block resolved by the backend for one task.
 public struct TaskRateLimit: Codable {
     public let blocked: Bool
+    public let quotaGroup: QuotaProvider?
     public let window: String?
     public let resetsAt: ISOTimestamp?
 }
@@ -1492,6 +1518,7 @@ public struct ProviderQuota: Codable {
     public let authKind: ProviderAuthKind
     /// link to provider's usage/billing page
     public let usageUrl: String
+    public let fetchStatus: ProviderFetchStatus
     public let rateLimits: [QuotaRateLimit]?
     public let balance: QuotaBalance?
     public let extraUsage: QuotaExtraUsage?

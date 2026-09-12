@@ -30,6 +30,7 @@ function makeProvider(overrides: Partial<ProviderQuota> = {}): ProviderQuota {
     logoUrl: "",
     authKind: "apikey",
     usageUrl: "",
+    fetchStatus: "fresh",
     ...overrides,
   };
 }

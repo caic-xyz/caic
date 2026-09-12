@@ -54,6 +54,7 @@ function deferred<T>() {
 type MessageListener = (e: { data: string }) => void;
 type OpenListener = () => void;
 const fakeESListeners: MessageListener[] = [];
+const fakeUsageESListeners: MessageListener[] = [];
 const fakeESOpenListeners: OpenListener[] = [];
 
 class FakeEventSource {
@@ -94,7 +95,11 @@ vi.mock("./api", () => ({
     es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
     return es;
   }),
-  globalUsageEvents: vi.fn(() => new FakeEventSource()),
+  globalUsageEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
+    const es = new FakeEventSource();
+    fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
+    return es;
+  }),
   // Used by TaskDetail once a created task navigates into its detail route.
   taskEventStream: vi.fn(() => new FakeEventSource()),
   sendInput: vi.fn(),
@@ -136,6 +141,11 @@ function dispatchSSE(data: unknown) {
   fakeESListeners.forEach((fn) => fn(payload));
 }
 
+function dispatchUsageSSE(data: unknown) {
+  const payload = { data: JSON.stringify(data) };
+  fakeUsageESListeners.forEach((fn) => fn(payload));
+}
+
 function dispatchOpen() {
   fakeESOpenListeners.forEach((fn) => fn());
 }
@@ -171,6 +181,7 @@ function chipPathValues(): string[] {
 beforeEach(() => {
   vi.clearAllMocks();
   fakeESListeners.length = 0;
+  fakeUsageESListeners.length = 0;
   fakeESOpenListeners.length = 0;
   window.history.replaceState(null, "", "/");
   delete window.goModeHost;
@@ -1482,6 +1493,226 @@ describe("App repo chips: No repository", () => {
     await user.clear(screen.getByTestId("fork-prompt-input"));
     await user.type(screen.getByTestId("fork-prompt-input"), "Edited handoff prompt");
     expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Edited handoff prompt");
+  });
+
+  it("keeps ordinary fork harness selection unrestricted and unranked", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      { name: "claude", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "claudecode" },
+      { name: "codex", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "codex" },
+      { name: "pi", models: [], supportsImages: false, supportsCompact: false },
+    ] as unknown as HarnessInfo[]);
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
+
+    const harnessSelect = screen.getByRole("combobox", { name: "Fork Harness" });
+    expect(within(harnessSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "claude",
+      "codex",
+      "pi",
+    ]);
+    expect(screen.queryByTestId("fork-target-status")).not.toBeInTheDocument();
+  });
+
+  it("opens an editable handoff from the quota recovery action", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      { name: "claude", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "claudecode" },
+      { name: "codex", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "codex" },
+      { name: "pi", models: [], supportsImages: false, supportsCompact: false },
+    ] as unknown as HarnessInfo[]);
+    vi.mocked(api.getUsage).mockResolvedValue({
+      local: { windows: [] },
+      providers: [{
+        provider: "codex",
+        label: "Codex",
+        logoUrl: "",
+        authKind: "oauth",
+        usageUrl: "",
+        fetchStatus: "fresh",
+        rateLimits: [{ window: "primary", usedPct: 25 }],
+      }],
+    });
+    vi.mocked(api.getTaskHandoff).mockResolvedValue({ prompt: "Quota-aware generated handoff" });
+    vi.mocked(api.forkTask).mockResolvedValue(makeTask({
+      id: "forked-task",
+      harness: "codex",
+      repos: [{ name: "repos/a", branch: "forked-branch" }],
+    }));
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({
+        state: "waiting",
+        repos: [{ name: "repos/a", branch: "fork-source" }],
+        rateLimit: {
+          blocked: true,
+          quotaGroup: "claudecode",
+          window: "5h",
+          resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+        },
+      })],
+    });
+
+    await user.click(await screen.findByTestId("quota-recovery-detail-action"));
+
+    expect(screen.getByRole("heading", { name: "Continue after quota limit" })).toBeInTheDocument();
+    expect(api.getTaskHandoff).toHaveBeenCalledWith("task1");
+    await waitFor(() => expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Quota-aware generated handoff"));
+    await user.clear(screen.getByTestId("fork-prompt-input"));
+    await user.type(screen.getByTestId("fork-prompt-input"), "Edited quota recovery handoff");
+    const harnessSelect = screen.getByRole("combobox", { name: "Fork Harness" });
+    expect(within(harnessSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "codex — Available · Recommended",
+      "pi — Quota status unknown",
+      "claude — Same exhausted quota",
+    ]);
+    expect(harnessSelect).toHaveValue("codex");
+    fireEvent.change(harnessSelect, { target: { value: "pi" } });
+    expect(screen.getByTestId("fork-target-status")).toHaveTextContent("Selected harness: Quota status unknown");
+    fireEvent.change(harnessSelect, { target: { value: "codex" } });
+    await user.click(screen.getByTestId("fork-submit"));
+
+    expect(api.forkTask).toHaveBeenCalledWith("task1", expect.objectContaining({
+      prompt: { text: "Edited quota recovery handoff" },
+      harness: "codex",
+    }));
+  });
+
+  it("adopts a delayed recommendation without overwriting explicit target choices", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      {
+        name: "claude",
+        models: [
+          { id: "claude-default", effortOptions: ["low", "high"] },
+          { id: "claude-explicit", effortOptions: ["low", "high"] },
+        ],
+        supportsImages: false,
+        supportsCompact: false,
+        quotaGroup: "claudecode",
+      },
+      {
+        name: "codex",
+        models: [{ id: "codex-default", effortOptions: ["low", "high"] }],
+        supportsImages: false,
+        supportsCompact: false,
+        quotaGroup: "codex",
+      },
+      { name: "pi", models: [], supportsImages: false, supportsCompact: false },
+    ] as unknown as HarnessInfo[]);
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({
+        state: "waiting",
+        repos: [{ name: "repos/a", branch: "fork-source" }],
+        rateLimit: {
+          blocked: true,
+          quotaGroup: "claudecode",
+          window: "5h",
+          resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+        },
+      })],
+    });
+
+    await user.click(await screen.findByTestId("quota-recovery-detail-action"));
+    const harnessSelect = screen.getByRole("combobox", { name: "Fork Harness" });
+    expect(harnessSelect).toHaveValue("claude");
+
+    const codexUsage = (fetchStatus: "fresh" | "stale") => ({
+      local: { windows: [] },
+      providers: [{
+        provider: "codex",
+        label: "Codex",
+        logoUrl: "",
+        authKind: "oauth",
+        usageUrl: "",
+        fetchStatus,
+        rateLimits: [{ window: "primary", usedPct: 25 }],
+      }],
+    });
+    dispatchUsageSSE(codexUsage("fresh"));
+    await waitFor(() => expect(harnessSelect).toHaveValue("codex"));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    dispatchUsageSSE(codexUsage("stale"));
+    await user.click(screen.getByTestId("quota-recovery-detail-action"));
+    const reopenedSelect = screen.getByRole("combobox", { name: "Fork Harness" });
+    expect(reopenedSelect).toHaveValue("claude");
+    fireEvent.change(reopenedSelect, { target: { value: "pi" } });
+    dispatchUsageSSE(codexUsage("fresh"));
+    await Promise.resolve();
+    expect(reopenedSelect).toHaveValue("pi");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    dispatchUsageSSE(codexUsage("stale"));
+    await user.click(screen.getByTestId("quota-recovery-detail-action"));
+    await user.click(screen.getByRole("button", { name: "Fork Model" }));
+    await user.click(within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole("option", { name: "claude-explicit" }));
+    dispatchUsageSSE(codexUsage("fresh"));
+    await Promise.resolve();
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
+    expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("claude-explicit");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    dispatchUsageSSE(codexUsage("stale"));
+    await user.click(screen.getByTestId("quota-recovery-detail-action"));
+    fireEvent.change(screen.getByRole("combobox", { name: "Fork Effort" }), { target: { value: "high" } });
+    dispatchUsageSSE(codexUsage("fresh"));
+    await Promise.resolve();
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
+    expect(screen.getByRole("combobox", { name: "Fork Effort" })).toHaveValue("high");
+  });
+
+  it("does not apply a closed recovery handoff to a later ordinary fork of the same task", async () => {
+    const user = userEvent.setup();
+    const staleHandoff = deferred<Awaited<ReturnType<typeof api.getTaskHandoff>>>();
+    vi.mocked(api.getTaskHandoff).mockReturnValueOnce(staleHandoff.promise);
+    vi.mocked(api.forkTask).mockResolvedValue(makeTask({
+      id: "ordinary-fork",
+      repos: [{ name: "repos/a", branch: "ordinary-fork" }],
+    }));
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({
+        state: "waiting",
+        repos: [{ name: "repos/a", branch: "fork-source" }],
+        rateLimit: {
+          blocked: true,
+          window: "5h",
+          resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+        },
+      })],
+    });
+
+    await user.click(await screen.findByTestId("quota-recovery-detail-action"));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Context actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork" }));
+
+    staleHandoff.resolve({ prompt: "Stale quota recovery handoff" });
+    await staleHandoff.promise;
+    await Promise.resolve();
+
+    expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("");
+    await user.type(screen.getByTestId("fork-prompt-input"), "Ordinary fork prompt");
+    await user.click(screen.getByTestId("fork-submit"));
+
+    expect(api.forkTask).toHaveBeenCalledWith("task1", expect.objectContaining({
+      prompt: { text: "Ordinary fork prompt" },
+    }));
   });
 
   it("does not dismiss the fork dialog when it is clicked", async () => {

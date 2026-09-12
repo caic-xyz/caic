@@ -17,11 +17,12 @@ import (
 // configure metadata; to drive a real session, embed it and override Start or
 // AttachRelay.
 type FakeBackend struct {
-	HarnessName  harness.Name
-	Inventory    agent.ModelInventory
-	Images       bool
-	Compact      bool
-	ContextLimit int
+	HarnessName     harness.Name
+	QuotaProviderID agent.QuotaProvider
+	Inventory       agent.ModelInventory
+	Images          bool
+	Compact         bool
+	ContextLimit    int
 	// WireFactory, when set, backs NewWire. Set it (e.g. to a harness's real
 	// parser) for tests that replay stored wire output; the default is a no-op
 	// wire, since agenttest cannot import a specific harness without a cycle.
@@ -38,6 +39,9 @@ func (f *FakeBackend) Harness() harness.Name {
 	}
 	return f.HarnessName
 }
+
+// QuotaProvider implements agent.Backend.
+func (f *FakeBackend) QuotaProvider() agent.QuotaProvider { return f.QuotaProviderID }
 
 // Start implements agent.Backend.
 func (f *FakeBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {

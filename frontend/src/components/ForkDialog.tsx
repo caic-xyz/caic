@@ -22,9 +22,14 @@ export default function ForkDialog() {
       <ModalDialog
         class={styles.forkDialog}
         data-testid="fork-dialog"
-        onClose={() => s.setForkTaskId(null)}
+        onClose={s.closeFork}
       >
-        <h2 class={styles.forkTitle}>Fork task</h2>
+        <h2 class={styles.forkTitle}>{s.forkQuotaRecovery() ? "Continue after quota limit" : "Fork task"}</h2>
+        <Show when={s.forkQuotaRecovery()}>
+          <p class={styles.recoveryIntro}>
+            Start a new agent from the source task's current workspace. Choose a harness and review the handoff before continuing.
+          </p>
+        </Show>
         <AutoResizeTextarea
           value={s.forkPrompt()}
           onInput={s.setForkPrompt}
@@ -45,7 +50,11 @@ export default function ForkDialog() {
           >
             {s.forkPrompt().trim() ? "Replace with handoff" : "Generate handoff"}
           </Button>
-          <span class={styles.handoffHint}>Creates an editable summary for the new agent.</span>
+          <span class={styles.handoffHint}>
+            {s.forkQuotaRecovery()
+              ? "The quota-aware handoff stays editable."
+              : "Creates an editable summary for the new agent."}
+          </span>
         </div>
         <Show when={s.forkHandoffError()}>
           <p class={styles.handoffError} role="alert">{s.forkHandoffError()}</p>
@@ -65,15 +74,21 @@ export default function ForkDialog() {
         <div class={styles.forkRow}>
           <HarnessControls
             labelPrefix="Fork "
-            harnesses={s.harnesses()}
+            harnesses={s.forkHarnesses()}
             harness={s.forkHarness()}
             model={s.forkModel()}
             effort={s.forkEffort()}
             onHarness={s.setForkHarness}
             onModel={s.setForkModel}
             onEffort={s.setForkEffort}
+            harnessOptionLabel={s.forkHarnessLabel}
           />
         </div>
+        <Show when={s.forkQuotaRecovery()}>
+          <p class={styles.targetStatus} data-testid="fork-target-status">
+            Selected harness: {s.forkSelectedTargetLabel()}. Confirm to create the recovery fork.
+          </p>
+        </Show>
         <div class={styles.forkRow}>
           <Show when={s.tailscaleAvailable()}>
             <ToggleChip checked={s.forkTailscale()} title="Enable Tailscale networking" onChange={s.setForkTailscale}>
@@ -102,8 +117,10 @@ export default function ForkDialog() {
           </Show>
         </div>
         <div class={styles.forkActions}>
-          <button type="button" class={styles.forkCancel} onClick={() => s.setForkTaskId(null)}>Cancel</button>
-          <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()} data-testid="fork-submit">Fork</Button>
+          <button type="button" class={styles.forkCancel} onClick={s.closeFork}>Cancel</button>
+          <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()} data-testid="fork-submit">
+            {s.forkQuotaRecovery() ? "Continue in new agent" : "Fork"}
+          </Button>
         </div>
       </ModalDialog>
     </Show>

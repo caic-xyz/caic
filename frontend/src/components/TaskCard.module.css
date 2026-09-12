@@ -185,6 +185,27 @@ a.featureIconBadge:focus-visible {
   font-weight: 600;
 }
 
+.quotaRecovery {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-link);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quotaRecovery:hover {
+  text-decoration: underline;
+}
+
+.quotaRecovery:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .branchMeta {
   font-size: 0.75rem;
   color: var(--color-text-meta);

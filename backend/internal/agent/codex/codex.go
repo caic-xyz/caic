@@ -42,10 +42,11 @@ var (
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{}
 	b.Base = agent.Base{
-		HarnessID:     harness.Codex,
-		Images:        true,
-		Compact:       true,
-		ContextWindow: 200_000,
+		HarnessID:       harness.Codex,
+		QuotaProviderID: agent.QuotaProviderCodex,
+		Images:          true,
+		Compact:         true,
+		ContextWindow:   200_000,
 	}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Codex, envVars))
 	return b

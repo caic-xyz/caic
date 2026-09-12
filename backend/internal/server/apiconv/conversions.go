@@ -3,7 +3,9 @@
 package apiconv
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -173,24 +175,28 @@ func SafetyIssues(issues []repo.SafetyIssue) []v1.SafetyIssue {
 	return out
 }
 
-// ProviderQuota converts a provider quota snapshot to an API DTO.
-func ProviderQuota(q *usage.ProviderQuota) (v1.ProviderQuota, error) {
+// ProviderQuota converts a provider quota snapshot to an API DTO at now.
+func ProviderQuota(q *usage.ProviderQuota, now time.Time) (v1.ProviderQuota, error) {
 	if q == nil {
 		return v1.ProviderQuota{}, nil
 	}
-	provider, err := quotaProvider(q.Provider)
+	provider, err := QuotaProvider(q.Provider)
 	if err != nil {
 		return v1.ProviderQuota{}, err
+	}
+	if provider == "" {
+		return v1.ProviderQuota{}, errors.New("quota provider is required")
 	}
 	authKind, err := providerAuthKind(q.AuthKind)
 	if err != nil {
 		return v1.ProviderQuota{}, err
 	}
 	out := v1.ProviderQuota{
-		Provider:   provider,
-		Label:      q.Label,
-		AuthKind:   authKind,
-		RateLimits: make([]v1.QuotaRateLimit, len(q.RateLimits)),
+		Provider:    provider,
+		Label:       q.Label,
+		AuthKind:    authKind,
+		FetchStatus: providerFetchStatus(q, now),
+		RateLimits:  make([]v1.QuotaRateLimit, len(q.RateLimits)),
 		Balance: v1.QuotaBalance{
 			Currency: q.Balance.Currency,
 			Total:    q.Balance.Total,
@@ -213,6 +219,19 @@ func ProviderQuota(q *usage.ProviderQuota) (v1.ProviderQuota, error) {
 		}
 	}
 	return out, nil
+}
+
+func providerFetchStatus(q *usage.ProviderQuota, now time.Time) v1.ProviderFetchStatus {
+	if q.FetchError {
+		return v1.ProviderFetchStatusError
+	}
+	if q.FetchedAt.IsZero() {
+		return v1.ProviderFetchStatusUnknown
+	}
+	if !q.FetchedAt.Add(usage.CacheTTL).After(now) {
+		return v1.ProviderFetchStatusStale
+	}
+	return v1.ProviderFetchStatusFresh
 }
 
 // ForgeCheck converts a forge check run to an API DTO.
@@ -251,8 +270,11 @@ func DiffStat(ds agent.DiffStat) v1.DiffStat {
 	return out
 }
 
-func quotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
+// QuotaProvider converts a canonical agent quota provider to its API value.
+func QuotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 	switch p {
+	case "":
+		return "", nil
 	case agent.QuotaProviderAnthropic:
 		return v1.QuotaProviderAnthropic, nil
 	case agent.QuotaProviderClaudeCode:

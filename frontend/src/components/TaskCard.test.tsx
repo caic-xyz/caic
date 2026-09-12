@@ -76,6 +76,47 @@ describe("TaskCard", () => {
     expect(getByTestId("quota-countdown")).toHaveTextContent("out of quota · resets in 42m");
   });
 
+  it("opens quota recovery without selecting the task card", () => {
+    const onClick = vi.fn();
+    const onQuotaRecovery = vi.fn();
+    render(() => (
+      <TaskCard
+        {...props({
+          rateLimit: {
+            blocked: true,
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+          onClick,
+          onQuotaRecovery,
+        })}
+      />
+    ));
+
+    fireEvent.click(screen.getByTestId("quota-recovery-card"));
+
+    expect(onQuotaRecovery).toHaveBeenCalledOnce();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("hides quota recovery when the task has no repository", () => {
+    render(() => (
+      <TaskCard
+        {...props({
+          repos: undefined,
+          rateLimit: {
+            blocked: true,
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+          onQuotaRecovery: vi.fn(),
+        })}
+      />
+    ));
+
+    expect(screen.queryByTestId("quota-recovery-card")).not.toBeInTheDocument();
+  });
+
   it("renders errors as a clamped summary", () => {
     const error = "Error: failed to load extension from a very long runtime path";
     const { getByText } = render(() => <TaskCard {...props({ error })} />);

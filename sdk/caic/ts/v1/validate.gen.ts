@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -480,6 +480,7 @@ export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
   const obj = asObject(raw, "TaskRateLimit");
   return {
     blocked: asBoolean(obj["blocked"], "TaskRateLimit.blocked"),
+    quotaGroup: (obj["quotaGroup"] === undefined || obj["quotaGroup"] === null ? undefined : (asString(obj["quotaGroup"], "TaskRateLimit.quotaGroup") as QuotaProvider)),
     window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "TaskRateLimit.window")),
     resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "TaskRateLimit.resetsAt") as ISOTimestamp),
   };
@@ -636,6 +637,7 @@ export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
     logoUrl: asString(obj["logoUrl"], "ProviderQuota.logoUrl"),
     authKind: (asString(obj["authKind"], "ProviderQuota.authKind") as ProviderAuthKind),
     usageUrl: asString(obj["usageUrl"], "ProviderQuota.usageUrl"),
+    fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
     rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
     balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
     extraUsage: (obj["extraUsage"] === undefined || obj["extraUsage"] === null ? undefined : validateQuotaExtraUsage(obj["extraUsage"])),

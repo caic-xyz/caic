@@ -365,8 +365,41 @@ func TestTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := gotTask.RateLimit
-		if !got.Blocked || got.Window != "5h" {
+		if !got.Blocked || got.QuotaGroup != v1.QuotaProviderClaudeCode || got.Window != "5h" {
 			t.Errorf("RateLimit = %#v, want active 5h block", got)
+		}
+	})
+	t.Run("AllowsEmptyQuotaProvider", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.SetState(taskslog.StatePending)
+		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
+			Status:      agent.RateLimitStatusRejected,
+			ResetsAt:    time.Now().Add(time.Hour),
+			QuotaWindow: "5h",
+		}})
+
+		got, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.RateLimit.Blocked || got.RateLimit.QuotaGroup != "" {
+			t.Errorf("RateLimit = %#v, want blocked with empty quota group", got.RateLimit)
+		}
+	})
+	t.Run("RejectsUnsupportedQuotaProvider", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.SetState(taskslog.StatePending)
+		tk.SeedTimeline([]agent.Message{&agent.RateLimitMessage{
+			Status:        agent.RateLimitStatusRejected,
+			ResetsAt:      time.Now().Add(time.Hour),
+			QuotaProvider: agent.QuotaProvider("other"),
+			QuotaWindow:   "5h",
+		}})
+
+		if _, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()}); err == nil {
+			t.Fatal("Task() error = nil, want unsupported quota provider error")
 		}
 	})
 	t.Run("IncludesForkAndDelegationOrigins", func(t *testing.T) {
@@ -437,11 +470,13 @@ func TestProcessInfos(t *testing.T) {
 func TestProviderQuota(t *testing.T) {
 	t.Parallel()
 
+	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
 	resetsAt := time.Date(2026, time.June, 1, 10, 30, 0, 0, time.UTC)
 	got, err := ProviderQuota(&usage.ProviderQuota{
-		Provider: agent.QuotaProviderAnthropic,
-		Label:    "Anthropic",
-		AuthKind: usage.AuthKindOAuth,
+		Provider:  agent.QuotaProviderAnthropic,
+		Label:     "Anthropic",
+		AuthKind:  usage.AuthKindOAuth,
+		FetchedAt: now,
 		RateLimits: []usage.QuotaRateLimit{
 			{Window: "5h", UsedPct: 42.5, ResetsAt: resetsAt},
 		},
@@ -458,14 +493,15 @@ func TestProviderQuota(t *testing.T) {
 			MonthlyLimit: 25,
 			UsedPct:      14,
 		},
-	})
+	}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := v1.ProviderQuota{
-		Provider: v1.QuotaProviderAnthropic,
-		Label:    "Anthropic",
-		AuthKind: v1.ProviderAuthKindOAuth,
+		Provider:    v1.QuotaProviderAnthropic,
+		Label:       "Anthropic",
+		AuthKind:    v1.ProviderAuthKindOAuth,
+		FetchStatus: v1.ProviderFetchStatusFresh,
 		RateLimits: []v1.QuotaRateLimit{
 			{Window: "5h", UsedPct: 42.5, ResetsAt: resetsAt},
 		},
@@ -486,7 +522,52 @@ func TestProviderQuota(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ProviderQuota() = %#v, want %#v", got, want)
 	}
-	if _, err := ProviderQuota(&usage.ProviderQuota{Provider: agent.QuotaProvider("other"), AuthKind: usage.AuthKindOAuth}); err == nil {
+	if _, err := ProviderQuota(&usage.ProviderQuota{Provider: agent.QuotaProvider("other"), AuthKind: usage.AuthKindOAuth}, now); err == nil {
 		t.Error("ProviderQuota(other provider) error = nil, want error")
+	}
+
+	for _, test := range []struct {
+		name  string
+		quota usage.ProviderQuota
+		want  v1.ProviderFetchStatus
+	}{
+		{name: "unknown", quota: usage.ProviderQuota{}, want: v1.ProviderFetchStatusUnknown},
+		{name: "stale", quota: usage.ProviderQuota{FetchedAt: now.Add(-usage.CacheTTL)}, want: v1.ProviderFetchStatusStale},
+		{name: "failed", quota: usage.ProviderQuota{FetchedAt: now, FetchError: true}, want: v1.ProviderFetchStatusError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := providerFetchStatus(&test.quota, now)
+			if got != test.want {
+				t.Errorf("providerFetchStatus() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestQuotaProvider(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		in   agent.QuotaProvider
+		want v1.QuotaProvider
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "known", in: agent.QuotaProviderClaudeCode, want: v1.QuotaProviderClaudeCode},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := QuotaProvider(test.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Errorf("QuotaProvider(%q) = %q, want %q", test.in, got, test.want)
+			}
+		})
+	}
+	if _, err := QuotaProvider(agent.QuotaProvider("other")); err == nil {
+		t.Error("QuotaProvider(other) error = nil, want error")
 	}
 }

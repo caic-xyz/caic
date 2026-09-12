@@ -22,6 +22,25 @@ import (
 
 const isFakeMode = true
 
+const visualFixturesEnv = "CAIC_E2E_VISUALS"
+
+func fakeAgentBackends(visualFixtures bool) map[harness.Name]agent.Backend {
+	claude := smoketest.NewFakeBackend()
+	backends := map[harness.Name]agent.Backend{harness.Claude: claude}
+	if visualFixtures {
+		return backends
+	}
+	codex := smoketest.NewFakeBackend()
+	codex.HarnessID = harness.Codex
+	codex.QuotaProviderID = agent.QuotaProviderCodex
+	pi := smoketest.NewFakeBackend()
+	pi.HarnessID = harness.Pi
+	pi.QuotaProviderID = ""
+	backends[harness.Codex] = codex
+	backends[harness.Pi] = pi
+	return backends
+}
+
 // serveFake starts the HTTP server with fake container/agent ops and a temp
 // git repo. Used for e2e testing without md CLI or SSH.
 func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.Config, traceFile string) (retErr error) {
@@ -73,8 +92,8 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 
 	fc := smoketest.NewRuntimeBackend(fvnc.Port())
 	cfg.Runtime.System = fc
-	fb := smoketest.NewFakeBackend()
-	cfg.Agent.Backends = map[harness.Name]agent.Backend{fb.Harness(): fb}
+	visualFixtures := os.Getenv(visualFixturesEnv) == "1"
+	cfg.Agent.Backends = fakeAgentBackends(visualFixtures)
 
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.
@@ -104,7 +123,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	}
 	cfg.Runtime.SkipWarmup = true
 	cfg.FakeCI = smoketest.SimulateCI
-	cfg.UsageFetchers = smoketest.UsageFetchers()
+	cfg.UsageFetchers = smoketest.UsageFetchers(visualFixtures)
 
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)

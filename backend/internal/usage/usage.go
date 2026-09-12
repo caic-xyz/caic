@@ -76,9 +76,11 @@ type QuotaExtraUsage struct {
 
 // ProviderQuota is quota data for one provider.
 type ProviderQuota struct {
-	Provider agent.QuotaProvider
-	Label    string
-	AuthKind AuthKind
+	Provider   agent.QuotaProvider
+	Label      string
+	AuthKind   AuthKind
+	FetchedAt  time.Time
+	FetchError bool
 
 	RateLimits []QuotaRateLimit
 	Balance    QuotaBalance
@@ -286,7 +288,7 @@ func (b *baseFetcher) getIf(ctx context.Context, ok func() bool, fetch func(cont
 		return b.cached
 	}
 	if b.backoff > 0 && time.Since(b.errorAt) < b.backoff {
-		return b.cached
+		return quotaWithFetchError(b.cached)
 	}
 	resp, err := fetch(ctx)
 	if err != nil {
@@ -300,10 +302,21 @@ func (b *baseFetcher) getIf(ctx context.Context, ok func() bool, fetch func(cont
 				b.backoff = backoffMax
 			}
 		}
-		return b.cached
+		return quotaWithFetchError(b.cached)
 	}
 	b.backoff = 0
+	resp.FetchedAt = time.Now()
+	resp.FetchError = false
 	b.cached = resp
-	b.fetchAt = time.Now()
+	b.fetchAt = resp.FetchedAt
 	return resp
+}
+
+func quotaWithFetchError(q *ProviderQuota) *ProviderQuota {
+	if q == nil {
+		return nil
+	}
+	cloned := *q
+	cloned.FetchError = true
+	return &cloned
 }

@@ -33,6 +33,10 @@ type Backend interface {
 	// Harness returns the harness identifier ("claude", "codex", etc.)
 	Harness() harness.Name
 
+	// QuotaProvider returns the shared quota source used by this backend. An
+	// empty value means provider usage cannot be inferred for the harness.
+	QuotaProvider() QuotaProvider
+
 	// ModelInventory returns the models and per-model configuration supported
 	// by this backend.
 	ModelInventory() ModelInventory
@@ -142,10 +146,11 @@ type RecordHandshaker interface {
 // as immutable once set, so the mutex only needs to guard a pointer swap, not
 // the read.
 type Base struct {
-	HarnessID     harness.Name
-	Images        bool
-	ContextWindow int
-	Compact       bool
+	HarnessID       harness.Name
+	QuotaProviderID QuotaProvider
+	Images          bool
+	ContextWindow   int
+	Compact         bool
 
 	mu        sync.Mutex
 	inventory *ModelInventory
@@ -153,6 +158,9 @@ type Base struct {
 
 // Harness implements Backend.
 func (b *Base) Harness() harness.Name { return b.HarnessID }
+
+// QuotaProvider implements Backend.
+func (b *Base) QuotaProvider() QuotaProvider { return b.QuotaProviderID }
 
 // ModelInventory implements Backend.
 func (b *Base) ModelInventory() ModelInventory {

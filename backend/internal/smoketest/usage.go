@@ -31,17 +31,36 @@ func (f *fakeFetcher) AuthKind() usage.AuthKind { return f.authKind }
 func (f *fakeFetcher) UsageURL() string { return "https://example.com" }
 
 // Get implements usage.ProviderFetcher.
-func (f *fakeFetcher) Get(_ context.Context) *usage.ProviderQuota { return &f.resp }
+func (f *fakeFetcher) Get(_ context.Context) *usage.ProviderQuota {
+	resp := f.resp
+	resp.FetchedAt = time.Now()
+	return &resp
+}
 
-// UsageFetchers returns canned Anthropic and Codex usage for smoke and e2e tests.
-func UsageFetchers() []usage.ProviderFetcher {
+// UsageFetchers returns canned provider usage for smoke and e2e tests. Visual
+// fixtures preserve the legacy provider set used by tracked screenshots.
+func UsageFetchers(visualFixtures bool) []usage.ProviderFetcher {
 	now := time.Now().UTC()
 	fiveHourReset := now.Add(2 * time.Hour)
 	sevenDayReset := now.Add(3 * 24 * time.Hour)
 	primaryReset := now.Add(1 * time.Hour)
 	secondaryReset := now.Add(30 * time.Minute)
 
-	return []usage.ProviderFetcher{
+	claudeCode := &fakeFetcher{
+		provider: agent.QuotaProviderClaudeCode,
+		label:    "Claude Code",
+		authKind: usage.AuthKindOAuth,
+		resp: usage.ProviderQuota{
+			Provider: agent.QuotaProviderClaudeCode,
+			Label:    "Claude Code",
+			AuthKind: usage.AuthKindOAuth,
+			RateLimits: []usage.QuotaRateLimit{
+				{Window: "5h", UsedPct: 31, ResetsAt: fiveHourReset},
+				{Window: "7d", UsedPct: 9, ResetsAt: sevenDayReset},
+			},
+		},
+	}
+	providers := []usage.ProviderFetcher{
 		&fakeFetcher{
 			provider: agent.QuotaProviderAnthropic,
 			label:    "Anthropic",
@@ -82,4 +101,8 @@ func UsageFetchers() []usage.ProviderFetcher {
 			},
 		},
 	}
+	if visualFixtures {
+		return providers
+	}
+	return append([]usage.ProviderFetcher{claudeCode}, providers...)
 }

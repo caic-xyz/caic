@@ -46,19 +46,25 @@ func TestServerHandlers(t *testing.T) {
 		t.Parallel()
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{
+			harness.Claude: &agenttest.FakeBackend{QuotaProviderID: agent.QuotaProviderClaudeCode},
 			harness.Codex: &agenttest.FakeBackend{
-				Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"low", "ultra"}}}},
+				QuotaProviderID: agent.QuotaProviderCodex,
+				Inventory:       agent.ModelInventory{Models: []agent.Model{{ID: "gpt-5", EffortOptions: []string{"low", "ultra"}}}},
 			},
+			harness.Pi: &agenttest.FakeBackend{},
 		})
 
 		got, err := s.serverHandlers.listHarnesses(t.Context(), &api.EmptyReq{})
 		if err != nil {
 			t.Fatalf("listHarnesses: %v", err)
 		}
-		if len(*got) != 1 {
-			t.Fatalf("len(harnesses) = %d, want 1", len(*got))
+		if len(*got) != 3 {
+			t.Fatalf("len(harnesses) = %d, want 3", len(*got))
 		}
-		models := (*got)[0].Models
+		if (*got)[0].QuotaGroup != v1.QuotaProviderClaudeCode || (*got)[1].QuotaGroup != v1.QuotaProviderCodex || (*got)[2].QuotaGroup != "" {
+			t.Fatalf("quota groups = [%q %q %q], want [claudecode codex empty]", (*got)[0].QuotaGroup, (*got)[1].QuotaGroup, (*got)[2].QuotaGroup)
+		}
+		models := (*got)[1].Models
 		if len(models) != 1 || models[0].ID != "gpt-5" || len(models[0].EffortOptions) != 2 {
 			t.Fatalf("models = %#v, want gpt-5 with [low ultra]", models)
 		}
@@ -74,6 +80,17 @@ func TestServerHandlers(t *testing.T) {
 		}
 		if strings.Contains(string(data), `"modelCapabilities":`) || strings.Contains(string(data), `"modes":`) {
 			t.Fatalf("harnesses JSON = %s, want models as the only model configuration", data)
+		}
+	})
+
+	t.Run("list_harnesses_rejects_unsupported_quota_provider", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, map[harness.Name]agent.Backend{
+			harness.Claude: &agenttest.FakeBackend{QuotaProviderID: agent.QuotaProvider("other")},
+		})
+		if _, err := s.serverHandlers.listHarnesses(t.Context(), &api.EmptyReq{}); err == nil {
+			t.Fatal("listHarnesses() error = nil, want unsupported quota provider error")
 		}
 	})
 

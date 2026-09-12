@@ -334,6 +334,10 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 		if err != nil {
 			return nil, fmt.Errorf("convert available harness %q: %w", h, err)
 		}
+		quotaGroup, err := apiconv.QuotaProvider(b.QuotaProvider())
+		if err != nil {
+			return nil, fmt.Errorf("convert %s quota provider: %w", h, err)
+		}
 		inventory := b.ModelInventory()
 		models := make([]v1.Model, 0, len(inventory.Models))
 		for _, model := range inventory.Models {
@@ -347,6 +351,7 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 			Models:          models,
 			SupportsImages:  b.SupportsImages(),
 			SupportsCompact: b.SupportsCompact(),
+			QuotaGroup:      quotaGroup,
 		})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {

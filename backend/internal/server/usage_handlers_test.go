@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -101,6 +102,35 @@ func TestUsageHandlersHandleEvents(t *testing.T) {
 			t.Fatalf("usage stream = %q, want rejected quota update", writer.Body.String())
 		}
 	})
+}
+
+func TestUsageHandlersBuildResp(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	s := newTestRouter(t, nil)
+	s.usageHandlers.fetchers = []usage.ProviderFetcher{
+		&staticUsageFetcher{quota: usage.ProviderQuota{
+			Provider: agent.QuotaProviderAnthropic, Label: "Anthropic", AuthKind: usage.AuthKindOAuth, FetchedAt: now,
+		}},
+		&staticUsageFetcher{quota: usage.ProviderQuota{
+			Provider: agent.QuotaProviderCodex, Label: "Codex", AuthKind: usage.AuthKindOAuth, FetchedAt: now.Add(-usage.CacheTTL),
+		}},
+		&staticUsageFetcher{quota: usage.ProviderQuota{
+			Provider: agent.QuotaProviderDeepSeek, Label: "DeepSeek", AuthKind: usage.AuthKindAPIKey, FetchedAt: now, FetchError: true,
+		}},
+	}
+
+	got := s.usageHandlers.buildResp(t.Context())
+	statuses := make(map[v1.QuotaProvider]v1.ProviderFetchStatus, len(got.Providers))
+	for _, provider := range got.Providers {
+		statuses[provider.Provider] = provider.FetchStatus
+	}
+	if statuses[v1.QuotaProviderAnthropic] != v1.ProviderFetchStatusFresh ||
+		statuses[v1.QuotaProviderCodex] != v1.ProviderFetchStatusStale ||
+		statuses[v1.QuotaProviderDeepSeek] != v1.ProviderFetchStatusError {
+		t.Fatalf("provider fetch statuses = %#v, want fresh/stale/error", statuses)
+	}
 }
 
 func BenchmarkUsageHandlersHandleEvents(b *testing.B) {

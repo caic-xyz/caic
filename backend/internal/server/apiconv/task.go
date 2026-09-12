@@ -102,14 +102,19 @@ func Task(in *TaskInput) (v1.Task, error) {
 	out.StartedAt = t.StartedAt
 	out.TurnStartedAt = snap.TurnStartedAt
 	if snap.RateLimit.Status == "rejected" && !snap.RateLimit.IsUsingOverage && snap.RateLimit.ResetsAt.After(time.Now()) {
+		quotaGroup, err := QuotaProvider(snap.RateLimit.QuotaProvider)
+		if err != nil {
+			return v1.Task{}, fmt.Errorf("convert task quota provider: %w", err)
+		}
 		window := snap.RateLimit.QuotaWindow
 		if window == "" {
 			window = snap.RateLimit.RateLimitType
 		}
 		out.RateLimit = v1.TaskRateLimit{
-			Blocked:  true,
-			Window:   window,
-			ResetsAt: snap.RateLimit.ResetsAt,
+			Blocked:    true,
+			QuotaGroup: quotaGroup,
+			Window:     window,
+			ResetsAt:   snap.RateLimit.ResetsAt,
 		}
 	}
 	out.CumulativeInputTokens = cumulativeUsage.InputTokens

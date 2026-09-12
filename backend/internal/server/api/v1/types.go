@@ -59,10 +59,11 @@ const (
 
 // HarnessInfo is the JSON representation of an available harness.
 type HarnessInfo struct {
-	Name            Harness `json:"name"`
-	Models          []Model `json:"models"`
-	SupportsImages  bool    `json:"supportsImages"`
-	SupportsCompact bool    `json:"supportsCompact"`
+	Name            Harness       `json:"name"`
+	Models          []Model       `json:"models"`
+	SupportsImages  bool          `json:"supportsImages"`
+	SupportsCompact bool          `json:"supportsCompact"`
+	QuotaGroup      QuotaProvider `json:"quotaGroup,omitempty"` // Shared quota source; empty when harness usage cannot be inferred.
 }
 
 // Model describes the configuration choices supported by a harness model.
@@ -323,9 +324,10 @@ type Task struct {
 
 // TaskRateLimit is the current quota block resolved by the backend for one task.
 type TaskRateLimit struct {
-	Blocked  bool      `json:"blocked"`
-	Window   string    `json:"window,omitempty"`
-	ResetsAt time.Time `json:"resetsAt,omitzero"`
+	Blocked    bool          `json:"blocked"`
+	QuotaGroup QuotaProvider `json:"quotaGroup,omitempty"`
+	Window     string        `json:"window,omitempty"`
+	ResetsAt   time.Time     `json:"resetsAt,omitzero"`
 }
 
 // TaskInfo is the detailed metadata response for a task.
@@ -713,16 +715,32 @@ type QuotaExtraUsage struct {
 
 // ProviderQuota is the quota data for one provider.
 type ProviderQuota struct {
-	Provider QuotaProvider    `json:"provider"`
-	Label    string           `json:"label"`   // human-readable: "Anthropic", "DeepSeek", …
-	LogoURL  string           `json:"logoUrl"` // absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
-	AuthKind ProviderAuthKind `json:"authKind"`
-	UsageURL string           `json:"usageUrl"` // link to provider's usage/billing page
+	Provider    QuotaProvider       `json:"provider"`
+	Label       string              `json:"label"`   // human-readable: "Anthropic", "DeepSeek", …
+	LogoURL     string              `json:"logoUrl"` // absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
+	AuthKind    ProviderAuthKind    `json:"authKind"`
+	UsageURL    string              `json:"usageUrl"` // link to provider's usage/billing page
+	FetchStatus ProviderFetchStatus `json:"fetchStatus"`
 
 	RateLimits []QuotaRateLimit `json:"rateLimits,omitzero"`
 	Balance    QuotaBalance     `json:"balance,omitzero"`
 	ExtraUsage QuotaExtraUsage  `json:"extraUsage,omitzero"`
 }
+
+// ProviderFetchStatus describes whether provider quota data is current enough
+// to support availability claims.
+type ProviderFetchStatus string
+
+const (
+	// ProviderFetchStatusError means the latest provider refresh failed.
+	ProviderFetchStatusError ProviderFetchStatus = "error"
+	// ProviderFetchStatusFresh means the snapshot is within the provider cache TTL.
+	ProviderFetchStatusFresh ProviderFetchStatus = "fresh"
+	// ProviderFetchStatusStale means the snapshot is older than the provider cache TTL.
+	ProviderFetchStatusStale ProviderFetchStatus = "stale"
+	// ProviderFetchStatusUnknown means the provider has no timestamped snapshot.
+	ProviderFetchStatusUnknown ProviderFetchStatus = "unknown"
+)
 
 // ProviderAuthKind identifies a provider authentication method.
 type ProviderAuthKind string
