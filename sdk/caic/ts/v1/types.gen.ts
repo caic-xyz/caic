@@ -1126,7 +1126,7 @@ export interface CreateTaskReq {
   display?: boolean;
   sudo?: boolean;
   gitHubToken?: boolean;
-  /** Enables task-scoped CAIC MCP; each tool remains server-authorized. */
+  /** Enables task-scoped CAIC MCP delegation. */
   caicMCPEnabled?: boolean;
 }
 

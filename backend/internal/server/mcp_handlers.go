@@ -15,7 +15,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
@@ -28,9 +27,7 @@ type mcpHandlers struct {
 	rateLimiter *rateLimiter
 
 	// Shared, injected reference (not owned).
-	hostState          *auth.HostState
-	taskMgr            *taskmgr.Manager
-	taskMCPTokenIssuer *auth.TaskMCPTokenIssuer
+	hostState *auth.HostState
 }
 
 // handleMCP is the MCP endpoint handler. Origin validation and rate limiting
@@ -46,51 +43,6 @@ func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.protocol.HandleMCP(w, r)
-}
-
-// withTaskMCPAuth accepts server-issued task credentials before normal browser
-// or OAuth authentication. All non-task requests use normalAuth unchanged.
-func (h *mcpHandlers) withTaskMCPAuth(normalAuth func(http.Handler) http.Handler, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token, ok := taskMCPBearerToken(r); ok {
-			principal, valid := h.taskMCPPrincipal(token)
-			if !valid {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(newMCPPrincipalContext(r.Context(), principal)))
-			return
-		}
-		normalAuth(next).ServeHTTP(w, r)
-	})
-}
-
-func taskMCPBearerToken(r *http.Request) (string, bool) {
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return token, ok && strings.HasPrefix(token, auth.TaskMCPTokenPrefix)
-}
-
-func (h *mcpHandlers) taskMCPPrincipal(token string) (*mcpPrincipal, bool) {
-	if h.taskMCPTokenIssuer == nil || h.taskMgr == nil {
-		return nil, false
-	}
-	taskID, ok := h.taskMCPTokenIssuer.Verify(token)
-	if !ok {
-		return nil, false
-	}
-	id, err := ksid.Parse(taskID)
-	if err != nil || id == 0 {
-		return nil, false
-	}
-	entry, ok := h.taskMgr.GetEntry(taskID)
-	if !ok {
-		return nil, false
-	}
-	t := entry.Task()
-	if !t.CaicMCPEnabled || !taskMCPStateActive(t.GetState()) {
-		return nil, false
-	}
-	return &mcpPrincipal{TaskID: id, Remote: true}, true
 }
 
 func taskMCPStateActive(state taskslog.State) bool {

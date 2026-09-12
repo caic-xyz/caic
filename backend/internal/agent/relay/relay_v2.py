@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V2-only persistent relay with canonical framing and Claude Code task-scoped MCP configuration.
+# V2-only persistent relay with canonical framing and task-local MCP bridging.
 #
 # Modes:
 #   serve-attach --dir <path> -- <cmd...>   Start relay daemon + attach as first client.
@@ -51,12 +51,15 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 RELAY_DIR = os.environ.get("CAIC_RELAY_DIR", "/tmp/caic-relay")
 SOCK_PATH = os.path.join(RELAY_DIR, "relay.sock")
 OUTPUT_PATH = os.path.join(RELAY_DIR, "output.jsonl")
 PID_PATH = os.path.join(RELAY_DIR, "pid")
 CLAUDE_CODE_CAIC_MCP_CONFIG_PATH = os.path.join(RELAY_DIR, "caic-mcp.json")
+CAIC_MCP_SOCK_PATH = os.path.join(RELAY_DIR, "caic-mcp.sock")
+PI_CAIC_MCP_EXTENSION_PATH = os.path.join(RELAY_DIR, "caic-mcp.ts")
 
 # Max size of a single read from subprocess stdout.
 BUF_SIZE = 65536
@@ -70,19 +73,14 @@ _DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
 _DEFAULT_SHUTDOWN_GRACE = 10
 
 
-def _write_claude_code_caic_mcp_config(env: dict[str, str]) -> None:
-    """Write Claude Code's task-scoped CAIC MCP configuration atomically."""
-    endpoint = env.get("CAIC_MCP_URL")
-    token = env.get("CAIC_MCP_TOKEN")
-    if not endpoint or not token:
-        raise ValueError("CAIC MCP configuration requires CAIC_MCP_URL and CAIC_MCP_TOKEN")
-
+def _write_claude_code_caic_mcp_config() -> None:
+    """Write Claude Code's local CAIC MCP configuration atomically."""
     config = {
         "mcpServers": {
             "caic": {
-                "type": "http",
-                "url": endpoint,
-                "headers": {"Authorization": "Bearer ${CAIC_MCP_TOKEN}"},
+                "type": "stdio",
+                "command": "python3",
+                "args": [os.path.abspath(sys.argv[0]), "caic-mcp"],
             }
         }
     }
@@ -94,13 +92,63 @@ def _write_claude_code_caic_mcp_config(env: dict[str, str]) -> None:
     os.replace(temp_path, CLAUDE_CODE_CAIC_MCP_CONFIG_PATH)
 
 
+def _write_pi_caic_mcp_extension() -> None:
+    """Write Pi's local tool extension for the task MCP relay bridge."""
+    source = (
+        """import crypto from "node:crypto";
+import net from "node:net";
+import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+const socketPath = %r;
+type MCPResult = {result?: {content: unknown[]; structuredContent?: unknown}; error?: string};
+function createChild(prompt: string): Promise<MCPResult> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    let data = "";
+    socket.setTimeout(60000, () => socket.destroy(new Error("timed out creating child task")));
+    socket.on("connect", () => {
+      const request = {id: crypto.randomUUID(), method: "tools/call", name: "task_create", arguments: {prompt}};
+      socket.write(JSON.stringify(request) + "\\n");
+    });
+    socket.on("data", chunk => {
+      data += chunk;
+      if (data.includes("\\n")) { socket.end(); resolve(JSON.parse(data)); }
+    });
+    socket.on("error", reject);
+  });
+}
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "task_create", label: "Create child task",
+    description: "Create a child CAIC task from this task's current snapshot.",
+    parameters: Type.Object({prompt: Type.String({minLength: 1})}), executionMode: "sequential",
+    async execute(_id, params) {
+      const result = await createChild(params.prompt);
+      return {
+        content: result.result?.content || [{type: "text", text: result.error || "child task creation failed"}],
+        details: result.result?.structuredContent,
+      };
+    },
+  });
+}
+"""
+        % CAIC_MCP_SOCK_PATH
+    )
+    temp_path = PI_CAIC_MCP_EXTENSION_PATH + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(source)
+    os.replace(temp_path, PI_CAIC_MCP_EXTENSION_PATH)
+
+
 # The backend scanners reject a physical record whose size including LF is not
 # strictly smaller than 32 MiB.
 _MAX_ENCODED_RECORD_LEN = 32 << 20
 _MAX_UNIX_SECONDS = (1 << 63) - 1 - 62_135_596_800
 _DIAGNOSTIC_PREVIEW_BYTES = 1024
 _JSON_WHITESPACE = b" \t\r\n"
-_RELAY_CONTROL_TOKENS = frozenset(("diff_stat", "exit", "stripped_env"))
+_RELAY_CONTROL_TOKENS = frozenset(("diff_stat", "exit", "stripped_env", "mcp_request"))
 
 
 def _observe_unix_ns():
@@ -246,6 +294,8 @@ class _Daemon:
             self.proc_ready.set()
         self.shutdown_event = threading.Event()
         self.diff_activity = threading.Event()
+        self.caic_mcp_lock = threading.Lock()
+        self.caic_mcp_clients = {}
 
     def set_proc(self, proc):
         """Publish the subprocess after the first client can connect."""
@@ -272,6 +322,58 @@ class _Daemon:
                 c.sendall(data)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 self.client_conn = None
+
+    def caic_mcp_thread(self, srv):
+        """Bridge local CAIC MCP requests to the attached server."""
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._handle_caic_mcp, args=(conn,), daemon=True).start()
+
+    def _handle_caic_mcp(self, conn):
+        try:
+            raw = _read_line(conn)
+            req = json.loads(raw)
+            request_id = req.get("id")
+            method = req.get("method")
+            name = req.get("name")
+            arguments = req.get("arguments")
+            if not isinstance(request_id, str) or not request_id or method not in ("tools/list", "tools/call"):
+                raise ValueError("invalid MCP request")
+            if method == "tools/call" and (not isinstance(name, str) or not isinstance(arguments, dict)):
+                raise ValueError("invalid MCP tool call")
+            with self.caic_mcp_lock:
+                self.caic_mcp_clients[request_id] = conn
+            fields = {"id": request_id, "method": method}
+            if method == "tools/call":
+                fields["name"] = name
+                fields["arguments"] = arguments
+            self.publish_control("mcp_request", fields, to_client=True)
+            return
+        except (json.JSONDecodeError, OSError, ValueError) as error:
+            try:
+                conn.sendall((json.dumps({"error": str(error)}) + "\n").encode())
+            except OSError:
+                pass
+            conn.close()
+
+    def respond_caic_mcp(self, response):
+        """Return a server result to the waiting local task-MCP client."""
+        request_id = response.get("id")
+        if not isinstance(request_id, str):
+            return False
+        with self.caic_mcp_lock:
+            conn = self.caic_mcp_clients.pop(request_id, None)
+        if conn is None:
+            return False
+        try:
+            conn.sendall((json.dumps(response) + "\n").encode())
+        except OSError:
+            pass
+        conn.close()
+        return True
 
     def publish_records(self, *records, to_client):
         """Publish complete records in identical file/client order."""
@@ -551,6 +653,13 @@ class _Daemon:
                         close_stdin = True
                         break
                     payload = line + b"\n"
+                    try:
+                        control = json.loads(line)
+                    except json.JSONDecodeError:
+                        control = None
+                    if isinstance(control, dict) and control.get("t") == "mcp_response":
+                        self.respond_caic_mcp(control)
+                        continue
                     record = None
                     if self.log_stdin:
                         record = _encode_agent_record(line, _observe_unix_ns())
@@ -582,7 +691,7 @@ class _Daemon:
         self.shutdown_event.set()
 
 
-def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, claude_code_caic_mcp_config):
+def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -606,8 +715,7 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, claude_code_
         a stripped_env event after the first subprocess output.
       shutdown_grace: Seconds to wait after SIGINT before escalating to
         SIGTERM, then SIGKILL.
-      claude_code_caic_mcp_config: Write Claude Code's task-scoped CAIC MCP
-        configuration before starting the harness subprocess.
+      caic_mcp: Start the local CAIC MCP bridge before the harness.
 
     Failure modes handled:
       - SSH drops: client disconnects, subprocess keeps running. Next
@@ -630,6 +738,10 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, claude_code_
     # Clean up stale socket.
     try:
         os.unlink(SOCK_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        os.unlink(CAIC_MCP_SOCK_PATH)
     except FileNotFoundError:
         pass
 
@@ -723,10 +835,26 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, claude_code_
         env_event = _encode_control("stripped_env", {"variables": redacted})
     d = _Daemon(None, output_file, work_dir, log_stdin, env_event, cmd_args)
     threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
+    caic_mcp_srv = None
+    if caic_mcp:
+        caic_mcp_srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        caic_mcp_srv.bind(CAIC_MCP_SOCK_PATH)
+        caic_mcp_srv.listen(4)
+        threading.Thread(target=d.caic_mcp_thread, args=(caic_mcp_srv,), daemon=True).start()
 
     try:
-        if claude_code_caic_mcp_config:
-            _write_claude_code_caic_mcp_config(env)
+        if caic_mcp:
+            _write_claude_code_caic_mcp_config()
+            _write_pi_caic_mcp_extension()
+            try:
+                opencode_config = json.loads(env.get("OPENCODE_CONFIG_CONTENT", "{}"))
+            except json.JSONDecodeError:
+                opencode_config = {}
+            opencode_config.setdefault("mcp", {})["caic"] = {
+                "type": "local",
+                "command": ["python3", os.path.abspath(sys.argv[0]), "caic-mcp"],
+            }
+            env["OPENCODE_CONFIG_CONTENT"] = json.dumps(opencode_config)
         proc = subprocess.Popen(
             cmd_args,
             cwd=work_dir,
@@ -813,8 +941,14 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, claude_code_
 
     # Clean up.
     srv.close()
+    if caic_mcp_srv is not None:
+        caic_mcp_srv.close()
     try:
         os.unlink(SOCK_PATH)
+    except FileNotFoundError:
+        pass
+    try:
+        os.unlink(CAIC_MCP_SOCK_PATH)
     except FileNotFoundError:
         pass
     try:
@@ -946,6 +1080,67 @@ def read_plan(path):
     return 0
 
 
+def caic_mcp():
+    """Forward stdio MCP requests to the task-scoped server registry."""
+    for line in sys.stdin:
+        message = {}
+        try:
+            message = json.loads(line)
+            if not isinstance(message, dict):
+                raise ValueError("MCP request must be an object")
+            method = message.get("method")
+            message_id = message.get("id")
+            if method == "initialize":
+                result = {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "caic", "version": "1.0.0"},
+                }
+            elif method == "notifications/initialized":
+                continue
+            elif method == "tools/list":
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                    conn.settimeout(60)
+                    conn.connect(CAIC_MCP_SOCK_PATH)
+                    conn.sendall((json.dumps({"id": str(uuid.uuid4()), "method": "tools/list"}) + "\n").encode())
+                    response = json.loads(_read_line(conn))
+                if response.get("error"):
+                    raise ValueError(response["error"])
+                result = response["result"]
+            elif method == "tools/call":
+                params = message.get("params")
+                if not isinstance(params, dict):
+                    raise ValueError("tools/call requires parameters")
+                name = params.get("name")
+                arguments = params.get("arguments", {})
+                if not isinstance(name, str) or not name:
+                    raise ValueError("tools/call requires a name")
+                if not isinstance(arguments, dict):
+                    raise ValueError("tools/call requires object arguments")
+                request_id = str(uuid.uuid4())
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                    conn.settimeout(60)
+                    conn.connect(CAIC_MCP_SOCK_PATH)
+                    request = {"id": request_id, "method": "tools/call", "name": name, "arguments": arguments}
+                    conn.sendall((json.dumps(request) + "\n").encode())
+                    response = json.loads(_read_line(conn))
+                if response.get("error"):
+                    result = {"content": [{"type": "text", "text": response["error"]}], "isError": True}
+                else:
+                    result = response["result"]
+            else:
+                continue
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message_id, "result": result}) + "\n")
+        except (json.JSONDecodeError, OSError, ValueError, KeyError) as error:
+            response = {
+                "jsonrpc": "2.0",
+                "id": message.get("id"),
+                "error": {"code": -32602, "message": str(error)},
+            }
+            sys.stdout.write(json.dumps(response) + "\n")
+        sys.stdout.flush()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="relay_v2.py")
     sub = parser.add_subparsers(dest="mode")
@@ -953,7 +1148,7 @@ def main() -> int:
     sa = sub.add_parser("serve-attach")
     sa.add_argument("--dir", required=True, dest="work_dir")
     sa.add_argument("--no-log-stdin", action="store_true")
-    sa.add_argument("--claude-code-caic-mcp-config", action="store_true")
+    sa.add_argument("--caic-mcp", action="store_true")
     sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
     sa.add_argument(
         "--shutdown-grace",
@@ -970,6 +1165,8 @@ def main() -> int:
     rp = sub.add_parser("read-plan")
     rp.add_argument("path", nargs="?")
 
+    sub.add_parser("caic-mcp")
+
     args = parser.parse_args()
     if args.mode == "serve-attach":
         serve(
@@ -978,12 +1175,14 @@ def main() -> int:
             log_stdin=not args.no_log_stdin,
             strip_env=args.strip_env,
             shutdown_grace=args.shutdown_grace,
-            claude_code_caic_mcp_config=args.claude_code_caic_mcp_config,
+            caic_mcp=args.caic_mcp,
         )
     elif args.mode == "attach":
         attach_client(args.offset)
     elif args.mode == "read-plan":
         return read_plan(args.path)
+    elif args.mode == "caic-mcp":
+        caic_mcp()
     else:
         parser.print_help(sys.stderr)
         return 1

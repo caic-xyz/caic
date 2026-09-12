@@ -32,6 +32,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -81,8 +82,6 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // Start launches a Pi RPC process via the relay daemon. If Pi exits while
 // starting, it updates Pi once and retries the launch.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	// TODO: Add task-scoped CAIC MCP support with Pi's native per-task
-	// configuration, enabling only task_create without persisting the credential.
 	if opts.Logger == nil {
 		return nil, errors.New("opts.Logger is required")
 	}
@@ -149,7 +148,13 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{}
 
-	rp, err := agent.PrepareRelay(ctx, opts, nil, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
+	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
+	var relayArgs []string
+	if opts.MCP != nil {
+		relayArgs = append(relayArgs, "--caic-mcp")
+		args = append(args, "--extension", agent.PiCaicMCPExtensionPath)
+	}
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, args)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +249,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 	}
 
-	c := newPiConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire)
+	c := newPiConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire, opts)
 	sess, err := agent.StartSession(ctx, rp, c, opts)
 	if err != nil {
 		return nil, err
@@ -308,17 +313,19 @@ type piConn struct {
 	log     agent.LogSink
 	version agent.LogVersion
 	wire    *piWireFormat
+	mcp     mcp.Registry
 }
 
 // newPiConn creates a piConn wrapping a standard Conn.
-func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat) *piConn {
+func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, log agent.LogSink, wire *piWireFormat, opts *agent.Options) *piConn {
 	return &piConn{
-		Conn:    agent.NewConn(ctx, logger, stdin, log, wire),
+		Conn:    agent.NewMCPConn(ctx, logger, stdin, log, wire, opts.MCP),
 		ctx:     ctx,
 		logger:  logger,
 		log:     log,
 		version: log.LogVersion(),
 		wire:    wire,
+		mcp:     opts.MCP,
 	}
 }
 
@@ -327,6 +334,24 @@ func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, l
 func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
 	return agent.DefaultReadMessages(c.ctx, c.logger, r, func(parsed agent.TimedMessage) {
 		m := parsed.Message
+		if request, ok := m.(*agent.MCPRequestMessage); ok {
+			var result any
+			var err error
+			if c.mcp == nil {
+				err = errors.New("task-scoped MCP is unavailable")
+			} else {
+				rawResult, callErr := c.mcp.CallTool(c.ctx, request.Name, request.Arguments)
+				if callErr != nil {
+					err = callErr
+				} else {
+					result, err = agent.MCPToolResultResponse(rawResult)
+				}
+			}
+			if responseErr := agent.RespondMCP(c.Conn, request.ID, result, err); responseErr != nil {
+				c.logger.ErrorContext(c.ctx, "respond task-scoped MCP", "err", responseErr)
+			}
+			return
+		}
 		// Intercept extension UI requests.
 		if raw, ok := m.(*agent.RawMessage); ok && strings.HasPrefix(raw.MessageType, "response:") {
 			return

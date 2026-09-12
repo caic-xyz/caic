@@ -62,6 +62,7 @@ graph TD
   pkg_cmd_caic --> pkg_internal_server
   pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
+  pkg_internal_agent --> pkg_internal_mcp
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
@@ -87,6 +88,7 @@ graph TD
   pkg_internal_agent_opencode -.-> pkg_internal_taskslog
   pkg_internal_agent_pi --> pkg_internal_agent
   pkg_internal_agent_pi --> pkg_internal_agent_harness
+  pkg_internal_agent_pi --> pkg_internal_mcp
   pkg_internal_agent_pi --> pkg_internal_runtime
   pkg_internal_agent_pi -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_pi -.-> pkg_internal_taskslog
@@ -187,6 +189,7 @@ graph TD
   pkg_internal_task --> pkg_internal_agent
   pkg_internal_task --> pkg_internal_agent_harness
   pkg_internal_task --> pkg_internal_forge
+  pkg_internal_task --> pkg_internal_mcp
   pkg_internal_task --> pkg_internal_repo
   pkg_internal_task --> pkg_internal_runtime
   pkg_internal_task --> pkg_internal_taskslog
@@ -196,6 +199,7 @@ graph TD
   pkg_internal_task -.-> pkg_internal_runtime_runtimetest
   pkg_internal_task_taskmgr --> pkg_internal_agent
   pkg_internal_task_taskmgr --> pkg_internal_agent_harness
+  pkg_internal_task_taskmgr --> pkg_internal_mcp
   pkg_internal_task_taskmgr --> pkg_internal_repo
   pkg_internal_task_taskmgr --> pkg_internal_runtime
   pkg_internal_task_taskmgr --> pkg_internal_task
@@ -204,6 +208,7 @@ graph TD
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_agenttest
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_claudecode
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_codex
+  pkg_internal_task_taskmgr -.-> pkg_internal_mcp_mcptest
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_mdruntime
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_runtimetest
   pkg_internal_taskslog --> pkg_internal_agent
@@ -228,12 +233,15 @@ graph TD
   pkg_internal_agent_opencode["internal/agent/opencode"]
   pkg_internal_agent_pi["internal/agent/pi"]
   pkg_internal_agent_relay["internal/agent/relay"]
+  pkg_internal_mcp["internal/mcp"]
+  pkg_internal_mcp_mcptest["internal/mcp/mcptest"]
   pkg_internal_runtime["internal/runtime"]
   pkg_internal_runtime_runtimetest["internal/runtime/runtimetest"]
   pkg_internal_taskslog["internal/taskslog"]
 
   pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
+  pkg_internal_agent --> pkg_internal_mcp
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
@@ -259,9 +267,12 @@ graph TD
   pkg_internal_agent_opencode -.-> pkg_internal_taskslog
   pkg_internal_agent_pi --> pkg_internal_agent
   pkg_internal_agent_pi --> pkg_internal_agent_harness
+  pkg_internal_agent_pi --> pkg_internal_mcp
   pkg_internal_agent_pi --> pkg_internal_runtime
   pkg_internal_agent_pi -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_pi -.-> pkg_internal_taskslog
+  pkg_internal_mcp -.-> pkg_internal_mcp_mcptest
+  pkg_internal_mcp_mcptest --> pkg_internal_mcp
   pkg_internal_runtime --> pkg_internal_agent_harness
   pkg_internal_runtime -.-> pkg_internal_runtime_runtimetest
   pkg_internal_runtime_runtimetest --> pkg_internal_runtime
@@ -355,6 +366,7 @@ graph TD
   pkg_cmd_voice_gateway --> pkg_internal_httplog
   pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
+  pkg_internal_agent --> pkg_internal_mcp
   pkg_internal_agent --> pkg_internal_runtime
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
@@ -380,6 +392,7 @@ graph TD
   pkg_internal_agent_opencode -.-> pkg_internal_taskslog
   pkg_internal_agent_pi --> pkg_internal_agent
   pkg_internal_agent_pi --> pkg_internal_agent_harness
+  pkg_internal_agent_pi --> pkg_internal_mcp
   pkg_internal_agent_pi --> pkg_internal_runtime
   pkg_internal_agent_pi -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_pi -.-> pkg_internal_taskslog
@@ -510,6 +523,7 @@ graph TD
   pkg_internal_task --> pkg_internal_agent
   pkg_internal_task --> pkg_internal_agent_harness
   pkg_internal_task --> pkg_internal_forge
+  pkg_internal_task --> pkg_internal_mcp
   pkg_internal_task --> pkg_internal_repo
   pkg_internal_task --> pkg_internal_runtime
   pkg_internal_task --> pkg_internal_taskslog
@@ -519,6 +533,7 @@ graph TD
   pkg_internal_task -.-> pkg_internal_runtime_runtimetest
   pkg_internal_task_taskmgr --> pkg_internal_agent
   pkg_internal_task_taskmgr --> pkg_internal_agent_harness
+  pkg_internal_task_taskmgr --> pkg_internal_mcp
   pkg_internal_task_taskmgr --> pkg_internal_repo
   pkg_internal_task_taskmgr --> pkg_internal_runtime
   pkg_internal_task_taskmgr --> pkg_internal_task
@@ -527,6 +542,7 @@ graph TD
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_agenttest
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_claudecode
   pkg_internal_task_taskmgr -.-> pkg_internal_agent_codex
+  pkg_internal_task_taskmgr -.-> pkg_internal_mcp_mcptest
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_mdruntime
   pkg_internal_task_taskmgr -.-> pkg_internal_runtime_runtimetest
   pkg_internal_taskslog --> pkg_internal_agent
@@ -545,14 +561,14 @@ graph TD
 | `cmd/caic` | `internal/app`, `internal/auth`, `internal/autoupdate`, `internal/forge/github`, `internal/server` | None |
 | `cmd/voice-gateway` | `internal/httplog` | None |
 | `frontend` | None | None |
-| `internal/agent` | `internal/agent/harness`, `internal/agent/relay`, `internal/runtime` | None |
+| `internal/agent` | `internal/agent/harness`, `internal/agent/relay`, `internal/mcp`, `internal/runtime` | None |
 | `internal/agent/agenttest` | `internal/agent`, `internal/agent/harness` | None |
 | `internal/agent/backends` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi` | None |
 | `internal/agent/claudecode` | `internal/agent`, `internal/agent/harness` | `internal/agent/agenttest`, `internal/taskslog` |
 | `internal/agent/codex` | `internal/agent`, `internal/agent/harness`, `internal/runtime` | `internal/agent/agenttest`, `internal/taskslog` |
 | `internal/agent/harness` | None | None |
 | `internal/agent/opencode` | `internal/agent`, `internal/agent/harness`, `internal/runtime` | `internal/agent/agenttest`, `internal/taskslog` |
-| `internal/agent/pi` | `internal/agent`, `internal/agent/harness`, `internal/runtime` | `internal/agent/agenttest`, `internal/taskslog` |
+| `internal/agent/pi` | `internal/agent`, `internal/agent/harness`, `internal/mcp`, `internal/runtime` | `internal/agent/agenttest`, `internal/taskslog` |
 | `internal/agent/relay` | None | None |
 | `internal/app` | `internal/agent`, `internal/agent/backends`, `internal/agent/harness`, `internal/auth`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/preferences`, `internal/repo`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/taskslog`, `internal/usage` | `internal/agent/agenttest`, `internal/runtime/runtimetest` |
 | `internal/auth` | None | None |
@@ -584,8 +600,8 @@ graph TD
 | `internal/server/apiconv` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/repo`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/taskslog`, `internal/usage` | None |
 | `internal/server/ipgeo` | None | None |
 | `internal/smoketest` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/taskslog`, `internal/usage` | None |
-| `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/repo`, `internal/runtime`, `internal/taskslog` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/logtest`, `internal/runtime/runtimetest` |
-| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/repo`, `internal/runtime`, `internal/task`, `internal/taskslog`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
+| `internal/task` | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/mcp`, `internal/repo`, `internal/runtime`, `internal/taskslog` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/logtest`, `internal/runtime/runtimetest` |
+| `internal/task/taskmgr` | `internal/agent`, `internal/agent/harness`, `internal/mcp`, `internal/repo`, `internal/runtime`, `internal/task`, `internal/taskslog`, `internal/usage` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/mcp/mcptest`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
 | `internal/taskslog` | `internal/agent`, `internal/agent/harness`, `internal/runtime` | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex` |
 | `internal/usage` | `internal/agent` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->

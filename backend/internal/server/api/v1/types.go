@@ -533,7 +533,7 @@ type CreateTaskReq struct {
 	Display        bool       `json:"display,omitempty"`
 	Sudo           bool       `json:"sudo,omitempty"`
 	GitHubToken    bool       `json:"gitHubToken,omitempty"`
-	CaicMCPEnabled bool       `json:"caicMCPEnabled,omitempty"` // Enables task-scoped CAIC MCP; each tool remains server-authorized.
+	CaicMCPEnabled bool       `json:"caicMCPEnabled,omitempty"` // Enables task-scoped CAIC MCP delegation.
 }
 
 // Validate checks that prompt and harness are valid. Repos is optional (empty

@@ -40,6 +40,8 @@ import (
 // internal/app and reached through the handler concerns below.
 type Router struct {
 	// Immutable.
+	TaskMCPScoper taskmgr.TaskMCPScoper // Scopes the normal MCP registry for task agents.
+
 	log *slog.Logger
 	ctx context.Context // server-lifetime context; outlives individual HTTP requests
 
@@ -179,9 +181,9 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	if !r.mcpDisabled {
 		mcpHandler := r.mcpHandlers.endpointRoutes()
 		if r.oauthServer != nil {
-			mcpHandler = r.mcpHandlers.withTaskMCPAuth(r.oauthServer.BearerAuth, mcpHandler)
+			mcpHandler = r.oauthServer.BearerAuth(mcpHandler)
 		} else if r.authStore != nil {
-			mcpHandler = r.mcpHandlers.withTaskMCPAuth(auth.RequireUser, mcpHandler)
+			mcpHandler = auth.RequireUser(mcpHandler)
 		}
 		mountPrefix(mux, "", "/api/caic/v1/mcp", mcpHandler)
 	}
@@ -377,7 +379,6 @@ type Dependencies struct {
 	TaskMgr                    *taskmgr.Manager
 	Provider                   genai.Provider
 	IPGeoChecker               *ipgeo.Checker
-	TaskMCPTokenIssuer         *auth.TaskMCPTokenIssuer
 
 	// App-owned automation services, routed to by HTTP handlers and webhooks.
 	Bot        *bot.Bot
@@ -553,10 +554,8 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
 
 	s.mcpHandlers = &mcpHandlers{
-		rateLimiter:        rateLimiter,
-		hostState:          d.HostState,
-		taskMgr:            d.TaskMgr,
-		taskMCPTokenIssuer: d.TaskMCPTokenIssuer,
+		rateLimiter: rateLimiter,
+		hostState:   d.HostState,
 	}
 	registry := &mcpRegistry{
 		serverConfig:  s.serverHandlers,
@@ -566,6 +565,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		notifications: newNotificationFeed(),
 		audit:         audit,
 	}
+	s.TaskMCPScoper = registry
 	s.mcpHandlers.protocol = &mcp.Handler{
 		Registry:   registry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},

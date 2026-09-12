@@ -26,6 +26,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -82,6 +84,16 @@ func (f *metadataErrorInfo) Metadata(ctx context.Context, id runtime.ID, key run
 		return "", f.err
 	}
 	return f.FakeInfo.Metadata(ctx, id, key)
+}
+
+type fakeTaskMCPScoper struct {
+	taskID   ksid.ID
+	registry mcp.Registry
+}
+
+func (f *fakeTaskMCPScoper) ForTask(id ksid.ID) mcp.Registry {
+	f.taskID = id
+	return f.registry
 }
 
 func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Config mirrors New's value bag in tests.
@@ -632,6 +644,46 @@ func TestNew(t *testing.T) {
 
 func TestManager(t *testing.T) {
 	t.Parallel()
+
+	t.Run("Start", func(t *testing.T) {
+		t.Run("valid_scopes_enabled_task", func(t *testing.T) {
+			t.Parallel()
+			info := &runtimetest.FakeInfo{Events: make(chan runtime.Event)}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, info),
+			})
+			t.Cleanup(func() { _ = m.Close() })
+			scoper := &fakeTaskMCPScoper{registry: mcptest.FakeRegistry{}}
+			if err := m.Start(scoper); err != nil {
+				t.Fatalf("Start() error: %v", err)
+			}
+			if !m.TaskMCPAvailable() {
+				t.Fatal("TaskMCPAvailable() = false, want true")
+			}
+
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+			tk.CaicMCPEnabled = true
+			entry := m.NewEntry(tk, nil)
+			if _, ok := entry.Lifecycle.agentRuntime.MCPRegistry.(mcptest.FakeRegistry); !ok {
+				t.Errorf("entry MCP registry = %T, want mcptest.FakeRegistry", entry.Lifecycle.agentRuntime.MCPRegistry)
+			}
+			if scoper.taskID != tk.ID {
+				t.Errorf("scoper task ID = %s, want %s", scoper.taskID, tk.ID)
+			}
+		})
+
+		t.Run("error_missing_scoper", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			if err := m.Start(nil); err == nil {
+				t.Fatal("Start(nil) succeeded")
+			}
+			if m.TaskMCPAvailable() {
+				t.Fatal("TaskMCPAvailable() = true, want false")
+			}
+		})
+	})
 
 	t.Run("RegisterCheckout", func(t *testing.T) {
 		t.Parallel()
@@ -4116,7 +4168,7 @@ func TestManager(t *testing.T) {
 			fake := &runtimetest.FakeInfo{Events: events}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
 			t.Cleanup(func() { _ = m.Close() })
-			if err := m.BeginImport(); err != nil {
+			if err := m.Start(&fakeTaskMCPScoper{}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -4150,8 +4202,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			fake := &runtimetest.FakeInfo{WatchErr: errors.New("unavailable")}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
-			if err := m.BeginImport(); err == nil {
-				t.Fatal("BeginImport succeeded, want runtime event watch error")
+			if err := m.Start(&fakeTaskMCPScoper{}); err == nil {
+				t.Fatal("Start() succeeded, want runtime event watch error")
 			}
 			m.eventMu.Lock()
 			importing := m.importing

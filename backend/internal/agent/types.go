@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 	messageTypeResult                = "caic_result"
 	messageTypePendingUserAction     = "caic_pending_user_action"
 	messageTypeProvisioningLogRecord = "caic_log"
+	messageTypeMCPRequest            = "caic_mcp_request"
 )
 
 // SystemSubtypeModelRerouted identifies a system message reporting that the
@@ -44,6 +46,17 @@ type DiffFileStat struct {
 	Deleted int    `json:"deleted"`
 	Binary  bool   `json:"binary,omitempty"`
 }
+
+// MCPRequestMessage carries one task-local MCP request from the relay.
+type MCPRequestMessage struct {
+	ID        string          `json:"id"`
+	Method    mcp.Method      `json:"method"`
+	Name      string          `json:"name,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// Type implements Message.
+func (*MCPRequestMessage) Type() string { return messageTypeMCPRequest }
 
 // DiffStat summarises the changes in a branch relative to its base.
 type DiffStat []DiffFileStat
@@ -756,7 +769,7 @@ type MetaMessage struct {
 	OwnerID           string           `json:"owner_id,omitempty"`    // Human authorization principal; distinct from task lineage.
 	ForkedFromTaskID  string           `json:"forked_from_task_id,omitempty"`
 	ParentTaskID      string           `json:"parent_task_id,omitempty"`   // Delegating task identity; empty for roots and ordinary forks.
-	CaicMCPEnabled    bool             `json:"caic_mcp_enabled,omitempty"` // Grants the task-scoped CAIC MCP credential.
+	CaicMCPEnabled    bool             `json:"caic_mcp_enabled,omitempty"` // Enables task-scoped CAIC MCP delegation.
 	Tailscale         bool             `json:"tailscale,omitempty"`
 	USB               bool             `json:"usb,omitempty"`
 	Display           bool             `json:"display,omitempty"`

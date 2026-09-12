@@ -43,9 +43,8 @@ prompt. An agent cannot choose a different source task, owner, repository set,
 harness, model, resource limits, mounts, or privileged capabilities.
 
 Tasks may create children only when `CaicMCPEnabled` is true, and the
-capability is disabled by default. The name means the task may connect to the
-CAIC MCP server; the server separately authorizes each exposed tool. Phase 1
-exposes only `task_create` and deliberately does not propagate the capability:
+capability is disabled by default. It enables the task-local CAIC MCP bridge.
+Phase 1 exposes only `task_create` and deliberately does not propagate the capability:
 each created child has `CaicMCPEnabled` false. Depth, child-count, concurrency,
 and budget policies will be added before recursive delegation is enabled.
 
@@ -68,20 +67,19 @@ out of scope for the first release.
 
 ## MCP trust boundary
 
-Task containers use the existing MCP endpoint with a separate server-issued
-task credential, not a human OAuth credential. A credential identifies one
-calling task and is valid only while that task has `CaicMCPEnabled` and is
-active. The MCP authorization layer derives the parent from that identity; it
-never accepts a caller-selected parent ID.
+Task containers launch a local stdio MCP server through the persistent relay;
+they never contact the CAIC HTTP endpoint or receive a credential. The relay
+forwards normal MCP `tools/list` and `tools/call` requests to the server's
+task-scoped MCP registry. The server derives the source task, parent, and
+snapshot from the registry scope, never from a container-supplied field. The
+request cannot select a parent.
 
-The credential must be scoped to the task, revocable when delegation is
-disabled or the task becomes terminal, and unavailable in logs, task history,
-runtime metadata, or process arguments. Runtime launch provisioners inject it
-only into a server-controlled MCP client configuration. Harness adapters are
-introduced one at a time; unsupported harnesses fail closed and do not receive
-the endpoint or credential.
+The relay bridge contains no bearer token, endpoint URL, or task identity in
+the container configuration, task history, runtime metadata, or process
+arguments. Each supported harness launches its native local configuration;
+Pi uses its equivalent task-local extension.
 
-Phase 1 allows no task-scoped reads: the credential exposes only `task_create`.
+Phase 1 allows no task-scoped reads: the bridge exposes only `task_create`.
 Audit records include the ordinary MCP tool call; dedicated delegation audit
 fields and subtree reads are follow-up work.
 
@@ -107,21 +105,21 @@ that do not contain hierarchy data represent root tasks.
 
 ## Delivery plan
 
-### Phase 1 — task-mcp-identity: Provision a narrow MCP identity to enabled tasks
+### Phase 1 — task-mcp-bridge: Expose a narrow local MCP bridge to enabled tasks
 
-- **Scope:** server-signed task credential, task runtime launch configuration,
-  MCP authentication and authorization, Claude Code adapter, and reconciliation
-  of task-scoped `task_create` into a server-derived child fork.
+- **Scope:** relay-backed stdio MCP bridge, task runtime launch configuration,
+  native harness adapters, and reconciliation of task-scoped `task_create`
+  into a server-derived child fork.
 - **Preserve:** no task receives the general MCP endpoint, a user OAuth token,
   or global task permissions.
-- **Verify:** an enabled Claude task reaches only prompt-only `task_create`;
+- **Verify:** an enabled task reaches only prompt-only `task_create`;
   disabled or terminal identities fail closed; the server derives the parent
   and snapshot; secrets are absent from logs, task history, runtime labels,
   and command arguments.
 
 ### Phase 2 — delegation-policy: Bound and account for child creation
 
-- **Depends on:** task-mcp-identity
+- **Depends on:** task-mcp-bridge
 - **Scope:** durable idempotency, server-side depth/count/concurrency/budget
   enforcement, delegation audit fields, and opt-in recursive delegation.
 - **Preserve:** children inherit the source snapshot and only approved
@@ -133,7 +131,7 @@ that do not contain hierarchy data represent root tasks.
 
 ### Phase 3 — hierarchy-operations: Make supervision useful
 
-- **Depends on:** delegated-children
+- **Depends on:** delegation-policy
 - **Scope:** hierarchy views, parent/child status, budget rollups,
   notifications, and additional harness adapters.
 - **Preserve:** flat task views remain usable; no automatic merge or lifecycle

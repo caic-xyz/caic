@@ -33,12 +33,6 @@ type CreateRequest struct {
 	ForgeIssue int
 }
 
-// MCPConfig provisions the bounded CAIC MCP capability for enabled tasks.
-type MCPConfig struct {
-	EndpointURL  string
-	TokenForTask func(taskID string) string
-}
-
 const statsRingSize = 60
 
 type statsSub struct {
@@ -123,7 +117,7 @@ type Task struct {
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
-	CaicMCPEnabled    bool                 // Grants the task-scoped CAIC MCP credential.
+	CaicMCPEnabled    bool                 // Enables task-scoped CAIC MCP delegation.
 	Provider          genai.Provider
 
 	timelineID string

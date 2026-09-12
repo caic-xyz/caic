@@ -946,7 +946,7 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `display` | `boolean` |  |  |
 | `sudo` | `boolean` |  |  |
 | `gitHubToken` | `boolean` |  |  |
-| `caicMCPEnabled` | `boolean` | Enables task-scoped CAIC MCP; each tool remains server-authorized. |  |
+| `caicMCPEnabled` | `boolean` | Enables task-scoped CAIC MCP delegation. |  |
 
 ### EventInit
 

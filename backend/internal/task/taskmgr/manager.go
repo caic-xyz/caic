@@ -31,6 +31,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -84,7 +85,14 @@ type Config struct {
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
 	Checkouts           *repo.Registry
-	TaskMCP             task.MCPConfig
+}
+
+// TaskMCPScoper derives a server-authorized MCP registry for a task.
+//
+// The task manager supplies only its trusted task ID. The server owns the
+// authorization policy that turns that ID into an MCP capability.
+type TaskMCPScoper interface {
+	ForTask(id ksid.ID) mcp.Registry
 }
 
 // Manager owns task lifecycle state, runtime import, session watching, and
@@ -104,12 +112,11 @@ type Manager struct {
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
-	taskMCP             task.MCPConfig
+	taskMCPScoper       TaskMCPScoper
 	relay               relayReader
 
 	// Guarded by eventMu.
 	eventMu              sync.Mutex
-	eventWatchStarted    bool
 	importing            bool
 	pendingRuntimeEvents []runtime.Event
 
@@ -167,7 +174,6 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
-		taskMCP:             cfg.TaskMCP,
 		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
@@ -194,40 +200,37 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// BeginImport subscribes to runtime events before startup inventory is listed.
-// ImportInstances applies any buffered events after it registers the snapshot.
-func (m *Manager) BeginImport() error {
-	m.eventMu.Lock()
-	defer m.eventMu.Unlock()
-	if m.eventWatchStarted {
-		return errors.New("runtime event watch already started")
+// Start activates m with its task-scoped MCP authority and starts its runtime
+// event and stats watchers. It subscribes to events before startup inventory is
+// listed, and ImportInstances applies any buffered events after registration.
+func (m *Manager) Start(scoper TaskMCPScoper) error {
+	if scoper == nil {
+		return errors.New("task MCP scoper is required")
 	}
+	m.taskMCPScoper = scoper
+	m.eventMu.Lock()
 	m.importing = true
+	m.eventMu.Unlock()
 	events, err := m.Runtimes.WatchEvents(m.serverCtx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
 	if err != nil {
+		m.eventMu.Lock()
 		m.importing = false
+		m.eventMu.Unlock()
+	}
+	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, events) })
+	m.background.Go(func() { m.watchStats(m.serverCtx) })
+	if err != nil {
 		return fmt.Errorf("watch runtime events: %w", err)
 	}
-	m.eventWatchStarted = true
-	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, events) })
 	return nil
-}
-
-// Start launches the runtime event and stats watchers. BeginImport may start
-// the event watcher first to fence startup inventory from incoming events.
-func (m *Manager) Start() {
-	m.eventMu.Lock()
-	watchStarted := m.eventWatchStarted
-	m.eventWatchStarted = true
-	m.eventMu.Unlock()
-	if !watchStarted {
-		m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, nil) })
-	}
-	m.background.Go(func() { m.watchStats(m.serverCtx) })
 }
 
 // NewEntry creates an unregistered entry with its immutable lifecycle.
 func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
+	var taskMCP mcp.Registry
+	if t.CaicMCPEnabled {
+		taskMCP = m.taskMCPScoper.ForTask(t.ID)
+	}
 	e := &Entry{
 		task:            t,
 		loadedTask:      lt,
@@ -251,7 +254,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 			Checkout:            m.resolveCheckout(t),
 			RuntimeMetadata:     m.runtimeMetadata,
 			RuntimeStartTimeout: m.runtimeStartTimeout,
-			TaskMCP:             m.taskMCP,
+			MCPRegistry:         taskMCP,
 		},
 	}
 	return e
@@ -295,7 +298,7 @@ func (m *Manager) Len() int {
 
 // TaskMCPAvailable reports whether new tasks can receive the bounded MCP capability.
 func (m *Manager) TaskMCPAvailable() bool {
-	return m.taskMCP.EndpointURL != "" && m.taskMCP.TokenForTask != nil
+	return m.taskMCPScoper != nil
 }
 
 // NotifyTaskChange signals that task data may have changed.
@@ -382,8 +385,8 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	if !ok {
 		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 	}
-	if p.CaicMCPEnabled && (p.Harness != harness.Claude || m.taskMCP.EndpointURL == "" || m.taskMCP.TokenForTask == nil) {
-		return "", badRequestf("task-scoped MCP requires the Claude harness and a configured external MCP endpoint")
+	if p.CaicMCPEnabled && !m.TaskMCPAvailable() {
+		return "", badRequestf("task-scoped MCP is unavailable")
 	}
 
 	if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {

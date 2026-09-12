@@ -256,13 +256,13 @@ def _cleanup(relay_dir: str) -> None:
     shutil.rmtree(relay_dir, ignore_errors=True)
 
 
-def test_claude_code_caic_mcp_config() -> None:
-    """The v2 relay writes a private Claude Code MCP config from runtime env."""
+def test_harness_caic_mcp_integrations() -> None:
+    """The v2 relay writes local Claude Code, OpenCode, and Pi integrations."""
     relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
     config_path = os.path.join(relay_dir, "caic-mcp.json")
+    extension_path = os.path.join(relay_dir, "caic-mcp.ts")
+    opencode_path = os.path.join(relay_dir, "opencode-config.json")
     env = _make_env(relay_dir)
-    env["CAIC_MCP_URL"] = "https://caic.example/api/caic/v1/mcp"
-    env["CAIC_MCP_TOKEN"] = "task-token"
 
     try:
         proc = subprocess.Popen(
@@ -272,9 +272,11 @@ def test_claude_code_caic_mcp_config() -> None:
                 "serve-attach",
                 "--dir",
                 relay_dir,
-                "--claude-code-caic-mcp-config",
+                "--caic-mcp",
                 "--",
-                "cat",
+                "sh",
+                "-c",
+                "printf '%s' \"$OPENCODE_CONFIG_CONTENT\" > opencode-config.json; cat",
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -284,7 +286,7 @@ def test_claude_code_caic_mcp_config() -> None:
 
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if os.path.exists(config_path):
+            if os.path.exists(config_path) and os.path.exists(opencode_path):
                 break
             time.sleep(0.05)
         else:
@@ -295,13 +297,28 @@ def test_claude_code_caic_mcp_config() -> None:
         assert config == {
             "mcpServers": {
                 "caic": {
-                    "type": "http",
-                    "url": "https://caic.example/api/caic/v1/mcp",
-                    "headers": {"Authorization": "Bearer ${CAIC_MCP_TOKEN}"},
+                    "type": "stdio",
+                    "command": "python3",
+                    "args": [str(RELAY_PY), "caic-mcp"],
                 }
             }
         }
         assert os.stat(config_path).st_mode & 0o777 == 0o600
+        with open(extension_path, encoding="utf-8") as extension_file:
+            extension = extension_file.read()
+        assert 'name: "task_create"' in extension
+        assert "socketPath" in extension
+        assert os.stat(extension_path).st_mode & 0o777 == 0o600
+        with open(opencode_path, encoding="utf-8") as opencode_file:
+            opencode_config = json.load(opencode_file)
+        assert opencode_config == {
+            "mcp": {
+                "caic": {
+                    "type": "local",
+                    "command": ["python3", str(RELAY_PY), "caic-mcp"],
+                }
+            }
+        }
 
         assert proc.stdin is not None
         proc.stdin.write(b"\x00\n")
@@ -324,6 +341,132 @@ def _new_daemon(relay: ModuleType, *, chunks: tuple[bytes, ...] = (), log_stdin:
     client = RecordingSocket()
     daemon.set_client(client, "test")
     return daemon, proc, output, client
+
+
+def test_caic_mcp_bridge() -> None:
+    """A local task-MCP request reaches the attached server and receives its reply."""
+    relay = _load_relay()
+    daemon, _proc, _output, client = _new_daemon(relay)
+    server, local = socket.socketpair()
+    try:
+        request = {
+            "id": "request-1",
+            "method": "tools/call",
+            "name": "task_create",
+            "arguments": {"prompt": "write tests"},
+        }
+        local.sendall((json.dumps(request) + "\n").encode())
+        thread = threading.Thread(target=daemon._handle_caic_mcp, args=(server,))
+        thread.start()
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert _decode_records(bytes(client.sent)) == [
+            {
+                "t": "mcp_request",
+                "id": "request-1",
+                "method": "tools/call",
+                "name": "task_create",
+                "arguments": {"prompt": "write tests"},
+            }
+        ]
+
+        assert daemon.respond_caic_mcp({"id": "request-1", "result": {"content": []}})
+        assert json.loads(relay._read_line(local)) == {"id": "request-1", "result": {"content": []}}
+    finally:
+        local.close()
+
+
+def test_caic_mcp_stdio_server() -> None:
+    """The local stdio MCP server forwards normal tool calls through the relay socket."""
+    relay = _load_relay()
+    relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
+    socket_path = os.path.join(relay_dir, "caic-mcp.sock")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(socket_path)
+    server.listen(1)
+    received: list[dict[str, object]] = []
+
+    def respond() -> None:
+        for _ in range(2):
+            conn, _ = server.accept()
+            try:
+                request = json.loads(relay._read_line(conn))
+                received.append(request)
+                if request["method"] == "tools/list":
+                    result = {"tools": [{"name": "example_tool", "inputSchema": {"type": "object"}}]}
+                else:
+                    result = {
+                        "content": [{"type": "text", "text": "Created child task: child-1"}],
+                        "structuredContent": {"taskID": "child-1"},
+                    }
+                conn.sendall((json.dumps({"id": request["id"], "result": result}) + "\n").encode())
+            finally:
+                conn.close()
+
+    thread = threading.Thread(target=respond)
+    thread.start()
+    proc = subprocess.Popen(
+        [sys.executable, str(RELAY_PY), "caic-mcp"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_make_env(relay_dir),
+    )
+    try:
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n")
+        proc.stdin.flush()
+        initialized = json.loads(proc.stdout.readline())
+        assert initialized["id"] == 1
+        assert initialized["result"]["capabilities"] == {"tools": {}}
+
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}) + "\n")
+        proc.stdin.flush()
+        listed = json.loads(proc.stdout.readline())
+        assert listed == {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {"tools": [{"name": "example_tool", "inputSchema": {"type": "object"}}]},
+        }
+
+        proc.stdin.write(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "example_tool", "arguments": {"prompt": "write tests"}},
+                }
+            )
+            + "\n"
+        )
+        proc.stdin.flush()
+        result = json.loads(proc.stdout.readline())
+        assert result == {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "result": {
+                "content": [{"type": "text", "text": "Created child task: child-1"}],
+                "structuredContent": {"taskID": "child-1"},
+            },
+        }
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert len(received) == 2
+        assert received[0]["method"] == "tools/list"
+        assert received[1]["name"] == "example_tool"
+        assert received[1]["arguments"] == {"prompt": "write tests"}
+        assert received[1]["id"]
+    finally:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        proc.wait(timeout=5)
+        server.close()
+        _cleanup(relay_dir)
 
 
 def test_shared_encoder_vectors() -> None:
@@ -714,6 +857,9 @@ def main() -> int:
         test_concurrent_controls_keep_destination_order_and_v2_tokens,
         test_real_relay_output_superset_no_stdin_echo_and_attach_offset,
         test_exit_and_stripped_environment_controls,
+        test_harness_caic_mcp_integrations,
+        test_caic_mcp_bridge,
+        test_caic_mcp_stdio_server,
         test_parse_numstat,
     )
     failed: list[str] = []

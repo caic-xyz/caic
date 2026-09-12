@@ -32,6 +32,7 @@ const (
 	logRecordContextCleared    logRecordType = "context_cleared"
 	logRecordText              logRecordType = "text"
 	logRecordUserInput         logRecordType = "user_input"
+	logRecordMCPRequest        logRecordType = "mcp_request"
 )
 
 func (t logRecordType) controlKind() (logControlKind, bool) {
@@ -62,6 +63,8 @@ func (t logRecordType) controlKind() (logControlKind, bool) {
 		return logControlText, true
 	case logRecordUserInput:
 		return logControlUserInput, true
+	case logRecordMCPRequest:
+		return logControlMCPRequest, true
 	default:
 		return 0, false
 	}
@@ -252,6 +255,8 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 		case "images", "text":
 			return true
 		}
+	case logControlMCPRequest:
+		return field == "id" || field == "method" || field == "name" || field == "arguments"
 	case logControlLegacyInit:
 		return false
 	}

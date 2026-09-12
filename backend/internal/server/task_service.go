@@ -407,7 +407,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		return s.createDelegatedTask(ctx, sourceID.String(), req)
 	}
 	if req.CaicMCPEnabled && !s.taskMgr.TaskMCPAvailable() {
-		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP requires an explicit external_url"}
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP is unavailable"}
 	}
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {

@@ -1007,7 +1007,7 @@ public struct CreateTaskReq: Codable {
     public let display: Bool?
     public let sudo: Bool?
     public let gitHubToken: Bool?
-    /// Enables task-scoped CAIC MCP; each tool remains server-authorized.
+    /// Enables task-scoped CAIC MCP delegation.
     public let caicMCPEnabled: Bool?
 }
 

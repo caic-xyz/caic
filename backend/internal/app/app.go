@@ -35,7 +35,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
@@ -136,10 +135,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	sessionSecret, err := hex.DecodeString(settings.SessionSecret)
 	if err != nil {
 		return nil, fmt.Errorf("decode session secret: %w", err)
-	}
-	taskMCPTokenIssuer, err := auth.NewTaskMCPTokenIssuer(sessionSecret)
-	if err != nil {
-		return nil, fmt.Errorf("task MCP credentials: %w", err)
 	}
 	trustedProxies, err := cfg.Auth.TrustedProxyPrefixes()
 	if err != nil {
@@ -256,13 +251,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	}
 
 	checkoutRegistry := repo.NewRegistry()
-	var taskMCP task.MCPConfig
-	if oauthConfigured && cfg.Auth.ExternalURL != "" && !isAuto {
-		taskMCP = task.MCPConfig{
-			EndpointURL:  strings.TrimRight(cfg.Auth.ExternalURL, "/") + "/api/caic/v1/mcp",
-			TokenForTask: taskMCPTokenIssuer.Issue,
-		}
-	}
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
 		Log:                 log,
@@ -274,7 +262,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		RuntimeMetadata:     cfg.Runtime.Metadata,
 		RuntimeStartTimeout: time.Hour,
 		Provider:            provider,
-		TaskMCP:             taskMCP,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
@@ -285,24 +272,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			_ = taskMgr.Close()
 		}
 	}()
-	if err := taskMgr.BeginImport(); err != nil {
-		appLog.WarnContext(ctx, "runtime event watch unavailable during startup", "err", err)
-	}
-	instanceCh := make(chan instanceDiscoveryResult, 1)
-	go func() {
-		defer trace.StartRegion(ctx, "list-runtime-instances").End()
-		instances, err := runtimes.List(ctx)
-		instanceCh <- instanceDiscoveryResult{instances, err}
-	}()
-	repoRes := <-repoCh
-	if repoRes.err != nil {
-		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
-	}
-	instanceRes := <-instanceCh
-	if instanceRes.err != nil {
-		return nil, fmt.Errorf("list runtime instances: %w", instanceRes.err)
-	}
-
 	repoStatus := ci.NewRepoStatusStore()
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
@@ -337,7 +306,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		Preferences:                prefsStore,
 		AuthStore:                  authStore,
 		SessionSecret:              sessionSecret,
-		TaskMCPTokenIssuer:         taskMCPTokenIssuer,
 		OAuthPrivateKeyPEM:         []byte(settings.OAuthPrivateKeyPEM),
 		OAuthKeyID:                 settings.OAuthKeyID,
 		OAuthIssuer:                oauthIssuer,
@@ -372,6 +340,23 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	})
 	if err != nil {
 		return nil, err
+	}
+	if err := taskMgr.Start(s.TaskMCPScoper); err != nil {
+		appLog.WarnContext(ctx, "runtime event watch unavailable during startup", "err", err)
+	}
+	instanceCh := make(chan instanceDiscoveryResult, 1)
+	go func() {
+		defer trace.StartRegion(ctx, "list-runtime-instances").End()
+		instances, err := runtimes.List(ctx)
+		instanceCh <- instanceDiscoveryResult{instances, err}
+	}()
+	repoRes := <-repoCh
+	if repoRes.err != nil {
+		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
+	}
+	instanceRes := <-instanceCh
+	if instanceRes.err != nil {
+		return nil, fmt.Errorf("list runtime instances: %w", instanceRes.err)
 	}
 
 	liveBranches := repo.LiveBranchesByRoot(instanceRes.instances)
@@ -411,7 +396,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err != nil {
 		appLog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
-	taskMgr.Start()
 	backgroundTasks := []backgroundTask{}
 	// Task history loads in the background. It is best-effort: it never fails
 	// the server group, only logs its outcome and reports it to the task-list

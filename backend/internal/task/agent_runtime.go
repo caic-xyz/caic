@@ -19,6 +19,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -64,7 +65,7 @@ type AgentRuntime struct {
 	Checkout            *repo.Checkout // nil for no-repository tasks
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration // Timeout for instance start (image pull). Must be non-zero.
-	TaskMCP             MCPConfig
+	MCPRegistry         mcp.Registry  // Task-scoped CAIC MCP registry; nil when disabled.
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
@@ -747,16 +748,6 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	return h, nil
 }
 
-// TaskMCPEnv returns the CAIC MCP connection settings injected into its runtime.
-// The credential is deliberately not exposed through runtime metadata or agent args.
-func (r *AgentRuntime) TaskMCPEnv(t *Task) ([]string, error) {
-	endpoint, token, err := r.mcpCredentials(t)
-	if err != nil || token == "" {
-		return nil, err
-	}
-	return []string{"CAIC_MCP_URL=" + endpoint, "CAIC_MCP_TOKEN=" + token}, nil
-}
-
 func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
 	log, path, err := r.LogStore.Open(t.LogFilename(), t.LogHeader())
 	if err != nil {
@@ -846,12 +837,6 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 		GitHubToken:       resolvedGitHubToken,
 		LogWriter:         provisioningLog,
 	}
-	if mcpEnv, err := r.TaskMCPEnv(t); err != nil {
-		return setupResult{}, err
-	} else if len(mcpEnv) > 0 {
-		opts.ExtraEnv = mcpEnv
-	}
-
 	var repos []runtime.Repo
 	if r.Checkout != nil {
 		repos = t.RuntimeRepos()
@@ -897,24 +882,14 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 	}, nil
 }
 
-func (r *AgentRuntime) mcpCredentials(t *Task) (endpoint, token string, err error) {
-	if !t.CaicMCPEnabled {
-		return "", "", nil
-	}
-	if r.TaskMCP.EndpointURL == "" || r.TaskMCP.TokenForTask == nil {
-		return "", "", errors.New("task-scoped MCP is unavailable")
-	}
-	return r.TaskMCP.EndpointURL, r.TaskMCP.TokenForTask(t.ID.String()), nil
-}
-
 func (r *AgentRuntime) configureTaskMCP(t *Task, opts *agent.Options) error {
 	if !t.CaicMCPEnabled {
 		return nil
 	}
-	if _, _, err := r.mcpCredentials(t); err != nil {
-		return err
+	if r.MCPRegistry == nil {
+		return errors.New("task-scoped MCP is unavailable")
 	}
-	opts.CaicMCPEnabled = true
+	opts.MCP = r.MCPRegistry
 	return nil
 }
 

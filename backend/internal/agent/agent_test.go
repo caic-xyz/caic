@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 )
 
 // testWire implements WireFormat for testing.
@@ -43,6 +46,31 @@ func (s *testLogSink) AppendMessage(m Message) error {
 }
 
 func (*testLogSink) Close() error { return nil }
+
+func TestMCPToolResultResponse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		response, err := MCPToolResultResponse(mcp.RawToolResult{Structured: mcp.TextOutput{Result: "created"}})
+		if err != nil {
+			t.Fatalf("MCPToolResultResponse() error: %v", err)
+		}
+		if got, want := string(response.StructuredContent), `{"result":"created"}`; got != want {
+			t.Errorf("StructuredContent = %s, want %s", got, want)
+		}
+		if got, want := response.Content[0].Text, string(response.StructuredContent); got != want {
+			t.Errorf("content text = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		if _, err := MCPToolResultResponse(mcp.RawToolResult{Structured: math.Inf(1)}); err == nil {
+			t.Fatal("MCPToolResultResponse() accepted a non-JSON result")
+		}
+	})
+}
 
 func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	msg := struct {

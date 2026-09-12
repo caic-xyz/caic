@@ -943,8 +943,8 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		t.Run("valid_schema", func(t *testing.T) {
 			t.Parallel()
 			registry := &mcpRegistry{}
-			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
-			tools, err := registry.Tools(ctx)
+			scopedRegistry := registry.ForTask(ksid.NewID())
+			tools, err := scopedRegistry.Tools(t.Context())
 			if err != nil {
 				t.Fatalf("Tools() error: %v", err)
 			}
@@ -968,8 +968,11 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		t.Run("error_extra_task_properties", func(t *testing.T) {
 			t.Parallel()
 			registry := &mcpRegistry{}
-			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
-			result := registry.handleTaskCreate(ctx, mcpTaskCreateArgs{Prompt: "child", Repos: []string{"repo"}})
+			scopedRegistry := registry.ForTask(ksid.NewID())
+			result, err := scopedRegistry.CallTool(t.Context(), "task_create", json.RawMessage(`{"prompt":"child","repos":["repo"]}`))
+			if err != nil {
+				t.Fatalf("CallTool() error: %v", err)
+			}
 			if !result.IsError {
 				t.Fatal("task-scoped create with repos succeeded, want rejection")
 			}

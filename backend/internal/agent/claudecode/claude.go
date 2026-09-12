@@ -178,15 +178,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
 	var relayArgs []string
-	if opts.CaicMCPEnabled {
+	if opts.MCP != nil {
 		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath, "--allowedTools", "mcp__caic__task_create")
-		relayArgs = append(relayArgs, "--claude-code-caic-mcp-config")
+		relayArgs = append(relayArgs, "--caic-mcp")
 	}
 	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, args)
 	if err != nil {
 		return nil, err
 	}
-	c := agent.Conn(&controlConn{Conn: agent.NewConn(ctx, opts.Logger, rp.Stdin, opts.Log, newWireFormat())})
+	c := agent.Conn(&controlConn{Conn: agent.NewMCPConn(ctx, opts.Logger, rp.Stdin, opts.Log, newWireFormat(), opts.MCP)})
 	return agent.StartSession(ctx, rp, c, opts)
 }
 

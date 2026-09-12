@@ -58,6 +58,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -91,7 +92,46 @@ type Options struct {
 	MsgCh              chan<- TimedMessage // Receives parsed physical records from the agent.
 	Log                LogSink             // Non-nil task-owned physical task-log authority; use DiscardLogSink{Version: version} when persistence is unnecessary.
 	StripEnv           []string            // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
-	CaicMCPEnabled     bool                // Starts the harness with CAIC's task-scoped MCP configuration.
+	MCP                mcp.Registry        // Optional task-scoped CAIC MCP registry.
+}
+
+// MCPRequest is one task-local MCP bridge request.
+type MCPRequest struct {
+	ID        string          `json:"id"`
+	Method    mcp.Method      `json:"method"`
+	Name      string          `json:"name,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// MCPTextContent is one text block in a relayed MCP tool result.
+type MCPTextContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// MCPToolResponse is the MCP-compatible result returned through the task relay.
+type MCPToolResponse struct {
+	Content           []MCPTextContent `json:"content"`
+	IsError           bool             `json:"isError"`
+	StructuredContent json.RawMessage  `json:"structuredContent,omitempty"`
+}
+
+// MCPResponseEnvelope carries one task-local MCP response through the relay.
+type MCPResponseEnvelope struct {
+	Type   string          `json:"t"`
+	ID     string          `json:"id"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// MCPToolsListResponse is the result of a task-local MCP tools/list request.
+type MCPToolsListResponse struct {
+	Tools []mcp.ToolDescriptor `json:"tools"`
+}
+
+// mcpRelayEnvelope identifies a task-local MCP relay control record.
+type mcpRelayEnvelope struct {
+	Type string `json:"t"`
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -143,6 +183,7 @@ type conn struct {
 	log     LogSink
 	version LogVersion
 	wire    WireFormat
+	mcp     mcp.Registry
 	mu      sync.Mutex // serializes stdin writes
 }
 
@@ -156,6 +197,13 @@ func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink L
 	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire}
 }
 
+// NewMCPConn creates a connection that services a task-scoped MCP registry.
+//
+// A nil registry leaves task-local MCP requests unavailable.
+func NewMCPConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat, registry mcp.Registry) Conn {
+	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire, mcp: registry}
+}
+
 func (c *conn) SendPrompt(p Prompt) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -167,6 +215,9 @@ func (c *conn) SendRaw(data []byte) error {
 	defer c.mu.Unlock()
 	if _, err := c.stdin.Write(data); err != nil {
 		return err
+	}
+	if isMCPResponse(data) {
+		return nil
 	}
 	return AppendNativeRecord(c.log, c.version, data)
 }
@@ -182,7 +233,7 @@ func (c *conn) SendCompact(instructions string) error {
 }
 
 func (c *conn) ReadMessages(r io.Reader, msgCh chan<- TimedMessage) error {
-	return DefaultReadMessages(c.ctx, c.logger, r, func(m TimedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage)
+	return defaultReadMessages(c.ctx, c.logger, r, func(m TimedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage, c.handleMCP)
 }
 
 func (c *conn) SendStop(ctx context.Context) {
@@ -201,6 +252,67 @@ func (c *conn) SendStop(ctx context.Context) {
 
 func (c *conn) Close() error {
 	return c.stdin.Close()
+}
+
+func (c *conn) handleMCP(req MCPRequest) error {
+	if c.mcp == nil {
+		return RespondMCP(c, req.ID, nil, errors.New("task-scoped MCP is unavailable"))
+	}
+	if req.Method == mcp.MethodToolsList {
+		tools, err := c.mcp.Tools(c.ctx)
+		return RespondMCP(c, req.ID, MCPToolsListResponse{Tools: tools}, err)
+	}
+	if req.Method == mcp.MethodToolsCall {
+		result, err := c.mcp.CallTool(c.ctx, req.Name, req.Arguments)
+		if err != nil {
+			return RespondMCP(c, req.ID, nil, err)
+		}
+		response, err := MCPToolResultResponse(result)
+		return RespondMCP(c, req.ID, response, err)
+	}
+	return RespondMCP(c, req.ID, nil, fmt.Errorf("unsupported MCP method: %s", req.Method))
+}
+
+// MCPToolResultResponse translates a registry result to the standard MCP tool
+// response shape expected by the local relay clients.
+func MCPToolResultResponse(result mcp.RawToolResult) (MCPToolResponse, error) {
+	data, err := json.Marshal(result.Structured)
+	if err != nil {
+		return MCPToolResponse{}, err
+	}
+	response := MCPToolResponse{
+		Content: []MCPTextContent{{Type: "text", Text: string(data)}},
+		IsError: result.IsError,
+	}
+	if !result.IsError {
+		response.StructuredContent = data
+	}
+	return response, nil
+}
+
+// RespondMCP returns one bridge result to the task-local MCP process.
+func RespondMCP(c Conn, id string, result any, err error) error {
+	response := MCPResponseEnvelope{Type: "mcp_response", ID: id}
+	if result != nil {
+		encoded, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		response.Result = encoded
+	}
+	if err != nil {
+		response.Error = err.Error()
+	}
+	data, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
+		return marshalErr
+	}
+	return c.SendRaw(append(data, '\n'))
+}
+
+func isMCPResponse(data []byte) bool {
+	var envelope mcpRelayEnvelope
+	return json.Unmarshal(data, &envelope) == nil && envelope.Type == "mcp_response"
 }
 
 // Session manages a running agent process. It embeds Conn for wire I/O.
@@ -433,6 +545,7 @@ const (
 	logControlContextCleared
 	logControlText
 	logControlUserInput
+	logControlMCPRequest
 )
 
 var v1LogControlKinds = map[string]logControlKind{
@@ -569,6 +682,15 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&m}, nil
+	case logControlMCPRequest:
+		var m MCPRequestMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		if m.ID == "" || (m.Method != mcp.MethodToolsList && (m.Method != mcp.MethodToolsCall || m.Name == "")) {
+			return nil, fmt.Errorf("decode %s: invalid MCP request", token)
+		}
+		return []Message{&m}, nil
 	default:
 		return nil, fmt.Errorf("decode %s: unknown control kind %d", token, kind)
 	}
@@ -628,6 +750,10 @@ func messageIsNil(msg Message) bool {
 // DefaultReadMessages reads physical relay records, persists each
 // exactly once, and forwards the parser's original TimedMessage wrappers.
 func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage), sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
+	return defaultReadMessages(ctx, log, r, dispatch, sink, version, parseNative, nil)
+}
+
+func defaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage), sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error), handleMCP func(MCPRequest) error) error {
 	if log == nil {
 		return errors.New("logger is required")
 	}
@@ -664,6 +790,14 @@ func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 			continue
 		}
 		for _, msg := range parsed.Messages {
+			if request, ok := msg.Message.(*MCPRequestMessage); ok {
+				if handleMCP != nil {
+					if err := handleMCP(MCPRequest{ID: request.ID, Method: request.Method, Name: request.Name, Arguments: request.Arguments}); err != nil {
+						return fmt.Errorf("respond task-scoped MCP: %w", err)
+					}
+				}
+				continue
+			}
 			if n <= 3 {
 				log.DebugContext(ctx, "parsed message", "n", n, "type", fmt.Sprintf("%T", msg.Message))
 			}
@@ -682,6 +816,7 @@ const (
 	RelayOutputPath             = RelayDir + "/output.jsonl"
 	RelayLogPath                = RelayDir + "/relay.log"
 	ClaudeCodeCaicMCPConfigPath = RelayDir + "/caic-mcp.json"
+	PiCaicMCPExtensionPath      = RelayDir + "/caic-mcp.ts"
 )
 
 // RelayScript selects the embedded script for a validated log version.

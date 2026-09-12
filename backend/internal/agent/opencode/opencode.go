@@ -72,10 +72,12 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // container. It performs the JSON-RPC handshake (initialize → session/new)
 // before returning a Session.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	// TODO: Add task-scoped CAIC MCP support with OpenCode's native per-task
-	// configuration, enabling only task_create without persisting the credential.
 	ocArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
-	rp, err := agent.PrepareRelay(ctx, opts, nil, ocArgs)
+	var relayArgs []string
+	if opts.MCP != nil {
+		relayArgs = append(relayArgs, "--caic-mcp")
+	}
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, ocArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := opts.Logger.With("target", opts.Target.SSHHost)
-	c := agent.NewConn(ctx, log, rp.Stdin, opts.Log, hs.wire)
+	c := agent.NewMCPConn(ctx, log, rp.Stdin, opts.Log, hs.wire, opts.MCP)
 	s := agent.NewSession(ctx, rp.Cmd, c, continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {

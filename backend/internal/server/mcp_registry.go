@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+	"github.com/maruel/ksid"
 	orderedmap "github.com/pb33f/ordered-map/v2"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -81,6 +82,44 @@ type mcpRegistry struct {
 	usage         *usageHandlers
 	notifications *notificationFeed
 	audit         *auditStore
+}
+
+// scopedMCPRegistry binds a server-owned task principal to an MCP registry.
+// Agent session contexts do not carry an MCP principal, and a container must
+// not supply its own task identity. This wrapper therefore makes the registry
+// instance itself the task capability and scopes every registry method.
+type scopedMCPRegistry struct {
+	mcp.Registry
+
+	principal *mcpPrincipal
+}
+
+func (r scopedMCPRegistry) Instructions(ctx context.Context) (string, error) {
+	return r.Registry.Instructions(r.scopedContext(ctx))
+}
+
+func (r scopedMCPRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
+	return r.Registry.Tools(r.scopedContext(ctx))
+}
+
+func (r scopedMCPRegistry) CallTool(ctx context.Context, name string, args json.RawMessage) (mcp.RawToolResult, error) {
+	return r.Registry.CallTool(r.scopedContext(ctx), name, args)
+}
+
+func (r scopedMCPRegistry) ListResources(ctx context.Context) mcp.ResourcesListResult {
+	return r.Registry.ListResources(r.scopedContext(ctx))
+}
+
+func (r scopedMCPRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
+	return r.Registry.ReadResource(r.scopedContext(ctx), uri)
+}
+
+func (r scopedMCPRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
+	return r.Registry.SubscribeResourceUpdates(r.scopedContext(ctx), filter)
+}
+
+func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
+	return newMCPPrincipalContext(ctx, r.principal)
 }
 
 func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
@@ -264,6 +303,11 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 			}
 		}
 	}, nil
+}
+
+// ForTask returns m scoped to id's server-owned task principal.
+func (m *mcpRegistry) ForTask(id ksid.ID) mcp.Registry {
+	return scopedMCPRegistry{Registry: m, principal: &mcpPrincipal{TaskID: id, Remote: true}}
 }
 
 func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {

@@ -1445,7 +1445,7 @@ data class CreateTaskReq(
     val display: Boolean? = null,
     val sudo: Boolean? = null,
     val gitHubToken: Boolean? = null,
-    /** Enables task-scoped CAIC MCP; each tool remains server-authorized. */
+    /** Enables task-scoped CAIC MCP delegation. */
     @SerialName("caicMCPEnabled") val caicMCPEnabled: Boolean? = null,
 )
 
