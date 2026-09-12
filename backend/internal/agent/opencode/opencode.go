@@ -74,49 +74,20 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	// TODO: Add task-scoped CAIC MCP support with OpenCode's native per-task
 	// configuration, enabling only task_create without persisting the credential.
-	if opts.Dir == "" {
-		return nil, errors.New("opts.Dir is required")
-	}
-	sshHost := opts.Target.SSHHost
-	if sshHost == "" {
-		return nil, errors.New("agent connection target missing SSH host")
-	}
-	if err := agent.DeployRelay(ctx, opts.Target, opts.Log.LogVersion()); err != nil {
-		return nil, err
-	}
-
 	ocArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
-
-	sshArgs := make([]string, 0, 8+len(ocArgs))
-	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
-	sshArgs = append(sshArgs, ocArgs...)
-
-	if opts.Logger == nil {
-		return nil, errors.New("opts.Logger is required")
-	}
-	opts.Logger.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", ocArgs)
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
-	stdin, err := cmd.StdinPipe()
+	rp, err := agent.PrepareRelay(ctx, opts, nil, ocArgs)
 	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	cmd.Stderr = &agent.SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay serve-attach", Container: sshHost}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start relay: %w", err)
+		return nil, err
 	}
 
 	// Wrap stdout in a bufio.Reader so the handshake can read line-by-line
 	// without losing buffered bytes for the session's readMessages goroutine.
-	br := bufio.NewReaderSize(stdout, 1<<16)
+	br := bufio.NewReaderSize(rp.Stdout, 1<<16)
 
-	hs, continuation, err := handshake(ctx, stdin, br, opts)
+	hs, continuation, err := handshake(ctx, rp.Stdin, br, opts)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = rp.Cmd.Process.Kill()
+		_ = rp.Cmd.Wait()
 		return nil, fmt.Errorf("opencode handshake: %w", err)
 	}
 	// Emit InitMessage so the task captures session ID, model, and version.
@@ -131,22 +102,22 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		shutdownErr := agent.StopRelay(shutdownCtx, opts.Target)
-		closeErr := stdin.Close()
+		closeErr := rp.Stdin.Close()
 		waitCh := make(chan error, 1)
-		go func() { waitCh <- cmd.Wait() }()
+		go func() { waitCh <- rp.Cmd.Wait() }()
 		var waitErr error
 		select {
 		case waitErr = <-waitCh:
 		case <-shutdownCtx.Done():
-			_ = cmd.Process.Kill()
+			_ = rp.Cmd.Process.Kill()
 			waitErr = <-waitCh
 		}
 		return nil, fmt.Errorf("write session metadata: %w", errors.Join(err, shutdownErr, closeErr, waitErr))
 	}
 
-	log := opts.Logger.With("target", sshHost)
-	c := agent.NewConn(ctx, log, stdin, opts.Log, hs.wire)
-	s := agent.NewSession(ctx, cmd, c, continuation, opts.MsgCh, log)
+	log := opts.Logger.With("target", opts.Target.SSHHost)
+	c := agent.NewConn(ctx, log, rp.Stdin, opts.Log, hs.wire)
+	s := agent.NewSession(ctx, rp.Cmd, c, continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()

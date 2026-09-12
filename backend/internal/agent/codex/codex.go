@@ -85,54 +85,26 @@ func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout i
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	// TODO: Add task-scoped CAIC MCP support with Codex's native per-task
 	// configuration, enabling only mcp__caic__task_create without persisting the credential.
-	if opts.Dir == "" {
-		return nil, errors.New("opts.Dir is required")
-	}
-	sshHost := opts.Target.SSHHost
-	if sshHost == "" {
-		return nil, errors.New("agent connection target missing SSH host")
-	}
-	if err := agent.DeployRelay(ctx, opts.Target, opts.Log.LogVersion()); err != nil {
-		return nil, err
-	}
 	// TODO: re-enable once widget plugin is fixed for codex
 	// if err := deployWidgetMCP(ctx, opts.Target); err != nil {
 	// 	return nil, err
 	// }
 
 	codexArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
-
-	sshArgs := make([]string, 0, 8+len(codexArgs))
-	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
-	sshArgs = append(sshArgs, codexArgs...)
-
-	if opts.Logger == nil {
-		return nil, errors.New("opts.Logger is required")
-	}
-	opts.Logger.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", codexArgs)
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
-	stdin, err := cmd.StdinPipe()
+	rp, err := agent.PrepareRelay(ctx, opts, nil, codexArgs)
 	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	cmd.Stderr = &agent.SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay serve-attach", Container: sshHost}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start relay: %w", err)
+		return nil, err
 	}
 
 	// Wrap stdout in a bufio.Reader so the handshake can read line-by-line
 	// without losing buffered bytes for the session's readMessages goroutine.
-	br := bufio.NewReaderSize(stdout, 1<<16)
+	br := bufio.NewReaderSize(rp.Stdout, 1<<16)
 
-	wire, models, continuation, err := handshake(ctx, stdin, br, opts)
+	wire, models, continuation, err := handshake(ctx, rp.Stdin, br, opts)
 	if err != nil {
 		// Kill the process on handshake failure.
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = rp.Cmd.Process.Kill()
+		_ = rp.Cmd.Wait()
 		return nil, fmt.Errorf("codex handshake: %w", err)
 	}
 	if len(models) > 0 {
@@ -142,13 +114,13 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	initMsg := &agent.InitMessage{SessionID: wire.threadID, ReportedModel: wire.reportedModel, ReportedEffort: wire.reportedEffort, Version: wire.agentVersion}
 	opts.MsgCh <- agent.TimedMessage{Message: initMsg}
 	if err := agent.WriteMetaSession(opts.Log, initMsg); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = rp.Cmd.Process.Kill()
+		_ = rp.Cmd.Wait()
 		return nil, fmt.Errorf("write session metadata: %w", err)
 	}
 
-	log := opts.Logger.With("target", sshHost)
-	s := agent.NewSession(ctx, cmd, agent.NewConn(ctx, log, stdin, opts.Log, wire), continuation, opts.MsgCh, log)
+	log := opts.Logger.With("target", opts.Target.SSHHost)
+	s := agent.NewSession(ctx, rp.Cmd, agent.NewConn(ctx, log, rp.Stdin, opts.Log, wire), continuation, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
