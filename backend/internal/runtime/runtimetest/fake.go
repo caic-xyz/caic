@@ -4,6 +4,7 @@ package runtimetest
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -75,6 +76,7 @@ type FakeBackend struct {
 	mu      sync.Mutex
 	status  map[runtime.ID]InstanceStatus
 	signals map[runtime.ID]SignalDelivery
+	fetches []runtime.FetchOpts
 }
 
 // Ensure the fake satisfies the interface at compile time.
@@ -135,7 +137,19 @@ func (f *FakeBackend) RepositoryStatus(context.Context, runtime.ID, int) (runtim
 }
 
 // Fetch implements runtime.Repository.
-func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID) error { return f.FetchErr }
+func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
+	f.mu.Lock()
+	f.fetches = append(f.fetches, opts)
+	f.mu.Unlock()
+	return f.FetchErr
+}
+
+// Fetches returns the options of every Fetch call, in order.
+func (f *FakeBackend) Fetches() []runtime.FetchOpts {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.fetches)
+}
 
 // Stop implements runtime.Lifecycle.
 func (f *FakeBackend) Stop(ctx context.Context, id runtime.ID) error {

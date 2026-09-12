@@ -242,7 +242,9 @@ func (*modelRefreshRuntime) RepositoryStatus(_ context.Context, _ runtime.ID, _ 
 	return runtime.RepositoryStatus{}, nil
 }
 
-func (*modelRefreshRuntime) Fetch(_ context.Context, _ runtime.ID) error { return nil }
+func (*modelRefreshRuntime) Fetch(_ context.Context, _ runtime.ID, _ runtime.FetchOpts) error {
+	return nil
+}
 
 func (*modelRefreshRuntime) Stop(_ context.Context, _ runtime.ID) error { return nil }
 

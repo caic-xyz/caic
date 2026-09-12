@@ -371,10 +371,19 @@ type Lifecycle interface {
 	Signal(ctx context.Context, id ID, pid int, sig string) error
 }
 
+// FetchOpts configures [Repository.Fetch]. Its zero value fetches only what the
+// instance already committed, which leaves its history and working tree
+// untouched.
+type FetchOpts struct {
+	// Commit commits the instance's pending changes before fetching, so the
+	// host receives them as well.
+	Commit bool
+}
+
 // Repository provides repository operations inside runtime instances.
 type Repository interface {
 	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
-	Fetch(ctx context.Context, id ID) error
+	Fetch(ctx context.Context, id ID, opts FetchOpts) error
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 }

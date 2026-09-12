@@ -1096,6 +1096,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
 					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
 					msg.DiffStat = ds
+					r.recordTurnBoundary(ctx, instanceID)
 				}
 			}
 			stateChanged, generateTitle := t.addParsedMessage(parsed, skipSideEffects)
@@ -1111,6 +1112,21 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 		}
 	}()
 	return msgCh, dispatchDone
+}
+
+// recordTurnBoundary hands the work the finished turn committed to the host,
+// without committing what the turn left pending. The host's tracking ref then
+// records where the branch stood at the end of every turn, and the runtime
+// keeps reporting the pending work separately from the commits.
+//
+// A failure only costs the next turn a wider comparison base, so it is logged
+// and the turn still completes.
+func (r *AgentRuntime) recordTurnBoundary(ctx context.Context, id runtime.ID) {
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.Checkout.GitTimeout)
+	defer cancel()
+	if err := r.Runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{}); err != nil {
+		r.Log.WarnContext(ctx, "recording turn boundary failed", "id", id, "err", err)
+	}
 }
 
 // emitDiffStatBranch emits a DiffStatMessage from the current in-container

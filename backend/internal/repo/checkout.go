@@ -151,7 +151,7 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 	// refresh them first. A failed fetch must abort: pushing a stale ref
 	// would silently drop work done since the last fetch.
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-	err = runtimes.Fetch(fetchCtx, id)
+	err = runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{Commit: true})
 	fetchCancel()
 	// Per-repo diff failures are already logged; the stat only feeds the
 	// result report, so the sync proceeds regardless.
@@ -211,7 +211,7 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 	// first. A failed fetch must abort: squashing a stale ref would silently
 	// drop work done since the last fetch.
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-	err = runtimes.Fetch(fetchCtx, id)
+	err = runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{Commit: true})
 	fetchCancel()
 	// Per-repo diff failures are already logged; the stat only feeds the
 	// result report, so the sync proceeds regardless.

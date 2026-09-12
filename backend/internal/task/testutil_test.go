@@ -128,9 +128,9 @@ type fetchRecorder struct {
 	fetched atomic.Bool
 }
 
-func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID) error {
+func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
 	b.fetched.Store(true)
-	return b.FakeBackend.Fetch(ctx, id)
+	return b.FakeBackend.Fetch(ctx, id, opts)
 }
 
 // recvMsg reads a single message from ch, respecting the test context and a

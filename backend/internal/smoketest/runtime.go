@@ -109,7 +109,7 @@ func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repo
 }
 
 // Fetch implements runtime.Repository.
-func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.ID) error { return nil }
+func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.ID, _ runtime.FetchOpts) error { return nil }
 
 // Stop implements runtime.Lifecycle.
 func (*RuntimeBackend) Stop(_ context.Context, _ runtime.ID) error { return nil }

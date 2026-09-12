@@ -48,8 +48,8 @@ type mdContainer interface {
 	AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error)
 	Launch(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) error
 	Connect(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) (*md.StartResult, error)
-	Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, extraArgs []string) error
-	Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, p genai.Provider) error
+	Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.DiffOpts) error
+	Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) error
 	Stop(ctx context.Context) error
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
 	Revive(ctx context.Context, stdout, stderr io.Writer) error
@@ -232,12 +232,12 @@ func (a mdContainerAdapter) Connect(ctx context.Context, stdout, stderr io.Write
 	return a.c.Connect(ctx, stdout, stderr, opts)
 }
 
-func (a mdContainerAdapter) Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, extraArgs []string) error {
-	return a.c.Diff(ctx, stdout, stderr, repoIdx, extraArgs)
+func (a mdContainerAdapter) Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.DiffOpts) error {
+	return a.c.Diff(ctx, stdout, stderr, repoIdx, opts)
 }
 
-func (a mdContainerAdapter) Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, p genai.Provider) error {
-	return a.c.Fetch(ctx, stdout, stderr, repoIdx, p)
+func (a mdContainerAdapter) Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) error {
+	return a.c.Fetch(ctx, stdout, stderr, repoIdx, opts)
 }
 
 func (a mdContainerAdapter) Stop(ctx context.Context) error { return a.c.Stop(ctx) }
@@ -405,7 +405,9 @@ func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...
 	repo := &repos[repoIdx]
 	b.log.DebugContext(ctx, "md diff", "ctr", name, "dir", repo.GitRoot, "br", primaryBranch(repo), "args", args)
 	var stdout bytes.Buffer
-	if err := ct.Diff(ctx, &stdout, &SlogWriter{Context: ctx, Logger: b.log, Phase: "diff"}, repoIdx, args); err != nil {
+	// The task view shows everything the task did, so it asks for the whole
+	// branch rather than the work since md last synchronized with the host.
+	if err := ct.Diff(ctx, &stdout, &SlogWriter{Context: ctx, Logger: b.log, Phase: "diff"}, repoIdx, &md.DiffOpts{Args: args, Full: true}); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil
@@ -463,7 +465,7 @@ func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx i
 }
 
 // Fetch implements runtime.Repository.
-func (b *Backend) Fetch(ctx context.Context, id runtime.ID) error {
+func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
 	defer trace.StartRegion(ctx, "instance.fetch").End()
 	localID, err := b.localID(id)
 	if err != nil {
@@ -476,10 +478,12 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.ID) error {
 	}
 	repos := ct.Repos()
 	if len(repos) > 0 {
-		b.log.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", primaryBranch(&repos[0]))
+		b.log.DebugContext(ctx, "md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", primaryBranch(&repos[0]), "commit", opts.Commit)
 	}
+	// md ignores the provider unless it commits.
+	mdOpts := &md.FetchOpts{Provider: b.Provider, Commit: opts.Commit}
 	for i := range repos {
-		if err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, b.Provider); err != nil {
+		if err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, mdOpts); err != nil {
 			return err
 		}
 	}

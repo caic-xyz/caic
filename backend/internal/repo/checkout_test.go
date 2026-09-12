@@ -403,9 +403,9 @@ type recordingContainer struct {
 	diffIdxs []int
 }
 
-func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID) error {
+func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
 	c.fetchIDs = append(c.fetchIDs, id)
-	return c.FakeBackend.Fetch(ctx, id)
+	return c.FakeBackend.Fetch(ctx, id, opts)
 }
 
 func (c *recordingContainer) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {

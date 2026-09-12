@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/md"
-	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -37,6 +36,8 @@ type fakeMDContainer struct {
 
 	calls      []string
 	agentPaths []md.AgentPaths
+	diffOpts   *md.DiffOpts
+	fetchOpts  *md.FetchOpts
 	forkOpts   *md.ForkOpts
 }
 
@@ -72,14 +73,16 @@ func (f *fakeMDContainer) Connect(_ context.Context, _, _ io.Writer, _ *md.Start
 	return &md.StartResult{}, nil
 }
 
-func (f *fakeMDContainer) Diff(_ context.Context, _, _ io.Writer, repoIdx int, _ []string) error {
+func (f *fakeMDContainer) Diff(_ context.Context, _, _ io.Writer, repoIdx int, opts *md.DiffOpts) error {
 	f.calls = append(f.calls, "Diff")
 	f.diffIdx = repoIdx
+	f.diffOpts = opts
 	return nil
 }
 
-func (f *fakeMDContainer) Fetch(_ context.Context, _, _ io.Writer, _ int, _ genai.Provider) error {
+func (f *fakeMDContainer) Fetch(_ context.Context, _, _ io.Writer, _ int, opts *md.FetchOpts) error {
 	f.calls = append(f.calls, "Fetch")
+	f.fetchOpts = opts
 	return nil
 }
 
@@ -255,6 +258,9 @@ func TestBackend(t *testing.T) {
 		if ctr.diffIdx != 1 {
 			t.Errorf("Diff repoIdx = %d, want 1", ctr.diffIdx)
 		}
+		if ctr.diffOpts == nil || !ctr.diffOpts.Full || !slices.Equal(ctr.diffOpts.Args, []string{"--numstat"}) {
+			t.Errorf("Diff opts = %+v, want the whole branch with --numstat", ctr.diffOpts)
+		}
 	})
 
 	t.Run("Fetch", func(t *testing.T) {
@@ -265,8 +271,11 @@ func TestBackend(t *testing.T) {
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if err := b.Fetch(t.Context(), "docker:ctr-1"); err != nil {
+		if err := b.Fetch(t.Context(), "docker:ctr-1", runtime.FetchOpts{Commit: true}); err != nil {
 			t.Fatalf("Fetch: %v", err)
+		}
+		if ctr.fetchOpts == nil || !ctr.fetchOpts.Commit {
+			t.Errorf("Fetch opts = %+v, want a commit", ctr.fetchOpts)
 		}
 		if fc.getCalls != 1 || fc.getName != "ctr-1" {
 			t.Fatalf("Get calls = %d name = %q, want 1 ctr-1", fc.getCalls, fc.getName)

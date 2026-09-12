@@ -123,12 +123,12 @@ func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (Repo
 }
 
 // Fetch fetches task repository changes from the owning backend.
-func (r *Router) Fetch(ctx context.Context, id ID) error {
+func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) error {
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
 	}
-	return rt.Fetch(ctx, id)
+	return rt.Fetch(ctx, id, opts)
 }
 
 // Stop gracefully stops a runtime instance on its owning backend.
