@@ -86,7 +86,7 @@ func TestMCPHandlers(t *testing.T) {
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: s.taskHandlers.taskSvc}
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
-		updates, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://repos"}})
+		updates, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://repos/repo"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,8 +102,8 @@ func TestMCPHandlers(t *testing.T) {
 		registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(t.TempDir()))
 		select {
 		case update := <-updateC:
-			if !slices.Equal(update.ResourceURIs, []string{"caic://repos"}) {
-				t.Errorf("ResourceURIs = %v, want [caic://repos]", update.ResourceURIs)
+			if !slices.Equal(update.ResourceURIs, []string{"caic://repos/repo"}) {
+				t.Errorf("ResourceURIs = %v, want [caic://repos/repo]", update.ResourceURIs)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("repository registration did not notify MCP subscribers")
@@ -288,16 +288,40 @@ func TestMCPHandlers(t *testing.T) {
 		if len(tools) == 0 {
 			t.Fatal("tools is empty")
 		}
-		var found bool
+		var foundRepos, foundTasks bool
 		for _, item := range tools {
 			tool, ok := item.(map[string]any)
 			if !ok {
 				t.Fatalf("tool type = %T", item)
 			}
-			if tool["name"] == "tasks_list" {
-				found = true
-				if _, ok := tool["inputSchema"].(map[string]any); !ok {
+			switch tool["name"] {
+			case "repos_list":
+				foundRepos = true
+				inputSchema, ok := tool["inputSchema"].(map[string]any)
+				if !ok {
 					t.Fatalf("inputSchema type = %T", tool["inputSchema"])
+				}
+				properties, ok := inputSchema["properties"].(map[string]any)
+				if !ok || properties["cursor"] == nil || properties["limit"] == nil {
+					t.Fatalf("repos_list input properties = %#v, want cursor and limit", inputSchema["properties"])
+				}
+				limit, ok := properties["limit"].(map[string]any)
+				if !ok || limit["minimum"] != float64(1) || limit["maximum"] != float64(mcpRepoPageSizeMax) {
+					t.Fatalf("repos_list limit schema = %#v", properties["limit"])
+				}
+			case "tasks_list":
+				foundTasks = true
+				inputSchema, ok := tool["inputSchema"].(map[string]any)
+				if !ok {
+					t.Fatalf("inputSchema type = %T", tool["inputSchema"])
+				}
+				properties, ok := inputSchema["properties"].(map[string]any)
+				if !ok || properties["cursor"] == nil || properties["limit"] == nil {
+					t.Fatalf("tasks_list input properties = %#v, want cursor and limit", inputSchema["properties"])
+				}
+				limit, ok := properties["limit"].(map[string]any)
+				if !ok || limit["minimum"] != float64(1) || limit["maximum"] != float64(mcpTaskPageSizeMax) {
+					t.Fatalf("tasks_list limit schema = %#v", properties["limit"])
 				}
 				outputSchema, ok := tool["outputSchema"].(map[string]any)
 				if !ok {
@@ -308,8 +332,8 @@ func TestMCPHandlers(t *testing.T) {
 				}
 			}
 		}
-		if !found {
-			t.Fatal("tasks_list not found")
+		if !foundRepos || !foundTasks {
+			t.Fatalf("list tools found repos=%t tasks=%t, want both", foundRepos, foundTasks)
 		}
 	})
 
@@ -344,7 +368,7 @@ func TestMCPHandlers(t *testing.T) {
 		s := newTestRouter(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["caic://tasks"]}`)
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourcesListChanged":true,"resourceSubscriptions":["gomode://items"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
@@ -360,7 +384,7 @@ func TestMCPHandlers(t *testing.T) {
 		if !strings.Contains(data, `"resourcesListChanged":true`) {
 			t.Fatalf("subscription response = %s, want supported resources list changes acknowledged", data)
 		}
-		if !strings.Contains(data, `"resourceSubscriptions":["caic://tasks"]`) {
+		if !strings.Contains(data, `"resourceSubscriptions":["gomode://items"]`) {
 			t.Fatalf("subscription response = %s, want supported task resource acknowledged", data)
 		}
 		// The acknowledgment is followed by an initial state burst that forces
@@ -371,8 +395,8 @@ func TestMCPHandlers(t *testing.T) {
 		if !strings.Contains(data, `"method":"notifications/resources/list_changed"`) {
 			t.Fatalf("subscription response = %s, want initial resources list_changed", data)
 		}
-		if !strings.Contains(data, `"method":"notifications/resources/updated"`) || !strings.Contains(data, `"uri":"caic://tasks"`) {
-			t.Fatalf("subscription response = %s, want initial caic://tasks update", data)
+		if !strings.Contains(data, `"method":"notifications/resources/updated"`) || !strings.Contains(data, `"uri":"gomode://items"`) {
+			t.Fatalf("subscription response = %s, want initial gomode://items update", data)
 		}
 	})
 
@@ -419,7 +443,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
-		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks", "gomode://notifications"}})
+		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items", "gomode://notifications"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -444,7 +468,7 @@ func TestMCPHandlers(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for subscription change")
 		}
-		if !slices.Equal(update.ResourceURIs, []string{"caic://tasks", "gomode://notifications"}) {
+		if !slices.Equal(update.ResourceURIs, []string{"gomode://items", "gomode://notifications"}) {
 			t.Fatalf("update resource uris = %#v, want task and notification resources", update.ResourceURIs)
 		}
 		cancel()
@@ -612,18 +636,33 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
-	// A resource backend fault is internal; an unknown resource is invalid params.
-	t.Run("resourceReadErrors", func(t *testing.T) {
+	// Client-caused resource errors are invalid params; catalog/backend faults are internal.
+	t.Run("resourceErrors", func(t *testing.T) {
 		t.Parallel()
-		internal := &mcp.Handler{Registry: mcptest.FakeRegistry{ReadErr: errors.New("snapshot failed")}, ServerInfo: mcp.Implementation{Name: "caic"}}
-		_, resp := postMCP(t, internal, "resources/read", "caic://tasks", mcpRequestJSON("resources/read", `"uri":"caic://tasks"`))
-		if resp.Error == nil || resp.Error.Code != mcp.InternalErrorCode {
-			t.Fatalf("error = %#v, want internal error", resp.Error)
+
+		cases := []struct {
+			name     string
+			registry mcptest.FakeRegistry
+			method   string
+			resource string
+			params   string
+			want     mcp.ErrorCode
+		}{
+			{name: "read backend", registry: mcptest.FakeRegistry{ReadErr: errors.New("snapshot failed")}, method: "resources/read", resource: "caic://tasks", params: `"uri":"caic://tasks"`, want: mcp.InternalErrorCode},
+			{name: "read unknown", registry: mcptest.FakeRegistry{ReadErr: mcp.ErrInvalidParams("unknown resource: caic://nope")}, method: "resources/read", resource: "caic://nope", params: `"uri":"caic://nope"`, want: mcp.InvalidParamsCode},
+			{name: "list catalog", registry: mcptest.FakeRegistry{ListErr: errors.New("invalid server catalog")}, method: "resources/list", want: mcp.InternalErrorCode},
+			{name: "list cursor", registry: mcptest.FakeRegistry{ListErr: mcp.ErrInvalidParams("invalid cursor")}, method: "resources/list", params: `"cursor":"bad"`, want: mcp.InvalidParamsCode},
 		}
-		notFound := &mcp.Handler{Registry: mcptest.FakeRegistry{ReadErr: mcp.ErrInvalidParams("unknown resource: caic://nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
-		_, resp = postMCP(t, notFound, "resources/read", "caic://nope", mcpRequestJSON("resources/read", `"uri":"caic://nope"`))
-		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
-			t.Fatalf("error = %#v, want invalid params", resp.Error)
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				h := &mcp.Handler{Registry: tc.registry, ServerInfo: mcp.Implementation{Name: "caic"}}
+				_, resp := postMCP(t, h, tc.method, tc.resource, mcpRequestJSON(tc.method, tc.params))
+				if resp.Error == nil || resp.Error.Code != tc.want {
+					t.Fatalf("error = %#v, want code %d", resp.Error, tc.want)
+				}
+			})
 		}
 	})
 }

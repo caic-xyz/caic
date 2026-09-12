@@ -89,6 +89,9 @@ func configureAccessTokenService(state *Store, keyPEM []byte, kid string, ttl ti
 }
 
 func reconcileSigningKeys(file *storeFile, keyPEM, kid string, ttl time.Duration, now time.Time) (bool, error) {
+	// TODO(observability): Report signing-key ring occupancy, rotations, the
+	// active KID, and the latest verification retirement time at this lifecycle
+	// boundary without exposing private key material.
 	if ttl <= 0 {
 		return false, errors.New("oauth: access token TTL must be positive")
 	}

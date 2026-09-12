@@ -184,7 +184,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 			Installation: github.WebhookInstallation{ID: 1},
 		})
 
-		got, _ := s.repoStatus.StatusFor("org/repo")
+		got, _ := s.repoStatus.StateFor("org/repo")
 		if got.Status != forge.CIStatusSuccess {
 			t.Errorf("repoCIStatus = %q, want %q", got.Status, forge.CIStatusSuccess)
 		}
@@ -208,7 +208,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 			Installation: github.WebhookInstallation{ID: 1},
 		})
 
-		got, ok := s.repoStatus.StatusFor("org/repo")
+		got, ok := s.repoStatus.StateFor("org/repo")
 		if ok || got.Status != "" {
 			t.Errorf("repoCIStatus = %q, ok=%v, want empty (stale event should be ignored)", got.Status, ok)
 		}

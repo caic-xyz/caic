@@ -30,16 +30,19 @@ func TestRepoStatusStore(t *testing.T) {
 		}
 
 		checks[0].Name = "mutated"
-		st, ok := s.StatusFor("a")
+		st, ok := s.StateFor("a")
 		if !ok || st.Status != forge.CIStatusSuccess || st.HeadSHA != "sha1" || st.Checks[0].Name != "test" {
 			t.Fatalf("stored status = %+v, ok=%v", st, ok)
 		}
 		st.Checks[0].Name = "returned-copy-mutated"
-		st, _ = s.StatusFor("a")
+		st, _ = s.StateFor("a")
 		if st.Checks[0].Name != "test" {
-			t.Fatalf("StatusFor leaked checks slice: %+v", st.Checks)
+			t.Fatalf("StateFor leaked checks slice: %+v", st.Checks)
 		}
-
+		status, ok := s.StatusFor("a")
+		if !ok || status != forge.CIStatusSuccess {
+			t.Fatalf("StatusFor = (%q, %t), want (%q, true)", status, ok, forge.CIStatusSuccess)
+		}
 		ch = s.Changed()
 		if s.SetResultIfChanged("a", "sha2", forgecache.Result{Status: forge.CIStatusSuccess}) {
 			t.Fatal("same status should report unchanged")
@@ -49,7 +52,7 @@ func TestRepoStatusStore(t *testing.T) {
 			t.Fatal("Changed channel closed for unchanged status")
 		default:
 		}
-		st, _ = s.StatusFor("a")
+		st, _ = s.StateFor("a")
 		if st.HeadSHA != "sha2" || len(st.Checks) != 0 {
 			t.Fatalf("unchanged status did not update payload: %+v", st)
 		}
@@ -88,7 +91,7 @@ func TestRepoStatusStore(t *testing.T) {
 			}()
 			go func() {
 				defer wg.Done()
-				_, _ = s.StatusFor("r-0")
+				_, _ = s.StateFor("r-0")
 				_ = s.PathsAtSHA([]RepoRef{{RelPath: "r-0", ForgeOwner: "o", ForgeRepo: "p"}}, "o", "p", "sha")
 			}()
 			_ = i

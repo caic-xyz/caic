@@ -43,8 +43,8 @@ func (s *RepoStatusStore) Changed() <-chan struct{} {
 	return ch
 }
 
-// StatusFor returns a copy of the cached CI status for rel.
-func (s *RepoStatusStore) StatusFor(rel string) (RepoCIState, bool) {
+// StateFor returns a copy of the cached CI state for rel.
+func (s *RepoStatusStore) StateFor(rel string) (RepoCIState, bool) {
 	s.mu.RLock()
 	st, ok := s.status[rel]
 	s.mu.RUnlock()
@@ -53,6 +53,14 @@ func (s *RepoStatusStore) StatusFor(rel string) (RepoCIState, bool) {
 	}
 	st.Checks = append([]forge.Check(nil), st.Checks...)
 	return st, true
+}
+
+// StatusFor returns the aggregate cached CI status for rel.
+func (s *RepoStatusStore) StatusFor(rel string) (forge.CIStatus, bool) {
+	s.mu.RLock()
+	st, ok := s.status[rel]
+	s.mu.RUnlock()
+	return st.Status, ok
 }
 
 // SetResultIfChanged stores result for rel and reports whether the status changed.

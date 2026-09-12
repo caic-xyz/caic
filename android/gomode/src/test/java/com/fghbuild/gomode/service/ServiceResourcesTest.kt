@@ -41,11 +41,13 @@ class ServiceResourcesTest {
         assertEquals(GoModeItemsResourceURI, plan.itemsResourceURI)
         assertEquals(listOf(GoModeItemsResourceURI, GoModeNotificationsResourceURI), plan.resourceSubscriptions)
         assertEquals(listOf("i1", "i2", "i3"), snapshot.items.map { it.id })
+        assertEquals(4, snapshot.omittedItemCount)
         assertEquals(listOf("Review plan", "Fix tests"), snapshot.attentionItems.map { it.title })
         assertEquals(2, snapshot.attentionCount)
         assertEquals("2 items need attention", snapshot.notificationText)
         assertTrue(snapshot.voiceContext.contains("Review plan: awaiting input needs attention"))
         assertTrue(snapshot.voiceContext.contains("Build feature: active"))
+        assertTrue(snapshot.voiceContext.contains("4 older items omitted"))
     }
 
     private fun itemsReadResult(text: String) = ResourcesReadResult(
@@ -63,11 +65,11 @@ class ServiceResourcesTest {
 
     private companion object {
         const val ITEMS_JSON = """
-            [
+            {"items": [
               {"id": "i1", "title": "Build feature", "state": "active", "needsAttention": false},
               {"id": "i2", "title": "Review plan", "state": "awaiting input", "needsAttention": true},
               {"id": "i3", "title": "Fix tests", "state": "failed", "needsAttention": true}
-            ]
+            ], "omittedCount": 4}
         """
     }
 }

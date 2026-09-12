@@ -1,12 +1,17 @@
 // Tests for VoiceOverlay voice session connection.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 
-const { connectMock, disconnectMock, voiceState } = vi.hoisted(() => ({
+import type { Task } from "@sdk/types.gen";
+
+const { connectMock, disconnectMock, injectTextMock, taskNumberForIDMock, voiceState } = vi.hoisted(() => ({
   connectMock: vi.fn(),
   disconnectMock: vi.fn(),
+  injectTextMock: vi.fn(),
+  taskNumberForIDMock: vi.fn((id: string) => id === "new-task" ? 2 : 1),
   voiceState: {
     connectStatus: null,
     connected: false,
@@ -27,12 +32,12 @@ const { connectMock, disconnectMock, voiceState } = vi.hoisted(() => ({
 vi.mock("./VoiceSession", () => ({
   voiceSession: {
     state: voiceState,
-    taskNumberMap: { update: vi.fn(), reset: vi.fn() },
+    taskNumberMap: { update: vi.fn(), reset: vi.fn(), toNumber: taskNumberForIDMock },
     excludedTaskIds: new Set<string>(),
     connect: connectMock,
     disconnect: disconnectMock,
     toggleMute: vi.fn(),
-    injectText: vi.fn(),
+    injectText: injectTextMock,
     clearTranscript: vi.fn(),
     enumerateDevices: vi.fn(),
     selectInputDevice: vi.fn(),
@@ -63,6 +68,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   voiceState.connected = false;
 });
+
+function task(id: string, title: string): Task {
+  return { id, state: "running", title } as Task;
+}
 
 describe("VoiceOverlay connection", () => {
   it("calls connect() on mic button click", async () => {
@@ -134,5 +143,25 @@ describe("VoiceOverlay connection", () => {
 
     expect(disconnectMock).toHaveBeenCalledOnce();
     expect(connectMock).not.toHaveBeenCalled();
+  });
+
+  it("injects newly created tasks into an active voice session", async () => {
+    voiceState.connected = true;
+    const [tasks, setTasks] = createSignal([task("existing-task", "Existing work")]);
+    render(() => (
+      <VoiceOverlay
+        tasks={tasks}
+        recentRepo={() => "my-repo"}
+        selectedHarness={() => "claude"}
+        selectedModel={() => "opus"}
+      />
+    ));
+
+    expect(injectTextMock).not.toHaveBeenCalled();
+    setTasks((current) => [...current, task("new-task", "New work")]);
+
+    await waitFor(() => {
+      expect(injectTextMock).toHaveBeenCalledWith("[Task #2 created (New work) — running]");
+    });
   });
 });

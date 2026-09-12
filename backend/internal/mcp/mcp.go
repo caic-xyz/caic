@@ -4,6 +4,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -115,7 +116,8 @@ type Registry interface {
 	Instructions(ctx context.Context) (string, error)
 	Tools(ctx context.Context) ([]ToolDescriptor, error)
 	CallTool(ctx context.Context, name string, args json.RawMessage) (RawToolResult, error)
-	ListResources(ctx context.Context) ResourcesListResult
+	ListResources(ctx context.Context, cursor string) (ResourcesListResult, error)
+	Resources(ctx context.Context) iter.Seq2[ResourceDescriptor, error]
 	ReadResource(ctx context.Context, uri string) (ResourcesReadResult, error)
 	SubscribeResourceUpdates(ctx context.Context, filter SubscriptionFilter) (iter.Seq2[ResourceUpdate, error], error)
 }
@@ -920,13 +922,10 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
-		res := h.Registry.ListResources(ctx)
-		page, next, err := paginate(res.Resources, p.Cursor)
+		res, err := h.Registry.ListResources(ctx, p.Cursor)
 		if err != nil {
-			return nil, rpcError(InvalidParamsCode, err.Error())
+			return nil, registryError(err)
 		}
-		res.Resources = page
-		res.NextCursor = next
 		return res, nil
 	case MethodResourceTemplatesList:
 		var p PaginatedRequestParams
@@ -960,6 +959,10 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 }
 
 func (h *Handler) writeResponse(w http.ResponseWriter, status int, resp JSONRPCResponse) {
+	// TODO(observability): Measure final encoded MCP response bytes and write
+	// failures here, labeled only by method family, status, and result/error.
+	// This transport boundary sees JSON envelope overhead that registry-level
+	// logical result measurements cannot include.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -1106,7 +1109,25 @@ func (h *Handler) subscriptionSnapshot(ctx context.Context, filter SubscriptionF
 }
 
 func (h *Handler) subscriptionResourcesHash(ctx context.Context) string {
-	return stableJSON(h.Registry.ListResources(ctx).Resources)
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, "[")
+	first := true
+	for resource, err := range h.Registry.Resources(ctx) {
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		data, err := json.Marshal(resource)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		if !first {
+			_, _ = io.WriteString(hash, ",")
+		}
+		_, _ = hash.Write(data)
+		first = false
+	}
+	_, _ = io.WriteString(hash, "]")
+	return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
 }
 
 func (h *Handler) subscriptionResourceContentHash(ctx context.Context, uri string) string {
@@ -1327,12 +1348,11 @@ func (h *Handler) dispatchCompat(ctx context.Context, method Method, params json
 		if err := decodeCompatParams(params, &p); err != nil {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
-		res := h.Registry.ListResources(ctx)
-		page, next, err := paginate(res.Resources, p.Cursor)
+		res, err := h.Registry.ListResources(ctx, p.Cursor)
 		if err != nil {
-			return nil, rpcError(InvalidParamsCode, err.Error())
+			return nil, registryError(err)
 		}
-		return compatListResourcesResult{Resources: page, NextCursor: next}, nil
+		return compatListResourcesResult{Resources: res.Resources, NextCursor: res.NextCursor}, nil
 	case MethodResourceTemplatesList:
 		var p PaginatedRequestParams
 		if err := decodeCompatParams(params, &p); err != nil {

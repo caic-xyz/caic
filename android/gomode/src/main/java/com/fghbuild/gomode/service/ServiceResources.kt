@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 data class ServiceMonitoringPlan(
@@ -22,6 +23,7 @@ data class ServiceMonitoringPlan(
 
 data class ServiceMonitoringSnapshot(
     val items: List<ServiceItemSummary>,
+    val omittedItemCount: Int = 0,
 ) {
     val attentionItems: List<ServiceItemSummary>
         get() = items.filter { it.needsAttention }
@@ -38,14 +40,16 @@ data class ServiceMonitoringSnapshot(
 
     val voiceContext: String
         get() {
-            if (items.isEmpty()) return "No visible service items."
-            return items.joinToString(
+            if (items.isEmpty() && omittedItemCount == 0) return "No visible service items."
+            val visibleItems = items.joinToString(
                 separator = "\n",
                 prefix = "Visible service items:\n",
             ) { item ->
                 val attention = if (item.needsAttention) " needs attention" else ""
                 "- ${item.title}: ${item.state}$attention"
             }
+            if (omittedItemCount == 0) return visibleItems
+            return "$visibleItems\n- $omittedItemCount older items omitted"
         }
 }
 
@@ -69,9 +73,16 @@ fun serviceMonitoringPlan(resources: List<ResourceDescriptor>): ServiceMonitorin
 
 fun serviceMonitoringSnapshot(readResults: Map<String, ResourcesReadResult>, plan: ServiceMonitoringPlan): ServiceMonitoringSnapshot {
     val root = Json.parseToJsonElement(resourceText(readResults, plan.itemsResourceURI))
-    require(root is JsonArray) { "resource ${plan.itemsResourceURI} must be a JSON array" }
+    require(root is JsonObject) { "resource ${plan.itemsResourceURI} must be a JSON object" }
+    val items = root["items"] as? JsonArray
+        ?: throw IllegalArgumentException("resource ${plan.itemsResourceURI} is missing items array")
+    val omittedItemCount = root["omittedCount"]?.let { value ->
+        value.jsonPrimitive.intOrNull
+            ?: throw IllegalArgumentException("resource ${plan.itemsResourceURI} has a non-integer omittedCount")
+    } ?: 0
+    require(omittedItemCount >= 0) { "resource ${plan.itemsResourceURI} has a negative omittedCount" }
     return ServiceMonitoringSnapshot(
-        items = root.mapIndexed { index, element ->
+        items = items.mapIndexed { index, element ->
             val item = element as? JsonObject
                 ?: throw IllegalArgumentException("resource ${plan.itemsResourceURI} item $index must be an object")
             ServiceItemSummary(
@@ -81,6 +92,7 @@ fun serviceMonitoringSnapshot(readResults: Map<String, ResourcesReadResult>, pla
                 needsAttention = item["needsAttention"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         },
+        omittedItemCount = omittedItemCount,
     )
 }
 

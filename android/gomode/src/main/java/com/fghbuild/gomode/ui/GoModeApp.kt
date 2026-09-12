@@ -174,6 +174,12 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         serviceMonitor.start(activeURL, ready.settings)
     }
 
+    // Voice item synchronization contract (keep aligned with the browser's
+    // frontend/src/gomode/VoiceOverlay.tsx): seed current items before a session
+    // connects without replaying them as changes, then deliver newly visible
+    // items and meaningful state changes to the active model session. VoiceSession
+    // buffers updates while the model is speaking. Android uses the generic
+    // gomode://items snapshot while the caic browser can emit task-specific deltas.
     LaunchedEffect(serviceMonitorState.voiceContext, voiceSession) {
         voiceSession.setServiceContext(serviceMonitorState.voiceContext)
     }

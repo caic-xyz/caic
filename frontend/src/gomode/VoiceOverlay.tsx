@@ -7,9 +7,14 @@ import CallEndIcon from "@material-symbols/svg-400/outlined/call_end.svg?solid";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 
 import type { Task } from "@sdk/types.gen";
+import {
+  buildTaskCIContext,
+  buildTaskCreatedContext,
+  buildTaskStateContext,
+} from "../voiceTaskContext";
 
 import { voiceSession } from "./VoiceSession";
-import type { VoiceState, TranscriptEntry, VoiceSession } from "./VoiceSession";
+import type { VoiceState, TranscriptEntry } from "./VoiceSession";
 import { setVoiceActive } from "./notifications";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
 import styles from "./VoiceOverlay.module.css";
@@ -43,6 +48,16 @@ export default function VoiceOverlay(props: Props) {
   let prevStates = new Map<string, string>();
   let prevCIStatuses = new Map<string, string | undefined>();
 
+  // Voice task synchronization contract (keep aligned with Android's
+  // ServiceMonitor + GoModeApp): seed the current items when a session starts
+  // without replaying them as changes, then deliver newly visible items and
+  // meaningful state changes to the active model session. Both transports also
+  // buffer updates while the model is speaking.
+  //
+  // This browser path emits caic-specific deltas because it owns Task DTOs and
+  // task numbering. Android rereads the host-neutral gomode://items snapshot.
+  // The payload shape differs, but the observable lifecycle must stay aligned.
+
   // Detect connected→true transition and build snapshot.
   let wasConnected = false;
   createEffect(() => {
@@ -65,14 +80,16 @@ export default function VoiceOverlay(props: Props) {
       setVoiceTaskNumberMap(session.taskNumberMap);
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
-        if (prev !== undefined && prev !== task.state) {
-          const notification = buildNotification(task, session);
+        const taskNumber = session.taskNumberMap.toNumber(task.id);
+        if (prev === undefined && taskNumber !== undefined) {
+          session.injectText(buildTaskCreatedContext(task, taskNumber));
+        } else if (prev !== task.state && taskNumber !== undefined) {
+          const notification = buildTaskStateContext(task, taskNumber);
           if (notification !== null) session.injectText(notification);
         }
         const prevCI = prevCIStatuses.get(task.id);
-        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure") {
-          const notification = buildCIFailureNotification(task, session);
-          if (notification !== null) session.injectText(notification);
+        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
+          session.injectText(buildTaskCIContext(task, taskNumber));
         }
       }
     }
@@ -407,44 +424,4 @@ function TranscriptLog(props: { transcript: TranscriptEntry[]; onClear: () => vo
       </Show>
     </>
   );
-}
-
-// Notification builders (mirror VoiceViewModel.buildNotification / buildCIFailureNotification)
-
-function buildCIFailureNotification(task: Task, session: VoiceSession): string | null {
-  const num = session.taskNumberMap.toNumber(task.id);
-  if (num === undefined) return null;
-  const shortName = task.title || task.id;
-  const pr = task.forgePR ? ` PR #${task.forgePR}` : "";
-  return `[Task #${num} (${shortName})${pr} — CI: failure]`;
-}
-
-function buildNotification(task: Task, session: VoiceSession): string | null {
-  const num = session.taskNumberMap.toNumber(task.id);
-  if (num === undefined) return null;
-  const shortName = task.title || task.id;
-  switch (task.state) {
-    case "asking":
-    case "waiting":
-    case "has_plan":
-      return `[Task #${num} (${shortName}) — ${task.state}]`;
-    case "purged":
-      return task.result ? `[Task #${num} (${shortName}) — completed: ${task.result}]` : null;
-    case "stopped":
-      return `[Task #${num} (${shortName}) — stopped]`;
-    case "crashed":
-      return `[Task #${num} (${shortName}) — crashed: ${task.error ?? "unknown"}]`;
-    case "failed":
-      return `[Task #${num} (${shortName}) — failed: ${task.error ?? "unknown"}]`;
-    case "pending":
-    case "branching":
-    case "provisioning":
-    case "starting":
-    case "running":
-    case "pulling":
-    case "pushing":
-    case "stopping":
-    case "purging":
-      return null;
-  }
 }

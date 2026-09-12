@@ -460,6 +460,17 @@ func (m *Manager) GetEntry(taskID string) (*Entry, bool) {
 	return e, ok
 }
 
+// Entries returns a point-in-time sequence of registered task entries.
+//
+// The iteration order is unspecified. The sequence owns a shallow snapshot,
+// so callers do not hold the manager lock while yielding entries.
+func (m *Manager) Entries() iter.Seq2[string, *Entry] {
+	m.mu.Lock()
+	tasks := maps.Clone(m.tasks)
+	m.mu.Unlock()
+	return maps.All(tasks)
+}
+
 // EffectiveBaseBranch returns the branch the task was forked from.
 func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 	p := t.Primary()

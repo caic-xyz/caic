@@ -28,6 +28,9 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 
 // Allow reports whether key is within the fixed-window request limit.
 func (r *rateLimiter) Allow(key string) bool {
+	// TODO(observability): Record admissions, denials by limit-versus-capacity
+	// reason, and current/max bucket pressure here. Keep caller keys out of
+	// labels because they contain user subjects or network addresses.
 	if r.limit <= 0 || r.window <= 0 {
 		return true
 	}

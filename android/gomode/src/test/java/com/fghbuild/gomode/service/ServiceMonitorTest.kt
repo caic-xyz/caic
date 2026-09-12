@@ -54,10 +54,10 @@ class ServiceMonitorTest {
         val client = FakeServiceResourceClient().apply {
             enqueueReadResult(
                 """
-                    [
+                    {"items": [
                       {"id":"i1","title":"Build feature","state":"active","needsAttention":false},
                       {"id":"i2","title":"Review plan","state":"awaiting input","needsAttention":true}
-                    ]
+                    ]}
                 """.trimIndent(),
             )
         }
@@ -83,10 +83,13 @@ class ServiceMonitorTest {
     }
 
     @Test
-    fun `resource update notifications re-read resources and update state`() = runTest {
+    fun `resource update notifications expose newly created items to voice`() = runTest {
         val client = FakeServiceResourceClient().apply {
-            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"active","needsAttention":false}]""")
-            enqueueReadResult("""[{"id":"i2","title":"Fix tests","state":"failed","needsAttention":true,"needsAttention":true}]""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Build feature","state":"active","needsAttention":false}]}""")
+            enqueueReadResult(
+                """{"items":[{"id":"i2","title":"Fix tests","state":"active","needsAttention":false},""" +
+                    """{"id":"i1","title":"Build feature","state":"active","needsAttention":false}]}""",
+            )
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
         monitor.start("https://service.test", serviceSettings())
@@ -96,7 +99,7 @@ class ServiceMonitorTest {
         advanceUntilIdle()
 
         assertEquals(listOf(GoModeItemsResourceURI, GoModeItemsResourceURI), client.readURIs)
-        assertEquals("Fix tests needs attention", monitor.state.value.notificationText)
+        assertTrue(monitor.state.value.voiceContext?.contains("Fix tests: active") == true)
         assertEquals(listOf(GoModeItemsResourceURI), client.subscriptionFilters.single().resourceSubscriptions)
         assertEquals(true, client.subscriptionFilters.single().resourcesListChanged)
         monitor.stop()
@@ -111,11 +114,11 @@ class ServiceMonitorTest {
                 ResourceDescriptor(uri = GoModeItemsResourceURI, name = "items", mimeType = "application/json"),
                 ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
             )
-            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]}""")
             enqueueNotificationReadResult("[]")
-            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]}""")
             enqueueNotificationReadResult("""[{"id":"event-1","title":"Item ready","body":"Build feature needs your input."}]""")
-            enqueueReadResult("""[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Build feature","state":"awaiting input","needsAttention":true}]}""")
             enqueueNotificationReadResult("""[{"id":"event-1","title":"Item ready","body":"Build feature needs your input."}]""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
@@ -152,7 +155,7 @@ class ServiceMonitorTest {
     fun `startup failures retry and recover`() = runTest {
         val client = FakeServiceResourceClient().apply {
             listFailuresRemaining = 1
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"active","needsAttention":false}]""")
+            enqueueReadResult("""{"items":[{"id":"t1","title":"Build feature","state":"active","needsAttention":false}]}""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
 
@@ -174,8 +177,8 @@ class ServiceMonitorTest {
     fun `closed subscription streams clear stale state and retry`() = runTest {
         val client = FakeServiceResourceClient().apply {
             closeSubscriptionsImmediately = true
-            enqueueReadResult("""[{"id":"t1","title":"Build feature","state":"active","needsAttention":false}]""")
-            enqueueReadResult("""[{"id":"t2","title":"Fix tests","state":"failed","needsAttention":true}]""")
+            enqueueReadResult("""{"items":[{"id":"t1","title":"Build feature","state":"active","needsAttention":false}]}""")
+            enqueueReadResult("""{"items":[{"id":"t2","title":"Fix tests","state":"failed","needsAttention":true}]}""")
         }
         val monitor = ServiceMonitor(this) { _, _ -> client }
 
@@ -381,7 +384,7 @@ class ServiceMonitorTest {
                   {
                     "uri": "gomode://items",
                     "mimeType": "application/json",
-                    "text": "[{\"id\":\"t1\",\"title\":\"Build feature\",\"state\":\"running\"}]"
+                    "text": "{\"items\":[{\"id\":\"t1\",\"title\":\"Build feature\",\"state\":\"running\"}]}"
                   }
                 ],
                 "ttlMs": 1000,

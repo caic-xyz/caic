@@ -971,6 +971,25 @@ func TestManager(t *testing.T) {
 		})
 	})
 
+	t.Run("Entries", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		for range 5 {
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+		}
+		var count int
+		for id, entry := range m.Entries() {
+			if _, ok := m.GetEntry(id); !ok || entry == nil {
+				t.Fatalf("Entries() yielded missing entry %q", id)
+			}
+			count++
+		}
+		if count != 5 {
+			t.Errorf("Entries() yielded %d entries, want 5", count)
+		}
+	})
+
 	t.Run("Changed", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_on_insert", func(t *testing.T) {

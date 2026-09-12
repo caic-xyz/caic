@@ -123,7 +123,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no forge token configured for this repo"}
 	}
 
-	state, ok := h.repoStatus.StatusFor(req.Repo)
+	state, ok := h.repoStatus.StateFor(req.Repo)
 	if !ok || state.Status != forge.CIStatusFailure {
 		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "no CI failure on default branch"}
 	}

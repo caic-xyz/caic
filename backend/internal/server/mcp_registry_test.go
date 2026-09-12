@@ -4,13 +4,18 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/maruel/ksid"
 
@@ -105,7 +110,7 @@ func TestCaicToolRegistryHandleReposList(t *testing.T) {
 	registerRouterCheckout(t, s.checkouts, "repo2", &repo.Checkout{BaseBranch: "develop", Dir: t.TempDir()})
 	c := &mcpRegistry{serverConfig: s.serverHandlers}
 
-	result := c.handleReposList(t.Context(), struct{}{})
+	result := c.handleReposList(t.Context(), mcpRepoListArgs{})
 	if result.IsError {
 		t.Fatalf("handleReposList() returned tool error: %+v", result.Structured)
 	}
@@ -123,10 +128,386 @@ func TestCaicToolRegistryHandleReposList(t *testing.T) {
 	if got[1].Path != "repo2" || got[1].BaseBranch.Name != "develop" {
 		t.Errorf("repositories[1] = %+v, want repo2 on develop", got[1])
 	}
+	invalid := c.handleReposList(t.Context(), mcpRepoListArgs{Limit: mcpRepoPageSizeMax + 1})
+	if !invalid.IsError || invalid.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeBadRequest) {
+		t.Fatalf("invalid limit result = %#v, meta = %#v, want bad request", invalid.Structured, invalid.Meta)
+	}
+}
+
+func TestCaicToolRegistryHandleTasksList(t *testing.T) {
+	t.Parallel()
+
+	s := newTestRouter(t, nil)
+	stoppedID := ksid.NewID()
+	stopped := mustNewTask(t, stoppedID, agent.Prompt{Text: "stopped"}, harness.Claude)
+	stopped.SetState(taskslog.StateStopped)
+	insertTestTask(s, stoppedID.String(), stopped)
+	runningID := ksid.NewID()
+	running := mustNewTask(t, runningID, agent.Prompt{Text: "running"}, harness.Codex)
+	running.SetState(taskslog.StateRunning)
+	insertTestTask(s, runningID.String(), running)
+	registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
+
+	first := registry.handleTasksList(t.Context(), mcpTaskListArgs{Limit: 1})
+	firstOutput, ok := first.Structured.(mcpTaskListOutput)
+	if first.IsError || !ok {
+		t.Fatalf("first page = %#v, want task-list output", first.Structured)
+	}
+	if len(firstOutput.Tasks) != 1 || firstOutput.Tasks[0].TaskNumber != 1 || firstOutput.Tasks[0].State != v1.TaskStateRunning || firstOutput.NextCursor == "" {
+		t.Fatalf("first page = %#v, want running task and a next cursor", firstOutput)
+	}
+
+	second := registry.handleTasksList(t.Context(), mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1})
+	secondOutput, ok := second.Structured.(mcpTaskListOutput)
+	if second.IsError || !ok {
+		t.Fatalf("second page = %#v, want task-list output", second.Structured)
+	}
+	if len(secondOutput.Tasks) != 1 || secondOutput.Tasks[0].TaskNumber != 2 || secondOutput.Tasks[0].State != v1.TaskStateStopped || secondOutput.NextCursor != "" {
+		t.Fatalf("second page = %#v, want stopped task without cursor", secondOutput)
+	}
+	stopped.SetState(taskslog.StateRunning)
+	stale := registry.handleTasksList(t.Context(), mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1})
+	if !stale.IsError {
+		t.Fatal("tasks_list accepted a cursor after another task changed ordering partition")
+	}
+
+	for name, args := range map[string]mcpTaskListArgs{
+		"cursor": {Cursor: "invalid"},
+		"limit":  {Limit: mcpTaskPageSizeMax + 1},
+	} {
+		t.Run("invalid "+name, func(t *testing.T) {
+			t.Parallel()
+			result := registry.handleTasksList(t.Context(), args)
+			if !result.IsError || result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeBadRequest) {
+				t.Fatalf("result = %#v, meta = %#v, want bad-request tool error", result.Structured, result.Meta)
+			}
+		})
+	}
+}
+
+func TestMCPResultBounds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("repository pagination survives earlier insertion", func(t *testing.T) {
+		t.Parallel()
+
+		repositories := []string{"b", "c"}
+		first, next, err := paginateMCPRepositories(repositories, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != 1 || first[0] != "b" || next == "" {
+			t.Fatalf("first page = %#v, cursor = %q", first, next)
+		}
+		repositories = []string{"a", "b", "c"}
+		second, next, err := paginateMCPRepositories(repositories, next, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 || second[0] != "c" || next != "" {
+			t.Fatalf("second page = %#v, cursor = %q", second, next)
+		}
+	})
+
+	t.Run("repository default page size", func(t *testing.T) {
+		t.Parallel()
+
+		paths := make([]string, mcpRepoPageSizeDefault+1)
+		for i := range paths {
+			paths[i] = fmt.Sprintf("repo-%03d", i)
+		}
+		page, next, err := paginateMCPRepositories(paths, "", mcpRepoPageSizeDefault)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) != mcpRepoPageSizeDefault || next == "" {
+			t.Fatalf("page length = %d, cursor = %q, want %d repositories and a cursor", len(page), next, mcpRepoPageSizeDefault)
+		}
+	})
+
+	t.Run("JSON size limit shortens page without losing cursor position", func(t *testing.T) {
+		t.Parallel()
+
+		paths := []string{"a", "b", "c", "d"}
+		repositories := make([]mcpRepoSummary, len(paths))
+		for i, path := range paths {
+			repositories[i] = mcpRepoSummary{Path: path, RemoteURL: strings.Repeat(path, 40)}
+		}
+		cursorForCount := func(count int) (string, error) { return mcpKeyCursor(paths[count-1]), nil }
+		outputForPage := func(page []mcpRepoSummary, cursor string) any {
+			return mcpRepoListOutput{Repositories: page, NextCursor: cursor}
+		}
+		twoItems, err := json.Marshal(outputForPage(repositories[:2], mcpKeyCursor(paths[1])))
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, next, err := fitMCPJSONPage(repositories, false, len(twoItems), cursorForCount, outputForPage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) != 2 || next != mcpKeyCursor("b") {
+			t.Fatalf("bounded page length = %d, cursor = %q, want two items anchored at b", len(page), next)
+		}
+		remaining, next, err := paginateMCPRepositories(paths, next, mcpRepoPageSizeDefault)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(remaining, []string{"c", "d"}) || next != "" {
+			t.Fatalf("remaining page = %#v, cursor = %q, want c and d", remaining, next)
+		}
+	})
+
+	t.Run("collection resources are represented by tools and individual resources", func(t *testing.T) {
+		t.Parallel()
+
+		for _, resource := range mcpStaticResources() {
+			if resource.URI == "caic://repos" || resource.URI == "caic://tasks" {
+				t.Fatalf("aggregate resource %q remains in the static catalog", resource.URI)
+			}
+		}
+	})
+
+	t.Run("repository cursor bounds long paths", func(t *testing.T) {
+		t.Parallel()
+
+		paths := []string{strings.Repeat("a", mcpTaskCursorMaxBytes*2), "z"}
+		first, cursor, err := paginateMCPRepositories(paths, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != 1 || len(cursor) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+			t.Fatalf("first page = %#v, cursor length = %d", first, len(cursor))
+		}
+		second, next, err := paginateMCPRepositories(paths, cursor, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 || second[0] != "z" || next != "" {
+			t.Fatalf("second page = %#v, cursor = %q", second, next)
+		}
+	})
+
+	t.Run("repository cursor rejects removed anchor", func(t *testing.T) {
+		t.Parallel()
+
+		_, cursor, err := paginateMCPRepositories([]string{"a", "b"}, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := paginateMCPRepositories([]string{"b"}, cursor, 1); err == nil {
+			t.Fatal("paginateMCPRepositories() accepted a removed cursor anchor")
+		}
+	})
+
+	t.Run("repository fields", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		longValue := strings.Repeat("€", maxMCPRepoField)
+		checkout := &repo.Checkout{
+			BaseBranch:       longValue,
+			BaseBranchRemote: longValue,
+			Dir:              t.TempDir(),
+			Repository:       &repo.Repository{Remote: "https://example.com/" + longValue},
+		}
+		registerRouterCheckout(t, s.checkouts, "bounded-repo", checkout)
+		registry := &mcpRegistry{serverConfig: s.serverHandlers}
+		result := registry.handleReposList(t.Context(), mcpRepoListArgs{})
+		output, ok := result.Structured.(mcpRepoListOutput)
+		if result.IsError || !ok || len(output.Repositories) != 1 {
+			t.Fatalf("handleReposList() result = %#v", result)
+		}
+		repository := output.Repositories[0]
+		if len(repository.BaseBranch.Name) > maxMCPRepoField || len(repository.BaseBranch.Remote) > maxMCPRepoField || len(repository.RemoteURL) > maxMCPRepoField {
+			t.Fatalf("repository fields exceed limit: %#v", repository)
+		}
+		if !output.FieldsTruncated || result.Meta[mcpTruncatedMetaKey] != true {
+			t.Fatalf("truncation output = %#v, metadata = %#v", output, result.Meta)
+		}
+
+		checkout.RelPath = strings.Repeat("x", maxMCPRepoField+1)
+		if _, _, err := registry.repositorySummary(checkout); !errors.Is(err, errMCPRepositoryPathTooLong) {
+			t.Fatalf("repositorySummary() path error = %v", err)
+		}
+	})
+
+	t.Run("resource pagination survives earlier insertion", func(t *testing.T) {
+		t.Parallel()
+
+		keys := make([]mcpResourceKey, mcpResourcePageSize+1)
+		for i := range keys {
+			keys[i] = mcpResourceKey{URI: fmt.Sprintf("test://resource/%03d/%s", i, strings.Repeat("x", mcpTaskCursorMaxBytes*2))}
+		}
+		first, cursor, err := paginateMCPResourceKeys(keys, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != mcpResourcePageSize || len(cursor) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+			t.Fatalf("first page length = %d, cursor = %q", len(first), cursor)
+		}
+		keys = append([]mcpResourceKey{{URI: "test://resource/-1"}}, keys...)
+		second, next, err := paginateMCPResourceKeys(keys, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 || !strings.HasPrefix(second[0].URI, "test://resource/100/") || next != "" {
+			t.Fatalf("second page = %#v, cursor = %q", second, next)
+		}
+	})
+
+	t.Run("text boundary", func(t *testing.T) {
+		t.Parallel()
+
+		exact := strings.Repeat("a", mcpTextOutputMaxBytes)
+		result := boundedTextToolResult(exact)
+		output, ok := result.Structured.(mcp.TextOutput)
+		if !ok {
+			t.Fatalf("exact boundary result type = %T, want mcp.TextOutput", result.Structured)
+		}
+		if output.Result != exact || result.Meta != nil {
+			t.Fatalf("exact boundary was changed: length = %d, meta = %#v", len(output.Result), result.Meta)
+		}
+
+		overflow := strings.Repeat("a", mcpTextOutputMaxBytes-1) + "€"
+		result = boundedTextToolResult(overflow)
+		output, ok = result.Structured.(mcp.TextOutput)
+		if !ok {
+			t.Fatalf("overflow result type = %T, want mcp.TextOutput", result.Structured)
+		}
+		if len(output.Result) > mcpTextOutputMaxBytes || !strings.Contains(output.Result, "[Output truncated.") {
+			t.Fatalf("overflow result length = %d, value suffix = %q", len(output.Result), output.Result[len(output.Result)-100:])
+		}
+		if got := result.Meta[mcpTruncatedMetaKey]; got != true {
+			t.Fatalf("truncated metadata = %#v, want true", got)
+		}
+		if !utf8.ValidString(output.Result) {
+			t.Fatal("overflow result is not valid UTF-8")
+		}
+	})
+
+	t.Run("resource overflow", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := boundedResourceJSON("caic://large", strings.Repeat("a", mcpResourceJSONMaxBytes-2)); err != nil {
+			t.Fatalf("boundedResourceJSON() rejected exact boundary: %v", err)
+		}
+		_, err := boundedResourceJSON("caic://large", strings.Repeat("a", mcpResourceJSONMaxBytes))
+		if err == nil || !strings.Contains(err.Error(), "256 KiB") {
+			t.Fatalf("boundedResourceJSON() error = %v", err)
+		}
+	})
+
+	t.Run("resource overflow audit", func(t *testing.T) {
+		t.Parallel()
+
+		store := &auditStore{log: testLogger()}
+		registry := &mcpRegistry{audit: store}
+		_, err := registry.resourceJSON(t.Context(), "caic://large", strings.Repeat("a", mcpResourceJSONMaxBytes))
+		if err == nil {
+			t.Fatal("resourceJSON() accepted an oversized resource")
+		}
+		events := store.snapshot()
+		if len(events) != 1 || events[0].Status != "error" {
+			t.Fatalf("audit events = %#v, want one error outcome", events)
+		}
+	})
+
+	t.Run("task summary strings", func(t *testing.T) {
+		t.Parallel()
+
+		tk := v1.Task{Title: strings.Repeat("€", maxMCPTaskTitle), RequestedModel: strings.Repeat("m", maxTaskSummaryModel+1)}
+		summary := taskMCPSummary(1, &tk)
+		if len(summary.Title) > maxMCPTaskTitle || len(summary.Model) > maxTaskSummaryModel {
+			t.Fatalf("summary string lengths = title %d, model %d", len(summary.Title), len(summary.Model))
+		}
+		if !utf8.ValidString(summary.Title) || !strings.HasSuffix(summary.Title, "…") || !strings.HasSuffix(summary.Model, "…") {
+			t.Fatalf("summary strings were not visibly UTF-8 truncated: %#v", summary)
+		}
+
+		resolved := taskMCPSummary(1, &v1.Task{
+			RequestedModel:  "requested-model",
+			RequestedEffort: "high",
+			ReportedModel:   "reported-model",
+			ReportedEffort:  "medium",
+		})
+		if resolved.Model != "reported-model" || resolved.Effort != "medium" {
+			t.Fatalf("resolved settings = %q/%q, want reported-model/medium", resolved.Model, resolved.Effort)
+		}
+	})
+
+	t.Run("resource task title", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		id := ksid.NewID()
+		tk := mustNewTask(t, id, agent.Prompt{Text: "task"}, harness.Claude)
+		tk.SetTitle(strings.Repeat("€", maxMCPTaskTitle))
+		insertTestTask(s, id.String(), tk)
+		registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
+		keys := []mcpResourceKey{{URI: "caic://tasks/" + id.String(), Kind: mcpResourceTask, Value: id.String()}}
+		var yielded bool
+		for resource, err := range registry.resourceDescriptors(t.Context(), keys) {
+			yielded = true
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(resource.Title) > maxMCPTaskTitle || !utf8.ValidString(resource.Title) {
+				t.Fatalf("resource title length = %d, valid UTF-8 = %t", len(resource.Title), utf8.ValidString(resource.Title))
+			}
+			if resource.Meta[mcpTruncatedMetaKey] != true {
+				t.Fatalf("resource metadata = %#v, want truncation marker", resource.Meta)
+			}
+		}
+		if !yielded {
+			t.Fatal("resourceDescriptors() yielded no task resource")
+		}
+	})
+
+	t.Run("resource repository path", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		checkout := &repo.Checkout{Dir: t.TempDir()}
+		registerRouterCheckout(t, s.checkouts, "repo", checkout)
+		checkout.RelPath = strings.Repeat("x", maxMCPRepoField+1)
+		registry := &mcpRegistry{serverConfig: s.serverHandlers}
+
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
+		if _, err := registry.ListResources(ctx, ""); !errors.Is(err, errMCPRepositoryPathTooLong) {
+			t.Fatalf("ListResources() error = %v, want %v", err, errMCPRepositoryPathTooLong)
+		}
+
+		checkout.RelPath = string([]byte{0xff})
+		if _, err := registry.ListResources(ctx, ""); !errors.Is(err, errMCPRepositoryPathInvalidUTF8) || strings.Contains(err.Error(), "512") {
+			t.Fatalf("ListResources() UTF-8 error = %v, want %v without a size diagnosis", err, errMCPRepositoryPathInvalidUTF8)
+		}
+	})
 }
 
 func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 	t.Parallel()
+
+	t.Run("bounds generated title", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := registry.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+			Prompt: strings.Repeat("€", maxMCPTaskTitle),
+			Repos:  []string{"myrepo"},
+		})
+		output, ok := result.Structured.(mcpTaskCreatedOutput)
+		if result.IsError || !ok {
+			t.Fatalf("handleTaskCreate() result = %#v", result)
+		}
+		const prefix = "Created task #1: "
+		if !strings.HasPrefix(output.Result, prefix) || len(strings.TrimPrefix(output.Result, prefix)) > maxMCPTaskTitle {
+			t.Fatalf("created task result length = %d", len(output.Result))
+		}
+		if result.Meta[mcpTruncatedMetaKey] != true || !utf8.ValidString(output.Result) {
+			t.Fatalf("created task metadata = %#v, valid UTF-8 = %t", result.Meta, utf8.ValidString(output.Result))
+		}
+	})
 
 	t.Run("non default harness leaves omitted model and effort unset", func(t *testing.T) {
 		t.Parallel()
@@ -993,7 +1374,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			})
 			t.Run("resource_subscription", func(t *testing.T) {
 				t.Parallel()
-				if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks"}}); err == nil {
+				if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}); err == nil {
 					t.Fatal("task-scoped subscription succeeded")
 				}
 			})

@@ -1,4 +1,4 @@
-// Benchmarks for task snapshots and SSE event replay performance.
+// Benchmarks for task snapshots, MCP result bounding, and SSE event replay performance.
 
 package server
 
@@ -21,6 +21,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
+	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
@@ -41,6 +45,64 @@ func BenchmarkTaskListSnapshot(b *testing.B) {
 	for b.Loop() {
 		if got := len(taskSvc.taskListSnapshot(b.Context())); got != 10 {
 			b.Fatalf("task count = %d, want 10", got)
+		}
+	}
+}
+
+func BenchmarkBoundedTextToolResult(b *testing.B) {
+	text := strings.Repeat("a", mcpTextOutputMaxBytes*2)
+	b.ReportAllocs()
+	b.ReportMetric(float64(len(text)), "input-B/op")
+	b.ResetTimer()
+	for b.Loop() {
+		result := boundedTextToolResult(text)
+		output, ok := result.Structured.(mcp.TextOutput)
+		if result.IsError || !ok || len(output.Result) != mcpTextOutputMaxBytes {
+			b.Fatal("bounded result has unexpected size")
+		}
+	}
+}
+
+func BenchmarkMCPTaskListPage(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for range 100 {
+		id := ksid.NewID()
+		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		insertTestTask(s, id.String(), task)
+	}
+	registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
+	b.ReportAllocs()
+	b.ReportMetric(mcpTaskPageSizeDefault, "tasks/op")
+	b.ResetTimer()
+	for b.Loop() {
+		result := registry.handleTasksList(b.Context(), mcpTaskListArgs{})
+		output, ok := result.Structured.(mcpTaskListOutput)
+		if result.IsError || !ok || len(output.Tasks) != mcpTaskPageSizeDefault {
+			b.Fatal("task-list page has unexpected size")
+		}
+	}
+}
+
+func BenchmarkMCPRepoListPage(b *testing.B) {
+	s := newTestRouter(b, nil)
+	checks := make([]forge.Check, 100)
+	for i := range checks {
+		checks[i].Name = fmt.Sprintf("check-%03d", i)
+	}
+	for i := range mcpRepoPageSizeDefault {
+		path := fmt.Sprintf("repo-%03d", i)
+		registerRouterCheckout(b, s.checkouts, path, &repo.Checkout{BaseBranch: "main", Dir: b.TempDir()})
+		s.repoStatus.SetResultIfChanged(path, "sha", forgecache.Result{Status: forge.CIStatusSuccess, Checks: checks})
+	}
+	registry := &mcpRegistry{serverConfig: s.serverHandlers}
+	b.ReportAllocs()
+	b.ReportMetric(mcpRepoPageSizeDefault, "repos/op")
+	b.ResetTimer()
+	for b.Loop() {
+		result := registry.handleReposList(b.Context(), mcpRepoListArgs{})
+		output, ok := result.Structured.(mcpRepoListOutput)
+		if result.IsError || !ok || len(output.Repositories) != mcpRepoPageSizeDefault {
+			b.Fatal("repository-list page has unexpected size")
 		}
 	}
 }

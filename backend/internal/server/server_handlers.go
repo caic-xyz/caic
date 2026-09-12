@@ -557,7 +557,7 @@ func repoDTO(log *slog.Logger, checkout *repo.Checkout, repoStatus *ci.RepoStatu
 		Forge:      forgeKind,
 	}
 	if repoStatus != nil {
-		if status, ok := repoStatus.StatusFor(checkout.RelPath); ok {
+		if status, ok := repoStatus.StateFor(checkout.RelPath); ok {
 			ciStatus, err := apiconv.CIStatus(status.Status)
 			if err != nil {
 				log.Error("convert repository CI status", "repo", checkout.RelPath, "err", err)

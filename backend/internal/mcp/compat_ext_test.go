@@ -4,6 +4,7 @@ package mcp_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,6 +185,31 @@ func TestCompatHandler(t *testing.T) {
 		// 2026-07-28 revision uses.
 		if _, ok := result["resultType"]; ok {
 			t.Fatalf("released resources/list result leaked resultType: %#v", result)
+		}
+	})
+
+	t.Run("resources_list_errors", func(t *testing.T) {
+		t.Parallel()
+
+		cases := []struct {
+			name   string
+			err    error
+			params string
+			want   mcp.ErrorCode
+		}{
+			{name: "catalog", err: errors.New("invalid server catalog"), want: mcp.InternalErrorCode},
+			{name: "cursor", err: mcp.ErrInvalidParams("invalid cursor"), params: `"cursor":"bad"`, want: mcp.InvalidParamsCode},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				h := &mcp.Handler{Registry: mcptest.FakeRegistry{ListErr: tc.err}, ServerInfo: mcp.Implementation{Name: "caic", Version: "test"}}
+				_, resp := postCompat(t, h, `{"jsonrpc":"2.0","id":4,"method":"resources/list","params":{`+tc.params+`}}`)
+				if resp.Error == nil || resp.Error.Code != tc.want {
+					t.Fatalf("error = %#v, want code %d", resp.Error, tc.want)
+				}
+			})
 		}
 	})
 

@@ -194,6 +194,8 @@ type subscriptionTestRegistry struct {
 	changes    chan struct{}
 	heartbeats chan struct{}
 	callResult RawToolResult
+	listCalls  int
+	seqCalls   int
 }
 
 func newSubscriptionTestRegistry() *subscriptionTestRegistry {
@@ -216,8 +218,38 @@ func (r *subscriptionTestRegistry) CallTool(context.Context, string, json.RawMes
 	return r.callResult, nil
 }
 
-func (r *subscriptionTestRegistry) ListResources(context.Context) ResourcesListResult {
-	return ResourcesListResult{ResultType: ResultTypeComplete, Resources: []ResourceDescriptor{{URI: "test://resource", Name: "resource", MimeType: "application/json"}}}
+func (r *subscriptionTestRegistry) ListResources(context.Context, string) (ResourcesListResult, error) {
+	r.mu.Lock()
+	r.listCalls++
+	r.mu.Unlock()
+	return ResourcesListResult{ResultType: ResultTypeComplete, Resources: []ResourceDescriptor{{URI: "test://resource", Name: "resource", MimeType: "application/json"}}}, nil
+}
+
+func (r *subscriptionTestRegistry) Resources(context.Context) iter.Seq2[ResourceDescriptor, error] {
+	r.mu.Lock()
+	r.seqCalls++
+	r.mu.Unlock()
+	return func(yield func(ResourceDescriptor, error) bool) {
+		yield(ResourceDescriptor{URI: "test://resource", Name: "resource", MimeType: "application/json"}, nil)
+	}
+}
+
+func TestSubscriptionResourcesHash(t *testing.T) {
+	t.Parallel()
+
+	registry := newSubscriptionTestRegistry()
+	h := &Handler{Registry: registry}
+	first := h.subscriptionResourcesHash(t.Context())
+	second := h.subscriptionResourcesHash(t.Context())
+	if first == "" || first != second {
+		t.Fatalf("subscription resource hashes = %q and %q", first, second)
+	}
+	registry.mu.Lock()
+	listCalls, seqCalls := registry.listCalls, registry.seqCalls
+	registry.mu.Unlock()
+	if listCalls != 0 || seqCalls != 2 {
+		t.Fatalf("catalog calls = list %d, sequence %d; want list 0, sequence 2", listCalls, seqCalls)
+	}
 }
 
 func (r *subscriptionTestRegistry) ReadResource(context.Context, string) (ResourcesReadResult, error) {
