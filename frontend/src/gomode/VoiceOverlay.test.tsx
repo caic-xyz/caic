@@ -79,9 +79,6 @@ describe("VoiceOverlay connection", () => {
     render(() => (
       <VoiceOverlay
         tasks={() => []}
-        recentRepo={() => "my-repo"}
-        selectedHarness={() => "claude"}
-        selectedModel={() => "opus"}
       />
     ));
 
@@ -96,9 +93,6 @@ describe("VoiceOverlay connection", () => {
     render(() => (
       <VoiceOverlay
         tasks={() => []}
-        recentRepo={() => "my-repo"}
-        selectedHarness={() => "claude"}
-        selectedModel={() => "opus"}
       />
     ));
 
@@ -114,9 +108,6 @@ describe("VoiceOverlay connection", () => {
         <input aria-label="Prompt" />
         <VoiceOverlay
           tasks={() => []}
-          recentRepo={() => "my-repo"}
-          selectedHarness={() => "claude"}
-          selectedModel={() => "opus"}
         />
       </>
     ));
@@ -133,9 +124,6 @@ describe("VoiceOverlay connection", () => {
     render(() => (
       <VoiceOverlay
         tasks={() => []}
-        recentRepo={() => "my-repo"}
-        selectedHarness={() => "claude"}
-        selectedModel={() => "opus"}
       />
     ));
 
@@ -151,9 +139,6 @@ describe("VoiceOverlay connection", () => {
     render(() => (
       <VoiceOverlay
         tasks={tasks}
-        recentRepo={() => "my-repo"}
-        selectedHarness={() => "claude"}
-        selectedModel={() => "opus"}
       />
     ));
 

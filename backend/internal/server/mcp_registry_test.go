@@ -72,36 +72,6 @@ func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
 	}
 }
 
-func TestVoiceTaskSummaryLineIncludesAgentConfiguration(t *testing.T) {
-	t.Parallel()
-
-	got := voiceTaskSummaryLine(1, &v1.Task{
-		Title:          "Fix the parser",
-		State:          v1.TaskStateRunning,
-		Harness:        v1.HarnessCodex,
-		ReportedModel:  "gpt-5.4",
-		ReportedEffort: "high",
-	})
-	want := "- Task #1: Fix the parser (running, harness: codex, requested model: default, requested effort: default, reported model: gpt-5.4, reported effort: high)"
-	if got != want {
-		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
-	}
-}
-
-func TestVoiceTaskSummaryLineMarksUnspecifiedConfigurationAsDefault(t *testing.T) {
-	t.Parallel()
-
-	got := voiceTaskSummaryLine(1, &v1.Task{
-		Title:   "Fix the parser",
-		State:   v1.TaskStateRunning,
-		Harness: v1.HarnessClaude,
-	})
-	want := "- Task #1: Fix the parser (running, harness: claude, requested model: default, requested effort: default, reported model: default, reported effort: default)"
-	if got != want {
-		t.Fatalf("voiceTaskSummaryLine() = %q, want %q", got, want)
-	}
-}
-
 func TestCaicToolRegistryHandleReposList(t *testing.T) {
 	t.Parallel()
 
@@ -1366,10 +1336,15 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		registry := &mcpRegistry{}
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			t.Run("task_context", func(t *testing.T) {
+			t.Run("voice_session_defaults", func(t *testing.T) {
 				t.Parallel()
-				if got := registry.voiceSessionContext(ctx); got != "[Task information unavailable: missing scope]" {
-					t.Fatalf("voiceSessionContext() = %q", got)
+				if got := registry.voiceSessionDefaults(ctx); got != "" {
+					t.Fatalf("voiceSessionDefaults() = %q, want no task-scoped preference data", got)
+				}
+				readOnlyCtx := newMCPPrincipalContext(ctx, &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
+				readOnlyCtx = auth.NewContext(readOnlyCtx, &auth.User{ID: "user-1"})
+				if got := registry.voiceSessionDefaults(readOnlyCtx); got != "" {
+					t.Fatalf("voiceSessionDefaults() = %q, want no read-only preference data", got)
 				}
 			})
 			t.Run("resource_subscription", func(t *testing.T) {

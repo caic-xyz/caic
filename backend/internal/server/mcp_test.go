@@ -183,12 +183,12 @@ func TestMCPHandlers(t *testing.T) {
 		if !ok {
 			t.Fatalf("instructions type = %T", result["instructions"])
 		}
-		if !strings.Contains(instructions, "[No active tasks]") {
-			t.Fatalf("instructions = %q, want no active tasks snapshot", instructions)
+		if strings.Contains(instructions, "[Current tasks at session start]") {
+			t.Fatalf("instructions duplicate the client-owned task snapshot: %q", instructions)
 		}
 	})
 
-	t.Run("serverDiscoverInstructionsIncludeTaskSnapshot", func(t *testing.T) {
+	t.Run("serverDiscoverInstructionsDoNotIncludeTaskSnapshot", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
@@ -206,10 +206,13 @@ func TestMCPHandlers(t *testing.T) {
 		if !ok {
 			t.Fatalf("instructions type = %T", result["instructions"])
 		}
-		for _, want := range []string{"[Current tasks at session start]", "Task #1", "ship voice prompt"} {
-			if !strings.Contains(instructions, want) {
-				t.Fatalf("instructions missing %q: %q", want, instructions)
+		for _, unwanted := range []string{"[Current tasks at session start]", "Task #1", "ship voice prompt"} {
+			if strings.Contains(instructions, unwanted) {
+				t.Fatalf("instructions include dynamic task data %q: %q", unwanted, instructions)
 			}
+		}
+		if !strings.Contains(instructions, "follow nextCursor until it is absent") {
+			t.Fatalf("instructions lack pagination guidance: %q", instructions)
 		}
 	})
 
@@ -255,9 +258,6 @@ func TestMCPHandlers(t *testing.T) {
 		}
 		if strings.Contains(instructions, "private task prompt") || strings.Contains(instructions, "[Current tasks at session start]") {
 			t.Fatalf("instructions disclose task snapshot: %q", instructions)
-		}
-		if !strings.Contains(instructions, "[Task information unavailable: missing scope]") {
-			t.Fatalf("instructions = %q, want unavailable marker", instructions)
 		}
 	})
 

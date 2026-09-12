@@ -62,7 +62,7 @@ A task has a prompt (what to build), a repo, a branch, and a state:
 - failed: unrecoverable failure; error has the reason
 
 ## Context you have
-At session start this prompt includes a bounded snapshot of current tasks. Use it to answer questions about listed task status without calling tasks_list first. Call tasks_list when the snapshot says tasks were omitted, and call task_get_detail when the user asks for specifics (recent events, diffs).
+If the client provides a bounded current-task snapshot at session start, use it to answer questions about listed task status without calling tasks_list first. When that snapshot says tasks were omitted, call tasks_list and follow nextCursor until it is absent. Without a snapshot, call tasks_list. Call task_get_detail when the user asks for specifics (recent events, diffs).
 
 ## Behavior guidelines
 - Reply only to the current request, in one or two short sentences unless the user explicitly asks for more detail. Speak quickly and omit background, explanations, and summaries that were not requested.
@@ -161,9 +161,11 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 }
 
 func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
-	parts := make([]string, 0, 2)
-	parts = append(parts, caicVoiceSystemInstruction, m.voiceSessionContext(ctx))
-	return strings.Join(parts, "\n\n"), nil
+	out := caicVoiceSystemInstruction
+	if defaults := m.voiceSessionDefaults(ctx); defaults != "" {
+		out += "\n\n" + defaults
+	}
+	return out, nil
 }
 
 func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
@@ -351,11 +353,11 @@ func (m *mcpRegistry) ForTask(id ksid.ID) mcp.Registry {
 	return scopedMCPRegistry{Registry: m, principal: &mcpPrincipal{TaskID: id, Remote: true}}
 }
 
-func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
+func (m *mcpRegistry) voiceSessionDefaults(ctx context.Context) string {
 	if !mcpHasScope(ctx, mcpScopeTasksRead) {
-		return "[Task information unavailable: missing scope]"
+		return ""
 	}
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 2)
 	prefs := m.serverConfig.prefs.Get(userIDFromCtx(ctx))
 	if len(prefs.Repositories) > 0 {
 		parts = append(parts, "[Default repo: "+prefs.Repositories[0].Path+"]")
@@ -363,24 +365,7 @@ func (m *mcpRegistry) voiceSessionContext(ctx context.Context) string {
 	if prefs.Harness != "" {
 		parts = append(parts, "[Default harness: "+prefs.Harness+"]")
 	}
-	taskList := m.taskSvc.taskListSnapshot(ctx)
-	if len(taskList) == 0 {
-		if len(parts) == 0 {
-			return "[No active tasks]"
-		}
-		return strings.Join(parts, "\n")
-	}
-	taskCount := min(len(taskList), mcpTaskPageSizeDefault)
-	lines := make([]string, 0, taskCount+1)
-	for i := range taskList[:taskCount] {
-		lines = append(lines, voiceTaskSummaryLine(i+1, &taskList[i]))
-	}
-	if omitted := len(taskList) - taskCount; omitted > 0 {
-		lines = append(lines, fmt.Sprintf("- … %d more tasks; call tasks_list and follow nextCursor to retrieve them.", omitted))
-	}
-	parts = append(parts, "[Current tasks at session start]\n"+strings.Join(lines, "\n"))
-	text, _ := truncateMCPText(strings.Join(parts, "\n"))
-	return text
+	return strings.Join(parts, "\n")
 }
 
 func (m *mcpRegistry) specs() []mcp.ToolSpec {
@@ -1583,27 +1568,50 @@ func fitMCPJSONPage[T any](
 	if cursor, fits, err := pageFits(len(items), hasMore); err != nil || fits {
 		return items, cursor, err
 	}
+	page, err = fitMCPJSONPrefix(items[:len(items)-1], maxBytes, func(page []T) (any, error) {
+		if len(page) == 0 {
+			return outputForPage(page, ""), nil
+		}
+		cursor, cursorErr := cursorForCount(len(page))
+		return outputForPage(page, cursor), cursorErr
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if len(page) == 0 {
+		return nil, "", errors.New("first page item exceeds JSON response limit")
+	}
+	next, err = cursorForCount(len(page))
+	return page, next, err
+}
 
-	best := 0
-	low, high := 1, len(items)-1
+// fitMCPJSONPrefix returns the largest leading slice whose wrapped JSON fits.
+// outputForPrefix must produce monotonically nondecreasing encoded sizes as the
+// prefix grows so the binary search cannot skip a later, smaller representation.
+func fitMCPJSONPrefix[T any](items []T, maxBytes int, outputForPrefix func([]T) (any, error)) ([]T, error) {
+	best := -1
+	low, high := 0, len(items)
 	for low <= high {
 		middle := low + (high-low)/2
-		_, fits, err := pageFits(middle, true)
+		output, err := outputForPrefix(items[:middle])
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
-		if fits {
+		data, err := json.Marshal(output)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) <= maxBytes {
 			best = middle
 			low = middle + 1
 		} else {
 			high = middle - 1
 		}
 	}
-	if best == 0 {
-		return nil, "", errors.New("first page item exceeds JSON response limit")
+	if best < 0 {
+		return nil, errors.New("empty MCP JSON response exceeds limit")
 	}
-	cursor, _, err := pageFits(best, true)
-	return items[:best], cursor, err
+	return items[:best], nil
 }
 
 func boundedTextToolResult(text string) mcp.ToolResult[mcp.TextOutput] {
@@ -1795,21 +1803,6 @@ func truncateUTF8(text string, maxBytes int) string {
 		end--
 	}
 	return text[:end] + suffix
-}
-
-func voiceTaskSummaryLine(num int, t *v1.Task) string {
-	return fmt.Sprintf("- Task #%d: %s (%s, %s)", num, taskTitle(t), t.State, taskAgentConfiguration(t))
-}
-
-func taskAgentConfiguration(t *v1.Task) string {
-	return fmt.Sprintf("harness: %s, requested model: %s, requested effort: %s, reported model: %s, reported effort: %s", t.Harness, configuredOrDefault(t.RequestedModel), configuredOrDefault(t.RequestedEffort), configuredOrDefault(t.ReportedModel), configuredOrDefault(t.ReportedEffort))
-}
-
-func configuredOrDefault(value string) string {
-	if value == "" {
-		return "default"
-	}
-	return value
 }
 
 func taskTitle(t *v1.Task) string {

@@ -37,6 +37,7 @@ import com.caic.voicegateway.sdk.v1.VoiceRTCOfferReq
 import com.caic.voicegateway.sdk.v1.VoiceRTCSignalingState
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.service.ServiceSettingsClient
+import com.fghbuild.gomode.service.readInitialServiceContext
 import com.fghbuild.mcp.sdk.v1.ToolDescriptor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -177,7 +178,6 @@ class VoiceSession(
     private var reconnectJob: Job? = null
     private val recoveryPolicy = VoiceRecoveryPolicy(MAX_RECONNECT_ATTEMPTS)
     private var recoveryContext = ""
-    private var recoveryServiceInstruction = ""
     private val micEnergySamples = mutableMapOf<String, MicEnergySample>()
 
     @Volatile
@@ -203,7 +203,6 @@ class VoiceSession(
     /** Text notifications buffered while the model is speaking; flushed on turn end. */
     private val pendingNotifications = ArrayList<String>()
 
-    private var serviceContextText: String? = null
     private var lastIceConnectionState: String? = null
     private var lastIceGatheringState: String? = null
     private var lastSignalingState: String? = null
@@ -255,7 +254,6 @@ class VoiceSession(
         if (!preserveTranscript) {
             recoveryPolicy.reset()
             recoveryContext = ""
-            recoveryServiceInstruction = ""
             clearTranscript()
         }
         requestAudioFocus()
@@ -306,8 +304,10 @@ class VoiceSession(
                 )
                 mcpClient = client
                 val systemInstruction = client.serverInstructions().ifBlank { FALLBACK_SYSTEM_INSTRUCTION }
-                recoveryServiceInstruction = systemInstruction
                 mcpTools = client.listTools()
+                // Android owns this captured session baseline; see the canonical contract in
+                // gomode/docs/ANDROID_SHELL.md. connect() repeats the read on recovery.
+                val serviceContextText = readInitialServiceContext(client)
                 val voiceGatewayClient = ApiClient(voiceGatewayEndpointURL)
                 val voiceGatewayHeaders = cookieHeaders(voiceGatewayEndpointURL)
 
@@ -375,7 +375,7 @@ class VoiceSession(
                         if (dc.state() == DataChannel.State.OPEN) {
                             recoveryPolicy.reset()
                             setStatus("Waiting for server…")
-                            sendSetupMessage(systemInstruction)
+                            sendSetupMessage(systemInstruction, serviceContextText)
                         }
                     }
                     override fun onMessage(buffer: DataChannel.Buffer) {
@@ -549,12 +549,7 @@ class VoiceSession(
             if (peerConnection === pc && recoveryPolicy.beginScheduledRecovery()) {
                 speakerActive = false
                 _state.update { it.copy(speaking = false) }
-                recoveryContext = buildNetworkRecoveryContext(
-                    _state.value.transcript,
-                    listOf(recoveryServiceInstruction, serviceContextText.orEmpty())
-                        .filter { it.isNotBlank() }
-                        .joinToString("\n"),
-                )
+                recoveryContext = buildNetworkRecoveryContext(_state.value.transcript)
                 connect(preserveTranscript = true)
             }
         }
@@ -750,15 +745,6 @@ class VoiceSession(
         _state.update { it.copy(transcript = emptyList()) }
     }
 
-    fun setServiceContext(text: String?) {
-        val nextText = text?.takeIf { it.isNotBlank() }
-        if (serviceContextText == nextText) return
-        serviceContextText = nextText
-        if (nextText != null && dataChannel?.state() == DataChannel.State.OPEN) {
-            injectText(nextText)
-        }
-    }
-
     fun injectText(text: String) {
         if (speakerActive) {
             pendingNotifications.add(text)
@@ -791,8 +777,8 @@ class VoiceSession(
         sendClientContent(text)
     }
 
-    private fun sendSetupMessage(systemInstruction: String) {
-        val setup = gatewaySessionSetup(voiceToolDeclarations(mcpTools), systemInstruction)
+    private fun sendSetupMessage(systemInstruction: String, serviceContextText: String) {
+        val setup = gatewaySessionSetup(voiceToolDeclarations(mcpTools), systemInstruction, serviceContextText)
         Log.i(TAG, "sending setup message")
         send(json.encodeToString(SessionSetup.serializer(), setup))
     }
@@ -924,22 +910,6 @@ class VoiceSession(
     private fun gatewayUserMessage(text: String) = UserMessage(
         kind = MessageKind.UserMessage,
         text = text,
-    )
-
-    private fun gatewaySessionSetup(
-        tools: List<ToolDeclaration>,
-        systemInstruction: String,
-    ) = SessionSetup(
-        kind = MessageKind.SessionSetup,
-        voice = VoiceConfig(
-            name = "Orus",
-            language = "en",
-        ),
-        tools = tools,
-        context = com.caic.voicegateway.sdk.v1.Context(
-            systemInstruction = systemInstruction,
-            text = serviceContextText,
-        ),
     )
 
     private fun gatewayToolResult(id: String, name: String, result: JsonElement) = ToolResult(
@@ -1149,13 +1119,9 @@ data class VoiceState(
 /** Build a bounded recovery-only context without replaying unfinished transcript deltas. */
 internal fun buildNetworkRecoveryContext(
     transcript: List<TranscriptEntry>,
-    serviceContext: String,
 ): String {
     val prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn."
-    // Reserve at most one quarter for service state, leaving room for the conversation.
-    val service = serviceContext.trim().take(MAX_RECOVERY_CONTEXT_CHARS / 4)
-    val serviceSection = service.takeIf { it.isNotEmpty() }?.let { "\nCurrent service context:\n$it" }.orEmpty()
-    val availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - serviceSection.length - 24
+    val availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - 24
     val lines = mutableListOf<String>()
     var lineChars = 0
     transcript.asReversed().forEach { entry ->
@@ -1170,8 +1136,25 @@ internal fun buildNetworkRecoveryContext(
     val transcriptSection = lines.takeIf { it.isNotEmpty() }
         ?.joinToString(prefix = "\nFinalized transcript:\n", separator = "\n")
         .orEmpty()
-    return "$prefix$serviceSection$transcriptSection"
+    return "$prefix$transcriptSection"
 }
+
+internal fun gatewaySessionSetup(
+    tools: List<ToolDeclaration>,
+    systemInstruction: String,
+    serviceContextText: String,
+) = SessionSetup(
+    kind = MessageKind.SessionSetup,
+    voice = VoiceConfig(
+        name = "Orus",
+        language = "en",
+    ),
+    tools = tools,
+    context = com.caic.voicegateway.sdk.v1.Context(
+        systemInstruction = systemInstruction,
+        text = serviceContextText,
+    ),
+)
 
 private fun List<TranscriptEntry>.appendChunk(speaker: TranscriptSpeaker, text: String): List<TranscriptEntry> =
     if (isNotEmpty() && last().speaker == speaker && !last().final) {

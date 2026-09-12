@@ -112,6 +112,11 @@ WebRTC client setup, and local execution of active SKILL.md tools. The gateway
 contract and backend split are canonical in
 [`VOICE_GATEWAY.md`](../../gomode/docs/VOICE_GATEWAY.md).
 
+Service-item voice context follows the canonical ownership contract in
+[`ANDROID_SHELL.md`](../../gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership):
+the backend owns authoritative `gomode://items` projection, each client owns its
+session baseline and later deltas, and the voice gateway remains transport-only.
+
 Halo/BLE policy and emulator notes live in [`HALO.md`](HALO.md). Keep Halo state
 service-neutral unless the hosted frontend exposes a shell capability for richer
 status.

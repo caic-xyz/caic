@@ -16,9 +16,6 @@ export default function GoModeBrowserShell() {
     <Show when={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}>
       <VoiceOverlay
         tasks={s.tasks}
-        recentRepo={() => s.repos()[0]?.path ?? ""}
-        selectedHarness={s.selectedHarness}
-        selectedModel={s.selectedModel}
       />
     </Show>
   );

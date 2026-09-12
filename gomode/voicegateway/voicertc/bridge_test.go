@@ -81,7 +81,7 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 	t.Parallel()
 	t.Run("setup", func(t *testing.T) {
 		t.Parallel()
-		got, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"tasks_list","description":"List tasks","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt"}}`))
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"tasks_list","description":"List tasks","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt","text":"Current service items:\n- Task #1: Build (running)"}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,8 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if msg.Setup.GenerationConfig.ThinkingConfig == nil || msg.Setup.GenerationConfig.ThinkingConfig.ThinkingLevel != geminiThinkingLevelLow {
 			t.Errorf("thinking config = %#v, want low", msg.Setup.GenerationConfig.ThinkingConfig)
 		}
-		if len(msg.Setup.SystemInstruction.Parts) != 1 || msg.Setup.SystemInstruction.Parts[0].Text != "system prompt" {
+		if len(msg.Setup.SystemInstruction.Parts) != 2 || msg.Setup.SystemInstruction.Parts[0].Text != "system prompt" ||
+			msg.Setup.SystemInstruction.Parts[1].Text != "Current service items:\n- Task #1: Build (running)" {
 			t.Errorf("system instruction = %#v, want system prompt", msg.Setup.SystemInstruction)
 		}
 		if len(msg.Setup.Tools) != 1 || len(msg.Setup.Tools[0].FunctionDeclarations) != 1 {

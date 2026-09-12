@@ -117,6 +117,14 @@ func buildGeminiSetup(msg *voicev1.SessionSetup) ([]byte, error) {
 			OutputAudioTranscription: geminiAudioTranscriptionConfig{},
 		},
 	}
+	if msg.Context.Text != "" {
+		// The gateway transports opaque client-owned baseline text. It must not
+		// interpret or retain service items; see gomode/docs/ANDROID_SHELL.md.
+		setup.Setup.SystemInstruction.Parts = append(
+			setup.Setup.SystemInstruction.Parts,
+			geminiPart{Text: msg.Context.Text},
+		)
+	}
 	return json.Marshal(setup)
 }
 

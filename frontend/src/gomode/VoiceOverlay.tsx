@@ -21,9 +21,6 @@ import styles from "./VoiceOverlay.module.css";
 
 interface Props {
   tasks: () => Task[];
-  recentRepo: () => string;
-  selectedHarness: () => string;
-  selectedModel: () => string;
 }
 
 /** Bar transition durations (ms): center reacts fastest, outer bars lag. */
@@ -75,8 +72,8 @@ export default function VoiceOverlay(props: Props) {
   // Track task changes and inject notifications while connected.
   createEffect(() => {
     const currentTasks = props.tasks();
+    session.taskNumberMap.update(currentTasks);
     if (session.state.connected) {
-      session.taskNumberMap.update(currentTasks);
       setVoiceTaskNumberMap(session.taskNumberMap);
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
@@ -121,11 +118,7 @@ export default function VoiceOverlay(props: Props) {
       session.disconnect();
     } else {
       await session.enumerateDevices();
-      const tasks = untrack(() => props.tasks());
-      const repo = untrack(() => props.recentRepo());
-      const harness = untrack(() => props.selectedHarness());
-      const model = untrack(() => props.selectedModel());
-      void session.connect(tasks, repo, harness, model);
+      void session.connect();
     }
   };
 

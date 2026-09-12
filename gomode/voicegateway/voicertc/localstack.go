@@ -167,6 +167,9 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 		}
 		s.mu.Lock()
 		s.conv = s.llm.newConversation(msg.Context.SystemInstruction, msg.Tools)
+		if msg.Context.Text != "" {
+			s.conv.addContext(msg.Context.Text)
+		}
 		s.mu.Unlock()
 		s.sink.backendReady(ctx)
 		return nil

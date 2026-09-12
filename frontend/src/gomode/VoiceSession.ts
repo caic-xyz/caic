@@ -2,8 +2,6 @@
 
 import { createStore, produce } from "solid-js/store";
 
-// TODO: Remove references to "Task".
-import type { Task } from "@sdk/types.gen";
 // TODO: Cleanup imports.
 import * as voicegatewaySDK from "@voicegateway-sdk/api.gen";
 import {
@@ -35,8 +33,13 @@ import {
   mcpListTools,
   mcpCallTool,
   mcpServerInstructions,
+  mcpReadAdvertisedTextResource,
   type McpToolDescriptor,
 } from "./McpClient";
+import {
+  GO_MODE_ITEMS_RESOURCE_URI,
+  initialServiceContext,
+} from "./ServiceItems";
 
 // Constants
 
@@ -144,10 +147,9 @@ export class VoiceSession {
   private _pendingNotifications: string[] = [];
   private _setupTimer: ReturnType<typeof setTimeout> | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private _reconnectArgs: [Task[], string, string, string] | null = null;
+  private _reconnectEnabled = false;
   private _reconnectAttempts = 0;
   private _recoveryContext = "";
-  private _recoveryServiceContext = "";
 
   constructor() {
     const [state, setState] = createStore<VoiceState>({
@@ -292,14 +294,12 @@ export class VoiceSession {
   }
 
   /** Start a new voice session via WebRTC data channel through the caic backend. */
-  async connect(
-    tasks: Task[],
-    _recentRepo: string,
-    _defaultHarness: string,
-    _defaultModel: string,
-    preserveTranscript = false,
-  ): Promise<void> {
-    this._reconnectArgs = [tasks, _recentRepo, _defaultHarness, _defaultModel];
+  async connect(): Promise<void> {
+    this._reconnectEnabled = true;
+    await this._connect(false);
+  }
+
+  private async _connect(preserveTranscript: boolean): Promise<void> {
     if (this._reconnectTimer !== null) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -316,15 +316,16 @@ export class VoiceSession {
     this._setStatus("Setting up WebRTC…");
 
     try {
-      const [systemInstruction, mcpTools] = await Promise.all([
+      const [systemInstruction, mcpTools, serviceItemsText] = await Promise.all([
         mcpServerInstructions(),
         mcpListTools(),
+        // Initial service context is advisory. A resource failure must not make
+        // the independent voice transport unavailable.
+        mcpReadAdvertisedTextResource(GO_MODE_ITEMS_RESOURCE_URI).catch(() => null),
       ]);
-
-      // Keep local task numbering aligned with the server-provided voice prompt.
-      this.taskNumberMap.reset();
-      this.taskNumberMap.update(tasks);
-      this._recoveryServiceContext = taskServiceContext(systemInstruction, tasks);
+      // This client owns the bounded session baseline and refreshes it on every
+      // reconnect; see gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
+      const serviceContext = initialServiceContext(serviceItemsText);
 
       // Create PeerConnection.
       const pc = new RTCPeerConnection({
@@ -406,7 +407,7 @@ export class VoiceSession {
       dc.onopen = () => {
         this._reconnectAttempts = 0;
         this._setStatus("Waiting for server…");
-        this._sendSetup(mcpTools, systemInstruction);
+        this._sendSetup(mcpTools, systemInstruction, serviceContext);
       };
 
       dc.onclose = () => {
@@ -456,7 +457,7 @@ export class VoiceSession {
   }
 
   disconnect(): void {
-    this._reconnectArgs = null;
+    this._reconnectEnabled = false;
     if (this._reconnectTimer !== null) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -540,7 +541,7 @@ export class VoiceSession {
   }
 
   private _scheduleReconnect(pc: RTCPeerConnection, reason: string, delay: number): void {
-    if (this._pc !== pc || this._reconnectArgs === null) return;
+    if (this._pc !== pc || !this._reconnectEnabled) return;
     if (this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       this._setError(`Voice connection lost after ${MAX_RECONNECT_ATTEMPTS} recovery attempts`);
       return;
@@ -552,19 +553,15 @@ export class VoiceSession {
     this._setStatus(`${reason}; reconnecting…`);
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      const args = this._reconnectArgs;
-      if (args === null) return;
+      if (!this._reconnectEnabled) return;
       this._reconnectAttempts++;
       this._speakerActive = false;
       this._update((s) => {
         s.speaking = false;
         s.activeTool = null;
       });
-      this._recoveryContext = buildRecoveryContext(
-        this.state.transcript,
-        this._recoveryServiceContext,
-      );
-      void this.connect(...args, true);
+      this._recoveryContext = buildRecoveryContext(this.state.transcript);
+      void this._connect(true);
     }, delay);
   }
 
@@ -654,10 +651,12 @@ export class VoiceSession {
   private _sendSetup(
     tools: McpToolDescriptor[],
     systemInstruction: string,
+    serviceContext: string,
   ): void {
     const setup = gatewaySessionSetup(
       voiceToolDeclarations(tools),
       systemInstruction,
+      serviceContext,
     );
     this._send(JSON.stringify(setup));
   }
@@ -968,16 +967,9 @@ export function formatVoiceRTCDiagnostics(
 /** Build a bounded recovery-only context without replaying unfinished transcript deltas. */
 export function buildRecoveryContext(
   transcript: TranscriptEntry[],
-  serviceContext: string,
 ): string {
   const prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn.";
-  const service = serviceContext.trim();
-  // Reserve at most one quarter for service/task state, leaving room for the conversation.
-  const serviceLimit = Math.floor(MAX_RECOVERY_CONTEXT_CHARS / 4);
-  const serviceSection = service === ""
-    ? ""
-    : `\nCurrent service/task context:\n${service.slice(0, serviceLimit)}`;
-  const availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - serviceSection.length - 24;
+  const availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - 24;
   const lines: string[] = [];
   let lineChars = 0;
   for (const entry of [...transcript].reverse()) {
@@ -988,14 +980,7 @@ export function buildRecoveryContext(
     lineChars += line.length + (lines.length === 1 ? 0 : 1);
   }
   const transcriptSection = lines.length === 0 ? "" : `\nFinalized transcript:\n${lines.join("\n")}`;
-  return `${prefix}${serviceSection}${transcriptSection}`;
-}
-
-function taskServiceContext(systemInstruction: string, tasks: Task[]): string {
-  const taskSummary = tasks
-    .map((task) => `Task ${task.id}: ${task.title} (${task.state})`)
-    .join("\n");
-  return [systemInstruction.trim(), taskSummary].filter((text) => text !== "").join("\n");
+  return `${prefix}${transcriptSection}`;
 }
 
 function gatewayContextUpdate(text: string): ContextUpdate {
@@ -1015,6 +1000,7 @@ function gatewayUserMessage(text: string): UserMessage {
 function gatewaySessionSetup(
   tools: SessionSetup["tools"],
   systemInstruction: string,
+  serviceContext: string,
 ): SessionSetup {
   return {
     kind: MessageKindSessionSetup,
@@ -1025,6 +1011,7 @@ function gatewaySessionSetup(
     tools,
     context: {
       systemInstruction,
+      text: serviceContext,
     },
   };
 }

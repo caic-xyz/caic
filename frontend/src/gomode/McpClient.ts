@@ -1,4 +1,4 @@
-// MCP JSON-RPC client for listing backend tool descriptors and dispatching tool calls via the MCP endpoint.
+// MCP JSON-RPC client for server guidance, tools, and resources used by browser Go Mode.
 
 import { createApiClient as createMcpApiClient } from "@mcp-sdk/api.gen";
 
@@ -94,6 +94,31 @@ export async function mcpListTools(): Promise<McpToolDescriptor[]> {
 
   _toolCache = new Map(tools.map((tool) => [tool.name, tool]));
   return tools;
+}
+
+/** Read a text resource when its URI is advertised to this scoped client. */
+export async function mcpReadAdvertisedTextResource(
+  uri: string,
+): Promise<string | null> {
+  let cursor: string | undefined;
+  let advertised = false;
+  do {
+    const page = (await mcpRequest(
+      "resources/list",
+      cursor === undefined ? {} : { cursor },
+    )) as {
+      resources: Array<{ uri: string }>;
+      nextCursor?: string;
+    };
+    advertised ||= page.resources.some((resource) => resource.uri === uri);
+    cursor = page.nextCursor;
+  } while (!advertised && cursor !== undefined && cursor !== "");
+  if (!advertised) return null;
+
+  const result = (await mcpRequest("resources/read", { uri }, { name: uri })) as {
+    contents: Array<{ uri: string; text?: string }>;
+  };
+  return result.contents.find((content) => content.uri === uri)?.text ?? null;
 }
 
 export interface McpToolResult {

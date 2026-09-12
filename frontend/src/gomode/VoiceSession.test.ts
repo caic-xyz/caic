@@ -11,6 +11,7 @@ const sdkMocks = vi.hoisted(() => ({
 const mcpMocks = vi.hoisted(() => ({
   mcpCallTool: vi.fn(),
   mcpListTools: vi.fn(async () => []),
+  mcpReadAdvertisedTextResource: vi.fn(async () => '{"items":[]}'),
   mcpServerInstructions: vi.fn(async () => "instructions"),
 }));
 
@@ -21,6 +22,7 @@ vi.mock("@voicegateway-sdk/api.gen", () => ({
 vi.mock("./McpClient", () => ({
   mcpCallTool: mcpMocks.mcpCallTool,
   mcpListTools: mcpMocks.mcpListTools,
+  mcpReadAdvertisedTextResource: mcpMocks.mcpReadAdvertisedTextResource,
   mcpServerInstructions: mcpMocks.mcpServerInstructions,
 }));
 
@@ -49,6 +51,7 @@ class FakePeerConnection extends EventTarget {
   static reflexiveCandidateDelayMs: number | null = null;
   static last: FakePeerConnection | null = null;
   static instances: FakePeerConnection[] = [];
+  static dataChannels: FakeDataChannel[] = [];
 
   connectionState: RTCPeerConnectionState = "new";
   iceConnectionState: RTCIceConnectionState = "new";
@@ -66,7 +69,9 @@ class FakePeerConnection extends EventTarget {
   addTrack(): void {}
 
   createDataChannel(): RTCDataChannel {
-    return { close: () => {} } as RTCDataChannel;
+    const channel = new FakeDataChannel();
+    FakePeerConnection.dataChannels.push(channel);
+    return channel as unknown as RTCDataChannel;
   }
 
   createOffer(): Promise<RTCSessionDescriptionInit> {
@@ -114,16 +119,35 @@ class FakePeerConnection extends EventTarget {
   close(): void {}
 }
 
+class FakeDataChannel {
+  readonly send = vi.fn();
+  readyState: RTCDataChannelState = "open";
+  onclose: (() => void) | null = null;
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
+  onopen: (() => void) | null = null;
+
+  close(): void {
+    this.readyState = "closed";
+  }
+}
+
 beforeEach(() => {
   FakePeerConnection.completeICE = true;
   FakePeerConnection.reflexiveCandidateDelayMs = null;
   FakePeerConnection.last = null;
   FakePeerConnection.instances = [];
+  FakePeerConnection.dataChannels = [];
   sdkMocks.closeVoiceRTC.mockReset();
   sdkMocks.diagnoseVoiceRTC.mockReset();
   sdkMocks.voiceRTCOffer.mockReset();
   sdkMocks.voiceRTCOffer.mockResolvedValue({ sdp: "answer-sdp", sessionID: "session-1" });
   mcpMocks.mcpCallTool.mockReset();
+  mcpMocks.mcpListTools.mockReset();
+  mcpMocks.mcpListTools.mockResolvedValue([]);
+  mcpMocks.mcpReadAdvertisedTextResource.mockReset();
+  mcpMocks.mcpReadAdvertisedTextResource.mockResolvedValue('{"items":[]}');
+  mcpMocks.mcpServerInstructions.mockReset();
+  mcpMocks.mcpServerInstructions.mockResolvedValue("instructions");
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection as unknown as typeof RTCPeerConnection);
   vi.stubGlobal("AudioContext", FakeAudioContext as unknown as typeof AudioContext);
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
@@ -190,11 +214,46 @@ describe("VoiceSession", () => {
   it("sends the complete local SDP after ICE gathering", async () => {
     const session = new VoiceSession();
 
-    await session.connect([], "", "", "");
+    await session.connect();
 
     expect(sdkMocks.voiceRTCOffer).toHaveBeenCalledWith({
       sdp: "v=0\r\na=candidate:1 1 udp 2130706431 192.0.2.2 50000 typ host\r\n",
     });
+  });
+
+  it("includes the current bounded service items in session setup", async () => {
+    mcpMocks.mcpReadAdvertisedTextResource.mockResolvedValue(
+      '{"items":[{"id":"1","reference":"Task #1","title":"Build feature","state":"running","needsAttention":false}]}',
+    );
+    const session = new VoiceSession();
+
+    await session.connect();
+    FakePeerConnection.dataChannels[0]?.onopen?.();
+
+    const sent = FakePeerConnection.dataChannels[0]?.send.mock.calls[0]?.[0];
+    expect(JSON.parse(sent as string)).toMatchObject({
+      kind: "session.setup",
+      context: {
+        systemInstruction: "instructions",
+        text: "Current service items:\n- Task #1: Build feature (running)",
+      },
+    });
+  });
+
+  it("starts with an empty baseline when service-item loading fails", async () => {
+    mcpMocks.mcpReadAdvertisedTextResource.mockRejectedValue(
+      new Error("resource unavailable"),
+    );
+    const session = new VoiceSession();
+
+    await session.connect();
+    FakePeerConnection.dataChannels[0]?.onopen?.();
+
+    expect(sdkMocks.voiceRTCOffer).toHaveBeenCalled();
+    const sent = FakePeerConnection.dataChannels[0]?.send.mock.calls[0]?.[0];
+    expect(JSON.parse(sent as string).context.text).toBe(
+      "No visible service items.",
+    );
   });
 
   it("waits briefly for a reflexive candidate without waiting for ICE completion", async () => {
@@ -204,7 +263,7 @@ describe("VoiceSession", () => {
     const session = new VoiceSession();
 
     try {
-      const connect = session.connect([], "", "", "");
+      const connect = session.connect();
       await vi.advanceTimersByTimeAsync(49);
       expect(sdkMocks.voiceRTCOffer).not.toHaveBeenCalled();
 
@@ -232,7 +291,7 @@ describe("VoiceSession", () => {
     const session = new VoiceSession();
 
     try {
-      const connect = session.connect([], "", "", "");
+      const connect = session.connect();
       await vi.waitFor(() => expect(sdkMocks.voiceRTCOffer).toHaveBeenCalled());
 
       await vi.advanceTimersByTimeAsync(15_000);
@@ -258,11 +317,36 @@ function triggerIceState(state: RTCIceConnectionState): void {
 }
 
 describe("voice network recovery", () => {
+  it("fetches a fresh service-item snapshot for reconnect setup", async () => {
+    vi.useFakeTimers();
+    mcpMocks.mcpReadAdvertisedTextResource
+      .mockResolvedValueOnce('{"items":[{"id":"1","title":"Old state","state":"running","needsAttention":false}]}')
+      .mockResolvedValueOnce('{"items":[{"id":"1","title":"Fresh state","state":"waiting","needsAttention":true}]}');
+    const session = new VoiceSession();
+    try {
+      await session.connect();
+      FakePeerConnection.dataChannels[0]?.onopen?.();
+
+      triggerIceState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(FakePeerConnection.dataChannels).toHaveLength(2));
+      FakePeerConnection.dataChannels[1]?.onopen?.();
+
+      const firstSetup = FakePeerConnection.dataChannels[0]?.send.mock.calls[0]?.[0];
+      const secondSetup = FakePeerConnection.dataChannels[1]?.send.mock.calls[0]?.[0];
+      expect(JSON.parse(firstSetup as string).context.text).toContain("Old state");
+      expect(JSON.parse(secondSetup as string).context.text).toContain("Fresh state");
+    } finally {
+      session.disconnect();
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels the disconnected grace recovery when ICE reconnects", async () => {
     vi.useFakeTimers();
     const session = new VoiceSession();
     try {
-      await session.connect([], "", "", "");
+      await session.connect();
       triggerIceState("disconnected");
       expect(session.state.connectStatus).toContain("reconnecting");
 
@@ -281,7 +365,7 @@ describe("voice network recovery", () => {
     vi.useFakeTimers();
     const session = new VoiceSession();
     try {
-      await session.connect([], "", "", "");
+      await session.connect();
       for (let attempt = 1; attempt <= 3; attempt++) {
         triggerIceState("failed");
         await vi.advanceTimersByTimeAsync(0);
@@ -301,7 +385,7 @@ describe("voice network recovery", () => {
     vi.useFakeTimers();
     const session = new VoiceSession();
     try {
-      await session.connect([], "", "", "");
+      await session.connect();
       triggerIceState("disconnected");
       session.disconnect();
       await vi.advanceTimersByTimeAsync(5_000);
@@ -321,11 +405,9 @@ describe("buildRecoveryContext", () => {
         { speaker: "assistant", text: "second", final: true },
         { speaker: "user", text: "partial", final: false },
       ],
-      "active service context",
     );
 
     expect(context).toContain("do not treat this as a new user turn");
-    expect(context).toContain("Current service/task context:\nactive service context");
     expect(context).toContain("user: first\nassistant: second");
     expect(context).not.toContain("partial");
   });
@@ -337,7 +419,6 @@ describe("buildRecoveryContext", () => {
         text: `${index}: ${"x".repeat(600)}`,
         final: true,
       })),
-      "service".repeat(1_000),
     );
 
     expect(context.length).toBeLessThanOrEqual(MAX_RECOVERY_CONTEXT_CHARS);

@@ -3,6 +3,7 @@ package com.fghbuild.gomode.service
 
 import com.fghbuild.mcp.sdk.v1.ResourceDescriptor
 import com.fghbuild.mcp.sdk.v1.ResourcesReadResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -23,6 +24,7 @@ data class ServiceMonitoringPlan(
 
 data class ServiceMonitoringSnapshot(
     val items: List<ServiceItemSummary>,
+    val moreItemsHint: String? = null,
     val omittedItemCount: Int = 0,
 ) {
     val attentionItems: List<ServiceItemSummary>
@@ -40,21 +42,39 @@ data class ServiceMonitoringSnapshot(
 
     val voiceContext: String
         get() {
+            // Android owns this bounded session baseline; see the canonical contract in
+            // gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
             if (items.isEmpty() && omittedItemCount == 0) return "No visible service items."
-            val visibleItems = items.joinToString(
-                separator = "\n",
-                prefix = "Visible service items:\n",
-            ) { item ->
-                val attention = if (item.needsAttention) " needs attention" else ""
-                "- ${item.title}: ${item.state}$attention"
+            // Keep these setup-context limits and formatting aligned with the browser's ServiceItems.ts.
+            val limit = minOf(items.size, MaxInitialServiceItems)
+            var included = 0
+            for (count in 1..limit) {
+                if (formatVoiceContext(count).length > MaxInitialServiceContextChars) break
+                included = count
             }
-            if (omittedItemCount == 0) return visibleItems
-            return "$visibleItems\n- $omittedItemCount older items omitted"
+            return formatVoiceContext(included)
         }
+
+    private fun formatVoiceContext(count: Int): String {
+        val lines = items.take(count).map { item ->
+            val reference = item.reference?.takeIf { it.isNotEmpty() }?.let { "$it: " }.orEmpty()
+            val state = item.state.takeIf { it.isNotEmpty() }?.let {
+                " ($it${if (item.needsAttention) ", needs attention" else ""})"
+            }.orEmpty()
+            "- $reference${item.title}$state"
+        }.toMutableList()
+        val omitted = omittedItemCount + items.size - count
+        if (omitted > 0) {
+            val hint = moreItemsHint?.takeIf { it.isNotEmpty() }?.let { " $it" }.orEmpty()
+            lines += "- … $omitted more items omitted.$hint"
+        }
+        return "Current service items:\n${lines.joinToString("\n")}"
+    }
 }
 
 data class ServiceItemSummary(
     val id: String,
+    val reference: String? = null,
     val title: String,
     val state: String,
     val needsAttention: Boolean,
@@ -87,13 +107,29 @@ fun serviceMonitoringSnapshot(readResults: Map<String, ResourcesReadResult>, pla
                 ?: throw IllegalArgumentException("resource ${plan.itemsResourceURI} item $index must be an object")
             ServiceItemSummary(
                 id = item.requiredString("id", plan.itemsResourceURI, index),
+                reference = item.optionalString("reference"),
                 title = item.requiredString("title", plan.itemsResourceURI, index),
                 state = item.optionalString("state").orEmpty(),
                 needsAttention = item["needsAttention"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         },
+        moreItemsHint = root["moreItemsHint"]?.jsonPrimitive?.contentOrNull?.take(MaxMoreItemsHintChars),
         omittedItemCount = omittedItemCount,
     )
+}
+
+suspend fun readInitialServiceContext(client: ServiceResourceClient): String {
+    return try {
+        val plan = serviceMonitoringPlan(client.listResources()) ?: return "No visible service items."
+        val items = client.readResource(plan.itemsResourceURI)
+        serviceMonitoringSnapshot(mapOf(plan.itemsResourceURI to items), plan).voiceContext
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        // Service context is advisory: resource failures and version skew must
+        // not prevent the otherwise independent voice transport from starting.
+        "No visible service items."
+    }
 }
 
 private fun isJSONResource(resource: ResourceDescriptor): Boolean =
@@ -118,3 +154,6 @@ private fun JsonObject.optionalString(field: String): String? = this[field]?.jso
 internal const val GoModeItemsResourceURI = "gomode://items"
 internal const val GoModeNotificationsResourceURI = "gomode://notifications"
 private const val JsonMimeType = "application/json"
+private const val MaxInitialServiceContextChars = 4000
+private const val MaxInitialServiceItems = 20
+private const val MaxMoreItemsHintChars = 512

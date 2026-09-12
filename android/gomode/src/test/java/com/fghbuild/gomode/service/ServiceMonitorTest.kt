@@ -50,6 +50,28 @@ import java.io.IOException
 @OptIn(ExperimentalCoroutinesApi::class)
 class ServiceMonitorTest {
     @Test
+    fun `initial voice context rereads authoritative items for reconnect`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Old state","state":"active"}]}""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Fresh state","state":"waiting"}]}""")
+        }
+
+        assertTrue(readInitialServiceContext(client).contains("Old state"))
+        assertTrue(readInitialServiceContext(client).contains("Fresh state"))
+        assertEquals(2, client.listCalls)
+        assertEquals(listOf(GoModeItemsResourceURI, GoModeItemsResourceURI), client.readURIs)
+    }
+
+    @Test
+    fun `malformed initial items use an empty voice baseline`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            enqueueReadResult("""{"items":[{"id":"new","title":""}]}""")
+        }
+
+        assertEquals("No visible service items.", readInitialServiceContext(client))
+    }
+
+    @Test
     fun `generic items update native attention notification and voice context state`() = runTest {
         val client = FakeServiceResourceClient().apply {
             enqueueReadResult(
@@ -77,8 +99,6 @@ class ServiceMonitorTest {
         assertEquals("2026-07-28", protocolVersion)
         assertEquals(1, state.attentionCount)
         assertEquals("Review plan needs attention", state.notificationText)
-        assertTrue(state.voiceContext?.contains("Build feature: active") == true)
-        assertTrue(state.voiceContext?.contains("Review plan: awaiting input needs attention") == true)
         monitor.stop()
     }
 
@@ -99,7 +119,6 @@ class ServiceMonitorTest {
         advanceUntilIdle()
 
         assertEquals(listOf(GoModeItemsResourceURI, GoModeItemsResourceURI), client.readURIs)
-        assertTrue(monitor.state.value.voiceContext?.contains("Fix tests: active") == true)
         assertEquals(listOf(GoModeItemsResourceURI), client.subscriptionFilters.single().resourceSubscriptions)
         assertEquals(true, client.subscriptionFilters.single().resourcesListChanged)
         monitor.stop()

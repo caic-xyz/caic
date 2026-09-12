@@ -46,9 +46,6 @@ data class ServiceMonitorState(
 
     val notificationText: String?
         get() = snapshot?.notificationText
-
-    val voiceContext: String?
-        get() = snapshot?.voiceContext
 }
 
 class ServiceMonitor(

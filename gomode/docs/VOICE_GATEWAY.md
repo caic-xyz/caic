@@ -37,6 +37,8 @@ The client owns:
 - local service tool execution for active SKILL.md skills
 - returning tool results over the data channel
 - session close and user cancellation intent
+- the bounded service-context baseline sent in `session.setup.context.text`
+- reconnect refresh, later service-item diffing, and context buffering
 
 The host owns:
 
@@ -45,6 +47,12 @@ The host owns:
 - product APIs
 - hosted frontend content
 - voice token issuance policy
+- authoritative service-item projection and continuation guidance
+
+The gateway treats setup and update context as opaque client-authored text. It
+does not read service MCP resources, interpret service items, diff snapshots, or
+retain service-specific state across sessions. The canonical service-item
+ownership contract is in [`ANDROID_SHELL.md`](ANDROID_SHELL.md#service-item-voice-context-ownership).
 
 ## Deployment Modes
 

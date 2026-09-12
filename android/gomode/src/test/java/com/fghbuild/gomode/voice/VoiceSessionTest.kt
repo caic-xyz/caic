@@ -38,6 +38,18 @@ class VoiceSessionTest {
     }
 
     @Test
+    fun sessionSetupCarriesTheCapturedServiceBaseline() {
+        val setup = gatewaySessionSetup(
+            tools = emptyList(),
+            systemInstruction = "system prompt",
+            serviceContextText = "Current service items:\n- Build (running)",
+        )
+
+        assertEquals("system prompt", setup.context.systemInstruction)
+        assertEquals("Current service items:\n- Build (running)", setup.context.text)
+    }
+
+    @Test
     fun usableICECandidateAcceptsLANAndTailscaleIPv4UDP() {
         assertTrue(isUsableICECandidate("candidate:1 1 udp 2130706431 192.168.1.64 57033 typ host"))
         assertTrue(isUsableICECandidate("candidate:2 1 udp 2121998079 100.99.136.28 57469 typ host"))
@@ -125,11 +137,9 @@ class VoiceSessionTest {
                 TranscriptEntry(TranscriptSpeaker.ASSISTANT, "second", final = true),
                 TranscriptEntry(TranscriptSpeaker.USER, "partial", final = false),
             ),
-            "active service context",
         )
 
         assertTrue(context.contains("do not treat this as a new user turn"))
-        assertTrue(context.contains("Current service context:\nactive service context"))
         assertTrue(context.contains("user: first\nassistant: second"))
         assertFalse(context.contains("partial"))
         assertTrue(context.length <= MAX_RECOVERY_CONTEXT_CHARS)

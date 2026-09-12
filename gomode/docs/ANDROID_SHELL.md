@@ -96,13 +96,40 @@ resource list.
 The shell reads the generic `gomode://items` resource for native status:
 
 - `id`: stable service-item identity
+- `reference`: optional host-authored session-facing reference, such as `Task #3`
 - `title`: user-visible item label
 - `state`: optional user-visible status label
 - `needsAttention`: whether the item requires user attention
+- `omittedCount`: number of authoritative items excluded from the bounded resource
+- `moreItemsHint`: host-authored guidance for retrieving omitted or newer detail
 
 Hosts map product concepts to this schema. The shell parses only this generic
 resource, maps only the native state it needs, and treats all product text as
 untrusted. It does not import product SDK DTOs or hard-code product HTTP routes.
+
+### Service-item voice context ownership
+
+This is the canonical ownership contract for service-item voice context:
+
+- The service backend owns the authoritative `gomode://items` facts, ordering,
+  attention priority, stable references, omission metadata, and continuation
+  guidance. Authorization is enforced before projecting the resource.
+- Each Go Mode client owns the compact baseline placed in its particular voice
+  session setup and bounds untrusted resource text.
+- The voice gateway is transport-only. It forwards the client's opaque initial
+  context to the selected model backend and neither interprets service items nor
+  retains service-specific state.
+
+On reconnect, the client reads or uses the freshest bounded service snapshot in
+the new `session.setup`; conversation recovery context must not duplicate an
+older service snapshot. A missing item resource produces an empty baseline,
+not product-specific fallback behavior in the shell.
+
+Planned client-delta work will cache the latest snapshot for comparison, reset
+that baseline when the session or service identity changes, and derive bounded
+chronological changes from later snapshots rather than repeatedly appending
+complete state. Browser and Android will share transition fixtures and buffer
+delivery around speech.
 
 ## Service Notifications
 
@@ -127,7 +154,9 @@ Voice setup uses the manifest, not product constants:
 3. Open the voice gateway signaling route.
 4. Attach the `voice-gateway` data channel.
 5. Merge active service MCP tools with Android-native tools.
-6. Execute service tool calls locally through the active skill MCP endpoint.
+6. Read and bound the current `gomode://items` baseline.
+7. Send that baseline in `session.setup.context.text` before the first response.
+8. Execute service tool calls locally through the active skill MCP endpoint.
 
 The shell must not branch on Gemini, local stack, Parakeet, Qwen, Gemma, or any
 other provider/runtime.
