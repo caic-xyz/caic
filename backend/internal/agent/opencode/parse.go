@@ -163,14 +163,10 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, fmt.Errorf("current_mode_update: %w", err)
 		}
-		detail := u.ModeName
-		if detail == "" {
-			detail = u.ModeID
-		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
 			Subtype:     "mode_update",
-			Detail:      detail,
+			Detail:      u.CurrentModeID,
 		}}, nil
 
 	case opencode.UpdateSessionInfoUpdate:
@@ -271,11 +267,17 @@ func parseEditInput(raw json.RawMessage) (string, []agent.TextReplacement, bool)
 	}}, true
 }
 
+type toolCallRawOutput struct {
+	Error  string `json:"error"`
+	Output string `json:"output"`
+}
+
 // extractToolError extracts the error message from a failed tool call update.
 // It checks rawOutput.error first (structured), then falls back to content text.
 func extractToolError(u *opencode.ToolCallUpdateUpdate) string {
-	if u.RawOutput != nil && u.RawOutput.Error != "" {
-		return u.RawOutput.Error
+	raw := decodeToolCallRawOutput(u.RawOutput)
+	if raw.Error != "" {
+		return raw.Error
 	}
 	for i := range u.Content {
 		if u.Content[i].Type == "content" && u.Content[i].Content.Text != "" {
@@ -288,8 +290,9 @@ func extractToolError(u *opencode.ToolCallUpdateUpdate) string {
 // extractToolOutputDelta extracts streaming output from an in-progress tool call.
 // It checks rawOutput.output first (structured), then falls back to content text.
 func extractToolOutputDelta(u *opencode.ToolCallUpdateUpdate) string {
-	if u.RawOutput != nil && u.RawOutput.Output != "" {
-		return u.RawOutput.Output
+	raw := decodeToolCallRawOutput(u.RawOutput)
+	if raw.Output != "" {
+		return raw.Output
 	}
 	for i := range u.Content {
 		if u.Content[i].Type == "content" && u.Content[i].Content.Text != "" {
@@ -297,6 +300,12 @@ func extractToolOutputDelta(u *opencode.ToolCallUpdateUpdate) string {
 		}
 	}
 	return ""
+}
+
+func decodeToolCallRawOutput(data json.RawMessage) toolCallRawOutput {
+	var raw toolCallRawOutput
+	_ = json.Unmarshal(data, &raw)
+	return raw
 }
 
 // parsePlanUpdate converts a plan update to a TodoMessage.

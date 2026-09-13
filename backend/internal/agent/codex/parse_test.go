@@ -795,6 +795,18 @@ func TestParseMessage(t *testing.T) {
 			t.Fatalf("msgs = %d, want no quota event for an active goal", len(msgs))
 		}
 	})
+
+	t.Run("ThreadGoalCleared", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"method":"thread/goal/cleared","params":{"threadId":"thread-1"}}`)
+		msgs, err := parseMessage(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("messages = %#v, want none", msgs)
+		}
+	})
 	t.Run("AccountIndividualLimit", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"individualLimit":{"limit":"100","used":"100","remainingPercent":0,"resetsAt":1735689720},"spendControlReached":true}}}`

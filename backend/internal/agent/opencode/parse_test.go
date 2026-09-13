@@ -559,8 +559,7 @@ func TestParseMessage(t *testing.T) {
 				"sessionId": "ses_1",
 				"update": map[string]any{
 					"sessionUpdate": "current_mode_update",
-					"modeId":        "ask",
-					"modeName":      "Ask Mode",
+					"currentModeId": "ask",
 				},
 			},
 		})
@@ -578,8 +577,8 @@ func TestParseMessage(t *testing.T) {
 		if sm.Subtype != "mode_update" {
 			t.Errorf("Subtype = %q", sm.Subtype)
 		}
-		if sm.Detail != "Ask Mode" {
-			t.Errorf("Detail = %q, want %q", sm.Detail, "Ask Mode")
+		if sm.Detail != "ask" {
+			t.Errorf("Detail = %q, want %q", sm.Detail, "ask")
 		}
 	})
 

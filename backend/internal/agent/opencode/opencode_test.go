@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -146,26 +145,6 @@ func TestHandshake(t *testing.T) {
 			t.Fatalf("v2 handshake = session=%q model=%q", hs.wire.sessionID, hs.currentModel)
 		}
 	})
-
-	t.Run("retains default model when legacy selection fails", func(t *testing.T) {
-		t.Parallel()
-
-		const defaultModel = "anthropic/claude-sonnet-4"
-		var stdin bytes.Buffer
-		stdout := bufio.NewReader(strings.NewReader(strings.Join([]string{
-			`{"jsonrpc":"2.0","id":1,"result":{}}`,
-			`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","models":{"currentModelId":"anthropic/claude-sonnet-4","availableModels":[{"modelId":"anthropic/claude-sonnet-4"},{"modelId":"openai/gpt-5"}]}}}`,
-			`{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"method not found"}}`,
-		}, "\n") + "\n"))
-
-		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: "openai/gpt-5", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
-		if err != nil {
-			t.Fatalf("handshake: %v", err)
-		}
-		if hs.currentModel != defaultModel {
-			t.Fatalf("current model = %q, want default %q after failed selection", hs.currentModel, defaultModel)
-		}
-	})
 }
 
 func TestHandshakeContinuation(t *testing.T) {
@@ -201,45 +180,38 @@ func TestHandshakeContinuation(t *testing.T) {
 	}
 }
 
-func TestLegacyModelSelectionCancellation(t *testing.T) {
-	t.Parallel()
-	reader, writer := io.Pipe()
-	t.Cleanup(func() { _ = writer.Close() })
-	records, err := agent.NewRelayRecordReader(reader, agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	res := &handshakeResult{wire: &wireFormat{sessionID: "s"}}
-	if _, err := res.setSessionModel(ctx, io.Discard, records, "openai/gpt-5"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("setSessionModel error = %v, want context canceled", err)
-	}
-}
-
 func TestHandshakeResultSetConfigOptions(t *testing.T) {
 	t.Parallel()
 
 	res := &handshakeResult{currentModel: "fallback/model"}
-	res.setConfigOptions([]genaiopencode.SessionConfigOption{
+	err := res.setConfigOptions([]genaiopencode.SessionConfigOption{
 		{
 			ID:           genaiopencode.ConfigOptionModel,
 			Type:         genaiopencode.ConfigOptionTypeSelect,
-			CurrentValue: "openai/gpt-5",
+			CurrentValue: json.RawMessage(`"openai/gpt-5"`),
 			Options:      []genaiopencode.ConfigOptionValue{{Value: "openai/gpt-5"}, {Value: "anthropic/claude-sonnet-4"}},
 		},
 		{
 			ID:           genaiopencode.ConfigOptionEffort,
 			Type:         genaiopencode.ConfigOptionTypeSelect,
-			CurrentValue: "high",
+			CurrentValue: json.RawMessage(`"high"`),
 			Options:      []genaiopencode.ConfigOptionValue{{Value: "minimal"}, {Value: "high"}},
 		},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res.currentModel != "openai/gpt-5" || res.currentEffort != "high" {
 		t.Fatalf("reported settings = %q/%q, want openai/gpt-5/high", res.currentModel, res.currentEffort)
 	}
 	if got := res.configOption(genaiopencode.ConfigOptionEffort); got == nil || len(got.Options) != 2 || got.Options[0].Value != "minimal" || got.Options[1].Value != "high" {
 		t.Fatalf("effort option = %#v, want minimal and high", got)
+	}
+	if err := res.setConfigOptions([]genaiopencode.SessionConfigOption{{
+		ID:           genaiopencode.ConfigOptionModel,
+		CurrentValue: json.RawMessage(`true`),
+	}}); err == nil || !strings.Contains(err.Error(), "decode current model configuration") {
+		t.Fatalf("setConfigOptions error = %v, want model decoding error", err)
 	}
 }
 

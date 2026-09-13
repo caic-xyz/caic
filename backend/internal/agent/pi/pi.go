@@ -523,7 +523,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		case pi.DeltaError:
 			return w.handleError(&ev)
 		default:
-			return messagesFromMessageUpdateDelta(&ev.AssistantMessageEvent, line)
+			return messagesFromAssistantMessageEvent(&ev.AssistantMessageEvent, line)
 		}
 	}
 
@@ -576,7 +576,7 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 // handleDone converts a done delta into a ResultMessage. Pi currently does not
 // emit done deltas, so this path is not exercised in normal operation, but is
 // kept for protocol evolution.
-func (w *piWireFormat) handleDone(ev *pi.MessageUpdateDeltaEvent) ([]agent.Message, error) {
+func (w *piWireFormat) handleDone(ev *pi.MessageUpdateEvent) ([]agent.Message, error) {
 	rm := &agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "result",
@@ -658,7 +658,7 @@ func resolvedModel(provider, responseModel, model string) string {
 }
 
 // handleError converts an error delta into a ResultMessage.
-func (w *piWireFormat) handleError(ev *pi.MessageUpdateDeltaEvent) ([]agent.Message, error) {
+func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, error) {
 	result := ""
 	if ev.AssistantMessageEvent.Error != nil && ev.AssistantMessageEvent.Error.ErrorMessage != "" {
 		result = ev.AssistantMessageEvent.Error.ErrorMessage

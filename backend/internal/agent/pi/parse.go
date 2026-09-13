@@ -55,8 +55,8 @@ func decodeEventType(line []byte) (pi.EventType, error) {
 // deliberately skipping the line's "message" field: Pi resends the full
 // accumulated assistant message on every delta, and parsing it here would
 // cost O(n²) over a turn's output.
-func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateDeltaEvent, error) {
-	var ev pi.MessageUpdateDeltaEvent
+func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateEvent, error) {
+	var ev pi.MessageUpdateEvent
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if err := consumeObjectStart(dec); err != nil {
 		return ev, err
@@ -261,10 +261,10 @@ func parseMessageUpdate(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal message_update: %w", err)
 	}
 
-	return messagesFromMessageUpdateDelta(&ev.AssistantMessageEvent, line)
+	return messagesFromAssistantMessageEvent(&ev.AssistantMessageEvent, line)
 }
 
-func messagesFromMessageUpdateDelta(delta *pi.MessageUpdateDelta, line []byte) ([]agent.Message, error) {
+func messagesFromAssistantMessageEvent(delta *pi.AssistantMessageEvent, line []byte) ([]agent.Message, error) {
 	switch delta.Type {
 	case pi.DeltaTextDelta:
 		return []agent.Message{&agent.TextDeltaMessage{Text: delta.Delta}}, nil

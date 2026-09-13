@@ -160,6 +160,56 @@ func TestFetchModels(t *testing.T) {
 			t.Fatalf("method = %q, want model/list", req.Method)
 		}
 	})
+	t.Run("pagination", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"first"}],"nextCursor":"page-2"}}
+{"id":3,"result":{"data":[{"id":"second"}],"nextCursor":null}}
+`
+		var stdin bytes.Buffer
+		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var nextID atomic.Int64
+		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := modelIDs(models), []string{"first", "second"}; !slices.Equal(got, want) {
+			t.Fatalf("models = %v, want %v", got, want)
+		}
+		lines := bytes.Split(bytes.TrimSpace(stdin.Bytes()), []byte{'\n'})
+		if len(lines) != 4 {
+			t.Fatalf("wrote %d requests, want 4:\n%s", len(lines), stdin.String())
+		}
+		var params codex.ModelListParams
+		var request codex.JSONRPCRequest
+		if err := json.Unmarshal(lines[3], &request); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		if params.Cursor != "page-2" {
+			t.Fatalf("second model/list cursor = %q, want page-2", params.Cursor)
+		}
+	})
+	t.Run("repeated_cursor", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{}}
+{"id":2,"result":{"data":[],"nextCursor":"same"}}
+{"id":3,"result":{"data":[],"nextCursor":"same"}}
+`
+		records, err := agent.NewRelayRecordReader(strings.NewReader(responses), agent.LogVersionV1, agent.DiscardLogSink{Version: agent.LogVersionV1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var nextID atomic.Int64
+		if _, err := fetchModelsFromAppServer(t.Context(), io.Discard, records, &nextID); err == nil || !strings.Contains(err.Error(), "repeated cursor") {
+			t.Fatalf("fetchModelsFromAppServer error = %v, want repeated cursor", err)
+		}
+	})
 }
 
 func v2Records(native string) string {

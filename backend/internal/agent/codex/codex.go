@@ -481,7 +481,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Extract thread ID from the response result.
-	var result codex.ThreadStartResult
+	var result codex.ThreadStartResponse
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, nil, nil, fmt.Errorf("parse thread/start result: %w", err)
 	}
@@ -552,32 +552,42 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *age
 		return nil, fmt.Errorf("write initialized: %w", err)
 	}
 
-	// 3. Fetch model list so the UI offers only valid model IDs.
+	// 3. Fetch every model list page so the UI offers only valid model IDs.
 	var models []codex.ModelInfo
-	mlParams, err := marshalParams(struct{}{})
-	if err != nil {
-		return nil, fmt.Errorf("marshal model/list params: %w", err)
-	}
-	if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}); err != nil {
-		return nil, fmt.Errorf("write model/list: %w", err)
-	}
-	mlResp, err := readJSONRPCResponse(ctx, records)
-	if err != nil {
-		return nil, fmt.Errorf("read model/list response: %w", err)
-	}
-	if mlResp.Result == nil {
-		return nil, errors.New("model/list response missing result")
-	}
-	var mlResult codex.ModelListResult
-	if err := json.Unmarshal(mlResp.Result, &mlResult); err != nil {
-		return nil, fmt.Errorf("parse model/list result: %w", err)
-	}
-	for i := range mlResult.Data {
-		if mlResult.Data[i].ID != "" {
-			models = append(models, mlResult.Data[i])
+	seenCursors := map[string]struct{}{}
+	for cursor := ""; ; {
+		mlParams, err := marshalParams(codex.ModelListParams{Cursor: cursor})
+		if err != nil {
+			return nil, fmt.Errorf("marshal model/list params: %w", err)
 		}
+		if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}); err != nil {
+			return nil, fmt.Errorf("write model/list: %w", err)
+		}
+		mlResp, err := readJSONRPCResponse(ctx, records)
+		if err != nil {
+			return nil, fmt.Errorf("read model/list response: %w", err)
+		}
+		if mlResp.Result == nil {
+			return nil, errors.New("model/list response missing result")
+		}
+		var mlResult codex.ModelListResponse
+		if err := json.Unmarshal(mlResp.Result, &mlResult); err != nil {
+			return nil, fmt.Errorf("parse model/list result: %w", err)
+		}
+		for i := range mlResult.Data {
+			if mlResult.Data[i].ID != "" {
+				models = append(models, mlResult.Data[i])
+			}
+		}
+		if mlResult.NextCursor == "" {
+			return models, nil
+		}
+		if _, ok := seenCursors[mlResult.NextCursor]; ok {
+			return nil, fmt.Errorf("model/list repeated cursor %q", mlResult.NextCursor)
+		}
+		seenCursors[mlResult.NextCursor] = struct{}{}
+		cursor = mlResult.NextCursor
 	}
-	return models, nil
 }
 
 // marshalParams marshals v into a json.RawMessage for use as JSONRPCRequest.Params.

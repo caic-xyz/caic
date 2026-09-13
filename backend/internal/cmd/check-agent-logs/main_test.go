@@ -93,6 +93,10 @@ func TestCheckCodex(t *testing.T) {
 			data: `{"method":"thread/status/changed","params":{"threadId":"thread","status":{"type":"idle"}}}`,
 		},
 		{
+			name: "thread goal cleared",
+			data: `{"method":"thread/goal/cleared","params":{"threadId":"thread"}}`,
+		},
+		{
 			name: "model rerouted",
 			data: `{"method":"model/rerouted","params":{"fromModel":"old","toModel":"new","reason":"high_risk_cyber_activity"}}`,
 		},

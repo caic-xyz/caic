@@ -123,8 +123,14 @@ func TestToolCallUpdateUpdate(t *testing.T) {
 		if u.RawOutput == nil {
 			t.Fatal("RawOutput = nil")
 		}
-		if u.RawOutput.Error != "permission denied" {
-			t.Errorf("RawOutput.Error = %q", u.RawOutput.Error)
+		var raw struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(u.RawOutput, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw.Error != "permission denied" {
+			t.Errorf("RawOutput error = %q", raw.Error)
 		}
 	})
 	t.Run("DiffContent", func(t *testing.T) {
@@ -164,17 +170,6 @@ func TestPlanUpdate(t *testing.T) {
 		}
 		if u.Entries[1].Status != opencode.PlanStatusPending {
 			t.Errorf("Entries[1].Status = %q", u.Entries[1].Status)
-		}
-	})
-	t.Run("CancelledStatus", func(t *testing.T) {
-		t.Parallel()
-		const input = `{"sessionUpdate":"plan","entries":[{"status":"cancelled","content":"dropped"}]}`
-		var u opencode.PlanUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if u.Entries[0].Status != opencode.PlanStatusCancelled {
-			t.Errorf("Status = %q, want cancelled", u.Entries[0].Status)
 		}
 	})
 }
@@ -316,31 +311,13 @@ func TestCurrentModeUpdate(t *testing.T) {
 	t.Parallel()
 	t.Run("WithFields", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"sessionUpdate":"current_mode_update","modeId":"code","modeName":"Code Mode"}`
+		const input = `{"sessionUpdate":"current_mode_update","currentModeId":"code"}`
 		var u opencode.CurrentModeUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
 			t.Fatal(err)
 		}
-		if u.ModeID != "code" {
-			t.Errorf("ModeID = %q", u.ModeID)
-		}
-		if u.ModeName != "Code Mode" {
-			t.Errorf("ModeName = %q", u.ModeName)
-		}
-	})
-}
-
-func TestToolCallRawOutput(t *testing.T) {
-	t.Parallel()
-	t.Run("Basic", func(t *testing.T) {
-		t.Parallel()
-		const input = `{"output":"success","error":"","metadata":{"exitCode":0}}`
-		var o opencode.ToolCallRawOutput
-		if err := json.Unmarshal([]byte(input), &o); err != nil {
-			t.Fatal(err)
-		}
-		if o.Output != "success" {
-			t.Errorf("Output = %q", o.Output)
+		if u.CurrentModeID != "code" {
+			t.Errorf("CurrentModeID = %q", u.CurrentModeID)
 		}
 	})
 }

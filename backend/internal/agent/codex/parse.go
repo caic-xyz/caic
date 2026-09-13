@@ -166,6 +166,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 
 	case codex.MethodThreadGoalUpdated:
 		return parseThreadGoalUpdated(msg.Params)
+	case codex.MethodThreadGoalCleared:
+		var p codex.ThreadGoalClearedNotification
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return nil, fmt.Errorf("thread/goal/cleared params: %w", err)
+		}
+		return nil, nil
 
 	case codex.MethodReasoningSummaryTextDelta:
 		var p codex.ReasoningSummaryTextDeltaNotification

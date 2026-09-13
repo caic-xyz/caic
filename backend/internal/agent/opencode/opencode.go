@@ -368,9 +368,9 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 	} else if resp.Result != nil {
 		var pr opencode.PromptResult
 		if err := json.Unmarshal(resp.Result, &pr); err == nil {
-			if pr.StopReason == "cancelled" || pr.StopReason == "refusal" {
+			if pr.StopReason == opencode.StopReasonCancelled || pr.StopReason == opencode.StopReasonRefusal {
 				rm.IsError = true
-				rm.Result = pr.StopReason
+				rm.Result = string(pr.StopReason)
 			}
 			if pr.Usage != (opencode.PromptUsage{}) {
 				// ACP reports cache reads and writes but no duration bucket or
@@ -516,24 +516,18 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		return nil, nil, errors.New("session response missing sessionId")
 	}
 	res.setModels(snResult.Models)
-	res.setConfigOptions(snResult.ConfigOptions)
+	if err := res.setConfigOptions(snResult.ConfigOptions); err != nil {
+		return nil, nil, err
+	}
 
 	// 3. Select the requested model and effort using ACP configuration options.
-	// Older ACP implementations do not expose configuration options, so model
-	// selection falls back to their legacy session/set_model method. Effort has
-	// no safe fallback: only ACP tells us which values a model supports.
 	model := opts.Model
 	if model == "" {
 		model = res.currentModel
 	}
 	if model != "" && model != res.currentModel {
-		hasModelConfig := res.configOption(opencode.ConfigOptionModel) != nil
-		selected, err := res.setSessionModel(ctx, stdin, records, model)
-		if err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model); err != nil {
 			return nil, nil, err
-		}
-		if selected && !hasModelConfig {
-			res.currentModel = model
 		}
 	}
 	if opts.Effort != "" {
@@ -549,14 +543,19 @@ func (res *handshakeResult) setModels(models opencode.ModelsInfo) {
 	res.currentModel = models.CurrentModelID
 }
 
-func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOption) {
+func (res *handshakeResult) setConfigOptions(options []opencode.SessionConfigOption) error {
 	res.configOptions = options
 	if model := res.configOption(opencode.ConfigOptionModel); model != nil {
-		res.currentModel = model.CurrentValue
+		if err := json.Unmarshal(model.CurrentValue, &res.currentModel); err != nil {
+			return fmt.Errorf("decode current model configuration: %w", err)
+		}
 	}
 	if effort := res.configOption(opencode.ConfigOptionEffort); effort != nil {
-		res.currentEffort = effort.CurrentValue
+		if err := json.Unmarshal(effort.CurrentValue, &res.currentEffort); err != nil {
+			return fmt.Errorf("decode current effort configuration: %w", err)
+		}
 	}
+	return nil
 }
 
 func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.SessionConfigOption {
@@ -566,32 +565,6 @@ func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.S
 		}
 	}
 	return nil
-}
-
-func (res *handshakeResult) setSessionModel(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, model string) (bool, error) {
-	if res.configOption(opencode.ConfigOptionModel) != nil {
-		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	params, err := marshalParams(opencode.SetSessionModelParams{SessionID: res.wire.sessionID, ModelID: model})
-	if err != nil {
-		return false, fmt.Errorf("marshal session/set_model params: %w", err)
-	}
-	if err := writeJSON(stdin, opencode.JSONRPCRequest{
-		JSONRPC: "2.0", ID: res.wire.allocIDLocked(), Method: opencode.MethodSessionSetModel, Params: params,
-	}); err != nil {
-		return false, fmt.Errorf("write session/set_model: %w", err)
-	}
-	if _, err := readJSONRPCResponse(ctx, records); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return false, err
-		}
-		slog.WarnContext(ctx, "opencode: session/set_model failed, using default model", "err", err, "model", model)
-		return false, nil
-	}
-	return true, nil
 }
 
 func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string) error {
@@ -625,8 +598,7 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	if len(result.ConfigOptions) == 0 {
 		return errors.New("session/set_config_option response missing configOptions")
 	}
-	res.setConfigOptions(result.ConfigOptions)
-	return nil
+	return res.setConfigOptions(result.ConfigOptions)
 }
 
 func normalizeModels(models []agent.Model) []agent.Model {

@@ -373,10 +373,6 @@ func checkClaude(data []byte) (string, error) {
 		dst = &claudedto.InputControlResponseMsg{}
 	case claudedto.OutputControlCancelRequest:
 		dst = &claudedto.OutputControlCancelRequestMsg{}
-	case claudedto.OutputStreamlinedText:
-		dst = &claudedto.OutputStreamlinedTextMsg{}
-	case claudedto.OutputStreamlinedToolUseSummary:
-		dst = &claudedto.OutputStreamlinedToolUseSummaryMsg{}
 	default:
 		return "OutputTypeProbe", fmt.Errorf("unrecognized Claude Code output type %q; add its DTO and checker dispatch", probe.Type)
 	}
@@ -421,6 +417,8 @@ func checkCodex(data []byte) (string, error) {
 		dst = &codexdto.McpToolCallProgressNotification{}
 	case codexdto.MethodThreadStatusChanged:
 		dst = &codexdto.ThreadStatusChangedNotification{}
+	case codexdto.MethodThreadGoalCleared:
+		dst = &codexdto.ThreadGoalClearedNotification{}
 	case codexdto.MethodModelRerouted:
 		dst = &codexdto.ModelReroutedNotification{}
 	case codexdto.MethodMcpServerStatusUpdated:
