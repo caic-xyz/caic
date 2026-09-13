@@ -2954,6 +2954,21 @@ func TestTask(t *testing.T) {
 		}
 	})
 
+	t.Run("RecordsDiskUsageWithoutResourceSample", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "", "")
+		tk.UpdateDiskUsage(700)
+
+		if diskUsed, ok := tk.DiskUsage(); !ok || diskUsed != 700 {
+			t.Fatalf("DiskUsage() = (%d, %t), want (700, true)", diskUsed, ok)
+		}
+		history, _, unsub := tk.SubscribeStats(t.Context())
+		unsub()
+		if len(history) != 0 {
+			t.Fatalf("stats history = %+v, want none", history)
+		}
+	})
+
 	t.Run("SendCompact", func(t *testing.T) {
 		t.Parallel()
 		t.Run("NoSession", func(t *testing.T) {

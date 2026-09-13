@@ -978,6 +978,8 @@ type Snapshot struct {
 	LastAPIUsage       agent.Usage
 	CacheExpiresAt     time.Time
 	DiffStat           agent.DiffStat
+	DiskUsed           int64
+	DiskKnown          bool
 	ForgeOwner         string
 	ForgeRepo          string
 	ForgePR            int
@@ -1049,6 +1051,8 @@ func (t *Task) Snapshot() Snapshot {
 		LastAPIUsage:       t.lastAPIUsage,
 		CacheExpiresAt:     t.cacheExpiresAt,
 		DiffStat:           t.liveDiffStat,
+		DiskUsed:           t.diskUsed,
+		DiskKnown:          t.diskKnown,
 		ForgeOwner:         t.forgeOwner,
 		ForgeRepo:          t.forgeRepo,
 		ForgePR:            t.forgePR,
@@ -1500,6 +1504,13 @@ func (t *Task) UpdateDiskUsage(bytes int64) {
 		}
 	}
 	t.mu.Unlock()
+}
+
+// DiskUsage returns the latest writable-layer measurement, when one is known.
+func (t *Task) DiskUsage() (int64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.diskUsed, t.diskKnown
 }
 
 // SubscribeStats returns a snapshot of the stats ring buffer and a channel that

@@ -422,6 +422,52 @@ func TestTask(t *testing.T) {
 			t.Errorf("ParentTaskID = %s, want %s", got.ParentTaskID, parentTaskID)
 		}
 	})
+	t.Run("IncludesStoppedDiskUsage", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.SetState(taskslog.StateStopped)
+		tk.UpdateDiskUsage(1024)
+
+		live, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if live.StoppedDiskUsedBytes != 1024 {
+			t.Fatalf("live stopped disk = %v, want 1024", live.StoppedDiskUsedBytes)
+		}
+
+		durableDisk := int64(2048)
+		durable, err := Task(&TaskInput{
+			Task:     tk,
+			Snapshot: tk.Snapshot(),
+			Result:   &taskslog.Result{State: taskslog.StateStopped, DiskUsedBytes: &durableDisk},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if durable.StoppedDiskUsedBytes != durableDisk {
+			t.Fatalf("durable stopped disk = %v, want %d", durable.StoppedDiskUsedBytes, durableDisk)
+		}
+
+		tk.SetState(taskslog.StateWaiting)
+		notStopped, err := Task(&TaskInput{Task: tk, Snapshot: tk.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if notStopped.StoppedDiskUsedBytes != -1 {
+			t.Fatalf("active stopped disk = %v, want -1", notStopped.StoppedDiskUsedBytes)
+		}
+
+		oldTask := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "old task"})
+		oldTask.SetState(taskslog.StateStopped)
+		old, err := Task(&TaskInput{Task: oldTask, Snapshot: oldTask.Snapshot()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if old.StoppedDiskUsedBytes != -1 {
+			t.Fatalf("old stopped disk = %v, want -1", old.StoppedDiskUsedBytes)
+		}
+	})
 }
 
 func TestProcessInfos(t *testing.T) {

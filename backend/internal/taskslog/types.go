@@ -80,14 +80,17 @@ func (s State) IsTerminal() bool { return s == StateFailed || s == StatePurged }
 //
 // Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
 type Result struct {
-	State       State          `json:"state"`
-	DiffStat    agent.DiffStat `json:"diff_stat"`
-	CostUSD     float64        `json:"cost_usd"`
-	Duration    time.Duration  `json:"duration"`
-	NumTurns    int            `json:"num_turns"`
-	Usage       agent.Usage    `json:"usage"`
-	AgentResult string         `json:"agent_result"`
-	Err         error          `json:"-"`
+	State    State          `json:"state"`
+	DiffStat agent.DiffStat `json:"diff_stat"`
+	// DiskUsedBytes is the final measured writable-layer size. Nil means the
+	// runtime could not provide a measurement.
+	DiskUsedBytes *int64        `json:"disk_used_bytes,omitempty"`
+	CostUSD       float64       `json:"cost_usd"`
+	Duration      time.Duration `json:"duration"`
+	NumTurns      int           `json:"num_turns"`
+	Usage         agent.Usage   `json:"usage"`
+	AgentResult   string        `json:"agent_result"`
+	Err           error         `json:"-"`
 }
 
 type persistedResult Result

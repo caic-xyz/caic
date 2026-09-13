@@ -953,8 +953,11 @@ type MetaResultMessage struct {
 	CacheReadInputTokens     int      `json:"cache_read_input_tokens,omitempty"`
 	ReasoningOutputTokens    int      `json:"reasoning_output_tokens,omitempty"`
 	DiffStat                 DiffStat `json:"diff_stat,omitzero"`
-	Error                    string   `json:"error,omitempty"`
-	AgentResult              string   `json:"agent_result,omitempty"`
+	// TODO(2026-10-01): Make DiskUsedBytes an int64 value using -1 for
+	// unavailable measurements after legacy result records have aged out.
+	DiskUsedBytes *int64 `json:"disk_used_bytes,omitempty"`
+	Error         string `json:"error,omitempty"`
+	AgentResult   string `json:"agent_result,omitempty"`
 }
 
 // Type implements Message.

@@ -867,6 +867,8 @@ public struct Task: Codable {
     public let cacheTTLSeconds: Int?
     /// When the prompt cache expires.
     public let cacheExpiresAt: ISOTimestamp?
+    /// Final writable-layer size retained by a stopped task, or -1 when unavailable.
+    public let stoppedDiskUsedBytes: Int
     /// Model context window limit (tokens).
     public let contextWindowLimit: Int
     public let error: String?

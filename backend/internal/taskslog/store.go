@@ -253,6 +253,7 @@ func resultTrailer(title string, res *Result) *agent.MetaResultMessage {
 		CacheReadInputTokens:     res.Usage.CacheReadInputTokens,
 		ReasoningOutputTokens:    res.Usage.ReasoningOutputTokens,
 		DiffStat:                 res.DiffStat,
+		DiskUsedBytes:            res.DiskUsedBytes,
 		AgentResult:              res.AgentResult,
 	}
 	if res.Err != nil {

@@ -832,6 +832,29 @@ func TestRunner(t *testing.T) {
 				}
 			})
 		}
+		t.Run("recordsStoppedDiskUsage", func(t *testing.T) {
+			t.Parallel()
+			stub := testContainer()
+			runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{
+				testRuntimeBackend: stub,
+				DiskSizes: map[runtime.ID]int64{
+					runtime.NewID("test-runtime", "ctr-1"): 700,
+				},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := newTestAgentRuntimeWithRuntime(t, stub, nil, "")
+			r.Runtimes = runtimes
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+
+			r.recordStoppedDiskUsage(t.Context(), tk, tk.RuntimeInstanceID(), logtest.Logger(t))
+
+			if diskUsed, ok := tk.DiskUsage(); !ok || diskUsed != 700 {
+				t.Fatalf("DiskUsage() = (%d, %t), want (700, true)", diskUsed, ok)
+			}
+		})
 	})
 
 	t.Run("ReviveTask", func(t *testing.T) {

@@ -104,7 +104,8 @@ func TestStore(t *testing.T) {
 		t.Parallel()
 		b := &agenttest.LogSink{Version: agent.LogVersionV2}
 		res := &Result{
-			State: StateWaiting,
+			State:         StateWaiting,
+			DiskUsedBytes: new(int64(456)),
 			Usage: agent.Usage{
 				ReasoningOutputTokens: 123,
 			},
@@ -118,6 +119,9 @@ func TestStore(t *testing.T) {
 		}
 		if got.ReasoningOutputTokens != 123 {
 			t.Errorf("ReasoningOutputTokens = %d, want 123", got.ReasoningOutputTokens)
+		}
+		if got.DiskUsedBytes == nil || *got.DiskUsedBytes != 456 {
+			t.Errorf("DiskUsedBytes = %v, want 456", got.DiskUsedBytes)
 		}
 	})
 	t.Run("CompressClosesWriterBeforeCompression", func(t *testing.T) {

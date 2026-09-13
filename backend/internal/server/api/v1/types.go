@@ -291,6 +291,7 @@ type Task struct {
 	ActiveCacheReadTokens              int          `json:"activeCacheReadTokens"`     // Last turn's cache-read input tokens.
 	CacheTTLSeconds                    int          `json:"cacheTTLSeconds,omitempty"` // Effective cache TTL from last API call (seconds); 0 = unknown.
 	CacheExpiresAt                     time.Time    `json:"cacheExpiresAt,omitzero"`   // When the prompt cache expires.
+	StoppedDiskUsedBytes               int64        `json:"stoppedDiskUsedBytes"`      // Final writable-layer size retained by a stopped task, or -1 when unavailable.
 	ContextWindowLimit                 int          `json:"contextWindowLimit"`        // Model context window limit (tokens).
 	Error                              string       `json:"error,omitempty"`
 	Result                             string       `json:"result,omitempty"`

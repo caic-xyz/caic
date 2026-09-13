@@ -63,6 +63,7 @@ const baseProps = {
   branch: "feature-branch",
   baseBranch: "main",
   harness: "claude",
+  stoppedDiskUsedBytes: -1,
   now: Date.parse("2026-07-08T12:00:00Z"),
   onClose: () => {},
   onStop: () => {},
@@ -83,6 +84,18 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
     </HostModeProvider>
   ));
 }
+
+it("shows retained disk usage for a stopped task", () => {
+  renderTaskDetail({ taskState: "stopped", stoppedDiskUsedBytes: 2_097_152 });
+
+  expect(screen.getByText("Disk 2.0 MiB")).toHaveAttribute("title", "Writable disk space retained by this stopped task");
+});
+
+it("hides unavailable disk usage for an old stopped task", () => {
+  renderTaskDetail({ taskState: "stopped" });
+
+  expect(screen.queryByText(/^Disk /)).not.toBeInTheDocument();
+});
 
 function resultEvent(ts: number): EventMessage {
   return {

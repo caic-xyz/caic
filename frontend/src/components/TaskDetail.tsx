@@ -18,7 +18,7 @@ import { requestNotificationPermission } from "../gomode/notifications";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskToolInput, botFixPR } from "../api";
 import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session, type Turn } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
-import { formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
 import type { ToolCall } from "../grouping";
@@ -78,6 +78,7 @@ interface Props {
   cumulativeOutputTokens?: number;
   cumulativeCacheCreationInputTokens?: number;
   cumulativeCacheReadInputTokens?: number;
+	stoppedDiskUsedBytes: number;
   diffStat?: DiffFileStat[];
   vncPort?: number;
   sudoPassword?: string;
@@ -767,6 +768,11 @@ export default function TaskDetail(props: Props) {
         </Show>
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
+        </Show>
+		<Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
+		  <span class={styles.stoppedDiskUsage} title="Writable disk space retained by this stopped task">
+			Disk {formatBytes(props.stoppedDiskUsedBytes)}
+          </span>
         </Show>
         <StatsIcon
           events={messages()}

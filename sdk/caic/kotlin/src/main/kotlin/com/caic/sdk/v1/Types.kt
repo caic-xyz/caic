@@ -1313,6 +1313,8 @@ data class Task(
     @SerialName("cacheTTLSeconds") val cacheTTLSeconds: Int? = null,
     /** When the prompt cache expires. */
     val cacheExpiresAt: Instant? = null,
+    /** Final writable-layer size retained by a stopped task, or -1 when unavailable. */
+    val stoppedDiskUsedBytes: Long,
     /** Model context window limit (tokens). */
     val contextWindowLimit: Int,
     val error: String? = null,

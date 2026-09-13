@@ -504,6 +504,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 	} else {
 		tlog.DebugContext(ctx, "stop: no instance to stop", "name", name)
 	}
+	r.recordStoppedDiskUsage(ctx, t, name, tlog)
 
 	// Drain session after instance is stopped, then wait for the dispatch
 	// goroutine to finish processing all buffered messages so that t.msgs
@@ -527,6 +528,9 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 	// Write log trailer so the task reloads as "stopped" (not "failed")
 	// after a server restart, preserving live stats for the UI.
 	res := taskslog.Result{State: taskslog.StateStopped, AgentResult: t.LastAgentResult()}
+	if diskUsed, ok := t.DiskUsage(); ok {
+		res.DiskUsedBytes = &diskUsed
+	}
 	if liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats(); liveCost > 0 {
 		res.CostUSD = liveCost
 		res.NumTurns = liveTurns
@@ -747,6 +751,26 @@ func (r *AgentRuntime) ForkTask(ctx context.Context, source, fork *Task, forkOpt
 	}
 	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
+}
+
+// recordStoppedDiskUsage captures a stopped instance's writable-layer size
+// before its result is persisted. The measurement is optional: stop remains
+// successful when a runtime cannot inspect the stopped instance.
+func (r *AgentRuntime) recordStoppedDiskUsage(ctx context.Context, t *Task, id runtime.ID, log *slog.Logger) {
+	if id == "" || r.Runtimes == nil {
+		return
+	}
+	usage, err := r.Runtimes.DiskUsage(ctx, []runtime.ID{id})
+	if err != nil {
+		log.WarnContext(ctx, "measure stopped disk usage failed", "err", err)
+		return
+	}
+	diskUsed, ok := usage[id]
+	if !ok {
+		log.WarnContext(ctx, "stopped disk usage unavailable")
+		return
+	}
+	t.UpdateDiskUsage(diskUsed)
 }
 
 func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {

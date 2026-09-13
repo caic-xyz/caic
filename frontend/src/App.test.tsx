@@ -28,6 +28,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     cumulativeCacheReadInputTokens: 0,
     activeInputTokens: 0,
     activeCacheReadTokens: 0,
+    stoppedDiskUsedBytes: -1,
     contextWindowLimit: 0,
     harness: "claude",
     runtime: { id: "rt1" },

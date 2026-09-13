@@ -30,6 +30,7 @@ function task(id: string): Task {
     cumulativeCacheReadInputTokens: 0,
     activeInputTokens: 0,
     activeCacheReadTokens: 0,
+    stoppedDiskUsedBytes: -1,
     contextWindowLimit: 0,
     harness: "claude",
     runtime: { id: "runtime" },

@@ -1005,6 +1005,8 @@ export interface Task {
   cacheTTLSeconds?: number /* int */;
   /** When the prompt cache expires. */
   cacheExpiresAt?: ISOTimestamp;
+  /** Final writable-layer size retained by a stopped task, or -1 when unavailable. */
+  stoppedDiskUsedBytes: number /* int64 */;
   /** Model context window limit (tokens). */
   contextWindowLimit: number /* int */;
   error?: string;

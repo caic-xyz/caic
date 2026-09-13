@@ -526,7 +526,7 @@ func TestLoadLogHeader(t *testing.T) {
 			claudeAssistant(t, map[string]any{"type": "text", "text": "hello"}),
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Title: "done", CostUSD: 1.5,
 				Duration: 2.5, NumTurns: 2, InputTokens: 100, OutputTokens: 200,
-				DiffStat: agent.DiffStat{{Path: "main.go", Added: 4, Deleted: 1}}}),
+				DiffStat: agent.DiffStat{{Path: "main.go", Added: 4, Deleted: 1}}, DiskUsedBytes: new(int64(456))}),
 		)
 		return path
 	}
@@ -551,6 +551,9 @@ func TestLoadLogHeader(t *testing.T) {
 		}
 		if first.LastTrailer == nil || len(first.LastTrailer.DiffStat) != 1 || first.LastTrailer.Usage.InputTokens != 100 {
 			t.Fatalf("fixture did not populate Result projection: %+v", first.LastTrailer)
+		}
+		if first.LastTrailer.DiskUsedBytes == nil || *first.LastTrailer.DiskUsedBytes != 456 {
+			t.Fatalf("DiskUsedBytes = %v, want 456", first.LastTrailer.DiskUsedBytes)
 		}
 		info, err := os.Stat(path)
 		if err != nil {

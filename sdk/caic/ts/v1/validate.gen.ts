@@ -538,6 +538,7 @@ export function validateTask(raw: ValidatorInput): Task {
     activeCacheReadTokens: asNumber(obj["activeCacheReadTokens"], "Task.activeCacheReadTokens"),
     cacheTTLSeconds: (obj["cacheTTLSeconds"] === undefined || obj["cacheTTLSeconds"] === null ? undefined : asNumber(obj["cacheTTLSeconds"], "Task.cacheTTLSeconds")),
     cacheExpiresAt: (obj["cacheExpiresAt"] === undefined || obj["cacheExpiresAt"] === null ? undefined : asString(obj["cacheExpiresAt"], "Task.cacheExpiresAt") as ISOTimestamp),
+    stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
     contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
     error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
     result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "Task.result")),

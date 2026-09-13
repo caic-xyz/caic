@@ -827,6 +827,17 @@ a.ciStatus:hover {
   flex-shrink: 0;
 }
 
+.stoppedDiskUsage {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .planAction {
   margin-top: 0.5rem;
 }

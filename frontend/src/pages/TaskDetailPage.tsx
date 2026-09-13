@@ -46,6 +46,7 @@ export default function TaskDetailPage() {
               cumulativeOutputTokens={t()?.cumulativeOutputTokens}
               cumulativeCacheCreationInputTokens={t()?.cumulativeCacheCreationInputTokens}
               cumulativeCacheReadInputTokens={t()?.cumulativeCacheReadInputTokens}
+			  stoppedDiskUsedBytes={t()?.stoppedDiskUsedBytes ?? -1}
               diffStat={t()?.diffStat}
               vncPort={t()?.runtime.vncPort ?? 0}
               sudoPassword={t()?.runtime.sudoPassword}

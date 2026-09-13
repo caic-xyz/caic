@@ -127,6 +127,14 @@ func Task(in *TaskInput) (v1.Task, error) {
 	out.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens
 	out.CacheTTLSeconds = snap.LastAPIUsage.CacheTTLSeconds
 	out.CacheExpiresAt = snap.CacheExpiresAt
+	out.StoppedDiskUsedBytes = -1
+	if snap.State == taskslog.StateStopped {
+		if result != nil && result.DiskUsedBytes != nil {
+			out.StoppedDiskUsedBytes = *result.DiskUsedBytes
+		} else if snap.DiskKnown {
+			out.StoppedDiskUsedBytes = snap.DiskUsed
+		}
+	}
 	if snap.ContextWindowLimit > 0 {
 		out.ContextWindowLimit = snap.ContextWindowLimit
 	} else {
