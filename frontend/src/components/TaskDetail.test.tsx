@@ -135,7 +135,7 @@ describe("TaskDetail", () => {
   it("replaces the Diff link with a repository state marker", async () => {
     renderTaskDetail();
 
-    expect(await screen.findByRole("link", { name: "View diff for my-repo: 2 changed files, 15 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream" }))
+    expect(await screen.findByRole("link", { name: "my-repo: 2 changed files, 15 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream" }))
       .toHaveAttribute("href", "/task/@abc+test-task/diff");
     expect(screen.queryByText("Diff")).not.toBeInTheDocument();
   });
@@ -152,7 +152,7 @@ describe("TaskDetail", () => {
     window.dispatchEvent(new Event("resize"));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-    const link = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    const link = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
     expect(link).not.toHaveAttribute("data-elide-diff-stats");
   });
 
@@ -169,7 +169,7 @@ describe("TaskDetail", () => {
     window.dispatchEvent(new Event("resize"));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-    const diffLink = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    const diffLink = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
     expect(diffLink).toHaveAttribute("data-elide-diff-stats", "");
   });
 
@@ -194,7 +194,7 @@ describe("TaskDetail", () => {
     });
     window.dispatchEvent(new Event("resize"));
 
-    const link = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    const link = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
     await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
   });
 
@@ -289,14 +289,14 @@ describe("TaskDetail", () => {
 
   it("repository state diff link href ends with /diff", async () => {
     renderTaskDetail();
-    const link = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    const link = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
     expect(link).toHaveAttribute("href", "/task/@abc+test-task/diff");
   });
 
   it("clicking a repository state marker navigates to the diff", async () => {
     const user = userEvent.setup();
     renderTaskDetail();
-    await user.click(await screen.findByRole("link", { name: /View diff for my-repo/ }));
+    await user.click(await screen.findByRole("link", { name: /my-repo: 2 changed files/ }));
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
 
