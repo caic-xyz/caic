@@ -76,7 +76,7 @@ describe("StatsIcon", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "tool-1", name: "Bash", input: {} } },
       { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "tool-1", duration: 1 } },
     ] as const;
-    const { findByTestId, getByLabelText, getByRole, getByTestId } = render(() => (
+    const { findByTestId, getByRole, getByTestId } = render(() => (
       <StatsIcon events={events} stats={[]} turns={turns} usage={usage} />
     ));
 
@@ -90,13 +90,6 @@ describe("StatsIcon", () => {
     expect(summary).toHaveTextContent("Thinking200t");
     expect(summary).toHaveTextContent("Cache hit 70%");
 
-    const invocations = getByTestId("invocation-usage");
-    expect(invocations).toHaveTextContent("test-model");
-    expect(invocations).toHaveTextContent("1.0kt");
-    expect(invocations).toHaveTextContent("2.0kt");
-    expect(invocations).toHaveTextContent("7.0kt");
-    expect(invocations).toHaveTextContent("200t");
-    expect(getByLabelText("Turn 1 used 1.0kt of uncached input")).toBeInTheDocument();
     expect(await findByTestId("turn-token-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
     expect(await findByTestId("tool-time-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
   });

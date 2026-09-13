@@ -409,10 +409,9 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText, getAllByText } = renderTaskDetail();
+    const { getAllByText } = renderTaskDetail();
 
     expect(getAllByText("Finished the requested change.")).toHaveLength(1);
-    expect(getByText("Done").closest("div")).toContainElement(getByText("Finished the requested change."));
   });
 
   it("keeps result payload text for failed turns", () => {
@@ -433,6 +432,60 @@ describe("TaskDetail", () => {
     const { getByText } = renderTaskDetail();
 
     expect(getByText("Provider request failed.")).toBeInTheDocument();
+  });
+
+  it("opens invocation details from a completed turn's result card", async () => {
+    const user = userEvent.setup();
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const event = resultEvent(2_000);
+      if (!event.result) throw new Error("result fixture is missing payload");
+      event.result.usage.inputTokens = 1_000;
+      event.result.usage.reportedModel = "turn-model";
+      handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText } = renderTaskDetail();
+
+    expect(getByText("0:01").className).toMatch(/resultDuration/);
+    await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
+  });
+
+  it("opens invocation details from a collapsed turn without expanding it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const firstResult = resultEvent(2_000);
+      const latestResult = resultEvent(4_000);
+      if (!firstResult.result || !latestResult.result) throw new Error("result fixture is missing payload");
+      firstResult.result.usage.reportedModel = "collapsed-model";
+      latestResult.result.usage.reportedModel = "latest-model";
+      const events: EventMessage[] = [
+        { kind: "text", ts: 1_000, text: { text: "collapsed response" } },
+        firstResult,
+        { kind: "userInput", ts: 3_000, userInput: { text: "continue" } },
+        latestResult,
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    renderTaskDetail();
+
+    const [collapsedTurn] = screen.getAllByRole("button", { name: "Turn invocation details" });
+    await user.click(collapsedTurn);
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("collapsed-model");
+    expect(screen.queryByText("collapsed response")).not.toBeInTheDocument();
   });
 
   it("right-aligns the duration on collapsed turns", () => {
@@ -484,9 +537,9 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail();
+    const { getAllByText } = renderTaskDetail();
 
-    expect(getByText("0s").className).toMatch(/turnDuration/);
+    expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(true);
   });
 
   it("shows turn count and total work duration on a section collapsed after compaction", () => {

@@ -1,12 +1,12 @@
 // StatsIcon surfaces task cost, token/cache behavior, tool timing, and container resource statistics.
 
-import { createMemo, createSignal, For, lazy, Show, Suspense } from "solid-js";
+import { createMemo, createSignal, lazy, Show, Suspense } from "solid-js";
 
 import type { EventMessage, EventStats } from "@sdk/types.gen";
 
-import { formatDuration, formatTokens } from "../formatting";
+import { formatTokens } from "../formatting";
 import { IncrementalToolTimingTracker, type ToolTimingSummary } from "../taskStats";
-import { formatTimingDuration, type TurnTiming } from "../timing";
+import type { TurnTiming } from "../timing";
 import styles from "./StatsIcon.module.css";
 
 const StatsCharts = lazy(() => import("./StatsCharts"));
@@ -219,63 +219,6 @@ export default function StatsIcon(props: { events: readonly EventMessage[]; stat
               </Suspense>
             </Show>
           </div>
-          <Show when={perfs().length > 0}>
-            <div class={styles.popupSection}>
-              <div class={styles.popupSectionTitle}>Invocations</div>
-              <table class={styles.perfTable} data-testid="invocation-usage">
-                <thead>
-                  <tr>
-                    <th class={styles.perfTh}>#</th>
-                    <th class={styles.perfTh}>Model</th>
-                    <th class={styles.perfTh}>Timing</th>
-                    <th class={styles.perfTh}>Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={perfs()}>
-                    {(p, index) => {
-                      const r = p.result;
-                      return (
-                        <>
-                          <tr>
-                            <td class={styles.perfTd}>
-                              {index() + 1}
-                              <Show when={p.result.usage.inputTokens > 0}>
-                                <span
-                                  class={styles.coldWarning}
-                                  title={`${formatUsageTokens(r.usage.inputTokens)} of uncached input on this turn`}
-                                  aria-label={`Turn ${index() + 1} used ${formatUsageTokens(r.usage.inputTokens)} of uncached input`}
-                                  role="img"
-                                >⚠</span>
-                              </Show>
-                            </td>
-							<td class={`${styles.perfTd} ${styles.modelCell}`}>{r.usage.reportedModel || "—"}</td>
-                            <td class={styles.perfTd}>
-                              {r.duration > 0 ? formatDuration(r.duration) : "—"}
-                              <span class={styles.perfSub}> API {r.durationAPI > 0 ? formatDuration(r.durationAPI) : "—"} · wait {p.waitMs !== null && p.waitMs > 0 ? formatTimingDuration(p.waitMs) : "—"}</span>
-                            </td>
-                            <td class={styles.perfTd}>{r.totalCostUSD > 0 ? formatUSD(r.totalCostUSD) : "—"}</td>
-                          </tr>
-                          <tr class={styles.tokenDetailRow}>
-                            <td />
-                            <td colspan={3} class={styles.tokenDetailCell}>
-                              <span title="New input">New {formatUsageTokens(r.usage.inputTokens)}</span>
-                              <span title="Cache write">Write {formatUsageTokens(r.usage.cacheCreationInputTokens)}</span>
-                              <span title="Cache read">Read {formatUsageTokens(r.usage.cacheReadInputTokens)}</span>
-                              <span title="Output">Out {formatUsageTokens(r.usage.outputTokens)}</span>
-                              <Show when={(r.usage.reasoningOutputTokens ?? 0) > 0}>
-                                <span title="Thinking; included in output">Think {formatUsageTokens(r.usage.reasoningOutputTokens ?? 0)}</span>
-                              </Show>
-                            </td>
-                          </tr>
-                        </>
-                      );
-                    }}
-                  </For>
-                </tbody>
-              </table>
-            </div>
-          </Show>
         </div>
       </Show>
     </div>

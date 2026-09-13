@@ -222,10 +222,6 @@ a.headerPR:hover {
   transition: opacity 0.15s;
 }
 
-.messageTimingCardInset {
-  margin-top: 0.65rem;
-}
-
 .timedItemContent:has(.markdownWrap:hover) > .messageTiming {
   opacity: 0;
   pointer-events: none;
@@ -591,6 +587,29 @@ a.headerPR:hover {
 
 .resultError {
   background: var(--color-danger-bg);
+}
+
+.resultHeader,
+.resultTiming {
+  display: flex;
+  align-items: center;
+}
+
+.resultHeader {
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.resultTiming {
+  flex-shrink: 0;
+  gap: 0.15rem;
+}
+
+.resultDuration {
+  color: var(--color-text-tertiary);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .resultMeta {
@@ -1068,19 +1087,35 @@ a.ciStatus:hover {
   margin-top: 0.35rem;
   margin-bottom: 0.35rem;
   background: var(--color-primary-container);
-  border: none;
   border-radius: var(--radius-md);
   padding: 0.25rem 0.5rem;
-  cursor: pointer;
   font-size: 0.8rem;
   color: var(--color-on-primary-container);
+}
+
+.turnToggle {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  padding: 0;
+  border: none;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
   text-align: left;
 }
 
-.elidedTurn::before {
+.turnToggle::before {
   content: "▶";
   margin-right: 0.4em;
   font-size: 0.7em;
+}
+
+.turnToggle:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
 }
 
 .turnSummaryText {
@@ -1107,7 +1142,7 @@ a.ciStatus:hover {
   margin-bottom: 0.1rem;
 }
 
-.elidedTurnExpanded::before {
+.elidedTurnExpanded .turnToggle::before {
   content: "▼";
 }
 

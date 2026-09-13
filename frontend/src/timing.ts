@@ -5,6 +5,8 @@ import type { EventMessage, EventResult } from "@sdk/types.gen";
 export interface TurnTiming {
   event: EventMessage;
   result: EventResult;
+  // Model reported when the session that produced this turn started.
+  reportedModel?: string;
   waitMs: number | null;
 }
 
@@ -75,6 +77,7 @@ export class IncrementalTaskTimingTracker {
   private userWaitMs = new Map<EventMessage, number>();
   private previousTs = 0;
   private processed = 0;
+  private reportedModel: string | undefined;
   private waitingTurn: TurnTiming | null = null;
 
   derive(messages: readonly EventMessage[], reset: boolean): TaskTimings {
@@ -89,6 +92,9 @@ export class IncrementalTaskTimingTracker {
   }
 
   private append(event: EventMessage) {
+    if (event.kind === "init") {
+      this.reportedModel = event.init?.reportedModel || undefined;
+    }
     if (isVisualTimelineEvent(event) && event.ts > 0) {
       if (this.previousTs > 0 && event.ts >= this.previousTs) {
         this.previousEventTs.set(event, this.previousTs);
@@ -96,7 +102,7 @@ export class IncrementalTaskTimingTracker {
       this.previousTs = event.ts;
     }
     if (event.kind === "result" && event.result) {
-      const turn = { event, result: event.result, waitMs: null } satisfies TurnTiming;
+      const turn = { event, result: event.result, reportedModel: this.reportedModel, waitMs: null } satisfies TurnTiming;
       this.turns.push(turn);
       this.waitingTurn = turn;
       return;
@@ -117,6 +123,7 @@ export class IncrementalTaskTimingTracker {
     this.userWaitMs = new Map<EventMessage, number>();
     this.previousTs = 0;
     this.processed = 0;
+    this.reportedModel = undefined;
     this.waitingTurn = null;
   }
 }

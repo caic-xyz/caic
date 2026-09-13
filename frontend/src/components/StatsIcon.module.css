@@ -1,4 +1,4 @@
-/* Styles for compact task usage, container statistics, and per-invocation performance details. */
+/* Styles for compact task usage, analytics, and container resource statistics. */
 
 .wrapper {
   position: relative;
@@ -118,67 +118,6 @@
 .noData {
   color: var(--color-text-muted);
   font-size: 0.78rem;
-}
-
-/* Perf table */
-.perfTable {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.perfTh {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: var(--color-text-tertiary);
-  text-align: left;
-  padding: 0 0.3rem 0.25rem 0;
-  border-bottom: 1px solid var(--color-border-light);
-}
-
-.perfTd {
-  font-size: 0.78rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  padding: 0.1rem 0.3rem 0.1rem 0;
-  vertical-align: baseline;
-}
-
-.coldWarning {
-  margin-left: 0.2rem;
-  color: var(--color-warning-text);
-  cursor: help;
-  font-size: 0.68rem;
-}
-
-.modelCell {
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.perfSub {
-  display: block;
-  color: var(--color-text-muted);
-  font-size: 0.67rem;
-  white-space: nowrap;
-}
-
-.tokenDetailRow + tr .perfTd {
-  padding-top: 0.3rem;
-}
-
-.tokenDetailCell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 0.65rem;
-  padding: 0 0.3rem 0.3rem 0;
-  border-bottom: 1px solid var(--color-border-light);
-  color: var(--color-text-muted);
-  font-size: 0.69rem;
-  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 480px) {

@@ -76,6 +76,19 @@ describe("deriveTaskTimings", () => {
     expect(timings.userWaitMs.has(initialInput)).toBe(false);
   });
 
+  it("keeps the session-reported model when a result omits it", () => {
+    const completed = result(2_000, 1);
+    if (!completed.result) throw new Error("result fixture is missing payload");
+    completed.result.usage.reportedModel = "";
+
+    const timings = deriveTaskTimings([
+      { kind: "init", ts: 1_000, init: { reportedModel: "session-model", agentVersion: "test", sessionID: "session", tools: [], cwd: "", harness: "test" } },
+      completed,
+    ]);
+
+    expect(timings.turns[0].reportedModel).toBe("session-model");
+  });
+
   it("does not present same-timestamp inputs as a measured wait", () => {
     const userInput = input(1_000, "continue");
     const timings = deriveTaskTimings([result(1_000, 1), userInput]);

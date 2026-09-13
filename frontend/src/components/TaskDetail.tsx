@@ -16,11 +16,11 @@ import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
 import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskToolInput, botFixPR } from "../api";
-import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session, type Turn } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
 import { formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown } from "../quota";
-import { IncrementalTaskTimingTracker, formatTimingDuration } from "../timing";
+import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
 import type { ToolCall } from "../grouping";
 import { Marked, Renderer, type Tokens } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -30,6 +30,7 @@ import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
+import TurnInvocationIcon from "./TurnInvocationIcon";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -341,6 +342,13 @@ export default function TaskDetail(props: Props) {
     timingEpoch = epoch;
     return timingTracker.derive(messages(), reset);
   });
+  const turnTimingsByResultEvent = createMemo(() => new Map(
+    taskTimings().turns.map((turn) => [turn.event, turn]),
+  ));
+  const turnTimingsByResult = createMemo(() => new Map(
+    taskTimings().turns.map((turn) => [turn.result, turn]),
+  ));
+  const turnTiming = (turn: Turn) => turn.result ? turnTimingsByResult().get(turn.result) : undefined;
   const statsHistory = createMemo<EventStats[]>(() => messages().filter((m) => m.kind === "stats" && m.stats !== undefined).map((m) => m.stats as EventStats));
   // The agent normally emits the initial prompt as its first user-input event.
   // Setup can fail before that happens, so retain the recorded prompt as task context.
@@ -861,25 +869,33 @@ export default function TaskDetail(props: Props) {
                 {/* Collapsed past turn: single clickable row. */}
                 <Match when={elided()} keyed>
                   {(e) => (
-                    <button class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${e.key}`}
-                      onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
-                      <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
-                      <span class={styles.turnDuration}>
-                        {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
-                      </span>
-                    </button>
+                    <div class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${e.key}`}>
+                      <button type="button" class={styles.turnToggle} onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
+                        <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
+                        <span class={styles.turnDuration}>
+                          {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
+                        </span>
+                      </button>
+                      <Show when={turnTiming(e.turn)} keyed>
+                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                      </Show>
+                    </div>
                   )}
                 </Match>
                 {/* Expanded past turn header: click to collapse. */}
                 <Match when={expHdr()} keyed>
                   {(h) => (
-                    <button class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${h.turnKey}`}
-                      onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}>
-                      <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
-                      <span class={styles.turnDuration}>
-                        {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
-                      </span>
-                    </button>
+                    <div class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${h.turnKey}`}>
+                      <button type="button" class={styles.turnToggle} onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}>
+                        <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
+                        <span class={styles.turnDuration}>
+                          {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
+                        </span>
+                      </button>
+                      <Show when={turnTiming(h.turn)} keyed>
+                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                      </Show>
+                    </div>
                   )}
                 </Match>
                 {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
@@ -887,8 +903,8 @@ export default function TaskDetail(props: Props) {
                   {(gi) => (
                     <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
                       <div class={styles.timedItemContent}>
-                        <Show when={hasGroupTiming(gi().group) && (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)}>
-                          <span class={`${styles.messageTiming}${gi().group.events.some((event) => event.kind === "result") ? ` ${styles.messageTimingCardInset}` : ""}`}>
+                        <Show when={hasGroupTiming(gi().group) && !gi().group.events.some((event) => event.kind === "result") && (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)}>
+                          <span class={styles.messageTiming}>
                             <TimingIcon
                               events={gi().group.events}
                               segments={gi().group.timingSegments}
@@ -905,6 +921,8 @@ export default function TaskDetail(props: Props) {
                           onAskAnswer={sendAskAnswer}
                           onClearAndExecutePlan={clearAndExecutePlan}
                           pendingAction={pendingAction}
+                          model={props.model ?? null}
+                          turnTiming={(event) => turnTimingsByResultEvent().get(event)}
                         />
                       </div>
                     </div>
@@ -1007,6 +1025,8 @@ function GroupContent(props: {
   onAskAnswer: (text: string) => void;
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
+  model: string | null;
+  turnTiming: (event: EventMessage) => TurnTiming | undefined;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
   const group = props.group;
@@ -1050,7 +1070,7 @@ function GroupContent(props: {
       </Match>
       <Match when={group().kind === "other"}>
         <For each={group().events}>
-          {(ev) => <MessageItem ev={ev} />}
+          {(ev) => <MessageItem ev={ev} model={props.model} turnTiming={props.turnTiming(ev)} />}
         </For>
       </Match>
     </Switch>
@@ -1163,7 +1183,7 @@ function usageMetaParts(u: EventUsage): string[] {
 	return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
 }
 
-function MessageItem(props: { ev: EventMessage }) {
+function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming?: TurnTiming }) {
   return (
     <Switch>
       <Match when={props.ev.rateLimit}>
@@ -1210,7 +1230,7 @@ function MessageItem(props: { ev: EventMessage }) {
         }}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => <ResultCard result={result} />}
+        {(result) => <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />}
       </Match>
       <Match when={props.ev.error} keyed>
         {(err) => (
@@ -1228,7 +1248,7 @@ function MessageItem(props: { ev: EventMessage }) {
   );
 }
 
-function ResultCard(props: { result: EventResult }) {
+function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: TurnTiming }) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
@@ -1239,7 +1259,20 @@ function ResultCard(props: { result: EventResult }) {
   });
   return (
     <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
-      <strong>{result().isError ? "Error" : "Done"}</strong>
+      <Show when={props.turnTiming} keyed>
+        {(turn) => (
+          <div class={styles.resultHeader}>
+            <strong>{result().isError ? "Error" : "Done"}</strong>
+            <div class={styles.resultTiming}>
+              <span class={styles.resultDuration}>{turn.result.duration > 0 ? formatTimingDuration(turn.result.duration * 1_000) : "0s"}</span>
+              <TurnInvocationIcon turn={turn} model={props.model} />
+            </div>
+          </div>
+        )}
+      </Show>
+      <Show when={!props.turnTiming}>
+        <strong>{result().isError ? "Error" : "Done"}</strong>
+      </Show>
       <Show when={result().result}>
         <div class={styles.resultText}><Markdown text={result().result} /></div>
       </Show>
