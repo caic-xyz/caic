@@ -69,13 +69,16 @@ export default function SearchableSelect(props: Props) {
     return found ? found.label : (props.value || props.placeholder || "");
   };
 
-  function openMenu() {
+  function selectedOptionIndex() {
+    const idx = visibleOptions().findIndex((o) => o.value === props.value);
+    return idx >= 0 ? idx : 0;
+  }
+
+  function openMenu(initialOption: "selected" | "last") {
     if (props.disabled) return;
     openerRef = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFilter("");
-    const vis = visibleOptions();
-    const idx = vis.findIndex((o) => o.value === props.value);
-    setActive(idx >= 0 ? idx : 0);
+    setActive(initialOption === "last" ? Math.max(0, visibleOptions().length - 1) : selectedOptionIndex());
     setOpen(true);
     props.onOpen?.();
     requestAnimationFrame(() => inputRef?.focus());
@@ -130,14 +133,19 @@ export default function SearchableSelect(props: Props) {
 
   createEffect(() => {
     if (!open()) return;
-    optionRefs[active()]?.scrollIntoView?.({ block: "nearest" });
+    const initialActiveIndex = active();
+    visibleOptions();
+    const frame = requestAnimationFrame(() => {
+      optionRefs[initialActiveIndex]?.scrollIntoView({ block: "nearest" });
+    });
+    onCleanup(() => cancelAnimationFrame(frame));
   });
 
   function onTriggerKeyDown(e: KeyboardEvent) {
     if (props.disabled) return;
-    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      openMenu();
+      openMenu(e.key === "ArrowUp" ? "last" : "selected");
     }
   }
 
@@ -171,7 +179,7 @@ export default function SearchableSelect(props: Props) {
         disabled={props.disabled}
         title={props.title}
         data-testid={props["data-testid"]}
-        onClick={() => (open() ? closeMenu(false) : openMenu())}
+        onClick={() => (open() ? closeMenu(false) : openMenu("selected"))}
         onKeyDown={onTriggerKeyDown}
       >
         <span class={styles.triggerLabel}>{props.triggerLabel ?? selectedLabel()}</span>

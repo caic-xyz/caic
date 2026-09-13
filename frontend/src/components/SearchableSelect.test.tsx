@@ -3,6 +3,7 @@
 
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach } from "vitest";
 
 import SearchableSelect, { type SearchableOption } from "./SearchableSelect";
 
@@ -31,6 +32,33 @@ function setup(initial = "a") {
 }
 
 describe("SearchableSelect", () => {
+  const scrollIntoView = vi.fn();
+  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (originalScrollIntoView) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
+    scrollIntoView.mockReset();
+  });
+
   it("shows the selected label and opens on click", async () => {
     const user = userEvent.setup();
     setup();
@@ -79,6 +107,43 @@ describe("SearchableSelect", () => {
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     expect(onChange).toHaveBeenCalledWith("c");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("opens with either arrow key and scrolls the active option into view", async () => {
+    const user = userEvent.setup();
+    const deepOptions = Array.from({ length: 30 }, (_, i) => ({
+      value: `option-${i}`,
+      label: `Option ${i}`,
+      search: `option ${i}`,
+    }));
+    render(() => (
+      <SearchableSelect
+        ariaLabel="Deep picker"
+        value="option-25"
+        options={() => deepOptions}
+        onChange={vi.fn()}
+      />
+    ));
+
+    const trigger = screen.getByRole("button", { name: "Deep picker" });
+    trigger.focus();
+    await user.keyboard("{ArrowUp}");
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrollIntoView.mock.contexts).toContain(screen.getByRole("option", { name: "Option 29" }));
+    expect(screen.getByRole("combobox", { name: "Deep picker" })).toHaveAttribute(
+      "aria-activedescendant",
+      expect.stringContaining("-opt-29"),
+    );
+
+    await user.keyboard("{Escape}");
+    scrollIntoView.mockClear();
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(scrollIntoView.mock.contexts).toContain(screen.getByRole("option", { name: "Option 25" }));
   });
 
   it("filters options as the user types", async () => {
