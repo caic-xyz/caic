@@ -40,25 +40,38 @@ _NAMED_COLORS = frozenset(
 )
 _NAMED_COLOR_RE = re.compile(rf"(?<![-\w.])({'|'.join(sorted(_NAMED_COLORS))})(?![-\w])", re.IGNORECASE)
 _PROP_DEF_RE = re.compile(r"--[A-Za-z][\w-]*\s*:[^;{}]*;")
+_THEME_COLOR_META_RE = re.compile(r"<meta\b[^>]*\bname=[\"']theme-color[\"'][^>]*>", re.IGNORECASE)
 
 
-def _strip_comments(text: str, *, line_comments: bool = False, html_comments: bool = False) -> str:
-    """Blank comments while preserving quoted strings and line numbers."""
+def _strip_comments(
+    text: str,
+    *,
+    blank_strings: bool = False,
+    line_comments: bool = False,
+    html_comments: bool = False,
+) -> str:
+    """Blank comments and optional quoted strings while preserving line numbers."""
     chars = list(text)
     quote: str | None = None
     i = 0
     while i < len(chars):
         if quote is not None:
-            if chars[i] == "\\":
+            if blank_strings and text[i] != "\n":
+                chars[i] = " "
+            if text[i] == "\\":
+                if blank_strings and i + 1 < len(chars) and text[i + 1] != "\n":
+                    chars[i + 1] = " "
                 i += 2
                 continue
-            if chars[i] == quote:
+            if text[i] == quote:
                 quote = None
             i += 1
             continue
 
-        if chars[i] in {'"', "'", "`"}:
-            quote = chars[i]
+        if text[i] in {'"', "'", "`"}:
+            quote = text[i]
+            if blank_strings:
+                chars[i] = " "
             i += 1
             continue
 
@@ -131,7 +144,7 @@ def check_css_vars(variable_files: list[str], source_files: list[str], token_fil
 
 
 def extract_css_classes(text: str) -> set[str]:
-    cleaned = _CSS_GLOBAL_RE.sub("", _strip_comments(text))
+    cleaned = _CSS_GLOBAL_RE.sub("", _strip_comments(text, blank_strings=True))
     return {m.group(1) for m in _CLASS_DEF_RE.finditer(cleaned)}
 
 
@@ -187,7 +200,7 @@ def check_unused_selectors(files: list[str]) -> list[str]:
             if dyn_line:
                 errors.append(
                     f"  {ts_path}:{dyn_line}: dynamic CSS module access `{alias}[...]`"
-                    " — use an explicit Record<Variant, string> map instead"
+                    ": use an explicit Record<Variant, string> map instead"
                 )
                 skip = True
                 break
@@ -217,6 +230,8 @@ def check_hardcoded_colors(files: list[str], *, check_named_colors: bool = True)
     seen: set[tuple[str, int, str]] = set()
     for path in files:
         text = _PROP_DEF_RE.sub(_blank_span, _read_source(path))
+        if Path(path).suffix == ".html":
+            text = _THEME_COLOR_META_RE.sub(_blank_span, text)
         for lineno, line in enumerate(text.splitlines(), start=1):
             values: list[str] = []
             for m in _HEX_COLOR_RE.finditer(line):
@@ -240,7 +255,7 @@ def main() -> int:
     parser.add_argument(
         "--source-path",
         type=Path,
-        default=Path("frontend/src"),
+        default=Path("frontend"),
         help="frontend source directory (default: %(default)s)",
     )
     parser.add_argument(
@@ -249,6 +264,16 @@ def main() -> int:
         default=Path("frontend/src/global.css"),
         help="shared CSS token file (default: %(default)s)",
     )
+    parser.add_argument(
+        "--allow-hardcoded-colors",
+        action="store_true",
+        help="skip raw-color checks while migrating an existing frontend",
+    )
+    parser.add_argument(
+        "--allow-hardcoded-typescript-colors",
+        action="store_true",
+        help="skip raw-color checks in TypeScript and TSX files",
+    )
     args = parser.parse_args()
 
     try:
@@ -256,6 +281,7 @@ def main() -> int:
             ["git", "ls-files", "--cached", "--others", "--exclude-standard", str(args.source_path)],
             text=True,
         ).splitlines()
+        files = [path for path in files if Path(path).is_file()]
         files.sort()
     except subprocess.CalledProcessError as e:
         print(f"Error running git: {e}", file=sys.stderr)
@@ -273,8 +299,11 @@ def main() -> int:
     try:
         var_errors = check_css_vars(variable_files, source_files, token_file)
         selector_errors = check_unused_selectors(files)
-        color_errors = check_hardcoded_colors(css_files + html_files)
-        color_errors += check_hardcoded_colors(raw_color_source_files, check_named_colors=False)
+        color_errors: list[tuple[str, int, str]] = []
+        if not args.allow_hardcoded_colors:
+            color_errors = check_hardcoded_colors(css_files + html_files)
+            if not args.allow_hardcoded_typescript_colors:
+                color_errors += check_hardcoded_colors(raw_color_source_files, check_named_colors=False)
     except (OSError, UnicodeError) as e:
         print(f"Error reading source file: {e}", file=sys.stderr)
         return 1
