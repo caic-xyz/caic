@@ -456,7 +456,7 @@ describe("TaskDetail", () => {
     expect(getByText("0s").className).toMatch(/turnDuration/);
   });
 
-  it("shows total work duration on a section collapsed after compaction", () => {
+  it("shows turn count and total work duration on a section collapsed after compaction", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
@@ -485,6 +485,7 @@ describe("TaskDetail", () => {
 
     const { getByText } = renderTaskDetail();
 
+    expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
     expect(getByText("0:05").className).toMatch(/sessionDuration/);
   });
 

@@ -925,6 +925,7 @@ export function sessionSummary(session: Session): string {
   } else {
     parts.push("Compacted session");
   }
+  parts.push(session.turns.length === 1 ? "1 turn" : `${session.turns.length} turns`);
   if (session.textCount > 0) {
     parts.push(session.textCount === 1 ? "1 message" : `${session.textCount} messages`);
   }
