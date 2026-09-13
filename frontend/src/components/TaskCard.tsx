@@ -167,11 +167,11 @@ export default function TaskCard(props: TaskCardProps) {
 
   const repositoryState = (repoIndex: number) =>
     repoStates()[repoIndex] ?? (repoIndex === 0 ? diffStatState(props.diffStat) : undefined);
-  const repoStateRows = () => (props.repos ?? []).flatMap((repo, index) =>
-    repoStateLabel(repositoryState(index))
-      ? [{ name: repo.name, branch: repositoryState(index)?.branch || repo.branch, state: repositoryState(index) }]
-      : [],
-  );
+  const repoStateRows = () => (props.repos ?? []).map((repo, index) => ({
+    name: repo.name,
+    branch: repositoryState(index)?.branch || repo.branch,
+    state: repositoryState(index),
+  }));
   const hasMultipleRepos = () => (props.repos?.length ?? 0) > 1;
   const repoStateText = (repo: { name: string; branch: string }) =>
     hasMultipleRepos() ? [repo.name, repo.branch].filter(Boolean).join(" · ") : repo.branch || repo.name;
@@ -597,9 +597,11 @@ export default function TaskCard(props: TaskCardProps) {
               {(repo) => (
                 <span class={styles.repoState} data-testid="task-card-repo-state">
                   <span class={styles.repoStateLabel}>{repoStateText(repo)}</span>
-                  <span class={styles.repoStateSummary}>
-                    <RepoStateIcons state={repo.state} />
-                  </span>
+                  <Show when={repoStateLabel(repo.state)}>
+                    <span class={styles.repoStateSummary}>
+                      <RepoStateIcons state={repo.state} />
+                    </span>
+                  </Show>
                 </span>
               )}
             </For>

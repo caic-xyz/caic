@@ -55,6 +55,22 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
 }
 
 describe("TaskCard", () => {
+  it("renders every repository and branch before Git status is available", () => {
+    render(() => <TaskCard {...props({
+      runtime: undefined,
+      repos: [
+        { name: "repo/primary", branch: "caic-1" },
+        { name: "repo/extra", branch: "caic-2" },
+      ],
+    })} />);
+
+    const rows = screen.getAllByTestId("task-card-repo-state");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("repo/primary · caic-1");
+    expect(rows[1]).toHaveTextContent("repo/extra · caic-2");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
   it("shows the complete repository-state component in the bottom row", async () => {
     vi.mocked(getTaskRepoStatus).mockResolvedValueOnce({
       repositories: [{
