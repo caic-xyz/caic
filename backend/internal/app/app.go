@@ -467,6 +467,11 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			return errors.Join(errs...)
 		})
 	}
+	if cfg.Runtime.ImagePruneSchedule != nil {
+		backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
+			return pruneImages(ctx, log.With("cmp", "prune"), mdRuntimes, cfg.Runtime.ImagePruneSchedule)
+		})
+	}
 	backgroundTasks = append(backgroundTasks,
 		func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "watch-harness-model-cache")

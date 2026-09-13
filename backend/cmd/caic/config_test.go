@@ -71,6 +71,7 @@ func TestLoadTOMLConfig(t *testing.T) {
 [core]
 root = "/srv/repos"
 auto_update = ""
+prune = "0 6 * * *"
 
 [core.env]
 TAILSCALE_API_KEY = "tskey_test"
@@ -138,6 +139,9 @@ pprof = true
 		}
 		if tc.Core.AutoUpdate == nil || *tc.Core.AutoUpdate != "" {
 			t.Errorf("AutoUpdate = %v, want empty string", tc.Core.AutoUpdate)
+		}
+		if tc.Core.Prune == nil || *tc.Core.Prune != "0 6 * * *" {
+			t.Errorf("Prune = %v, want 0 6 * * *", tc.Core.Prune)
 		}
 		if tc.GitHub.PAT.Token != "ghp_test" {
 			t.Errorf("GitHub.PAT.Token = %q", tc.GitHub.PAT.Token)
@@ -370,10 +374,12 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		githubClientSecret := strings.Join([]string{"github", "client", "secret"}, "-")
 		gitlabClientSecret := strings.Join([]string{"gitlab", "client", "secret"}, "-")
+		prune := "0 6 * * *"
 
 		tc := &tomlConfig{
 			Core: tomlCore{
-				Root: "/repos",
+				Root:  "/repos",
+				Prune: &prune,
 				Env: map[string]string{
 					"GEMINI_API_KEY":    "AIza_from_core_env",
 					"DEEPSEEK_API_KEY":  "sk_deepseek_from_core_env",
@@ -479,6 +485,9 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.Runtime.TailscaleAPIKey != "tskey_from_core_env" {
 			t.Errorf("TailscaleAPIKey = %q, want tskey_from_core_env", cfg.Runtime.TailscaleAPIKey)
+		}
+		if cfg.Runtime.ImagePruneSchedule == nil || len(cfg.Runtime.ImagePruneSchedule.Hour) != 1 || cfg.Runtime.ImagePruneSchedule.Hour[0] != 6 {
+			t.Errorf("ImagePruneSchedule = %+v, want daily at 06:00", cfg.Runtime.ImagePruneSchedule)
 		}
 	})
 
@@ -740,6 +749,58 @@ func TestAutoUpdateSchedule(t *testing.T) {
 		t.Parallel()
 		cron := "not a cron"
 		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
+		if err == nil {
+			t.Error("expected error for invalid cron")
+		}
+	})
+}
+
+func TestPruneSchedule(t *testing.T) {
+	t.Parallel()
+	t.Run("default schedule", func(t *testing.T) {
+		t.Parallel()
+		s, err := pruneSchedule(&tomlConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s == nil {
+			t.Fatal("expected non-nil schedule for default")
+		}
+		if len(s.Hour) != 1 || s.Hour[0] != 5 {
+			t.Errorf("Hour = %v, want [5]", s.Hour)
+		}
+	})
+
+	t.Run("empty disables", func(t *testing.T) {
+		t.Parallel()
+		s, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: new(string)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s != nil {
+			t.Error("expected nil schedule for empty string")
+		}
+	})
+
+	t.Run("custom cron", func(t *testing.T) {
+		t.Parallel()
+		cron := "0 3 * * *"
+		s, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: &cron}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s == nil {
+			t.Fatal("expected non-nil schedule")
+		}
+		if len(s.Hour) != 1 || s.Hour[0] != 3 {
+			t.Errorf("Hour = %v, want [3]", s.Hour)
+		}
+	})
+
+	t.Run("invalid cron", func(t *testing.T) {
+		t.Parallel()
+		cron := "not a cron"
+		_, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: &cron}})
 		if err == nil {
 			t.Error("expected error for invalid cron")
 		}

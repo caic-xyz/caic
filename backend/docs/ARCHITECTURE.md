@@ -96,6 +96,7 @@ graph TD
   pkg_internal_app --> pkg_internal_agent_backends
   pkg_internal_app --> pkg_internal_agent_harness
   pkg_internal_app --> pkg_internal_auth
+  pkg_internal_app --> pkg_internal_autoupdate
   pkg_internal_app --> pkg_internal_bot
   pkg_internal_app --> pkg_internal_ci
   pkg_internal_app --> pkg_internal_forge
@@ -400,6 +401,7 @@ graph TD
   pkg_internal_app --> pkg_internal_agent_backends
   pkg_internal_app --> pkg_internal_agent_harness
   pkg_internal_app --> pkg_internal_auth
+  pkg_internal_app --> pkg_internal_autoupdate
   pkg_internal_app --> pkg_internal_bot
   pkg_internal_app --> pkg_internal_ci
   pkg_internal_app --> pkg_internal_forge
@@ -570,7 +572,7 @@ graph TD
 | `internal/agent/opencode` | `internal/agent`, `internal/agent/harness`, `internal/runtime` | `internal/agent/agenttest`, `internal/taskslog` |
 | `internal/agent/pi` | `internal/agent`, `internal/agent/harness`, `internal/mcp`, `internal/runtime` | `internal/agent/agenttest`, `internal/taskslog` |
 | `internal/agent/relay` | None | None |
-| `internal/app` | `internal/agent`, `internal/agent/backends`, `internal/agent/harness`, `internal/auth`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/preferences`, `internal/repo`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/taskslog`, `internal/usage` | `internal/agent/agenttest`, `internal/runtime/runtimetest` |
+| `internal/app` | `internal/agent`, `internal/agent/backends`, `internal/agent/harness`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/preferences`, `internal/repo`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/taskslog`, `internal/usage` | `internal/agent/agenttest`, `internal/runtime/runtimetest` |
 | `internal/auth` | None | None |
 | `internal/autoupdate` | `internal/forge/github` | None |
 | `internal/bot` | `internal/forge`, `internal/task` | None |

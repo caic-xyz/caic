@@ -40,6 +40,7 @@ type tomlHarness struct {
 type tomlCore struct {
 	Root       string            `toml:"root"`
 	AutoUpdate *string           `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
+	Prune      *string           `toml:"prune"`       // nil = default schedule; "" = disabled; else cron expression
 	Env        map[string]string `toml:"env"`
 }
 
@@ -193,6 +194,10 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 	if err != nil {
 		return nil, "", "", "", err
 	}
+	prune, err := pruneSchedule(tc)
+	if err != nil {
+		return nil, "", "", "", err
+	}
 	// gh CLI fallback: when no token and no OAuth configured, try gh auth token.
 	// TODO: remove OAuth guard once gh auth token reliably provides a scoped PAT.
 	ghToken := tc.GitHub.PAT.Token
@@ -223,7 +228,8 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			CacheDir:  cacheDir(),
 		},
 		Runtime: server.RuntimeConfig{
-			TailscaleAPIKey: tailscaleAPIKey,
+			TailscaleAPIKey:    tailscaleAPIKey,
+			ImagePruneSchedule: prune,
 		},
 		Agent: server.AgentConfig{
 			HarnessEnv: harnessEnv,
@@ -324,6 +330,9 @@ func coreEnvOrDefault(env map[string]string, key string) string {
 // defaultAutoUpdate is the default cron schedule: daily at 04:50 local time.
 const defaultAutoUpdate = "50 4 * * *"
 
+// defaultPrune is the default cron schedule: daily at 05:00 local time.
+const defaultPrune = "0 5 * * *"
+
 // autoUpdateSchedule returns the parsed auto-update schedule, or nil if
 // disabled. When auto_update is not set in the config file, the default
 // schedule "50 4 * * *" (daily at 04:50) is used. Set to "" to disable.
@@ -341,6 +350,27 @@ func autoUpdateSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
 	s, err := autoupdate.ParseSchedule(*tc.Core.AutoUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("core.auto_update: %w", err)
+	}
+	return &s, nil
+}
+
+// pruneSchedule returns the parsed image-prune schedule, or nil if disabled.
+// When prune is not set in the config file, the default schedule "0 5 * * *"
+// (daily at 05:00) is used. Set to "" to disable.
+func pruneSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
+	if tc.Core.Prune == nil {
+		s, err := autoupdate.ParseSchedule(defaultPrune)
+		if err != nil {
+			return nil, fmt.Errorf("core.prune: %w", err)
+		}
+		return &s, nil
+	}
+	if *tc.Core.Prune == "" {
+		return nil, nil //nolint:nilnil // nil schedule means disabled, not an error
+	}
+	s, err := autoupdate.ParseSchedule(*tc.Core.Prune)
+	if err != nil {
+		return nil, fmt.Errorf("core.prune: %w", err)
 	}
 	return &s, nil
 }

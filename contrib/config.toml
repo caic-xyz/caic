@@ -11,6 +11,10 @@
 # replaces the binary on a match. Unset = daily at 04:50; "" disables.
 # e.g. auto_update = "50 4 * * *"
 
+# Remove unused md-built images on this cron schedule (local time). Unset =
+# daily at 05:00; "" disables.
+# e.g. prune = "0 5 * * *"
+
 # Environment variables added to those inherited by the server process. Each key
 # falls back to the host environment when omitted here.
 [core.env]

@@ -11,6 +11,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
@@ -83,9 +84,10 @@ type DirsConfig struct {
 
 // RuntimeConfig selects and configures task runtime provisioning.
 type RuntimeConfig struct {
-	TailscaleAPIKey string           // required for Tailscale networking inside runtime instances
-	System          runtime.System   // optional runtime override for smoke/e2e tests
-	Metadata        runtime.Metadata // optional runtime metadata added to every created instance
+	TailscaleAPIKey    string               // required for Tailscale networking inside runtime instances
+	ImagePruneSchedule *autoupdate.Schedule // nil disables unused md image pruning
+	System             runtime.System       // optional runtime override for smoke/e2e tests
+	Metadata           runtime.Metadata     // optional runtime metadata added to every created instance
 	// SkipWarmup skips base-image warmup at startup. Used by e2e fake mode to
 	// avoid pulling Docker images that aren't needed for testing.
 	SkipWarmup bool

@@ -1,4 +1,4 @@
-// Startup maintenance for md base images.
+// Startup and scheduled maintenance for md images.
 
 package app
 
@@ -11,6 +11,7 @@ import (
 
 	"github.com/caic-xyz/md"
 
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 )
@@ -50,6 +51,39 @@ func warmupImages(ctx context.Context, log *slog.Logger, client *md.Client, pref
 		case <-ticker.C:
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+// pruneImages removes unused md-built images one runtime at a time on sched
+// until ctx is cancelled.
+func pruneImages(ctx context.Context, log *slog.Logger, runtimes []mdRuntime, sched *autoupdate.Schedule) error {
+	log.InfoContext(ctx, "image pruning enabled")
+	for {
+		now := time.Now()
+		target := sched.Next(now)
+		delay := target.Sub(now)
+		log.DebugContext(ctx, "image pruning: next run", "in", delay.Round(time.Second))
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+
+		for i := range runtimes {
+			w := &mdruntime.SlogWriter{Context: ctx, Logger: log, Phase: "prune"}
+			removed, err := runtimes[i].client.PruneImages(ctx, w, w)
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				log.WarnContext(ctx, "prune unused images", "err", err)
+				continue
+			}
+			log.InfoContext(ctx, "pruned unused images", "count", len(removed))
 		}
 	}
 }
