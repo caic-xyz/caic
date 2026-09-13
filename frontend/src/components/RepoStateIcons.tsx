@@ -94,11 +94,6 @@ export default function RepoStateIcons(props: Props) {
 
   const label = () => repoStateLabel(props.state);
   const shouldElideDiffStats = () => props.elideDiffStats || elideDiffStats();
-  const diffLabel = () => {
-    const status = label();
-    if (!status) return "View diff";
-    return props.state?.name ? `View diff for ${props.state.name}: ${status}` : `View diff: ${status}`;
-  };
   const markers = () => (
     <>
       <Show when={label()}>
@@ -142,8 +137,8 @@ export default function RepoStateIcons(props: Props) {
             data-elide-diff-stats={shouldElideDiffStats() ? "" : undefined}
             href={href}
             ref={(element) => { markerRef = element; }}
-            aria-label={diffLabel()}
-            title={diffLabel()}
+            aria-label={props.state?.name ? `${props.state.name}: ${label()}` : label()}
+            title={props.state?.name ? `${props.state.name}: ${label()}` : label()}
           >
             <span class={styles.icons} aria-hidden="true">{markers()}</span>
           </A>

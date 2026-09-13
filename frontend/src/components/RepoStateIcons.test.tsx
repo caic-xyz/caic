@@ -107,7 +107,7 @@ it("links a state marker to its repository diff", () => {
     />
   ));
 
-  expect(screen.getByRole("link", { name: "View diff for repo: 1 changed file, 1 addition, 1 commit ahead of upstream" }))
+  expect(screen.getByRole("link", { name: "repo: 1 changed file, 1 addition, 1 commit ahead of upstream" }))
     .toHaveAttribute("href", "/task/@abc+task/diff");
   expect(screen.queryByRole("img")).not.toBeInTheDocument();
 });
