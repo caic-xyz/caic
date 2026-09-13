@@ -1264,7 +1264,7 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
           <div class={styles.resultHeader}>
             <strong>{result().isError ? "Error" : "Done"}</strong>
             <div class={styles.resultTiming}>
-              <span class={styles.resultDuration}>{turn.result.duration > 0 ? formatTimingDuration(turn.result.duration * 1_000) : "0s"}</span>
+              <span class={styles.resultDuration} data-testid="turn-duration">{turn.result.duration > 0 ? formatTimingDuration(turn.result.duration * 1_000) : "0s"}</span>
               <TurnInvocationIcon turn={turn} model={props.model} />
             </div>
           </div>

@@ -450,9 +450,9 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail();
+    renderTaskDetail();
 
-    expect(getByText("0:01").className).toMatch(/resultDuration/);
+    expect(screen.getByTestId("turn-duration")).toHaveTextContent("0:01");
     await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
     expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
   });

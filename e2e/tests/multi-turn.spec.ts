@@ -36,7 +36,7 @@ test("fake timing reaches tool rows and collapsed turn summaries", async ({ page
   await page.goto(`/task/@${id}`);
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toHaveCount(1);
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toHaveCount(1);
-  await expect(page.getByTestId("timing-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
+  await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
 
   await page.waitForTimeout(1100);
   await api.sendInput(id, { prompt: { text: "continue" } });

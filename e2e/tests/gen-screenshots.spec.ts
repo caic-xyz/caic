@@ -147,7 +147,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await toolSummary.click();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
-  await expect(page.getByTestId("timing-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
+  await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
   await captureScreenshot(page, "task-detail.png");
 
   // Screenshot 3: Plan mode.
