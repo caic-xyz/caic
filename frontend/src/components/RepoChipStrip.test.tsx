@@ -5,13 +5,64 @@ import userEvent from "@testing-library/user-event";
 
 import type { Repo } from "@sdk/types.gen";
 
+import * as api from "../api";
 import RepoChipStrip from "./RepoChipStrip";
+
+vi.mock("../api", () => ({ listRepoBranches: vi.fn() }));
 
 const repoA: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" } };
 const repoB: Repo = { path: "repos/b", branch: "main", baseBranch: { name: "main" } };
 const repoC: Repo = { path: "repos/c", branch: "main", baseBranch: { name: "main" } };
 
 describe("RepoChipStrip", () => {
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("shows whether each branch will be adopted or branched off", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listRepoBranches).mockResolvedValue({
+      branches: [
+        { name: "available", action: "adopt" },
+        { name: "occupied", action: "branch_off" },
+        { name: "remote-only", remote: "origin", action: "branch_off" },
+      ],
+    });
+
+    render(() => (
+      <RepoChipStrip
+        repos={() => [repoA]}
+        selectedRepos={() => [{ path: repoA.path, branch: "" }]}
+        availableRecent={() => []}
+        availableRest={() => []}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onSetBranch={vi.fn()}
+        showClone={false}
+      />
+    ));
+
+    await user.click(
+      screen.getByRole("button", { name: `Branch for ${repoA.path}` }),
+    );
+    expect(
+      await screen.findByRole("option", { name: /available Adopt/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /occupied Branch off/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /remote-only.*origin.*Branch off/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /Default.*main.*Branch off/ }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: `Branch for ${repoA.path}` }));
+    await waitFor(() => expect(api.listRepoBranches).toHaveBeenCalledTimes(2));
+  });
+
   it("selects repositories from the manager with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onAdd = vi.fn();

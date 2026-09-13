@@ -364,7 +364,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	forkEntry.Lifecycle.wg.Go(func() { //nolint:contextcheck // fork must finish during shutdown
 		ctx, tk := trace.NewTask(forkEntry.Lifecycle.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
-		if err := r.manager.allocateBranches(ctx, t, mounts, len(sourceRepos)); err != nil {
+		if err := r.manager.allocateBranches(ctx, t, mounts, len(sourceRepos), false); err != nil {
 			forkEntry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "allocate fork branch")})
 			r.manager.NotifyTaskChange()
 			return

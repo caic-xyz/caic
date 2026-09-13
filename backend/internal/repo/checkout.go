@@ -126,13 +126,12 @@ func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string, 
 	return checkout, nil
 }
 
-// AllocateBranch allocates a caic-N branch for this checkout's repo using the
-// checkout's base branch. Used by the server to allocate branches for extra
-// repos before starting an instance.
-func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger) (string, error) {
+// AllocateBranch allocates a caic-N branch from baseBranch. An empty baseBranch
+// uses the checkout default. Used to allocate branches for extra repositories.
+func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBranch string) (string, error) {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	return w.allocateBranchLocked(ctx, log, nil)
+	return w.allocateBranchLocked(ctx, log, baseBranch)
 }
 
 // SyncToOrigin fetches the instance to refresh the host tracking refs, then
@@ -367,6 +366,9 @@ func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, log *slog.L
 		if repo.BaseBranch != "" {
 			baseBranch = repo.BaseBranch
 		}
+		if repo.Branch == baseBranch {
+			continue
+		}
 		checkout := &git.Checkout{Root: dir, Logger: log}
 		deleted, err := deleteLocalBranchIfUnmodified(gitCtx, checkout, repo.Branch, baseBranch)
 		if err != nil {
@@ -397,9 +399,30 @@ func (w *Checkout) ReserveBranchName() string {
 	return name
 }
 
-// FetchAndCreateBranch fetches origin and creates the given branch from the
-// resolved base. Acquires branchMu to serialize git operations across concurrent
-// task setups on the same repo.
+// AdoptableBranches returns local branches that have a configured upstream.
+func (w *Checkout) AdoptableBranches(ctx context.Context, log *slog.Logger) ([]string, error) {
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer gitCancel()
+	checkout := &git.Checkout{Root: w.Dir, Logger: log.With("repo", w.RelPath)}
+	out, err := checkout.RunGit(gitCtx, "for-each-ref", "--format=%(refname:short)%09%(upstream:short)", "refs/heads/")
+	if err != nil {
+		return nil, err
+	}
+	var branches []string
+	for line := range strings.SplitSeq(out, "\n") {
+		name, upstream, ok := strings.Cut(line, "\t")
+		if ok && name != "" && upstream != "" {
+			branches = append(branches, name)
+		}
+	}
+	return branches, nil
+}
+
+// FetchAndCreateBranch adopts branch when it is the selected local base;
+// otherwise it fetches origin and creates branch from the resolved base.
+// It acquires branchMu to serialize git operations across concurrent task setups.
 func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t TaskView, branch string) error {
 	log = log.With("repo", w.RelPath)
 	w.branchMu.Lock()
@@ -407,11 +430,23 @@ func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t
 	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer gitCancel()
 	checkout := &git.Checkout{Root: w.Dir, Logger: log}
+	effectiveBase := w.effectiveBaseBranch(t)
+	if branch == effectiveBase {
+		if _, err := checkout.RevParse(gitCtx, "refs/heads/"+branch); err != nil {
+			return fmt.Errorf("adopt local branch: %w", err)
+		}
+		log.Info("adopting branch", "br", branch)
+		return nil
+	}
 	if err := checkout.Fetch(gitCtx); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
-	effectiveBase := w.effectiveBaseBranch(t)
 	startPoint := "origin/" + effectiveBase
+	if t != nil && t.PrimaryBaseBranch() != "" {
+		if _, err := checkout.RevParse(gitCtx, "refs/heads/"+effectiveBase); err == nil {
+			startPoint = effectiveBase
+		}
+	}
 	if _, err := checkout.RevParse(gitCtx, startPoint); err != nil {
 		startPoint = effectiveBase
 	}
@@ -453,7 +488,7 @@ func (w *Checkout) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
 
 // allocateBranchLocked fetches origin, resolves the start point, and creates
 // the task branch. Must be called under branchMu.
-func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, t TaskView) (string, error) {
+func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, baseBranch string) (string, error) {
 	detached := context.WithoutCancel(ctx)
 	gitCtx, gitCancel := context.WithTimeout(detached, w.GitTimeout)
 	defer gitCancel()
@@ -462,11 +497,18 @@ func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, t
 	if err := checkout.Fetch(gitCtx); err != nil {
 		return "", fmt.Errorf("fetch: %w", err)
 	}
-	// Resolve effective base branch: use task override if provided.
-	effectiveBase := w.effectiveBaseBranch(t)
+	effectiveBase := baseBranch
+	if effectiveBase == "" {
+		effectiveBase = w.BaseBranch
+	}
 	// Prefer the remote tracking ref, but fall back to the local branch when
 	// the base branch only exists locally (not yet pushed to origin).
 	startPoint := "origin/" + effectiveBase
+	if baseBranch != "" {
+		if _, err := checkout.RevParse(gitCtx, "refs/heads/"+effectiveBase); err == nil {
+			startPoint = effectiveBase
+		}
+	}
 	if _, err := checkout.RevParse(gitCtx, startPoint); err != nil {
 		startPoint = effectiveBase
 	}

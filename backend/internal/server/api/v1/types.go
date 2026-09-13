@@ -1054,10 +1054,20 @@ type WebFetchResp struct {
 	Content string `json:"content"`
 }
 
-// BranchInfo describes a single branch with its origin.
+// BranchAction describes how a newly created task will use a selected branch.
+type BranchAction string
+
+// Task branch actions.
+const (
+	BranchActionAdopt     BranchAction = "adopt"
+	BranchActionBranchOff BranchAction = "branch_off"
+)
+
+// BranchInfo describes a single branch with its origin and task-creation action.
 type BranchInfo struct {
-	Name   string `json:"name"`
-	Remote string `json:"remote,omitempty"`
+	Name   string       `json:"name"`
+	Remote string       `json:"remote,omitempty"`
+	Action BranchAction `json:"action,omitempty"`
 }
 
 // RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches.

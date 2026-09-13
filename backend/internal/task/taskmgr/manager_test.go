@@ -4424,7 +4424,7 @@ func TestAllocateBranches(t *testing.T) {
 	}
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	tk.Repos = slices.Clone(mounts)
-	if err := m.allocateBranches(t.Context(), tk, mounts, len(mounts)); err != nil {
+	if err := m.allocateBranches(t.Context(), tk, mounts, len(mounts), false); err != nil {
 		t.Fatal(err)
 	}
 	for i, r := range tk.ReposSnapshot() {
@@ -4439,8 +4439,70 @@ func TestAllocateBranches(t *testing.T) {
 	// A repo with no registered checkout is a hard error.
 	bad := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 	bad.Repos = []taskslog.RepoMount{{Name: "ghost/repo", Branch: "caic-1"}}
-	if err := m.allocateBranches(t.Context(), bad, bad.ReposSnapshot(), 1); err == nil {
+	if err := m.allocateBranches(t.Context(), bad, bad.ReposSnapshot(), 1, false); err == nil {
 		t.Fatal("allocateForkBranches error = nil, want error for unregistered repo")
+	}
+}
+
+func TestAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...) //nolint:gosec // Test helper receives only controlled arguments.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "initial")
+	run("branch", "local-work")
+	run("remote", "add", "origin", dir)
+	run("update-ref", "refs/remotes/origin/main", "main")
+	run("branch", "--set-upstream-to", "origin/main", "local-work")
+	run("branch", "untracked", "main")
+	run("update-ref", "refs/remotes/origin/tracked", "main")
+	run("branch", "tracked", "main")
+	run("branch", "--set-upstream-to", "origin/tracked", "tracked")
+	run("rev-parse", "tracked@{upstream}")
+	run("update-ref", "refs/remotes/origin/remote-only", "main")
+
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+	checkout := &repo.Checkout{Dir: dir, BaseBranch: "main", GitTimeout: time.Minute}
+	registerCheckout(t, m.Checkouts, "repo", checkout)
+
+	allocate := func(base string) *task.Task {
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+		tk.Repos = []taskslog.RepoMount{{Name: "repo", BaseBranch: base, GitRoot: dir}}
+		m.insertEntry(tk.ID.String(), m.NewEntry(tk, nil))
+		if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, true); err != nil {
+			t.Fatal(err)
+		}
+		return tk
+	}
+
+	if got := allocate("local-work").Primary().Branch; got != "local-work" {
+		t.Errorf("local branch = %q, want local-work", got)
+	}
+	if !m.BranchAssociated("repo", "local-work") {
+		t.Error("BranchAssociated = false, want true for claimed local-work")
+	}
+	if got := allocate("tracked").Primary().Branch; got != "tracked" {
+		t.Errorf("tracking branch = %q, want tracked", got)
+	}
+	if got := allocate("untracked").Primary().Branch; !strings.HasPrefix(got, "caic-") {
+		t.Errorf("untracked local branch = %q, want caic-N", got)
+	}
+	if got := allocate("remote-only").Primary().Branch; !strings.HasPrefix(got, "caic-") {
+		t.Errorf("remote branch = %q, want caic-N", got)
+	}
+	if got := allocate("local-work").Primary().Branch; !strings.HasPrefix(got, "caic-") {
+		t.Errorf("associated local branch = %q, want caic-N", got)
 	}
 }
 

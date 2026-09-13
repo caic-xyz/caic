@@ -37,6 +37,27 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
+public struct BranchAction: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Adopt = BranchAction("adopt")
+    public static let BranchOff = BranchAction("branch_off")
+
+    public static func other(_ value: String) -> BranchAction { BranchAction(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct CIStatus: Codable, Equatable, Hashable {
     public let value: String
 
@@ -716,10 +737,11 @@ public struct CacheSizesResp: Codable {
     public let wellKnown: [CacheSize]
 }
 
-/// BranchInfo describes a single branch with its origin.
+/// BranchInfo describes a single branch with its origin and task-creation action.
 public struct BranchInfo: Codable {
     public let name: String
     public let remote: String?
+    public let action: BranchAction?
 }
 
 /// ForgeCheck describes a CI check run with its status, conclusion, and timing.

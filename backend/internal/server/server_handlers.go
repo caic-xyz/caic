@@ -428,9 +428,17 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 	}
 	seen := make(map[string]struct{}, len(localPairs))
 	branches := make([]v1.BranchInfo, 0, len(localPairs))
+	adoptable, err := info.AdoptableBranches(ctx, h.log)
+	if err != nil {
+		h.log.WarnContext(ctx, "inspect adoptable branches failed", "repo", repoPath, "err", err)
+	}
 	for _, p := range localPairs {
 		seen[p[0]] = struct{}{}
-		branches = append(branches, v1.BranchInfo{Name: p[0]})
+		action := v1.BranchActionBranchOff
+		if slices.Contains(adoptable, p[0]) && !h.taskMgr.BranchAssociated(repoPath, p[0]) {
+			action = v1.BranchActionAdopt
+		}
+		branches = append(branches, v1.BranchInfo{Name: p[0], Action: action})
 	}
 	// Fetch remote branches from all remotes.
 	remoteList, err := checkout.RunGit(ctx, "remote")
@@ -449,7 +457,7 @@ func (h *serverHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.R
 		for _, p := range remotePairs {
 			if _, ok := seen[p[0]]; !ok {
 				seen[p[0]] = struct{}{}
-				branches = append(branches, v1.BranchInfo{Name: p[0], Remote: remote})
+				branches = append(branches, v1.BranchInfo{Name: p[0], Remote: remote, Action: v1.BranchActionBranchOff})
 			}
 		}
 	}

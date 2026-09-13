@@ -216,7 +216,7 @@ func (r *AgentRuntime) ClearContextSession(ctx context.Context, t *Task) (*Sessi
 // session watcher.
 //
 // Sequence:
-//  1. Create a new git branch from origin/<BaseBranch> (or the local branch if not on origin).
+//  1. Adopt the selected unused local branch, or create a new branch from the selected remote/default branch.
 //  2. Start a runtime instance on that branch.
 //  3. Deploy the relay script and launch the agent (claude) via the
 //     relay daemon. The relay owns the agent's stdin/stdout and persists

@@ -30,23 +30,49 @@ export default function RepoChipStrip(props: Props) {
   const [branchCache, setBranchCache] = createSignal<Record<string, BranchInfo[]>>({});
 
   function loadBranches(path: string) {
-    if (branchCache()[path]) return;
     listRepoBranches(path)
       .then((r) => setBranchCache((c) => ({ ...c, [path]: r.branches })))
-      .catch(() => {});
+      .catch((err: unknown) => console.error("Failed to load repository branches", err));
+  }
+
+  function branchActionLabel(action: BranchInfo["action"]) {
+    return (
+      <span class={styles.branchAction} data-action={action ?? "branch_off"}>
+        {action === "adopt" ? "Adopt" : "Branch off"}
+      </span>
+    );
   }
 
   function defaultBranchLabel(path: string) {
     const base = props.repos().find((r) => r.path === path)?.baseBranch;
     const remote = base?.remote;
     const branch = base?.name ?? "main";
-    return <><span class={selectStyles.optionMuted}>Default</span>{" "}({remote ? `${remote}/` : ""}{branch})</>;
+    return (
+      <span class={styles.branchOption}>
+        <span>
+          <span class={selectStyles.optionMuted}>Default</span> (
+          {remote ? `${remote}/` : ""}
+          {branch})
+        </span>{" "}
+        {branchActionLabel("branch_off")}
+      </span>
+    );
   }
 
   function branchOptions(path: string) {
     return (branchCache()[path] ?? []).map((b) => ({
       value: b.name,
-      label: <>{b.name}{b.remote && <span class={selectStyles.optionMuted}> ({b.remote})</span>}</>,
+      label: (
+        <span class={styles.branchOption}>
+          <span class={styles.branchOptionName}>
+            {b.name}
+            {b.remote && (
+              <span class={selectStyles.optionMuted}> ({b.remote})</span>
+            )}
+          </span>{" "}
+          {branchActionLabel(b.action)}
+        </span>
+      ),
       search: b.name,
     }));
   }

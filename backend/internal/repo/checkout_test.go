@@ -205,6 +205,31 @@ func TestCheckout(t *testing.T) {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
 		}
 	})
+	t.Run("AdoptLocalBranch", func(t *testing.T) {
+		t.Parallel()
+		clone := initTestRepo(t, "main")
+		runGit(t, clone, "branch", "local-work")
+		runGit(t, clone, "branch", "--set-upstream-to", "origin/main", "local-work")
+		r := newInitializedTestCheckout(t, clone)
+		branches, err := r.AdoptableBranches(t.Context(), logtest.Logger(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(branches, "local-work") {
+			t.Fatalf("AdoptableBranches = %v, want local-work", branches)
+		}
+		tv := &fakeTaskView{
+			baseBranch: "local-work",
+			repo:       []runtime.Repo{{GitRoot: clone, BaseBranch: "local-work", Branch: "local-work"}},
+		}
+		if err := r.FetchAndCreateBranch(t.Context(), logtest.Logger(t), tv, "local-work"); err != nil {
+			t.Fatal(err)
+		}
+		r.DeleteUnmodifiedTaskBranches(t.Context(), logtest.Logger(t), tv)
+		if _, err := (&git.Checkout{Root: clone, Logger: logtest.Logger(t)}).RevParse(t.Context(), "refs/heads/local-work"); err != nil {
+			t.Fatalf("adopted branch was deleted: %v", err)
+		}
+	})
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := newRecordingContainer()

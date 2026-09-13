@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -562,6 +562,7 @@ export function validateBranchInfo(raw: ValidatorInput): BranchInfo {
   return {
     name: asString(obj["name"], "BranchInfo.name"),
     remote: (obj["remote"] === undefined || obj["remote"] === null ? undefined : asString(obj["remote"], "BranchInfo.remote")),
+    action: (obj["action"] === undefined || obj["action"] === null ? undefined : (asString(obj["action"], "BranchInfo.action") as BranchAction)),
   };
 }
 

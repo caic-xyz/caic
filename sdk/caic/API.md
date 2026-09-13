@@ -121,6 +121,15 @@ All errors return:
 
 ## Types
 
+### BranchAction
+
+BranchAction describes how a newly created task will use a selected branch.
+
+| Value | Description |
+|-------|-------------|
+| `adopt` |  |
+| `branch_off` |  |
+
 ### CIStatus
 
 CIStatus is the CI check state for a task or repo default branch.
@@ -618,12 +627,13 @@ CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
 
 ### BranchInfo
 
-BranchInfo describes a single branch with its origin.
+BranchInfo describes a single branch with its origin and task-creation action.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `name` | `string` |  | yes |
 | `remote` | `string` |  |  |
+| `action` | `BranchAction` |  |  |
 
 ### ForgeCheck
 

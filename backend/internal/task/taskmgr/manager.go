@@ -127,6 +127,8 @@ type Manager struct {
 
 	background sync.WaitGroup
 
+	branchAllocationMu sync.Mutex // Serializes branch adoption checks and reservations across task startups.
+
 	// Guarded by mu.
 	mu      sync.Mutex
 	tasks   map[string]*Entry
@@ -437,7 +439,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	entry.Lifecycle.wg.Go(func() {
 		// The primary's branch is created by the agent runtime before instance launch,
 		// so it only needs a name reserved; extras are created here.
-		if err := m.allocateBranches(entry.Lifecycle.ctx, t, mounts, 1); err != nil {
+		if err := m.allocateBranches(entry.Lifecycle.ctx, t, mounts, 1, true); err != nil {
 			entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "allocate branch")})
 			m.NotifyTaskChange()
 			return
@@ -866,6 +868,22 @@ func (m *Manager) BackwardMessages(ctx context.Context, entry *Entry) iter.Seq2[
 	}
 }
 
+// BranchAssociated reports whether a nonterminal task has claimed branch for repoName.
+func (m *Manager) BranchAssociated(repoName, branch string) bool {
+	for _, entry := range m.Entries() {
+		candidate := entry.Task()
+		if candidate.GetState().IsTerminal() {
+			continue
+		}
+		for _, mounted := range candidate.ReposSnapshot() {
+			if mounted.Name == repoName && mounted.Branch == branch {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // insertLoadedTasks inserts loaded task logs into the registry, skipping tasks
 // whose id or repo/branch already exists. It is shared by LoadUnsettledTasks
 // (plain logs, uncapped) and LoadPurgedTasks (settled logs, pre-capped by the
@@ -1048,9 +1066,10 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 	return collides
 }
 
-// allocateBranches assigns every repo of a task its own branch name, uniformly —
-// the Manager owns branch-name allocation for all repos, with no special case for
-// the primary. mounts[:reserveOnly] are repos whose branch is created elsewhere
+// allocateBranches assigns every repo of a task its final branch. Fresh tasks
+// adopt an explicitly selected local branch when it is available; remote-only,
+// default, and already-associated branches receive a new caic-N branch. Forks
+// always receive new branches. mounts[:reserveOnly] are repos whose new branch is created elsewhere
 // (by md.Fork for a fork's source repos, or by the agent runtime before launch for
 // a fresh task's primary), so they only need a name reserved.
 // mounts[reserveOnly:] are new to the host, so their branch is created here from
@@ -1059,17 +1078,29 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // Reservation happens before any task log opens: the log filename and metadata
 // header embed each repo's final branch name, and md.Fork creates the git
 // branches using these names verbatim (the caller owns their uniqueness).
-func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int) error {
+func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
+	m.branchAllocationMu.Lock()
+	defer m.branchAllocationMu.Unlock()
 	for i := range mounts {
 		ws, ok := m.Checkouts.Checkout(mounts[i].Name)
 		if !ok {
 			return fmt.Errorf("repo %q is not registered", mounts[i].Name)
 		}
+		if adoptLocal && mounts[i].BaseBranch != "" && !m.BranchAssociated(mounts[i].Name, mounts[i].BaseBranch) {
+			branches, err := ws.AdoptableBranches(ctx, m.log)
+			if err != nil {
+				return fmt.Errorf("inspect branch for %s: %w", mounts[i].Name, err)
+			}
+			if slices.Contains(branches, mounts[i].BaseBranch) {
+				t.SetRepoBranch(i, mounts[i].BaseBranch)
+				continue
+			}
+		}
 		if i < reserveOnly {
 			t.SetRepoBranch(i, ws.ReserveBranchName())
 			continue
 		}
-		branch, err := ws.AllocateBranch(ctx, m.log)
+		branch, err := ws.AllocateBranch(ctx, m.log, mounts[i].BaseBranch)
 		if err != nil {
 			return fmt.Errorf("allocate branch for %s: %w", mounts[i].Name, err)
 		}

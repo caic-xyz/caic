@@ -42,6 +42,43 @@ func TestServerHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("repo branches describe task creation action", func(t *testing.T) {
+		t.Parallel()
+		dir := initCloneSourceRepo(t)
+		runServerGit(t, dir, "remote", "add", "origin", dir)
+		runServerGit(t, dir, "update-ref", "refs/remotes/origin/main", "main")
+		runServerGit(t, dir, "branch", "available", "main")
+		runServerGit(t, dir, "branch", "--set-upstream-to", "origin/main", "available")
+		runServerGit(t, dir, "branch", "untracked", "main")
+		runServerGit(t, dir, "update-ref", "refs/remotes/origin/remote-only", "main")
+
+		s := newTestRouter(t, nil)
+		registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(dir))
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/server/repos/branches?repo=repo", nil)
+		s.serverHandlers.handleListRepoBranches(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		var resp v1.RepoBranchesResp
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		got := make(map[string]v1.BranchInfo, len(resp.Branches))
+		for _, branch := range resp.Branches {
+			got[branch.Name] = branch
+		}
+		if got["available"].Action != v1.BranchActionAdopt {
+			t.Errorf("available action = %q, want adopt", got["available"].Action)
+		}
+		if got["untracked"].Action != v1.BranchActionBranchOff {
+			t.Errorf("untracked action = %q, want branch_off", got["untracked"].Action)
+		}
+		if branch := got["remote-only"]; branch.Remote != "origin" || branch.Action != v1.BranchActionBranchOff {
+			t.Errorf("remote-only = %+v, want origin branch_off", branch)
+		}
+	})
+
 	t.Run("list_harnesses", func(t *testing.T) {
 		t.Parallel()
 

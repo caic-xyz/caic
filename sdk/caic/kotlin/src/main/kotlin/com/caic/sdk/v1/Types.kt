@@ -21,6 +21,34 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
+@Serializable(with = BranchActionSerializer::class)
+sealed interface BranchAction {
+    val value: String
+    @Serializable
+    data object Adopt : BranchAction {
+        override val value = "adopt"
+    }
+    @Serializable
+    data object BranchOff : BranchAction {
+        override val value = "branch_off"
+    }
+    @Serializable
+    data class Other(override val value: String) : BranchAction
+}
+
+object BranchActionSerializer : KSerializer<BranchAction> {
+    override val descriptor = PrimitiveSerialDescriptor("BranchAction", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: BranchAction) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): BranchAction {
+        val v = decoder.decodeString()
+        return when (v) {
+            "adopt" -> BranchAction.Adopt
+            "branch_off" -> BranchAction.BranchOff
+            else -> BranchAction.Other(v)
+        }
+    }
+}
+
 @Serializable(with = CIStatusSerializer::class)
 sealed interface CIStatus {
     val value: String
@@ -1146,9 +1174,13 @@ data class CacheSize(
 @Serializable
 data class CacheSizesResp(val wellKnown: List<CacheSize>)
 
-/** BranchInfo describes a single branch with its origin. */
+/** BranchInfo describes a single branch with its origin and task-creation action. */
 @Serializable
-data class BranchInfo(val name: String, val remote: String? = null)
+data class BranchInfo(
+    val name: String,
+    val remote: String? = null,
+    val action: BranchAction? = null,
+)
 
 /** ForgeCheck describes a CI check run with its status, conclusion, and timing. */
 @Serializable

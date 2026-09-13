@@ -36,6 +36,30 @@
   color: var(--color-text-secondary);
 }
 
+.branchOption {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+.branchOptionName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branchAction {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.branchAction[data-action="adopt"] {
+  color: var(--color-success-text);
+}
+
 .chipRemove {
   padding: 0.35rem 0.45rem 0.35rem 0.2rem;
   font: inherit;

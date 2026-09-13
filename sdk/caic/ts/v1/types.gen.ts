@@ -399,6 +399,15 @@ export interface TaskHistoryStreamError {
 //////////
 // source: types.go
 
+export type BranchAction =
+  | "adopt"
+  | "branch_off";
+/**
+ * Supported values.
+ */
+export const BranchActionAdopt: BranchAction = "adopt";
+export const BranchActionBranchOff: BranchAction = "branch_off";
+
 export type CIStatus =
   | "pending"
   | "success"
@@ -854,10 +863,11 @@ export interface CacheSizesResp {
   wellKnown: CacheSize[];
 }
 
-/** BranchInfo describes a single branch with its origin. */
+/** BranchInfo describes a single branch with its origin and task-creation action. */
 export interface BranchInfo {
   name: string;
   remote?: string;
+  action?: BranchAction;
 }
 
 /** ForgeCheck describes a CI check run with its status, conclusion, and timing. */
