@@ -96,9 +96,9 @@ tracked baselines explicitly.
 | Any Go Mode Android change | `make android-check` |
 | Networking, SSE, service monitoring, WebView loading, settings, host-mode behavior, or native shell routing | `make android-e2e` |
 
-`make android-e2e` starts the emulator before running the Android E2E suite.
-Do not run the Python test command directly unless an emulator is already
-required for another task.
+`make android-e2e` reuses a sole connected emulator or physical device and
+starts the canonical emulator when no device is ready. Do not run the Python
+test command directly unless a ready device is already available.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

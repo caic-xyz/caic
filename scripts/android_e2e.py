@@ -10,12 +10,13 @@ Steps:
   1. Build the fake backend (go build -tags e2e).
   2. Find a free port and start the backend on it.
   3. Wait until the backend responds.
-  4. Run the selected connectedAndroidTest module(s) via Gradle, passing
-     10.0.2.2:PORT (emulator's host alias — no adb reverse needed).
-  5. With --screenshots, run only the Go Mode documentation generator and pull
+  4. Reverse a device loopback port to the backend through adb.
+  5. Run the selected connectedAndroidTest module(s) via Gradle, passing the
+     device loopback URL. This works for emulators, USB, and Wi-Fi adb devices.
+  6. With --screenshots, run only the Go Mode documentation generator and pull
      its images into the requested output directory.
-  6. Dump logcat on failure for CI diagnostics.
-  7. Kill the backend on exit.
+  7. Dump logcat on failure for CI diagnostics.
+  8. Remove the reverse mapping and kill the backend on exit.
 """
 
 import argparse
@@ -117,12 +118,47 @@ def ready_adb_serials(output: str, requested_serial: str | None) -> list[str]:
     return serials
 
 
-def start_logcat(tmp_dir):
+def allocate_reverse_port(serial: str, host_port: int, device_port: int | None) -> int:
+    """Reverse a device loopback port to host_port and return the device port."""
+    requested_port = 0 if device_port is None else device_port
+    result = subprocess.run(
+        [
+            "adb",
+            "-s",
+            serial,
+            "reverse",
+            f"tcp:{requested_port}",
+            f"tcp:{host_port}",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    if device_port is not None:
+        return device_port
+    try:
+        allocated_port = int(result.stdout.strip())
+    except ValueError as error:
+        raise RuntimeError(f"adb reverse returned an unexpected port: {result.stdout!r}") from error
+    if not 1 <= allocated_port <= 65535:
+        raise RuntimeError(f"adb reverse returned an unexpected port: {allocated_port}")
+    return allocated_port
+
+
+def remove_reverse_port(serial: str, device_port: int) -> None:
+    """Remove the reverse mapping owned by this test run."""
+    subprocess.run(
+        ["adb", "-s", serial, "reverse", "--remove", f"tcp:{device_port}"],
+        check=True,
+    )
+
+
+def start_logcat(tmp_dir, serial):
     """Start adb logcat in the background, writing to a temp file."""
     logcat_path = os.path.join(tmp_dir, "logcat.txt")
     logcat_file = open(logcat_path, "w")  # noqa: SIM115
     proc = subprocess.Popen(
-        ["adb", "logcat", "-v", "threadtime"],
+        ["adb", "-s", serial, "logcat", "-v", "threadtime"],
         stdout=logcat_file,
         stderr=logcat_file,
     )
@@ -147,11 +183,11 @@ APP_PACKAGES = (
 )
 
 
-def _running_app_pids():
+def _running_app_pids(serial):
     """Return currently running PIDs for Android app/test packages."""
     try:
         out = subprocess.run(
-            ["adb", "shell", "pidof", *APP_PACKAGES],
+            ["adb", "-s", serial, "shell", "pidof", *APP_PACKAGES],
             capture_output=True,
             text=True,
             timeout=5,
@@ -177,7 +213,7 @@ def _logged_app_pids(logcat_path):
     return sorted(pids)
 
 
-def dump_logcat_on_failure(logcat_path):
+def dump_logcat_on_failure(logcat_path, serial):
     """Dump logcat to stderr for immediate CI visibility."""
     tail_lines = 500
     print(f"--- LOGCAT (last {tail_lines} lines) ---", file=sys.stderr)
@@ -194,7 +230,7 @@ def dump_logcat_on_failure(logcat_path):
     # includes the PID as the first column after the date: "05-06 17:58:10.123  4395".
     # Prefer PIDs seen in the captured log because instrumentation may stop the
     # app before this failure handler runs.
-    app_pids = sorted(set(_logged_app_pids(logcat_path)) | set(_running_app_pids()))
+    app_pids = sorted(set(_logged_app_pids(logcat_path)) | set(_running_app_pids(serial)))
     app_tail = 300
     print(
         f"--- APP LOGCAT (last {app_tail} lines for PIDs {app_pids}) ---",
@@ -226,10 +262,10 @@ def persist_logcat_for_artifact(logcat_path, module):
     return dest
 
 
-def is_emulator():
+def is_emulator(serial):
     """Return True if the connected device is an emulator."""
     result = subprocess.run(
-        ["adb", "shell", "getprop", "ro.build.characteristics"],
+        ["adb", "-s", serial, "shell", "getprop", "ro.build.characteristics"],
         capture_output=True,
         text=True,
         timeout=5,
@@ -244,9 +280,9 @@ def module_for_task(task):
     return "gomode"
 
 
-def normalize_visual_emulator():
+def normalize_visual_emulator(serial):
     """Normalize rendering-affecting emulator state before screenshot instrumentation."""
-    if not is_emulator():
+    if not is_emulator(serial):
         raise RuntimeError("documentation screenshots require the canonical Android emulator")
     commands = (
         ("settings", "put", "global", "animator_duration_scale", "0"),
@@ -266,75 +302,79 @@ def normalize_visual_emulator():
         ("wm", "size", "reset"),
     )
     for command in commands:
-        subprocess.run(["adb", "shell", *command], check=True, capture_output=True)
+        subprocess.run(["adb", "-s", serial, "shell", *command], check=True, capture_output=True)
 
 
-def clear_visual_app_state():
+def clear_visual_app_state(serial):
     """Remove installed app packages so each visual pass starts from first launch."""
     for package in APP_PACKAGES:
-        subprocess.run(["adb", "uninstall", package], capture_output=True, check=False)
+        subprocess.run(["adb", "-s", serial, "uninstall", package], capture_output=True, check=False)
 
 
-def run_tests(port, module, screenshots):
-    # 10.0.2.2 is the emulator's host loopback alias — no adb reverse needed.
-    # Real devices need localhost + adb reverse.
-    if is_emulator():
-        host = "10.0.2.2"
-    else:
-        host = "localhost"
-        subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
+def run_tests(host_port, device_port, serial, module, screenshots):
+    forwarded_port = allocate_reverse_port(serial, host_port, device_port)
     tasks = TEST_TASKS_BY_MODULE[module]
-    if screenshots:
-        subprocess.run(
-            [
+    gradle_environment = os.environ.copy()
+    gradle_environment["ANDROID_SERIAL"] = serial
+    try:
+        if screenshots:
+            subprocess.run(
+                [
+                    "./gradlew",
+                    "--no-daemon",
+                    ":gomode:assembleDebug",
+                    ":gomode:assembleDebugAndroidTest",
+                ],
+                cwd=os.path.join(ROOT_DIR, "android"),
+                env=gradle_environment,
+                check=True,
+            )
+            clear_visual_app_state(serial)
+            normalize_visual_emulator(serial)
+
+        for task in tasks:
+            print(f"Running {task}...")
+            command = [
                 "./gradlew",
                 "--no-daemon",
-                ":gomode:assembleDebug",
-                ":gomode:assembleDebugAndroidTest",
-            ],
-            cwd=os.path.join(ROOT_DIR, "android"),
-            check=True,
-        )
-        clear_visual_app_state()
-        normalize_visual_emulator()
-
-    for task in tasks:
-        print(f"Running {task}...")
-        command = [
-            "./gradlew",
-            "--no-daemon",
-            task,
-            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://{host}:{port}",
-        ]
-        if screenshots:
-            command.extend(
-                [
-                    f"-Pandroid.testInstrumentationRunnerArguments.class={SCREENSHOT_TEST_CLASS}",
-                    "-Pandroid.testInstrumentationRunnerArguments.caicVisualScreenshots=true",
-                ],
+                task,
+                f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://localhost:{forwarded_port}",
+            ]
+            if screenshots:
+                command.extend(
+                    [
+                        f"-Pandroid.testInstrumentationRunnerArguments.class={SCREENSHOT_TEST_CLASS}",
+                        "-Pandroid.testInstrumentationRunnerArguments.caicVisualScreenshots=true",
+                    ],
+                )
+            result = subprocess.run(
+                command,
+                cwd=os.path.join(ROOT_DIR, "android"),
+                env=gradle_environment,
             )
-        result = subprocess.run(command, cwd=os.path.join(ROOT_DIR, "android"))
-        if result.returncode != 0:
-            return result.returncode, module_for_task(task)
-    return 0, module
+            if result.returncode != 0:
+                return result.returncode, module_for_task(task)
+        return 0, module
+    finally:
+        remove_reverse_port(serial, forwarded_port)
 
 
-def clear_device_screenshots():
+def clear_device_screenshots(serial):
     """Remove stale screenshots whose directory may be owned by a prior app UID."""
     subprocess.run(
-        ["adb", "shell", "rm", "-rf", GOMODE_DEVICE_SCREENSHOT_DIR],
+        ["adb", "-s", serial, "shell", "rm", "-rf", GOMODE_DEVICE_SCREENSHOT_DIR],
         capture_output=True,
     )
 
 
-def pull_screenshots(screenshot_dir):
+def pull_screenshots(screenshot_dir, serial):
     """Pull screenshots from device, convert to webp, clean up."""
     if shutil.which("ffmpeg") is None:
         print("ffmpeg is required to encode Android screenshots", file=sys.stderr)
         return 1
 
     result = subprocess.run(
-        ["adb", "shell", "ls", f"{GOMODE_DEVICE_SCREENSHOT_DIR}/"],
+        ["adb", "-s", serial, "shell", "ls", f"{GOMODE_DEVICE_SCREENSHOT_DIR}/"],
         capture_output=True,
         text=True,
     )
@@ -352,7 +392,7 @@ def pull_screenshots(screenshot_dir):
         remote = f"{GOMODE_DEVICE_SCREENSHOT_DIR}/{name}.png"
         local_png = os.path.join(screenshot_dir, f"{name}.png")
         local_webp = os.path.join(screenshot_dir, f"{name}.webp")
-        subprocess.run(["adb", "pull", remote, local_png], capture_output=True, check=True)
+        subprocess.run(["adb", "-s", serial, "pull", remote, local_png], capture_output=True, check=True)
         subprocess.run(
             ["ffmpeg", "-y", "-i", local_png, "-lossless", "1", local_webp],
             stdout=subprocess.DEVNULL,
@@ -363,7 +403,7 @@ def pull_screenshots(screenshot_dir):
         print(f"  {name}.webp")
 
     subprocess.run(
-        ["adb", "shell", "rm", "-rf", GOMODE_DEVICE_SCREENSHOT_DIR],
+        ["adb", "-s", serial, "shell", "rm", "-rf", GOMODE_DEVICE_SCREENSHOT_DIR],
         capture_output=True,
     )
     return 0
@@ -459,22 +499,30 @@ def main():
                     file=sys.stderr,
                 )
                 return 1
+            serial = devices[0]
             if args.screenshots:
-                clear_device_screenshots()
-            print(f"Running Android E2E tests for {args.module}...")
-            logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir)
+                clear_device_screenshots(serial)
+            print(f"Running Android E2E tests for {args.module} on {serial}...")
+            logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir, serial)
             try:
-                rc, failed_module = run_tests(port, args.module, args.screenshots)
+                fixed_device_port = port if args.port is not None else None
+                rc, failed_module = run_tests(
+                    port,
+                    fixed_device_port,
+                    serial,
+                    args.module,
+                    args.screenshots,
+                )
             finally:
                 stop_logcat(logcat_proc, logcat_file)
 
             if rc != 0:
                 print(f"Tests failed (exit {rc}). Dumping logcat:", file=sys.stderr)
-                dump_logcat_on_failure(logcat_path)
+                dump_logcat_on_failure(logcat_path, serial)
                 persist_logcat_for_artifact(logcat_path, failed_module)
             elif args.screenshots:
                 print("Pulling screenshots...")
-                rc = pull_screenshots(args.screenshot_dir)
+                rc = pull_screenshots(args.screenshot_dir, serial)
             else:
                 print(f"Skipping screenshots for {args.module}.")
 

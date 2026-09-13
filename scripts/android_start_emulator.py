@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start or reuse the caic_test Android emulator and wait until it has booted.
+"""Reuse a connected Android device or start the caic_test emulator.
 
 The make target runs SDK and AVD setup before starting this script.
 Works on Linux and macOS.
@@ -95,6 +95,17 @@ def _running_avd_serial(adb: str) -> str | None:
         if AVD_NAME in (line.strip() for line in avd.stdout.splitlines()):
             return serial
     return None
+
+
+def _ready_device_serials(adb: str) -> list[str]:
+    """Return serials for connected adb devices that are ready for commands."""
+    devices = subprocess.run([adb, "devices"], capture_output=True, check=True, text=True)
+    serials = []
+    for line in devices.stdout.splitlines()[1:]:
+        serial, separator, state = line.partition("\t")
+        if separator and state.split(maxsplit=1)[0] == "device":
+            serials.append(serial)
+    return serials
 
 
 def _emulator_exited(proc: subprocess.Popen, log_path: str) -> str | None:
@@ -209,6 +220,11 @@ def main() -> int:
         action="store_true",
         help="reuse a running caic_test emulator instead of starting another one",
     )
+    parser.add_argument(
+        "--reuse-connected-device",
+        action="store_true",
+        help="reuse one ready emulator, USB device, or Wi-Fi adb device",
+    )
     args = parser.parse_args()
 
     if _check_host() != 0:
@@ -220,6 +236,24 @@ def main() -> int:
     adb = _find_tool("adb", sdk)
     if adb is None:
         return 1
+    if args.reuse_connected_device:
+        serials = _ready_device_serials(adb)
+        requested_serial = os.environ.get("ANDROID_SERIAL")
+        if requested_serial is not None:
+            if requested_serial not in serials:
+                print(f"ANDROID_SERIAL device is not ready: {requested_serial}", file=sys.stderr)
+                return 1
+            print(f"Reusing connected Android device ({requested_serial})...", file=sys.stderr)
+            return 0
+        if len(serials) == 1:
+            print(f"Reusing connected Android device ({serials[0]})...", file=sys.stderr)
+            return 0
+        if len(serials) > 1:
+            print(
+                f"Multiple adb devices found ({len(serials)}). Use ANDROID_SERIAL to select one.",
+                file=sys.stderr,
+            )
+            return 1
     if args.auto_reuse:
         serial = _running_avd_serial(adb)
         if serial is not None:

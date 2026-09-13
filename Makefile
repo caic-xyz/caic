@@ -150,7 +150,7 @@ android-push-gomode: android-check
 	wait
 
 android-e2e: android-setup-emulator
-	@python3 scripts/android_start_emulator.py --auto-reuse
+	@python3 scripts/android_start_emulator.py --reuse-connected-device
 	@python3 scripts/android_e2e.py
 
 lint-fix: $(FRONTEND_STAMP)

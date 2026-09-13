@@ -61,14 +61,16 @@ adb -s <device-id> shell pm grant com.fghbuild.gomode android.permission.POST_NO
 ## Set Up Port Forwarding
 
 The emulator needs to reach the backend. Use `adb reverse` so `localhost:2242`
-inside the emulator maps to the host:
+inside the emulator maps to the host process's network namespace:
 
 ```bash
 adb -s <device-id> reverse tcp:2242 tcp:2242
 ```
 
-Alternative: the emulator maps `10.0.2.2` to the host, so
-`http://10.0.2.2:2242` also works as a server URL.
+The emulator normally maps `10.0.2.2` to its QEMU host. That alias may point at
+the wrong network namespace or be unroutable when caic, md, or the emulator is
+containerized, so prefer `adb reverse`. The Android E2E runner configures and
+cleans up its own temporary reverse mapping automatically.
 
 ## Build, Install, and Launch
 

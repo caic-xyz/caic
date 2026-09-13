@@ -69,14 +69,21 @@ make android-stop-emulator
 cheap; for Android E2E work, start it and run the focused test instead of
 skipping local validation.
 
-The emulator reaches the host at `10.0.2.2`. For a fake caic backend:
+`make android-e2e` reuses a sole ready emulator, USB device, or Wi-Fi adb
+device. Set `ANDROID_SERIAL` when more than one device is connected. The test
+runner assigns temporary backend and device ports and connects them with
+`adb reverse`, so it also works when an emulator runs inside a container.
+
+For manual development with a fake caic backend:
 
 ```bash
 make fake-dev
 ```
 
-Then use `http://10.0.2.2:2242` from Android settings. On a physical device,
-use `adb reverse tcp:2242 tcp:2242` and connect to `http://localhost:2242`.
+Use `adb reverse tcp:2242 tcp:2242` and connect to `http://localhost:2242` from
+Android settings. This works for emulators and physical devices over USB or
+Wi-Fi. The emulator-only `10.0.2.2` host alias may not reach the intended
+network namespace when the emulator or backend runs in a container.
 
 ## UI Automation
 
