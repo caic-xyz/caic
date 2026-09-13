@@ -29,6 +29,12 @@ func TestParseGitStatus(t *testing.T) {
 			"? notes/new.txt",
 			gitComparisonMarker + "origin/main",
 			gitDivergenceMarker + "1\t2",
+			gitOperationMarker,
+			"rebase",
+			gitTotalStatMarker,
+			"14\t1\tsrc/status.go",
+			"-\t-\tassets/logo.png",
+			"3\t1\tfrontend/new.tsx",
 			gitWorktreeStatMarker,
 			"2\t0\tsrc/staged.go",
 			"1\t1\tsrc/working.go",
@@ -60,10 +66,16 @@ func TestParseGitStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := runtime.RepositoryStatus{
-			Branch:   "caic-42",
-			Upstream: "origin/main",
-			Ahead:    2,
-			Behind:   1,
+			Branch:    "caic-42",
+			Upstream:  "origin/main",
+			Operation: runtime.RepositoryOperationRebase,
+			Ahead:     2,
+			Behind:    1,
+			DiffStat: []runtime.GitFileStat{
+				{Path: "src/status.go", Added: 14, Deleted: 1},
+				{Path: "assets/logo.png", Binary: true},
+				{Path: "frontend/new.tsx", Added: 3, Deleted: 1},
+			},
 			Commits: []runtime.GitCommit{
 				{
 					SHA:          "1111111111111111111111111111111111111111",
@@ -133,7 +145,7 @@ func TestGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_INDEX_FILE", "git add -N", "git diff HEAD --numstat -z", gitComparisonMarker, gitDivergenceMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_INDEX_FILE", "git add -N", `git diff "$comparison" --numstat -z`, "git diff HEAD --numstat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}
@@ -193,6 +205,15 @@ func TestGitStatusCommand(t *testing.T) {
 		}
 		if status.Uncommitted[0].Added != 1 || status.Uncommitted[0].Deleted != 0 || status.Uncommitted[1].Added != 1 || status.Uncommitted[1].Deleted != 1 || status.Uncommitted[2].Added != 1 {
 			t.Errorf("uncommitted stats = %+v", status.Uncommitted)
+		}
+		wantDiffStat := []runtime.GitFileStat{
+			{Path: "committed.txt", Added: 1},
+			{Path: "staged.txt", Added: 1},
+			{Path: "tracked.txt", Added: 1, Deleted: 1},
+			{Path: "untracked.txt", Added: 1},
+		}
+		if !reflect.DeepEqual(status.DiffStat, wantDiffStat) {
+			t.Errorf("diff stat = %+v, want %+v", status.DiffStat, wantDiffStat)
 		}
 		if cached := runTestGitOutput(t, dir, "diff", "--cached", "--name-only"); cached != "staged.txt" {
 			t.Errorf("cached diff after status = %q, want staged.txt", cached)

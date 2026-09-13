@@ -795,6 +795,37 @@ type GitFileStatus struct {
 	Diff           string `json:"diff"`
 }
 
+// GitOperation identifies an in-progress Git operation in a task repository.
+type GitOperation string
+
+// GitOperation values identify supported in-progress Git operations.
+const (
+	GitOperationRebase     GitOperation = "rebase"
+	GitOperationMerge      GitOperation = "merge"
+	GitOperationCherryPick GitOperation = "cherry-pick"
+	GitOperationRevert     GitOperation = "revert"
+	GitOperationBisect     GitOperation = "bisect"
+)
+
+// GitRepositoryState summarizes the compact Git state of one task repository.
+type GitRepositoryState struct {
+	Name             string       `json:"name"`
+	Branch           string       `json:"branch"`
+	Ahead            int          `json:"ahead"`
+	Behind           int          `json:"behind"`
+	ChangedFiles     int          `json:"changedFiles"`
+	Added            int          `json:"added"`
+	Deleted          int          `json:"deleted"`
+	UncommittedFiles int          `json:"uncommittedFiles"`
+	Conflicts        int          `json:"conflicts"`
+	Operation        GitOperation `json:"operation,omitempty"`
+}
+
+// TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.
+type TaskRepoStatusResp struct {
+	Repositories []GitRepositoryState `json:"repositories"`
+}
+
 // GitRepositoryStatus describes the checked-out state of one task repository.
 type GitRepositoryStatus struct {
 	Name     string `json:"name"`

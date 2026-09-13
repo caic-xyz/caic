@@ -1,4 +1,4 @@
-// Compact card for a single task, used in the sidebar task list.
+// Compact sidebar task card with per-repository Git and change-state markers.
 
 import { For, Show, createEffect, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -16,6 +16,7 @@ import type {
   CIStatus,
   ForgeCheck,
   RuntimeInstance,
+  GitRepositoryState,
   TaskRateLimit,
   TaskRepo,
   TaskState,
@@ -23,8 +24,9 @@ import type {
 } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
-import { compactContext, syncTask } from "../api";
+import { compactContext, getTaskRepoStatus, syncTask } from "../api";
 import CIDot from "./CIDot";
+import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import TaskActionsMenu from "./TaskActionsMenu";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -83,7 +85,6 @@ export interface TaskCardProps {
   onRevive?: () => void;
   purgeModifierActive: boolean;
   actionLoading?: boolean;
-  onDiffClick?: () => void;
   supportsCompact?: boolean;
   onFork?: () => void;
   onQuotaRecovery?: () => void;
@@ -140,9 +141,40 @@ export default function TaskCard(props: TaskCardProps) {
     { x: number; y: number } | undefined
   >();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
+  const [repoStates, setRepoStates] = createSignal<GitRepositoryState[]>([]);
   let cardRef: HTMLDivElement | undefined;
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
   let contextMenuRef: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    const taskID = props.id;
+    if (!props.runtime?.id || props.state === "purged") {
+      setRepoStates([]);
+      return;
+    }
+    let current = true;
+    getTaskRepoStatus(taskID)
+      .then((response) => {
+        if (current) setRepoStates(response.repositories);
+      })
+      .catch(() => {
+        if (current) setRepoStates([]);
+      });
+    onCleanup(() => {
+      current = false;
+    });
+  });
+
+  const repositoryState = (repoIndex: number) =>
+    repoStates()[repoIndex] ?? (repoIndex === 0 ? diffStatState(props.diffStat) : undefined);
+  const repoStateRows = () => (props.repos ?? []).flatMap((repo, index) =>
+    repoStateLabel(repositoryState(index))
+      ? [{ name: repo.name, branch: repositoryState(index)?.branch || repo.branch, state: repositoryState(index) }]
+      : [],
+  );
+  const hasMultipleRepos = () => (props.repos?.length ?? 0) > 1;
+  const repoStateText = (repo: { name: string; branch: string }) =>
+    hasMultipleRepos() ? [repo.name, repo.branch].filter(Boolean).join(" · ") : repo.branch || repo.name;
 
   createEffect(() => {
     if (!contextMenuPosition()) return;
@@ -430,9 +462,8 @@ export default function TaskCard(props: TaskCardProps) {
         )}
       </Show>
 
-      {/* Line 2: base→branch | [timer times] [PR] [CI] [state badge] */}
+      {/* Line 2: [timer times] [PR] [CI] [state badge] */}
       {(() => {
-        const multiRepo = (props.repos?.length ?? 0) > 1;
         const timePair = () => (
           <Show
             when={(!isTerminal() && props.stateUpdatedAt) || props.duration > 0}
@@ -499,70 +530,13 @@ export default function TaskCard(props: TaskCardProps) {
             </Tooltip>
           </>
         );
-        const repoSpan = (
-          r: { baseBranch?: string; branch: string; name: string },
-          showName: boolean,
-        ) => {
-          if (!r.branch)
-            return (
-              <Show when={showName}>
-                <span class={styles.repoName}>{r.name}</span>
-              </Show>
-            );
-          return (
-            <>
-              <Show when={r.baseBranch && r.branch}>
-                <span class={styles.baseBranch}>{r.baseBranch}</span>
-                <span class={styles.branchArrow}>→</span>
-              </Show>
-              <span class={styles.branchName}>{r.branch}</span>
-              <Show when={showName}>
-                <span class={styles.repoName}>{r.name}</span>
-              </Show>
-            </>
-          );
-        };
         return (
-          <>
-            <Show when={!multiRepo}>
-              {/* Single repo: branch + timing + badges on same row */}
-              <div class={styles.metaRow}>
-                <span class={styles.branchMeta}>
-                  <Show when={props.repos?.[0]} keyed>
-                    {(primary) => repoSpan(primary, false)}
-                  </Show>
-                </span>
-                <span class={styles.stateGroup}>
-                  {timePair()}
-                  {statusBadges()}
-                </span>
-              </div>
-            </Show>
-            <Show when={multiRepo}>
-              {/* Multi repo: first repo + badges, middle repos plain, last repo + timing */}
-              <div class={styles.metaRow}>
-                <span class={styles.branchMeta}>
-                  <Show when={props.repos?.[0]} keyed>
-                    {(primary) => repoSpan(primary, true)}
-                  </Show>
-                </span>
-                <span class={styles.stateGroup}>{statusBadges()}</span>
-              </div>
-              <For each={props.repos?.slice(1)}>
-                {(r, i) => {
-                  const isLast = () => i() === (props.repos?.length ?? 0) - 2;
-                  return (
-                    <div class={styles.metaRow}>
-                      <span class={styles.branchMeta}>{repoSpan(r, true)}</span>
-                      <Show when={isLast()}>
-                        <span class={styles.stateGroup}>{timePair()}</span>
-                      </Show>
-                    </div>
-                  );
-                }}
-              </For>
-            </Show>
-          </>
+          <div class={styles.metaRow}>
+            {timePair()}
+            <span class={styles.statusBadges}>
+              {statusBadges()}
+            </span>
+          </div>
         );
       })()}
 
@@ -616,6 +590,23 @@ export default function TaskCard(props: TaskCardProps) {
         </div>
       </Show>
 
+      <Show when={repoStateRows().length > 0}>
+        <div class={styles.metaRow}>
+          <span class={styles.repoStates} data-testid="task-card-repo-states">
+            <For each={repoStateRows()}>
+              {(repo) => (
+                <span class={styles.repoState} data-testid="task-card-repo-state">
+                  <span class={styles.repoStateLabel}>{repoStateText(repo)}</span>
+                  <span class={styles.repoStateSummary}>
+                    <RepoStateIcons state={repo.state} />
+                  </span>
+                </span>
+              )}
+            </For>
+          </span>
+        </div>
+      </Show>
+
       <Show when={props.rateLimit?.blocked && props.repos?.[0]?.name ? props.onQuotaRecovery : undefined} keyed>
         {(recover) => (
           <button
@@ -632,49 +623,6 @@ export default function TaskCard(props: TaskCardProps) {
         )}
       </Show>
 
-      {/* Line 4 (optional): diff */}
-      <Show when={props.diffStat?.length ? props.diffStat : undefined} keyed>
-        {(ds) => {
-          const content = () => (
-            <>
-              {ds.length} file{ds.length !== 1 ? "s" : ""}{" "}
-              <span class={styles.diffAdded}>
-                +{ds.reduce((s, f) => s + f.added, 0)}
-              </span>{" "}
-              <span class={styles.diffDeleted}>
-                -{ds.reduce((s, f) => s + f.deleted, 0)}
-              </span>
-            </>
-          );
-          return (
-            <Show
-              when={props.onDiffClick}
-              fallback={<div class={styles.meta}>{content()}</div>}
-            >
-              {(fn) => (
-                <div
-                  class={`${styles.meta} ${styles.diffClickable}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    fn()();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      fn()();
-                    }
-                  }}
-                >
-                  {content()}
-                </div>
-              )}
-            </Show>
-          );
-        }}
-      </Show>
       <Show when={props.error}>
         <div class={styles.errorSummary}>{props.error}</div>
       </Show>

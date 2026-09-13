@@ -1,4 +1,4 @@
-// TaskDetail renders agent output, task context, and task actions.
+// TaskDetail renders agent output, task context, actions, and Git-state diff navigation.
 
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useLocation } from "@solidjs/router";
@@ -9,13 +9,13 @@ import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import checkIconSVG from "@material-symbols/svg-400/outlined/check.svg?raw";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn, TaskRateLimit } from "@sdk/types.gen";
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn, TaskRateLimit, GitRepositoryState } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
-import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskToolInput, botFixPR } from "../api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskRepoStatus, getTaskToolInput, botFixPR } from "../api";
 import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session, type Turn } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
@@ -34,6 +34,7 @@ import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon"
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
+import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import styles from "./TaskDetail.module.css";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
@@ -166,6 +167,74 @@ export default function TaskDetail(props: Props) {
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
+  const [repoStates, setRepoStates] = createSignal<GitRepositoryState[]>([]);
+  const [elideHeaderGitStats, setElideHeaderGitStats] = createSignal(false);
+  let headerRef: HTMLDivElement | undefined;
+  let headerMetaRef: HTMLSpanElement | undefined;
+  let headerGitStatsFrame: number | undefined;
+
+  function isEllipsized(element: HTMLElement | undefined): boolean {
+    return !!element && element.scrollWidth > element.clientWidth;
+  }
+
+  function headerWraps(): boolean {
+    if (!headerRef) return false;
+    const headerItems = Array.from(headerRef.children)
+      .filter((child): child is HTMLElement => child instanceof HTMLElement && getComputedStyle(child).display !== "none");
+    const first = headerItems[0]?.getBoundingClientRect();
+    const firstCenter = first && first.top + first.height / 2;
+    return firstCenter !== undefined && headerItems.some((item) => {
+      const box = item.getBoundingClientRect();
+      return Math.abs(box.top + box.height / 2 - firstCenter) > 1;
+    });
+  }
+
+  function scheduleHeaderGitStatsElision() {
+    if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
+    setElideHeaderGitStats(false);
+    headerGitStatsFrame = requestAnimationFrame(() => {
+      headerGitStatsFrame = undefined;
+      setElideHeaderGitStats(isEllipsized(headerMetaRef) || headerWraps());
+    });
+  }
+
+  onMount(() => {
+    scheduleHeaderGitStatsElision();
+    window.addEventListener("resize", scheduleHeaderGitStatsElision);
+    onCleanup(() => {
+      window.removeEventListener("resize", scheduleHeaderGitStatsElision);
+      if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
+    });
+  });
+
+  createEffect(() => {
+    const hasRepositoryState = repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat));
+    if (!hasRepositoryState) {
+      setElideHeaderGitStats(false);
+      return;
+    }
+    scheduleHeaderGitStatsElision();
+  });
+
+  createEffect(() => {
+    const taskID = props.taskId;
+    const hasRuntime = !["pending", "branching", "provisioning", "starting", "stopped", "purging", "crashed", "failed", "purged"].includes(props.taskState);
+    if (!hasRuntime) {
+      setRepoStates([]);
+      return;
+    }
+    let current = true;
+    getTaskRepoStatus(taskID)
+      .then((response) => {
+        if (current) setRepoStates(response.repositories);
+      })
+      .catch(() => {
+        if (current) setRepoStates([]);
+      });
+    onCleanup(() => {
+      current = false;
+    });
+  });
 
   // The prompt may appear after the task fetch; defer desktop autofocus until its ref exists.
   // Touch-primary devices skip this to avoid opening the software keyboard.
@@ -234,13 +303,9 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  const currentDiffStat = () => props.diffStat?.length ? props.diffStat : undefined;
-
-  // Scroll to bottom whenever messages or current diff stats change, if the
-  // user hasn't scrolled up.
+  // Scroll to bottom whenever messages change, if the user hasn't scrolled up.
   createEffect(() => {
     messages(); // track dependency
-    currentDiffStat();
     requestAnimationFrame(scrollToBottom);
   });
 
@@ -666,12 +731,12 @@ export default function TaskDetail(props: Props) {
 
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
+      <div class={styles.header} data-testid="task-detail-header" ref={(element) => { headerRef = element; }}>
         <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close"><CloseIcon width={20} height={20} /></button>
         <Show when={props.title}>
           <span class={styles.headerTitle}>{props.title}</span>
         </Show>
-        <span class={styles.headerMeta}>
+        <span class={styles.headerMeta} ref={(element) => { headerMetaRef = element; }}>
           <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
             <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">{props.repo}</a>
           </Show>
@@ -737,8 +802,15 @@ export default function TaskDetail(props: Props) {
           </Show>
         </span>
         <A class={styles.diffLink} href={`${location.pathname}/info`}>Info</A>
-        <Show when={(props.diffStat?.length ?? 0) > 0}>
-          <A class={styles.diffLink} href={`${location.pathname}/diff`}>Diff</A>
+        <Show when={repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))}>
+          <span class={styles.repoStateLinks}>
+            <For each={repoStates()}>
+              {(state) => <RepoStateIcons state={state} href={`${location.pathname}/diff`} elideDiffStats={elideHeaderGitStats()} />}
+            </For>
+            <Show when={!repoStates().some((state) => repoStateLabel(state))}>
+              <RepoStateIcons state={diffStatState(props.diffStat)} href={`${location.pathname}/diff`} elideDiffStats={elideHeaderGitStats()} />
+            </Show>
+          </span>
         </Show>
         <Show when={props.taskState !== "pending" && props.taskState !== "branching" && props.taskState !== "provisioning" && props.taskState !== "starting" && props.taskState !== "stopped" && props.taskState !== "crashed" && props.taskState !== "purged" && props.taskState !== "failed"}>
           <A class={styles.diffLink} href={`${location.pathname}/processes`}>Processes</A>
@@ -951,9 +1023,6 @@ export default function TaskDetail(props: Props) {
             );
           }}
         </Index>
-        <Show when={currentDiffStat()} keyed>
-          {(files) => <DiffStatBlock files={files} />}
-        </Show>
         <Show when={messages().length === 0}>
           <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>
@@ -1299,42 +1368,6 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
         {(text) => <div class={styles.resultMeta}>{text}</div>}
       </Show>
     </div>
-  );
-}
-
-function DiffStatBlock(props: { files: DiffFileStat[] }) {
-  const location = useLocation();
-  const added = () => props.files.reduce((total, file) => total + file.added, 0);
-  const deleted = () => props.files.reduce((total, file) => total + file.deleted, 0);
-  return (
-    <details class={styles.diffStat}>
-      <summary class={styles.diffSummary}>
-        <span class={styles.diffSummaryContent}>
-          <span>{props.files.length} {props.files.length === 1 ? "file" : "files"} changed</span>
-          <span class={styles.diffCounts}>
-            <span class={styles.diffAdded}>+{added()}</span>
-            <span class={styles.diffDeleted}>&minus;{deleted()}</span>
-          </span>
-        </span>
-      </summary>
-      <div class={styles.diffFiles}>
-        <For each={props.files}>
-          {(f) => (
-            <A class={`${styles.diffFile} ${styles.diffFileLink}`} href={`${location.pathname}/diff`}>
-              <span class={styles.diffPath}>{f.path}</span>
-              <Show when={f.binary} fallback={
-                <span class={styles.diffCounts}>
-                  <Show when={f.added > 0}><span class={styles.diffAdded}>+{f.added}</span></Show>
-                  <Show when={f.deleted > 0}><span class={styles.diffDeleted}>&minus;{f.deleted}</span></Show>
-                </span>
-              }>
-                <span class={styles.diffBinary}>binary</span>
-              </Show>
-            </A>
-          )}
-        </For>
-      </div>
-    </details>
   );
 }
 

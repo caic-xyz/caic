@@ -796,7 +796,8 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
 	}
 	repositories := make([]v1.GitRepositoryStatus, len(statuses))
-	for i, status := range statuses {
+	for i := range statuses {
+		status := &statuses[i]
 		commits := make([]v1.GitCommit, len(status.Commits))
 		for j, commit := range status.Commits {
 			stat := make(v1.DiffStat, len(commit.Stat))
@@ -843,6 +844,58 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 		}
 	}
 	return &v1.DiffResp{Diff: diff, Repositories: repositories}, nil
+}
+
+func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) (*v1.TaskRepoStatusResp, error) {
+	t := entry.Task()
+	if t.RuntimeInstanceID() == "" {
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
+	}
+	primaryName := ""
+	if primary := t.Primary(); primary != nil {
+		primaryName = primary.Name
+	}
+	checkout, ok := s.taskMgr.Checkouts.Checkout(primaryName)
+	if !ok {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
+	}
+	statuses, err := checkout.RepositoryStatuses(ctx, s.log, s.runtimes, t)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
+	}
+	repos := t.ReposSnapshot()
+	if len(repos) != len(statuses) {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
+	}
+	out := make([]v1.GitRepositoryState, len(statuses))
+	for i := range statuses {
+		status := &statuses[i]
+		conflicts := 0
+		for _, file := range status.Uncommitted {
+			if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
+				conflicts++
+			}
+		}
+		added := 0
+		deleted := 0
+		for _, file := range status.DiffStat {
+			added += file.Added
+			deleted += file.Deleted
+		}
+		out[i] = v1.GitRepositoryState{
+			Name:             repos[i].Name,
+			Branch:           status.Branch,
+			Ahead:            status.Ahead,
+			Behind:           status.Behind,
+			ChangedFiles:     len(status.DiffStat),
+			Added:            added,
+			Deleted:          deleted,
+			UncommittedFiles: len(status.Uncommitted),
+			Conflicts:        conflicts,
+			Operation:        v1.GitOperation(status.Operation),
+		}
+	}
+	return &v1.TaskRepoStatusResp{Repositories: out}, nil
 }
 
 func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {

@@ -153,6 +153,8 @@ class ApiClient(
     suspend fun getTaskHandoff(id: String): TaskHandoffResp = request("GET", "/api/caic/v1/tasks/$id/handoff")
     /** Returns repository status and the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path")
+    /** Returns compact Git state for every repository mapped to a task. */
+    suspend fun getTaskRepoStatus(id: String): TaskRepoStatusResp = request("GET", "/api/caic/v1/tasks/$id/repo-status")
     /** Returns the list of running processes inside the task's runtime instance. */
     suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/processes/$id")
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */

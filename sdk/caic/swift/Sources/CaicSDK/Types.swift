@@ -294,6 +294,30 @@ public struct ForgePRState: Codable, Equatable, Hashable {
     }
 }
 
+public struct GitOperation: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Rebase = GitOperation("rebase")
+    public static let Merge = GitOperation("merge")
+    public static let CherryPick = GitOperation("cherry-pick")
+    public static let Revert = GitOperation("revert")
+    public static let Bisect = GitOperation("bisect")
+
+    public static func other(_ value: String) -> GitOperation { GitOperation(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct Harness: Codable, Equatable, Hashable {
     public let value: String
 
@@ -1451,6 +1475,25 @@ public struct GitRepositoryStatus: Codable {
 public struct DiffResp: Codable {
     public let diff: String
     public let repositories: [GitRepositoryStatus]
+}
+
+/// GitRepositoryState summarizes the compact Git state of one task repository.
+public struct GitRepositoryState: Codable {
+    public let name: String
+    public let branch: String
+    public let ahead: Int
+    public let behind: Int
+    public let changedFiles: Int
+    public let added: Int
+    public let deleted: Int
+    public let uncommittedFiles: Int
+    public let conflicts: Int
+    public let operation: GitOperation?
+}
+
+/// TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.
+public struct TaskRepoStatusResp: Codable {
+    public let repositories: [GitRepositoryState]
 }
 
 /// ProcessInfo describes a single process running inside a task runtime instance.

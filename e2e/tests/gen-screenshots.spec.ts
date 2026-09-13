@@ -95,11 +95,18 @@ test("generate documentation screenshots", async ({ page, api }) => {
   ).toBeVisible();
 
   // Create tasks that will reach different states for a populated task list.
-  // Task 1: demo scenario — "fix" triggers demo mode (will complete with tool uses).
-  const id1 = await createTaskAPI(
-    api,
-    "Fix token expiry bug in auth middleware",
-  );
+  // Task 1: a long title and mapped repository state exercise the dense task
+  // card and detail-header layouts in every visual capture.
+  const repos = await api.listRepos();
+  const harnesses = await api.listHarnesses();
+  expect(repos.length).toBeGreaterThanOrEqual(2);
+  expect(harnesses.length).toBeGreaterThan(0);
+  const detailTask = await api.createTask({
+    initialPrompt: { text: "Fix OAuth security hardening and migration across service boundaries" },
+    repos: [{ name: repos[0].path }, { name: repos[1].path }],
+    harness: harnesses[0].name,
+  });
+  const id1 = detailTask.id;
   await waitForTaskState(api, id1, "waiting", 30_000);
 
   // Task 2: plan mode — "plan" triggers plan mode.
@@ -148,6 +155,11 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
   await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
+  const desktopHeaderStats = page.getByTestId("task-detail-header").getByTestId("repo-state-diff-stats");
+  await expect(desktopHeaderStats).toHaveCount(2);
+  for (let i = 0; i < 2; i++) {
+    await expect(desktopHeaderStats.nth(i)).toBeVisible();
+  }
   await captureScreenshot(page, "task-detail.png");
 
   // Screenshot 3: Plan mode.
@@ -277,8 +289,6 @@ test("generate documentation screenshots", async ({ page, api }) => {
   }
 
   // Screenshot 6: VNC display — fake IDE screenshot in noVNC viewer.
-  const harnesses = await api.listHarnesses();
-  const repos = await api.listRepos();
   const vncResp = await api.createTask({
     initialPrompt: { text: "Show the VNC display" },
     repos: [{ name: repos[0].path }],
@@ -341,10 +351,39 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const contextToggle = page.locator("[aria-label='Context actions']");
   await expect(contextToggle).toBeVisible({ timeout: 3_000 });
   await captureScreenshot(page, "task-detail-mobile.png");
+
+  // Screenshot 8: Dense task-detail header at the width where a larger phone
+  // or narrow desktop pane needs compact repository state markers.
+  await page.setViewportSize({ width: 525, height: 320 });
+  const detailHeader = page.getByTestId("task-detail-header");
+  const headerStats = detailHeader.getByTestId("repo-state-diff-stats");
+  await expect(headerStats).toHaveCount(2);
+  for (let i = 0; i < 2; i++) {
+    await expect(headerStats.nth(i)).toBeHidden();
+  }
+  const taskStatistics = detailHeader.getByRole("button", { name: "Task statistics" });
+  await expect(taskStatistics).toBeVisible();
+  const titleBox = await detailHeader
+    .locator(":scope > span")
+    .filter({ hasText: "Fix OAuth security hardening" })
+    .first()
+    .boundingBox();
+  expect(titleBox?.width).toBeLessThanOrEqual(128);
+  const [repositoryStateBox, taskStatisticsBox] = await Promise.all([
+    headerStats.first().locator("xpath=../..").boundingBox(),
+    taskStatistics.boundingBox(),
+  ]);
+  expect(repositoryStateBox).not.toBeNull();
+  expect(taskStatisticsBox).not.toBeNull();
+  expect(
+    Math.abs(repositoryStateBox!.y + repositoryStateBox!.height / 2 - taskStatisticsBox!.y - taskStatisticsBox!.height / 2),
+  ).toBeLessThanOrEqual(1);
+  await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await captureScreenshot(page, "task-detail-header-compact.png");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  // Screenshot 8: Scrolled task list — bottom alpha fade cues more cards.
+  // Screenshot 9: Scrolled task list — bottom alpha fade cues more cards.
   const scrollTaskIds: string[] = [];
   for (let i = 1; i <= 8; i++) {
     const id = await createTaskAPI(

@@ -536,6 +536,49 @@ object ForgePRStateSerializer : KSerializer<ForgePRState> {
     }
 }
 
+@Serializable(with = GitOperationSerializer::class)
+sealed interface GitOperation {
+    val value: String
+    @Serializable
+    data object Rebase : GitOperation {
+        override val value = "rebase"
+    }
+    @Serializable
+    data object Merge : GitOperation {
+        override val value = "merge"
+    }
+    @Serializable
+    data object CherryPick : GitOperation {
+        override val value = "cherry-pick"
+    }
+    @Serializable
+    data object Revert : GitOperation {
+        override val value = "revert"
+    }
+    @Serializable
+    data object Bisect : GitOperation {
+        override val value = "bisect"
+    }
+    @Serializable
+    data class Other(override val value: String) : GitOperation
+}
+
+object GitOperationSerializer : KSerializer<GitOperation> {
+    override val descriptor = PrimitiveSerialDescriptor("GitOperation", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: GitOperation) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): GitOperation {
+        val v = decoder.decodeString()
+        return when (v) {
+            "rebase" -> GitOperation.Rebase
+            "merge" -> GitOperation.Merge
+            "cherry-pick" -> GitOperation.CherryPick
+            "revert" -> GitOperation.Revert
+            "bisect" -> GitOperation.Bisect
+            else -> GitOperation.Other(v)
+        }
+    }
+}
+
 @Serializable(with = HarnessSerializer::class)
 sealed interface Harness {
     val value: String
@@ -1926,6 +1969,25 @@ data class GitRepositoryStatus(
 /** DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff. */
 @Serializable
 data class DiffResp(val diff: String, val repositories: List<GitRepositoryStatus>)
+
+/** GitRepositoryState summarizes the compact Git state of one task repository. */
+@Serializable
+data class GitRepositoryState(
+    val name: String,
+    val branch: String,
+    val ahead: Int,
+    val behind: Int,
+    val changedFiles: Int,
+    val added: Int,
+    val deleted: Int,
+    val uncommittedFiles: Int,
+    val conflicts: Int,
+    val operation: GitOperation? = null,
+)
+
+/** TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status. */
+@Serializable
+data class TaskRepoStatusResp(val repositories: List<GitRepositoryState>)
 
 /** ProcessInfo describes a single process running inside a task runtime instance. */
 @Serializable

@@ -1,7 +1,7 @@
 // Tests for TaskDetail navigation, prompts, and SSE connection behaviour.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { type JSX } from "solid-js";
 
@@ -17,6 +17,9 @@ vi.mock("@solidjs/router", () => ({
     <a
       href={props.href as string}
       class={props.class as string}
+      aria-label={props["aria-label"] as string}
+      data-elide-diff-stats={props["data-elide-diff-stats"] as string}
+      title={props.title as string}
       onClick={(e: MouseEvent) => {
         e.preventDefault();
         navigateMock(props.href);
@@ -47,6 +50,9 @@ vi.mock("../api", () => ({
   compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
   syncTask: vi.fn(),
   getTaskDiff: vi.fn(),
+  getTaskRepoStatus: vi.fn(() => Promise.resolve({
+    repositories: [{ name: "my-repo", branch: "task-branch", ahead: 1, behind: 0, changedFiles: 2, added: 15, deleted: 3, uncommittedFiles: 1, conflicts: 0 }],
+  })),
 }));
 
 // Import after mocks are set up.
@@ -126,19 +132,70 @@ describe("TaskDetail", () => {
     navigateMock.mockClear();
   });
 
-  it("shows Diff link when diffStat has items", () => {
-    const { getByText } = renderTaskDetail({ diffStat: [{ path: "file.ts", added: 10, deleted: 2 }] });
-    expect(getByText("Diff")).toBeInTheDocument();
+  it("replaces the Diff link with a repository state marker", async () => {
+    renderTaskDetail();
+
+    expect(await screen.findByRole("link", { name: "View diff for my-repo: 2 changed files, 15 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream" }))
+      .toHaveAttribute("href", "/task/@abc+test-task/diff");
+    expect(screen.queryByText("Diff")).not.toBeInTheDocument();
   });
 
-  it("hides Diff link when diffStat is empty", () => {
-    const { queryByText } = renderTaskDetail({ diffStat: [] });
-    expect(queryByText("Diff")).not.toBeInTheDocument();
+  it("keeps header Git line totals when its capped title ellipsizes", async () => {
+    const title = "OAuth security hardening and migration";
+    renderTaskDetail({ title });
+
+    const titleElement = screen.getByText(title);
+    Object.defineProperties(titleElement, {
+      clientWidth: { configurable: true, value: 160 },
+      scrollWidth: { configurable: true, value: 320 },
+    });
+    window.dispatchEvent(new Event("resize"));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const link = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    expect(link).not.toHaveAttribute("data-elide-diff-stats");
   });
 
-  it("hides Diff link when diffStat is undefined", () => {
-    const { queryByText } = renderTaskDetail({ diffStat: undefined });
-    expect(queryByText("Diff")).not.toBeInTheDocument();
+  it("elides header Git line totals when repository context ellipsizes", async () => {
+    renderTaskDetail();
+
+    const repoLink = await screen.findByRole("link", { name: "my-repo" });
+    const headerMeta = repoLink.parentElement;
+    if (!headerMeta) throw new Error("repository link is missing its header context");
+    Object.defineProperties(headerMeta, {
+      clientWidth: { configurable: true, value: 160 },
+      scrollWidth: { configurable: true, value: 320 },
+    });
+    window.dispatchEvent(new Event("resize"));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const diffLink = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    expect(diffLink).toHaveAttribute("data-elide-diff-stats", "");
+  });
+
+  it("keeps header Git line totals on one center-aligned flex line", async () => {
+    renderTaskDetail();
+
+    const header = screen.getByTestId("task-detail-header");
+    Array.from(header.children).forEach((child, index) => {
+      const height = 16 + index * 2;
+      const top = 40 - height / 2;
+      vi.spyOn(child, "getBoundingClientRect").mockReturnValue({
+        bottom: top + height,
+        height,
+        left: 0,
+        right: 0,
+        toJSON: () => ({}),
+        top,
+        width: 0,
+        x: 0,
+        y: top,
+      });
+    });
+    window.dispatchEvent(new Event("resize"));
+
+    const link = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
   });
 
   it("copies only the selected fenced code block", async () => {
@@ -230,42 +287,17 @@ describe("TaskDetail", () => {
     expect(screen.queryByTestId("quota-recovery-detail-action")).not.toBeInTheDocument();
   });
 
-  it("diff link href ends with /diff", () => {
-    const { getByText } = renderTaskDetail({ diffStat: [{ path: "file.ts", added: 5, deleted: 1 }] });
-    const link = getByText("Diff");
-    expect(link.getAttribute("href")).toBe("/task/@abc+test-task/diff");
+  it("repository state diff link href ends with /diff", async () => {
+    renderTaskDetail();
+    const link = await screen.findByRole("link", { name: /View diff for my-repo/ });
+    expect(link).toHaveAttribute("href", "/task/@abc+test-task/diff");
   });
 
-  it("clicking diff link calls navigate with path/diff", async () => {
+  it("clicking a repository state marker navigates to the diff", async () => {
     const user = userEvent.setup();
-    const { getByText } = renderTaskDetail({ diffStat: [{ path: "file.ts", added: 5, deleted: 1 }] });
-    await user.click(getByText("Diff"));
+    renderTaskDetail();
+    await user.click(await screen.findByRole("link", { name: /View diff for my-repo/ }));
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
-  });
-
-  it("collapses current task diff stats into an expandable file summary", async () => {
-    const user = userEvent.setup();
-
-    const { getByText } = renderTaskDetail({
-      diffStat: [
-        { path: "frontend/src/App.tsx", added: 10, deleted: 2 },
-        { path: "frontend/src/App.test.tsx", added: 5, deleted: 1 },
-      ],
-    });
-    const summary = getByText("2 files changed").closest("summary");
-    const details = summary?.closest("details");
-
-    expect(summary).not.toBeNull();
-    expect(details).not.toHaveAttribute("open");
-    if (!(summary instanceof HTMLElement)) throw new Error("diff summary was not rendered");
-    expect(getByText("+15")).toBeInTheDocument();
-    expect(getByText("−3")).toBeInTheDocument();
-
-    await user.click(summary);
-
-    expect(details).toHaveAttribute("open");
-    expect(getByText("frontend/src/App.tsx")).toBeVisible();
-    expect(getByText("frontend/src/App.test.tsx")).toBeVisible();
   });
 
   it("renders Codex file-change diffs with colored lines", () => {

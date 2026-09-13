@@ -8,11 +8,18 @@ import type { ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
+import { getTaskRepoStatus } from "../api";
 
 vi.mock("@solidjs/router", () => ({
   A: (linkProps: { href: string; class?: string; title?: string; onClick?: (event: MouseEvent) => void; children: JSX.Element }) => (
     <a class={linkProps.class} href={linkProps.href} title={linkProps.title} onClick={(event) => linkProps.onClick?.(event)}>{linkProps.children}</a>
   ),
+}));
+
+vi.mock("../api", () => ({
+  compactContext: vi.fn(),
+  getTaskRepoStatus: vi.fn(() => Promise.resolve({ repositories: [] })),
+  syncTask: vi.fn(),
 }));
 
 const now = () => Date.parse("2026-07-08T12:00:00Z");
@@ -48,6 +55,33 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
 }
 
 describe("TaskCard", () => {
+  it("shows the complete repository-state component in the bottom row", async () => {
+    vi.mocked(getTaskRepoStatus).mockResolvedValueOnce({
+      repositories: [{
+        name: "repo",
+        branch: "task-branch",
+        ahead: 1,
+        behind: 0,
+        changedFiles: 2,
+        added: 12,
+        deleted: 3,
+        uncommittedFiles: 1,
+        conflicts: 0,
+      }],
+    });
+    render(() => <TaskCard {...props()} />);
+
+    expect(await screen.findByRole("img")).toHaveAccessibleName(
+      "2 changed files, 12 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream",
+    );
+    const repoStateRow = await screen.findByTestId("task-card-repo-state");
+    expect(repoStateRow).toHaveTextContent("task-branch");
+    expect(screen.getAllByText("task-branch")).toHaveLength(1);
+    expect(screen.getByText("2f")).toBeInTheDocument();
+    expect(screen.getByText("+12")).toBeInTheDocument();
+    expect(screen.getByText("−3")).toBeInTheDocument();
+  });
+
   it("does not invent a TTL when only a legacy cache expiry is available", () => {
     render(() => <TaskCard {...props({
       state: "waiting",

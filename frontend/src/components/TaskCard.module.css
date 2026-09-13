@@ -48,7 +48,8 @@
 }
 
 .title {
-  font-size: 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -66,6 +67,7 @@
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   font-size: 0.75rem;
+  font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
   line-height: 1.4;
@@ -147,14 +149,20 @@ a.featureIconBadge:focus-visible {
 .metaRow {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+}
+
+.statusBadges {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
 }
 
 .originRow {
   display: flex;
   align-items: baseline;
   gap: 0.3rem;
-  margin-top: 0.2rem;
   color: var(--color-text-muted);
   font-size: 0.7rem;
   min-width: 0;
@@ -206,50 +214,30 @@ a.featureIconBadge:focus-visible {
   outline-offset: 2px;
 }
 
-.branchMeta {
-  font-size: 0.75rem;
-  color: var(--color-text-meta);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.repoStates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+}
+
+.repoState {
+  display: flex;
+  align-items: center;
   min-width: 0;
 }
 
-.baseBranch {
-  opacity: 0.65;
+.repoStateLabel {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.branchArrow {
-  opacity: 0.4;
-  margin: 0 0.15em;
-  font-size: 0.7em;
-}
-
-.branchName {
-  font-weight: 600;
-}
-
-.repoName {
-  opacity: 0.5;
-  margin-left: 0.4em;
-  font-weight: 400;
-}
-
-.diffClickable {
-  cursor: pointer;
-  width: fit-content;
-}
-
-.diffClickable:hover {
-  text-decoration: underline;
-}
-
-.diffAdded {
-  color: var(--color-diff-added);
-}
-
-.diffDeleted {
-  color: var(--color-diff-deleted);
+.repoStateSummary {
+  margin-left: auto;
 }
 
 .purgeBtn,

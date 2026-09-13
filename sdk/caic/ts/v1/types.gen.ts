@@ -521,6 +521,21 @@ export const ForgePRStateOpen: ForgePRState = "open";
 export const ForgePRStateClosed: ForgePRState = "closed";
 export const ForgePRStateMerged: ForgePRState = "merged";
 
+export type GitOperation =
+  | "rebase"
+  | "merge"
+  | "cherry-pick"
+  | "revert"
+  | "bisect";
+/**
+ * Supported values.
+ */
+export const GitOperationRebase: GitOperation = "rebase";
+export const GitOperationMerge: GitOperation = "merge";
+export const GitOperationCherryPick: GitOperation = "cherry-pick";
+export const GitOperationRevert: GitOperation = "revert";
+export const GitOperationBisect: GitOperation = "bisect";
+
 export type Harness =
   | "claude"
   | "codex"
@@ -1294,6 +1309,25 @@ export interface GitRepositoryStatus {
 export interface DiffResp {
   diff: string;
   repositories: GitRepositoryStatus[];
+}
+
+/** GitRepositoryState summarizes the compact Git state of one task repository. */
+export interface GitRepositoryState {
+  name: string;
+  branch: string;
+  ahead: number /* int */;
+  behind: number /* int */;
+  changedFiles: number /* int */;
+  added: number /* int */;
+  deleted: number /* int */;
+  uncommittedFiles: number /* int */;
+  conflicts: number /* int */;
+  operation?: GitOperation;
+}
+
+/** TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status. */
+export interface TaskRepoStatusResp {
+  repositories: GitRepositoryState[];
 }
 
 /** ProcessInfo describes a single process running inside a task runtime instance. */

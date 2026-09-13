@@ -65,6 +65,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/handoff` | Builds an editable handoff prompt for continuing a task in a fresh agent session. |  | `TaskHandoffResp` |
 | GET | `/api/caic/v1/tasks/{id}/diff` | Returns repository status and the unified diff for a task's branch. |  | `DiffResp` |
+| GET | `/api/caic/v1/tasks/{id}/repo-status` | Returns compact Git state for every repository mapped to a task. |  | `TaskRepoStatusResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
 
@@ -259,6 +260,18 @@ ForgePRState is the state of a pull/merge request.
 | `open` |  |
 | `closed` |  |
 | `merged` |  |
+
+### GitOperation
+
+GitOperation identifies an in-progress Git operation in a task repository.
+
+| Value | Description |
+|-------|-------------|
+| `rebase` |  |
+| `merge` |  |
+| `cherry-pick` |  |
+| `revert` |  |
+| `bisect` |  |
 
 ### Harness
 
@@ -1480,6 +1493,31 @@ DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 |-------|------|-------------|----------|
 | `diff` | `string` |  | yes |
 | `repositories` | `GitRepositoryStatus[]` |  | yes |
+
+### GitRepositoryState
+
+GitRepositoryState summarizes the compact Git state of one task repository.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `branch` | `string` |  | yes |
+| `ahead` | `int` |  | yes |
+| `behind` | `int` |  | yes |
+| `changedFiles` | `int` |  | yes |
+| `added` | `int` |  | yes |
+| `deleted` | `int` |  | yes |
+| `uncommittedFiles` | `int` |  | yes |
+| `conflicts` | `int` |  | yes |
+| `operation` | `GitOperation` |  |  |
+
+### TaskRepoStatusResp
+
+TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositories` | `GitRepositoryState[]` |  | yes |
 
 ### ProcessInfo
 

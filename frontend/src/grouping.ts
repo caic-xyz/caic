@@ -242,7 +242,7 @@ function groupMessagesAfter(
         break;
       case "commitSnapshot":
       case "diffStat":
-        // Metadata-only; live diff stat shown in the task list via Task.diffStat.
+        // Metadata-only; repository summaries load the current diff state separately.
         break;
       case "stats":
         // Metadata-only; stats are handled by StatsIcon component.

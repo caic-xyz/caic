@@ -1,0 +1,75 @@
+/* Dense visual markers for a task repository's Git state. */
+
+.icons {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: 0.15rem;
+  margin-left: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.link {
+  color: inherit;
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  text-decoration: none;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.icons > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.03rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.icon {
+  width: 0.72rem;
+  height: 0.72rem;
+}
+
+.dirty,
+.behind {
+  color: var(--color-warning-text);
+}
+
+.ahead {
+  color: var(--color-success);
+}
+
+.conflict {
+  color: var(--color-danger);
+}
+
+.operation {
+  color: var(--color-text-secondary);
+}
+
+.diffStats {
+  color: inherit;
+}
+
+.icons[data-elide-diff-stats] .diffStats,
+.link[data-elide-diff-stats] .diffStats {
+  display: none;
+}
+
+.added {
+  color: var(--color-diff-added);
+}
+
+.deleted {
+  color: var(--color-diff-deleted);
+}

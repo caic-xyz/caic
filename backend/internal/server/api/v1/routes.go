@@ -329,6 +329,13 @@ var Routes = []Route{
 		QueryParams: []string{"path"},
 	},
 	{
+		Name:   "getTaskRepoStatus",
+		Doc:    "Returns compact Git state for every repository mapped to a task.",
+		Method: "GET",
+		Path:   "/api/caic/v1/tasks/{id}/repo-status",
+		Resp:   reflect.TypeFor[TaskRepoStatusResp](),
+	},
+	{
 		Name:   "getTaskProcesses",
 		Doc:    "Returns the list of running processes inside the task's runtime instance.",
 		Method: "GET",

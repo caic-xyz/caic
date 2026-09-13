@@ -32,7 +32,6 @@ export interface TaskListProps {
   onError: (message: string) => void;
   supportsCompact: (harness: string) => boolean;
   actionId: Accessor<string | null>;
-  onDiffClick?: (id: string) => void;
   autoFixCI: Accessor<boolean>;
   autoFixPR: Accessor<boolean>;
   onFixCI?: (repoPath: string) => void;
@@ -318,7 +317,6 @@ export default function TaskList(props: TaskListProps) {
       onError={props.onError}
       supportsCompact={props.supportsCompact(t().harness)}
       actionLoading={props.actionId() === t().id}
-      onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
       voiceNumber={props.voiceConnected() ? props.getTaskNumber(t().id) : undefined}
     />;
   };

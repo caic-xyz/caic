@@ -16,6 +16,8 @@ const (
 	gitCommitMarker       = "caic-git-commit"
 	gitComparisonMarker   = "# caic.branch.upstream "
 	gitDivergenceMarker   = "# caic.branch.ab "
+	gitOperationMarker    = "caic-git-operation"
+	gitTotalStatMarker    = "caic-git-total-stat"
 	gitWorktreeStatMarker = "caic-git-worktree-stat"
 )
 
@@ -32,7 +34,16 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`if [ -n "$comparison" ]; then ` +
 		`divergence=$(git rev-list --left-right --count "$comparison...HEAD") && ` +
 		`printf '` + gitComparisonMarker + `%s\0` + gitDivergenceMarker + `%s\0' "$comparison" "$divergence"; ` +
-		`fi && printf '` + gitWorktreeStatMarker + `\0' && ` +
+		`fi && git_dir=$(git rev-parse --git-dir) && operation= && ` +
+		`if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then operation=rebase; ` +
+		`elif git rev-parse --verify --quiet MERGE_HEAD >/dev/null; then operation=merge; ` +
+		`elif git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null; then operation=cherry-pick; ` +
+		`elif git rev-parse --verify --quiet REVERT_HEAD >/dev/null; then operation=revert; ` +
+		`elif [ -f "$git_dir/BISECT_LOG" ]; then operation=bisect; fi && ` +
+		`if [ -n "$operation" ]; then printf '` + gitOperationMarker + `\0%s\0' "$operation"; fi && ` +
+		`printf '` + gitTotalStatMarker + `\0' && ` +
+		`if [ -n "$comparison" ]; then ` + alternateIndexDiffCommand(`git diff "$comparison" --numstat -z -- .`) + `; fi && ` +
+		`printf '` + gitWorktreeStatMarker + `\0' && ` +
 		alternateIndexDiffCommand("git diff HEAD --numstat -z -- .") + ` && ` +
 		`printf '` + gitLogMarker + `\0' && ` +
 		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
@@ -118,6 +129,15 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 			i += consumed + 1
 			continue
 		}
+		if record == gitTotalStatMarker {
+			stats, consumed, err := parseGitNumstats(records[i+1:], gitWorktreeStatMarker)
+			if err != nil {
+				return runtime.RepositoryStatus{}, err
+			}
+			status.DiffStat = stats
+			i += consumed + 1
+			continue
+		}
 		consumed, err := parseGitStatusRecord(&status, records[i:])
 		if err != nil {
 			return runtime.RepositoryStatus{}, err
@@ -177,18 +197,11 @@ func alternateIndexDiffCommand(diffCommand string) string {
 }
 
 func parseGitWorktreeStats(status *runtime.RepositoryStatus, records []string) (int, error) {
-	for i := 0; i < len(records); {
-		if records[i] == gitLogMarker {
-			return i, nil
-		}
-		if records[i] == "" {
-			i++
-			continue
-		}
-		stat, consumed, err := parseGitNumstatRecord(records[i:])
-		if err != nil {
-			return 0, err
-		}
+	stats, consumed, err := parseGitNumstats(records, gitLogMarker)
+	if err != nil {
+		return 0, err
+	}
+	for _, stat := range stats {
 		for j := range status.Uncommitted {
 			if status.Uncommitted[j].Path == stat.Path {
 				status.Uncommitted[j].Added = stat.Added
@@ -197,9 +210,28 @@ func parseGitWorktreeStats(status *runtime.RepositoryStatus, records []string) (
 				break
 			}
 		}
+	}
+	return consumed, nil
+}
+
+func parseGitNumstats(records []string, endMarker string) ([]runtime.GitFileStat, int, error) {
+	stats := make([]runtime.GitFileStat, 0, len(records))
+	for i := 0; i < len(records); {
+		if records[i] == endMarker {
+			return stats, i, nil
+		}
+		if records[i] == "" {
+			i++
+			continue
+		}
+		stat, consumed, err := parseGitNumstatRecord(records[i:])
+		if err != nil {
+			return nil, 0, err
+		}
+		stats = append(stats, stat)
 		i += consumed
 	}
-	return len(records), nil
+	return stats, len(records), nil
 }
 
 func parseGitNumstatRecord(records []string) (runtime.GitFileStat, int, error) {
@@ -248,6 +280,18 @@ func parseGitStatusRecord(status *runtime.RepositoryStatus, records []string) (i
 		if _, err := fmt.Sscanf(strings.TrimPrefix(record, gitDivergenceMarker), "%d %d", &status.Behind, &status.Ahead); err != nil {
 			return 0, fmt.Errorf("parse comparison divergence %q: %w", record, err)
 		}
+	case record == gitOperationMarker:
+		if len(records) < 2 {
+			return 0, errors.New("git status output is missing operation")
+		}
+		operation := runtime.RepositoryOperation(records[1])
+		switch operation {
+		case runtime.RepositoryOperationRebase, runtime.RepositoryOperationMerge, runtime.RepositoryOperationCherryPick, runtime.RepositoryOperationRevert, runtime.RepositoryOperationBisect:
+			status.Operation = operation
+		default:
+			return 0, fmt.Errorf("unknown git operation %q", operation)
+		}
+		return 2, nil
 	case strings.HasPrefix(record, "1 "):
 		fields := strings.SplitN(record, " ", 9)
 		if len(fields) != 9 {

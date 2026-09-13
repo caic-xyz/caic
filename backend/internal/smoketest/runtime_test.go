@@ -5,6 +5,7 @@ package smoketest
 import (
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -13,7 +14,71 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
+
+func TestRuntimeBackendRepositoryStatus(t *testing.T) {
+	t.Parallel()
+
+	b := NewRuntimeBackend(0)
+	id, err := b.Launch(t.Context(), []runtime.Repo{
+		{GitRoot: "primary", Branch: "caic-1"},
+		{GitRoot: "mapped", Branch: "caic-1"},
+	}, &runtime.StartOptions{LogWriter: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("primary repository has committed and uncommitted changes", func(t *testing.T) {
+		t.Parallel()
+
+		status, err := b.RepositoryStatus(t.Context(), id, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Ahead != 1 || status.Behind != 0 {
+			t.Errorf("divergence = ahead %d behind %d, want ahead 1 behind 0", status.Ahead, status.Behind)
+		}
+		if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
+			{Path: "cmd/caic/main.go", Added: 8},
+			{Path: "frontend/src/App.tsx", Added: 4, Deleted: 2},
+		}) {
+			t.Errorf("DiffStat = %#v", status.DiffStat)
+		}
+		if len(status.Commits) != 1 || status.Commits[0].Subject != "Add task activity summary" {
+			t.Errorf("Commits = %#v", status.Commits)
+		}
+		if !slices.Equal(status.Uncommitted, []runtime.GitFileStatus{{
+			Path:           "frontend/src/App.tsx",
+			WorktreeStatus: "M",
+			Added:          4,
+			Deleted:        2,
+		}}) {
+			t.Errorf("Uncommitted = %#v", status.Uncommitted)
+		}
+	})
+
+	t.Run("mapped repository has an independent worktree state", func(t *testing.T) {
+		t.Parallel()
+
+		status, err := b.RepositoryStatus(t.Context(), id, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Ahead != 0 || status.Behind != 1 {
+			t.Errorf("divergence = ahead %d behind %d, want ahead 0 behind 1", status.Ahead, status.Behind)
+		}
+		if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
+			{Path: "internal/service/api.go", Added: 6, Deleted: 1},
+			{Path: "README.md", Added: 3, Deleted: 4},
+		}) {
+			t.Errorf("DiffStat = %#v", status.DiffStat)
+		}
+		if len(status.Commits) != 0 {
+			t.Errorf("Commits = %#v, want none", status.Commits)
+		}
+	})
+}
 
 func TestFakeAgentNaturalPromptMatching(t *testing.T) {
 	t.Parallel()

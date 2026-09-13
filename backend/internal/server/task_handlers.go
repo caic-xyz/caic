@@ -771,6 +771,16 @@ func (h *taskHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(r.Context(), w, resp, err)
 }
 
+func (h *taskHandlers) handleTaskRepoStatus(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	resp, err := h.taskSvc.taskRepoStatus(r.Context(), entry)
+	writeJSONResponse(r.Context(), w, resp, err)
+}
+
 // handleVNCWebSocket proxies a WebSocket connection to the instance's VNC
 // TCP port via the Docker host port mapping. Used by noVNC in the frontend.
 func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -880,6 +890,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(h, h.taskSvc.reviveTask))
 	m.HandleFunc("POST /tasks/{id}/sync", handleWithTask(h, h.taskSvc.syncTask))
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
+	m.HandleFunc("GET /tasks/{id}/repo-status", h.handleTaskRepoStatus)
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m

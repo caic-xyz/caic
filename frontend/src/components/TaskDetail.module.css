@@ -10,6 +10,7 @@
 .header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
   margin-bottom: 0.5rem;
 }
@@ -54,8 +55,8 @@
   display: none;
   font-size: 0.85rem;
   font-weight: 500;
-  flex: 1;
-  min-width: 0;
+  flex: 0 1 8rem;
+  min-width: 8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -634,6 +635,14 @@ a.headerPR:hover {
   text-decoration: underline;
 }
 
+.repoStateLinks {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
 .sudoPassword {
   display: inline-flex;
   align-items: center;
@@ -849,76 +858,6 @@ a.ciStatus:hover {
   border: 1px solid var(--color-plan-border);
   border-radius: var(--radius-lg);
   overflow-x: auto;
-}
-
-.diffStat {
-  margin: 0.25rem 0 0;
-  padding: 0.4rem 0.6rem;
-  background: var(--color-overlay-soft);
-  border-radius: var(--radius-sm);
-  font-size: 0.8rem;
-  line-height: 1.5;
-}
-
-.diffSummary {
-  cursor: pointer;
-}
-
-
-.diffSummaryContent {
-  display: inline-flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: calc(100% - 1.2rem);
-}
-
-.diffFiles {
-  margin-top: 0.3rem;
-  padding-top: 0.3rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.diffFile {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.diffFileLink {
-  color: inherit;
-  text-decoration: none;
-}
-
-.diffFileLink:hover .diffPath {
-  text-decoration: underline;
-}
-
-.diffPath {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
-}
-
-.diffCounts {
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.diffAdded {
-  color: var(--color-diff-added);
-  margin-right: 0.3em;
-}
-
-.diffDeleted {
-  color: var(--color-diff-deleted);
-}
-
-.diffBinary {
-  color: var(--color-diff-binary);
-  font-style: italic;
-  flex-shrink: 0;
 }
 
 .toolGroup {

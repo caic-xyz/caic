@@ -168,6 +168,20 @@ func TestRoutes(t *testing.T) {
 			t.Fatalf("QueryParams = %v, want [path]", r.QueryParams)
 		}
 	})
+
+	t.Run("getTaskRepoStatusDeclaresStatusPath", func(t *testing.T) {
+		t.Parallel()
+		r := routeByName(t, "getTaskRepoStatus")
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.Path != "/api/caic/v1/tasks/{id}/repo-status" {
+			t.Fatalf("path = %q, want repo-status path", r.Path)
+		}
+		if len(r.QueryParams) != 0 {
+			t.Fatalf("QueryParams = %v, want none", r.QueryParams)
+		}
+	})
 }
 
 func routeByName(t *testing.T, name string) Route {

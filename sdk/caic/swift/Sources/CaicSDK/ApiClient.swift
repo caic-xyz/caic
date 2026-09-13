@@ -242,6 +242,10 @@ public final class ApiClient {
     public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
     }
+    /// Returns compact Git state for every repository mapped to a task.
+    public func getTaskRepoStatus(id: String) async throws -> TaskRepoStatusResp {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/repo-status")
+    }
     /// Returns the list of running processes inside the task's runtime instance.
     public func getTaskProcesses(id: String) async throws -> ProcessListResp {
         try await request("GET", path: "/api/caic/v1/processes/\(id)")

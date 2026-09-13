@@ -1112,12 +1112,6 @@ function createAppStore() {
     const found = taskById(id);
     navigate(found ? taskPathForTask(found) : `/task/@${id}`);
   };
-  const navigateToDiff = (id: string) => {
-    const found = taskById(id);
-    if (found?.diffStat?.length) {
-      navigate(taskPathForTask(found) + "/diff");
-    }
-  };
   const fixCI = (repoPath: string) => {
     void botFixCI({ repo: repoPath }).then((data) => {
       seedTask(data);
@@ -1172,7 +1166,7 @@ function createAppStore() {
     voiceGatewayAvailable,
     // sidebar + actions
     sidebarOpen, setSidebarOpen, now, actionId, handleStop, handlePurge, handleRevive, handleFork, handleQuotaRecovery,
-    navigateToTask, navigateToDiff, fixCI,
+    navigateToTask, fixCI,
     // input drafts
     inputDraft, setInputDraft, inputImages, setInputImages,
     // warnings

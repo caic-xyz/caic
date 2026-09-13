@@ -101,13 +101,27 @@ type Repo struct {
 	Remote        string
 }
 
+// RepositoryOperation identifies an in-progress Git operation in a repository.
+type RepositoryOperation string
+
+// RepositoryOperation values identify supported in-progress Git operations.
+const (
+	RepositoryOperationRebase     RepositoryOperation = "rebase"
+	RepositoryOperationMerge      RepositoryOperation = "merge"
+	RepositoryOperationCherryPick RepositoryOperation = "cherry-pick"
+	RepositoryOperationRevert     RepositoryOperation = "revert"
+	RepositoryOperationBisect     RepositoryOperation = "bisect"
+)
+
 // RepositoryStatus describes the checked-out branch and its changes relative
 // to the host checkout's original tracking branch.
 type RepositoryStatus struct {
 	Branch      string
 	Upstream    string
+	Operation   RepositoryOperation
 	Ahead       int
 	Behind      int
+	DiffStat    []GitFileStat
 	Commits     []GitCommit
 	Uncommitted []GitFileStatus
 }
