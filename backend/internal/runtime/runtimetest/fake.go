@@ -64,6 +64,8 @@ type FakeBackend struct {
 	RuntimeName runtime.Name
 	// DiffOutput is returned verbatim by Diff.
 	DiffOutput string
+	// CommitDiffStatOutput is returned verbatim by CommitDiffStat.
+	CommitDiffStatOutput string
 	// FileDiffOutput is returned verbatim by FileDiff.
 	FileDiffOutput string
 	// RepositoryStatusValue is returned by RepositoryStatus.
@@ -126,6 +128,11 @@ func (f *FakeBackend) Connect(ctx context.Context, id runtime.ID, opts *runtime.
 // Diff implements runtime.Repository.
 func (f *FakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
 	return f.DiffOutput, nil
+}
+
+// CommitDiffStat implements runtime.Repository.
+func (f *FakeBackend) CommitDiffStat(context.Context, runtime.ID, int, string, string) (string, error) {
+	return f.CommitDiffStatOutput, nil
 }
 
 // FileDiff implements runtime.Repository.

@@ -428,20 +428,35 @@ type RepositoryCommit struct {
 	CommitHash string `json:"commit_hash"`
 }
 
+// ChangeStat summarizes the net committed file changes between two repository snapshots.
+type ChangeStat struct {
+	Files       int `json:"files"`
+	Added       int `json:"added"`
+	Deleted     int `json:"deleted"`
+	BinaryFiles int `json:"binary_files"`
+}
+
 // TurnCommitSnapshotMessage is a standalone durable record of the committed
 // repository branch tips fetched from a task runtime when a turn finishes.
 type TurnCommitSnapshotMessage struct {
 	MessageType string `json:"type"`
+	// Baseline marks the snapshot taken before a newly started agent session.
+	Baseline bool `json:"baseline,omitempty"`
 	// RepositoryCommits contains the immutable Git branch tips fetched from
 	// every repository in the task runtime at this boundary.
 	RepositoryCommits []RepositoryCommit `json:"repository_commits"`
+	// ChangeStat is the completed turn's net committed change since the prior
+	// snapshot. It is nil when no complete comparison was available.
+	ChangeStat *ChangeStat `json:"change_stat,omitempty"`
 }
 
-// NewTurnCommitSnapshotMessage creates a durable turn-boundary commit snapshot.
-func NewTurnCommitSnapshotMessage(commits []RepositoryCommit) *TurnCommitSnapshotMessage {
+// NewTurnCommitSnapshotMessage creates a durable commit snapshot.
+func NewTurnCommitSnapshotMessage(commits []RepositoryCommit, baseline bool, changeStat *ChangeStat) *TurnCommitSnapshotMessage {
 	return &TurnCommitSnapshotMessage{
 		MessageType:       messageTypeTurnCommitSnapshot,
+		Baseline:          baseline,
 		RepositoryCommits: append([]RepositoryCommit(nil), commits...),
+		ChangeStat:        changeStat,
 	}
 }
 

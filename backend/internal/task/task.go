@@ -1755,6 +1755,27 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
+// latestCommitSnapshot returns a copy of the most recently recorded repository
+// tips, whether it is a pre-session baseline or a completed-turn snapshot.
+func (t *Task) latestCommitSnapshot() *agent.TurnCommitSnapshotMessage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, entry := range slices.Backward(t.timeline) {
+		snapshot, ok := entry.Message.(*agent.TurnCommitSnapshotMessage)
+		if !ok {
+			continue
+		}
+		clone := *snapshot
+		clone.RepositoryCommits = slices.Clone(snapshot.RepositoryCommits)
+		if snapshot.ChangeStat != nil {
+			change := *snapshot.ChangeStat
+			clone.ChangeStat = &change
+		}
+		return &clone
+	}
+	return nil
+}
+
 func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 	t.liveDiffStat = ds
 	if len(ds) > 0 {

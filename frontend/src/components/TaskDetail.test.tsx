@@ -554,11 +554,14 @@ describe("TaskDetail", () => {
       secondResult.result.usage.inputTokens = 200;
       const events: EventMessage[] = [
         { kind: "init", ts: 1_000, init: { reportedModel: "test", agentVersion: "test", sessionID: "session-one", tools: [], cwd: "", harness: "test" } },
+        { kind: "commitSnapshot", ts: 1_500, commitSnapshot: { baseline: true, repositoryCommits: [] } },
         { kind: "text", ts: 2_000, text: { text: "first response" } },
         firstResult,
+        { kind: "commitSnapshot", ts: 3_100, commitSnapshot: { repositoryCommits: [], changeStat: { files: 2, added: 10, deleted: 3, binaryFiles: 0 } } },
         { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
         { kind: "text", ts: 63_000, text: { text: "second response" } },
         secondResult,
+        { kind: "commitSnapshot", ts: 65_100, commitSnapshot: { repositoryCommits: [], changeStat: { files: 4, added: 20, deleted: 5, binaryFiles: 1 } } },
         { kind: "system", ts: 66_000, system: { subtype: "compact_boundary" } },
         { kind: "text", ts: 67_000, text: { text: "response after compaction" } },
         resultEvent(68_000),
@@ -581,6 +584,7 @@ describe("TaskDetail", () => {
     expect(dialog).toHaveTextContent("Combined turn time0:05");
     expect(dialog).toHaveTextContent("Combined API time0:02");
     expect(dialog).toHaveTextContent("Time awaiting user response0:59");
+    expect(dialog).toHaveTextContent("Generated change6 file changes · +30 −8 · 1 binary");
     expect(dialog).toHaveTextContent("Cost$0.0000");
     expect(dialog).toHaveTextContent("New input300t");
     expect(queryByText("first response")).not.toBeInTheDocument();

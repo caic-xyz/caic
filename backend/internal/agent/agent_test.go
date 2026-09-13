@@ -542,7 +542,7 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 	for _, version := range []LogVersion{LogVersionV1, LogVersionV2} {
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
 			t.Parallel()
-			snapshot, err := MarshalLogMessage(version, NewTurnCommitSnapshotMessage([]RepositoryCommit{commit}))
+			snapshot, err := MarshalLogMessage(version, NewTurnCommitSnapshotMessage([]RepositoryCommit{commit}, false, nil))
 			if err != nil {
 				t.Fatal(err)
 			}

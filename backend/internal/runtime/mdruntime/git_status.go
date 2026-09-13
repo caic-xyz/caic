@@ -66,6 +66,17 @@ func gitFileDiffCommand(repo, commit, path, originalPath string) (string, error)
 	return strings.Join(commands, " && "), nil
 }
 
+func gitCommitDiffStatCommand(repo, from, to string) (string, error) {
+	if !isGitObjectID(from) || !isGitObjectID(to) {
+		return "", errors.New("git commit diff stat requires full object IDs")
+	}
+	return strings.Join([]string{
+		"cd " + shellQuote(repo),
+		"export GIT_OPTIONAL_LOCKS=0 LC_ALL=C",
+		"git diff --numstat --find-renames=50% " + shellQuote(from) + " " + shellQuote(to) + " --",
+	}, " && "), nil
+}
+
 func gitPatchCommand(subcommand string) string {
 	return "git -c core.quotePath=true -c diff.mnemonicPrefix=false -c diff.noprefix=false " + subcommand +
 		" --patch --diff-algorithm=myers --no-indent-heuristic --unified=3 --inter-hunk-context=0" +

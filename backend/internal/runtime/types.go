@@ -396,6 +396,7 @@ type FetchedBranch struct {
 // Repository provides repository operations inside runtime instances.
 type Repository interface {
 	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
+	CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (string, error)
 	Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error)
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)

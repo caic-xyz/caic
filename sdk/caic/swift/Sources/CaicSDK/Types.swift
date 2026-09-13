@@ -1281,10 +1281,20 @@ public struct EventRepositoryCommit: Codable {
     public let commitHash: String
 }
 
+/// EventChangeStat summarizes a completed turn's net committed change.
+public struct EventChangeStat: Codable {
+    public let files: Int
+    public let added: Int
+    public let deleted: Int
+    public let binaryFiles: Int
+}
+
 /// EventCommitSnapshot records the exact committed repository branch tips
 /// fetched from the runtime when a turn finishes.
 public struct EventCommitSnapshot: Codable {
     public let repositoryCommits: [EventRepositoryCommit]
+    public let baseline: Bool?
+    public let changeStat: EventChangeStat?
 }
 
 // Backend-neutral event types

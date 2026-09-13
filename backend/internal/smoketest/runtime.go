@@ -88,6 +88,11 @@ func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string)
 	return "", nil
 }
 
+// CommitDiffStat implements runtime.Repository.
+func (*RuntimeBackend) CommitDiffStat(_ context.Context, _ runtime.ID, _ int, _, _ string) (string, error) {
+	return "", nil
+}
+
 // FileDiff implements runtime.Repository.
 func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, _ int, _, _, _ string) (string, error) {
 	return "", nil

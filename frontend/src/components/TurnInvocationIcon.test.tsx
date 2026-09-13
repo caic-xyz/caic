@@ -26,6 +26,7 @@ const turn: TurnTiming = {
       reportedModel: "test-model",
     },
   },
+  changeStat: { files: 3, added: 14, deleted: 2, binaryFiles: 1 },
   waitMs: 3_000,
 };
 
@@ -41,6 +42,7 @@ describe("TurnInvocationIcon", () => {
     expect(dialog).toHaveTextContent("Turn time0:05");
     expect(dialog).toHaveTextContent("API time0:04");
     expect(dialog).toHaveTextContent("User wait0:03");
+    expect(dialog).toHaveTextContent("Generated change3 files · +14 −2 · 1 binary");
     expect(dialog).toHaveTextContent("Cost$0.13");
     expect(dialog).toHaveTextContent("New input1.0kt");
     expect(dialog).toHaveTextContent("Cache write2.0kt");

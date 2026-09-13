@@ -349,12 +349,22 @@ export interface EventRepositoryCommit {
   commitHash: string;
 }
 
+/** EventChangeStat summarizes a completed turn's net committed change. */
+export interface EventChangeStat {
+  files: number /* int */;
+  added: number /* int */;
+  deleted: number /* int */;
+  binaryFiles: number /* int */;
+}
+
 /**
  * EventCommitSnapshot records the exact committed repository branch tips
  * fetched from the runtime when a turn finishes.
  */
 export interface EventCommitSnapshot {
   repositoryCommits: EventRepositoryCommit[];
+  baseline?: boolean;
+  changeStat?: EventChangeStat;
 }
 
 /**

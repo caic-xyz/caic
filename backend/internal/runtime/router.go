@@ -104,6 +104,15 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 	return rt.Diff(ctx, id, repoIdx, args...)
 }
 
+// CommitDiffStat returns the net committed diff stat between two repository tips.
+func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (string, error) {
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return "", err
+	}
+	return rt.CommitDiffStat(ctx, id, repoIdx, from, to)
+}
+
 // FileDiff returns one committed or uncommitted file patch from the owning backend.
 func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error) {
 	rt, err := r.runtimeForInstance(id)

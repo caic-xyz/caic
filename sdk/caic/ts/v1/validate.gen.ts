@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -356,10 +356,22 @@ export function validateEventRepositoryCommit(raw: ValidatorInput): EventReposit
   };
 }
 
+export function validateEventChangeStat(raw: ValidatorInput): EventChangeStat {
+  const obj = asObject(raw, "EventChangeStat");
+  return {
+    files: asNumber(obj["files"], "EventChangeStat.files"),
+    added: asNumber(obj["added"], "EventChangeStat.added"),
+    deleted: asNumber(obj["deleted"], "EventChangeStat.deleted"),
+    binaryFiles: asNumber(obj["binaryFiles"], "EventChangeStat.binaryFiles"),
+  };
+}
+
 export function validateEventCommitSnapshot(raw: ValidatorInput): EventCommitSnapshot {
   const obj = asObject(raw, "EventCommitSnapshot");
   return {
     repositoryCommits: validateArray(obj["repositoryCommits"], "EventCommitSnapshot.repositoryCommits", validateEventRepositoryCommit) as EventRepositoryCommit[],
+    baseline: (obj["baseline"] === undefined || obj["baseline"] === null ? undefined : asBoolean(obj["baseline"], "EventCommitSnapshot.baseline")),
+    changeStat: (obj["changeStat"] === undefined || obj["changeStat"] === null ? undefined : validateEventChangeStat(obj["changeStat"])),
   };
 }
 

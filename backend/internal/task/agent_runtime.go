@@ -255,6 +255,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 		return nil, r.finishStartupFailure(ctx, t, log, err)
 	}
 	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtimes.VNCPort(ctx, sr.InstanceID))
+	r.recordCommitBaseline(ctx, t, log, sr.InstanceID)
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -967,6 +968,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	}
 	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
+	r.recordCommitBaseline(ctx, t, log, instanceID)
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
@@ -1053,6 +1055,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	instanceID := t.RuntimeInstanceID()
 	tlog := r.Log.With("br", branch, "instance", instanceID)
 	tlog.Info(mode.logMessage(), "hns", t.Harness)
+	r.recordCommitBaseline(ctx, t, log, instanceID)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
 		Logger: r.Log,
@@ -1132,19 +1135,20 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 				}
 			case *agent.ResultMessage:
 				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
+					// TODO: Consolidate these result-time branch and turn measurements
+					// into one runtime operation. They currently require two Git diffs
+					// and two container-reference synchronizations per repository.
 					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
 					msg.DiffStat = ds
 					commits := r.fetchTurnCommits(ctx, instanceID)
 					if len(commits) > 0 {
-						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits)
+						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits, false, r.turnChangeStat(ctx, instanceID, allRepos, t.latestCommitSnapshot(), commits))
 					}
 				}
 			}
 			stateChanged, generateTitle := t.addParsedMessage(parsed, skipSideEffects)
 			if commitSnapshot != nil {
-				if err := t.WriteToLog(commitSnapshot); err != nil {
-					r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", instanceID, "err", err)
-				}
+				r.persistCommitSnapshot(ctx, t, commitSnapshot, instanceID)
 				t.addMessage(ctx, commitSnapshot, false)
 			}
 			if stateChanged {
@@ -1185,6 +1189,76 @@ func (r *AgentRuntime) fetchTurnCommits(ctx context.Context, id runtime.ID) []ag
 		}
 	}
 	return commits
+}
+
+// recordCommitBaseline records the branch tips from immediately before a new
+// agent session, making the first completed turn comparable to the task state
+// it inherited.
+func (r *AgentRuntime) recordCommitBaseline(ctx context.Context, t *Task, log agent.LogSink, id runtime.ID) {
+	if r.Checkout == nil || r.Runtimes == nil || log == nil {
+		return
+	}
+	commits := r.fetchTurnCommits(ctx, id)
+	if len(commits) == 0 {
+		return
+	}
+	snapshot := agent.NewTurnCommitSnapshotMessage(commits, true, nil)
+	if err := log.AppendMessage(snapshot); err != nil {
+		r.Log.WarnContext(ctx, "persisting commit baseline failed", "id", id, "err", err)
+		return
+	}
+	t.addMessage(ctx, snapshot, false)
+}
+
+// persistCommitSnapshot writes a completed-turn commit snapshot without
+// preventing the turn from completing when persistence is unavailable.
+func (r *AgentRuntime) persistCommitSnapshot(ctx context.Context, t *Task, snapshot *agent.TurnCommitSnapshotMessage, id runtime.ID) {
+	if err := t.WriteToLog(snapshot); err != nil {
+		r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", id, "err", err)
+	}
+}
+
+// turnChangeStat summarizes every repository whose current tip can be
+// compared with the preceding durable snapshot. It returns nil rather than a
+// partial statistic when any repository is missing or cannot be compared.
+//
+// TODO: Move this comparison into the runtime operation that fetches the
+// current tips, avoiding its separate container Git command at turn end.
+func (r *AgentRuntime) turnChangeStat(ctx context.Context, id runtime.ID, repos []runtime.Repo, previous *agent.TurnCommitSnapshotMessage, current []agent.RepositoryCommit) *agent.ChangeStat {
+	if previous == nil || len(repos) == 0 {
+		return nil
+	}
+	previousByRepo := make(map[string]string, len(previous.RepositoryCommits))
+	for _, commit := range previous.RepositoryCommits {
+		previousByRepo[commit.RepositoryPath+"\x00"+commit.BranchName] = commit.CommitHash
+	}
+	currentByRepo := make(map[string]string, len(current))
+	for _, commit := range current {
+		currentByRepo[commit.RepositoryPath+"\x00"+commit.BranchName] = commit.CommitHash
+	}
+	stat := &agent.ChangeStat{}
+	for i, runtimeRepo := range repos {
+		key := runtimeRepo.ContainerPath + "\x00" + runtimeRepo.Branch
+		from, previousOK := previousByRepo[key]
+		to, currentOK := currentByRepo[key]
+		if !previousOK || !currentOK {
+			return nil
+		}
+		numstat, err := r.Runtimes.CommitDiffStat(ctx, id, i, from, to)
+		if err != nil {
+			r.Log.WarnContext(ctx, "calculating turn change failed", "id", id, "repo", runtimeRepo.ContainerPath, "err", err)
+			return nil
+		}
+		for _, file := range repo.ParseDiffNumstat(numstat) {
+			stat.Files++
+			stat.Added += file.Added
+			stat.Deleted += file.Deleted
+			if file.Binary {
+				stat.BinaryFiles++
+			}
+		}
+	}
+	return stat
 }
 
 // emitDiffStatBranch emits a DiffStatMessage from the current in-container

@@ -36,6 +36,7 @@ const turns: TurnTiming[] = [{
       reportedModel: "test-model",
     },
   },
+  changeStat: null,
   waitMs: 3_000,
 }];
 

@@ -568,7 +568,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
 			CommitHash:     "1111111111111111111111111111111111111111",
-		}})
+		}}, false, nil)
 		after := &agent.TextMessage{Text: "after restart"}
 		merged := mergeLogAndRelayMessages(
 			harness.Codex,

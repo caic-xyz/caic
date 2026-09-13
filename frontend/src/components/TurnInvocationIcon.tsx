@@ -1,9 +1,10 @@
-// TurnInvocationIcon opens per-turn and aggregate session invocation details.
+// TurnInvocationIcon opens per-turn and aggregate session invocation and change details.
 
 import { createSignal, Show } from "solid-js";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
 
+import type { EventChangeStat } from "@sdk/types.gen";
 import type { TurnTiming } from "../timing";
 import { formatTimingDuration } from "../timing";
 import ModalDialog from "./ModalDialog";
@@ -21,6 +22,14 @@ function formatUSD(usd: number): string {
 
 function formatTotalDuration(ms: number): string {
   return ms > 0 ? formatTimingDuration(ms) : "0s";
+}
+
+function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
+  const files = aggregate
+    ? `${stat.files} ${stat.files === 1 ? "file change" : "file changes"}`
+    : `${stat.files} ${stat.files === 1 ? "file" : "files"}`;
+  const binary = stat.binaryFiles > 0 ? ` · ${stat.binaryFiles} ${stat.binaryFiles === 1 ? "binary" : "binaries"}` : "";
+  return `${files} · +${stat.added} −${stat.deleted}${binary}`;
 }
 
 export default function TurnInvocationIcon(props: { turn: TurnTiming; model: string | null }) {
@@ -60,6 +69,9 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
             <Show when={props.turn.waitMs !== null && props.turn.waitMs > 0}>
               <div><dt>User wait</dt><dd>{formatTimingDuration(props.turn.waitMs ?? 0)}</dd></div>
             </Show>
+            <Show when={props.turn.changeStat} keyed>
+              {(stat) => <div><dt>Generated change</dt><dd>{formatChangeStat(stat, false)}</dd></div>}
+            </Show>
             <Show when={result().totalCostUSD > 0}>
               <div><dt>Cost</dt><dd>{formatUSD(result().totalCostUSD)}</dd></div>
             </Show>
@@ -95,6 +107,12 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
     total.outputTokens += usage.outputTokens;
     total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
     total.userWaitMs += turn.waitMs ?? 0;
+    if (turn.changeStat !== null) {
+      total.changeStat.files += turn.changeStat.files;
+      total.changeStat.added += turn.changeStat.added;
+      total.changeStat.deleted += turn.changeStat.deleted;
+      total.changeStat.binaryFiles += turn.changeStat.binaryFiles;
+    }
     return total;
   }, {
     apiMs: 0,
@@ -106,11 +124,18 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
     outputTokens: 0,
     reasoningOutputTokens: 0,
     userWaitMs: 0,
+    changeStat: {
+      files: 0,
+      added: 0,
+      deleted: 0,
+      binaryFiles: 0,
+    },
   });
   const models = () => Array.from(new Set(props.turns.flatMap((turn) => {
     const model = turn.result.usage.reportedModel || turn.reportedModel || props.model;
     return model ? [model] : [];
   })));
+  const hasCompleteChangeStats = () => props.turns.length > 0 && props.turns.every((turn) => turn.changeStat !== null);
 
   return (
     <>
@@ -139,6 +164,9 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
             <div><dt>Combined turn time</dt><dd>{formatTotalDuration(totals().durationMs)}</dd></div>
             <div><dt>Combined API time</dt><dd>{formatTotalDuration(totals().apiMs)}</dd></div>
             <div><dt>Time awaiting user response</dt><dd>{formatTotalDuration(totals().userWaitMs)}</dd></div>
+            <Show when={hasCompleteChangeStats()}>
+              <div><dt>Generated change</dt><dd>{formatChangeStat(totals().changeStat, true)}</dd></div>
+            </Show>
             <div><dt>Cost</dt><dd>{formatUSD(totals().costUSD)}</dd></div>
           </dl>
           <section class={styles.usage} aria-labelledby="session-token-usage">

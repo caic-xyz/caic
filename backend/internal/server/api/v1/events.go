@@ -202,6 +202,16 @@ type EventResult struct {
 // fetched from the runtime when a turn finishes.
 type EventCommitSnapshot struct {
 	RepositoryCommits []EventRepositoryCommit `json:"repositoryCommits"`
+	Baseline          bool                    `json:"baseline,omitempty"`
+	ChangeStat        *EventChangeStat        `json:"changeStat,omitempty"`
+}
+
+// EventChangeStat summarizes a completed turn's net committed change.
+type EventChangeStat struct {
+	Files       int `json:"files"`
+	Added       int `json:"added"`
+	Deleted     int `json:"deleted"`
+	BinaryFiles int `json:"binaryFiles"`
 }
 
 // EventRepositoryCommit identifies one immutable repository branch tip in a

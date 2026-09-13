@@ -212,6 +212,25 @@ func TestGitStatusCommand(t *testing.T) {
 	})
 }
 
+func TestGitCommitDiffStatCommand(t *testing.T) {
+	t.Parallel()
+	from := "1111111111111111111111111111111111111111"
+	to := "2222222222222222222222222222222222222222"
+	cmd, err := gitCommitDiffStatCommand("/work/repo's copy", from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
+		t.Errorf("gitCommitDiffStatCommand() does not safely quote repo: %q", cmd)
+	}
+	if !strings.Contains(cmd, "git diff --numstat --find-renames=50% '"+from+"' '"+to+"' --") {
+		t.Errorf("gitCommitDiffStatCommand() = %q, want commit comparison", cmd)
+	}
+	if _, err := gitCommitDiffStatCommand("/repo", "short", to); err == nil {
+		t.Fatal("gitCommitDiffStatCommand() accepted a short object ID")
+	}
+}
+
 func TestGitFileDiffCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("normalizes configurable output", func(t *testing.T) {

@@ -1,12 +1,13 @@
-// Incremental task timing derivation: associates completed turns with user-response waits.
+// Incremental task timing derivation: associates completed turns with waits and committed change.
 
-import type { EventMessage, EventResult } from "@sdk/types.gen";
+import type { EventChangeStat, EventMessage, EventResult } from "@sdk/types.gen";
 
 export interface TurnTiming {
   event: EventMessage;
   result: EventResult;
   // Model reported when the session that produced this turn started.
   reportedModel?: string;
+  changeStat: EventChangeStat | null;
   waitMs: number | null;
 }
 
@@ -78,6 +79,7 @@ export class IncrementalTaskTimingTracker {
   private previousTs = 0;
   private processed = 0;
   private reportedModel: string | undefined;
+  private latestTurn: TurnTiming | null = null;
   private waitingTurn: TurnTiming | null = null;
 
   derive(messages: readonly EventMessage[], reset: boolean): TaskTimings {
@@ -102,9 +104,14 @@ export class IncrementalTaskTimingTracker {
       this.previousTs = event.ts;
     }
     if (event.kind === "result" && event.result) {
-      const turn = { event, result: event.result, reportedModel: this.reportedModel, waitMs: null } satisfies TurnTiming;
+      const turn = { event, result: event.result, reportedModel: this.reportedModel, changeStat: null, waitMs: null } satisfies TurnTiming;
       this.turns.push(turn);
+      this.latestTurn = turn;
       this.waitingTurn = turn;
+      return;
+    }
+    if (event.kind === "commitSnapshot" && event.commitSnapshot && !event.commitSnapshot.baseline && this.latestTurn !== null) {
+      this.latestTurn.changeStat = event.commitSnapshot.changeStat ?? null;
       return;
     }
     if (event.kind !== "userInput" || this.waitingTurn === null) return;
@@ -124,6 +131,7 @@ export class IncrementalTaskTimingTracker {
     this.previousTs = 0;
     this.processed = 0;
     this.reportedModel = undefined;
+    this.latestTurn = null;
     this.waitingTurn = null;
   }
 }

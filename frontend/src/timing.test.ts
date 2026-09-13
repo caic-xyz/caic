@@ -89,6 +89,19 @@ describe("deriveTaskTimings", () => {
     expect(timings.turns[0].reportedModel).toBe("session-model");
   });
 
+  it("associates a completed snapshot's committed change with its turn", () => {
+    const completed = result(2_000, 1);
+    const changeStat = { files: 3, added: 14, deleted: 2, binaryFiles: 1 };
+
+    const timings = deriveTaskTimings([
+      { kind: "commitSnapshot", ts: 1_000, commitSnapshot: { baseline: true, repositoryCommits: [] } },
+      completed,
+      { kind: "commitSnapshot", ts: 2_100, commitSnapshot: { repositoryCommits: [], changeStat } },
+    ]);
+
+    expect(timings.turns[0].changeStat).toEqual(changeStat);
+  });
+
   it("does not present same-timestamp inputs as a measured wait", () => {
     const userInput = input(1_000, "continue");
     const timings = deriveTaskTimings([result(1_000, 1), userInput]);

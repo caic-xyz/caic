@@ -1275,6 +1275,17 @@ commit snapshot.
 | `branchName` | `string` | BranchName is the short local branch name, such as "main" or "caic-1". | yes |
 | `commitHash` | `string` | CommitHash is the full Git object ID of the branch tip. | yes |
 
+### EventChangeStat
+
+EventChangeStat summarizes a completed turn's net committed change.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `files` | `int` |  | yes |
+| `added` | `int` |  | yes |
+| `deleted` | `int` |  | yes |
+| `binaryFiles` | `int` |  | yes |
+
 ### EventCommitSnapshot
 
 EventCommitSnapshot records the exact committed repository branch tips
@@ -1283,6 +1294,8 @@ fetched from the runtime when a turn finishes.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `repositoryCommits` | `EventRepositoryCommit[]` |  | yes |
+| `baseline` | `boolean` |  |  |
+| `changeStat` | `EventChangeStat` |  |  |
 
 ### EventMessage
 

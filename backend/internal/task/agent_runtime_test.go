@@ -1455,21 +1455,27 @@ func testRunnerSessions(t *testing.T) {
 		t.Run("ResultMessageRecordsDiffStatAndCommitSnapshot", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
+			stub.CommitDiffStatOutput = "6\t2\tchange.go\n-\t-\timage.png\n"
 			stub.FetchedBranches = []runtime.FetchedBranch{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
-				CommitHash:     "1111111111111111111111111111111111111111",
+				CommitHash:     "2222222222222222222222222222222222222222",
 			}}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 			changed := make(chan struct{}, 1)
 			r.NotifyTaskChange = func() { changed <- struct{}{} }
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
-			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0"}}
+			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/home/user/src/repo"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 			persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
 			tk.AttachSession(&SessionHandle{Log: persisted})
+			tk.addMessage(t.Context(), agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+				RepositoryPath: "/home/user/src/repo",
+				BranchName:     "caic-0",
+				CommitHash:     "1111111111111111111111111111111111111111",
+			}}, true, nil), false)
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
@@ -1496,7 +1502,7 @@ func testRunnerSessions(t *testing.T) {
 			wantCommits := []agent.RepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
-				CommitHash:     "1111111111111111111111111111111111111111",
+				CommitHash:     "2222222222222222222222222222222222222222",
 			}}
 			select {
 			case got := <-ch:
@@ -1507,6 +1513,10 @@ func testRunnerSessions(t *testing.T) {
 				if !reflect.DeepEqual(snapshot.RepositoryCommits, wantCommits) {
 					t.Errorf("commit snapshot = %+v, want commits %+v", snapshot, wantCommits)
 				}
+				wantChange := &agent.ChangeStat{Files: 2, Added: 6, Deleted: 2, BinaryFiles: 1}
+				if !reflect.DeepEqual(snapshot.ChangeStat, wantChange) {
+					t.Errorf("commit snapshot change = %+v, want %+v", snapshot.ChangeStat, wantChange)
+				}
 			case <-timeout:
 				t.Fatal("timed out waiting for commit snapshot")
 			}
@@ -1516,7 +1526,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Errorf("Fetch calls = %+v, want one fetch without a commit", got)
 			}
 			<-done
-			if got := persisted.String(); !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"1111111111111111111111111111111111111111"`) {
+			if got := persisted.String(); !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"2222222222222222222222222222222222222222"`) {
 				t.Errorf("persisted task log = %q, want turn commit snapshot", got)
 			}
 			select {

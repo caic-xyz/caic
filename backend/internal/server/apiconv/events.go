@@ -222,6 +222,8 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			Ts:   ts,
 			CommitSnapshot: &v1.EventCommitSnapshot{
 				RepositoryCommits: repositoryCommits(m.RepositoryCommits),
+				Baseline:          m.Baseline,
+				ChangeStat:        changeStat(m.ChangeStat),
 			},
 		}}
 	case *agent.TextDeltaMessage:
@@ -374,6 +376,18 @@ func repositoryCommits(commits []agent.RepositoryCommit) []v1.EventRepositoryCom
 		}
 	}
 	return result
+}
+
+func changeStat(stat *agent.ChangeStat) *v1.EventChangeStat {
+	if stat == nil {
+		return nil
+	}
+	return &v1.EventChangeStat{
+		Files:       stat.Files,
+		Added:       stat.Added,
+		Deleted:     stat.Deleted,
+		BinaryFiles: stat.BinaryFiles,
+	}
 }
 
 // planFor resolves the plan content projection for a tool use event. The

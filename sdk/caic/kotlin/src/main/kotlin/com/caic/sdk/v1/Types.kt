@@ -1749,12 +1749,25 @@ data class EventRepositoryCommit(
     val commitHash: String,
 )
 
+/** EventChangeStat summarizes a completed turn's net committed change. */
+@Serializable
+data class EventChangeStat(
+    val files: Int,
+    val added: Int,
+    val deleted: Int,
+    val binaryFiles: Int,
+)
+
 /**
  * EventCommitSnapshot records the exact committed repository branch tips
  * fetched from the runtime when a turn finishes.
  */
 @Serializable
-data class EventCommitSnapshot(val repositoryCommits: List<EventRepositoryCommit>)
+data class EventCommitSnapshot(
+    val repositoryCommits: List<EventRepositoryCommit>,
+    val baseline: Boolean? = null,
+    val changeStat: EventChangeStat? = null,
+)
 
 // Backend-neutral event types
 

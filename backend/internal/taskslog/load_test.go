@@ -591,7 +591,7 @@ func TestLoadLogHeader(t *testing.T) {
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
 			CommitHash:     "1111111111111111111111111111111111111111",
-		}}))
+		}}, false, nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1112,7 +1112,7 @@ func TestLoadedTask(t *testing.T) {
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
 			CommitHash:     "1111111111111111111111111111111111111111",
-		}}))
+		}}, false, nil))
 		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(
 			meta,
 			`{"kind":"result","text":"old result"}`,
