@@ -128,6 +128,39 @@ describe("TaskDetail", () => {
     expect(queryByText("Diff")).not.toBeInTheDocument();
   });
 
+  it("copies only the selected fenced code block", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    try {
+      vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+        handlers.onMessage({
+          kind: "text",
+          ts: 1_000,
+          text: { text: "Run this:\n\n```ts\nconst answer = 42;\n```\n\nThen continue." },
+        });
+        handlers.onReady?.();
+        return {
+          addEventListener: vi.fn(),
+          close: vi.fn(),
+          onerror: null,
+        } as unknown as EventSource;
+      });
+
+      renderTaskDetail();
+
+      const copyButton = screen.getByRole("button", { name: "Copy code block" });
+      expect(copyButton.parentElement?.className).toMatch(/singleLineCodeBlock/);
+
+      await user.click(copyButton);
+      expect(writeText).toHaveBeenCalledWith("const answer = 42;\n");
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+    }
+  });
+
   it("renders parent and child task navigation", () => {
     renderTaskDetail({
       parentTaskID: "parent",

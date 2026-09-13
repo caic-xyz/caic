@@ -4,7 +4,9 @@ import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, on
 import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
+import copyIconSVG from "@material-symbols/svg-400/outlined/content_copy.svg?raw";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
+import checkIconSVG from "@material-symbols/svg-400/outlined/check.svg?raw";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn, TaskRateLimit } from "@sdk/types.gen";
@@ -20,7 +22,7 @@ import { formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration } from "../timing";
 import type { ToolCall } from "../grouping";
-import { Marked } from "marked";
+import { Marked, Renderer, type Tokens } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
@@ -1623,17 +1625,55 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; durationMs: numbe
   );
 }
 
+const markdownRenderer = {
+  code(this: Renderer, token: Tokens.Code): string {
+    const code = Renderer.prototype.code.call(this, token);
+    if (token.codeBlockStyle === "indented") return code;
+    const blockClass = token.text.includes("\n") ? styles.codeBlock : `${styles.codeBlock} ${styles.singleLineCodeBlock}`;
+    return `<div class="${blockClass}"><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true">${copyIconSVG}</span><span class="${styles.checkIcon}" aria-hidden="true">${checkIconSVG}</span></button>${code}</div>\n`;
+  },
+};
+
 const marked = new Marked({
   breaks: true,
   gfm: true,
+  renderer: markdownRenderer,
 });
 
 function Markdown(props: { text: string }) {
   const html = createMemo(() => marked.parse(props.text) as string);
   const [raw, setRaw] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
+  let wrapperRef: HTMLDivElement | undefined;
+
+  function copyCodeBlock(event: MouseEvent) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest<HTMLButtonElement>("button[data-copy-code]");
+    if (!button) return;
+
+    const text = button.parentElement?.querySelector("pre > code")?.textContent;
+    if (text === undefined || text === null) return;
+
+    navigator.clipboard.writeText(text).then(() => {
+      button.classList.add(styles.copied);
+      setTimeout(() => {
+        button.classList.remove(styles.copied);
+      }, 1500);
+    }).catch((error: unknown) => {
+      console.error("Failed to copy code block", error);
+    });
+  }
+
+  onMount(() => {
+    const wrapper = wrapperRef;
+    if (!wrapper) return;
+    wrapper.addEventListener("click", copyCodeBlock);
+    onCleanup(() => wrapper.removeEventListener("click", copyCodeBlock));
+  });
+
   return (
-    <div class={styles.markdownWrap}>
+    <div class={styles.markdownWrap} ref={(el) => { wrapperRef = el; }}>
       <div class={styles.rawToolbar}>
         <button class={styles.rawToolbarBtn} onClick={() => setRaw(!raw())} title={raw() ? "Show rendered" : "Show raw"}>
           {raw() ? "rendered" : "raw"}

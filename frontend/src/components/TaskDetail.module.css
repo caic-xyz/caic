@@ -397,7 +397,8 @@ a.headerPR:hover {
   fill: var(--color-text-secondary);
 }
 
-.rawCopyBtn {
+.rawCopyBtn,
+.codeCopyBtn {
   display: inline-flex;
   align-items: center;
   gap: 0.2em;
@@ -410,11 +411,17 @@ a.headerPR:hover {
   cursor: pointer;
 }
 
-.rawCopyBtn .copyIcon { display: block; }
-.rawCopyBtn .checkIcon { display: none; }
+.rawCopyBtn .copyIcon,
+.codeCopyBtn .copyIcon { display: block; }
 
-.rawCopyBtn.copied .copyIcon { display: none; }
-.rawCopyBtn.copied .checkIcon { display: block; color: var(--color-success); }
+.rawCopyBtn .checkIcon,
+.codeCopyBtn .checkIcon { display: none; }
+
+.rawCopyBtn.copied .copyIcon,
+.codeCopyBtn.copied .copyIcon { display: none; }
+
+.rawCopyBtn.copied .checkIcon,
+.codeCopyBtn.copied .checkIcon { display: block; color: var(--color-success); }
 
 .rawText {
   white-space: pre-wrap;
@@ -483,6 +490,36 @@ a.headerPR:hover {
   margin: 0.5em 0;
   font-size: 0.8em;
   line-height: 1.4;
+}
+
+.codeBlock {
+  position: relative;
+}
+
+.codeBlock pre {
+  padding-right: 4.5rem;
+}
+
+.codeCopyBtn {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  z-index: 1;
+}
+
+.singleLineCodeBlock .codeCopyBtn {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.codeCopyBtn svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--color-text-secondary);
+}
+
+.codeCopyBtn.copied svg {
+  fill: var(--color-success);
 }
 
 .markdown pre code {
