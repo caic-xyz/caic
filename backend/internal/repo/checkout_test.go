@@ -403,7 +403,7 @@ type recordingContainer struct {
 	diffIdxs []int
 }
 
-func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
+func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	c.fetchIDs = append(c.fetchIDs, id)
 	return c.FakeBackend.Fetch(ctx, id, opts)
 }

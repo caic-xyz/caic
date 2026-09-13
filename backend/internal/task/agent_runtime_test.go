@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1451,9 +1452,14 @@ func testRunnerSessions(t *testing.T) {
 			<-done
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"}, false)
 		})
-		t.Run("ResultMessageEmitsDiffStatAndRecordsTurnBoundary", func(t *testing.T) {
+		t.Run("ResultMessageRecordsDiffStatAndCommitSnapshot", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
+			stub.FetchedBranches = []runtime.FetchedBranch{{
+				RepositoryPath: "/home/user/src/repo",
+				BranchName:     "caic-0",
+				CommitHash:     "1111111111111111111111111111111111111111",
+			}}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
 			changed := make(chan struct{}, 1)
 			r.NotifyTaskChange = func() { changed <- struct{}{} }
@@ -1462,10 +1468,12 @@ func testRunnerSessions(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
+			persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
+			tk.AttachSession(&SessionHandle{Log: persisted})
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- agent.TimedMessage{Message: rm}
@@ -1485,10 +1493,31 @@ func testRunnerSessions(t *testing.T) {
 			case <-timeout:
 				t.Fatal("timed out waiting for message")
 			}
+			wantCommits := []agent.RepositoryCommit{{
+				RepositoryPath: "/home/user/src/repo",
+				BranchName:     "caic-0",
+				CommitHash:     "1111111111111111111111111111111111111111",
+			}}
+			select {
+			case got := <-ch:
+				snapshot, ok := got.Message.(*agent.TurnCommitSnapshotMessage)
+				if !ok {
+					t.Fatalf("expected *agent.TurnCommitSnapshotMessage, got %T", got.Message)
+				}
+				if !reflect.DeepEqual(snapshot.RepositoryCommits, wantCommits) {
+					t.Errorf("commit snapshot = %+v, want commits %+v", snapshot, wantCommits)
+				}
+			case <-timeout:
+				t.Fatal("timed out waiting for commit snapshot")
+			}
 			// The finished turn hands what it committed to the host, and leaves
 			// what it did not commit pending in the container.
 			if got := stub.Fetches(); len(got) != 1 || got[0].Commit {
 				t.Errorf("Fetch calls = %+v, want one fetch without a commit", got)
+			}
+			<-done
+			if got := persisted.String(); !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"1111111111111111111111111111111111111111"`) {
+				t.Errorf("persisted task log = %q, want turn commit snapshot", got)
 			}
 			select {
 			case <-changed:

@@ -128,7 +128,7 @@ type fetchRecorder struct {
 	fetched atomic.Bool
 }
 
-func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
+func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	b.fetched.Store(true)
 	return b.FakeBackend.Fetch(ctx, id, opts)
 }

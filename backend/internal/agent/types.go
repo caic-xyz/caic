@@ -30,6 +30,7 @@ const (
 	messageTypeModelInfo             = "caic_model_info"
 	messageTypePR                    = "caic_pr"
 	messageTypeResult                = "caic_result"
+	messageTypeTurnCommitSnapshot    = "caic_turn_commit_snapshot"
 	messageTypePendingUserAction     = "caic_pending_user_action"
 	messageTypeProvisioningLogRecord = "caic_log"
 	messageTypeMCPRequest            = "caic_mcp_request"
@@ -415,6 +416,37 @@ type Usage struct {
 	ReasoningOutputTokens    int `json:"reasoning_output_tokens,omitempty"`
 	CacheTTLSeconds          int `json:"cache_ttl_seconds,omitempty"` // Effective cache TTL from last API call; 0 = unknown.
 }
+
+// RepositoryCommit identifies a committed repository branch tip recorded at a
+// turn boundary.
+type RepositoryCommit struct {
+	// RepositoryPath is the repository's absolute path inside the task runtime.
+	RepositoryPath string `json:"repository_path"`
+	// BranchName is the short local branch name, such as "main" or "caic-1".
+	BranchName string `json:"branch_name"`
+	// CommitHash is the full Git object ID of the branch tip.
+	CommitHash string `json:"commit_hash"`
+}
+
+// TurnCommitSnapshotMessage is a standalone durable record of the committed
+// repository branch tips fetched from a task runtime when a turn finishes.
+type TurnCommitSnapshotMessage struct {
+	MessageType string `json:"type"`
+	// RepositoryCommits contains the immutable Git branch tips fetched from
+	// every repository in the task runtime at this boundary.
+	RepositoryCommits []RepositoryCommit `json:"repository_commits"`
+}
+
+// NewTurnCommitSnapshotMessage creates a durable turn-boundary commit snapshot.
+func NewTurnCommitSnapshotMessage(commits []RepositoryCommit) *TurnCommitSnapshotMessage {
+	return &TurnCommitSnapshotMessage{
+		MessageType:       messageTypeTurnCommitSnapshot,
+		RepositoryCommits: append([]RepositoryCommit(nil), commits...),
+	}
+}
+
+// Type implements Message.
+func (m *TurnCommitSnapshotMessage) Type() string { return messageTypeTurnCommitSnapshot }
 
 // ResultMessage is the terminal message for a query.
 type ResultMessage struct {
@@ -988,6 +1020,8 @@ func v2ControlToken(m Message) (logRecordType, error) {
 		return logRecordPR, nil
 	case messageTypeResult:
 		return logRecordResult, nil
+	case messageTypeTurnCommitSnapshot:
+		return logRecordTurnCommitSnapshot, nil
 	case messageTypePendingUserAction:
 		return logRecordPendingUserAction, nil
 	case messageTypeProvisioningLog:

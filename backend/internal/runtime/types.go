@@ -383,10 +383,20 @@ type FetchOpts struct {
 	Commit bool
 }
 
+// FetchedBranch identifies an exact repository branch tip observed by Fetch.
+type FetchedBranch struct {
+	// RepositoryPath is the repository's absolute path inside the runtime.
+	RepositoryPath string
+	// BranchName is the short local branch name, such as "main" or "caic-1".
+	BranchName string
+	// CommitHash is the full Git object ID of the fetched branch tip.
+	CommitHash string
+}
+
 // Repository provides repository operations inside runtime instances.
 type Repository interface {
 	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
-	Fetch(ctx context.Context, id ID, opts FetchOpts) error
+	Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error)
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 }

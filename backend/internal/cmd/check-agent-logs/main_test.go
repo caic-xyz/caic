@@ -20,6 +20,7 @@ func TestRun(t *testing.T) {
 		lines := []string{
 			v2Meta("pi"),
 			`{"t":"agent","ts":1.000,"msg":{"type":"agent_start"}}`,
+			`{"t":"turn_commit_snapshot","repository_commits":[{"repository_path":"/home/user/src/repo","branch_name":"caic-1","commit_hash":"1111111111111111111111111111111111111111"}]}`,
 		}
 		for _, compressed := range []bool{false, true} {
 			name := "task.jsonl"

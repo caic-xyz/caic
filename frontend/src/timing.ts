@@ -144,6 +144,7 @@ function isVisualTimelineEvent(event: EventMessage): boolean {
     case "widget":
     case "widgetDelta":
       return true;
+    case "commitSnapshot":
     case "diffStat":
     case "init":
     case "log":

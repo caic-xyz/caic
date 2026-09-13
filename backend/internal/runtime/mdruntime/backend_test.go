@@ -8,6 +8,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -34,11 +35,12 @@ type fakeMDContainer struct {
 	agentMounts []md.Mount
 	agentErr    error
 
-	calls      []string
-	agentPaths []md.AgentPaths
-	diffOpts   *md.DiffOpts
-	fetchOpts  *md.FetchOpts
-	forkOpts   *md.ForkOpts
+	calls        []string
+	agentPaths   []md.AgentPaths
+	diffOpts     *md.DiffOpts
+	fetchOpts    *md.FetchOpts
+	fetchResults [][]md.FetchedBranch
+	forkOpts     *md.ForkOpts
 }
 
 func (f *fakeMDContainer) Name() string     { return f.name }
@@ -80,10 +82,13 @@ func (f *fakeMDContainer) Diff(_ context.Context, _, _ io.Writer, repoIdx int, o
 	return nil
 }
 
-func (f *fakeMDContainer) Fetch(_ context.Context, _, _ io.Writer, _ int, opts *md.FetchOpts) error {
+func (f *fakeMDContainer) Fetch(_ context.Context, _, _ io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error) {
 	f.calls = append(f.calls, "Fetch")
 	f.fetchOpts = opts
-	return nil
+	if repoIdx >= len(f.fetchResults) {
+		return nil, nil
+	}
+	return slices.Clone(f.fetchResults[repoIdx]), nil
 }
 
 func (f *fakeMDContainer) Stop(_ context.Context) error {
@@ -268,11 +273,22 @@ func TestBackend(t *testing.T) {
 		ctr := &fakeMDContainer{repo: []md.Repo{
 			{GitRoot: "/home/user/src/caic", Branches: []string{"caic-7"}, ContainerPath: "/home/user/src/caic"},
 			{GitRoot: "/home/user/src/genai", Branches: []string{"caic-0"}, ContainerPath: "/home/user/src/genai"},
+		}, fetchResults: [][]md.FetchedBranch{
+			{{BranchName: "caic-7", CommitHash: "1111111"}},
+			{{BranchName: "caic-0", CommitHash: "2222222"}},
 		}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		if err := b.Fetch(t.Context(), "docker:ctr-1", runtime.FetchOpts{Commit: true}); err != nil {
+		fetched, err := b.Fetch(t.Context(), "docker:ctr-1", runtime.FetchOpts{Commit: true})
+		if err != nil {
 			t.Fatalf("Fetch: %v", err)
+		}
+		wantFetched := []runtime.FetchedBranch{
+			{RepositoryPath: "/home/user/src/caic", BranchName: "caic-7", CommitHash: "1111111"},
+			{RepositoryPath: "/home/user/src/genai", BranchName: "caic-0", CommitHash: "2222222"},
+		}
+		if !reflect.DeepEqual(fetched, wantFetched) {
+			t.Errorf("Fetch result = %+v, want %+v", fetched, wantFetched)
 		}
 		if ctr.fetchOpts == nil || !ctr.fetchOpts.Commit {
 			t.Errorf("Fetch opts = %+v, want a commit", ctr.fetchOpts)

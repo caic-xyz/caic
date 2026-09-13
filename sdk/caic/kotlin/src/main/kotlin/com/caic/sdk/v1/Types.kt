@@ -344,6 +344,10 @@ sealed interface EventKind {
         override val value = "stats"
     }
     @Serializable
+    data object CommitSnapshot : EventKind {
+        override val value = "commitSnapshot"
+    }
+    @Serializable
     data class Other(override val value: String) : EventKind
 }
 
@@ -376,6 +380,7 @@ object EventKindSerializer : KSerializer<EventKind> {
             "widgetDelta" -> EventKind.WidgetDelta
             "rateLimit" -> EventKind.RateLimit
             "stats" -> EventKind.Stats
+            "commitSnapshot" -> EventKind.CommitSnapshot
             else -> EventKind.Other(v)
         }
     }
@@ -1698,6 +1703,27 @@ data class EventStats(
     val diskUsed: Long,
 )
 
+/**
+ * EventRepositoryCommit identifies one immutable repository branch tip in a
+ * commit snapshot.
+ */
+@Serializable
+data class EventRepositoryCommit(
+    /** RepositoryPath is the repository's absolute path inside the task runtime. */
+    val repositoryPath: String,
+    /** BranchName is the short local branch name, such as "main" or "caic-1". */
+    val branchName: String,
+    /** CommitHash is the full Git object ID of the branch tip. */
+    val commitHash: String,
+)
+
+/**
+ * EventCommitSnapshot records the exact committed repository branch tips
+ * fetched from the runtime when a turn finishes.
+ */
+@Serializable
+data class EventCommitSnapshot(val repositoryCommits: List<EventRepositoryCommit>)
+
 // Backend-neutral event types
 
 /**
@@ -1731,6 +1757,7 @@ data class EventMessage(
     val widgetDelta: EventWidgetDelta? = null,
     val rateLimit: EventRateLimit? = null,
     val stats: EventStats? = null,
+    val commitSnapshot: EventCommitSnapshot? = null,
 )
 
 /** TaskHistoryStreamError reports that task history could not be replayed. */

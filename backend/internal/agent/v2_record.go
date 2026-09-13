@@ -18,21 +18,22 @@ import (
 type logRecordType string
 
 const (
-	logRecordAgent             logRecordType = "agent"
-	logRecordMeta              logRecordType = "caic_meta"
-	logRecordDiffStat          logRecordType = "diff_stat"
-	logRecordExit              logRecordType = "exit"
-	logRecordStrippedEnv       logRecordType = "stripped_env"
-	logRecordSession           logRecordType = "session"
-	logRecordModelInfo         logRecordType = "model_info"
-	logRecordPR                logRecordType = "pr"
-	logRecordResult            logRecordType = "result"
-	logRecordPendingUserAction logRecordType = "pending_user_action"
-	logRecordProvisioningLog   logRecordType = "log"
-	logRecordContextCleared    logRecordType = "context_cleared"
-	logRecordText              logRecordType = "text"
-	logRecordUserInput         logRecordType = "user_input"
-	logRecordMCPRequest        logRecordType = "mcp_request"
+	logRecordAgent              logRecordType = "agent"
+	logRecordMeta               logRecordType = "caic_meta"
+	logRecordDiffStat           logRecordType = "diff_stat"
+	logRecordExit               logRecordType = "exit"
+	logRecordStrippedEnv        logRecordType = "stripped_env"
+	logRecordSession            logRecordType = "session"
+	logRecordModelInfo          logRecordType = "model_info"
+	logRecordPR                 logRecordType = "pr"
+	logRecordResult             logRecordType = "result"
+	logRecordTurnCommitSnapshot logRecordType = "turn_commit_snapshot"
+	logRecordPendingUserAction  logRecordType = "pending_user_action"
+	logRecordProvisioningLog    logRecordType = "log"
+	logRecordContextCleared     logRecordType = "context_cleared"
+	logRecordText               logRecordType = "text"
+	logRecordUserInput          logRecordType = "user_input"
+	logRecordMCPRequest         logRecordType = "mcp_request"
 )
 
 func (t logRecordType) controlKind() (logControlKind, bool) {
@@ -53,6 +54,8 @@ func (t logRecordType) controlKind() (logControlKind, bool) {
 		return logControlPR, true
 	case logRecordResult:
 		return logControlResult, true
+	case logRecordTurnCommitSnapshot:
+		return logControlTurnCommitSnapshot, true
 	case logRecordPendingUserAction:
 		return logControlPendingUserAction, true
 	case logRecordProvisioningLog:
@@ -239,6 +242,8 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 		case "agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cost_usd", "diff_stat", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "state", "title":
 			return true
 		}
+	case logControlTurnCommitSnapshot:
+		return field == "repository_commits"
 	case logControlPendingUserAction:
 		return field == "action"
 	case logControlProvisioningLog:

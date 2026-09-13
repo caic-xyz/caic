@@ -240,6 +240,7 @@ function groupMessagesAfter(
         // Rendered by ProgressPanel from messages() directly; skip here to avoid
         // splitting consecutive tool groups.
         break;
+      case "commitSnapshot":
       case "diffStat":
         // Metadata-only; live diff stat shown in the task list via Task.diffStat.
         break;

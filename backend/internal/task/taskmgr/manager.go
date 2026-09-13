@@ -1899,13 +1899,33 @@ func (m *logRelayMessageMerger) merge(relayEntries []agent.TimedMessage) []agent
 	if len(relayEntries) == 0 {
 		return slices.Clone(m.logEntries)
 	}
-	maxOverlap := min(len(m.logEntries), len(relayEntries))
+	comparableLogEntries := m.comparableLogTimeline()
+	maxOverlap := min(len(comparableLogEntries), len(relayEntries))
 	for n := maxOverlap; n > 0; n-- {
-		if m.messagesEqual(m.logEntries[len(m.logEntries)-n:], relayEntries[:n]) {
+		if m.messagesEqual(comparableLogEntries[len(comparableLogEntries)-n:], relayEntries[:n]) {
 			return append(slices.Clone(m.logEntries), relayEntries[n:]...)
 		}
 	}
 	return append(slices.Clone(m.logEntries), relayEntries...)
+}
+
+// comparableLogTimeline drops caic controls that exist only in the durable
+// log. They remain in the merged output but cannot prevent adjacent native
+// messages from matching the relay overlap.
+func (m *logRelayMessageMerger) comparableLogTimeline() []agent.TimedMessage {
+	for i, entry := range m.logEntries {
+		if _, logOnly := entry.Message.(*agent.TurnCommitSnapshotMessage); !logOnly {
+			continue
+		}
+		entries := slices.Clone(m.logEntries[:i])
+		for _, entry := range m.logEntries[i+1:] {
+			if _, logOnly := entry.Message.(*agent.TurnCommitSnapshotMessage); !logOnly {
+				entries = append(entries, entry)
+			}
+		}
+		return entries
+	}
+	return m.logEntries
 }
 
 // comparableRelayTimeline drops relay-only metadata before overlap matching.

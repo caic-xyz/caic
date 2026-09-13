@@ -5,6 +5,7 @@ package apiconv
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -191,6 +192,26 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 		if events[0].RateLimit == nil || events[0].RateLimit.Status != v1.EventRateLimitStatusAllowedWarning {
 			t.Fatalf("rate limit status = %#v, want %q", events[0].RateLimit, v1.EventRateLimitStatusAllowedWarning)
+		}
+	})
+
+	t.Run("commit snapshot is a standalone event", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Claude, nil)
+		events := tracker.ConvertMessage(agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+			RepositoryPath: "/home/user/src/repo",
+			BranchName:     "caic-1",
+			CommitHash:     "1111111111111111111111111111111111111111",
+		}}), time.Unix(1, 0))
+		want := &v1.EventCommitSnapshot{
+			RepositoryCommits: []v1.EventRepositoryCommit{{
+				RepositoryPath: "/home/user/src/repo",
+				BranchName:     "caic-1",
+				CommitHash:     "1111111111111111111111111111111111111111",
+			}},
+		}
+		if len(events) != 1 || !reflect.DeepEqual(events[0].CommitSnapshot, want) {
+			t.Fatalf("commit snapshot = %+v, want %+v", events, want)
 		}
 	})
 }

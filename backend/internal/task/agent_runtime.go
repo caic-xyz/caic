@@ -1119,6 +1119,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 		for parsed := range msgCh {
 			m := parsed.Message
 			emitToolDiff := false
+			var commitSnapshot *agent.TurnCommitSnapshotMessage
 			switch msg := m.(type) {
 			case *agent.ToolUseMessage:
 				if _, ok := mutatingTools[msg.Name]; ok {
@@ -1133,10 +1134,19 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
 					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
 					msg.DiffStat = ds
-					r.recordTurnBoundary(ctx, instanceID)
+					commits := r.fetchTurnCommits(ctx, instanceID)
+					if len(commits) > 0 {
+						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits)
+					}
 				}
 			}
 			stateChanged, generateTitle := t.addParsedMessage(parsed, skipSideEffects)
+			if commitSnapshot != nil {
+				if err := t.WriteToLog(commitSnapshot); err != nil {
+					r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", instanceID, "err", err)
+				}
+				t.addMessage(ctx, commitSnapshot, false)
+			}
 			if stateChanged {
 				r.NotifyTaskChange()
 			}
@@ -1151,19 +1161,30 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 	return msgCh, dispatchDone
 }
 
-// recordTurnBoundary hands the work the finished turn committed to the host,
-// without committing what the turn left pending. The host's tracking ref then
-// records where the branch stood at the end of every turn, and the runtime
-// keeps reporting the pending work separately from the commits.
+// fetchTurnCommits makes the finished turn's committed work durable on the
+// host without committing pending work or marking it integrated into the host
+// branch. The returned immutable tips are persisted as a standalone caic-owned
+// turn-boundary log control.
 //
-// A failure only costs the next turn a wider comparison base, so it is logged
-// and the turn still completes.
-func (r *AgentRuntime) recordTurnBoundary(ctx context.Context, id runtime.ID) {
+// A failure leaves the turn without a commit snapshot, so it is logged and
+// the turn still completes.
+func (r *AgentRuntime) fetchTurnCommits(ctx context.Context, id runtime.ID) []agent.RepositoryCommit {
 	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.Checkout.GitTimeout)
 	defer cancel()
-	if err := r.Runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{}); err != nil {
-		r.Log.WarnContext(ctx, "recording turn boundary failed", "id", id, "err", err)
+	fetched, err := r.Runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{})
+	if err != nil {
+		r.Log.WarnContext(ctx, "fetching turn commits failed", "id", id, "err", err)
+		return nil
 	}
+	commits := make([]agent.RepositoryCommit, len(fetched))
+	for i, f := range fetched {
+		commits[i] = agent.RepositoryCommit{
+			RepositoryPath: f.RepositoryPath,
+			BranchName:     f.BranchName,
+			CommitHash:     f.CommitHash,
+		}
+	}
+	return commits
 }
 
 // emitDiffStatBranch emits a DiffStatMessage from the current in-container

@@ -532,6 +532,43 @@ func TestMarshalLogMessage(t *testing.T) {
 	})
 }
 
+func TestTurnCommitSnapshotReplay(t *testing.T) {
+	t.Parallel()
+	commit := RepositoryCommit{
+		RepositoryPath: "/home/user/src/repo",
+		BranchName:     "caic-1",
+		CommitHash:     "1111111111111111111111111111111111111111",
+	}
+	for _, version := range []LogVersion{LogVersionV1, LogVersionV2} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			t.Parallel()
+			snapshot, err := MarshalLogMessage(version, NewTurnCommitSnapshotMessage([]RepositoryCommit{commit}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var messages []Message
+			err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) {
+				messages = append(messages, parsed.Message)
+			}, DiscardLogSink{Version: version}, version, func([]byte) ([]Message, error) {
+				return nil, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(messages) != 1 {
+				t.Fatalf("messages = %d, want 1", len(messages))
+			}
+			got, ok := messages[0].(*TurnCommitSnapshotMessage)
+			if !ok {
+				t.Fatalf("message = %T, want *TurnCommitSnapshotMessage", messages[0])
+			}
+			if !reflect.DeepEqual(got.RepositoryCommits, []RepositoryCommit{commit}) {
+				t.Fatalf("snapshot = %+v, want commits %+v", got, []RepositoryCommit{commit})
+			}
+		})
+	}
+}
+
 func TestMarshalMessagePreservesDurableReportedModel(t *testing.T) {
 	t.Parallel()
 

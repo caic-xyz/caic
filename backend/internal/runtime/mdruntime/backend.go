@@ -49,7 +49,7 @@ type mdContainer interface {
 	Launch(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) error
 	Connect(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) (*md.StartResult, error)
 	Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.DiffOpts) error
-	Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) error
+	Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error)
 	Stop(ctx context.Context) error
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
 	Revive(ctx context.Context, stdout, stderr io.Writer) error
@@ -236,7 +236,7 @@ func (a mdContainerAdapter) Diff(ctx context.Context, stdout, stderr io.Writer, 
 	return a.c.Diff(ctx, stdout, stderr, repoIdx, opts)
 }
 
-func (a mdContainerAdapter) Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) error {
+func (a mdContainerAdapter) Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error) {
 	return a.c.Fetch(ctx, stdout, stderr, repoIdx, opts)
 }
 
@@ -465,16 +465,16 @@ func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx i
 }
 
 // Fetch implements runtime.Repository.
-func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
+func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	defer trace.StartRegion(ctx, "instance.fetch").End()
 	localID, err := b.localID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	name := string(localID)
 	ct, err := b.container(ctx, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	repos := ct.Repos()
 	if len(repos) > 0 {
@@ -482,12 +482,21 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOp
 	}
 	// md ignores the provider unless it commits.
 	mdOpts := &md.FetchOpts{Provider: b.Provider, Commit: opts.Commit}
+	fetched := make([]runtime.FetchedBranch, 0, len(repos))
 	for i := range repos {
-		if err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, mdOpts); err != nil {
-			return err
+		branches, err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "fetch"}, i, mdOpts)
+		if err != nil {
+			return nil, err
+		}
+		for _, branch := range branches {
+			fetched = append(fetched, runtime.FetchedBranch{
+				RepositoryPath: repos[i].ContainerPath,
+				BranchName:     branch.BranchName,
+				CommitHash:     branch.CommitHash,
+			})
 		}
 	}
-	return nil
+	return fetched, nil
 }
 
 // Stop implements runtime.Lifecycle.

@@ -1697,7 +1697,7 @@ func loadLogHeader(log *slog.Logger, path string, cacheHeader bool) (loaded *Loa
 // messages while streaming task history.
 func isHistoryStreamControlMessage(msg agent.Message) bool {
 	switch msg := msg.(type) {
-	case *agent.DiffStatMessage, *agent.ExitMessage, *agent.LogMessage:
+	case *agent.DiffStatMessage, *agent.ExitMessage, *agent.LogMessage, *agent.TurnCommitSnapshotMessage:
 		return true
 	case *agent.SystemMessage:
 		return msg.Subtype == "context_cleared"

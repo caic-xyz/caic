@@ -529,6 +529,28 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 			t.Fatalf("merged texts = %#v, want %#v", texts, want)
 		}
 	})
+	t.Run("valid_ignores_log_only_commit_snapshot_for_overlap", func(t *testing.T) {
+		t.Parallel()
+		before := &agent.TextMessage{Text: "before"}
+		result := &agent.ResultMessage{MessageType: "result", Result: "done"}
+		snapshot := agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+			RepositoryPath: "/home/user/src/repo",
+			BranchName:     "caic-1",
+			CommitHash:     "1111111111111111111111111111111111111111",
+		}})
+		after := &agent.TextMessage{Text: "after restart"}
+		merged := mergeLogAndRelayMessages(
+			harness.Codex,
+			[]agent.Message{before, result, snapshot},
+			[]agent.Message{before, result, after},
+		)
+		if len(merged) != 4 {
+			t.Fatalf("merged messages = %d, want 4: %#v", len(merged), merged)
+		}
+		if merged[0] != before || merged[1] != result || merged[2] != snapshot || merged[3] != after {
+			t.Fatalf("merged messages = %#v, want log history plus non-overlapping relay tail", merged)
+		}
+	})
 	t.Run("valid_ignores_artificial_relay_init", func(t *testing.T) {
 		t.Parallel()
 		merged := mergeLogAndRelayMessages(

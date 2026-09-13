@@ -31,7 +31,8 @@ export type EventKind =
   | "widget"
   | "widgetDelta"
   | "rateLimit"
-  | "stats";
+  | "stats"
+  | "commitSnapshot";
 /**
  * Supported values.
  */
@@ -58,6 +59,7 @@ export const EventKindWidget: EventKind = "widget";
 export const EventKindWidgetDelta: EventKind = "widgetDelta";
 export const EventKindRateLimit: EventKind = "rateLimit";
 export const EventKindStats: EventKind = "stats";
+export const EventKindCommitSnapshot: EventKind = "commitSnapshot";
 
 export type EventRateLimitStatus =
   | "allowed"
@@ -335,6 +337,27 @@ export interface EventStats {
 }
 
 /**
+ * EventRepositoryCommit identifies one immutable repository branch tip in a
+ * commit snapshot.
+ */
+export interface EventRepositoryCommit {
+  /** RepositoryPath is the repository's absolute path inside the task runtime. */
+  repositoryPath: string;
+  /** BranchName is the short local branch name, such as "main" or "caic-1". */
+  branchName: string;
+  /** CommitHash is the full Git object ID of the branch tip. */
+  commitHash: string;
+}
+
+/**
+ * EventCommitSnapshot records the exact committed repository branch tips
+ * fetched from the runtime when a turn finishes.
+ */
+export interface EventCommitSnapshot {
+  repositoryCommits: EventRepositoryCommit[];
+}
+
+/**
  * EventMessage is a single SSE event in the backend-neutral stream
  * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
  */
@@ -364,6 +387,7 @@ export interface EventMessage {
   widgetDelta?: EventWidgetDelta;
   rateLimit?: EventRateLimit;
   stats?: EventStats;
+  commitSnapshot?: EventCommitSnapshot;
 }
 
 /** TaskHistoryStreamError reports that task history could not be replayed. */

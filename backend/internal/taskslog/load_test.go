@@ -584,6 +584,37 @@ func TestLoadLogHeader(t *testing.T) {
 		}
 	})
 
+	t.Run("V2AcceptsStandaloneCommitSnapshot", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		snapshot, err := agent.MarshalLogMessage(agent.LogVersionV2, agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+			RepositoryPath: "/home/user/src/repo",
+			BranchName:     "caic-1",
+			CommitHash:     "1111111111111111111111111111111111111111",
+		}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		trailer, err := agent.MarshalLogMessage(agent.LogVersionV2, &agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "task-v2.jsonl")
+		writeLogFile(t, dir, filepath.Base(path),
+			mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: int(agent.LogVersionV2), Prompt: "v2 snapshot", Harness: harness.Codex}),
+			`{"t":"agent","ts":1.000,"msg":{"method":"thread/started","params":{"thread":{"id":"thread"}}}}`,
+			string(snapshot),
+			string(trailer),
+		)
+		loaded, err := loadLogHeader(testLogger(), path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.State != StatePurged {
+			t.Fatalf("state = %s, want %s", loaded.State, StatePurged)
+		}
+	})
+
 	t.Run("InvalidatesOnLogChange", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -1070,6 +1101,75 @@ func TestLoadedTask(t *testing.T) {
 		}
 		if badParses != 0 {
 			t.Fatalf("older invalid record parsed %d times, want 0", badParses)
+		}
+	})
+
+	t.Run("BackwardMessagesKeepsLatestCommitSnapshot", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "backward snapshot", Harness: harness.Claude})
+		snapshot := mustJSON(t, agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+			RepositoryPath: "/home/user/src/repo",
+			BranchName:     "caic-1",
+			CommitHash:     "1111111111111111111111111111111111111111",
+		}}))
+		writeCompressedLogFile(t, dir, "t.jsonl.zst", seqOf(
+			meta,
+			`{"kind":"result","text":"old result"}`,
+			`{"kind":"text","text":"new text"}`,
+			`{"kind":"result","text":"new result"}`,
+			snapshot,
+			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"}),
+		))
+
+		store := NewStore(testLogger(), dir)
+		store.cutoff, store.maxSettledPerRepo = time.Time{}, 0
+		tasks, err := store.LoadSettled()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("loaded tasks = %d, want 1", len(tasks))
+		}
+		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func(line []byte) ([]agent.Message, error) {
+				var record struct {
+					Kind string `json:"kind"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(line, &record); err != nil {
+					return nil, err
+				}
+				switch record.Kind {
+				case "result":
+					return []agent.Message{&agent.ResultMessage{Result: record.Text}}, nil
+				case "text":
+					return []agent.Message{&agent.TextMessage{Text: record.Text}}, nil
+				default:
+					return nil, nil
+				}
+			}, nil
+		})
+
+		var got []string
+		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch message := parsed.Message.(type) {
+			case *agent.TurnCommitSnapshotMessage:
+				got = append(got, "snapshot:"+message.RepositoryCommits[0].CommitHash)
+			case *agent.ResultMessage:
+				got = append(got, message.Result)
+			case *agent.TextMessage:
+				got = append(got, message.Text)
+			}
+			if len(got) == 3 {
+				break
+			}
+		}
+		if want := []string{"snapshot:1111111111111111111111111111111111111111", "new result", "new text"}; !slices.Equal(got, want) {
+			t.Fatalf("backward newest turn = %q, want %q", got, want)
 		}
 	})
 

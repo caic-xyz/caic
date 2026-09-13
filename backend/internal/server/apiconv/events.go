@@ -216,6 +216,14 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				},
 			},
 		}}
+	case *agent.TurnCommitSnapshotMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindCommitSnapshot,
+			Ts:   ts,
+			CommitSnapshot: &v1.EventCommitSnapshot{
+				RepositoryCommits: repositoryCommits(m.RepositoryCommits),
+			},
+		}}
 	case *agent.TextDeltaMessage:
 		if m.Text != "" {
 			return []v1.EventMessage{{
@@ -351,6 +359,21 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	default:
 		return nil
 	}
+}
+
+func repositoryCommits(commits []agent.RepositoryCommit) []v1.EventRepositoryCommit {
+	if len(commits) == 0 {
+		return nil
+	}
+	result := make([]v1.EventRepositoryCommit, len(commits))
+	for i, commit := range commits {
+		result[i] = v1.EventRepositoryCommit{
+			RepositoryPath: commit.RepositoryPath,
+			BranchName:     commit.BranchName,
+			CommitHash:     commit.CommitHash,
+		}
+	}
+	return result
 }
 
 // planFor resolves the plan content projection for a tool use event. The

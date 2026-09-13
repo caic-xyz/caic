@@ -41,6 +41,7 @@ const (
 	EventKindWidgetDelta     EventKind = "widgetDelta"
 	EventKindRateLimit       EventKind = "rateLimit"
 	EventKindStats           EventKind = "stats"
+	EventKindCommitSnapshot  EventKind = "commitSnapshot"
 )
 
 // TaskHistoryStreamError reports that task history could not be replayed.
@@ -76,6 +77,7 @@ type EventMessage struct {
 	WidgetDelta     *EventWidgetDelta     `json:"widgetDelta,omitempty"`
 	RateLimit       *EventRateLimit       `json:"rateLimit,omitempty"`
 	Stats           *EventStats           `json:"stats,omitempty"`
+	CommitSnapshot  *EventCommitSnapshot  `json:"commitSnapshot,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -194,6 +196,23 @@ type EventResult struct {
 	DurationAPI  float64    `json:"durationAPI"` // Seconds.
 	NumTurns     int        `json:"numTurns"`
 	Usage        EventUsage `json:"usage"`
+}
+
+// EventCommitSnapshot records the exact committed repository branch tips
+// fetched from the runtime when a turn finishes.
+type EventCommitSnapshot struct {
+	RepositoryCommits []EventRepositoryCommit `json:"repositoryCommits"`
+}
+
+// EventRepositoryCommit identifies one immutable repository branch tip in a
+// commit snapshot.
+type EventRepositoryCommit struct {
+	// RepositoryPath is the repository's absolute path inside the task runtime.
+	RepositoryPath string `json:"repositoryPath"`
+	// BranchName is the short local branch name, such as "main" or "caic-1".
+	BranchName string `json:"branchName"`
+	// CommitHash is the full Git object ID of the branch tip.
+	CommitHash string `json:"commitHash"`
 }
 
 // EventSystem is a system event (status, compact_boundary, etc.).

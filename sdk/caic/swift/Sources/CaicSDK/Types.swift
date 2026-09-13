@@ -172,6 +172,7 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let WidgetDelta = EventKind("widgetDelta")
     public static let RateLimit = EventKind("rateLimit")
     public static let Stats = EventKind("stats")
+    public static let CommitSnapshot = EventKind("commitSnapshot")
 
     public static func other(_ value: String) -> EventKind { EventKind(value) }
 
@@ -1247,6 +1248,23 @@ public struct EventStats: Codable {
     public let diskUsed: Int
 }
 
+/// EventRepositoryCommit identifies one immutable repository branch tip in a
+/// commit snapshot.
+public struct EventRepositoryCommit: Codable {
+    /// RepositoryPath is the repository's absolute path inside the task runtime.
+    public let repositoryPath: String
+    /// BranchName is the short local branch name, such as "main" or "caic-1".
+    public let branchName: String
+    /// CommitHash is the full Git object ID of the branch tip.
+    public let commitHash: String
+}
+
+/// EventCommitSnapshot records the exact committed repository branch tips
+/// fetched from the runtime when a turn finishes.
+public struct EventCommitSnapshot: Codable {
+    public let repositoryCommits: [EventRepositoryCommit]
+}
+
 // Backend-neutral event types
 
 /// EventMessage is a single SSE event in the backend-neutral stream
@@ -1277,6 +1295,7 @@ public struct EventMessage: Codable {
     public let widgetDelta: EventWidgetDelta?
     public let rateLimit: EventRateLimit?
     public let stats: EventStats?
+    public let commitSnapshot: EventCommitSnapshot?
 }
 
 /// TaskHistoryStreamError reports that task history could not be replayed.

@@ -540,6 +540,7 @@ const (
 	logControlModelInfo
 	logControlPR
 	logControlResult
+	logControlTurnCommitSnapshot
 	logControlPendingUserAction
 	logControlProvisioningLog
 	logControlContextCleared
@@ -558,6 +559,7 @@ var v1LogControlKinds = map[string]logControlKind{
 	messageTypeModelInfo:             logControlModelInfo,
 	messageTypePR:                    logControlPR,
 	messageTypeResult:                logControlResult,
+	messageTypeTurnCommitSnapshot:    logControlTurnCommitSnapshot,
 	messageTypePendingUserAction:     logControlPendingUserAction,
 	messageTypeProvisioningLogRecord: logControlProvisioningLog,
 }
@@ -653,6 +655,13 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeResult
+		return []Message{&m}, nil
+	case logControlTurnCommitSnapshot:
+		var m TurnCommitSnapshotMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		m.MessageType = messageTypeTurnCommitSnapshot
 		return []Message{&m}, nil
 	case logControlPendingUserAction:
 		var m PendingUserActionMessage

@@ -209,6 +209,7 @@ EventKind identifies the type of SSE event.
 | `widgetDelta` |  |
 | `rateLimit` |  |
 | `stats` |  |
+| `commitSnapshot` |  |
 
 ### EventRateLimitStatus
 
@@ -1253,6 +1254,26 @@ EventStats is a runtime resource usage snapshot emitted periodically.
 | `blockWrite` | `uint64` |  | yes |
 | `diskUsed` | `int64` |  | yes |
 
+### EventRepositoryCommit
+
+EventRepositoryCommit identifies one immutable repository branch tip in a
+commit snapshot.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositoryPath` | `string` | RepositoryPath is the repository's absolute path inside the task runtime. | yes |
+| `branchName` | `string` | BranchName is the short local branch name, such as "main" or "caic-1". | yes |
+| `commitHash` | `string` | CommitHash is the full Git object ID of the branch tip. | yes |
+
+### EventCommitSnapshot
+
+EventCommitSnapshot records the exact committed repository branch tips
+fetched from the runtime when a turn finishes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositoryCommits` | `EventRepositoryCommit[]` |  | yes |
+
 ### EventMessage
 
 EventMessage is a single SSE event in the backend-neutral stream
@@ -1285,6 +1306,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `widgetDelta` | `EventWidgetDelta` |  |  |
 | `rateLimit` | `EventRateLimit` |  |  |
 | `stats` | `EventStats` |  |  |
+| `commitSnapshot` | `EventCommitSnapshot` |  |  |
 
 ### TaskHistoryStreamError
 

@@ -72,6 +72,8 @@ type FakeBackend struct {
 	LaunchErr error
 	// FetchErr, when set, is returned by Fetch.
 	FetchErr error
+	// FetchedBranches is returned by Fetch.
+	FetchedBranches []runtime.FetchedBranch
 
 	mu      sync.Mutex
 	status  map[runtime.ID]InstanceStatus
@@ -137,11 +139,11 @@ func (f *FakeBackend) RepositoryStatus(context.Context, runtime.ID, int) (runtim
 }
 
 // Fetch implements runtime.Repository.
-func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) error {
+func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	f.mu.Lock()
 	f.fetches = append(f.fetches, opts)
 	f.mu.Unlock()
-	return f.FetchErr
+	return slices.Clone(f.FetchedBranches), f.FetchErr
 }
 
 // Fetches returns the options of every Fetch call, in order.

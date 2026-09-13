@@ -122,11 +122,12 @@ func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (Repo
 	return rt.RepositoryStatus(ctx, id, repoIdx)
 }
 
-// Fetch fetches task repository changes from the owning backend.
-func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) error {
+// Fetch fetches task repository changes from the owning backend and returns
+// the exact branch tips observed.
+func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error) {
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	return rt.Fetch(ctx, id, opts)
 }

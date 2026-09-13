@@ -233,7 +233,7 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 }
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, ExitMessage, PendingUserActionMessage,
+// messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
 // TextDeltaMessage, RawMessage), and returns the trailing ResultMessage if the
 // last semantically meaningful message is a result. Returns nil if it is not a
 // ResultMessage (agent still producing output) or msgs is empty.
@@ -244,6 +244,8 @@ func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
 			continue // Relay metadata; skip.
 		case *agent.ExitMessage:
 			continue // Relay metadata; skip.
+		case *agent.TurnCommitSnapshotMessage:
+			continue // Caic turn-boundary metadata; skip.
 		case *agent.PendingUserActionMessage:
 			continue // Reconnect metadata; skip.
 		case *agent.TextDeltaMessage:
@@ -344,7 +346,7 @@ func fallbackBoundary(msg agent.Message) bool {
 // filter must all agree on this rule, so it lives in one place.
 func ClearsExitError(msg agent.Message) bool {
 	switch m := msg.(type) {
-	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.RawMessage,
+	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.RawMessage,
 		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
 		*agent.LogMessage, *agent.StrippedEnvMessage:
 		return false
@@ -1110,7 +1112,7 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 //   - Trailing ResultMessage (no ask) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
-// Metadata-only messages (DiffStatMessage, PendingUserActionMessage,
+// Metadata-only messages (DiffStatMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
 // RawMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
