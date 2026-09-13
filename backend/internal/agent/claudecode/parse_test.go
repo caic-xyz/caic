@@ -176,7 +176,7 @@ func TestParseMessage(t *testing.T) {
 	t.Parallel()
 	t.Run("SystemInit", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"system","subtype":"init","cwd":"/home/user","session_id":"abc-123","tools":["Bash","Read"],"model":"claude-opus-4-6","claude_code_version":"2.1.34","uuid":"uuid-1"}`
+		line := `{"type":"system","subtype":"init","cwd":"/home/user","session_id":"abc-123","tools":["Bash","Read"],"model":"claude-opus-4-6","claude_code_version":"2.1.34","uuid":"uuid-1","effort":"high"}`
 		msgs, err := parseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
@@ -188,8 +188,8 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.InitMessage", msgs[0])
 		}
-		if m.ReportedModel != "claude-opus-4-6" {
-			t.Errorf("model = %q, want %q", m.ReportedModel, "claude-opus-4-6")
+		if m.ReportedModel != "claude-opus-4-6" || m.ReportedEffort != "high" {
+			t.Errorf("reported settings = %q/%q, want claude-opus-4-6/high", m.ReportedModel, m.ReportedEffort)
 		}
 		if len(m.Tools) != 2 {
 			t.Errorf("tools = %v, want 2 items", m.Tools)

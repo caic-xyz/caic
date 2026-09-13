@@ -310,11 +310,12 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 			return nil, err
 		}
 		return []agent.Message{&agent.InitMessage{
-			SessionID:     w.SessionID,
-			Cwd:           w.Cwd,
-			Tools:         w.Tools,
-			ReportedModel: w.Model,
-			Version:       w.Version,
+			SessionID:      w.SessionID,
+			Cwd:            w.Cwd,
+			Tools:          w.Tools,
+			ReportedModel:  w.Model,
+			ReportedEffort: w.Effort,
+			Version:        w.Version,
 		}}, nil
 	}
 	if subtype == "thinking_tokens" {
