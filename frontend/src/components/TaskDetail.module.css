@@ -1170,13 +1170,25 @@ a.ciStatus:hover {
   align-items: baseline;
   margin-bottom: 0.4rem;
   background: var(--color-session-bg);
-  border: none;
   border-radius: var(--radius-md);
   padding: 0.3rem 0.6rem;
-  cursor: pointer;
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--color-on-primary-container);
+}
+
+.sessionToggle {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  padding: 0;
+  border: none;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
   text-align: left;
 }
 
@@ -1188,10 +1200,15 @@ a.ciStatus:hover {
   white-space: nowrap;
 }
 
-.sessionElided::before {
+.sessionToggle::before {
   content: "▶";
   margin-right: 0.4em;
   font-size: 0.7em;
+}
+
+.sessionToggle:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
 }
 
 .sessionElided:hover {
@@ -1203,7 +1220,7 @@ a.ciStatus:hover {
   margin-bottom: 0.1rem;
 }
 
-.sessionElidedExpanded::before {
+.sessionElidedExpanded .sessionToggle::before {
   content: "▼";
 }
 

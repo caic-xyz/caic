@@ -1,4 +1,4 @@
-// TurnInvocationIcon opens per-turn invocation details from a result card.
+// TurnInvocationIcon opens per-turn and aggregate session invocation details.
 
 import { createSignal, Show } from "solid-js";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
@@ -17,6 +17,10 @@ function formatTokens(tokens: number): string {
 
 function formatUSD(usd: number): string {
   return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
+}
+
+function formatTotalDuration(ms: number): string {
+  return ms > 0 ? formatTimingDuration(ms) : "0s";
 }
 
 export default function TurnInvocationIcon(props: { turn: TurnTiming; model: string | null }) {
@@ -69,6 +73,83 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
               <div><dt>Output</dt><dd>{formatTokens(usage().outputTokens)}</dd></div>
               <Show when={(usage().reasoningOutputTokens ?? 0) > 0}>
                 <div><dt>Thinking</dt><dd>{formatTokens(usage().reasoningOutputTokens ?? 0)}</dd></div>
+              </Show>
+            </dl>
+          </section>
+        </ModalDialog>
+      </Show>
+    </>
+  );
+}
+
+export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; model: string | null }) {
+  const [open, setOpen] = createSignal(false);
+  const totals = () => props.turns.reduce((total, turn) => {
+    const usage = turn.result.usage;
+    total.apiMs += turn.result.durationAPI * 1_000;
+    total.costUSD += turn.result.totalCostUSD;
+    total.durationMs += turn.result.duration * 1_000;
+    total.inputTokens += usage.inputTokens;
+    total.cacheWriteInputTokens += usage.cacheCreationInputTokens;
+    total.cacheReadInputTokens += usage.cacheReadInputTokens;
+    total.outputTokens += usage.outputTokens;
+    total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
+    total.userWaitMs += turn.waitMs ?? 0;
+    return total;
+  }, {
+    apiMs: 0,
+    cacheReadInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    costUSD: 0,
+    durationMs: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+    userWaitMs: 0,
+  });
+  const models = () => Array.from(new Set(props.turns.flatMap((turn) => {
+    const model = turn.result.usage.reportedModel || turn.reportedModel || props.model;
+    return model ? [model] : [];
+  })));
+
+  return (
+    <>
+      <button
+        type="button"
+        class={styles.trigger}
+        onClick={() => setOpen(true)}
+        aria-label="Session invocation details"
+        title="Session invocation details"
+        data-testid="session-invocation-trigger"
+      >
+        <InfoIcon width="13" height="13" aria-hidden="true" />
+      </button>
+      <Show when={open()}>
+        <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="session-invocation-dialog">
+          <div class={styles.heading}>
+            <h2>Session details</h2>
+            <button type="button" class={styles.close} onClick={() => setOpen(false)} aria-label="Close session details" title="Close session details">
+              <CloseIcon width="18" height="18" aria-hidden="true" />
+            </button>
+          </div>
+          <dl class={styles.metrics}>
+            <Show when={models().length > 0}>
+              <div><dt>{models().length === 1 ? "Model" : "Models"}</dt><dd>{models().join(", ")}</dd></div>
+            </Show>
+            <div><dt>Combined turn time</dt><dd>{formatTotalDuration(totals().durationMs)}</dd></div>
+            <div><dt>Combined API time</dt><dd>{formatTotalDuration(totals().apiMs)}</dd></div>
+            <div><dt>Time awaiting user response</dt><dd>{formatTotalDuration(totals().userWaitMs)}</dd></div>
+            <div><dt>Cost</dt><dd>{formatUSD(totals().costUSD)}</dd></div>
+          </dl>
+          <section class={styles.usage} aria-labelledby="session-token-usage">
+            <h3 id="session-token-usage">Token usage</h3>
+            <dl class={styles.tokenMetrics}>
+              <div><dt>New input</dt><dd>{formatTokens(totals().inputTokens)}</dd></div>
+              <div><dt>Cache write</dt><dd>{formatTokens(totals().cacheWriteInputTokens)}</dd></div>
+              <div><dt>Cache read</dt><dd>{formatTokens(totals().cacheReadInputTokens)}</dd></div>
+              <div><dt>Output</dt><dd>{formatTokens(totals().outputTokens)}</dd></div>
+              <Show when={totals().reasoningOutputTokens > 0}>
+                <div><dt>Thinking</dt><dd>{formatTokens(totals().reasoningOutputTokens)}</dd></div>
               </Show>
             </dl>
           </section>

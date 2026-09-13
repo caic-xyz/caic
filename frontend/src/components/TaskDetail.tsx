@@ -30,7 +30,7 @@ import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
-import TurnInvocationIcon from "./TurnInvocationIcon";
+import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -349,6 +349,15 @@ export default function TaskDetail(props: Props) {
     taskTimings().turns.map((turn) => [turn.result, turn]),
   ));
   const turnTiming = (turn: Turn) => turn.result ? turnTimingsByResult().get(turn.result) : undefined;
+  const sessionTimings = (session: Session) => {
+    const timings: TurnTiming[] = [];
+    const timingsByResult = turnTimingsByResult();
+    for (const turn of session.turns) {
+      const timing = turn.result ? timingsByResult.get(turn.result) : undefined;
+      if (timing) timings.push(timing);
+    }
+    return timings;
+  };
   const statsHistory = createMemo<EventStats[]>(() => messages().filter((m) => m.kind === "stats" && m.stats !== undefined).map((m) => m.stats as EventStats));
   // The agent normally emits the initial prompt as its first user-input event.
   // Setup can fail before that happens, so retain the recorded prompt as task context.
@@ -841,25 +850,29 @@ export default function TaskDetail(props: Props) {
                 {/* Collapsed past session: single clickable row. */}
                 <Match when={sessElided()} keyed>
                   {(se) => (
-                    <button class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}
-                      onClick={(e) => anchoredToggleSession(e, se.sessionKey)}>
-                      <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
-                      <span class={styles.sessionDuration}>
-                        {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
-                      </span>
-                    </button>
+                    <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
+                      <button type="button" class={styles.sessionToggle} onClick={(e) => anchoredToggleSession(e, se.sessionKey)}>
+                        <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
+                        <span class={styles.sessionDuration}>
+                          {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
+                        </span>
+                      </button>
+                      <SessionInvocationIcon turns={sessionTimings(se.session)} model={props.model ?? null} />
+                    </div>
                   )}
                 </Match>
                 {/* Expanded past session header: click to collapse. */}
                 <Match when={sessHdr()} keyed>
                   {(sh) => (
-                    <button class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} data-anchor-key={`session:${sh.sessionKey}`}
-                      onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}>
-                      <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
-                      <span class={styles.sessionDuration}>
-                        {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
-                      </span>
-                    </button>
+                    <div class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} data-anchor-key={`session:${sh.sessionKey}`}>
+                      <button type="button" class={styles.sessionToggle} onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}>
+                        <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
+                        <span class={styles.sessionDuration}>
+                          {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
+                        </span>
+                      </button>
+                      <SessionInvocationIcon turns={sessionTimings(sh.session)} model={props.model ?? null} />
+                    </div>
                   )}
                 </Match>
                 {/* Session boundary: init or compact_boundary rendered as a separator. */}

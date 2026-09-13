@@ -542,13 +542,16 @@ describe("TaskDetail", () => {
     expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(true);
   });
 
-  it("shows turn count and total work duration on a section collapsed after compaction", () => {
+  it("summarizes every turn in the collapsed session details", async () => {
+    const user = userEvent.setup();
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
       firstResult.result.duration = 2;
       secondResult.result.duration = 3;
+      firstResult.result.usage.inputTokens = 100;
+      secondResult.result.usage.inputTokens = 200;
       const events: EventMessage[] = [
         { kind: "init", ts: 1_000, init: { reportedModel: "test", agentVersion: "test", sessionID: "session-one", tools: [], cwd: "", harness: "test" } },
         { kind: "text", ts: 2_000, text: { text: "first response" } },
@@ -569,10 +572,18 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail();
+    const { getByText, queryByText } = renderTaskDetail();
 
     expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
     expect(getByText("0:05").className).toMatch(/sessionDuration/);
+    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    const dialog = screen.getByTestId("session-invocation-dialog");
+    expect(dialog).toHaveTextContent("Combined turn time0:05");
+    expect(dialog).toHaveTextContent("Combined API time0:02");
+    expect(dialog).toHaveTextContent("Time awaiting user response0:59");
+    expect(dialog).toHaveTextContent("Cost$0.0000");
+    expect(dialog).toHaveTextContent("New input300t");
+    expect(queryByText("first response")).not.toBeInTheDocument();
   });
 
   it("shows recover actions for crashed tasks", async () => {
