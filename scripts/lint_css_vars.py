@@ -108,12 +108,13 @@ def _strip_comments(
     return "".join(chars)
 
 
-def _read_source(path: str | Path) -> str:
+def _read_source(path: str | Path, *, blank_strings: bool = False) -> str:
     source_path = Path(path)
     text = source_path.read_text(encoding="utf-8")
     suffix = source_path.suffix
     return _strip_comments(
         text,
+        blank_strings=blank_strings,
         line_comments=suffix in {".html", ".ts", ".tsx"},
         html_comments=suffix == ".html",
     )
@@ -229,7 +230,10 @@ def check_hardcoded_colors(files: list[str], *, check_named_colors: bool = True)
     errors: list[tuple[str, int, str]] = []
     seen: set[tuple[str, int, str]] = set()
     for path in files:
-        text = _PROP_DEF_RE.sub(_blank_span, _read_source(path))
+        text = _PROP_DEF_RE.sub(
+            _blank_span,
+            _read_source(path, blank_strings=Path(path).suffix == ".css"),
+        )
         if Path(path).suffix == ".html":
             text = _THEME_COLOR_META_RE.sub(_blank_span, text)
         for lineno, line in enumerate(text.splitlines(), start=1):
@@ -264,16 +268,6 @@ def main() -> int:
         default=Path("frontend/src/global.css"),
         help="shared CSS token file (default: %(default)s)",
     )
-    parser.add_argument(
-        "--allow-hardcoded-colors",
-        action="store_true",
-        help="skip raw-color checks while migrating an existing frontend",
-    )
-    parser.add_argument(
-        "--allow-hardcoded-typescript-colors",
-        action="store_true",
-        help="skip raw-color checks in TypeScript and TSX files",
-    )
     args = parser.parse_args()
 
     try:
@@ -299,11 +293,8 @@ def main() -> int:
     try:
         var_errors = check_css_vars(variable_files, source_files, token_file)
         selector_errors = check_unused_selectors(files)
-        color_errors: list[tuple[str, int, str]] = []
-        if not args.allow_hardcoded_colors:
-            color_errors = check_hardcoded_colors(css_files + html_files)
-            if not args.allow_hardcoded_typescript_colors:
-                color_errors += check_hardcoded_colors(raw_color_source_files, check_named_colors=False)
+        color_errors = check_hardcoded_colors(css_files + html_files)
+        color_errors += check_hardcoded_colors(raw_color_source_files, check_named_colors=False)
     except (OSError, UnicodeError) as e:
         print(f"Error reading source file: {e}", file=sys.stderr)
         return 1
