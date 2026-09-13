@@ -384,6 +384,37 @@ func BenchmarkMergeLogAndRelayTimeline(b *testing.B) {
 	}
 }
 
+func BenchmarkUnionRuntimeIDs(b *testing.B) {
+	for _, n := range []int{1, 5, 20} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			a := make([]runtime.ID, n)
+			other := make([]runtime.ID, n)
+			for i := range n {
+				a[i] = runtime.ID(fmt.Sprintf("docker:a-%d", i))
+				other[i] = runtime.ID(fmt.Sprintf("docker:a-%d", i+n/2))
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				if got := unionRuntimeIDs(a, other); len(got) == 0 {
+					b.Fatal("empty union")
+				}
+			}
+		})
+	}
+}
+
+func TestUnionRuntimeIDs(t *testing.T) {
+	t.Parallel()
+	got := unionRuntimeIDs(
+		[]runtime.ID{"docker:three", "docker:one", "docker:one"},
+		[]runtime.ID{"docker:two", "docker:three"},
+	)
+	want := []runtime.ID{"docker:one", "docker:three", "docker:two"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("union = %v, want %v", got, want)
+	}
+}
+
 func TestMergeLogAndRelayMessages(t *testing.T) {
 	t.Parallel()
 	t.Run("valid_exact_overlap", func(t *testing.T) {
@@ -4198,6 +4229,58 @@ func TestManager(t *testing.T) {
 				t.Fatal("timed out waiting for stats push")
 			case <-ticker.C:
 			}
+		}
+	})
+
+	t.Run("watchDiskUsage", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		started := make(chan []runtime.ID, 4)
+		id := runtime.NewID("test-runtime", "ctr-1")
+		fake := &runtimetest.FakeInfo{
+			DiskSizes:        map[runtime.ID]int64{id: 700},
+			DiskUsageStarted: started,
+		}
+		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+		tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetState(taskslog.StateRunning)
+		tk.PushStats(&runtime.Stats{CPUPerc: 2.5, DiskUsed: -1})
+		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+
+		go m.watchDiskUsage(ctx)
+		select {
+		case ids := <-started:
+			if !slices.Equal(ids, []runtime.ID{id}) {
+				t.Fatalf("disk usage ids = %v, want [%s]", ids, id)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for initial disk usage")
+		}
+
+		tk.SetState(taskslog.StateStopping)
+		m.NotifyTaskChange()
+		tk.SetState(taskslog.StateStopped)
+		m.NotifyTaskChange()
+		select {
+		case ids := <-started:
+			if !slices.Equal(ids, []runtime.ID{id}) {
+				t.Fatalf("final disk usage ids = %v, want [%s]", ids, id)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for final disk usage")
+		}
+
+		history, _, unsub := tk.SubscribeStats(t.Context())
+		unsub()
+		if len(history) != 1 || history[0].DiskUsed != 700 {
+			t.Fatalf("stopped task stats = %+v, want disk usage 700", history)
+		}
+		select {
+		case ids := <-started:
+			t.Fatalf("unexpected disk usage poll with no active task: %v", ids)
+		case <-time.After(100 * time.Millisecond):
 		}
 	})
 

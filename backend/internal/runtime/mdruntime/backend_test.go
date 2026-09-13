@@ -8,6 +8,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -127,6 +128,9 @@ type fakeMDClient struct {
 	containerRepos []md.Repo
 	getCalls       int
 	getName        string
+	diskCalls      int
+	diskIDs        []runtime.InstanceID
+	diskSizes      map[runtime.InstanceID]int64
 }
 
 func (f *fakeMDClient) Runtime() string {
@@ -172,6 +176,12 @@ func (*fakeMDClient) Inspect(context.Context, runtime.InstanceID) (*runtime.Inst
 	return &runtime.InstanceInspect{}, nil
 }
 
+func (f *fakeMDClient) DiskUsage(_ context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]int64, error) {
+	f.diskCalls++
+	f.diskIDs = slices.Clone(ids)
+	return maps.Clone(f.diskSizes), nil
+}
+
 func (*fakeMDClient) WatchStats(context.Context, []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return func(func(runtime.StatsSample, error) bool) {}, nil
 }
@@ -192,6 +202,38 @@ func newTestBackend(c mdClient) *Backend {
 
 func TestBackend(t *testing.T) {
 	t.Parallel()
+	t.Run("parse disk usage", func(t *testing.T) {
+		t.Parallel()
+		usage, err := parseDiskUsage("/one\t376657501\ntwo\t0", "docker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[runtime.InstanceID]int64{"one": 376657501, "two": 0}
+		if !reflect.DeepEqual(usage, want) {
+			t.Fatalf("usage = %v, want %v", usage, want)
+		}
+		for _, out := range []string{"missing-tab", "one\tnull", "one\t-1", "one\tnot-json"} {
+			if _, err := parseDiskUsage(out, "docker"); err == nil {
+				t.Errorf("parseDiskUsage(%q) succeeded, want error", out)
+			}
+		}
+	})
+	t.Run("batch disk usage", func(t *testing.T) {
+		t.Parallel()
+		client := &fakeMDClient{diskSizes: map[runtime.InstanceID]int64{"one": 10, "two": 20}}
+		backend := newTestBackend(client)
+		usage, err := backend.DiskUsage(t.Context(), []runtime.ID{"docker:one", "docker:two"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if client.diskCalls != 1 || !slices.Equal(client.diskIDs, []runtime.InstanceID{"one", "two"}) {
+			t.Fatalf("disk calls = %d ids = %v, want one call for [one two]", client.diskCalls, client.diskIDs)
+		}
+		want := map[runtime.ID]int64{"docker:one": 10, "docker:two": 20}
+		if !reflect.DeepEqual(usage, want) {
+			t.Fatalf("usage = %v, want %v", usage, want)
+		}
+	})
 
 	t.Run("Launch", func(t *testing.T) {
 		t.Run("valid", func(t *testing.T) {

@@ -1,5 +1,5 @@
 // Package task orchestrates a single coding agent task: branch creation,
-// instance lifecycle, agent execution, and git integration.
+// instance lifecycle, agent execution, resource history, and git integration.
 package task
 
 import (
@@ -141,6 +141,8 @@ type Task struct {
 	statsLen              int
 	statsHead             int
 	statsSubs             []*statsSub
+	diskUsed              int64
+	diskKnown             bool
 	state                 taskslog.State
 	stateUpdatedAt        time.Time // UTC timestamp of the last state transition.
 	sessionID             string    // Agent session ID, captured from InitMessage.
@@ -1454,14 +1456,43 @@ func (t *Task) SubscribeRateLimits(ctx context.Context) (history []*agent.RateLi
 // PushStats records a runtime stats snapshot and notifies live subscribers.
 func (t *Task) PushStats(s *runtime.Stats) {
 	t.mu.Lock()
+	val := *s
+	if val.DiskUsed >= 0 {
+		t.diskUsed = val.DiskUsed
+		t.diskKnown = true
+	} else if t.diskKnown {
+		val.DiskUsed = t.diskUsed
+	}
 	idx := (t.statsHead + t.statsLen) % statsRingSize
-	t.statsRing[idx] = *s
+	t.statsRing[idx] = val
 	if t.statsLen < statsRingSize {
 		t.statsLen++
 	} else {
 		t.statsHead = (t.statsHead + 1) % statsRingSize
 	}
-	val := *s
+	for _, sub := range t.statsSubs {
+		select {
+		case sub.ch <- val:
+		default:
+		}
+	}
+	t.mu.Unlock()
+}
+
+// UpdateDiskUsage records the latest writable-layer size and applies it to the
+// most recent resource sample. Future samples inherit the value until the next
+// disk measurement.
+func (t *Task) UpdateDiskUsage(bytes int64) {
+	t.mu.Lock()
+	t.diskUsed = bytes
+	t.diskKnown = true
+	if t.statsLen == 0 {
+		t.mu.Unlock()
+		return
+	}
+	idx := (t.statsHead + t.statsLen - 1) % statsRingSize
+	t.statsRing[idx].DiskUsed = bytes
+	val := t.statsRing[idx]
 	for _, sub := range t.statsSubs {
 		select {
 		case sub.ch <- val:

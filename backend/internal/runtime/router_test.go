@@ -8,6 +8,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -83,6 +84,30 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("batches disk usage by runtime", func(t *testing.T) {
+		t.Parallel()
+		docker := newRouterFakeBackend("docker")
+		podman := newRouterFakeBackend("podman")
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []runtime.ID{"docker:one", "podman:two", "docker:three"}
+		usage, err := router.DiskUsage(t.Context(), ids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if docker.diskCalls != 1 || podman.diskCalls != 1 {
+			t.Fatalf("disk calls docker=%d podman=%d, want one each", docker.diskCalls, podman.diskCalls)
+		}
+		if !slices.Equal(docker.diskIDs, []runtime.ID{"docker:one", "docker:three"}) {
+			t.Fatalf("docker disk ids = %v", docker.diskIDs)
+		}
+		if len(usage) != len(ids) {
+			t.Fatalf("disk usage len = %d, want %d", len(usage), len(ids))
+		}
+	})
+
 	t.Run("rejects unqualified instance IDs", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
@@ -148,6 +173,10 @@ func (m *routerEventMonitor) WatchStats(context.Context, []runtime.ID) (iter.Seq
 	return func(func(runtime.StatsSample, error) bool) {}, nil
 }
 
+func (m *routerEventMonitor) DiskUsage(context.Context, []runtime.ID) (map[runtime.ID]int64, error) {
+	return map[runtime.ID]int64{}, nil
+}
+
 func (m *routerEventMonitor) WatchEvents(ctx context.Context, _ runtime.EventFilter) (<-chan runtime.Event, error) {
 	if m.err != nil {
 		return nil, m.err
@@ -164,9 +193,11 @@ func (m *routerEventMonitor) WatchEvents(ctx context.Context, _ runtime.EventFil
 type routerFakeBackend struct {
 	*runtimetest.FakeBackend
 
-	name     string
-	launches int
-	lastID   runtime.ID
+	name      string
+	launches  int
+	lastID    runtime.ID
+	diskCalls int
+	diskIDs   []runtime.ID
 }
 
 func newRouterFakeBackend(name string) *routerFakeBackend {
@@ -205,6 +236,16 @@ func (f *routerFakeBackend) SudoPassword(context.Context, runtime.ID) (string, e
 
 func (f *routerFakeBackend) WatchStats(context.Context, []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return func(func(runtime.StatsSample, error) bool) {}, nil
+}
+
+func (f *routerFakeBackend) DiskUsage(_ context.Context, ids []runtime.ID) (map[runtime.ID]int64, error) {
+	f.diskCalls++
+	f.diskIDs = slices.Clone(ids)
+	usage := make(map[runtime.ID]int64, len(ids))
+	for _, id := range ids {
+		usage[id] = 1
+	}
+	return usage, nil
 }
 
 func (f *routerFakeBackend) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {

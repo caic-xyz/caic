@@ -403,6 +403,9 @@ type Repository interface {
 
 // Monitor reads resource usage and lifecycle events.
 type Monitor interface {
+	// DiskUsage returns writable-layer sizes for the requested instances in one
+	// batch. Missing entries have no available measurement.
+	DiskUsage(ctx context.Context, ids []ID) (map[ID]int64, error)
 	WatchStats(ctx context.Context, ids []ID) (iter.Seq2[StatsSample, error], error)
 	WatchEvents(ctx context.Context, filter EventFilter) (<-chan Event, error)
 }

@@ -5,6 +5,7 @@ package runtimetest
 import (
 	"context"
 	"iter"
+	"maps"
 	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -15,6 +16,10 @@ import (
 // the zero value is usable. Fields are read-only after the fake is wired into a
 // consumer, so no locking is needed.
 type FakeInfo struct {
+	// DiskSizes is returned by DiskUsage.
+	DiskSizes map[runtime.ID]int64
+	// DiskUsageStarted, when set, receives the instance ids passed to DiskUsage.
+	DiskUsageStarted chan []runtime.ID
 	// Meta answers Metadata, keyed by string(id)+"\x00"+string(key).
 	Meta map[string]string
 	// Events is returned by WatchEvents (unless WatchErr is set).
@@ -32,6 +37,10 @@ type FakeInfo struct {
 
 // FakeMonitor is an in-memory runtime.Monitor test double.
 type FakeMonitor struct {
+	// DiskSizes is returned by DiskUsage.
+	DiskSizes map[runtime.ID]int64
+	// DiskUsageStarted, when set, receives the instance ids passed to DiskUsage.
+	DiskUsageStarted chan []runtime.ID
 	// Events is returned by WatchEvents (unless WatchErr is set).
 	Events <-chan runtime.Event
 	// WatchErr, when set, is returned by WatchEvents.
@@ -72,6 +81,14 @@ func (f *FakeInfo) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[
 	return watchStats(ctx, ids, f.WatchStarted, f.Stats)
 }
 
+// DiskUsage implements runtime.Monitor.
+func (f *FakeInfo) DiskUsage(_ context.Context, ids []runtime.ID) (map[runtime.ID]int64, error) {
+	if f.DiskUsageStarted != nil {
+		f.DiskUsageStarted <- slices.Clone(ids)
+	}
+	return maps.Clone(f.DiskSizes), nil
+}
+
 // WatchEvents implements runtime.Monitor.
 func (f *FakeInfo) WatchEvents(context.Context, runtime.EventFilter) (<-chan runtime.Event, error) {
 	if f.WatchErr != nil {
@@ -101,6 +118,14 @@ func (f *FakeInfo) SudoPassword(context.Context, runtime.ID) (string, error) {
 // WatchStats implements runtime.Monitor.
 func (f *FakeMonitor) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return watchStats(ctx, ids, f.WatchStarted, f.Stats)
+}
+
+// DiskUsage implements runtime.Monitor.
+func (f *FakeMonitor) DiskUsage(_ context.Context, ids []runtime.ID) (map[runtime.ID]int64, error) {
+	if f.DiskUsageStarted != nil {
+		f.DiskUsageStarted <- slices.Clone(ids)
+	}
+	return maps.Clone(f.DiskSizes), nil
 }
 
 // WatchEvents implements runtime.Monitor.

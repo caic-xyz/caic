@@ -5,6 +5,7 @@ package mdruntime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"runtime/trace"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/caic-xyz/md"
@@ -33,6 +35,7 @@ type mdClient interface {
 	List(ctx context.Context) ([]runtime.Instance, error)
 	Metadata(ctx context.Context, id runtime.InstanceID, key runtime.MetadataKey) (map[string]string, error)
 	Inspect(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error)
+	DiskUsage(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]int64, error)
 	WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error)
 	WatchEvents(ctx context.Context, filter runtime.EventFilter) (<-chan runtime.Event, error)
 	SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error)
@@ -135,6 +138,42 @@ func (a mdClientAdapter) Inspect(ctx context.Context, id runtime.InstanceID) (*r
 		Mounts:          mounts,
 		Caches:          caches,
 	}, nil
+}
+
+func (a mdClientAdapter) DiskUsage(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]int64, error) {
+	args := make([]string, 0, 4+len(ids))
+	args = append(args, "inspect", "--size", "--format", "{{.Name}}\t{{json .SizeRw}}")
+	for _, id := range ids {
+		args = append(args, string(id))
+	}
+	out, err := a.c.Runtime.Run(ctx, "", args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s inspect --size: %w", a.c.Runtime.Name(), err)
+	}
+	return parseDiskUsage(out, a.c.Runtime.Name())
+}
+
+func parseDiskUsage(out, runtimeName string) (map[runtime.InstanceID]int64, error) {
+	usage := make(map[runtime.InstanceID]int64, strings.Count(out, "\n")+1)
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("parse %s inspect --size line %q", runtimeName, line)
+		}
+		var size *int64
+		if err := json.Unmarshal([]byte(parts[1]), &size); err != nil {
+			return nil, fmt.Errorf("parse %s inspect --size for %q: %w", runtimeName, parts[0], err)
+		}
+		if size == nil || *size < 0 {
+			return nil, fmt.Errorf("parse %s inspect --size for %q: invalid size %s", runtimeName, parts[0], parts[1])
+		}
+		usage[runtime.InstanceID(strings.TrimPrefix(parts[0], "/"))] = *size
+	}
+	return usage, nil
 }
 
 func (a mdClientAdapter) WatchStats(ctx context.Context, ids []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
@@ -746,6 +785,27 @@ func (b *Backend) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[r
 			}
 		}
 	}, nil
+}
+
+// DiskUsage returns writable-layer sizes for the requested runtime instances.
+func (b *Backend) DiskUsage(ctx context.Context, ids []runtime.ID) (map[runtime.ID]int64, error) {
+	localIDs := make([]runtime.InstanceID, len(ids))
+	for i, id := range ids {
+		localID, err := b.localID(id)
+		if err != nil {
+			return nil, err
+		}
+		localIDs[i] = localID
+	}
+	usage, err := b.client.DiskUsage(ctx, localIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[runtime.ID]int64, len(usage))
+	for id, size := range usage {
+		out[runtime.NewID(b.Name(), id)] = size
+	}
+	return out, nil
 }
 
 // SudoPassword fetches the sudo password for a runtime instance over SSH.

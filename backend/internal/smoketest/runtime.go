@@ -162,6 +162,15 @@ func (*RuntimeBackend) WatchStats(ctx context.Context, _ []runtime.ID) (iter.Seq
 	}, nil
 }
 
+// DiskUsage implements runtime.Monitor.
+func (*RuntimeBackend) DiskUsage(_ context.Context, ids []runtime.ID) (map[runtime.ID]int64, error) {
+	usage := make(map[runtime.ID]int64, len(ids))
+	for _, id := range ids {
+		usage[id] = 0
+	}
+	return usage, nil
+}
+
 // WatchEvents implements runtime.Monitor.
 func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (<-chan runtime.Event, error) {
 	ch := make(chan runtime.Event)

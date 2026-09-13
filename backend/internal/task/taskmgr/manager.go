@@ -1,4 +1,4 @@
-// Package taskmgr owns task registry state, creation, stats streaming, and
+// Package taskmgr owns task registry state, creation, resource sampling, and
 // runtime-instance import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
@@ -221,6 +221,7 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 	}
 	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, events) })
 	m.background.Go(func() { m.watchStats(m.serverCtx) })
+	m.background.Go(func() { m.watchDiskUsage(m.serverCtx) })
 	if err != nil {
 		return fmt.Errorf("watch runtime events: %w", err)
 	}
@@ -1178,6 +1179,101 @@ func (m *Manager) activeStatsIDs() (ids []runtime.ID, changed <-chan struct{}) {
 	return ids, m.changed
 }
 
+const diskUsageInterval = 5 * time.Second
+
+// watchDiskUsage periodically samples all active writable layers in one batch.
+// A final sample is taken after an instance stops, then the timer remains
+// disabled until another task becomes active.
+func (m *Manager) watchDiskUsage(ctx context.Context) {
+	var tracked []runtime.ID
+	var timer *time.Timer
+	var tick <-chan time.Time
+	for {
+		active, changed := m.activeDiskUsageIDs()
+		if !slices.Equal(active, tracked) {
+			m.updateDiskUsage(ctx, unionRuntimeIDs(active, tracked))
+			tracked = slices.Clone(active)
+			if timer == nil && len(active) > 0 {
+				timer = time.NewTimer(diskUsageInterval)
+				tick = timer.C
+			} else if timer != nil {
+				timer.Stop()
+				if len(active) > 0 {
+					timer.Reset(diskUsageInterval)
+					tick = timer.C
+				} else {
+					timer = nil
+					tick = nil
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
+			return
+		case <-changed:
+		case <-tick:
+			m.updateDiskUsage(ctx, active)
+			timer.Reset(diskUsageInterval)
+		}
+	}
+}
+
+func (m *Manager) activeDiskUsageIDs() (ids []runtime.ID, changed <-chan struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids = make([]runtime.ID, 0, len(m.tasks))
+	for _, e := range m.tasks {
+		id := e.task.RuntimeInstanceID()
+		if id == "" || !diskUsageStateActive(e.task.GetState()) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids, m.changed
+}
+
+func (m *Manager) updateDiskUsage(ctx context.Context, ids []runtime.ID) {
+	if len(ids) == 0 {
+		return
+	}
+	usage, err := m.Runtimes.DiskUsage(ctx, ids)
+	if err != nil {
+		m.log.WarnContext(ctx, "disk usage poll failed", "err", err)
+		return
+	}
+	m.mu.Lock()
+	tasks := make(map[runtime.ID]*task.Task, len(usage))
+	for _, e := range m.tasks {
+		if _, ok := usage[e.task.RuntimeInstanceID()]; ok {
+			tasks[e.task.RuntimeInstanceID()] = e.task
+		}
+	}
+	m.mu.Unlock()
+	for id, size := range usage {
+		if target := tasks[id]; target != nil {
+			target.UpdateDiskUsage(size)
+		}
+	}
+}
+
+func unionRuntimeIDs(a, b []runtime.ID) []runtime.ID {
+	ids := make([]runtime.ID, 0, len(a)+len(b))
+	for _, candidates := range [][]runtime.ID{a, b} {
+		for _, id := range candidates {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 func resolveRuntimeName(router *runtime.Router, id runtime.Name) (runtime.Name, error) {
 	if id == "" {
 		return router.Runtimes[0].Name(), nil
@@ -1232,6 +1328,15 @@ func (m *Manager) pushStatsSample(sample *runtime.StatsSample) {
 func statsStateActive(st taskslog.State) bool {
 	switch st {
 	case taskslog.StatePurged, taskslog.StateFailed, taskslog.StateCrashed, taskslog.StateStopped, taskslog.StateStopping, taskslog.StatePurging:
+		return false
+	default:
+		return true
+	}
+}
+
+func diskUsageStateActive(st taskslog.State) bool {
+	switch st {
+	case taskslog.StatePurged, taskslog.StateFailed, taskslog.StateCrashed, taskslog.StateStopped, taskslog.StatePurging:
 		return false
 	default:
 		return true

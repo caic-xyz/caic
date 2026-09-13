@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 )
@@ -205,6 +206,28 @@ func (r *Router) Signal(ctx context.Context, id ID, pid int, sig string) error {
 		return err
 	}
 	return rt.Signal(ctx, id, pid, sig)
+}
+
+// DiskUsage returns writable-layer sizes across the requested runtime
+// instances. Each owning runtime receives one batched request.
+func (r *Router) DiskUsage(ctx context.Context, ids []ID) (map[ID]int64, error) {
+	groups := map[Name][]ID{}
+	for _, id := range ids {
+		rt, err := r.runtimeForInstance(id)
+		if err != nil {
+			return nil, err
+		}
+		groups[rt.Name()] = append(groups[rt.Name()], id)
+	}
+	result := make(map[ID]int64, len(ids))
+	for runtimeName, runtimeIDs := range groups {
+		usage, err := r.ByName[runtimeName].DiskUsage(ctx, runtimeIDs)
+		if err != nil {
+			return nil, fmt.Errorf("disk usage %s: %w", runtimeName, err)
+		}
+		maps.Copy(result, usage)
+	}
+	return result, nil
 }
 
 // WatchStats streams stats across the requested runtime instances.
