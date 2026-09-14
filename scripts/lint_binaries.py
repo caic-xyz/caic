@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
-# Lint for unexpected binary or executable files in the repository.
+# Copyright 2026 Marc-Antoine Ruel. All rights reserved.
+# Use of this source code is governed under the Apache License, Version 2.0
+# that can be found in the LICENSE file.
+
+"""Lint git-tracked files for unexpected binary data and executable files."""
+
 import os
 import stat
 import subprocess
 import sys
 
-ALLOWED_BINARY_EXT = {
+ALLOWED_BINARY_EXTENSIONS = {
+    ".aac",
     ".avif",
     ".br",
+    ".flac",
     ".gif",
     ".ico",
     ".jar",
     ".jpg",
     ".mov",
+    ".mp3",
     ".mp4",
+    ".ogg",
     ".pdf",
     ".png",
     ".svg",
@@ -23,68 +32,62 @@ ALLOWED_BINARY_EXT = {
     ".webp",
     ".zst",
 }
+ALLOWED_EXECUTABLE_EXTENSIONS = {".desktop"}
 
 
-def is_binary(file_path):
-    """Simple binary detection by checking for null bytes in the first 1024 bytes."""
-    if os.path.islink(file_path) or not os.path.isfile(file_path):
+def is_binary(path: str) -> bool:
+    """Return whether path contains a null byte near its start."""
+    if os.path.islink(path) or not os.path.isfile(path):
         return False
-    try:
-        with open(file_path, "rb") as f:
-            chunk = f.read(1024)
-            return b"\0" in chunk
-    except Exception:
+    with open(path, "rb") as f:
+        return b"\0" in f.read(1024)
+
+
+def is_executable(path: str) -> bool:
+    """Return whether path has the owner executable bit set."""
+    if os.path.islink(path) or not os.path.isfile(path):
         return False
+    return bool(os.stat(path).st_mode & stat.S_IXUSR)
 
 
-def has_shebang(file_path):
-    """Check if file starts with a shebang line."""
-    try:
-        with open(file_path, "rb") as f:
-            return f.read(2) == b"#!"
-    except Exception:
-        return False
+def has_executable_preamble(path: str) -> bool:
+    """Return whether path starts with a supported executable declaration."""
+    with open(path, "rb") as f:
+        first_line = f.readline()
+    # Go generator files use this shell/Go polyglot preamble to run with go run.
+    return first_line.startswith((b"#!/", b"///usr/bin/true; exec /usr/bin/env go run "))
 
 
-def is_executable(file_path):
-    """Check if file has executable bit set."""
-    try:
-        if os.path.islink(file_path):
-            return False
-        return os.stat(file_path).st_mode & stat.S_IXUSR != 0
-    except Exception:
-        return False
+def tracked_files() -> list[str]:
+    """Return all Git-tracked paths, including paths with whitespace."""
+    raw = subprocess.check_output(("git", "ls-files", "-z"))
+    return [os.fsdecode(path) for path in raw.split(b"\0") if path]
 
 
-def main():
-    try:
-        files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-    except subprocess.CalledProcessError as e:
-        print(f"Error running git: {e}", file=sys.stderr)
-        return 1
+def main() -> int:
+    """Report tracked files that are binary or executable without a declaration."""
+    unexpected_binaries: list[str] = []
+    unexpected_executables: list[str] = []
+    for path in tracked_files():
+        if is_binary(path) and os.path.splitext(path)[1].lower() not in ALLOWED_BINARY_EXTENSIONS:
+            unexpected_binaries.append(path)
+        if (
+            is_executable(path)
+            and os.path.splitext(path)[1].lower() not in ALLOWED_EXECUTABLE_EXTENSIONS
+            and not has_executable_preamble(path)
+        ):
+            unexpected_executables.append(path)
 
-    unexpected_binaries = []
-    unexpected_executables = []
-
-    for f in files:
-        ext = os.path.splitext(f)[1].lower()
-        if is_binary(f) and ext not in ALLOWED_BINARY_EXT:
-            unexpected_binaries.append(f)
-        if is_executable(f) and not has_shebang(f):
-            unexpected_executables.append(f)
-
-    rc = 0
     if unexpected_binaries:
-        print("Error: unexpected binary files in repository:")
-        for b in unexpected_binaries:
-            print(f"  {b}")
-        rc = 1
+        print("Unexpected binary files:", file=sys.stderr)
+        print(*(f"  {path}" for path in unexpected_binaries), sep="\n", file=sys.stderr)
     if unexpected_executables:
-        print("Error: unexpected executable files in repository:")
-        for e in unexpected_executables:
-            print(f"  {e}")
-        rc = 1
-    return rc
+        print(
+            "Executable files without a shebang, Go launcher preamble, or allowed extension:",
+            file=sys.stderr,
+        )
+        print(*(f"  {path}" for path in unexpected_executables), sep="\n", file=sys.stderr)
+    return int(bool(unexpected_binaries or unexpected_executables))
 
 
 if __name__ == "__main__":
