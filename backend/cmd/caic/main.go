@@ -271,7 +271,7 @@ func initLogging(level string, noLogTime bool) *slog.Logger {
 		ll.Set(slog.LevelError)
 	}
 	homeDir, _ := os.UserHomeDir()
-	log := slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
+	log := slog.New(tint.NewTextHandler(colorable.NewColorable(os.Stderr), &tint.Options{
 		Level:      ll,
 		TimeFormat: "15:04:05.000",
 		NoColor:    !isatty.IsTerminal(os.Stderr.Fd()),

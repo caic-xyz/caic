@@ -113,7 +113,7 @@ func initLogging(level string) *slog.Logger {
 	case "error":
 		ll.Set(slog.LevelError)
 	}
-	l := slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
+	l := slog.New(tint.NewTextHandler(colorable.NewColorable(os.Stderr), &tint.Options{
 		Level:      ll,
 		TimeFormat: "15:04:05.000",
 		NoColor:    !isatty.IsTerminal(os.Stderr.Fd()),
