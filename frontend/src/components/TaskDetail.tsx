@@ -1232,7 +1232,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     const dayMS = 24 * 60 * 60 * 1000;
     const d = new Date(resetMS);
     if (remainingMS > dayMS) {
-      return ` · resets in ${Math.ceil(remainingMS / dayMS)} days at ${d.toLocaleTimeString()}`;
+      return ` · resets in ${Math.floor(remainingMS / dayMS)} days at ${d.toLocaleTimeString()}`;
     }
     return ` · resets at ${d.toLocaleTimeString()}`;
   };
