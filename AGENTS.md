@@ -42,8 +42,9 @@ make check     # Refresh generated files, build, lint, and test (non-Android).
 `pnpm install` configures the versioned hooks in `scripts/hooks/`. Run
 `pnpm hooks:install` to restore them after an installation that skipped lifecycle scripts;
 `make git-hooks` also configures the repository merge driver. Pre-commit validates the
-fully staged snapshot and co-author trailers, while pre-push rejects WIP or multi-commit
-pushes and runs `make check`.
+fully staged snapshot. Commit-msg requires a subject, blank line, and rationale body with
+body lines no longer than 120 characters; it also rejects `Co-authored-by:` trailers.
+Pre-push rejects WIP or multi-commit pushes and runs `make check`.
 
 ### Performance
 
