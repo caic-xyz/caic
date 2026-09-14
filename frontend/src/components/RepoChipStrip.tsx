@@ -27,12 +27,16 @@ interface Props {
 
 export default function RepoChipStrip(props: Props) {
   // Branch options, loaded lazily per repo when its picker opens.
-  const [branchCache, setBranchCache] = createSignal<Record<string, BranchInfo[]>>({});
+  const [branchCache, setBranchCache] = createSignal<
+    Record<string, BranchInfo[]>
+  >({});
 
   function loadBranches(path: string) {
     listRepoBranches(path)
       .then((r) => setBranchCache((c) => ({ ...c, [path]: r.branches })))
-      .catch((err: unknown) => console.error("Failed to load repository branches", err));
+      .catch((err: unknown) =>
+        console.error("Failed to load repository branches", err),
+      );
   }
 
   function branchActionLabel(action: BranchInfo["action"]) {
@@ -77,30 +81,30 @@ export default function RepoChipStrip(props: Props) {
     }));
   }
 
-  const manageRepoOptions = (): SearchableOption[] => {
-    const selectedPaths = new Set(props.selectedRepos().map((repo) => repo.path));
-    const selected = props.selectedRepos()
-      .map((repo) => ({
-        value: repo.path,
-        label: `✓ ${repo.path}`,
-        search: repo.path,
-        group: "Selected",
-        selected: true,
-      }));
+  const addRepoOptions = (): SearchableOption[] => {
+    const selectedPaths = new Set(
+      props.selectedRepos().map((repo) => repo.path),
+    );
     const recent = [...props.availableRecent()]
       .filter((repo) => !selectedPaths.has(repo.path))
-      .sort((a, b) => a.path < b.path ? -1 : 1)
-      .map((repo) => ({ value: repo.path, label: repo.path, search: repo.path, group: "Recent" }));
-    const rest = props.availableRest()
+      .sort((a, b) => (a.path < b.path ? -1 : 1))
+      .map((repo) => ({
+        value: repo.path,
+        label: repo.path,
+        search: repo.path,
+        group: "Recent",
+      }));
+    const rest = props
+      .availableRest()
       .filter((repo) => !selectedPaths.has(repo.path))
-      .map((repo) => ({ value: repo.path, label: repo.path, search: repo.path, group: recent.length > 0 ? "All repositories" : undefined }));
-    return [...selected, ...recent, ...rest];
+      .map((repo) => ({
+        value: repo.path,
+        label: repo.path,
+        search: repo.path,
+        group: recent.length > 0 ? "All repositories" : undefined,
+      }));
+    return [...recent, ...rest];
   };
-
-  function toggleRepo(path: string) {
-    if (props.selectedRepos().some((repo) => repo.path === path)) props.onRemove(path);
-    else props.onAdd(path);
-  }
 
   return (
     <div class={styles.repoChips} data-testid={props["data-testid"]}>
@@ -117,7 +121,8 @@ export default function RepoChipStrip(props: Props) {
               onOpen={() => loadBranches(entry.path)}
               onChange={(b) => props.onSetBranch(entry.path, b)}
               triggerLabel={
-                <>{entry.path.split("/").pop()}
+                <>
+                  {entry.path.split("/").pop()}
                   <Show when={entry.branch}>
                     <span class={styles.chipBranch}> · {entry.branch}</span>
                   </Show>
@@ -131,11 +136,19 @@ export default function RepoChipStrip(props: Props) {
               onClick={() => props.onRemove(entry.path)}
               aria-label={`Remove ${entry.path}`}
               data-testid={`chip-remove-${entry.path}`}
-            >×</button>
+            >
+              ×
+            </button>
           </span>
         )}
       </For>
-      <Show when={props.selectedRepos().length > 0 || props.availableRecent().length > 0 || props.availableRest().length > 0}>
+      <Show
+        when={
+          props.selectedRepos().length > 0 ||
+          props.availableRecent().length > 0 ||
+          props.availableRest().length > 0
+        }
+      >
         <div class={styles.addRepoWrap}>
           <SearchableSelect
             class={styles.addRepoBtn}
@@ -143,12 +156,12 @@ export default function RepoChipStrip(props: Props) {
             ariaLabel="Manage repositories"
             ariaKeyShortcuts="F2"
             value=""
-            options={manageRepoOptions}
+            options={addRepoOptions}
             placeholder="Filter repositories…"
             triggerLabel="+"
             hideCaret
             noOptionsLabel="No matches"
-            onChange={toggleRepo}
+            onChange={props.onAdd}
             title="Manage repositories (F2)"
             data-testid="add-repo-button"
             menuTestId="add-repo-dropdown"
@@ -162,7 +175,9 @@ export default function RepoChipStrip(props: Props) {
           onClick={() => props.onClone?.()}
           title="Clone a repository"
           data-testid="clone-toggle"
-        >⎘</button>
+        >
+          ⎘
+        </button>
       </Show>
     </div>
   );

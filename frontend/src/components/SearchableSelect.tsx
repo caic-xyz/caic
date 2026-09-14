@@ -1,6 +1,14 @@
 // Reusable searchable select (combobox) with keyboard navigation and optional grouped options.
 
-import { createEffect, createMemo, createSignal, For, Show, onCleanup, type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Show,
+  onCleanup,
+  type JSX,
+} from "solid-js";
 import { Portal } from "solid-js/web";
 
 import KeyboardArrowDown from "@material-symbols/svg-400/outlined/keyboard_arrow_down.svg?solid";
@@ -10,7 +18,7 @@ import styles from "./SearchableSelect.module.css";
 export interface SearchableOption {
   value: string;
   label: JSX.Element;
-  /** Lowercased text used for filtering; defaults to the string-cast label. */
+  /** Text used for filtering and match ranking; defaults to the string-cast label. */
   search?: string;
   /** Optional group label rendered before the first matching option in a group. */
   group?: string;
@@ -42,6 +50,14 @@ interface Props {
 
 let idSeq = 0;
 
+function matchRank(search: string, filter: string): number {
+  const baseName = search.slice(search.lastIndexOf("/") + 1);
+  if (baseName.startsWith(filter)) return 0;
+  if (baseName.includes(filter)) return 1;
+  if (search.startsWith(filter)) return 2;
+  return 3;
+}
+
 export default function SearchableSelect(props: Props) {
   const [open, setOpen] = createSignal(false);
   const [filter, setFilter] = createSignal("");
@@ -57,16 +73,29 @@ export default function SearchableSelect(props: Props) {
   const visibleOptions = createMemo(() => {
     const initialFilter = filter().toLowerCase();
     const opts = initialFilter
-      ? props.options().filter((o) => (o.search ?? String(o.label)).toLowerCase().includes(initialFilter))
+      ? props
+          .options()
+          .map((option, index) => ({
+            option,
+            index,
+            search: (option.search ?? String(option.label)).toLowerCase(),
+          }))
+          .filter(({ search }) => search.includes(initialFilter))
+          .sort(
+            (a, b) =>
+              matchRank(a.search, initialFilter) -
+                matchRank(b.search, initialFilter) || a.index - b.index,
+          )
+          .map(({ option }) => option)
       : props.options();
-    const base = (!initialFilter && props.emptyOption) ? [props.emptyOption] : [];
+    const base = !initialFilter && props.emptyOption ? [props.emptyOption] : [];
     return [...base, ...opts];
   });
 
   const selectedLabel = () => {
     if (props.value === "" && props.emptyOption) return props.emptyOption.label;
     const found = props.options().find((o) => o.value === props.value);
-    return found ? found.label : (props.value || props.placeholder || "");
+    return found ? found.label : props.value || props.placeholder || "";
   };
 
   function selectedOptionIndex() {
@@ -76,9 +105,16 @@ export default function SearchableSelect(props: Props) {
 
   function openMenu(initialOption: "selected" | "last") {
     if (props.disabled) return;
-    openerRef = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openerRef =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     setFilter("");
-    setActive(initialOption === "last" ? Math.max(0, visibleOptions().length - 1) : selectedOptionIndex());
+    setActive(
+      initialOption === "last"
+        ? Math.max(0, visibleOptions().length - 1)
+        : selectedOptionIndex(),
+    );
     setOpen(true);
     props.onOpen?.();
     requestAnimationFrame(() => inputRef?.focus());
@@ -86,7 +122,8 @@ export default function SearchableSelect(props: Props) {
 
   function closeMenu(restoreFocus = true) {
     setOpen(false);
-    if (restoreFocus) (openerRef?.isConnected ? openerRef : triggerRef)?.focus();
+    if (restoreFocus)
+      (openerRef?.isConnected ? openerRef : triggerRef)?.focus();
     openerRef = null;
   }
 
@@ -102,17 +139,26 @@ export default function SearchableSelect(props: Props) {
   }
 
   function onClickOutside(e: MouseEvent) {
-    if (menuRef?.contains(e.target as Node) || triggerRef?.contains(e.target as Node)) return;
+    if (
+      menuRef?.contains(e.target as Node) ||
+      triggerRef?.contains(e.target as Node)
+    )
+      return;
     setOpen(false);
   }
   createEffect(() => {
     if (open()) document.addEventListener("mousedown", onClickOutside, true);
     else document.removeEventListener("mousedown", onClickOutside, true);
-    onCleanup(() => document.removeEventListener("mousedown", onClickOutside, true));
+    onCleanup(() =>
+      document.removeEventListener("mousedown", onClickOutside, true),
+    );
   });
 
   function onDocKey(e: KeyboardEvent) {
-    if (e.key === "Escape") { closeMenu(); e.stopPropagation(); }
+    if (e.key === "Escape") {
+      closeMenu();
+      e.stopPropagation();
+    }
   }
   createEffect(() => {
     if (open()) document.addEventListener("keydown", onDocKey, true);
@@ -143,18 +189,31 @@ export default function SearchableSelect(props: Props) {
 
   function onTriggerKeyDown(e: KeyboardEvent) {
     if (props.disabled) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+    if (
+      e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "Enter" ||
+      e.key === " "
+    ) {
       e.preventDefault();
       openMenu(e.key === "ArrowUp" ? "last" : "selected");
     }
   }
 
   function onInputKeyDown(e: KeyboardEvent) {
-    if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-    else if (e.key === "Home") { e.preventDefault(); setActive(0); }
-    else if (e.key === "End") { e.preventDefault(); setActive(Math.max(0, visibleOptions().length - 1)); }
-    else if (e.key === "Enter") {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      move(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      move(-1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(Math.max(0, visibleOptions().length - 1));
+    } else if (e.key === "Enter") {
       e.preventDefault();
       const v = visibleOptions()[active()];
       if (v) commit(v.value);
@@ -169,7 +228,9 @@ export default function SearchableSelect(props: Props) {
   return (
     <>
       <button
-        ref={(el) => { triggerRef = el; }}
+        ref={(el) => {
+          triggerRef = el;
+        }}
         type="button"
         class={`${styles.trigger} ${props.class ?? ""}`}
         aria-haspopup="listbox"
@@ -182,7 +243,9 @@ export default function SearchableSelect(props: Props) {
         onClick={() => (open() ? closeMenu(false) : openMenu("selected"))}
         onKeyDown={onTriggerKeyDown}
       >
-        <span class={styles.triggerLabel}>{props.triggerLabel ?? selectedLabel()}</span>
+        <span class={styles.triggerLabel}>
+          {props.triggerLabel ?? selectedLabel()}
+        </span>
         <Show when={!props.hideCaret}>
           <KeyboardArrowDown class={styles.caret} aria-hidden="true" />
         </Show>
@@ -190,7 +253,9 @@ export default function SearchableSelect(props: Props) {
       <Show when={open()}>
         <Portal mount={triggerRef?.closest("dialog") ?? undefined}>
           <div
-            ref={(el) => { menuRef = el; }}
+            ref={(el) => {
+              menuRef = el;
+            }}
             class={`${styles.menu} ${props.menuClass ?? ""}`}
             role="listbox"
             aria-label={props.ariaLabel}
@@ -198,7 +263,9 @@ export default function SearchableSelect(props: Props) {
             data-testid={props.menuTestId}
           >
             <input
-              ref={(el) => { inputRef = el; }}
+              ref={(el) => {
+                inputRef = el;
+              }}
               type="text"
               class={styles.input}
               placeholder={props.placeholder ?? "Search…"}
@@ -207,18 +274,32 @@ export default function SearchableSelect(props: Props) {
               role="combobox"
               aria-expanded={open()}
               aria-controls={listboxId}
-              aria-activedescendant={visibleOptions()[active()] ? `${listboxId}-opt-${active()}` : undefined}
-              onInput={(e) => { setFilter(e.currentTarget.value); setActive(0); }}
+              aria-activedescendant={
+                visibleOptions()[active()]
+                  ? `${listboxId}-opt-${active()}`
+                  : undefined
+              }
+              onInput={(e) => {
+                setFilter(e.currentTarget.value);
+                setActive(0);
+              }}
               onKeyDown={onInputKeyDown}
             />
             <For each={visibleOptions()}>
               {(opt, i) => (
                 <>
-                  <Show when={opt.group && opt.group !== visibleOptions()[i() - 1]?.group}>
+                  <Show
+                    when={
+                      opt.group &&
+                      opt.group !== visibleOptions()[i() - 1]?.group
+                    }
+                  >
                     <div class={styles.groupLabel}>{opt.group}</div>
                   </Show>
                   <button
-                    ref={(el) => { optionRefs[i()] = el; }}
+                    ref={(el) => {
+                      optionRefs[i()] = el;
+                    }}
                     type="button"
                     id={`${listboxId}-opt-${i()}`}
                     class={`${styles.option}${i() === active() ? ` ${styles.optionActive}` : ""}${(opt.selected ?? opt.value === props.value) ? ` ${styles.optionSelected}` : ""}`}

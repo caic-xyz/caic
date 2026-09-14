@@ -10,9 +10,21 @@ import RepoChipStrip from "./RepoChipStrip";
 
 vi.mock("../api", () => ({ listRepoBranches: vi.fn() }));
 
-const repoA: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" } };
-const repoB: Repo = { path: "repos/b", branch: "main", baseBranch: { name: "main" } };
-const repoC: Repo = { path: "repos/c", branch: "main", baseBranch: { name: "main" } };
+const repoA: Repo = {
+  path: "repos/a",
+  branch: "main",
+  baseBranch: { name: "main" },
+};
+const repoB: Repo = {
+  path: "repos/b",
+  branch: "main",
+  baseBranch: { name: "main" },
+};
+const repoC: Repo = {
+  path: "repos/c",
+  branch: "main",
+  baseBranch: { name: "main" },
+};
 
 describe("RepoChipStrip", () => {
   afterEach(() => {
@@ -59,7 +71,9 @@ describe("RepoChipStrip", () => {
     ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: `Branch for ${repoA.path}` }));
+    await user.click(
+      screen.getByRole("button", { name: `Branch for ${repoA.path}` }),
+    );
     await waitFor(() => expect(api.listRepoBranches).toHaveBeenCalledTimes(2));
   });
 
@@ -80,35 +94,55 @@ describe("RepoChipStrip", () => {
       />
     ));
 
-    await user.click(screen.getByRole("button", { name: "Manage repositories" }));
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus());
+    await user.click(
+      screen.getByRole("button", { name: "Manage repositories" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Manage repositories" }),
+      ).toHaveFocus(),
+    );
     await user.keyboard("{ArrowDown}{Enter}");
 
     expect(onAdd).toHaveBeenCalledWith("repos/b");
-    expect(screen.queryByRole("listbox", { name: "Manage repositories" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("listbox", { name: "Manage repositories" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("removes a selected repository with Enter", async () => {
+  it("omits selected repositories from the add menu", async () => {
     const user = userEvent.setup();
-    const onRemove = vi.fn();
+    const onAdd = vi.fn();
 
     render(() => (
       <RepoChipStrip
         repos={() => [repoA, repoB]}
         selectedRepos={() => [{ path: repoA.path, branch: "" }]}
         availableRecent={() => []}
-        availableRest={() => [repoB]}
-        onAdd={vi.fn()}
-        onRemove={onRemove}
+        availableRest={() => [repoA, repoB]}
+        onAdd={onAdd}
+        onRemove={vi.fn()}
         onSetBranch={vi.fn()}
         showClone={false}
       />
     ));
 
-    await user.click(screen.getByRole("button", { name: "Manage repositories" }));
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus());
+    await user.click(
+      screen.getByRole("button", { name: "Manage repositories" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Manage repositories" }),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.queryByRole("option", { name: repoA.path }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: repoB.path }),
+    ).toBeInTheDocument();
     await user.keyboard("{Enter}");
 
-    expect(onRemove).toHaveBeenCalledWith(repoA.path);
+    expect(onAdd).toHaveBeenCalledWith(repoB.path);
   });
 });
