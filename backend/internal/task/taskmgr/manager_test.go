@@ -3319,6 +3319,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Fork: %v", err)
 			}
+			awaitTaskCleanup(t, e.Lifecycle.manager, id)
 			fork, ok := e.Lifecycle.manager.GetEntry(id)
 			if !ok {
 				t.Fatalf("forked task %q not found", id)
