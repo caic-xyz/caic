@@ -1228,20 +1228,16 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     if (!r) return "";
     const resetMS = Date.parse(r);
     if (!Number.isFinite(resetMS) || resetMS <= 0) return "";
-    const remainingMS = resetMS - Date.now();
     const dayMS = 24 * 60 * 60 * 1000;
     const d = new Date(resetMS);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (
-      d.getFullYear() === tomorrow.getFullYear()
-      && d.getMonth() === tomorrow.getMonth()
-      && d.getDate() === tomorrow.getDate()
-    ) {
+    const now = new Date();
+    const localDay = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMS;
+    const days = localDay(d) - localDay(now);
+    if (days === 1) {
       return ` · resets tomorrow at ${d.toLocaleTimeString()}`;
     }
-    if (remainingMS > dayMS) {
-      return ` · resets in ${Math.ceil(remainingMS / dayMS)} days at ${d.toLocaleTimeString()}`;
+    if (days > 1) {
+      return ` · resets in ${days} days at ${d.toLocaleTimeString()}`;
     }
     return ` · resets at ${d.toLocaleTimeString()}`;
   };

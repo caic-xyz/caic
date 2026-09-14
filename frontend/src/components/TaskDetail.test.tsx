@@ -996,11 +996,12 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("5-hour quota reached; using extra usage · resets at 4:26:40 AM");
+    const resetTime = new Date("2024-03-21T04:26:40Z").toLocaleTimeString();
+    expect(document.body.textContent).toContain(`5-hour quota reached; using extra usage · resets at ${resetTime}`);
     expect(document.body.textContent).not.toContain("monthly");
   });
 
-  it("shows quota resets more than 24 hours away in days", () => {
+  it("counts the local midnights crossed before a quota reset", () => {
     vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
@@ -1021,7 +1022,8 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("resets in 3 days at 1:00:00 PM");
+    const resetTime = new Date("2026-07-10T13:00:00Z").toLocaleTimeString();
+    expect(document.body.textContent).toContain(`resets in 2 days at ${resetTime}`);
   });
 
   it("labels a reset on the next calendar day as tomorrow", () => {
@@ -1045,7 +1047,8 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("resets tomorrow at 1:00:00 PM");
+    const resetTime = new Date("2026-07-09T13:00:00Z").toLocaleTimeString();
+    expect(document.body.textContent).toContain(`resets tomorrow at ${resetTime}`);
   });
 
   it("does not render empty usage metadata", () => {
