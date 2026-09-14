@@ -1021,7 +1021,7 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("resets in 2 days at 1:00:00 PM");
+    expect(document.body.textContent).toContain("resets in 3 days at 1:00:00 PM");
   });
 
   it("labels a reset on the next calendar day as tomorrow", () => {

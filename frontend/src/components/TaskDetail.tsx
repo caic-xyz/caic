@@ -1241,7 +1241,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
       return ` · resets tomorrow at ${d.toLocaleTimeString()}`;
     }
     if (remainingMS > dayMS) {
-      return ` · resets in ${Math.floor(remainingMS / dayMS)} days at ${d.toLocaleTimeString()}`;
+      return ` · resets in ${Math.ceil(remainingMS / dayMS)} days at ${d.toLocaleTimeString()}`;
     }
     return ` · resets at ${d.toLocaleTimeString()}`;
   };
