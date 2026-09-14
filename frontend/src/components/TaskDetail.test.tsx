@@ -1024,6 +1024,30 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain("resets in 2 days at 1:00:00 PM");
   });
 
+  it("labels a reset on the next calendar day as tomorrow", () => {
+    vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail();
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    capturedCb.value({
+      kind: "rateLimit",
+      ts: 1,
+      rateLimit: {
+        status: "allowed_warning",
+        rateLimitType: "seven_day",
+        utilization: 0.89,
+        resetsAt: "2026-07-09T13:00:00Z" as ISOTimestamp,
+      },
+    });
+    vi.advanceTimersByTime(100);
+
+    expect(document.body.textContent).toContain("resets tomorrow at 1:00:00 PM");
+  });
+
   it("does not render empty usage metadata", () => {
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
