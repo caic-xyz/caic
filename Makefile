@@ -162,9 +162,7 @@ lint-fix: $(FRONTEND_STAMP)
 	@./scripts/update_backend_architecture.py
 
 git-hooks:
-	@mkdir -p .git/hooks
-	@cp ./scripts/pre-commit .git/hooks/pre-commit
-	@cp ./scripts/pre-push .git/hooks/pre-push
+	@./scripts/install-git-hooks.sh
 	@git config merge.ours.driver true
 	@echo "✓ Git hooks installed"
 

@@ -15,6 +15,7 @@
     }
   },
   "scripts": {
+    "check:pre-commit": "scripts/check-staged.sh",
     "dev": "vite",
     "build": "vite build",
     "postbuild": "./scripts/compress_dist.py",
@@ -24,7 +25,9 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "hooks:install": "scripts/install-git-hooks.sh",
+    "prepare": "pnpm hooks:install"
   },
   "dependencies": {
     "@material-symbols/svg-400": "^0.47.0",

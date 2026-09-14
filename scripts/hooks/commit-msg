@@ -1,0 +1,22 @@
+#!/bin/bash
+# Rejects commit messages containing a co-author trailer.
+
+set -euo pipefail
+
+if (($# != 1)); then
+  printf '%s\n' 'Usage: commit-msg <message-file>' >&2
+  exit 2
+fi
+
+message_file=$1
+readonly message_file
+
+if [[ ! -f "$message_file" ]]; then
+  printf 'Commit message file does not exist: %s\n' "$message_file" >&2
+  exit 2
+fi
+
+if grep -Eiq '^co-authored-by: ' "$message_file"; then
+  printf '%s\n' 'Commit messages must not contain Co-authored-by trailers.' >&2
+  exit 1
+fi

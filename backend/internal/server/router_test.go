@@ -573,6 +573,10 @@ func initCloneSourceRepo(t *testing.T) string {
 func runServerGit(t *testing.T, dir string, args ...string) {
 	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test-only fixed arguments and temp paths
 	cmd.Dir = dir
+	if cmd.Dir == "" {
+		cmd.Dir = t.TempDir()
+	}
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)

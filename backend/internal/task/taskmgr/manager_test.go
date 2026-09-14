@@ -4532,7 +4532,9 @@ func TestAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	run := func(args ...string) {
-		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...) //nolint:gosec // Test helper receives only controlled arguments.
+		cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // Test helper receives only controlled arguments.
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -4549,7 +4551,7 @@ func TestAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 	run("remote", "add", "origin", dir)
 	run("update-ref", "refs/remotes/origin/main", "main")
 	run("branch", "--set-upstream-to", "origin/main", "local-work")
-	run("branch", "untracked", "main")
+	run("-c", "branch.autoSetupMerge=false", "branch", "untracked", "main")
 	run("update-ref", "refs/remotes/origin/tracked", "main")
 	run("branch", "tracked", "main")
 	run("branch", "--set-upstream-to", "origin/tracked", "tracked")
