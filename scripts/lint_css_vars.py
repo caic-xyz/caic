@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lint CSS variables, module selectors, and raw colors in frontend sources."""
+"""Lint frontend CSS variables, module selectors, raw colors, and color-palette JSON boundaries."""
 
 import argparse
 import re
@@ -41,6 +41,7 @@ _NAMED_COLORS = frozenset(
 _NAMED_COLOR_RE = re.compile(rf"(?<![-\w.])({'|'.join(sorted(_NAMED_COLORS))})(?![-\w])", re.IGNORECASE)
 _PROP_DEF_RE = re.compile(r"--[A-Za-z][\w-]*\s*:[^;{}]*;")
 _THEME_COLOR_META_RE = re.compile(r"<meta\b[^>]*\bname=[\"']theme-color[\"'][^>]*>", re.IGNORECASE)
+_MANIFEST_COLOR_RE = re.compile(r'^\s*"(?:background_color|theme_color)"\s*:\s*"[^"]*",?\s*$', re.MULTILINE)
 
 
 def _strip_comments(
@@ -144,6 +145,17 @@ def check_css_vars(variable_files: list[str], source_files: list[str], token_fil
     return errors
 
 
+def check_unused_shared_css_vars(token_file: str, source_files: list[str]) -> list[tuple[str, int, str]]:
+    """Report shared token definitions that no frontend source references."""
+    token_text = _read_source(token_file)
+    used = {match.group(1) for path in source_files for match in _VAR_USE_RE.finditer(_read_source(path))}
+    return [
+        (token_file, token_text[: match.start()].count("\n") + 1, match.group(1))
+        for match in _VAR_DEF_RE.finditer(token_text)
+        if match.group(1) not in used
+    ]
+
+
 def extract_css_classes(text: str) -> set[str]:
     cleaned = _CSS_GLOBAL_RE.sub("", _strip_comments(text, blank_strings=True))
     return {m.group(1) for m in _CLASS_DEF_RE.finditer(cleaned)}
@@ -236,6 +248,8 @@ def check_hardcoded_colors(files: list[str], *, check_named_colors: bool = True)
         )
         if Path(path).suffix == ".html":
             text = _THEME_COLOR_META_RE.sub(_blank_span, text)
+        if Path(path).name == "manifest.json":
+            text = _MANIFEST_COLOR_RE.sub(_blank_span, text)
         for lineno, line in enumerate(text.splitlines(), start=1):
             values: list[str] = []
             for m in _HEX_COLOR_RE.finditer(line):
@@ -290,11 +304,15 @@ def main() -> int:
     source_files = [f for f in files if f.endswith((".css", ".html", ".ts", ".tsx"))]
 
     raw_color_source_files = [f for f in source_files if f.endswith((".ts", ".tsx"))]
+    color_palette_json_files = [f for f in files if f.endswith("ColorPalette.json")]
+    raw_color_json_files = [f for f in files if f.endswith(".json") and f not in color_palette_json_files]
     try:
         var_errors = check_css_vars(variable_files, source_files, token_file)
+        unused_var_errors = check_unused_shared_css_vars(token_file, source_files)
         selector_errors = check_unused_selectors(files)
         color_errors = check_hardcoded_colors(css_files + html_files)
         color_errors += check_hardcoded_colors(raw_color_source_files, check_named_colors=False)
+        json_color_errors = check_hardcoded_colors(raw_color_json_files, check_named_colors=False)
     except (OSError, UnicodeError) as e:
         print(f"Error reading source file: {e}", file=sys.stderr)
         return 1
@@ -303,6 +321,12 @@ def main() -> int:
     if var_errors:
         print("Error: undefined CSS custom properties:")
         for path, line, var in sorted(var_errors):
+            print(f"  {path}:{line}: {var}")
+        rc = 1
+
+    if unused_var_errors:
+        print("Error: unused shared CSS custom properties:")
+        for path, line, var in sorted(unused_var_errors):
             print(f"  {path}:{line}: {var}")
         rc = 1
 
@@ -315,6 +339,12 @@ def main() -> int:
     if color_errors:
         print(f"Error: hardcoded color values (use var(); shared tokens: {args.token_file}):")
         for path, line, value in sorted(color_errors):
+            print(f"  {path}:{line}: {value}")
+        rc = 1
+
+    if json_color_errors:
+        print("Error: raw JSON colors must live in a *ColorPalette.json data file or manifest theme field:")
+        for path, line, value in sorted(json_color_errors):
             print(f"  {path}:{line}: {value}")
         rc = 1
 

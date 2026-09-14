@@ -53,8 +53,6 @@
   --color-gray: #6c757d;
   --color-gray-hover: #5a6268;
 
-  /* Secondary (matching Android Material secondary) */
-  --color-secondary: #6c757d;
   --color-secondary-container: #f8f9fa;
 
   /* Plan mode and thinking (purple) */
@@ -121,8 +119,7 @@
   --color-border-medium: #ccc;
   --color-border-strong: #444;
 
-  /* Content wash, modal scrim, and media scrim, from lightest to strongest. */
-  --color-overlay-soft: rgba(0, 0, 0, 0.05);
+  /* Modal and media scrims, from lighter to stronger. */
   --color-overlay: rgba(0, 0, 0, 0.5);
   --color-overlay-strong: rgba(0, 0, 0, 0.6);
 
