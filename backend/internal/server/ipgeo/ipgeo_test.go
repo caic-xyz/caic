@@ -5,8 +5,6 @@ package ipgeo
 import (
 	"errors"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"net/netip"
 	"testing"
 	"time"
@@ -41,40 +39,6 @@ func (r countryResolver) Resolve(netip.Addr) string {
 func originOf(c *Checker, ip string) string {
 	origin, _ := c.CheckOrigin(ip)
 	return origin
-}
-
-func TestGetClientIP(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name          string
-		remoteAddr    string
-		xForwardedFor string
-		xRealIP       string
-		want          string
-	}{
-		{name: "remote addr ipv4", remoteAddr: "1.2.3.4:5678", want: "1.2.3.4"},
-		{name: "remote addr ipv6", remoteAddr: "[::1]:8080", want: "::1"},
-		{name: "x-forwarded-for single", xForwardedFor: "1.2.3.4", remoteAddr: "10.0.0.1:80", want: "1.2.3.4"},
-		{name: "x-forwarded-for chain", xForwardedFor: "1.2.3.4, 10.0.0.1", remoteAddr: "10.0.0.2:80", want: "1.2.3.4"},
-		{name: "x-real-ip", xRealIP: "5.6.7.8", remoteAddr: "10.0.0.1:80", want: "5.6.7.8"},
-		{name: "x-forwarded-for beats x-real-ip", xForwardedFor: "1.2.3.4", xRealIP: "5.6.7.8", remoteAddr: "10.0.0.1:80", want: "1.2.3.4"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
-			r.RemoteAddr = tt.remoteAddr
-			if tt.xForwardedFor != "" {
-				r.Header.Set("X-Forwarded-For", tt.xForwardedFor)
-			}
-			if tt.xRealIP != "" {
-				r.Header.Set("X-Real-IP", tt.xRealIP)
-			}
-			if got := GetClientIP(r); got != tt.want {
-				t.Errorf("GetClientIP() = %q, want %q", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestCheckOrigin(t *testing.T) {

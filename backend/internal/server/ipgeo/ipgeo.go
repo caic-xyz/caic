@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"net/netip"
 	"path/filepath"
 	"slices"
@@ -16,34 +15,6 @@ import (
 
 	"github.com/oschwald/maxminddb-golang/v2"
 )
-
-// GetClientIP extracts the real client IP from a request, checking
-// X-Forwarded-For and X-Real-IP headers for proxied requests.
-func GetClientIP(r *http.Request) string {
-	// X-Forwarded-For may contain "client, proxy1, proxy2" — use the leftmost.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		first, _, found := strings.Cut(xff, ",")
-		if found {
-			return strings.TrimSpace(first)
-		}
-		return strings.TrimSpace(xff)
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	// RemoteAddr: strip port, handle IPv6 [::1]:port form.
-	addr := r.RemoteAddr
-	if strings.HasPrefix(addr, "[") {
-		if host, _, found := strings.Cut(addr, "]:"); found {
-			return host[1:]
-		}
-		return strings.Trim(addr, "[]")
-	}
-	if host, _, found := strings.Cut(addr, ":"); found {
-		return host
-	}
-	return addr
-}
 
 type originResolver interface {
 	Resolve(addr netip.Addr) string

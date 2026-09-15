@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -2686,10 +2687,47 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("blocked origin error includes IP and category", func(t *testing.T) {
+	t.Run("untrusted peer cannot spoof allowed origin", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name   string
+			header string
+		}{
+			{name: "X-Forwarded-For", header: "X-Forwarded-For"},
+			{name: "X-Real-IP", header: "X-Real-IP"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				s := newTestRouter(t, nil)
+				checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "local", "", "")
+				if err != nil {
+					t.Fatalf("ipgeo.NewChecker: %v", err)
+				}
+				s.ipgeoChecker = checker
+				h, err := s.buildHandler()
+				if err != nil {
+					t.Fatalf("buildHandler() error = %v", err)
+				}
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/config", http.NoBody)
+				req.RemoteAddr = "198.51.100.1:1234"
+				req.Header.Set(tc.header, "127.0.0.1")
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				if w.Code != http.StatusForbidden {
+					t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+				}
+				if got, want := strings.TrimSpace(w.Body.String()), "forbidden: origin 198.51.100.1 () not allowed"; got != want {
+					t.Fatalf("body = %q, want %q", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("trusted proxy forwards allowed origin", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "tailscale", "", "")
+		s.trustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+		checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "local", "", "")
 		if err != nil {
 			t.Fatalf("ipgeo.NewChecker: %v", err)
 		}
@@ -2699,14 +2737,12 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/config", http.NoBody)
+		req.RemoteAddr = "192.0.2.10:1234"
 		req.Header.Set("X-Forwarded-For", "127.0.0.1")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
-		if w.Code != http.StatusForbidden {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
-		}
-		if got, want := strings.TrimSpace(w.Body.String()), "forbidden: origin 127.0.0.1 (local) not allowed"; got != want {
-			t.Fatalf("body = %q, want %q", got, want)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 		}
 	})
 

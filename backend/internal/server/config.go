@@ -176,7 +176,7 @@ type AuthConfig struct {
 	// "auto" locks the hostname from the first FQDN request.
 	ExternalURL string
 	// TrustedProxies contains direct reverse-proxy address prefixes whose
-	// Forwarded and X-Forwarded-* origin headers may be accepted.
+	// Forwarded and X-Forwarded-* origin and client-IP headers may be accepted.
 	TrustedProxies []string
 }
 

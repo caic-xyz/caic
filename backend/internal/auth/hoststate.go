@@ -102,7 +102,7 @@ func (s *HostState) effectiveHostAndScheme(r *http.Request) (authority, scheme s
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	if !s.trustsPeer(r.RemoteAddr) {
+	if !TrustsPeer(r.RemoteAddr, s.trustedProxies) {
 		return authority, scheme, true
 	}
 	host, proto, present, valid := forwardedOrigin(r.Header)
@@ -115,16 +115,22 @@ func (s *HostState) effectiveHostAndScheme(r *http.Request) (authority, scheme s
 	return host, proto, true
 }
 
-func (s *HostState) trustsPeer(remoteAddr string) bool {
-	if len(s.trustedProxies) == 0 {
+// TrustsPeer reports whether remoteAddr is the address of a configured trusted
+// proxy. A trusted peer must use the host:port form supplied by net/http.
+func TrustsPeer(remoteAddr string, trustedProxies []netip.Prefix) bool {
+	if len(trustedProxies) == 0 {
 		return false
 	}
 	peer, err := netip.ParseAddrPort(remoteAddr)
 	if err != nil {
 		return false
 	}
-	addr := peer.Addr()
-	for _, prefix := range s.trustedProxies {
+	return TrustsAddress(peer.Addr(), trustedProxies)
+}
+
+// TrustsAddress reports whether addr belongs to a configured trusted proxy.
+func TrustsAddress(addr netip.Addr, trustedProxies []netip.Prefix) bool {
+	for _, prefix := range trustedProxies {
 		if prefix.Contains(addr) {
 			return true
 		}

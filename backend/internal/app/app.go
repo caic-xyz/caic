@@ -324,6 +324,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		TaskMgr:                    taskMgr,
 		Provider:                   provider,
 		IPGeoChecker:               ipgeoChecker,
+		TrustedProxies:             trustedProxies,
 		Bot:                        botService,
 		CIService:                  ciService,
 		TaskClient:                 botClient,

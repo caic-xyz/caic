@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
 	"time"
 
 	"github.com/maruel/genai"
@@ -73,7 +75,8 @@ type Router struct {
 	mcpDisabled bool
 
 	// IP geolocation.
-	ipgeoChecker *ipgeo.Checker
+	ipgeoChecker   *ipgeo.Checker
+	trustedProxies []netip.Prefix
 
 	// Profiling (opt-in).
 	pprof bool
@@ -264,7 +267,7 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	}
 	inner = r.ipgeoMiddleware(inner)
 	inner = httplog.Handler{Handler: inner, Logger: r.log, Attrs: r.httpLogAttrs}
-	inner = httpLogContextMiddleware(r.log, inner)
+	inner = httpLogContextMiddleware(r.log, r.trustedProxies, inner)
 	return inner, nil
 }
 
@@ -296,9 +299,9 @@ func (r *Router) ipgeoMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func httpLogContextMiddleware(log *slog.Logger, next http.Handler) http.Handler {
+func httpLogContextMiddleware(log *slog.Logger, trustedProxies []netip.Prefix, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logCtx := &httpLogContext{clientIP: ipgeo.GetClientIP(r)}
+		logCtx := &httpLogContext{clientIP: clientIP(r, trustedProxies)}
 		ctx := context.WithValue(r.Context(), httpLogContextKey{}, logCtx)
 		r = r.WithContext(context.WithValue(ctx, httpLoggerKey{}, log))
 		next.ServeHTTP(w, r)
@@ -316,7 +319,7 @@ func (r *Router) httpLogAttrs(req *http.Request) []slog.Attr {
 func httpLogContextFromRequest(r *http.Request) *httpLogContext {
 	logCtx, _ := r.Context().Value(httpLogContextKey{}).(*httpLogContext)
 	if logCtx == nil {
-		return &httpLogContext{clientIP: ipgeo.GetClientIP(r)}
+		return &httpLogContext{clientIP: clientIP(r, nil)}
 	}
 	return logCtx
 }
@@ -379,6 +382,7 @@ type Dependencies struct {
 	TaskMgr                    *taskmgr.Manager
 	Provider                   genai.Provider
 	IPGeoChecker               *ipgeo.Checker
+	TrustedProxies             []netip.Prefix
 
 	// App-owned automation services, routed to by HTTP handlers and webhooks.
 	Bot        *bot.Bot
@@ -520,6 +524,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		hostState:        d.HostState,
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
+		trustedProxies:   slices.Clone(d.TrustedProxies),
 	}
 	svc.log = s.log.With("handler", "tasks")
 
