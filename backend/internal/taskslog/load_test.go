@@ -1319,6 +1319,76 @@ func TestLoadedTask(t *testing.T) {
 		}
 	})
 
+	t.Run("SemanticLoadPreservesEmptyV2NativeRecords", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV2),
+			Prompt:      "empty native records",
+			Harness:     harness.Codex,
+		})
+		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
+		path := writePhysicalTestLog(t, false, meta, native, native)
+		loaded := &LoadedTask{path: path}
+		err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(loaded.Timeline) != 0 || len(loaded.RelayRecords) != 2 {
+			t.Fatalf("loaded timeline = %#v, relay records = %#v", loaded.Timeline, loaded.RelayRecords)
+		}
+		for i, boundary := range loaded.RelayRecords {
+			wantEnd := int64((i + 1) * (len(native) + 1))
+			if boundary.RelayEnd != wantEnd || boundary.MessageEnd != 0 {
+				t.Fatalf("relay boundary %d = %#v, want offset %d at message end 0", i, boundary, wantEnd)
+			}
+		}
+		if loaded.RelayRecords[0].RelayEnd >= loaded.RelayRecords[1].RelayEnd {
+			t.Fatalf("identical physical record offsets = %d, %d; want increasing", loaded.RelayRecords[0].RelayEnd, loaded.RelayRecords[1].RelayEnd)
+		}
+	})
+
+	t.Run("SemanticLoadRetainsOnlyMarkedActiveRelayGeneration", func(t *testing.T) {
+		t.Parallel()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV2),
+			Prompt:      "generation boundaries",
+			Harness:     harness.Codex,
+		})
+		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
+		path := writePhysicalTestLog(t, false, meta,
+			`{"t":"relay_generation","generation":"old"}`,
+			native,
+			`{"t":"context_cleared"}`,
+			`{"t":"relay_generation","generation":"current"}`,
+			native,
+			native,
+		)
+		loaded := &LoadedTask{path: path}
+		err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.RelayGeneration != "current" || len(loaded.RelayRecords) != 3 {
+			t.Fatalf("active relay records = %#v, want generation marker plus 2 native records", loaded.RelayRecords)
+		}
+		markerLen := len(`{"t":"relay_generation","generation":"current"}`) + 1
+		for i, boundary := range loaded.RelayRecords {
+			wantEnd := int64(markerLen)
+			if i > 0 {
+				wantEnd += int64(i * (len(native) + 1))
+			}
+			if boundary.Generation != "current" || boundary.RelayEnd != wantEnd || boundary.Fingerprint == ([32]byte{}) {
+				t.Fatalf("active relay boundary %d = %#v, want generation current at %d", i, boundary, wantEnd)
+			}
+		}
+	})
+
 	t.Run("Primary", func(t *testing.T) {
 		t.Parallel()
 		t.Run("NoRepos", func(t *testing.T) {

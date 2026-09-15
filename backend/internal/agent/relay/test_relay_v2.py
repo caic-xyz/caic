@@ -729,6 +729,10 @@ def test_real_relay_output_superset_no_stdin_echo_and_attach_offset() -> None:
         )
         assert proc.stdin is not None
         assert proc.stdout is not None
+        generation = proc.stdout.readline()
+        generation_record = json.loads(generation)
+        assert generation_record["t"] == "relay_generation"
+        assert generation_record["generation"]
         proc.stdin.write(b'{"source":"stdin"}\n')
         proc.stdin.flush()
         live = proc.stdout.readline()
@@ -740,16 +744,17 @@ def test_real_relay_output_superset_no_stdin_echo_and_attach_offset() -> None:
             try:
                 with open(output_path, "rb") as output_file:
                     lines = output_file.readlines()
-                if len(lines) >= 2:
+                if len(lines) >= 3:
                     break
             except FileNotFoundError:
                 pass
             time.sleep(0.05)
-        assert len(lines) == 2, lines
-        assert live == lines[1]
+        assert len(lines) == 3, lines
+        assert lines[0] == generation
+        assert live == lines[2]
         assert lines[0] != live
-        assert json.loads(lines[0])["msg"] == {"source": "stdin"}
-        assert json.loads(lines[1])["msg"] == {"source": "stdout"}
+        assert json.loads(lines[1])["msg"] == {"source": "stdin"}
+        assert json.loads(lines[2])["msg"] == {"source": "stdout"}
 
         # Plain EOF preserves the daemon and agent, matching v1 SSH-drop semantics.
         proc.stdin.close()
@@ -771,9 +776,9 @@ def test_real_relay_output_superset_no_stdin_echo_and_attach_offset() -> None:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         conn.settimeout(5)
         conn.connect(sock_path)
-        conn.sendall(json.dumps({"offset": len(lines[0])}).encode() + b"\n")
+        conn.sendall(json.dumps({"offset": len(lines[0]) + len(lines[1])}).encode() + b"\n")
         replay = conn.recv(65536)
-        assert replay.startswith(lines[1]), (replay, lines)
+        assert replay.startswith(lines[2]), (replay, lines)
         conn.sendall(b"\x00\n")
         conn.close()
         _wait_for_daemon_exit(pid_path, timeout=10)
@@ -820,9 +825,10 @@ def test_exit_and_stripped_environment_controls() -> None:
             persisted = output_file.read()
         assert stdout == persisted
         records = _decode_records(persisted)
-        assert [record["t"] for record in records] == ["agent", "stripped_env", "exit"]
-        assert records[1]["variables"] == {"CAIC_RELAY_TEST_SECRET": ""}
-        assert records[2]["exit_code"] == 0
+        assert [record["t"] for record in records] == ["relay_generation", "agent", "stripped_env", "exit"]
+        assert records[0]["generation"]
+        assert records[2]["variables"] == {"CAIC_RELAY_TEST_SECRET": ""}
+        assert records[3]["exit_code"] == 0
         assert all("type" not in record for record in records)
         assert b"not-persisted" not in persisted
     finally:

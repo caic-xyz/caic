@@ -77,8 +77,9 @@ func runPiRelayHelper() {
 		os.Exit(1)
 	}
 	failedStartup := len(count) == 0
+	fmt.Printf(`{"t":"relay_generation","generation":"generation-%d"}`+"\n", len(count)+1)
 	if failedStartup {
-		fmt.Println(`{"type":"caic_exit","exit_code":1,"error":"extension load failure"}`)
+		fmt.Println(`{"t":"exit","exit_code":1,"error":"extension load failure"}`)
 	}
 
 	s := bufio.NewScanner(os.Stdin)
@@ -98,9 +99,9 @@ func runPiRelayHelper() {
 		}
 		switch cmd.Type {
 		case "set_model":
-			fmt.Println(`{"type":"response","command":"set_model","success":true,"data":{}}`)
+			fmt.Println(`{"t":"agent","ts":1.000,"msg":{"type":"response","command":"set_model","success":true,"data":{}}}`)
 		case "get_state":
-			fmt.Println(`{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","model":{"provider":"openai-codex","id":"gpt-5.6-terra"},"thinkingLevel":"high"}}`)
+			fmt.Println(`{"t":"agent","ts":2.000,"msg":{"type":"response","command":"get_state","success":true,"data":{"sessionId":"ses-1","model":{"provider":"openai-codex","id":"gpt-5.6-terra"},"thinkingLevel":"high"}}}`)
 		}
 	}
 	if err := s.Err(); err != nil {
@@ -253,7 +254,7 @@ func TestBackendStart(t *testing.T) {
 	t.Setenv("PI_SSH_HELPER_DIR", dir)
 
 	msgs := make(chan agent.TimedMessage, 1)
-	log := &agenttest.LogSink{Version: agent.LogVersionV1}
+	log := &agenttest.LogSink{Version: agent.LogVersionV2}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
 		Logger: slog.New(slog.DiscardHandler),
 		Target: runtime.ConnectionTarget{SSHHost: "task"},
@@ -268,8 +269,13 @@ func TestBackendStart(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {
 		t.Fatalf("pi update was not run: %v", err)
 	}
-	if !strings.Contains(log.String(), `"type":"caic_exit"`) {
+	if !strings.Contains(log.String(), `"t":"exit"`) {
 		t.Fatalf("startup log = %q, want failed launch diagnostics", log.String())
+	}
+	if strings.Count(log.String(), `"t":"relay_generation"`) != 2 ||
+		!strings.Contains(log.String(), `"generation":"generation-1"`) ||
+		!strings.Contains(log.String(), `"generation":"generation-2"`) {
+		t.Fatalf("startup log = %q, want one distinct generation per Pi relay launch", log.String())
 	}
 	for _, want := range []string{
 		"Pi startup failed; running pi update --all ...",

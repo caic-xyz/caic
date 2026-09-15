@@ -148,7 +148,7 @@ _MAX_ENCODED_RECORD_LEN = 32 << 20
 _MAX_UNIX_SECONDS = (1 << 63) - 1 - 62_135_596_800
 _DIAGNOSTIC_PREVIEW_BYTES = 1024
 _JSON_WHITESPACE = b" \t\r\n"
-_RELAY_CONTROL_TOKENS = frozenset(("diff_stat", "exit", "stripped_env", "mcp_request"))
+_RELAY_CONTROL_TOKENS = frozenset(("diff_stat", "exit", "stripped_env", "mcp_request", "relay_generation"))
 
 
 def _observe_unix_ns():
@@ -834,6 +834,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
         redacted = {k: "" for k in pending_env}
         env_event = _encode_control("stripped_env", {"variables": redacted})
     d = _Daemon(None, output_file, work_dir, log_stdin, env_event, cmd_args)
+    generation_event = _encode_control("relay_generation", {"generation": str(uuid.uuid4())})
+    d.publish_records(generation_event, to_client=False)
     threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
     caic_mcp_srv = None
     if caic_mcp:

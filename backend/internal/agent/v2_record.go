@@ -34,6 +34,7 @@ const (
 	logRecordText               logRecordType = "text"
 	logRecordUserInput          logRecordType = "user_input"
 	logRecordMCPRequest         logRecordType = "mcp_request"
+	logRecordRelayGeneration    logRecordType = "relay_generation"
 )
 
 func (t logRecordType) controlKind() (logControlKind, bool) {
@@ -68,9 +69,16 @@ func (t logRecordType) controlKind() (logControlKind, bool) {
 		return logControlUserInput, true
 	case logRecordMCPRequest:
 		return logControlMCPRequest, true
+	case logRecordRelayGeneration:
+		return logControlRelayGeneration, true
 	default:
 		return 0, false
 	}
+}
+
+func (t logRecordType) relayOwned() bool {
+	return t == logRecordAgent || t == logRecordDiffStat || t == logRecordExit ||
+		t == logRecordStrippedEnv || t == logRecordMCPRequest || t == logRecordRelayGeneration
 }
 
 const (
@@ -103,7 +111,7 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	}
 	if bytes.HasPrefix(line, []byte(v2AgentRecordPrefix)) {
 		msgs, err := parseV2AgentRecord(p, line)
-		return ParsedRecord{Messages: msgs}, err
+		return ParsedRecord{Messages: msgs, RelayRecord: true}, err
 	}
 
 	// Controls are small and retain ordinary decoding. Canonical agent records
@@ -125,7 +133,7 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	if !ok {
 		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: unknown top-level t %q", token)
 	}
-	record := ParsedRecord{Control: true}
+	record := ParsedRecord{RelayRecord: token.relayOwned(), Control: true}
 	if err := validateV2ControlFields(kind, token, fields); err != nil {
 		return record, err
 	}
@@ -135,6 +143,14 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 	}
 	msgs, err = p.applyMessageState(msgs)
 	record.Messages = wrapParsedMessages(msgs, time.Time{})
+	if token == logRecordRelayGeneration && len(msgs) == 1 {
+		generation, ok := msgs[0].(*RelayGenerationMessage)
+		if !ok {
+			return record, errors.New("corrupt v2 relay generation: unexpected message type")
+		}
+		record.RelayGeneration = generation.Generation
+		record.Messages = nil
+	}
 	return record, err
 }
 
@@ -262,6 +278,8 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 		}
 	case logControlMCPRequest:
 		return field == "id" || field == "method" || field == "name" || field == "arguments"
+	case logControlRelayGeneration:
+		return field == "generation"
 	case logControlLegacyInit:
 		return false
 	}

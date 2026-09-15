@@ -41,6 +41,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -422,8 +423,10 @@ type LogRecordParser struct {
 // ParsedRecord is a parser-owned semantic task-log record. Control reports
 // whether the version-specific discriminator identifies a caic-owned control.
 type ParsedRecord struct {
-	Messages []TimedMessage
-	Control  bool
+	Messages        []TimedMessage
+	RelayRecord     bool
+	Control         bool
+	RelayGeneration string
 }
 
 // RelayRecordReader reads one physical relay record at a time. Agent payloads
@@ -547,6 +550,7 @@ const (
 	logControlText
 	logControlUserInput
 	logControlMCPRequest
+	logControlRelayGeneration
 )
 
 var v1LogControlKinds = map[string]logControlKind{
@@ -699,6 +703,16 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		if m.ID == "" || (m.Method != mcp.MethodToolsList && (m.Method != mcp.MethodToolsCall || m.Name == "")) {
 			return nil, fmt.Errorf("decode %s: invalid MCP request", token)
 		}
+		return []Message{&m}, nil
+	case logControlRelayGeneration:
+		var m RelayGenerationMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		if m.Generation == "" {
+			return nil, fmt.Errorf("decode %s: generation is empty", token)
+		}
+		m.MessageType = messageTypeRelayGeneration
 		return []Message{&m}, nil
 	default:
 		return nil, fmt.Errorf("decode %s: unknown control kind %d", token, kind)
@@ -1149,52 +1163,97 @@ func RelayOutputSize(ctx context.Context, container string) (int64, error) {
 
 // ReadRelayTail reads only the tail of the relay output.jsonl from the
 // container and returns the parsed messages plus the total file size (for
-// RelayOffset). It streams the SSH output directly, so memory usage is O(1)
-// and no multi-GB transfer occurs during runtime import.
-func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParser, maxBytes int64) (msgs []TimedMessage, size int64, err error) {
+// RelayOffset). Memory and transfer are bounded by maxBytes; validated v2
+// records are retained so adoption can persist output produced while offline.
+func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParser, maxBytes int64) (timeline ParsedTimeline, size int64, err error) {
+	generation, err := relayOutputGeneration(ctx, container)
+	if err != nil {
+		return ParsedTimeline{}, 0, err
+	}
 	size, err = RelayOutputSize(ctx, container)
 	if err != nil {
-		return nil, 0, err
+		return ParsedTimeline{}, 0, err
 	}
 	cmd, start := relaySnapshotCommand(ctx, container, maxBytes, size)
 	skipFirst, err := relayTailNeedsLeadingSkip(ctx, container, start)
 	if err != nil {
-		return nil, start, err
+		return ParsedTimeline{}, start, err
 	}
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, start, fmt.Errorf("relay stdout pipe: %w", err)
+		return ParsedTimeline{}, start, fmt.Errorf("relay stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, start, fmt.Errorf("start relay read: %w", err)
+		return ParsedTimeline{}, start, fmt.Errorf("start relay read: %w", err)
 	}
-	msgs, offset, readErr := readRelayTailRecords(pipe, parser, start, skipFirst, container)
+	timeline, offset, readErr := readRelayTailRecords(pipe, parser, start, skipFirst, container, generation)
 	if readErr != nil {
 		_ = cmd.Wait()
-		return msgs, offset, readErr
+		return timeline, offset, readErr
 	}
 	if err := cmd.Wait(); err != nil {
-		return msgs, offset, fmt.Errorf("relay read: %w", err)
+		return timeline, offset, fmt.Errorf("relay read: %w", err)
 	}
-	return msgs, offset, nil
+	currentGeneration, err := relayOutputGeneration(ctx, container)
+	if err != nil {
+		return timeline, offset, err
+	}
+	if currentGeneration != generation {
+		return ParsedTimeline{}, 0, errors.New("relay output generation changed during snapshot")
+	}
+	return timeline, offset, nil
+}
+
+func relayOutputGeneration(ctx context.Context, container string) (string, error) {
+	out, err := relayGenerationCommand(ctx, container).Output()
+	if err != nil {
+		return "", fmt.Errorf("read relay generation: %w", err)
+	}
+	newline := bytes.IndexByte(out, '\n')
+	if newline < 0 {
+		return "", nil
+	}
+	out = out[:newline]
+	var record struct {
+		Type       string `json:"t"`
+		Generation string `json:"generation"`
+	}
+	if !json.Valid(out) {
+		return "", nil
+	}
+	if err := json.Unmarshal(out, &record); err != nil {
+		return "", fmt.Errorf("decode relay generation: %w", err)
+	}
+	if record.Type != string(logRecordRelayGeneration) {
+		return "", nil
+	}
+	if record.Generation == "" {
+		return "", errors.New("relay generation record is empty")
+	}
+	return record.Generation, nil
+}
+
+func relayGenerationCommand(ctx context.Context, container string) *exec.Cmd {
+	return exec.CommandContext(ctx, "ssh", container, "head", "-c", "4096", RelayOutputPath) //nolint:gosec // container is not user-controlled.
 }
 
 // readRelayTailRecords parses one stat-bounded relay snapshot and returns the
 // exact physical offset consumed, including a skipped partial tail record.
-func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src string) (msgs []TimedMessage, offset int64, err error) {
+func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src, generation string) (timeline ParsedTimeline, offset int64, err error) {
 	reader := bufio.NewReaderSize(r, 1<<20)
 	offset = start
+	currentGeneration := generation
 	for {
 		record, readErr := readNDJSONRecord(reader)
 		offset += int64(len(record))
 		if errors.Is(readErr, io.EOF) {
-			return msgs, offset, nil
+			return timeline, offset, nil
 		}
 		if errors.Is(readErr, io.ErrUnexpectedEOF) {
-			return msgs, offset - int64(len(record)), nil
+			return timeline, offset - int64(len(record)), nil
 		}
 		if readErr != nil {
-			return msgs, offset, fmt.Errorf("read relay record: %w", readErr)
+			return timeline, offset, fmt.Errorf("read relay record: %w", readErr)
 		}
 		line := record[:len(record)-1]
 		if skipFirst {
@@ -1207,12 +1266,27 @@ func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		parsed, parseErr := parser.ParseRecord(line)
 		if parseErr != nil {
 			if parser.version == LogVersionV2 || parsed.Control {
-				return msgs, offset, fmt.Errorf("parse relay record: %w", parseErr)
+				return timeline, offset, fmt.Errorf("parse relay record: %w", parseErr)
 			}
 			slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
 			continue
 		}
-		msgs = append(msgs, parsed.Messages...)
+		if parser.version == LogVersionV2 {
+			timeline.Encoded = append(timeline.Encoded, record...)
+		}
+		if parsed.RelayGeneration != "" {
+			currentGeneration = parsed.RelayGeneration
+		}
+		timeline.Messages = append(timeline.Messages, parsed.Messages...)
+		if parsed.RelayRecord {
+			timeline.RelayRecords = append(timeline.RelayRecords, RelayRecordBoundary{
+				Generation:  currentGeneration,
+				RelayEnd:    offset,
+				MessageEnd:  len(timeline.Messages),
+				ByteEnd:     len(timeline.Encoded),
+				Fingerprint: sha256.Sum256(line),
+			})
+		}
 	}
 }
 

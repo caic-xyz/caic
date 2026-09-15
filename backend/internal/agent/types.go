@@ -34,6 +34,7 @@ const (
 	messageTypePendingUserAction     = "caic_pending_user_action"
 	messageTypeProvisioningLogRecord = "caic_log"
 	messageTypeMCPRequest            = "caic_mcp_request"
+	messageTypeRelayGeneration       = "caic_relay_generation"
 )
 
 // SystemSubtypeModelRerouted identifies a system message reporting that the
@@ -73,6 +74,25 @@ type Message interface {
 type TimedMessage struct {
 	Message      Message
 	ProducerTime time.Time
+}
+
+// RelayRecordBoundary identifies one relay-owned physical record by its end
+// offset within a relay generation and the following semantic timeline position.
+type RelayRecordBoundary struct {
+	Generation  string
+	RelayEnd    int64
+	MessageEnd  int
+	ByteEnd     int
+	Fingerprint [32]byte
+}
+
+// ParsedTimeline contains semantic messages and adoption-only relay record
+// boundaries from one ordered physical-record scan. Encoded holds validated
+// relay bytes when the scan came directly from a bounded relay snapshot.
+type ParsedTimeline struct {
+	Messages     []TimedMessage
+	RelayRecords []RelayRecordBoundary
+	Encoded      []byte
 }
 
 // NativeDurationMessage is implemented by messages that carry an authoritative
@@ -866,6 +886,16 @@ type MetaSessionMessage struct {
 // Type implements Message.
 func (m *MetaSessionMessage) Type() string { return messageTypeSession }
 
+// RelayGenerationMessage marks the durable-log boundary corresponding to a
+// newly created relay output file. It is excluded from the visible timeline.
+type RelayGenerationMessage struct {
+	MessageType string `json:"type"`
+	Generation  string `json:"generation"`
+}
+
+// Type implements Message.
+func (m *RelayGenerationMessage) Type() string { return messageTypeRelayGeneration }
+
 // LogSink appends complete task-log records through the task-owned physical
 // log authority. Native records are already encoded physical records; semantic
 // messages are backend controls encoded according to the owned log version.
@@ -1048,6 +1078,8 @@ func v2ControlToken(m Message) (logRecordType, error) {
 		return logRecordText, nil
 	case messageTypeUserInput:
 		return logRecordUserInput, nil
+	case messageTypeRelayGeneration:
+		return logRecordRelayGeneration, nil
 	case messageTypeSystem:
 		if m, ok := m.(*SystemMessage); ok && m.Subtype == messageSubtypeContextCleared {
 			return logRecordContextCleared, nil

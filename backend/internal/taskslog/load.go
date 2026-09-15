@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,10 +48,16 @@ type logAuthority struct {
 // task-log harness. It must not retain or share parser state between scans.
 type NativeParserResolver func(harness.Name) (func([]byte) ([]agent.Message, error), error)
 
-// semanticRecord maps one non-empty physical record to its parsed messages.
+// semanticRecord maps one physical record to its parsed messages and optional
+// harness-native identity.
 type semanticRecord struct {
-	end     int
-	control bool
+	end              int
+	control          bool
+	relayRecord      bool
+	relayEnd         int64
+	relayGeneration  string
+	generationMarker bool
+	fingerprint      [32]byte
 }
 
 type semanticLog struct {
@@ -833,44 +840,46 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 // Its JSON form is durable header-cache metadata, separate from HTTP DTOs.
 // Preserve established disk keys such as model and effort across Go renames.
 type LoadedTask struct {
-	TaskID            string               `json:"task_id"` // Task ID parsed from log filename; empty if unparseable.
-	Prompt            string               `json:"prompt"`
-	Title             string               `json:"title"`
-	Repos             []RepoMount          `json:"repos"` // GitRoot will be empty for purged tasks loaded from logs.
-	LogVersion        agent.LogVersion     `json:"log_version"`
-	Harness           harness.Name         `json:"harness"`
-	StartedAt         time.Time            `json:"started_at"`
-	LastStateUpdateAt time.Time            `json:"last_state_update_at"` // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
-	State             State                `json:"state"`
-	ForgeIssue        int                  `json:"forge_issue"` // Originating issue number for bot comment callbacks.
-	OwnerID           string               `json:"owner_id"`
-	ForkedFromTaskID  string               `json:"forked_from_task_id"`
-	ParentTaskID      string               `json:"parent_task_id"`
-	CaicMCPEnabled    bool                 `json:"caic_mcp_enabled"`
-	ForgeOwner        string               `json:"forge_owner"`
-	ForgeRepo         string               `json:"forge_repo"`
-	ForgePR           int                  `json:"forge_pr"` // PR number created during the task; 0 if none.
-	Tailscale         bool                 `json:"tailscale"`
-	USB               bool                 `json:"usb"`
-	Display           bool                 `json:"display"`
-	Sudo              bool                 `json:"sudo"`
-	GitHubToken       bool                 `json:"github_token"`
-	RuntimeName       runtime.Name         `json:"runtime_name"`
-	BaseImage         string               `json:"base_image"`
-	ContainerPlatform string               `json:"container_platform"`
-	MaxCPUs           int                  `json:"max_cpus"`
-	CacheMounts       []runtime.CacheMount `json:"cache_mounts"`
-	Mounts            []runtime.Mount      `json:"mounts"`
-	RequestedModel    string               `json:"model"`           // User-requested model.
-	RequestedEffort   string               `json:"effort"`          // User-requested reasoning effort.
-	ReportedModel     string               `json:"reported_model"`  // Model resolved by the harness.
-	ReportedEffort    string               `json:"reported_effort"` // Reasoning effort resolved by the harness.
-	SessionID         string               `json:"session_id"`      // Backend-native session/thread ID required to resume stateful harnesses.
-	AgentVersion      string               `json:"agent_version"`
-	LogSize           int64                `json:"log_size"`     // Byte size of the log file on disk; populated by Store.Load.
-	DiffCreated       bool                 `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
-	LastTrailer       *Result              `json:"result"`       // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
-	Timeline          []agent.TimedMessage `json:"-"`
+	TaskID            string                      `json:"task_id"` // Task ID parsed from log filename; empty if unparseable.
+	Prompt            string                      `json:"prompt"`
+	Title             string                      `json:"title"`
+	Repos             []RepoMount                 `json:"repos"` // GitRoot will be empty for purged tasks loaded from logs.
+	LogVersion        agent.LogVersion            `json:"log_version"`
+	Harness           harness.Name                `json:"harness"`
+	StartedAt         time.Time                   `json:"started_at"`
+	LastStateUpdateAt time.Time                   `json:"last_state_update_at"` // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
+	State             State                       `json:"state"`
+	ForgeIssue        int                         `json:"forge_issue"` // Originating issue number for bot comment callbacks.
+	OwnerID           string                      `json:"owner_id"`
+	ForkedFromTaskID  string                      `json:"forked_from_task_id"`
+	ParentTaskID      string                      `json:"parent_task_id"`
+	CaicMCPEnabled    bool                        `json:"caic_mcp_enabled"`
+	ForgeOwner        string                      `json:"forge_owner"`
+	ForgeRepo         string                      `json:"forge_repo"`
+	ForgePR           int                         `json:"forge_pr"` // PR number created during the task; 0 if none.
+	Tailscale         bool                        `json:"tailscale"`
+	USB               bool                        `json:"usb"`
+	Display           bool                        `json:"display"`
+	Sudo              bool                        `json:"sudo"`
+	GitHubToken       bool                        `json:"github_token"`
+	RuntimeName       runtime.Name                `json:"runtime_name"`
+	BaseImage         string                      `json:"base_image"`
+	ContainerPlatform string                      `json:"container_platform"`
+	MaxCPUs           int                         `json:"max_cpus"`
+	CacheMounts       []runtime.CacheMount        `json:"cache_mounts"`
+	Mounts            []runtime.Mount             `json:"mounts"`
+	RequestedModel    string                      `json:"model"`           // User-requested model.
+	RequestedEffort   string                      `json:"effort"`          // User-requested reasoning effort.
+	ReportedModel     string                      `json:"reported_model"`  // Model resolved by the harness.
+	ReportedEffort    string                      `json:"reported_effort"` // Reasoning effort resolved by the harness.
+	SessionID         string                      `json:"session_id"`      // Backend-native session/thread ID required to resume stateful harnesses.
+	AgentVersion      string                      `json:"agent_version"`
+	LogSize           int64                       `json:"log_size"`     // Byte size of the log file on disk; populated by Store.Load.
+	DiffCreated       bool                        `json:"diff_created"` // True if any non-empty diff was recorded in the log; sticky across the run.
+	LastTrailer       *Result                     `json:"result"`       // Completion result parsed from the log trailer at load time; a snapshot of the last recorded run, never live state.
+	Timeline          []agent.TimedMessage        `json:"-"`
+	RelayRecords      []agent.RelayRecordBoundary `json:"-"`
+	RelayGeneration   string                      `json:"-"`
 
 	path           string               // Absolute path for lazy message loading via LoadMessages.
 	resolver       NativeParserResolver // Fresh parser factory supplied by the task owner.
@@ -1127,18 +1136,44 @@ func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticL
 			return fmt.Errorf("construct log parser: %w", err)
 		}
 		out = &semanticLog{authority: scanner.authority}
-		appendRecord := func(record agent.ParsedRecord) {
-			if len(record.Messages) == 0 {
+		var relayEnd int64
+		var relayGeneration string
+		appendRecord := func(record agent.ParsedRecord, encoded []byte) {
+			if record.RelayGeneration != "" {
+				relayGeneration = record.RelayGeneration
+				relayEnd = int64(len(encoded) + 1)
+				out.records = append(out.records, semanticRecord{
+					end:              len(out.messages),
+					control:          true,
+					relayRecord:      true,
+					relayEnd:         relayEnd,
+					relayGeneration:  relayGeneration,
+					generationMarker: true,
+					fingerprint:      sha256.Sum256(encoded),
+				})
+				return
+			}
+			if record.RelayRecord {
+				relayEnd += int64(len(encoded) + 1)
+			}
+			if len(record.Messages) == 0 && !record.RelayRecord {
 				return
 			}
 			out.messages = append(out.messages, record.Messages...)
-			out.records = append(out.records, semanticRecord{end: len(out.messages), control: record.Control})
+			out.records = append(out.records, semanticRecord{
+				end:             len(out.messages),
+				control:         record.Control,
+				relayRecord:     record.RelayRecord,
+				relayEnd:        relayEnd,
+				relayGeneration: relayGeneration,
+				fingerprint:     sha256.Sum256(encoded),
+			})
 		}
 		record, err := parser.ParseRecord(scanner.headerRaw)
 		if err != nil {
 			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 		}
-		appendRecord(record)
+		appendRecord(record, scanner.headerRaw)
 		for scanner.Scan() {
 			record, err := parser.ParseRecord(scanner.Bytes())
 			if err != nil {
@@ -1147,7 +1182,7 @@ func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticL
 				}
 				continue
 			}
-			appendRecord(record)
+			appendRecord(record, scanner.Bytes())
 		}
 		return scanner.Err()
 	})
@@ -1240,7 +1275,19 @@ func semanticLoadedTask(log *semanticLog) *LoadedTask {
 	loaded := &LoadedTask{LogVersion: log.authority.Version}
 	start := 0
 	for _, record := range log.records {
+		if record.generationMarker {
+			loaded.RelayRecords = nil
+			loaded.RelayGeneration = record.relayGeneration
+		}
 		semanticLoadedMessages(loaded, record.control, log.messages[start:record.end])
+		if record.relayRecord {
+			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
+				Generation:  record.relayGeneration,
+				RelayEnd:    record.relayEnd,
+				MessageEnd:  len(loaded.Timeline),
+				Fingerprint: record.fingerprint,
+			})
+		}
 		start = record.end
 	}
 	return loaded
@@ -1357,6 +1404,8 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 	}
 	if messages {
 		lt.Timeline = loaded.Timeline
+		lt.RelayRecords = loaded.RelayRecords
+		lt.RelayGeneration = loaded.RelayGeneration
 		lt.messagesLoaded = true
 	}
 }

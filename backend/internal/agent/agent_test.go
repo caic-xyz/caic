@@ -480,6 +480,27 @@ func TestWriteMetaSession(t *testing.T) {
 
 func TestMarshalLogMessage(t *testing.T) {
 	t.Parallel()
+	t.Run("V2RelayGenerationRoundTrip", func(t *testing.T) {
+		t.Parallel()
+		data, err := MarshalLogMessage(LogVersionV2, &RelayGenerationMessage{
+			MessageType: messageTypeRelayGeneration,
+			Generation:  "generation-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !record.Control || !record.RelayRecord || record.RelayGeneration != "generation-1" || len(record.Messages) != 0 {
+			t.Fatalf("parsed relay generation = %#v", record)
+		}
+	})
 	t.Run("V2MetaPreservesDurableSettings", func(t *testing.T) {
 		t.Parallel()
 		data, err := MarshalLogMessage(LogVersionV2, &MetaMessage{
@@ -748,16 +769,16 @@ func TestReadRelayTailRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msgs, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, start, true, "ctr")
+	timeline, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, start, true, "ctr", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("messages = %#v", msgs)
+	if len(timeline.Messages) != 1 || len(timeline.RelayRecords) != 0 {
+		t.Fatalf("timeline = %#v", timeline)
 	}
-	msg, ok := msgs[0].Message.(*TextMessage)
+	msg, ok := timeline.Messages[0].Message.(*TextMessage)
 	if !ok || msg.Text != "tail" {
-		t.Fatalf("messages = %#v", msgs)
+		t.Fatalf("messages = %#v", timeline.Messages)
 	}
 	if offset != int64(len(full)) {
 		t.Fatalf("offset = %d, want snapshot boundary %d", offset, len(full))
@@ -780,9 +801,9 @@ func TestReadRelayTailRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		msgs, offset, err := readRelayTailRecords(strings.NewReader("\n"+complete+"\n"), parser, 10, false, "ctr")
-		if err != nil || len(msgs) != 1 || offset != 10+int64(len("\n"+complete+"\n")) {
-			t.Fatalf("leading empty tail = msgs:%#v offset:%d err:%v", msgs, offset, err)
+		timeline, offset, err := readRelayTailRecords(strings.NewReader("\n"+complete+"\n"), parser, 10, false, "ctr", "")
+		if err != nil || len(timeline.Messages) != 1 || offset != 10+int64(len("\n"+complete+"\n")) {
+			t.Fatalf("leading empty tail = timeline:%#v offset:%d err:%v", timeline, offset, err)
 		}
 	})
 	t.Run("start at prior record LF retains following complete record", func(t *testing.T) {
@@ -794,9 +815,9 @@ func TestReadRelayTailRecords(t *testing.T) {
 			t.Fatal(err)
 		}
 		tail := "\n" + complete + "\n"
-		msgs, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, 10, true, "ctr")
-		if err != nil || len(msgs) != 1 || offset != 10+int64(len(tail)) {
-			t.Fatalf("LF-boundary tail = msgs:%#v offset:%d err:%v", msgs, offset, err)
+		timeline, offset, err := readRelayTailRecords(strings.NewReader(tail), parser, 10, true, "ctr", "")
+		if err != nil || len(timeline.Messages) != 1 || offset != 10+int64(len(tail)) {
+			t.Fatalf("LF-boundary tail = timeline:%#v offset:%d err:%v", timeline, offset, err)
 		}
 	})
 	t.Run("trailing fragment remains for attach", func(t *testing.T) {
@@ -808,9 +829,50 @@ func TestReadRelayTailRecords(t *testing.T) {
 			t.Fatal(err)
 		}
 		completeRecord := complete + "\n"
-		msgs, offset, err := readRelayTailRecords(strings.NewReader(completeRecord+`{"partial":true}`), parser, 0, false, "ctr")
-		if err != nil || len(msgs) != 1 || offset != int64(len(completeRecord)) {
-			t.Fatalf("trailing fragment = msgs:%#v offset:%d err:%v", msgs, offset, err)
+		timeline, offset, err := readRelayTailRecords(strings.NewReader(completeRecord+`{"partial":true}`), parser, 0, false, "ctr", "")
+		if err != nil || len(timeline.Messages) != 1 || offset != int64(len(completeRecord)) {
+			t.Fatalf("trailing fragment = timeline:%#v offset:%d err:%v", timeline, offset, err)
+		}
+	})
+	t.Run("v2 empty native record retains boundary", func(t *testing.T) {
+		t.Parallel()
+		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) {
+			return nil, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := `{"t":"agent","ts":1.000,"msg":{"type":"ignored"}}` + "\n"
+		timeline, _, err := readRelayTailRecords(strings.NewReader(input), parser, 0, false, "ctr", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(timeline.Messages) != 0 || len(timeline.RelayRecords) != 1 {
+			t.Fatalf("timeline = %#v, want one empty native boundary", timeline)
+		}
+		if boundary := timeline.RelayRecords[0]; boundary.RelayEnd != int64(len(input)) || boundary.MessageEnd != 0 {
+			t.Fatalf("boundary = %#v, want relay end %d at message end 0", boundary, len(input))
+		}
+	})
+	t.Run("v2 generation propagates to following boundaries", func(t *testing.T) {
+		t.Parallel()
+		parser, err := NewLogRecordParser(LogVersionV2, func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker := `{"t":"relay_generation","generation":"generation-1"}` + "\n"
+		native := `{"t":"agent","ts":1.000,"msg":{"type":"ignored"}}` + "\n"
+		timeline, _, err := readRelayTailRecords(strings.NewReader(marker+native), parser, 0, false, "ctr", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(timeline.Messages) != 0 || len(timeline.RelayRecords) != 2 {
+			t.Fatalf("timeline = %#v, want marker and native boundaries without semantic messages", timeline)
+		}
+		for i, boundary := range timeline.RelayRecords {
+			if boundary.Generation != "generation-1" {
+				t.Fatalf("boundary %d generation = %q, want generation-1", i, boundary.Generation)
+			}
 		}
 	})
 	t.Run("v2 corruption and oversized records do not persist", func(t *testing.T) {
@@ -832,6 +894,15 @@ func TestReadRelayTailRecords(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRelayGenerationCommand(t *testing.T) {
+	t.Parallel()
+	cmd := relayGenerationCommand(t.Context(), "container")
+	want := []string{"ssh", "container", "head", "-c", "4096", RelayOutputPath}
+	if !reflect.DeepEqual(cmd.Args, want) {
+		t.Fatalf("relay generation command args = %#v, want %#v", cmd.Args, want)
+	}
 }
 
 func TestYieldMessages(t *testing.T) {
@@ -911,24 +982,28 @@ func TestLogRecordParser(t *testing.T) {
 	t.Run("ControlVocabulary", func(t *testing.T) {
 		t.Parallel()
 		pairs := []struct {
-			name string
-			v1   string
-			v2   string
+			name         string
+			v1           string
+			v2           string
+			relayOwnedV2 bool
 		}{
 			{
-				name: "diff_stat",
-				v1:   `{"type":"caic_diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
-				v2:   `{"t":"diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
+				name:         "diff_stat",
+				v1:           `{"type":"caic_diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
+				v2:           `{"t":"diff_stat","diff_stat":[{"path":"a.go","added":2,"deleted":1}],"ts":12.5}`,
+				relayOwnedV2: true,
 			},
 			{
-				name: "exit",
-				v1:   `{"type":"caic_exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
-				v2:   `{"t":"exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
+				name:         "exit",
+				v1:           `{"type":"caic_exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
+				v2:           `{"t":"exit","exit_code":2,"cmd":["agent"],"error":"failed","ts":13}`,
+				relayOwnedV2: true,
 			},
 			{
-				name: "stripped_env",
-				v1:   `{"type":"caic_stripped_env","variables":{"TOKEN":"secret"}}`,
-				v2:   `{"t":"stripped_env","variables":{"TOKEN":"secret"}}`,
+				name:         "stripped_env",
+				v1:           `{"type":"caic_stripped_env","variables":{"TOKEN":"secret"}}`,
+				v2:           `{"t":"stripped_env","variables":{"TOKEN":"secret"}}`,
+				relayOwnedV2: true,
 			},
 			{
 				name: "session",
@@ -977,6 +1052,9 @@ func TestLogRecordParser(t *testing.T) {
 				}
 				if !gotV1.Control || !gotV2.Control {
 					t.Fatalf("control classification = %t, %t; want true", gotV1.Control, gotV2.Control)
+				}
+				if gotV1.RelayRecord || gotV2.RelayRecord != tc.relayOwnedV2 {
+					t.Fatalf("relay ownership = %t, %t; want false, %t", gotV1.RelayRecord, gotV2.RelayRecord, tc.relayOwnedV2)
 				}
 				if !reflect.DeepEqual(gotV1.Messages, gotV2.Messages) {
 					t.Fatalf("v1 = %#v, v2 = %#v", gotV1.Messages, gotV2.Messages)
@@ -1079,8 +1157,12 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if gotV1.Control || !gotV2.Control || !reflect.DeepEqual(gotV1.Messages, gotV2.Messages) {
+		if gotV1.Control || !gotV2.Control || len(gotV1.Messages) != 1 || len(gotV2.Messages) != 1 ||
+			!reflect.DeepEqual(gotV1.Messages[0].Message, gotV2.Messages[0].Message) {
 			t.Fatalf("v1 = %#v, v2 = %#v", gotV1, gotV2)
+		}
+		if gotV1.RelayRecord || gotV2.RelayRecord {
+			t.Fatalf("context-cleared relay classification = %t, %t; want false", gotV1.RelayRecord, gotV2.RelayRecord)
 		}
 	})
 
@@ -1409,6 +1491,27 @@ func TestLogRecordParser(t *testing.T) {
 		if mixed.Control || len(mixed.Messages) != len(wantTypes) {
 			t.Fatalf("mixed record = %#v", mixed)
 		}
+		if !mixed.RelayRecord {
+			t.Fatal("native v2 record is not classified as relay-owned")
+		}
+		freshV2, err := NewLogRecordParser(LogVersionV2, parseNative)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reparsed, err := freshV2.ParseRecord([]byte(`{"t":"agent","ts":123.250,"msg":{"kind":"mixed"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reparsed.RelayRecord {
+			t.Fatal("reparsed native v2 record is not relay-owned")
+		}
+		nextRecord, err := freshV2.ParseRecord([]byte(`{"t":"agent","ts":123.251,"msg":{"kind":"mixed"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !nextRecord.RelayRecord {
+			t.Fatal("next native v2 record is not relay-owned")
+		}
 		wantTime := time.Unix(123, 250_000_000).UTC()
 		for i, want := range wantTypes {
 			if reflect.TypeOf(mixed.Messages[i].Message) != reflect.TypeOf(want) {
@@ -1435,6 +1538,9 @@ func TestLogRecordParser(t *testing.T) {
 		if legacy.Control || len(legacy.Messages) != len(wantTypes) {
 			t.Fatalf("v1 record = %#v", legacy)
 		}
+		if legacy.RelayRecord {
+			t.Fatal("v1 native record is classified as relay-owned")
+		}
 		for i, msg := range legacy.Messages {
 			if msg.Message == nil || !msg.ProducerTime.IsZero() {
 				t.Fatalf("v1 message %d = %#v, want non-nil message and zero producer time", i, msg)
@@ -1445,7 +1551,7 @@ func TestLogRecordParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if empty.Control || len(empty.Messages) != 0 {
+		if empty.Control || len(empty.Messages) != 0 || !empty.RelayRecord {
 			t.Fatalf("empty native record = %#v", empty)
 		}
 
