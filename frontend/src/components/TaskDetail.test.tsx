@@ -50,9 +50,23 @@ vi.mock("../api", () => ({
   compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
   syncTask: vi.fn(),
   getTaskDiff: vi.fn(),
-  getTaskRepoStatus: vi.fn(() => Promise.resolve({
-    repositories: [{ name: "my-repo", branch: "task-branch", ahead: 1, behind: 0, changedFiles: 2, added: 15, deleted: 3, uncommittedFiles: 1, conflicts: 0 }],
-  })),
+  getTaskRepoStatus: vi.fn(() =>
+    Promise.resolve({
+      repositories: [
+        {
+          name: "my-repo",
+          branch: "task-branch",
+          ahead: 1,
+          behind: 0,
+          changedFiles: 2,
+          added: 15,
+          deleted: 3,
+          uncommittedFiles: 1,
+          conflicts: 0,
+        },
+      ],
+    }),
+  ),
 }));
 
 // Import after mocks are set up.
@@ -83,7 +97,9 @@ const baseProps = {
   onError: () => {},
 };
 
-function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
+function renderTaskDetail(
+  props: Partial<Parameters<typeof TaskDetail>[0]> = {},
+) {
   return render(() => (
     <HostModeProvider>
       <TaskDetail {...baseProps} {...props} />
@@ -94,7 +110,10 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
 it("shows retained disk usage for a stopped task", () => {
   renderTaskDetail({ taskState: "stopped", stoppedDiskUsedBytes: 2_097_152 });
 
-  expect(screen.getByText("Disk 2.0 MiB")).toHaveAttribute("title", "Writable disk space retained by this stopped task");
+  expect(screen.getByText("Disk 2.0 MiB")).toHaveAttribute(
+    "title",
+    "Writable disk space retained by this stopped task",
+  );
 });
 
 it("hides unavailable disk usage for an old stopped task", () => {
@@ -127,7 +146,6 @@ function resultEvent(ts: number): EventMessage {
 }
 
 describe("TaskDetail", () => {
-
   afterEach(() => {
     navigateMock.mockClear();
   });
@@ -135,9 +153,20 @@ describe("TaskDetail", () => {
   it("replaces the Diff link with a repository state marker", async () => {
     renderTaskDetail();
 
-    expect(await screen.findByRole("link", { name: "my-repo: 2 changed files, 15 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream" }))
-      .toHaveAttribute("href", "/task/@abc+test-task/diff");
+    expect(
+      await screen.findByRole("link", {
+        name: "my-repo: 2 changed files, 15 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream",
+      }),
+    ).toHaveAttribute("href", "/task/@abc+test-task/diff");
     expect(screen.queryByText("Diff")).not.toBeInTheDocument();
+  });
+
+  it("links task statistics to the full detail route", () => {
+    renderTaskDetail();
+
+    expect(
+      screen.getByRole("link", { name: "Task statistics" }),
+    ).toHaveAttribute("href", "/task/@abc+test-task/stats");
   });
 
   it("keeps header Git line totals when its capped title ellipsizes", async () => {
@@ -150,9 +179,13 @@ describe("TaskDetail", () => {
       scrollWidth: { configurable: true, value: 320 },
     });
     window.dispatchEvent(new Event("resize"));
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
 
-    const link = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
+    const link = await screen.findByRole("link", {
+      name: /my-repo: 2 changed files/,
+    });
     expect(link).not.toHaveAttribute("data-elide-diff-stats");
   });
 
@@ -161,15 +194,20 @@ describe("TaskDetail", () => {
 
     const repoLink = await screen.findByRole("link", { name: "my-repo" });
     const headerMeta = repoLink.parentElement;
-    if (!headerMeta) throw new Error("repository link is missing its header context");
+    if (!headerMeta)
+      throw new Error("repository link is missing its header context");
     Object.defineProperties(headerMeta, {
       clientWidth: { configurable: true, value: 160 },
       scrollWidth: { configurable: true, value: 320 },
     });
     window.dispatchEvent(new Event("resize"));
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
 
-    const diffLink = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
+    const diffLink = await screen.findByRole("link", {
+      name: /my-repo: 2 changed files/,
+    });
     expect(diffLink).toHaveAttribute("data-elide-diff-stats", "");
   });
 
@@ -194,22 +232,31 @@ describe("TaskDetail", () => {
     });
     window.dispatchEvent(new Event("resize"));
 
-    const link = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
-    await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
+    const link = await screen.findByRole("link", {
+      name: /my-repo: 2 changed files/,
+    });
+    await waitFor(() =>
+      expect(link).not.toHaveAttribute("data-elide-diff-stats"),
+    );
   });
 
   it("copies only the selected fenced code block", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     const originalClipboard = navigator.clipboard;
-    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
 
     try {
       vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
         handlers.onMessage({
           kind: "text",
           ts: 1_000,
-          text: { text: "Run this:\n\n```ts\nconst answer = 42;\n```\n\nThen continue." },
+          text: {
+            text: "Run this:\n\n```ts\nconst answer = 42;\n```\n\nThen continue.",
+          },
         });
         handlers.onReady?.();
         return {
@@ -221,13 +268,20 @@ describe("TaskDetail", () => {
 
       renderTaskDetail();
 
-      const copyButton = screen.getByRole("button", { name: "Copy code block" });
-      expect(copyButton.parentElement?.className).toMatch(/singleLineCodeBlock/);
+      const copyButton = screen.getByRole("button", {
+        name: "Copy code block",
+      });
+      expect(copyButton.parentElement?.className).toMatch(
+        /singleLineCodeBlock/,
+      );
 
       await user.click(copyButton);
       expect(writeText).toHaveBeenCalledWith("const answer = 42;\n");
     } finally {
-      Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
     }
   });
 
@@ -237,15 +291,24 @@ describe("TaskDetail", () => {
       childTasks: [{ id: "child", title: "Review tests" }],
     });
 
-    expect(screen.getByRole("navigation", { name: "Task hierarchy" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/task/@parent");
-    expect(screen.getByRole("link", { name: "Child: Review tests" })).toHaveAttribute("href", "/task/@child");
+    expect(
+      screen.getByRole("navigation", { name: "Task hierarchy" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Parent task" })).toHaveAttribute(
+      "href",
+      "/task/@parent",
+    );
+    expect(
+      screen.getByRole("link", { name: "Child: Review tests" }),
+    ).toHaveAttribute("href", "/task/@child");
   });
 
   it("uses a child ID when its title is empty", () => {
     renderTaskDetail({ childTasks: [{ id: "untitled-child", title: "" }] });
 
-    expect(screen.getByRole("link", { name: "Child: untitled-child" })).toHaveAttribute("href", "/task/@untitled-child");
+    expect(
+      screen.getByRole("link", { name: "Child: untitled-child" }),
+    ).toHaveAttribute("href", "/task/@untitled-child");
   });
 
   it("offers quota recovery without replacing the normal task actions", async () => {
@@ -263,7 +326,9 @@ describe("TaskDetail", () => {
       onFork,
     });
 
-    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent("5h quota resets in 42m");
+    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent(
+      "5h quota resets in 42m",
+    );
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
     expect(onQuotaRecovery).toHaveBeenCalledWith("abc");
 
@@ -283,20 +348,28 @@ describe("TaskDetail", () => {
       onQuotaRecovery: vi.fn(),
     });
 
-    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent("Agent quota exhausted");
-    expect(screen.queryByTestId("quota-recovery-detail-action")).not.toBeInTheDocument();
+    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent(
+      "Agent quota exhausted",
+    );
+    expect(
+      screen.queryByTestId("quota-recovery-detail-action"),
+    ).not.toBeInTheDocument();
   });
 
   it("repository state diff link href ends with /diff", async () => {
     renderTaskDetail();
-    const link = await screen.findByRole("link", { name: /my-repo: 2 changed files/ });
+    const link = await screen.findByRole("link", {
+      name: /my-repo: 2 changed files/,
+    });
     expect(link).toHaveAttribute("href", "/task/@abc+test-task/diff");
   });
 
   it("clicking a repository state marker navigates to the diff", async () => {
     const user = userEvent.setup();
     renderTaskDetail();
-    await user.click(await screen.findByRole("link", { name: /my-repo: 2 changed files/ }));
+    await user.click(
+      await screen.findByRole("link", { name: /my-repo: 2 changed files/ }),
+    );
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
 
@@ -310,13 +383,21 @@ describe("TaskDetail", () => {
             toolUseID: "edit-1",
             name: "Edit",
             detail: "main.go",
-            input: [{ path: "/workspace/main.go", diff: "@@ -5,3 +5,3 @@\n func main() {\n-\tfmt.Println(\"Hello, World!\")\n+\tfmt.Println(\"Hi, World!\")\n }\n" }],
+            input: [
+              {
+                path: "/workspace/main.go",
+                diff: '@@ -5,3 +5,3 @@\n func main() {\n-\tfmt.Println("Hello, World!")\n+\tfmt.Println("Hi, World!")\n }\n',
+              },
+            ],
             inputView: {
               kind: "fileChanges",
-              files: [{
-                path: "/workspace/main.go",
-                patch: "@@ -5,3 +5,3 @@\n func main() {\n-\tfmt.Println(\"Hello, World!\")\n+\tfmt.Println(\"Hi, World!\")\n }\n",
-              }],
+              files: [
+                {
+                  path: "/workspace/main.go",
+                  patch:
+                    '@@ -5,3 +5,3 @@\n func main() {\n-\tfmt.Println("Hello, World!")\n+\tfmt.Println("Hi, World!")\n }\n',
+                },
+              ],
             },
           },
         },
@@ -339,16 +420,29 @@ describe("TaskDetail", () => {
 
     expect(getAllByText("100ms")).toHaveLength(1);
     expect(getByText("/workspace/main.go")).toBeInTheDocument();
-    const added = getByText((_, element) => element?.textContent === "+\tfmt.Println(\"Hi, World!\")");
-    const deleted = getByText((_, element) => element?.textContent === "-\tfmt.Println(\"Hello, World!\")");
+    const added = getByText(
+      (_, element) => element?.textContent === '+\tfmt.Println("Hi, World!")',
+    );
+    const deleted = getByText(
+      (_, element) =>
+        element?.textContent === '-\tfmt.Println("Hello, World!")',
+    );
     expect(added.className).toMatch(/lineAdded/);
     expect(deleted.className).toMatch(/lineDeleted/);
   });
 
   it("shows elapsed time on a single-event message block", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "userInput", ts: 1_000, userInput: { text: "prompt" } });
-      handlers.onMessage({ kind: "text", ts: 2_500, text: { text: "response" } });
+      handlers.onMessage({
+        kind: "userInput",
+        ts: 1_000,
+        userInput: { text: "prompt" },
+      });
+      handlers.onMessage({
+        kind: "text",
+        ts: 2_500,
+        text: { text: "response" },
+      });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -364,8 +458,16 @@ describe("TaskDetail", () => {
 
   it("shows one timing control for a thinking-only block", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "userInput", ts: 1_000, userInput: { text: "prompt" } });
-      handlers.onMessage({ kind: "thinking", ts: 2_000, thinking: { text: "checking the implementation" } });
+      handlers.onMessage({
+        kind: "userInput",
+        ts: 1_000,
+        userInput: { text: "prompt" },
+      });
+      handlers.onMessage({
+        kind: "thinking",
+        ts: 2_000,
+        thinking: { text: "checking the implementation" },
+      });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -386,15 +488,29 @@ describe("TaskDetail", () => {
       const usage = (ts: number): EventMessage => ({
         kind: "usage",
         ts,
-        usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          reportedModel: "test",
+        },
       });
       const events: EventMessage[] = [
-        { kind: "thinkingDelta", ts: 1_000, thinkingDelta: { text: "first thought" } },
+        {
+          kind: "thinkingDelta",
+          ts: 1_000,
+          thinkingDelta: { text: "first thought" },
+        },
         { kind: "textDelta", ts: 2_000, textDelta: { text: "\n" } },
         { kind: "thinking", ts: 3_000, thinking: { text: "FIRST THOUGHT" } },
         { kind: "text", ts: 4_000, text: { text: "\n" } },
         usage(4_000),
-        { kind: "thinkingDelta", ts: 5_000, thinkingDelta: { text: "second thought" } },
+        {
+          kind: "thinkingDelta",
+          ts: 5_000,
+          thinkingDelta: { text: "second thought" },
+        },
         { kind: "textDelta", ts: 6_000, textDelta: { text: "\n" } },
         { kind: "thinking", ts: 7_000, thinking: { text: "SECOND THOUGHT" } },
         { kind: "text", ts: 8_000, text: { text: "\n" } },
@@ -441,7 +557,11 @@ describe("TaskDetail", () => {
 
   it("does not repeat a successful assistant response from the result payload", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "text", ts: 1_000, text: { text: "Finished the requested change." } });
+      handlers.onMessage({
+        kind: "text",
+        ts: 1_000,
+        text: { text: "Finished the requested change." },
+      });
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.result = "Finished the requested change.";
@@ -498,8 +618,12 @@ describe("TaskDetail", () => {
     renderTaskDetail();
 
     expect(screen.getByTestId("turn-duration")).toHaveTextContent("0:01");
-    await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
+    await user.click(
+      screen.getByRole("button", { name: "Turn invocation details" }),
+    );
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent(
+      "turn-model",
+    );
   });
 
   it("opens invocation details from a collapsed turn without expanding it", async () => {
@@ -507,7 +631,8 @@ describe("TaskDetail", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(2_000);
       const latestResult = resultEvent(4_000);
-      if (!firstResult.result || !latestResult.result) throw new Error("result fixture is missing payload");
+      if (!firstResult.result || !latestResult.result)
+        throw new Error("result fixture is missing payload");
       firstResult.result.usage.reportedModel = "collapsed-model";
       latestResult.result.usage.reportedModel = "latest-model";
       const events: EventMessage[] = [
@@ -527,9 +652,13 @@ describe("TaskDetail", () => {
 
     renderTaskDetail();
 
-    const [collapsedTurn] = screen.getAllByRole("button", { name: "Turn invocation details" });
+    const [collapsedTurn] = screen.getAllByRole("button", {
+      name: "Turn invocation details",
+    });
     await user.click(collapsedTurn);
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("collapsed-model");
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent(
+      "collapsed-model",
+    );
     expect(screen.queryByText("collapsed response")).not.toBeInTheDocument();
   });
 
@@ -563,7 +692,8 @@ describe("TaskDetail", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(0);
       const secondResult = resultEvent(0);
-      if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
+      if (!firstResult.result || !secondResult.result)
+        throw new Error("result fixture is missing payload");
       firstResult.result.duration = 0;
       secondResult.result.duration = 0;
       const events: EventMessage[] = [
@@ -584,7 +714,11 @@ describe("TaskDetail", () => {
 
     const { getAllByText } = renderTaskDetail();
 
-    expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(true);
+    expect(
+      getAllByText("0s").some((duration) =>
+        duration.className.includes("turnDuration"),
+      ),
+    ).toBe(true);
   });
 
   it("summarizes every turn in the collapsed session details", async () => {
@@ -592,23 +726,57 @@ describe("TaskDetail", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
-      if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
+      if (!firstResult.result || !secondResult.result)
+        throw new Error("result fixture is missing payload");
       firstResult.result.duration = 2;
       secondResult.result.duration = 3;
       firstResult.result.usage.inputTokens = 100;
       secondResult.result.usage.inputTokens = 200;
       const events: EventMessage[] = [
-        { kind: "init", ts: 1_000, init: { reportedModel: "test", agentVersion: "test", sessionID: "session-one", tools: [], cwd: "", harness: "test" } },
-        { kind: "commitSnapshot", ts: 1_500, commitSnapshot: { baseline: true, repositoryCommits: [] } },
+        {
+          kind: "init",
+          ts: 1_000,
+          init: {
+            reportedModel: "test",
+            agentVersion: "test",
+            sessionID: "session-one",
+            tools: [],
+            cwd: "",
+            harness: "test",
+          },
+        },
+        {
+          kind: "commitSnapshot",
+          ts: 1_500,
+          commitSnapshot: { baseline: true, repositoryCommits: [] },
+        },
         { kind: "text", ts: 2_000, text: { text: "first response" } },
         firstResult,
-        { kind: "commitSnapshot", ts: 3_100, commitSnapshot: { repositoryCommits: [], changeStat: { files: 2, added: 10, deleted: 3, binaryFiles: 0 } } },
+        {
+          kind: "commitSnapshot",
+          ts: 3_100,
+          commitSnapshot: {
+            repositoryCommits: [],
+            changeStat: { files: 2, added: 10, deleted: 3, binaryFiles: 0 },
+          },
+        },
         { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
         { kind: "text", ts: 63_000, text: { text: "second response" } },
         secondResult,
-        { kind: "commitSnapshot", ts: 65_100, commitSnapshot: { repositoryCommits: [], changeStat: { files: 4, added: 20, deleted: 5, binaryFiles: 1 } } },
+        {
+          kind: "commitSnapshot",
+          ts: 65_100,
+          commitSnapshot: {
+            repositoryCommits: [],
+            changeStat: { files: 4, added: 20, deleted: 5, binaryFiles: 1 },
+          },
+        },
         { kind: "system", ts: 66_000, system: { subtype: "compact_boundary" } },
-        { kind: "text", ts: 67_000, text: { text: "response after compaction" } },
+        {
+          kind: "text",
+          ts: 67_000,
+          text: { text: "response after compaction" },
+        },
         resultEvent(68_000),
       ];
       for (const event of events) handlers.onMessage(event);
@@ -624,12 +792,16 @@ describe("TaskDetail", () => {
 
     expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
     expect(getByText("0:05").className).toMatch(/sessionDuration/);
-    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    await user.click(
+      screen.getByRole("button", { name: "Session invocation details" }),
+    );
     const dialog = screen.getByTestId("session-invocation-dialog");
     expect(dialog).toHaveTextContent("Combined turn time0:05");
     expect(dialog).toHaveTextContent("Combined API time0:02");
     expect(dialog).toHaveTextContent("Time awaiting user response0:59");
-    expect(dialog).toHaveTextContent("Generated change6 file changes · +30 −8 · 1 binary");
+    expect(dialog).toHaveTextContent(
+      "Generated change6 file changes · +30 −8 · 1 binary",
+    );
     expect(dialog).toHaveTextContent("Cost$0.0000");
     expect(dialog).toHaveTextContent("New input300t");
     expect(queryByText("first response")).not.toBeInTheDocument();
@@ -638,7 +810,10 @@ describe("TaskDetail", () => {
   it("shows recover actions for crashed tasks", async () => {
     const user = userEvent.setup();
     const onRevive = vi.fn();
-    const { getByLabelText, getByText, getByTestId } = renderTaskDetail({ taskState: "crashed", onRevive });
+    const { getByLabelText, getByText, getByTestId } = renderTaskDetail({
+      taskState: "crashed",
+      onRevive,
+    });
     expect(getByTestId("send-input")).toBeDisabled();
 
     await user.click(getByLabelText("Context actions"));
@@ -648,8 +823,12 @@ describe("TaskDetail", () => {
   });
 
   it("shows the complete task error", () => {
-    const error = "Error: failed to load extension from a very long runtime path";
-    const { getByRole, getByText } = renderTaskDetail({ taskState: "failed", error });
+    const error =
+      "Error: failed to load extension from a very long runtime path";
+    const { getByRole, getByText } = renderTaskDetail({
+      taskState: "failed",
+      error,
+    });
 
     expect(getByRole("heading", { name: "Task error" })).toBeInTheDocument();
     expect(getByText(error)).toBeInTheDocument();
@@ -657,8 +836,16 @@ describe("TaskDetail", () => {
 
   it("keeps the prompt visible when a later input repeats it", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "text", ts: 1, text: { text: "agent reply" } });
-      handlers.onMessage({ kind: "userInput", ts: 2, userInput: { text: "same prompt" } });
+      handlers.onMessage({
+        kind: "text",
+        ts: 1,
+        text: { text: "agent reply" },
+      });
+      handlers.onMessage({
+        kind: "userInput",
+        ts: 2,
+        userInput: { text: "same prompt" },
+      });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -674,8 +861,16 @@ describe("TaskDetail", () => {
 
   it("shows setup logs inside task details", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "log", ts: 1, log: { line: "starting runtime" } });
-      handlers.onMessage({ kind: "error", ts: 2, error: { err: "agent extension failed to load", line: "" } });
+      handlers.onMessage({
+        kind: "log",
+        ts: 1,
+        log: { line: "starting runtime" },
+      });
+      handlers.onMessage({
+        kind: "error",
+        ts: 2,
+        error: { err: "agent extension failed to load", line: "" },
+      });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -690,18 +885,40 @@ describe("TaskDetail", () => {
     });
 
     expect(getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
-    expect(getByText("fetch origin then rebase on origin/main")).toBeInTheDocument();
+    expect(
+      getByText("fetch origin then rebase on origin/main"),
+    ).toBeInTheDocument();
     expect(getByText("Setup logs")).toBeInTheDocument();
     expect(getByTestId("task-setup")).toHaveAttribute("open");
-    expect(getByTestId("task-setup-logs")).toHaveTextContent("starting runtime");
-    expect(getByTestId("task-message-area")).toContainElement(getByTestId("task-setup"));
-    expect(getByTestId("task-message-area")).toHaveTextContent("agent extension failed to load");
+    expect(getByTestId("task-setup-logs")).toHaveTextContent(
+      "starting runtime",
+    );
+    expect(getByTestId("task-message-area")).toContainElement(
+      getByTestId("task-setup"),
+    );
+    expect(getByTestId("task-message-area")).toHaveTextContent(
+      "agent extension failed to load",
+    );
   });
 
   it("shows zero instead of an implausible reconstructed setup duration", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "log", ts: 1_500, log: { line: "starting runtime" } });
-      handlers.onMessage({ kind: "init", ts: 46 * 60 * 60 * 1000, init: { reportedModel: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onMessage({
+        kind: "log",
+        ts: 1_500,
+        log: { line: "starting runtime" },
+      });
+      handlers.onMessage({
+        kind: "init",
+        ts: 46 * 60 * 60 * 1000,
+        init: {
+          reportedModel: "test",
+          agentVersion: "test",
+          sessionID: "session",
+          cwd: "",
+          harness: "test",
+        },
+      });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -710,15 +927,31 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByText } = renderTaskDetail({ startedAt: new Date(1_000).toISOString() });
+    const { getByText } = renderTaskDetail({
+      startedAt: new Date(1_000).toISOString(),
+    });
 
     expect(getByText("0s")).toBeInTheDocument();
   });
 
   it("collapses setup logs after the agent session starts", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
-      handlers.onMessage({ kind: "log", ts: 1_500, log: { line: "starting runtime" } });
-      handlers.onMessage({ kind: "init", ts: 6_500, init: { reportedModel: "test", agentVersion: "test", sessionID: "session", cwd: "", harness: "test" } });
+      handlers.onMessage({
+        kind: "log",
+        ts: 1_500,
+        log: { line: "starting runtime" },
+      });
+      handlers.onMessage({
+        kind: "init",
+        ts: 6_500,
+        init: {
+          reportedModel: "test",
+          agentVersion: "test",
+          sessionID: "session",
+          cwd: "",
+          harness: "test",
+        },
+      });
       handlers.onReady?.();
       return {
         addEventListener: vi.fn(),
@@ -727,7 +960,9 @@ describe("TaskDetail", () => {
       } as unknown as EventSource;
     });
 
-    const { getByTestId, getByText } = renderTaskDetail({ startedAt: new Date(1_000).toISOString() });
+    const { getByTestId, getByText } = renderTaskDetail({
+      startedAt: new Date(1_000).toISOString(),
+    });
 
     expect(getByTestId("task-setup")).not.toHaveAttribute("open");
     expect(getByText("0:06")).toBeInTheDocument();
@@ -805,10 +1040,6 @@ describe("SSE connection", () => {
     expect(created).toHaveLength(1);
   });
 
-
-
-
-
   it("keeps buffered replay events across a native resume", () => {
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
@@ -819,7 +1050,11 @@ describe("SSE connection", () => {
     if (!capturedCb.value || !readyHandler.value || !created[0].onerror) {
       throw new Error("SSE callbacks not captured");
     }
-    capturedCb.value({ kind: "text", ts: 1, text: { text: "before disconnect" } });
+    capturedCb.value({
+      kind: "text",
+      ts: 1,
+      text: { text: "before disconnect" },
+    });
     created[0].onerror(new Event("error"));
     capturedCb.value({ kind: "text", ts: 2, text: { text: "after resume" } });
     readyHandler.value();
@@ -838,13 +1073,18 @@ describe("SSE connection", () => {
       onMessage = handlers.onMessage;
       onReady = handlers.onReady;
       onReset = handlers.onReset;
-      const fakeES: FakeES = { addEventListener: vi.fn(), close: vi.fn(), onerror: null };
+      const fakeES: FakeES = {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      };
       created.push(fakeES);
       return fakeES as unknown as EventSource;
     });
 
     const { getByRole } = renderTaskDetail();
-    if (!onMessage || !onReady || !onReset) throw new Error("SSE callbacks not captured");
+    if (!onMessage || !onReady || !onReset)
+      throw new Error("SSE callbacks not captured");
     const emitCompletedTurn = (prompt: string, text: string, ts: number) => {
       onMessage?.({ kind: "userInput", ts, userInput: { text: prompt } });
       onMessage?.({ kind: "text", ts: ts + 1, text: { text } });
@@ -852,13 +1092,21 @@ describe("SSE connection", () => {
     };
     emitCompletedTurn("old prompt 1", "old history", 1);
     emitCompletedTurn("old prompt 2", "old reply 2", 4);
-    onMessage({ kind: "textDelta", ts: 7, textDelta: { text: "old live tail" } });
+    onMessage({
+      kind: "textDelta",
+      ts: 7,
+      textDelta: { text: "old live tail" },
+    });
     onReady();
 
     onReset();
     emitCompletedTurn("replacement prompt 1", "replacement history", 10);
     emitCompletedTurn("replacement prompt 2", "replacement reply 2", 13);
-    onMessage({ kind: "textDelta", ts: 16, textDelta: { text: "replacement live a" } });
+    onMessage({
+      kind: "textDelta",
+      ts: 16,
+      textDelta: { text: "replacement live a" },
+    });
     onMessage({ kind: "textDelta", ts: 17, textDelta: { text: " + b" } });
     onReady();
 
@@ -869,12 +1117,18 @@ describe("SSE connection", () => {
     onReset();
     emitCompletedTurn("shorter prompt", "shorter completed reply", 20);
     for (let i = 1; i <= 5; i++) {
-      onMessage({ kind: "textDelta", ts: 22 + i, textDelta: { text: `lower-split-${i} ` } });
+      onMessage({
+        kind: "textDelta",
+        ts: 22 + i,
+        textDelta: { text: `lower-split-${i} ` },
+      });
     }
     onReady();
 
     expect(document.body).not.toHaveTextContent("replacement live a");
-    expect(document.body).toHaveTextContent("lower-split-1 lower-split-2 lower-split-3 lower-split-4 lower-split-5");
+    expect(document.body).toHaveTextContent(
+      "lower-split-1 lower-split-2 lower-split-3 lower-split-4 lower-split-5",
+    );
   });
 
   it("reports terminal history errors and does not retry after the native error", () => {
@@ -896,7 +1150,9 @@ describe("SSE connection", () => {
     if (!historyError) throw new Error("history error callback not captured");
     historyError({ message: "task history is unavailable" });
 
-    expect(onError).toHaveBeenCalledWith("Task history error: task history is unavailable");
+    expect(onError).toHaveBeenCalledWith(
+      "Task history error: task history is unavailable",
+    );
     expect(created[0].close).toHaveBeenCalledOnce();
     if (!created[0].onerror) throw new Error("onerror not set");
     created[0].onerror(new Event("error"));
@@ -948,7 +1204,11 @@ describe("SSE connection", () => {
     expect(created).toHaveLength(1);
     expect(created[0].close).not.toHaveBeenCalled();
 
-    callbacks[0]({ kind: "userInput", ts: 1, userInput: { text: "prompt sent before lock" } });
+    callbacks[0]({
+      kind: "userInput",
+      ts: 1,
+      userInput: { text: "prompt sent before lock" },
+    });
     expect(document.body).toHaveTextContent("prompt sent before lock");
   });
 
@@ -964,10 +1224,28 @@ describe("SSE connection", () => {
 
     const cb = capturedCb.value;
     cb({ kind: "thinking", ts: 1, thinking: { text: "planning tool 1" } });
-    cb({ kind: "toolUse", ts: 2, toolUse: { toolUseID: "t1", name: "Read", input: {} } });
-    cb({ kind: "usage", ts: 3, usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "m" } });
+    cb({
+      kind: "toolUse",
+      ts: 2,
+      toolUse: { toolUseID: "t1", name: "Read", input: {} },
+    });
+    cb({
+      kind: "usage",
+      ts: 3,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        reportedModel: "m",
+      },
+    });
     cb({ kind: "thinking", ts: 4, thinking: { text: "planning tool 2" } });
-    cb({ kind: "toolUse", ts: 5, toolUse: { toolUseID: "t2", name: "Bash", input: {} } });
+    cb({
+      kind: "toolUse",
+      ts: 5,
+      toolUse: { toolUseID: "t2", name: "Bash", input: {} },
+    });
     cb(resultEvent(6));
 
     expect(document.body.textContent).toContain("planning tool 1");
@@ -997,7 +1275,9 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2024-03-21T04:26:40Z").toLocaleTimeString();
-    expect(document.body.textContent).toContain(`5-hour quota reached; using extra usage · resets at ${resetTime}`);
+    expect(document.body.textContent).toContain(
+      `5-hour quota reached; using extra usage · resets at ${resetTime}`,
+    );
     expect(document.body.textContent).not.toContain("monthly");
   });
 
@@ -1023,7 +1303,9 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2026-07-10T13:00:00Z").toLocaleTimeString();
-    expect(document.body.textContent).toContain(`resets in 2 days at ${resetTime}`);
+    expect(document.body.textContent).toContain(
+      `resets in 2 days at ${resetTime}`,
+    );
   });
 
   it("labels a reset on the next calendar day as tomorrow", () => {
@@ -1048,7 +1330,9 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2026-07-09T13:00:00Z").toLocaleTimeString();
-    expect(document.body.textContent).toContain(`resets tomorrow at ${resetTime}`);
+    expect(document.body.textContent).toContain(
+      `resets tomorrow at ${resetTime}`,
+    );
   });
 
   it("does not render empty usage metadata", () => {
@@ -1110,8 +1394,12 @@ describe("SSE connection", () => {
     expect(document.body.textContent).not.toContain("0t in + 0t out");
     expect(document.body.textContent).toContain("50t thinking");
     expect(document.body.textContent).not.toContain("claude");
-    expect(document.body.textContent).toContain("codex · 100t new · 200t cache write · 700t cache read · 40t out");
-    expect(document.querySelectorAll('[aria-label="Timing details"]')).toHaveLength(0);
+    expect(document.body.textContent).toContain(
+      "codex · 100t new · 200t cache write · 700t cache read · 40t out",
+    );
+    expect(
+      document.querySelectorAll('[aria-label="Timing details"]'),
+    ).toHaveLength(0);
   });
 
   it("replayed textDelta events render once the SSE ready marker arrives", () => {
@@ -1125,7 +1413,11 @@ describe("SSE connection", () => {
     renderTaskDetail();
 
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
-    capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "replayed output" } });
+    capturedCb.value({
+      kind: "textDelta",
+      ts: 1,
+      textDelta: { text: "replayed output" },
+    });
 
     expect(document.body.textContent).not.toContain("replayed output");
     expect(readyHandler.value).not.toBeNull();
@@ -1134,8 +1426,6 @@ describe("SSE connection", () => {
 
     expect(document.body.textContent).toContain("replayed output");
   });
-
-
 
   it("live textDelta events render before the turn ends", () => {
     // Regression: initial task detail streaming must show output while the
@@ -1149,7 +1439,11 @@ describe("SSE connection", () => {
     expect(capturedCb.value).not.toBeNull();
 
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
-    capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "agent reply" } });
+    capturedCb.value({
+      kind: "textDelta",
+      ts: 1,
+      textDelta: { text: "agent reply" },
+    });
     expect(document.body.textContent).not.toContain("agent reply");
 
     vi.advanceTimersByTime(100);
@@ -1166,15 +1460,29 @@ describe("SSE connection", () => {
 
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
     capturedCb.value(resultEvent(1));
-    capturedCb.value({ kind: "userInput", ts: 2, userInput: { text: "follow up" } });
-    capturedCb.value({ kind: "textDelta", ts: 3, textDelta: { text: "first batch" } });
+    capturedCb.value({
+      kind: "userInput",
+      ts: 2,
+      userInput: { text: "follow up" },
+    });
+    capturedCb.value({
+      kind: "textDelta",
+      ts: 3,
+      textDelta: { text: "first batch" },
+    });
     vi.advanceTimersByTime(100);
     expect(document.body.textContent).toContain("first batch");
 
-    capturedCb.value({ kind: "textDelta", ts: 4, textDelta: { text: " then second batch" } });
+    capturedCb.value({
+      kind: "textDelta",
+      ts: 4,
+      textDelta: { text: " then second batch" },
+    });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("first batch then second batch");
+    expect(document.body.textContent).toContain(
+      "first batch then second batch",
+    );
   });
 
   it("live ask events render immediately so the user can answer", () => {
@@ -1190,7 +1498,12 @@ describe("SSE connection", () => {
       ts: 1,
       ask: {
         toolUseID: "ask_1",
-        questions: [{ question: "Which option?", options: [{ label: "A" }, { label: "B" }] }],
+        questions: [
+          {
+            question: "Which option?",
+            options: [{ label: "A" }, { label: "B" }],
+          },
+        ],
       },
     });
 
@@ -1242,7 +1555,10 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText } = renderTaskDetail({ taskState: "running", supportsCompact: true });
+    const { getByLabelText, getByText } = renderTaskDetail({
+      taskState: "running",
+      supportsCompact: true,
+    });
 
     // Toggle is present even when running.
     const toggle = getByLabelText("Context actions");
@@ -1263,7 +1579,10 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText, queryByText } = renderTaskDetail({ taskState: "waiting", supportsCompact: false });
+    const { getByLabelText, getByText, queryByText } = renderTaskDetail({
+      taskState: "waiting",
+      supportsCompact: false,
+    });
 
     await user.click(getByLabelText("Context actions"));
 
@@ -1300,7 +1619,11 @@ describe("SSE connection", () => {
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
 
     // Deliver a message so messages().length > 0.
-    capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "some output" } });
+    capturedCb.value({
+      kind: "textDelta",
+      ts: 1,
+      textDelta: { text: "some output" },
+    });
     vi.advanceTimersByTime(20);
 
     const es1 = created[0];
@@ -1315,7 +1638,10 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByText } = renderTaskDetail({ taskState: "failed", initialPrompt: "Fix the login bug" });
+    const { getByText } = renderTaskDetail({
+      taskState: "failed",
+      initialPrompt: "Fix the login bug",
+    });
 
     expect(getByText("Fix the login bug")).toBeInTheDocument();
   });

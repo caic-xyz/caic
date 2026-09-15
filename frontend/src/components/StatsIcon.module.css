@@ -1,24 +1,20 @@
-/* Styles for compact task usage, analytics, and container resource statistics. */
+/* Styles for the compact task statistics route link. */
 
-.wrapper {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.iconBtn {
+.iconLink {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 24px;
   height: 24px;
   padding: 0 0.25rem;
-  border: none;
   border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--color-text-muted);
-  cursor: pointer;
+  text-decoration: none;
   flex-shrink: 0;
+}
+
+.iconLink:hover {
+  background: var(--color-bg-hover);
 }
 
 .iconSummary {
@@ -31,97 +27,4 @@
 
 .iconSummarySeparator {
   color: var(--color-text-muted);
-}
-
-.iconBtn:hover {
-  background: var(--color-bg-hover);
-}
-
-.iconBtnActive {
-  background: var(--color-bg-hover);
-}
-
-.popup {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 100;
-  width: min(560px, calc(100vw - 1rem));
-  max-height: calc(100vh - 3rem);
-  overflow-y: auto;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-medium);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 4px 12px var(--color-shadow-sm);
-  padding: 0.5rem 0;
-  font-size: 0.8rem;
-}
-
-.usageGrid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.35rem;
-}
-
-.usageMetric {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.05rem;
-  padding: 0.3rem 0.35rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-surface);
-  color: var(--color-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.usageMetric strong {
-  overflow: hidden;
-  font-size: 0.82rem;
-  text-overflow: ellipsis;
-}
-
-.usageLabel {
-  color: var(--color-text-muted);
-  font-size: 0.68rem;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.efficiencyRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem 0.75rem;
-  margin-top: 0.4rem;
-  color: var(--color-text-secondary);
-  font-size: 0.74rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.popupSection {
-  padding: 0.4rem 0.75rem;
-}
-
-.popupSection + .popupSection {
-  border-top: 1px solid var(--color-border-light);
-}
-
-.popupSectionTitle {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--color-text-tertiary);
-  margin-bottom: 0.4rem;
-}
-
-.noData {
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
-}
-
-@media (max-width: 480px) {
-  .usageGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }

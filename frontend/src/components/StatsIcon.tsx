@@ -1,226 +1,133 @@
-// StatsIcon surfaces task cost, token/cache behavior, tool timing, and container resource statistics.
+// StatsIcon links from a task header to its full usage and performance view.
 
-import { createMemo, createSignal, lazy, Show, Suspense } from "solid-js";
+import { Show } from "solid-js";
+import { A } from "@solidjs/router";
 
-import type { EventMessage, EventStats } from "@sdk/types.gen";
+import type { EventStats } from "@sdk/types.gen";
 
 import { formatTokens } from "../formatting";
-import { IncrementalToolTimingTracker, type ToolTimingSummary } from "../taskStats";
-import type { TurnTiming } from "../timing";
+import type { TaskUsageSummary } from "./StatsDetail";
 import styles from "./StatsIcon.module.css";
-
-const StatsCharts = lazy(() => import("./StatsCharts"));
-const noStats: readonly EventStats[] = [];
-const noTools: readonly ToolTimingSummary[] = [];
-const noTurns: readonly TurnTiming[] = [];
-
-export interface TaskUsageSummary {
-  inputTokens: number;
-  cacheWriteInputTokens: number;
-  cacheReadInputTokens: number;
-  outputTokens: number;
-  costUSD: number;
-}
-
-interface UsageDetails extends TaskUsageSummary {
-  reasoningOutputTokens: number;
-  totalTokens: number;
-}
-
-function formatUsageTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}Mt`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}kt`;
-  return `${tokens}t`;
-}
 
 function formatUSD(usd: number): string {
   return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
 }
 
-function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
-  return turns.reduce<UsageDetails>((total, turn) => {
-    const u = turn.result.usage;
-    total.inputTokens += u.inputTokens;
-    total.cacheWriteInputTokens += u.cacheCreationInputTokens;
-    total.cacheReadInputTokens += u.cacheReadInputTokens;
-    total.outputTokens += u.outputTokens;
-    total.reasoningOutputTokens += u.reasoningOutputTokens ?? 0;
-    total.totalTokens += u.inputTokens + u.cacheCreationInputTokens + u.cacheReadInputTokens + u.outputTokens;
-    total.costUSD += turn.result.totalCostUSD;
-    return total;
-  }, {
-    inputTokens: 0,
-    cacheWriteInputTokens: 0,
-    cacheReadInputTokens: 0,
-    outputTokens: 0,
-    reasoningOutputTokens: 0,
-    totalTokens: 0,
-    costUSD: 0,
-  });
+function totalTokens(usage: TaskUsageSummary): number {
+  return (
+    usage.inputTokens +
+    usage.cacheWriteInputTokens +
+    usage.cacheReadInputTokens +
+    usage.outputTokens
+  );
 }
 
-// Color for CPU/MEM bars: ratio is 0–1 of a hard limit.
 function barColor(ratio: number): string {
   if (ratio >= 0.85) return "var(--color-danger)";
   if (ratio >= 0.5) return "var(--color-warning-text)";
   return "var(--color-success)";
 }
 
-// Color for NET bar: absolute thresholds on total bytes (cumulative).
 function netColor(bytes: number): string {
-  if (bytes >= 1e9) return "var(--color-danger)";      // ≥ 1 GB
-  if (bytes >= 100e6) return "var(--color-warning-text)"; // ≥ 100 MB
+  if (bytes >= 1e9) return "var(--color-danger)";
+  if (bytes >= 100e6) return "var(--color-warning-text)";
   return "var(--color-success)";
 }
 
-// Color for DISK bar: absolute thresholds on writable layer size.
 function diskColor(bytes: number): string {
-  if (bytes >= 10e9) return "var(--color-danger)";       // ≥ 10 GB
-  if (bytes >= 5e9) return "var(--color-warning-text)";  // ≥ 5 GB
+  if (bytes >= 10e9) return "var(--color-danger)";
+  if (bytes >= 5e9) return "var(--color-warning-text)";
   return "var(--color-success)";
 }
 
-export default function StatsIcon(props: { events: readonly EventMessage[]; stats: EventStats[]; turns: TurnTiming[]; usage?: TaskUsageSummary }) {
-  const [open, setOpen] = createSignal(false);
-
-  // Current stats: last sample.
-  const latest = () => props.stats[props.stats.length - 1];
-
-  // Normalize NET: max bytes/s across all samples.
-  const maxNet = createMemo(() => {
+export default function StatsIcon(props: {
+  href: string;
+  stats: EventStats[];
+  usage: TaskUsageSummary;
+}) {
+  const latest = () => props.stats.at(-1);
+  const maxNet = () => {
     let max = 1;
-    for (const stat of props.stats) max = Math.max(max, stat.netRx + stat.netTx);
+    for (const stat of props.stats)
+      max = Math.max(max, stat.netRx + stat.netTx);
     return max;
-  });
-  // Normalize DISK: max DiskUsed across all samples.
-  const maxDisk = createMemo(() => {
+  };
+  const maxDisk = () => {
     let max = 1;
     for (const stat of props.stats) max = Math.max(max, stat.diskUsed);
     return max;
-  });
-
+  };
   const cpuRatio = () => Math.min(1, (latest()?.cpuPerc ?? 0) / 100);
-  const memRatio = () => { const l = latest(); return l ? Math.min(1, l.memPerc / 100) : 0; };
+  const memRatio = () => Math.min(1, (latest()?.memPerc ?? 0) / 100);
   const netRatio = () => {
-    const s = latest();
-    if (!s) return 0;
-    return Math.min(1, (s.netRx + s.netTx) / maxNet());
+    const stat = latest();
+    return stat ? Math.min(1, (stat.netRx + stat.netTx) / maxNet()) : 0;
   };
   const diskRatio = () => {
-    const s = latest();
-    if (!s) return 0;
-    return Math.min(1, Math.max(0, s.diskUsed) / maxDisk());
+    const stat = latest();
+    return stat ? Math.min(1, Math.max(0, stat.diskUsed) / maxDisk()) : 0;
   };
-
   const hasStats = () => props.stats.length > 0;
-
-  const perfs = () => props.turns;
-  const toolTimingTracker = new IncrementalToolTimingTracker();
-  const toolSummaries = createMemo(() => open() ? toolTimingTracker.derive(props.events) : []);
-  const usage = createMemo<UsageDetails>(() => {
-    const fromTurns = sumTurnUsage(props.turns);
-    if (!props.usage) return fromTurns;
-    const u = props.usage;
-    return {
-      ...u,
-      reasoningOutputTokens: fromTurns.reasoningOutputTokens,
-      totalTokens: u.inputTokens + u.cacheWriteInputTokens + u.cacheReadInputTokens + u.outputTokens,
-    };
-  });
-  const cacheHitRate = () => {
-    const u = usage();
-    const input = u.inputTokens + u.cacheWriteInputTokens + u.cacheReadInputTokens;
-    return input > 0 ? u.cacheReadInputTokens / input : 0;
-  };
-  const costPerMillionTokens = () => {
-    const u = usage();
-    return u.totalTokens > 0 ? u.costUSD * 1_000_000 / u.totalTokens : 0;
-  };
+  const tokens = () => totalTokens(props.usage);
 
   return (
-    <div class={styles.wrapper}>
-      <button
-        class={`${styles.iconBtn}${open() ? ` ${styles.iconBtnActive}` : ""}`}
-        onClick={() => setOpen((v) => !v)}
-        title="Task usage and performance statistics"
-        aria-label="Task statistics"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          {/* Top-left: CPU */}
-          <rect x="0" y={8 - Math.round(cpuRatio() * 8)} width="6" height={Math.round(cpuRatio() * 8)} rx="1"
-            fill={hasStats() ? barColor(cpuRatio()) : "var(--color-border)"} />
-          {/* Top-right: MEM */}
-          <rect x="10" y={8 - Math.round(memRatio() * 8)} width="6" height={Math.round(memRatio() * 8)} rx="1"
-            fill={hasStats() ? barColor(memRatio()) : "var(--color-border)"} />
-          {/* Bottom-left: NET */}
-          <rect x="0" y={9 + (8 - Math.round(netRatio() * 8))} width="6" height={Math.round(netRatio() * 8)} rx="1"
-            fill={hasStats() ? netColor((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0)) : "var(--color-border)"} />
-          {/* Bottom-right: DISK */}
-          <rect x="10" y={9 + (8 - Math.round(diskRatio() * 8))} width="6" height={Math.round(diskRatio() * 8)} rx="1"
-            fill={hasStats() ? diskColor(latest()?.diskUsed ?? 0) : "var(--color-border)"} />
-        </svg>
-        <Show when={usage().totalTokens > 0}>
-          <span class={styles.iconSummary}>
-            {formatTokens(usage().totalTokens)}
-            <Show when={usage().costUSD > 0}><span class={styles.iconSummarySeparator}> · </span>{formatUSD(usage().costUSD)}</Show>
-          </span>
-        </Show>
-      </button>
-      <Show when={open()}>
-        <div class={styles.popup}>
-          <Show when={usage().totalTokens > 0}>
-            <div class={styles.popupSection} data-testid="task-usage-summary">
-              <div class={styles.popupSectionTitle}>Usage</div>
-              <div class={styles.usageGrid}>
-                <div class={styles.usageMetric} title="Input tokens that were neither written to nor read from cache">
-                  <span class={styles.usageLabel}>New input</span>
-                  <strong>{formatUsageTokens(usage().inputTokens)}</strong>
-                </div>
-                <div class={styles.usageMetric} title="Input tokens written to the provider prompt cache">
-                  <span class={styles.usageLabel}>Cache write</span>
-                  <strong>{formatUsageTokens(usage().cacheWriteInputTokens)}</strong>
-                </div>
-                <div class={styles.usageMetric} title="Input tokens served from the provider prompt cache">
-                  <span class={styles.usageLabel}>Cache read</span>
-                  <strong>{formatUsageTokens(usage().cacheReadInputTokens)}</strong>
-                </div>
-                <div class={styles.usageMetric} title="All generated output tokens, including thinking tokens">
-                  <span class={styles.usageLabel}>Output</span>
-                  <strong>{formatUsageTokens(usage().outputTokens)}</strong>
-                </div>
-                <div class={styles.usageMetric} title="Thinking or reasoning tokens; included in output">
-                  <span class={styles.usageLabel}>Thinking</span>
-                  <strong>{usage().reasoningOutputTokens > 0 ? formatUsageTokens(usage().reasoningOutputTokens) : "—"}</strong>
-                </div>
-              </div>
-              <div class={styles.efficiencyRow}>
-                <span><span class={styles.usageLabel}>Total </span>{formatUsageTokens(usage().totalTokens)}</span>
-                <span title="Share of input context served from cache"><span class={styles.usageLabel}>Cache hit </span>{Math.round(cacheHitRate() * 100)}%</span>
-                <Show when={usage().costUSD > 0}>
-                  <span><span class={styles.usageLabel}>Cost </span>{formatUSD(usage().costUSD)}</span>
-                  <span title="Reported cost divided by total token volume"><span class={styles.usageLabel}>Effective </span>{formatUSD(costPerMillionTokens())}/Mt</span>
-                </Show>
-              </div>
-            </div>
+    <A
+      class={styles.iconLink}
+      href={props.href}
+      title="Task usage and performance statistics"
+      aria-label="Task statistics"
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+        <rect
+          x="0"
+          y={8 - Math.round(cpuRatio() * 8)}
+          width="6"
+          height={Math.round(cpuRatio() * 8)}
+          rx="1"
+          fill={hasStats() ? barColor(cpuRatio()) : "var(--color-border)"}
+        />
+        <rect
+          x="10"
+          y={8 - Math.round(memRatio() * 8)}
+          width="6"
+          height={Math.round(memRatio() * 8)}
+          rx="1"
+          fill={hasStats() ? barColor(memRatio()) : "var(--color-border)"}
+        />
+        <rect
+          x="0"
+          y={9 + (8 - Math.round(netRatio() * 8))}
+          width="6"
+          height={Math.round(netRatio() * 8)}
+          rx="1"
+          fill={
+            hasStats()
+              ? netColor((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0))
+              : "var(--color-border)"
+          }
+        />
+        <rect
+          x="10"
+          y={9 + (8 - Math.round(diskRatio() * 8))}
+          width="6"
+          height={Math.round(diskRatio() * 8)}
+          rx="1"
+          fill={
+            hasStats()
+              ? diskColor(latest()?.diskUsed ?? 0)
+              : "var(--color-border)"
+          }
+        />
+      </svg>
+      <Show when={tokens() > 0}>
+        <span class={styles.iconSummary}>
+          {formatTokens(tokens())}
+          <Show when={props.usage.costUSD > 0}>
+            <span class={styles.iconSummarySeparator}> · </span>
+            {formatUSD(props.usage.costUSD)}
           </Show>
-          <Show when={perfs().length > 0 || toolSummaries().length > 0}>
-            <div class={styles.popupSection} data-testid="task-analytics-charts">
-              <div class={styles.popupSectionTitle}>Analytics</div>
-              <Suspense fallback={<div class={styles.noData}>Loading charts…</div>}>
-                <StatsCharts stats={noStats} turns={perfs()} tools={toolSummaries()} />
-              </Suspense>
-            </div>
-          </Show>
-          <div class={styles.popupSection}>
-            <div class={styles.popupSectionTitle}>Resources</div>
-            <Show when={props.stats.length > 0} fallback={<div class={styles.noData}>No data yet</div>}>
-              <Suspense fallback={<div class={styles.noData}>Loading resource history…</div>}>
-                <StatsCharts stats={props.stats} turns={noTurns} tools={noTools} />
-              </Suspense>
-            </Show>
-          </div>
-        </div>
+        </span>
       </Show>
-    </div>
+    </A>
   );
 }

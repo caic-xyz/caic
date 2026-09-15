@@ -1,6 +1,19 @@
 // TaskDetail renders agent output, task context, actions, and Git-state diff navigation.
 
-import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
+import {
+  createSignal,
+  createMemo,
+  createEffect,
+  For,
+  Index,
+  Show,
+  onCleanup,
+  onMount,
+  untrack,
+  Switch,
+  Match,
+  type Accessor,
+} from "solid-js";
 import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
@@ -9,18 +22,68 @@ import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import checkIconSVG from "@material-symbols/svg-400/outlined/check.svg?raw";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats, EventUsage, EventToolInputView, EventSubagentSpawn, TaskRateLimit, GitRepositoryState } from "@sdk/types.gen";
+import type {
+  EventMessage,
+  EventResult,
+  AskQuestion,
+  EventAsk,
+  EventTextDelta,
+  SafetyIssue,
+  ImageData as APIImageData,
+  SyncTarget,
+  DiffFileStat,
+  ForgeCheck,
+  EventStats,
+  EventUsage,
+  EventToolInputView,
+  EventSubagentSpawn,
+  TaskRateLimit,
+  GitRepositoryState,
+} from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "../gomode/HostMode";
 import { requestNotificationPermission } from "../gomode/notifications";
 
-import { sendInput as apiSendInput, restartTask as apiRestartTask, compactContext as apiCompactContext, syncTask as apiSyncTask, getTaskRepoStatus, getTaskToolInput, botFixPR } from "../api";
-import { IncrementalMessageGrouper, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, rateLimitPercentage, toolCallDurationMs, toolCallDurations, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session, type Turn } from "../grouping";
+import {
+  sendInput as apiSendInput,
+  restartTask as apiRestartTask,
+  compactContext as apiCompactContext,
+  syncTask as apiSyncTask,
+  getTaskRepoStatus,
+  getTaskToolInput,
+  botFixPR,
+} from "../api";
+import {
+  IncrementalMessageGrouper,
+  groupSessions,
+  isSessionBoundary,
+  buildPastSessionItems,
+  buildTurnItems,
+  rateLimitPercentage,
+  toolCallDurationMs,
+  toolCallDurations,
+  toolCountSummary,
+  turnSummary,
+  sessionSummary,
+  type MsgItem,
+  type MessageGroup,
+  type Session,
+  type Turn,
+} from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
-import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import {
+  formatBytes,
+  formatElapsed,
+  formatTokens,
+  toolCallDetail,
+} from "../formatting";
 import { formatQuotaCountdown } from "../quota";
-import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
+import {
+  IncrementalTaskTimingTracker,
+  formatTimingDuration,
+  type TurnTiming,
+} from "../timing";
 import type { ToolCall } from "../grouping";
 import { Marked, Renderer, type Tokens } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -30,11 +93,16 @@ import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
-import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
+import TurnInvocationIcon, {
+  SessionInvocationIcon,
+} from "./TurnInvocationIcon";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
-import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
+import RepoStateIcons, {
+  diffStatState,
+  repoStateLabel,
+} from "./RepoStateIcons";
 import styles from "./TaskDetail.module.css";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
@@ -79,7 +147,7 @@ interface Props {
   cumulativeOutputTokens?: number;
   cumulativeCacheCreationInputTokens?: number;
   cumulativeCacheReadInputTokens?: number;
-	stoppedDiskUsedBytes: number;
+  stoppedDiskUsedBytes: number;
   diffStat?: DiffFileStat[];
   vncPort?: number;
   sudoPassword?: string;
@@ -126,7 +194,11 @@ function ciLabel(status: CIStatus, checks?: ForgeCheck[]): string {
 }
 
 function checkDuration(c: ForgeCheck, now: number): string {
-  const start = c.startedAt ? new Date(c.startedAt).getTime() : c.queuedAt ? new Date(c.queuedAt).getTime() : 0;
+  const start = c.startedAt
+    ? new Date(c.startedAt).getTime()
+    : c.queuedAt
+      ? new Date(c.queuedAt).getTime()
+      : 0;
   if (!start) return "";
   const end = c.completedAt ? new Date(c.completedAt).getTime() : now;
   return formatElapsed(end - start);
@@ -134,7 +206,12 @@ function checkDuration(c: ForgeCheck, now: number): string {
 
 function checkStatusLabel(c: ForgeCheck): string {
   if (c.status === "completed") {
-    if (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped") return "passed";
+    if (
+      c.conclusion === "success" ||
+      c.conclusion === "neutral" ||
+      c.conclusion === "skipped"
+    )
+      return "passed";
     return c.conclusion || "failed";
   }
   if (c.status === "in_progress") return "running";
@@ -142,14 +219,18 @@ function checkStatusLabel(c: ForgeCheck): string {
 }
 
 function checkJobURL(c: ForgeCheck, forge?: string): string | undefined {
-  if (forge === "gitlab") return `https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}`;
-  if (c.runID && c.jobID) return `https://github.com/${c.owner}/${c.repo}/actions/runs/${c.runID}/job/${c.jobID}`;
+  if (forge === "gitlab")
+    return `https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}`;
+  if (c.runID && c.jobID)
+    return `https://github.com/${c.owner}/${c.repo}/actions/runs/${c.runID}/job/${c.jobID}`;
   return undefined;
 }
 
 function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
   if (!remoteURL) return undefined;
-  return forge === "gitlab" ? `${remoteURL}/-/pipelines` : `${remoteURL}/actions`;
+  return forge === "gitlab"
+    ? `${remoteURL}/-/pipelines`
+    : `${remoteURL}/actions`;
 }
 
 export default function TaskDetail(props: Props) {
@@ -162,7 +243,9 @@ export default function TaskDetail(props: Props) {
   });
   const messages = timeline.messages;
   const [sending, setSending] = createSignal(false);
-  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
+  const [pendingAction, setPendingAction] = createSignal<
+    "sync" | "restart" | "compact" | null
+  >(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
@@ -179,18 +262,25 @@ export default function TaskDetail(props: Props) {
 
   function headerWraps(): boolean {
     if (!headerRef) return false;
-    const headerItems = Array.from(headerRef.children)
-      .filter((child): child is HTMLElement => child instanceof HTMLElement && getComputedStyle(child).display !== "none");
+    const headerItems = Array.from(headerRef.children).filter(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement &&
+        getComputedStyle(child).display !== "none",
+    );
     const first = headerItems[0]?.getBoundingClientRect();
     const firstCenter = first && first.top + first.height / 2;
-    return firstCenter !== undefined && headerItems.some((item) => {
-      const box = item.getBoundingClientRect();
-      return Math.abs(box.top + box.height / 2 - firstCenter) > 1;
-    });
+    return (
+      firstCenter !== undefined &&
+      headerItems.some((item) => {
+        const box = item.getBoundingClientRect();
+        return Math.abs(box.top + box.height / 2 - firstCenter) > 1;
+      })
+    );
   }
 
   function scheduleHeaderGitStatsElision() {
-    if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
+    if (headerGitStatsFrame !== undefined)
+      cancelAnimationFrame(headerGitStatsFrame);
     setElideHeaderGitStats(false);
     headerGitStatsFrame = requestAnimationFrame(() => {
       headerGitStatsFrame = undefined;
@@ -203,12 +293,15 @@ export default function TaskDetail(props: Props) {
     window.addEventListener("resize", scheduleHeaderGitStatsElision);
     onCleanup(() => {
       window.removeEventListener("resize", scheduleHeaderGitStatsElision);
-      if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
+      if (headerGitStatsFrame !== undefined)
+        cancelAnimationFrame(headerGitStatsFrame);
     });
   });
 
   createEffect(() => {
-    const hasRepositoryState = repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat));
+    const hasRepositoryState =
+      repoStates().some((state) => repoStateLabel(state)) ||
+      repoStateLabel(diffStatState(props.diffStat));
     if (!hasRepositoryState) {
       setElideHeaderGitStats(false);
       return;
@@ -218,7 +311,17 @@ export default function TaskDetail(props: Props) {
 
   createEffect(() => {
     const taskID = props.taskId;
-    const hasRuntime = !["pending", "branching", "provisioning", "starting", "stopped", "purging", "crashed", "failed", "purged"].includes(props.taskState);
+    const hasRuntime = ![
+      "pending",
+      "branching",
+      "provisioning",
+      "starting",
+      "stopped",
+      "purging",
+      "crashed",
+      "failed",
+      "purged",
+    ].includes(props.taskState);
     if (!hasRuntime) {
       setRepoStates([]);
       return;
@@ -243,8 +346,11 @@ export default function TaskDetail(props: Props) {
   function setPromptRef(element: HTMLElement) {
     if (!initialPromptFocusPending) return;
     initialPromptFocusPending = false;
-    if (!props.autoFocusPrompt
-      || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
+    if (
+      !props.autoFocusPrompt ||
+      window.matchMedia("(hover: none) and (pointer: coarse)").matches
+    )
+      return;
     requestAnimationFrame(() => {
       if (element.isConnected) element.focus();
     });
@@ -256,7 +362,9 @@ export default function TaskDetail(props: Props) {
       event.stopPropagation();
       props.onClose();
       requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus();
+        document
+          .querySelector<HTMLElement>("[data-testid='prompt-input']")
+          ?.focus();
       });
       return;
     }
@@ -266,8 +374,9 @@ export default function TaskDetail(props: Props) {
     // Task updates can replace the card while this handler runs. Focus the
     // current card after Solid has applied that update.
     requestAnimationFrame(() => {
-      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
-        .find((candidate) => candidate.dataset.taskId === props.taskId);
+      const card = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-task-id]"),
+      ).find((candidate) => candidate.dataset.taskId === props.taskId);
       card?.focus();
     });
   }
@@ -310,16 +419,24 @@ export default function TaskDetail(props: Props) {
   });
 
   // Expansion state for collapsed past turns and sessions. Persisted per task across remounts.
-  const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<ReadonlySet<string>>(
+  const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<
+    ReadonlySet<string>
+  >(
     expandedTurnsByTask.get(props.taskId) ?? new Set<string>(), // eslint-disable-line solid/reactivity -- initial value; createEffect below syncs on taskId changes
   );
-  const [expandedSessionKeys, setExpandedSessionKeys] = createSignal<ReadonlySet<string>>(
+  const [expandedSessionKeys, setExpandedSessionKeys] = createSignal<
+    ReadonlySet<string>
+  >(
     expandedSessionsByTask.get(props.taskId) ?? new Set<string>(), // eslint-disable-line solid/reactivity -- initial value
   );
   // Sync expansion state when taskId changes.
   createEffect(() => {
-    setExpandedTurnKeys(expandedTurnsByTask.get(props.taskId) ?? new Set<string>());
-    setExpandedSessionKeys(expandedSessionsByTask.get(props.taskId) ?? new Set<string>());
+    setExpandedTurnKeys(
+      expandedTurnsByTask.get(props.taskId) ?? new Set<string>(),
+    );
+    setExpandedSessionKeys(
+      expandedSessionsByTask.get(props.taskId) ?? new Set<string>(),
+    );
   });
   // Expanding/collapsing a past turn or session replaces its row with a different
   // number of rows, shifting every row after it. Since those rows are matched by
@@ -329,13 +446,17 @@ export default function TaskDetail(props: Props) {
   // same data-anchor-key and correct scrollTop so it lands back at that offset.
   function anchoredToggleTurn(e: MouseEvent, key: string) {
     const anchorKey = `turn:${key}`;
-    const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
+    const beforeTop = (
+      e.currentTarget as HTMLElement | null
+    )?.getBoundingClientRect().top;
     toggleTurn(key);
     restoreAnchor(anchorKey, beforeTop);
   }
   function anchoredToggleSession(e: MouseEvent, key: string) {
     const anchorKey = `session:${key}`;
-    const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
+    const beforeTop = (
+      e.currentTarget as HTMLElement | null
+    )?.getBoundingClientRect().top;
     toggleSession(key);
     restoreAnchor(anchorKey, beforeTop);
   }
@@ -343,7 +464,9 @@ export default function TaskDetail(props: Props) {
     const container = messageAreaRef;
     if (!container || beforeTop === undefined) return;
     requestAnimationFrame(() => {
-      const afterEl = container.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
+      const afterEl = container.querySelector<HTMLElement>(
+        `[data-anchor-key="${CSS.escape(anchorKey)}"]`,
+      );
       if (afterEl) {
         container.scrollTop += afterEl.getBoundingClientRect().top - beforeTop;
       }
@@ -352,7 +475,8 @@ export default function TaskDetail(props: Props) {
   function toggleTurn(key: string) {
     setExpandedTurnKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       expandedTurnsByTask.set(props.taskId, next);
       return next;
     });
@@ -360,7 +484,8 @@ export default function TaskDetail(props: Props) {
   function toggleSession(key: string) {
     setExpandedSessionKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       expandedSessionsByTask.set(props.taskId, next);
       return next;
     });
@@ -408,13 +533,14 @@ export default function TaskDetail(props: Props) {
     timingEpoch = epoch;
     return timingTracker.derive(messages(), reset);
   });
-  const turnTimingsByResultEvent = createMemo(() => new Map(
-    taskTimings().turns.map((turn) => [turn.event, turn]),
-  ));
-  const turnTimingsByResult = createMemo(() => new Map(
-    taskTimings().turns.map((turn) => [turn.result, turn]),
-  ));
-  const turnTiming = (turn: Turn) => turn.result ? turnTimingsByResult().get(turn.result) : undefined;
+  const turnTimingsByResultEvent = createMemo(
+    () => new Map(taskTimings().turns.map((turn) => [turn.event, turn])),
+  );
+  const turnTimingsByResult = createMemo(
+    () => new Map(taskTimings().turns.map((turn) => [turn.result, turn])),
+  );
+  const turnTiming = (turn: Turn) =>
+    turn.result ? turnTimingsByResult().get(turn.result) : undefined;
   const sessionTimings = (session: Session) => {
     const timings: TurnTiming[] = [];
     const timingsByResult = turnTimingsByResult();
@@ -424,16 +550,33 @@ export default function TaskDetail(props: Props) {
     }
     return timings;
   };
-  const statsHistory = createMemo<EventStats[]>(() => messages().filter((m) => m.kind === "stats" && m.stats !== undefined).map((m) => m.stats as EventStats));
+  const statsHistory = createMemo<EventStats[]>(() =>
+    messages()
+      .filter((m) => m.kind === "stats" && m.stats !== undefined)
+      .map((m) => m.stats as EventStats),
+  );
   // The agent normally emits the initial prompt as its first user-input event.
   // Setup can fail before that happens, so retain the recorded prompt as task context.
   const hasInitialPromptEvent = createMemo(() => {
     const history = messages();
     const firstInput = history.findIndex((event) => event.kind === "userInput");
-    if (firstInput < 0 || history[firstInput].userInput?.text !== props.initialPrompt) return false;
-    return !history.slice(0, firstInput).some((event) =>
-      event.kind === "text" || event.kind === "textDelta" || event.kind === "thinking" || event.kind === "thinkingDelta" || event.kind === "toolUse" || event.kind === "toolResult" || event.kind === "result",
-    );
+    if (
+      firstInput < 0 ||
+      history[firstInput].userInput?.text !== props.initialPrompt
+    )
+      return false;
+    return !history
+      .slice(0, firstInput)
+      .some(
+        (event) =>
+          event.kind === "text" ||
+          event.kind === "textDelta" ||
+          event.kind === "thinking" ||
+          event.kind === "thinkingDelta" ||
+          event.kind === "toolUse" ||
+          event.kind === "toolResult" ||
+          event.kind === "result",
+      );
   });
   // Fold setup metadata incrementally; large retained histories must not be
   // rescanned on each live flush.
@@ -447,7 +590,11 @@ export default function TaskDetail(props: Props) {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     const history = messages();
-    if (taskId !== setupTaskId || epoch !== setupEpoch || history.length < setupProcessed) {
+    if (
+      taskId !== setupTaskId ||
+      epoch !== setupEpoch ||
+      history.length < setupProcessed
+    ) {
       setupTaskId = taskId;
       setupEpoch = epoch;
       setupProcessed = 0;
@@ -459,7 +606,10 @@ export default function TaskDetail(props: Props) {
       const event = history[i];
       if (event.kind === "log" && event.log) setupLogs.push(event);
       if (firstInit === null && event.kind === "init") firstInit = event;
-      if ((event.kind === "init" || event.kind === "userInput") && event.ts > 0) {
+      if (
+        (event.kind === "init" || event.kind === "userInput") &&
+        event.ts > 0
+      ) {
         firstSetupEndTs = Math.min(firstSetupEndTs, event.ts);
       }
     }
@@ -467,9 +617,13 @@ export default function TaskDetail(props: Props) {
 
     const taskStartTs = props.startedAt ? Date.parse(props.startedAt) : 0;
     const durationMs = firstSetupEndTs - taskStartTs;
-    const range = taskStartTs > 0 && Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= maxCredibleSetupDurationMs
-      ? { start: taskStartTs, end: firstSetupEndTs }
-      : null;
+    const range =
+      taskStartTs > 0 &&
+      Number.isFinite(durationMs) &&
+      durationMs >= 0 &&
+      durationMs <= maxCredibleSetupDurationMs
+        ? { start: taskStartTs, end: firstSetupEndTs }
+        : null;
     return {
       events: firstInit ? [...setupLogs, firstInit] : [...setupLogs],
       lines: setupLogs.map((event) => event.log?.line ?? ""),
@@ -490,9 +644,13 @@ export default function TaskDetail(props: Props) {
     const sessions = allCompletedSessions();
     return sessions.length > 0 ? sessions[sessions.length - 1] : null;
   });
-  const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
+  const currentSessionCompletedTurns = createMemo(
+    () => currentSessionEntry()?.turns ?? [],
+  );
   // Boundary event for the current session from completed messages.
-  const currentSessionBoundaryFromCompleted = createMemo(() => currentSessionEntry()?.boundaryEvent);
+  const currentSessionBoundaryFromCompleted = createMemo(
+    () => currentSessionEntry()?.boundaryEvent,
+  );
 
   // Scan live messages for a session boundary event (e.g., init before the first result).
   // This handles the common case where the first session starts before any turn completes.
@@ -504,8 +662,8 @@ export default function TaskDetail(props: Props) {
     }
     return undefined;
   });
-  const currentSessionBoundaryEvent = createMemo(() =>
-    currentSessionBoundaryFromCompleted() ?? liveSessionBoundary(),
+  const currentSessionBoundaryEvent = createMemo(
+    () => currentSessionBoundaryFromCompleted() ?? liveSessionBoundary(),
   );
   const currentSessionKey = createMemo(() => {
     const idx = allCompletedSessions().length - 1;
@@ -523,13 +681,19 @@ export default function TaskDetail(props: Props) {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     const start = splitIdx();
-    if (taskId !== groupedTaskId || epoch !== groupedEpoch || start !== groupedSplitIdx) {
+    if (
+      taskId !== groupedTaskId ||
+      epoch !== groupedEpoch ||
+      start !== groupedSplitIdx
+    ) {
       groupedTaskId = taskId;
       groupedEpoch = epoch;
       groupedSplitIdx = start;
       messageGrouper.resetAfter(completedMsgs());
     }
-    const msgs = messages().slice(start).filter((ev) => !isSessionBoundary(ev));
+    const msgs = messages()
+      .slice(start)
+      .filter((ev) => !isSessionBoundary(ev));
     return messageGrouper.group(msgs);
   });
 
@@ -538,7 +702,11 @@ export default function TaskDetail(props: Props) {
   // <Match when={..} keyed> pattern uses reference equality as the DOM key, and new
   // object identities on every flush would cause remounting (flickering + unclickable).
   const pastSessionItems = createMemo(() =>
-    buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys()),
+    buildPastSessionItems(
+      pastSessions(),
+      expandedSessionKeys(),
+      expandedTurnKeys(),
+    ),
   );
   // Whether a live turn is currently streaming. Mirrors Android's hasLiveTurn.
   const hasLiveTurn = createMemo(() => currentGroups().length > 0);
@@ -562,12 +730,25 @@ export default function TaskDetail(props: Props) {
     // key collisions with live items. When idle, use "g" so the LazyColumn can reuse
     // composables if the same turn transitions between live and last-expanded states.
     const initialKeyPrefix = hasLiveTurn() ? "lg" : "g";
-    return last.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `${initialKeyPrefix}:${j}` }));
+    return last.groups.map((g, j) => ({
+      kind: "group" as const,
+      group: g,
+      isLive: false,
+      key: `${initialKeyPrefix}:${j}`,
+    }));
   });
   // Session boundary item for the current session.
   const sessionBoundaryItems = createMemo((): MsgItem[] => {
     const boundaryEv = currentSessionBoundaryEvent();
-    return boundaryEv ? [{ kind: "sessionBoundary", event: boundaryEv, key: "cur-sess-boundary" }] : [];
+    return boundaryEv
+      ? [
+          {
+            kind: "sessionBoundary",
+            event: boundaryEv,
+            key: "cur-sess-boundary",
+          },
+        ]
+      : [];
   });
   // Live turn groups: incomplete turn groups flushed on structural boundaries.
   const liveItems = createMemo((): MsgItem[] => {
@@ -592,7 +773,9 @@ export default function TaskDetail(props: Props) {
   // Last ask group: only the most recent ask is interactive.
   // Flatten all groups from all sessions + current live turn for ask detection.
   const allGroups = createMemo(() => {
-    const sessionGroups = allCompletedSessions().flatMap((s) => s.turns.flatMap((t) => t.groups));
+    const sessionGroups = allCompletedSessions().flatMap((s) =>
+      s.turns.flatMap((t) => t.groups),
+    );
     return [...sessionGroups, ...currentGroups()];
   });
   const lastAskGroup = createMemo((): MessageGroup | null => {
@@ -607,10 +790,14 @@ export default function TaskDetail(props: Props) {
     const text = props.inputDraft.trim();
     const imgs = props.inputImages;
     if (!text && imgs.length === 0) return;
-    requestNotificationPermission({ enabled: hostMode.browserNotificationsEnabled() });
+    requestNotificationPermission({
+      enabled: hostMode.browserNotificationsEnabled(),
+    });
     setSending(true);
     try {
-      await apiSendInput(props.taskId, { prompt: { text, ...(imgs.length > 0 ? { images: imgs } : {}) } });
+      await apiSendInput(props.taskId, {
+        prompt: { text, ...(imgs.length > 0 ? { images: imgs } : {}) },
+      });
       props.onInputDraft("");
       props.onInputImages([]);
     } catch (e) {
@@ -641,22 +828,39 @@ export default function TaskDetail(props: Props) {
   };
 
   // Detail SSE can show an ask before the task-list SSE patches the task state.
-  const isPendingAsk = () => props.taskState === "pending" && hasUnansweredAsk();
+  const isPendingAsk = () =>
+    props.taskState === "pending" && hasUnansweredAsk();
 
   const isActive = () => {
     const s = props.taskState;
-    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking" || s === "has_plan" || s === "purging" || isPendingAsk();
+    return (
+      s === "running" ||
+      s === "branching" ||
+      s === "provisioning" ||
+      s === "starting" ||
+      s === "waiting" ||
+      s === "asking" ||
+      s === "has_plan" ||
+      s === "purging" ||
+      isPendingAsk()
+    );
   };
 
-  const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan" || isPendingAsk();
-  const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
+  const isWaiting = () =>
+    props.taskState === "waiting" ||
+    props.taskState === "asking" ||
+    props.taskState === "has_plan" ||
+    isPendingAsk();
+  const isRecoverable = () =>
+    props.taskState === "stopped" || props.taskState === "crashed";
   const canSendInput = () => isActive() && props.taskState !== "purging";
   const prURL = () => {
     const owner = props.forgeOwner;
     const repo = props.forgeRepo;
     const pr = props.forgePR;
     if (!owner || !repo || !pr) return undefined;
-    if (props.forge === "gitlab") return `https://gitlab.com/${owner}/${repo}/-/merge_requests/${pr}`;
+    if (props.forge === "gitlab")
+      return `https://gitlab.com/${owner}/${repo}/-/merge_requests/${pr}`;
     return `https://github.com/${owner}/${repo}/pull/${pr}`;
   };
 
@@ -686,7 +890,10 @@ export default function TaskDetail(props: Props) {
     setActionError(null);
     setSafetyIssues([]);
     try {
-      const resp = await apiSyncTask(props.taskId, { force, ...(target ? { target } : {}) });
+      const resp = await apiSyncTask(props.taskId, {
+        force,
+        ...(target ? { target } : {}),
+      });
       if (resp.status === "blocked" && resp.safetyIssues?.length) {
         setSafetyIssues(resp.safetyIssues);
       }
@@ -714,7 +921,10 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  async function runAction(name: "sync" | "restart" | "compact", fn: () => Promise<unknown>) {
+  async function runAction(
+    name: "sync" | "restart" | "compact",
+    fn: () => Promise<unknown>,
+  ) {
     if (pendingAction()) return;
     setPendingAction(name);
     setActionError(null);
@@ -731,56 +941,147 @@ export default function TaskDetail(props: Props) {
 
   return (
     <div class={styles.container}>
-      <div class={styles.header} data-testid="task-detail-header" ref={(element) => { headerRef = element; }}>
-        <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close"><CloseIcon width={20} height={20} /></button>
+      <div
+        class={styles.header}
+        data-testid="task-detail-header"
+        ref={(element) => {
+          headerRef = element;
+        }}
+      >
+        <button
+          class={styles.closeBtn}
+          onClick={() => props.onClose()}
+          title="Close"
+        >
+          <CloseIcon width={20} height={20} />
+        </button>
         <Show when={props.title}>
           <span class={styles.headerTitle}>{props.title}</span>
         </Show>
-        <span class={styles.headerMeta} ref={(element) => { headerMetaRef = element; }}>
-          <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
-            <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">{props.repo}</a>
+        <span
+          class={styles.headerMeta}
+          ref={(element) => {
+            headerMetaRef = element;
+          }}
+        >
+          <Show
+            when={props.remoteURL}
+            fallback={<span class={styles.headerRepo}>{props.repo}</span>}
+          >
+            <a
+              class={styles.headerRepo}
+              href={props.remoteURL}
+              target="_blank"
+              rel="noopener"
+            >
+              {props.repo}
+            </a>
           </Show>
           <span class={styles.headerBranch}>{props.branch}</span>
           <Show when={prURL()}>
-            <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">{prLabel()}</a>
+            <a
+              class={styles.headerPR}
+              href={prURL()}
+              target="_blank"
+              rel="noopener"
+            >
+              {prLabel()}
+            </a>
           </Show>
           <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
             {(() => {
               const s = props.ciStatus as CIStatus;
               const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
-              const actionsURL = () => ciActionsURL(props.remoteURL, props.forge);
+              const actionsURL = () =>
+                ciActionsURL(props.remoteURL, props.forge);
               return (
                 <>
-                  <Show when={hasChecks()} fallback={
-                    <Show when={actionsURL()} keyed fallback={<span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</span>}>
-                      {(url) => <a class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`} href={url} target="_blank" rel="noopener">{ciLabel(s, props.ciChecks)}</a>}
-                    </Show>
-                  }>
+                  <Show
+                    when={hasChecks()}
+                    fallback={
+                      <Show
+                        when={actionsURL()}
+                        keyed
+                        fallback={
+                          <span
+                            class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
+                          >
+                            {ciLabel(s, props.ciChecks)}
+                          </span>
+                        }
+                      >
+                        {(url) => (
+                          <a
+                            class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
+                            href={url}
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            {ciLabel(s, props.ciChecks)}
+                          </a>
+                        )}
+                      </Show>
+                    }
+                  >
                     <details class={styles.ciDetails}>
-                      <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</summary>
+                      <summary
+                        class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
+                      >
+                        {ciLabel(s, props.ciChecks)}
+                      </summary>
                       <div class={styles.ciDropdown}>
                         <For each={props.ciChecks}>
                           {(c) => {
-                            const statusCls = c.status === "completed"
-                              ? (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped" ? styles.ciCheckPassed : styles.ciCheckFailed)
-                              : c.status === "in_progress" ? styles.ciCheckRunning : styles.ciCheckQueued;
+                            const statusCls =
+                              c.status === "completed"
+                                ? c.conclusion === "success" ||
+                                  c.conclusion === "neutral" ||
+                                  c.conclusion === "skipped"
+                                  ? styles.ciCheckPassed
+                                  : styles.ciCheckFailed
+                                : c.status === "in_progress"
+                                  ? styles.ciCheckRunning
+                                  : styles.ciCheckQueued;
                             const jobURL = () => checkJobURL(c, props.forge);
                             return (
-                              <Show when={jobURL()} keyed fallback={
-                                <div class={`${styles.ciCheckRow} ${statusCls}`}>
-                                  <span class={styles.ciCheckName}>{c.name}</span>
-                                  <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
-                                  <Show when={c.startedAt || c.queuedAt}>
-                                    <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
-                                  </Show>
-                                </div>
-                              }>
-                                {(url) => (
-                                  <a class={`${styles.ciCheckRow} ${styles.ciCheckLink} ${statusCls}`} href={url} target="_blank" rel="noopener">
-                                    <span class={styles.ciCheckName}>{c.name}</span>
-                                    <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
+                              <Show
+                                when={jobURL()}
+                                keyed
+                                fallback={
+                                  <div
+                                    class={`${styles.ciCheckRow} ${statusCls}`}
+                                  >
+                                    <span class={styles.ciCheckName}>
+                                      {c.name}
+                                    </span>
+                                    <span class={styles.ciCheckStatus}>
+                                      {checkStatusLabel(c)}
+                                    </span>
                                     <Show when={c.startedAt || c.queuedAt}>
-                                      <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
+                                      <span class={styles.ciCheckDuration}>
+                                        {checkDuration(c, Date.now())}
+                                      </span>
+                                    </Show>
+                                  </div>
+                                }
+                              >
+                                {(url) => (
+                                  <a
+                                    class={`${styles.ciCheckRow} ${styles.ciCheckLink} ${statusCls}`}
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener"
+                                  >
+                                    <span class={styles.ciCheckName}>
+                                      {c.name}
+                                    </span>
+                                    <span class={styles.ciCheckStatus}>
+                                      {checkStatusLabel(c)}
+                                    </span>
+                                    <Show when={c.startedAt || c.queuedAt}>
+                                      <span class={styles.ciCheckDuration}>
+                                        {checkDuration(c, Date.now())}
+                                      </span>
                                     </Show>
                                   </a>
                                 )}
@@ -791,8 +1092,23 @@ export default function TaskDetail(props: Props) {
                       </div>
                     </details>
                   </Show>
-                  <Show when={s === "failure" && props.ciChecks?.some((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped")}>
-                    <button class={styles.fixCIBtn} onClick={handleFixPR} disabled={fixingPR()} title="Inject a fix-PR command into this task (auto mode — no new task created)">
+                  <Show
+                    when={
+                      s === "failure" &&
+                      props.ciChecks?.some(
+                        (c) =>
+                          c.conclusion !== "success" &&
+                          c.conclusion !== "neutral" &&
+                          c.conclusion !== "skipped",
+                      )
+                    }
+                  >
+                    <button
+                      class={styles.fixCIBtn}
+                      onClick={handleFixPR}
+                      disabled={fixingPR()}
+                      title="Inject a fix-PR command into this task (auto mode — no new task created)"
+                    >
                       {fixingPR() ? "Sending…" : "Fix PR"}
                     </button>
                   </Show>
@@ -801,22 +1117,54 @@ export default function TaskDetail(props: Props) {
             })()}
           </Show>
         </span>
-        <A class={styles.diffLink} href={`${location.pathname}/info`}>Info</A>
-        <Show when={repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))}>
+        <A class={styles.diffLink} href={`${location.pathname}/info`}>
+          Info
+        </A>
+        <Show
+          when={
+            repoStates().some((state) => repoStateLabel(state)) ||
+            repoStateLabel(diffStatState(props.diffStat))
+          }
+        >
           <span class={styles.repoStateLinks}>
             <For each={repoStates()}>
-              {(state) => <RepoStateIcons state={state} href={`${location.pathname}/diff`} elideDiffStats={elideHeaderGitStats()} />}
+              {(state) => (
+                <RepoStateIcons
+                  state={state}
+                  href={`${location.pathname}/diff`}
+                  elideDiffStats={elideHeaderGitStats()}
+                />
+              )}
             </For>
             <Show when={!repoStates().some((state) => repoStateLabel(state))}>
-              <RepoStateIcons state={diffStatState(props.diffStat)} href={`${location.pathname}/diff`} elideDiffStats={elideHeaderGitStats()} />
+              <RepoStateIcons
+                state={diffStatState(props.diffStat)}
+                href={`${location.pathname}/diff`}
+                elideDiffStats={elideHeaderGitStats()}
+              />
             </Show>
           </span>
         </Show>
-        <Show when={props.taskState !== "pending" && props.taskState !== "branching" && props.taskState !== "provisioning" && props.taskState !== "starting" && props.taskState !== "stopped" && props.taskState !== "crashed" && props.taskState !== "purged" && props.taskState !== "failed"}>
-          <A class={styles.diffLink} href={`${location.pathname}/processes`}>Processes</A>
+        <Show
+          when={
+            props.taskState !== "pending" &&
+            props.taskState !== "branching" &&
+            props.taskState !== "provisioning" &&
+            props.taskState !== "starting" &&
+            props.taskState !== "stopped" &&
+            props.taskState !== "crashed" &&
+            props.taskState !== "purged" &&
+            props.taskState !== "failed"
+          }
+        >
+          <A class={styles.diffLink} href={`${location.pathname}/processes`}>
+            Processes
+          </A>
         </Show>
         <Show when={(props.vncPort ?? 0) > 0}>
-          <A class={styles.diffLink} href={`${location.pathname}/vnc`}>VNC</A>
+          <A class={styles.diffLink} href={`${location.pathname}/vnc`}>
+            VNC
+          </A>
         </Show>
         <Show when={props.sudoPassword}>
           <span class={styles.sudoPassword}>
@@ -839,20 +1187,29 @@ export default function TaskDetail(props: Props) {
           </span>
         </Show>
         <Show when={props.inPlanMode}>
-          <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
+          <span class={styles.planIndicator} title="Agent is in plan mode">
+            Plan Mode
+          </span>
         </Show>
-		<Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
-		  <span class={styles.stoppedDiskUsage} title="Writable disk space retained by this stopped task">
-			Disk {formatBytes(props.stoppedDiskUsedBytes)}
+        <Show
+          when={
+            props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0
+          }
+        >
+          <span
+            class={styles.stoppedDiskUsage}
+            title="Writable disk space retained by this stopped task"
+          >
+            Disk {formatBytes(props.stoppedDiskUsedBytes)}
           </span>
         </Show>
         <StatsIcon
-          events={messages()}
+          href={`${location.pathname}/stats`}
           stats={statsHistory()}
-          turns={taskTimings().turns}
           usage={{
             inputTokens: props.cumulativeInputTokens ?? 0,
-            cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
+            cacheWriteInputTokens:
+              props.cumulativeCacheCreationInputTokens ?? 0,
             cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
             outputTokens: props.cumulativeOutputTokens ?? 0,
             costUSD: props.costUSD ?? 0,
@@ -862,19 +1219,36 @@ export default function TaskDetail(props: Props) {
       <Show when={props.parentTaskID || props.childTasks.length > 0}>
         <nav class={styles.hierarchy} aria-label="Task hierarchy">
           <Show when={props.parentTaskID} keyed>
-            {(parentID) => <A class={styles.hierarchyLink} href={`/task/@${parentID}`}>Parent task</A>}
+            {(parentID) => (
+              <A class={styles.hierarchyLink} href={`/task/@${parentID}`}>
+                Parent task
+              </A>
+            )}
           </Show>
           <For each={props.childTasks}>
-            {(child) => <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>Child: {child.title || child.id}</A>}
+            {(child) => (
+              <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>
+                Child: {child.title || child.id}
+              </A>
+            )}
           </For>
         </nav>
       </Show>
       <Show when={props.rateLimit?.blocked}>
-        <section class={styles.quotaRecovery} aria-labelledby="quota-recovery-title" data-testid="quota-recovery-detail">
+        <section
+          class={styles.quotaRecovery}
+          aria-labelledby="quota-recovery-title"
+          data-testid="quota-recovery-detail"
+        >
           <div>
-            <h4 id="quota-recovery-title" class={styles.quotaRecoveryTitle}>Agent quota exhausted</h4>
+            <h4 id="quota-recovery-title" class={styles.quotaRecoveryTitle}>
+              Agent quota exhausted
+            </h4>
             <p class={styles.quotaRecoveryText}>
-              {props.rateLimit?.window || "Current"} quota resets in {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this task unchanged and continue its workspace in a new agent.
+              {props.rateLimit?.window || "Current"} quota resets in{" "}
+              {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}
+              . You can keep this task unchanged and continue its workspace in a
+              new agent.
             </p>
           </div>
           <Show when={props.onQuotaRecovery && props.repo}>
@@ -891,65 +1265,135 @@ export default function TaskDetail(props: Props) {
       <Show when={props.error} keyed>
         {(error) => (
           <section class={styles.taskError} aria-labelledby="task-error-title">
-            <h4 id="task-error-title" class={styles.taskErrorTitle}>Task error</h4>
+            <h4 id="task-error-title" class={styles.taskErrorTitle}>
+              Task error
+            </h4>
             <pre class={styles.taskErrorText}>{error}</pre>
           </section>
         )}
       </Show>
       <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
         {(prompt) => (
-          <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
-            <h4 id="task-prompt-title" class={styles.taskPromptTitle}>Prompt</h4>
-            <div class={styles.userInputMsg}><Markdown text={prompt} /></div>
+          <section
+            class={styles.taskPrompt}
+            aria-labelledby="task-prompt-title"
+          >
+            <h4 id="task-prompt-title" class={styles.taskPromptTitle}>
+              Prompt
+            </h4>
+            <div class={styles.userInputMsg}>
+              <Markdown text={prompt} />
+            </div>
           </section>
         )}
       </Show>
-      <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
+      <div
+        class={styles.messageArea}
+        ref={messageAreaRef}
+        onScroll={handleScroll}
+        data-testid="task-message-area"
+      >
         <Show when={setupLogLines().length > 0}>
-          <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
+          <details
+            class={styles.taskSetup}
+            open={!hasSessionStarted()}
+            data-testid="task-setup"
+          >
             <summary class={styles.taskSetupTitle}>
               <span>Setup logs</span>
-              <TimingIcon events={setupInfo().events} range={setupInfo().range} showZero />
+              <TimingIcon
+                events={setupInfo().events}
+                range={setupInfo().range}
+                showZero
+              />
             </summary>
-            <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">{setupLogLines().join("\n")}</pre>
+            <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">
+              {setupLogLines().join("\n")}
+            </pre>
           </details>
         </Show>
         <Index each={items()}>
           {(item) => {
             // Type-narrowing accessors for the MsgItem discriminated union.
-            const sessElided = () => item().kind === "sessionElided" ? item() as Extract<MsgItem, { kind: "sessionElided" }> : null;
-            const sessHdr = () => item().kind === "sessionHeader" ? item() as Extract<MsgItem, { kind: "sessionHeader" }> : null;
-            const sessBoundary = () => item().kind === "sessionBoundary" ? item() as Extract<MsgItem, { kind: "sessionBoundary" }> : null;
-            const elided = () => item().kind === "elided" ? item() as Extract<MsgItem, { kind: "elided" }> : null;
-            const expHdr = () => item().kind === "expandedHeader" ? item() as Extract<MsgItem, { kind: "expandedHeader" }> : null;
-            const grpItem = () => item().kind === "group" ? item() as Extract<MsgItem, { kind: "group" }> : null;
+            const sessElided = () =>
+              item().kind === "sessionElided"
+                ? (item() as Extract<MsgItem, { kind: "sessionElided" }>)
+                : null;
+            const sessHdr = () =>
+              item().kind === "sessionHeader"
+                ? (item() as Extract<MsgItem, { kind: "sessionHeader" }>)
+                : null;
+            const sessBoundary = () =>
+              item().kind === "sessionBoundary"
+                ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>)
+                : null;
+            const elided = () =>
+              item().kind === "elided"
+                ? (item() as Extract<MsgItem, { kind: "elided" }>)
+                : null;
+            const expHdr = () =>
+              item().kind === "expandedHeader"
+                ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>)
+                : null;
+            const grpItem = () =>
+              item().kind === "group"
+                ? (item() as Extract<MsgItem, { kind: "group" }>)
+                : null;
             return (
               <Switch>
                 {/* Collapsed past session: single clickable row. */}
                 <Match when={sessElided()} keyed>
                   {(se) => (
-                    <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
-                      <button type="button" class={styles.sessionToggle} onClick={(e) => anchoredToggleSession(e, se.sessionKey)}>
-                        <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
+                    <div
+                      class={styles.sessionElided}
+                      data-anchor-key={`session:${se.sessionKey}`}
+                    >
+                      <button
+                        type="button"
+                        class={styles.sessionToggle}
+                        onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
+                      >
+                        <span class={styles.turnSummaryText}>
+                          {sessionSummary(se.session)}
+                        </span>
                         <span class={styles.sessionDuration}>
-                          {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
+                          {se.session.durationMs > 0
+                            ? formatTimingDuration(se.session.durationMs)
+                            : "0s"}
                         </span>
                       </button>
-                      <SessionInvocationIcon turns={sessionTimings(se.session)} model={props.model ?? null} />
+                      <SessionInvocationIcon
+                        turns={sessionTimings(se.session)}
+                        model={props.model ?? null}
+                      />
                     </div>
                   )}
                 </Match>
                 {/* Expanded past session header: click to collapse. */}
                 <Match when={sessHdr()} keyed>
                   {(sh) => (
-                    <div class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} data-anchor-key={`session:${sh.sessionKey}`}>
-                      <button type="button" class={styles.sessionToggle} onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}>
-                        <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
+                    <div
+                      class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
+                      data-anchor-key={`session:${sh.sessionKey}`}
+                    >
+                      <button
+                        type="button"
+                        class={styles.sessionToggle}
+                        onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
+                      >
+                        <span class={styles.turnSummaryText}>
+                          {sessionSummary(sh.session)}
+                        </span>
                         <span class={styles.sessionDuration}>
-                          {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
+                          {sh.session.durationMs > 0
+                            ? formatTimingDuration(sh.session.durationMs)
+                            : "0s"}
                         </span>
                       </button>
-                      <SessionInvocationIcon turns={sessionTimings(sh.session)} model={props.model ?? null} />
+                      <SessionInvocationIcon
+                        turns={sessionTimings(sh.session)}
+                        model={props.model ?? null}
+                      />
                     </div>
                   )}
                 </Match>
@@ -960,15 +1404,31 @@ export default function TaskDetail(props: Props) {
                 {/* Collapsed past turn: single clickable row. */}
                 <Match when={elided()} keyed>
                   {(e) => (
-                    <div class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${e.key}`}>
-                      <button type="button" class={styles.turnToggle} onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
-                        <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
+                    <div
+                      class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                      data-anchor-key={`turn:${e.key}`}
+                    >
+                      <button
+                        type="button"
+                        class={styles.turnToggle}
+                        onClick={(ev) => anchoredToggleTurn(ev, e.key)}
+                      >
+                        <span class={styles.turnSummaryText}>
+                          {turnSummary(e.turn)}
+                        </span>
                         <span class={styles.turnDuration}>
-                          {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
+                          {e.turn.durationMs > 0
+                            ? formatTimingDuration(e.turn.durationMs)
+                            : "0s"}
                         </span>
                       </button>
                       <Show when={turnTiming(e.turn)} keyed>
-                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                        {(turn) => (
+                          <TurnInvocationIcon
+                            turn={turn}
+                            model={props.model ?? null}
+                          />
+                        )}
                       </Show>
                     </div>
                   )}
@@ -976,15 +1436,31 @@ export default function TaskDetail(props: Props) {
                 {/* Expanded past turn header: click to collapse. */}
                 <Match when={expHdr()} keyed>
                   {(h) => (
-                    <div class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} data-anchor-key={`turn:${h.turnKey}`}>
-                      <button type="button" class={styles.turnToggle} onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}>
-                        <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
+                    <div
+                      class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                      data-anchor-key={`turn:${h.turnKey}`}
+                    >
+                      <button
+                        type="button"
+                        class={styles.turnToggle}
+                        onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
+                      >
+                        <span class={styles.turnSummaryText}>
+                          {turnSummary(h.turn)}
+                        </span>
                         <span class={styles.turnDuration}>
-                          {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
+                          {h.turn.durationMs > 0
+                            ? formatTimingDuration(h.turn.durationMs)
+                            : "0s"}
                         </span>
                       </button>
                       <Show when={turnTiming(h.turn)} keyed>
-                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                        {(turn) => (
+                          <TurnInvocationIcon
+                            turn={turn}
+                            model={props.model ?? null}
+                          />
+                        )}
                       </Show>
                     </div>
                   )}
@@ -992,9 +1468,22 @@ export default function TaskDetail(props: Props) {
                 {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
                 <Match when={grpItem()}>
                   {(gi) => (
-                    <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
+                    <div
+                      class={
+                        gi().indent === "turn" ? styles.indentTurn : undefined
+                      }
+                    >
                       <div class={styles.timedItemContent}>
-                        <Show when={hasGroupTiming(gi().group) && !gi().group.events.some((event) => event.kind === "result") && (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)}>
+                        <Show
+                          when={
+                            hasGroupTiming(gi().group) &&
+                            !gi().group.events.some(
+                              (event) => event.kind === "result",
+                            ) &&
+                            (gi().group.kind !== "action" ||
+                              gi().group.toolCalls.length !== 1)
+                          }
+                        >
                           <span class={styles.messageTiming}>
                             <TimingIcon
                               events={gi().group.events}
@@ -1013,7 +1502,9 @@ export default function TaskDetail(props: Props) {
                           onClearAndExecutePlan={clearAndExecutePlan}
                           pendingAction={pendingAction}
                           model={props.model ?? null}
-                          turnTiming={(event) => turnTimingsByResultEvent().get(event)}
+                          turnTiming={(event) =>
+                            turnTimingsByResultEvent().get(event)
+                          }
                         />
                       </div>
                     </div>
@@ -1031,14 +1522,25 @@ export default function TaskDetail(props: Props) {
       <ProgressPanel messages={messages()} />
 
       <Show when={isActive() || isRecoverable() || !!pendingAction()}>
-        <form onSubmit={(e) => { e.preventDefault(); if (canSendInput()) sendInput(); }} class={styles.inputForm} data-testid="task-detail-form">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSendInput()) sendInput();
+          }}
+          class={styles.inputForm}
+          data-testid="task-detail-form"
+        >
           <PromptInput
             ref={setPromptRef}
             value={props.inputDraft}
             onInput={props.onInputDraft}
             onSubmit={sendInput}
             onKeyDown={handlePromptNavigation}
-            placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
+            placeholder={
+              isRecoverable()
+                ? "Revive or fork to continue..."
+                : "Send message to agent..."
+            }
             disabled={!canSendInput()}
             class={styles.textInput}
             tabIndex={0}
@@ -1046,7 +1548,20 @@ export default function TaskDetail(props: Props) {
             supportsImages={props.supportsImages}
             images={props.inputImages}
             onImagesChange={props.onInputImages}
-            sendButton={<Button type="submit" disabled={!canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>}
+            sendButton={
+              <Button
+                type="submit"
+                disabled={
+                  !canSendInput() ||
+                  sending() ||
+                  (!props.inputDraft.trim() && props.inputImages.length === 0)
+                }
+                title="Send"
+                data-testid="send-input"
+              >
+                <SendIcon width="1.1em" height="1.1em" />
+              </Button>
+            }
           />
           <Dropdown
             open={contextMenuOpen()}
@@ -1064,23 +1579,55 @@ export default function TaskDetail(props: Props) {
                 purging={props.taskState === "purging"}
                 supportsCompact={props.supportsCompact}
                 canFork={!!props.onFork && !!props.repo}
-                onSync={() => { setContextMenuOpen(false); doSync(false); }}
-                onSyncDefault={() => { setContextMenuOpen(false); doSync(false, SyncTargetDefault); }}
-                onStop={() => { setContextMenuOpen(false); props.onStop(props.taskId); }}
-                onRevive={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}
+                onSync={() => {
+                  setContextMenuOpen(false);
+                  doSync(false);
+                }}
+                onSyncDefault={() => {
+                  setContextMenuOpen(false);
+                  doSync(false, SyncTargetDefault);
+                }}
+                onStop={() => {
+                  setContextMenuOpen(false);
+                  props.onStop(props.taskId);
+                }}
+                onRevive={() => {
+                  setContextMenuOpen(false);
+                  props.onRevive(props.taskId);
+                }}
                 onPurge={() => {
                   setContextMenuOpen(false);
                   props.onPurge(props.taskId);
                 }}
-                onCompact={() => { setContextMenuOpen(false); doCompact(); }}
-                onFork={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}
+                onCompact={() => {
+                  setContextMenuOpen(false);
+                  doCompact();
+                }}
+                onFork={() => {
+                  setContextMenuOpen(false);
+                  props.onFork?.(props.taskId);
+                }}
               />
             }
           >
-            <Show when={!!pendingAction()} fallback={
-              <button type="button" class={styles.contextMenuToggle} disabled={!!pendingAction()} onClick={() => setContextMenuOpen((v) => !v)} aria-label="Context actions" title="Context actions">&#8942;</button>
-            }>
-              <button type="button" class={styles.contextMenuToggle} disabled>&#8987;</button>
+            <Show
+              when={!!pendingAction()}
+              fallback={
+                <button
+                  type="button"
+                  class={styles.contextMenuToggle}
+                  disabled={!!pendingAction()}
+                  onClick={() => setContextMenuOpen((v) => !v)}
+                  aria-label="Context actions"
+                  title="Context actions"
+                >
+                  &#8942;
+                </button>
+              }
+            >
+              <button type="button" class={styles.contextMenuToggle} disabled>
+                &#8987;
+              </button>
             </Show>
           </Dropdown>
         </form>
@@ -1089,10 +1636,25 @@ export default function TaskDetail(props: Props) {
             <strong>Safety issues detected:</strong>
             <ul>
               <For each={safetyIssues()}>
-                {(issue) => <li><strong>{issue.file}</strong>: {issue.detail} ({issue.kind})</li>}
+                {(issue) => (
+                  <li>
+                    <strong>{issue.file}</strong>: {issue.detail} ({issue.kind})
+                  </li>
+                )}
               </For>
             </ul>
-            <Button type="button" variant="red" loading={pendingAction() === "sync"} disabled={!!pendingAction()} onClick={() => { setSafetyIssues([]); doSync(true); }}>Force Push to {props.branch}</Button>
+            <Button
+              type="button"
+              variant="red"
+              loading={pendingAction() === "sync"}
+              disabled={!!pendingAction()}
+              onClick={() => {
+                setSafetyIssues([]);
+                doSync(true);
+              }}
+            >
+              Force Push to {props.branch}
+            </Button>
           </div>
         </Show>
         <Show when={actionError()}>
@@ -1130,14 +1692,23 @@ function GroupContent(props: {
           />
         )}
       </Match>
-      <Match when={group().kind === "userInput" && group().events[0]?.userInput} keyed>
+      <Match
+        when={group().kind === "userInput" && group().events[0]?.userInput}
+        keyed
+      >
         {(ui) => (
           <div class={styles.userInputMsg}>
             <Markdown text={ui.text} />
             <Show when={ui.images?.length}>
               <div class={styles.userInputImages}>
                 <For each={ui.images}>
-                  {(img) => <img class={styles.userInputImage} src={`data:${img.mediaType};base64,${img.data}`} alt="attached" />}
+                  {(img) => (
+                    <img
+                      class={styles.userInputImage}
+                      src={`data:${img.mediaType};base64,${img.data}`}
+                      alt="attached"
+                    />
+                  )}
                 </For>
               </div>
             </Show>
@@ -1145,9 +1716,19 @@ function GroupContent(props: {
         )}
       </Match>
       <Match when={group().kind === "action"}>
-        <Show when={group().toolCalls.length > 0}
-          fallback={<ThinkingCard events={group().events} />}>
-          <ToolMessageGroup toolCalls={group().toolCalls} taskId={props.taskId} events={group().events} onClearAndExecutePlan={props.isWaiting() ? props.onClearAndExecutePlan : undefined} pendingAction={props.pendingAction} />
+        <Show
+          when={group().toolCalls.length > 0}
+          fallback={<ThinkingCard events={group().events} />}
+        >
+          <ToolMessageGroup
+            toolCalls={group().toolCalls}
+            taskId={props.taskId}
+            events={group().events}
+            onClearAndExecutePlan={
+              props.isWaiting() ? props.onClearAndExecutePlan : undefined
+            }
+            pendingAction={props.pendingAction}
+          />
         </Show>
       </Match>
       <Match when={group().kind === "text"}>
@@ -1158,7 +1739,13 @@ function GroupContent(props: {
       </Match>
       <Match when={group().kind === "other"}>
         <For each={group().events}>
-          {(ev) => <MessageItem ev={ev} model={props.model} turnTiming={props.turnTiming(ev)} />}
+          {(ev) => (
+            <MessageItem
+              ev={ev}
+              model={props.model}
+              turnTiming={props.turnTiming(ev)}
+            />
+          )}
         </For>
       </Match>
     </Switch>
@@ -1167,21 +1754,35 @@ function GroupContent(props: {
 
 function hasGroupTiming(group: MessageGroup): boolean {
   if (group.kind === "action") {
-    return group.toolCalls.length > 0 || group.events.some((event) =>
-      (event.kind === "thinking" && (event.thinking?.text ?? "").trim() !== "") ||
-      (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
+    return (
+      group.toolCalls.length > 0 ||
+      group.events.some(
+        (event) =>
+          (event.kind === "thinking" &&
+            (event.thinking?.text ?? "").trim() !== "") ||
+          (event.kind === "thinkingDelta" &&
+            (event.thinkingDelta?.text ?? "").trim() !== ""),
+      )
     );
   }
   if (group.kind === "text") {
-    return group.events.some((event) =>
-      (event.kind === "text" && (event.text?.text ?? "").trim() !== "") ||
-      (event.kind === "textDelta" && (event.textDelta?.text ?? "").trim() !== "") ||
-      (event.kind === "thinking" && (event.thinking?.text ?? "").trim() !== "") ||
-      (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
+    return group.events.some(
+      (event) =>
+        (event.kind === "text" && (event.text?.text ?? "").trim() !== "") ||
+        (event.kind === "textDelta" &&
+          (event.textDelta?.text ?? "").trim() !== "") ||
+        (event.kind === "thinking" &&
+          (event.thinking?.text ?? "").trim() !== "") ||
+        (event.kind === "thinkingDelta" &&
+          (event.thinkingDelta?.text ?? "").trim() !== ""),
     );
   }
-  return group.kind !== "other" || group.events.some((event) =>
-    event.kind !== "usage" && event.system?.subtype !== "step_start",
+  return (
+    group.kind !== "other" ||
+    group.events.some(
+      (event) =>
+        event.kind !== "usage" && event.system?.subtype !== "step_start",
+    )
   );
 }
 
@@ -1194,9 +1795,15 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
       <Match when={ev().init} keyed>
         {(init) => (
           <div class={styles.systemInit}>
-			Session started &middot; {init.reportedModel}
-			{init.reportedEffort ? <>{' · '}{init.reportedEffort} effort</> : null}
-            {' · '}{init.agentVersion} &middot; {init.sessionID}
+            Session started &middot; {init.reportedModel}
+            {init.reportedEffort ? (
+              <>
+                {" · "}
+                {init.reportedEffort} effort
+              </>
+            ) : null}
+            {" · "}
+            {init.agentVersion} &middot; {init.sessionID}
           </div>
         )}
       </Match>
@@ -1231,7 +1838,8 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     const dayMS = 24 * 60 * 60 * 1000;
     const d = new Date(resetMS);
     const now = new Date();
-    const localDay = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMS;
+    const localDay = (date: Date) =>
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMS;
     const days = localDay(d) - localDay(now);
     if (days === 1) {
       return ` · resets tomorrow at ${d.toLocaleTimeString()}`;
@@ -1250,13 +1858,21 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   return (
     <Switch>
       <Match when={rl()?.status === "rejected"}>
-        <div class={rl()?.isUsingOverage ? styles.rateLimitWarning : styles.rateLimitRejected}>
-          {rejectedLabel()}{resetsLabel()}
+        <div
+          class={
+            rl()?.isUsingOverage
+              ? styles.rateLimitWarning
+              : styles.rateLimitRejected
+          }
+        >
+          {rejectedLabel()}
+          {resetsLabel()}
         </div>
       </Match>
       <Match when={rl()?.status === "allowed_warning"}>
         <div class={styles.rateLimitWarning}>
-          Rate limit warning: {rateLimitPercentage(rl()?.utilization ?? 0)}% of {rateLimitLabel(rl()?.rateLimitType)} used{resetsLabel()}
+          Rate limit warning: {rateLimitPercentage(rl()?.utilization ?? 0)}% of{" "}
+          {rateLimitLabel(rl()?.rateLimitType)} used{resetsLabel()}
         </div>
       </Match>
     </Switch>
@@ -1266,17 +1882,24 @@ function RateLimitBanner(props: { ev: EventMessage }) {
 function usageMetaParts(u: EventUsage): string[] {
   const tokenParts: string[] = [];
   if (u.inputTokens > 0) tokenParts.push(`${formatTokens(u.inputTokens)} new`);
-  if (u.cacheCreationInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
-  if (u.cacheReadInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
-  if (u.outputTokens > 0) tokenParts.push(`${formatTokens(u.outputTokens)} out`);
+  if (u.cacheCreationInputTokens > 0)
+    tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
+  if (u.cacheReadInputTokens > 0)
+    tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
+  if (u.outputTokens > 0)
+    tokenParts.push(`${formatTokens(u.outputTokens)} out`);
   if ((u.reasoningOutputTokens ?? 0) > 0) {
     tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
   }
   if (tokenParts.length === 0) return [];
-	return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
+  return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
 }
 
-function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming?: TurnTiming }) {
+function MessageItem(props: {
+  ev: EventMessage;
+  model: string | null;
+  turnTiming?: TurnTiming;
+}) {
   return (
     <Switch>
       <Match when={props.ev.rateLimit}>
@@ -1293,15 +1916,12 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
       </Match>
       <Match when={props.ev.system?.subtype === "model_rerouted"}>
         <div class={styles.systemMsg}>
-          Model rerouted{props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
+          Model rerouted
+          {props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
         </div>
       </Match>
       <Match when={props.ev.system} keyed>
-        {(sys) => (
-          <div class={styles.systemMsg}>
-            [{sys.subtype}]
-          </div>
-        )}
+        {(sys) => <div class={styles.systemMsg}>[{sys.subtype}]</div>}
       </Match>
       <Match when={props.ev.text} keyed>
         {(text) => (
@@ -1315,49 +1935,61 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
           const parts = usageMetaParts(usage);
           return (
             <Show when={parts.length > 0}>
-              <div class={styles.usageMeta}>
-                {parts.join(" · ")}
-              </div>
+              <div class={styles.usageMeta}>{parts.join(" · ")}</div>
             </Show>
           );
         }}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />}
+        {(result) => (
+          <ResultCard
+            result={result}
+            model={props.model}
+            turnTiming={props.turnTiming}
+          />
+        )}
       </Match>
       <Match when={props.ev.error} keyed>
-        {(err) => (
-          <div class={styles.parseError}>
-            Parse error: {err.err}
-          </div>
-        )}
+        {(err) => <div class={styles.parseError}>Parse error: {err.err}</div>}
       </Match>
       <Match when={props.ev.log} keyed>
-        {(log) => (
-          <div class={styles.logLine}>{log.line}</div>
-        )}
+        {(log) => <div class={styles.logLine}>{log.line}</div>}
       </Match>
     </Switch>
   );
 }
 
-function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: TurnTiming }) {
+function ResultCard(props: {
+  result: EventResult;
+  model: string | null;
+  turnTiming?: TurnTiming;
+}) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
     const parts: string[] = [];
-    if (current.totalCostUSD > 0) parts.push(`$${current.totalCostUSD.toFixed(4)}`);
-    if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
+    if (current.totalCostUSD > 0)
+      parts.push(`$${current.totalCostUSD.toFixed(4)}`);
+    if (current.numTurns > 0)
+      parts.push(
+        `${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`,
+      );
     return parts.join(" · ");
   });
   return (
-    <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
+    <div
+      class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}
+    >
       <Show when={props.turnTiming} keyed>
         {(turn) => (
           <div class={styles.resultHeader}>
             <strong>{result().isError ? "Error" : "Done"}</strong>
             <div class={styles.resultTiming}>
-              <span class={styles.resultDuration} data-testid="turn-duration">{turn.result.duration > 0 ? formatTimingDuration(turn.result.duration * 1_000) : "0s"}</span>
+              <span class={styles.resultDuration} data-testid="turn-duration">
+                {turn.result.duration > 0
+                  ? formatTimingDuration(turn.result.duration * 1_000)
+                  : "0s"}
+              </span>
               <TurnInvocationIcon turn={turn} model={props.model} />
             </div>
           </div>
@@ -1367,7 +1999,9 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
         <strong>{result().isError ? "Error" : "Done"}</strong>
       </Show>
       <Show when={result().result}>
-        <div class={styles.resultText}><Markdown text={result().result} /></div>
+        <div class={styles.resultText}>
+          <Markdown text={result().result} />
+        </div>
       </Show>
       <Show when={meta()} keyed>
         {(text) => <div class={styles.resultMeta}>{text}</div>}
@@ -1376,59 +2010,97 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
   );
 }
 
-function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null }) {
+function ToolMessageGroup(props: {
+  toolCalls: ToolCall[];
+  taskId: string;
+  events?: EventMessage[];
+  onClearAndExecutePlan?: () => void;
+  pendingAction?: () => string | null;
+}) {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
-  const thinkingEvents = () => (props.events ?? []).filter(
-    (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
-  );
+  const thinkingEvents = () =>
+    (props.events ?? []).filter(
+      (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
+    );
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
   // Compute accumulated tool output deltas per toolUseID from the group events.
-  const outputDeltaEvents = (toolUseID: string) => (props.events ?? []).filter(
-    (e) => e.kind === "toolOutputDelta" && e.toolOutputDelta?.toolUseID === toolUseID,
-  );
+  const outputDeltaEvents = (toolUseID: string) =>
+    (props.events ?? []).filter(
+      (e) =>
+        e.kind === "toolOutputDelta" &&
+        e.toolOutputDelta?.toolUseID === toolUseID,
+    );
   return (
     <Show when={calls().length > 0}>
-      <Show when={calls().length > 1} fallback={
-        <ToolCallCard call={calls()[0]} taskId={props.taskId}
-          durationMs={toolCallDurationMs(calls()[0], durations())}
-          thinkingEvents={thinkingEvents()}
-          outputDeltaEvents={outputDeltaEvents(calls()[0].use.toolUseID)}
-          open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
-          onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)}
-          onClearAndExecutePlan={props.onClearAndExecutePlan}
-          pendingAction={props.pendingAction} />
-      }>
+      <Show
+        when={calls().length > 1}
+        fallback={
+          <ToolCallCard
+            call={calls()[0]}
+            taskId={props.taskId}
+            durationMs={toolCallDurationMs(calls()[0], durations())}
+            thinkingEvents={thinkingEvents()}
+            outputDeltaEvents={outputDeltaEvents(calls()[0].use.toolUseID)}
+            open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
+            onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)}
+            onClearAndExecutePlan={props.onClearAndExecutePlan}
+            pendingAction={props.pendingAction}
+          />
+        }
+      >
         <>
-          <details class={styles.toolGroup} open={isOpen()}
-            onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}>
+          <details
+            class={styles.toolGroup}
+            open={isOpen()}
+            onToggle={(e) =>
+              detailsOpenState.set(groupKey(), e.currentTarget.open)
+            }
+          >
             <summary>
-              {calls().filter((c) => c.done).length}/{calls().length} tools: {toolCountSummary(calls())}
+              {calls().filter((c) => c.done).length}/{calls().length} tools:{" "}
+              {toolCountSummary(calls())}
             </summary>
             <div class={styles.toolGroupInner}>
               <Show when={thinkingEvents().length > 0}>
                 <ThinkingCard events={thinkingEvents()} />
               </Show>
               <Index each={calls()}>
-                {(call) => <ToolCallCard call={call()} taskId={props.taskId}
-                  durationMs={toolCallDurationMs(call(), durations())}
-                  outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
-                  open={detailsOpenState.get(call().use.toolUseID) ?? false}
-                  onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
-                  suppressPlanContent={true}
-                  pendingAction={props.pendingAction} />}
+                {(call) => (
+                  <ToolCallCard
+                    call={call()}
+                    taskId={props.taskId}
+                    durationMs={toolCallDurationMs(call(), durations())}
+                    outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
+                    open={detailsOpenState.get(call().use.toolUseID) ?? false}
+                    onToggle={(v) =>
+                      detailsOpenState.set(call().use.toolUseID, v)
+                    }
+                    suppressPlanContent={true}
+                    pendingAction={props.pendingAction}
+                  />
+                )}
               </Index>
             </div>
           </details>
-          <Show when={calls().find((c) => c.use.planContent)?.use.planContent} keyed>
+          <Show
+            when={calls().find((c) => c.use.planContent)?.use.planContent}
+            keyed
+          >
             {(plan) => (
               <div class={styles.planAction}>
                 <div class={styles.planContent} data-testid="plan-content">
                   <Markdown text={plan} />
                 </div>
                 <Show when={props.onClearAndExecutePlan}>
-                  <Button variant="gray" loading={props.pendingAction?.() === "restart"} disabled={!!props.pendingAction?.()} onClick={props.onClearAndExecutePlan} data-testid="clear-and-execute-plan">
+                  <Button
+                    variant="gray"
+                    loading={props.pendingAction?.() === "restart"}
+                    disabled={!!props.pendingAction?.()}
+                    onClick={props.onClearAndExecutePlan}
+                    data-testid="clear-and-execute-plan"
+                  >
                     Clear and execute plan
                   </Button>
                 </Show>
@@ -1468,8 +2140,11 @@ function ThinkingCard(props: { events: EventMessage[] }) {
   const isOpen = () => detailsOpenState.get(key()) ?? false;
   return (
     <Show when={text()}>
-      <details class={styles.thinkingBlock} open={isOpen()}
-        onToggle={(e) => detailsOpenState.set(key(), e.currentTarget.open)}>
+      <details
+        class={styles.thinkingBlock}
+        open={isOpen()}
+        onToggle={(e) => detailsOpenState.set(key(), e.currentTarget.open)}
+      >
         <summary>
           Thinking
           <Show when={excerpt()}>
@@ -1486,7 +2161,11 @@ function ThinkingCard(props: { events: EventMessage[] }) {
 // widget HTML as text instead of calling show_widget).
 function looksLikeHTML(text: string): boolean {
   const trimmed = text.trimStart();
-  return trimmed.startsWith("<style") || trimmed.startsWith("<div") || trimmed.startsWith("<!--");
+  return (
+    trimmed.startsWith("<style") ||
+    trimmed.startsWith("<div") ||
+    trimmed.startsWith("<!--")
+  );
 }
 
 // Renders raw HTML inside a shadow DOM so its styles cannot leak out and
@@ -1505,13 +2184,18 @@ function ShadowHTML(props: { html: string }) {
 // Renders a text group, combining textDelta fragments into a single view.
 function TextMessageGroup(props: { events: EventMessage[] }) {
   const thinkingEvents = createMemo(() =>
-    props.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta"),
+    props.events.filter(
+      (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
+    ),
   );
   const text = createMemo(() => {
     const finalEv = props.events.findLast((e) => e.kind === "text");
     if (finalEv?.text) return finalEv.text.text;
     return props.events
-      .filter((e): e is EventMessage & { textDelta: EventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
+      .filter(
+        (e): e is EventMessage & { textDelta: EventTextDelta } =>
+          e.kind === "textDelta" && !!e.textDelta,
+      )
       .map((e) => e.textDelta.text)
       .join("");
   });
@@ -1521,11 +2205,14 @@ function TextMessageGroup(props: { events: EventMessage[] }) {
         <ThinkingCard events={thinkingEvents()} />
       </Show>
       <Show when={text()}>
-        <Show when={looksLikeHTML(text())} fallback={
-          <div class={styles.assistantMsg}>
-            <Markdown text={text()} />
-          </div>
-        }>
+        <Show
+          when={looksLikeHTML(text())}
+          fallback={
+            <div class={styles.assistantMsg}>
+              <Markdown text={text()} />
+            </div>
+          }
+        >
           <ShadowHTML html={text()} />
         </Show>
       </Show>
@@ -1536,7 +2223,11 @@ function TextMessageGroup(props: { events: EventMessage[] }) {
 // Returns true if every value in the object is a scalar (string, number, boolean, null).
 function isFlat(obj: Record<string, unknown>): boolean {
   return Object.values(obj).every(
-    (v) => v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean",
+    (v) =>
+      v === null ||
+      typeof v === "string" ||
+      typeof v === "number" ||
+      typeof v === "boolean",
   );
 }
 
@@ -1552,7 +2243,9 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
     <Show
       when={flat()}
       fallback={
-        <pre class={styles.toolBlockPre}>{JSON.stringify(props.input, null, 2)}</pre>
+        <pre class={styles.toolBlockPre}>
+          {JSON.stringify(props.input, null, 2)}
+        </pre>
       }
     >
       <div class={styles.toolInputList}>
@@ -1562,9 +2255,11 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
             return (
               <div class={styles.toolInputRow}>
                 <span class={styles.toolInputKey}>{k}:</span>
-                {multiline
-                  ? <pre class={styles.toolInputBlock}>{v as string}</pre>
-                  : <>{" "}{fmtValue(v)}</>}
+                {multiline ? (
+                  <pre class={styles.toolInputBlock}>{v as string}</pre>
+                ) : (
+                  <> {fmtValue(v)}</>
+                )}
               </div>
             );
           }}
@@ -1574,7 +2269,9 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-function FileChangesInputView(props: { files: NonNullable<EventToolInputView["files"]> }) {
+function FileChangesInputView(props: {
+  files: NonNullable<EventToolInputView["files"]>;
+}) {
   return (
     <div class={styles.fileChangesInput}>
       <For each={props.files}>
@@ -1595,16 +2292,26 @@ function ToolInputView(props: { view: EventToolInputView }) {
       <Match when={props.view.kind === "fileChanges" && props.view.files} keyed>
         {(files) => <FileChangesInputView files={files} />}
       </Match>
-      <Match when={props.view.kind === "subagents" && props.view.subagents} keyed>
+      <Match
+        when={props.view.kind === "subagents" && props.view.subagents}
+        keyed
+      >
         {(spawns) => <SubagentSpawns spawns={spawns} />}
       </Match>
     </Switch>
   );
 }
 
-function ToolCallInput(props: { input: Record<string, unknown>; inputView?: EventToolInputView }) {
+function ToolCallInput(props: {
+  input: Record<string, unknown>;
+  inputView?: EventToolInputView;
+}) {
   return (
-    <Show when={props.inputView} keyed fallback={<GenericToolCallInput input={props.input} />}>
+    <Show
+      when={props.inputView}
+      keyed
+      fallback={<GenericToolCallInput input={props.input} />}
+    >
       {(view) => <ToolInputView view={view} />}
     </Show>
   );
@@ -1621,7 +2328,9 @@ function SubagentSpawns(props: { spawns: EventSubagentSpawn[] }) {
             <div class={styles.subagentHead}>
               <span class={styles.subagentAgent}>{s.agent}</span>
               <Show when={s.phase || s.label}>
-                <span class={styles.subagentPhase}>{[s.phase, s.label].filter(Boolean).join(" · ")}</span>
+                <span class={styles.subagentPhase}>
+                  {[s.phase, s.label].filter(Boolean).join(" · ")}
+                </span>
               </Show>
             </div>
             <Show when={s.task}>
@@ -1634,21 +2343,40 @@ function SubagentSpawns(props: { spawns: EventSubagentSpawn[] }) {
   );
 }
 
-function ToolCallCard(props: { call: ToolCall; taskId: string; durationMs: number | null; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[]; outputDeltaEvents?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null; suppressPlanContent?: boolean }) {
-  const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
+function ToolCallCard(props: {
+  call: ToolCall;
+  taskId: string;
+  durationMs: number | null;
+  open: boolean;
+  onToggle: (open: boolean) => void;
+  thinkingEvents?: EventMessage[];
+  outputDeltaEvents?: EventMessage[];
+  onClearAndExecutePlan?: () => void;
+  pendingAction?: () => string | null;
+  suppressPlanContent?: boolean;
+}) {
+  const [loadedInput, setLoadedInput] = createSignal<Record<
+    string,
+    unknown
+  > | null>(null);
   const [loading, setLoading] = createSignal(false);
 
   const durationMs = () => props.durationMs;
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
-  const detail = () => props.call.use.detail || toolCallDetail(props.call.use.name, effectiveInput());
+  const detail = () =>
+    props.call.use.detail ||
+    toolCallDetail(props.call.use.name, effectiveInput());
   const showLoadBtn = () => props.call.use.inputTruncated && !loadedInput();
 
   async function loadInput() {
     setLoading(true);
     try {
-      const resp = await getTaskToolInput(props.taskId, props.call.use.toolUseID);
+      const resp = await getTaskToolInput(
+        props.taskId,
+        props.call.use.toolUseID,
+      );
       setLoadedInput(resp.input as Record<string, unknown>);
     } finally {
       setLoading(false);
@@ -1657,16 +2385,30 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; durationMs: numbe
 
   return (
     <>
-      <details class={styles.toolBlock} open={props.open}
-        onToggle={(e) => props.onToggle(e.currentTarget.open)}>
+      <details
+        class={styles.toolBlock}
+        open={props.open}
+        onToggle={(e) => props.onToggle(e.currentTarget.open)}
+      >
         <summary>
           <span class={styles.toolSummaryContent}>
             <span class={styles.toolSummaryMain}>
-              <Show when={!props.call.done} fallback={
-                <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
-                  <span class={styles.toolBackground} title="Running in background">&#8943;</span>
-                </Show>
-              }>
+              <Show
+                when={!props.call.done}
+                fallback={
+                  <Show
+                    when={props.call.use.background}
+                    fallback={<span class={styles.toolDone}>&#10003;</span>}
+                  >
+                    <span
+                      class={styles.toolBackground}
+                      title="Running in background"
+                    >
+                      &#8943;
+                    </span>
+                  </Show>
+                }
+              >
                 <span class={styles.toolPending} />
               </Show>
               {props.call.use.name}
@@ -1678,15 +2420,31 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; durationMs: numbe
               </Show>
             </span>
             <Show when={durationMs()} keyed>
-              {(duration) => <span class={styles.toolDuration} data-testid="tool-duration">{formatTimingDuration(duration)}</span>}
+              {(duration) => (
+                <span class={styles.toolDuration} data-testid="tool-duration">
+                  {formatTimingDuration(duration)}
+                </span>
+              )}
             </Show>
           </span>
         </summary>
         <Show when={(props.thinkingEvents?.length ?? 0) > 0}>
           <ThinkingCard events={props.thinkingEvents ?? []} />
         </Show>
-        <Show when={showLoadBtn()} fallback={<ToolCallInput input={effectiveInput()} inputView={props.call.use.inputView} />}>
-          <button class={styles.loadInputBtn} onClick={loadInput} disabled={loading()}>
+        <Show
+          when={showLoadBtn()}
+          fallback={
+            <ToolCallInput
+              input={effectiveInput()}
+              inputView={props.call.use.inputView}
+            />
+          }
+        >
+          <button
+            class={styles.loadInputBtn}
+            onClick={loadInput}
+            disabled={loading()}
+          >
             {loading() ? "Loading…" : "Load input"}
           </button>
         </Show>
@@ -1694,17 +2452,29 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; durationMs: numbe
           <pre class={styles.toolErrorPre}>{error()}</pre>
         </Show>
         <Show when={(props.outputDeltaEvents?.length ?? 0) > 0}>
-          <pre class={styles.toolOutputDelta}>{props.outputDeltaEvents?.map((e) => e.toolOutputDelta?.delta ?? "").join("")}</pre>
+          <pre class={styles.toolOutputDelta}>
+            {props.outputDeltaEvents
+              ?.map((e) => e.toolOutputDelta?.delta ?? "")
+              .join("")}
+          </pre>
         </Show>
       </details>
-      <Show when={!props.suppressPlanContent && props.call.use.planContent} keyed>
+      <Show
+        when={!props.suppressPlanContent && props.call.use.planContent}
+        keyed
+      >
         {(plan) => (
           <div class={styles.planAction}>
             <div class={styles.planContent} data-testid="plan-content">
               <Markdown text={plan} />
             </div>
             <Show when={props.onClearAndExecutePlan}>
-              <Button variant="gray" loading={props.pendingAction?.() === "restart"} disabled={!!props.pendingAction?.()} onClick={props.onClearAndExecutePlan}>
+              <Button
+                variant="gray"
+                loading={props.pendingAction?.() === "restart"}
+                disabled={!!props.pendingAction?.()}
+                onClick={props.onClearAndExecutePlan}
+              >
                 Clear and execute plan
               </Button>
             </Show>
@@ -1719,7 +2489,9 @@ const markdownRenderer = {
   code(this: Renderer, token: Tokens.Code): string {
     const code = Renderer.prototype.code.call(this, token);
     if (token.codeBlockStyle === "indented") return code;
-    const blockClass = token.text.includes("\n") ? styles.codeBlock : `${styles.codeBlock} ${styles.singleLineCodeBlock}`;
+    const blockClass = token.text.includes("\n")
+      ? styles.codeBlock
+      : `${styles.codeBlock} ${styles.singleLineCodeBlock}`;
     return `<div class="${blockClass}"><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true">${copyIconSVG}</span><span class="${styles.checkIcon}" aria-hidden="true">${checkIconSVG}</span></button>${code}</div>\n`;
   },
 };
@@ -1745,14 +2517,17 @@ function Markdown(props: { text: string }) {
     const text = button.parentElement?.querySelector("pre > code")?.textContent;
     if (text === undefined || text === null) return;
 
-    navigator.clipboard.writeText(text).then(() => {
-      button.classList.add(styles.copied);
-      setTimeout(() => {
-        button.classList.remove(styles.copied);
-      }, 1500);
-    }).catch((error: unknown) => {
-      console.error("Failed to copy code block", error);
-    });
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        button.classList.add(styles.copied);
+        setTimeout(() => {
+          button.classList.remove(styles.copied);
+        }, 1500);
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to copy code block", error);
+      });
   }
 
   onMount(() => {
@@ -1763,9 +2538,18 @@ function Markdown(props: { text: string }) {
   });
 
   return (
-    <div class={styles.markdownWrap} ref={(el) => { wrapperRef = el; }}>
+    <div
+      class={styles.markdownWrap}
+      ref={(el) => {
+        wrapperRef = el;
+      }}
+    >
       <div class={styles.rawToolbar}>
-        <button class={styles.rawToolbarBtn} onClick={() => setRaw(!raw())} title={raw() ? "Show rendered" : "Show raw"}>
+        <button
+          class={styles.rawToolbarBtn}
+          onClick={() => setRaw(!raw())}
+          title={raw() ? "Show rendered" : "Show raw"}
+        >
           {raw() ? "rendered" : "raw"}
         </button>
         <Show when={raw()}>
@@ -1783,10 +2567,13 @@ function Markdown(props: { text: string }) {
           </button>
         </Show>
       </div>
-      <Show when={raw()} fallback={
-        // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
-        <div class={styles.markdown} innerHTML={html()} />
-      }>
+      <Show
+        when={raw()}
+        fallback={
+          // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
+          <div class={styles.markdown} innerHTML={html()} />
+        }
+      >
         <pre class={styles.rawText}>{props.text}</pre>
       </Show>
     </div>
@@ -1798,13 +2585,24 @@ function Markdown(props: { text: string }) {
 // keyed Match re-creation when group object identities change.
 const pendingAskAnswers = new Map<string, string>();
 
-function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
+function AskQuestionCard(props: {
+  ask: EventAsk;
+  interactive: boolean;
+  answerText?: string;
+  onSubmit: (text: string) => void;
+}) {
   const questions = () => props.ask.questions;
-  const [selections, setSelections] = createSignal<Map<number, Set<string>>>(new Map());
-  const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(new Map());
+  const [selections, setSelections] = createSignal<Map<number, Set<string>>>(
+    new Map(),
+  );
+  const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(
+    new Map(),
+  );
   // eslint-disable-next-line solid/reactivity -- toolUseID is immutable per ask instance
   const toolUseID = props.ask.toolUseID;
-  const [submitted, setSubmitted] = createSignal(pendingAskAnswers.has(toolUseID));
+  const [submitted, setSubmitted] = createSignal(
+    pendingAskAnswers.has(toolUseID),
+  );
   const answered = () => props.answerText !== undefined || submitted();
 
   // Clean up pending entry once the server confirms the answer via SSE.
@@ -1877,7 +2675,13 @@ function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerTex
   const canInteract = (): boolean => props.interactive && !answered();
 
   return (
-    <div class={canInteract() ? `${styles.askGroup} ${styles.askGroupActive}` : styles.askGroup}>
+    <div
+      class={
+        canInteract()
+          ? `${styles.askGroup} ${styles.askGroupActive}`
+          : styles.askGroup
+      }
+    >
       <For each={questions()}>
         {(q: AskQuestion, qIdx: Accessor<number>) => (
           <div class={styles.askQuestion}>
@@ -1888,17 +2692,26 @@ function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerTex
             <div class={styles.askOptions}>
               <For each={q.options}>
                 {(opt) => {
-                  const selected = (): boolean => selections().get(qIdx())?.has(opt.label) ?? false;
+                  const selected = (): boolean =>
+                    selections().get(qIdx())?.has(opt.label) ?? false;
                   return (
                     <button
-                      class={selected() ? `${styles.askChip} ${styles.askChipSelected}` : styles.askChip}
+                      class={
+                        selected()
+                          ? `${styles.askChip} ${styles.askChipSelected}`
+                          : styles.askChip
+                      }
                       disabled={!canInteract()}
-                      onClick={() => toggleOption(qIdx(), opt.label, q.multiSelect ?? false)}
+                      onClick={() =>
+                        toggleOption(qIdx(), opt.label, q.multiSelect ?? false)
+                      }
                       data-testid={`ask-option-${opt.label}`}
                     >
                       <span class={styles.askChipLabel}>{opt.label}</span>
                       <Show when={opt.description}>
-                        <span class={styles.askChipDesc}>{opt.description}</span>
+                        <span class={styles.askChipDesc}>
+                          {opt.description}
+                        </span>
                       </Show>
                     </button>
                   );
@@ -1906,9 +2719,15 @@ function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerTex
               </For>
               {/* "Other" option */}
               <button
-                class={selections().get(qIdx())?.has("__other__") ? `${styles.askChip} ${styles.askChipSelected}` : styles.askChip}
+                class={
+                  selections().get(qIdx())?.has("__other__")
+                    ? `${styles.askChip} ${styles.askChipSelected}`
+                    : styles.askChip
+                }
                 disabled={!canInteract()}
-                onClick={() => toggleOption(qIdx(), "__other__", q.multiSelect ?? false)}
+                onClick={() =>
+                  toggleOption(qIdx(), "__other__", q.multiSelect ?? false)
+                }
               >
                 <span class={styles.askChipLabel}>Other</span>
               </button>
@@ -1926,11 +2745,19 @@ function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerTex
         )}
       </For>
       <Show when={canInteract()}>
-        <button class={styles.askSubmit} onClick={() => handleSubmit()} data-testid="ask-submit">Submit</button>
+        <button
+          class={styles.askSubmit}
+          onClick={() => handleSubmit()}
+          data-testid="ask-submit"
+        >
+          Submit
+        </button>
       </Show>
       <Show when={answered()}>
         <div class={styles.askSubmitted} data-testid="ask-submitted-answer">
-          {props.answerText ?? pendingAskAnswers.get(toolUseID) ?? formatAnswer()}
+          {props.answerText ??
+            pendingAskAnswers.get(toolUseID) ??
+            formatAnswer()}
         </div>
       </Show>
     </div>
