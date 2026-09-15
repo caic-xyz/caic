@@ -1970,6 +1970,57 @@ data class GitRepositoryStatus(
 @Serializable
 data class DiffResp(val diff: String, val repositories: List<GitRepositoryStatus>)
 
+/** DiffIndexFileStat describes a committed file without its patch body. */
+@Serializable
+data class DiffIndexFileStat(
+    val path: String,
+    val added: Int,
+    val deleted: Int,
+    val binary: Boolean? = null,
+)
+
+/** DiffIndexCommit describes one commit and its changed-file metadata. */
+@Serializable
+data class DiffIndexCommit(
+    val sha: String,
+    val subject: String,
+    val decorations: String? = null,
+    val authoredDate: String,
+    val stat: List<DiffIndexFileStat>,
+)
+
+/** DiffIndexFileStatus describes one uncommitted path without its patch body. */
+@Serializable
+data class DiffIndexFileStatus(
+    val path: String,
+    val originalPath: String? = null,
+    val indexStatus: String? = null,
+    val worktreeStatus: String? = null,
+    val added: Int,
+    val deleted: Int,
+    val binary: Boolean,
+)
+
+/** DiffIndexRepository describes one repository in a diff index. */
+@Serializable
+data class DiffIndexRepository(
+    val name: String,
+    val branch: String,
+    val upstream: String? = null,
+    val ahead: Int,
+    val behind: Int,
+    val commits: List<DiffIndexCommit>,
+    val uncommitted: List<DiffIndexFileStatus>,
+)
+
+/** TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index. */
+@Serializable
+data class TaskDiffIndexResp(val repositories: List<DiffIndexRepository>)
+
+/** FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file. */
+@Serializable
+data class FileDiffResp(val diff: String)
+
 /** GitRepositoryState summarizes the compact Git state of one task repository. */
 @Serializable
 data class GitRepositoryState(
@@ -1989,7 +2040,7 @@ data class GitRepositoryState(
 @Serializable
 data class TaskRepoStatusResp(val repositories: List<GitRepositoryState>)
 
-/** ProcessInfo describes a single process running inside a task runtime instance. */
+/** ProcessInfo describes a single process running inside the task runtime instance. */
 @Serializable
 data class ProcessInfo(
     /** PID is the process ID. */

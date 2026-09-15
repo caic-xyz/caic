@@ -844,7 +844,82 @@ type DiffResp struct {
 	Repositories []GitRepositoryStatus `json:"repositories"`
 }
 
-// ProcessInfo describes a single process running inside a task runtime instance.
+// DiffIndexFileStat describes a committed file without its patch body.
+type DiffIndexFileStat struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Binary  bool   `json:"binary,omitempty"`
+}
+
+// DiffIndexCommit describes one commit and its changed-file metadata.
+type DiffIndexCommit struct {
+	SHA          string              `json:"sha"`
+	Subject      string              `json:"subject"`
+	Decorations  string              `json:"decorations,omitempty"`
+	AuthoredDate string              `json:"authoredDate"`
+	Stat         []DiffIndexFileStat `json:"stat"`
+}
+
+// DiffIndexFileStatus describes one uncommitted path without its patch body.
+type DiffIndexFileStatus struct {
+	Path           string `json:"path"`
+	OriginalPath   string `json:"originalPath,omitempty"`
+	IndexStatus    string `json:"indexStatus,omitempty"`
+	WorktreeStatus string `json:"worktreeStatus,omitempty"`
+	Added          int    `json:"added"`
+	Deleted        int    `json:"deleted"`
+	Binary         bool   `json:"binary"`
+}
+
+// DiffIndexRepository describes one repository in a diff index.
+type DiffIndexRepository struct {
+	Name     string `json:"name"`
+	Branch   string `json:"branch"`
+	Upstream string `json:"upstream,omitempty"`
+	Ahead    int    `json:"ahead"`
+	Behind   int    `json:"behind"`
+
+	Commits     []DiffIndexCommit     `json:"commits"`
+	Uncommitted []DiffIndexFileStatus `json:"uncommitted"`
+}
+
+// TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index.
+type TaskDiffIndexResp struct {
+	Repositories []DiffIndexRepository `json:"repositories"`
+}
+
+// FileDiffReq selects one committed or uncommitted file patch.
+type FileDiffReq struct {
+	Repository   int
+	Commit       string
+	Path         string
+	OriginalPath string
+}
+
+// Validate checks that the file patch selector is well formed.
+func (r FileDiffReq) Validate() error {
+	if r.Repository < 0 {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repository must be non-negative"}
+	}
+	if r.Path == "" {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path is required"}
+	}
+	if r.Commit != "" && !isFullGitObjectID(r.Commit) {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "commit must be a full object ID"}
+	}
+	if r.Commit != "" && r.OriginalPath != "" {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "originalPath is only valid for uncommitted files"}
+	}
+	return nil
+}
+
+// FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file.
+type FileDiffResp struct {
+	Diff string `json:"diff"`
+}
+
+// ProcessInfo describes a single process running inside the task runtime instance.
 type ProcessInfo struct {
 	// PID is the process ID.
 	PID int `json:"pid"`

@@ -1,4 +1,4 @@
-// TaskDetail renders agent output, task context, actions, and Git-state diff navigation.
+// TaskDetail renders agent output, task context, actions, and intent-prefetched Git-state diff navigation.
 
 import {
   createSignal,
@@ -103,6 +103,7 @@ import RepoStateIcons, {
   diffStatState,
   repoStateLabel,
 } from "./RepoStateIcons";
+import { prefetchTaskDiff } from "../diffCache";
 import styles from "./TaskDetail.module.css";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
@@ -1133,6 +1134,9 @@ export default function TaskDetail(props: Props) {
                   state={state}
                   href={`${location.pathname}/diff`}
                   elideDiffStats={elideHeaderGitStats()}
+                  onNavigateIntent={() =>
+                    void prefetchTaskDiff(props.taskId).catch(() => undefined)
+                  }
                 />
               )}
             </For>
@@ -1141,6 +1145,9 @@ export default function TaskDetail(props: Props) {
                 state={diffStatState(props.diffStat)}
                 href={`${location.pathname}/diff`}
                 elideDiffStats={elideHeaderGitStats()}
+                onNavigateIntent={() =>
+                  void prefetchTaskDiff(props.taskId).catch(() => undefined)
+                }
               />
             </Show>
           </span>

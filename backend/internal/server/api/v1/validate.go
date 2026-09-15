@@ -27,6 +27,19 @@ const (
 // pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
 var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+func isFullGitObjectID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for i := range len(value) {
+		c := value[i]
+		if ('0' > c || c > '9') && ('a' > c || c > 'f') && ('A' > c || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 func validateContainerPlatform(platform Platform) error {
 	switch platform {
 	case PlatformDefault, PlatformLinuxAMD64, PlatformLinuxARM64:

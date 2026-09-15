@@ -18,6 +18,7 @@
     "check:pre-commit": "scripts/check-staged.sh",
     "dev": "vite",
     "build": "vite build",
+    "benchmark": "vitest bench --run --maxWorkers=1 --no-file-parallelism",
     "postbuild": "./scripts/compress_dist.py",
     "preview": "vite preview",
     "test": "vitest run",

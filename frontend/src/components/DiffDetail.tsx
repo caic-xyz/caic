@@ -1,4 +1,4 @@
-// Full-page repository status with collapsible per-file commit and uncommitted diffs.
+// Full-page repository status with shared stale-refresh metadata and persistent lazy file rows.
 
 import {
   createSignal,
@@ -7,14 +7,21 @@ import {
   Show,
   onMount,
   onCleanup,
+  untrack,
 } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
-import type { GitFileStatus, GitRepositoryStatus } from "@sdk/types.gen";
+import type {
+  DiffIndexCommit,
+  DiffIndexFileStat,
+  DiffIndexFileStatus,
+  DiffIndexRepository,
+} from "@sdk/types.gen";
 
-import { getTaskDiff } from "../api";
+import { taskDiffCache } from "../diffCache";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import styles from "./DiffDetail.module.css";
 
@@ -24,30 +31,98 @@ interface Props {
   onTaskRefreshError?: (taskId: string, err: unknown) => boolean;
 }
 
+type ViewFileStat = DiffIndexFileStat & { id: string };
+type ViewFileStatus = DiffIndexFileStatus & { id: string };
+type ViewCommit = Omit<DiffIndexCommit, "stat"> & {
+  id: string;
+  stat: ViewFileStat[];
+};
+type ViewRepository = Omit<DiffIndexRepository, "commits" | "uncommitted"> & {
+  id: string;
+  commits: ViewCommit[];
+  uncommitted: ViewFileStatus[];
+};
+
+function indexedRepositories(
+  repositories: DiffIndexRepository[],
+): ViewRepository[] {
+  return repositories.map((repo, repositoryIndex) => ({
+    ...repo,
+    id: `${repositoryIndex}\0${repo.name}`,
+    commits: repo.commits.map((commit) => ({
+      ...commit,
+      id: `${repo.name}\0${commit.sha}`,
+      stat: commit.stat.map((file) => ({
+        ...file,
+        id: `${repo.name}\0${commit.sha}\0${file.path}`,
+      })),
+    })),
+    uncommitted: repo.uncommitted.map((file) => ({
+      ...file,
+      id: `${repo.name}\0${file.originalPath ?? ""}\0${file.path}`,
+    })),
+  }));
+}
+
 export default function DiffDetail(props: Props) {
   const navigate = useNavigate();
-  const [repositories, setRepositories] = createSignal<GitRepositoryStatus[]>(
-    [],
-  );
+  const [repositories, setRepositories] = createStore<ViewRepository[]>([]);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
+  const [stale, setStale] = createSignal(false);
+  const [refreshError, setRefreshError] = createSignal<string | null>(null);
+  const [unavailable, setUnavailable] = createSignal(false);
+  const [indexVersion, setIndexVersion] = createSignal(0);
   const [lineWrap, setLineWrap] = createSignal(false);
+  const [expandedRows, setExpandedRows] = createSignal<Set<string>>(new Set());
 
   createEffect(() => {
     const id = props.taskId;
     const onTaskRefreshError = props.onTaskRefreshError;
-    setLoading(true);
-    setError(null);
-    getTaskDiff(id, "")
-      .then((d) => {
-        setRepositories(d.repositories);
-      })
-      .catch((e: unknown) => {
-        if (onTaskRefreshError?.(id, e)) return;
-        setError(e instanceof Error ? e.message : "Unknown error");
-      })
-      .finally(() => setLoading(false));
+    const update = () => {
+      const snapshot = taskDiffCache.snapshot(id);
+      setRepositories(
+        reconcile(indexedRepositories(snapshot.data?.repositories ?? []), {
+          key: "id",
+        }),
+      );
+      setLoading(snapshot.loading && snapshot.data === null);
+      setStale(snapshot.loading && snapshot.data !== null);
+      setUnavailable(
+        snapshot.data === null && !snapshot.loading && snapshot.error === null,
+      );
+      setIndexVersion(snapshot.version);
+      setError(
+        snapshot.error && snapshot.data === null
+          ? snapshot.error instanceof Error
+            ? snapshot.error.message
+            : "Unknown error"
+          : null,
+      );
+      setRefreshError(
+        snapshot.error && snapshot.data !== null
+          ? snapshot.error instanceof Error
+            ? snapshot.error.message
+            : "Unknown error"
+          : null,
+      );
+    };
+    const unsubscribe = taskDiffCache.subscribe(id, update);
+    update();
+    taskDiffCache.revalidateIndex(id).catch((e: unknown) => {
+      onTaskRefreshError?.(id, e);
+    });
+    onCleanup(unsubscribe);
   });
+
+  const toggleRow = (key: string) => {
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   // Escape navigates back to the task detail.
   onMount(() => {
@@ -58,7 +133,7 @@ export default function DiffDetail(props: Props) {
     onCleanup(() => document.removeEventListener("keydown", onKey));
   });
 
-  function statusLabels(file: GitFileStatus) {
+  function statusLabels(file: DiffIndexFileStatus) {
     if (file.indexStatus === "?" && file.worktreeStatus === "?") {
       return [{ scope: "", label: "untracked" }];
     }
@@ -97,15 +172,34 @@ export default function DiffDetail(props: Props) {
       </div>
       <div class={styles.fileList}>
         <Show when={loading()}>
-          <div class={styles.diffLoading}>Loading diff...</div>
+          <div class={styles.diffLoading} role="status" aria-live="polite">
+            Loading diff...
+          </div>
+        </Show>
+        <Show when={stale()}>
+          <div class={styles.diffLoading} role="status" aria-live="polite">
+            Updating diff...
+          </div>
+        </Show>
+        <Show when={refreshError()}>
+          {(message) => (
+            <div class={styles.diffError} role="alert">
+              Diff may be out of date: {message()}
+            </div>
+          )}
+        </Show>
+        <Show when={unavailable()}>
+          <div class={styles.diffError} role="status">
+            Diff unavailable
+          </div>
         </Show>
         <Show when={error()}>
           <div class={styles.diffError}>{error()}</div>
         </Show>
         <Show when={!loading() && !error()}>
           <div class={styles.statusList}>
-            <For each={repositories()}>
-              {(repo) => (
+            <For each={repositories}>
+              {(repo, repositoryIndex) => (
                 <section class={styles.repoStatus}>
                   <div class={styles.repoHeading}>
                     <span class={styles.headerRepo}>{repo.name}</span>
@@ -175,17 +269,37 @@ export default function DiffDetail(props: Props) {
                               <Show when={commit.stat.length > 0}>
                                 <div class={styles.commitStat}>
                                   <For each={commit.stat}>
-                                    {(file) => (
-                                      <FileDiffRow
-                                        path={file.path}
-                                        added={file.added}
-                                        deleted={file.deleted}
-                                        binary={file.binary ?? false}
-                                        diff={file.diff ?? ""}
-                                        lineWrap={lineWrap()}
-                                        variant="commit"
-                                      />
-                                    )}
+                                    {(file) => {
+                                      return (
+                                        <FileDiffRow
+                                          path={file.path}
+                                          added={file.added}
+                                          deleted={file.deleted}
+                                          binary={file.binary ?? false}
+                                          loadDiff={() =>
+                                            taskDiffCache.loadPatch({
+                                              taskId: props.taskId,
+                                              repository:
+                                                String(repositoryIndex()),
+                                              commit: commit.sha,
+                                              path: file.path,
+                                              originalPath: "",
+                                            })
+                                          }
+                                          onLoadError={(err) =>
+                                            props.onTaskRefreshError?.(
+                                              props.taskId,
+                                              err,
+                                            ) ?? false
+                                          }
+                                          lineWrap={lineWrap()}
+                                          variant="commit"
+                                          expanded={expandedRows().has(file.id)}
+                                          onToggle={() => toggleRow(file.id)}
+                                          indexVersion={indexVersion()}
+                                        />
+                                      );
+                                    }}
                                   </For>
                                   <div class={styles.commitSummary}>
                                     {commit.stat.length}{" "}
@@ -213,19 +327,38 @@ export default function DiffDetail(props: Props) {
                     >
                       <div class={styles.uncommittedList}>
                         <For each={repo.uncommitted}>
-                          {(file) => (
-                            <FileDiffRow
-                              path={file.path}
-                              originalPath={file.originalPath}
-                              added={file.added}
-                              deleted={file.deleted}
-                              binary={file.binary}
-                              diff={file.diff}
-                              statuses={statusLabels(file)}
-                              lineWrap={lineWrap()}
-                              variant="uncommitted"
-                            />
-                          )}
+                          {(file) => {
+                            return (
+                              <FileDiffRow
+                                path={file.path}
+                                originalPath={file.originalPath}
+                                added={file.added}
+                                deleted={file.deleted}
+                                binary={file.binary}
+                                loadDiff={() =>
+                                  taskDiffCache.loadPatch({
+                                    taskId: props.taskId,
+                                    repository: String(repositoryIndex()),
+                                    commit: "",
+                                    path: file.path,
+                                    originalPath: file.originalPath ?? "",
+                                  })
+                                }
+                                onLoadError={(err) =>
+                                  props.onTaskRefreshError?.(
+                                    props.taskId,
+                                    err,
+                                  ) ?? false
+                                }
+                                statuses={statusLabels(file)}
+                                lineWrap={lineWrap()}
+                                variant="uncommitted"
+                                expanded={expandedRows().has(file.id)}
+                                onToggle={() => toggleRow(file.id)}
+                                indexVersion={indexVersion()}
+                              />
+                            );
+                          }}
                         </For>
                       </div>
                     </Show>
@@ -246,16 +379,69 @@ interface FileDiffRowProps {
   added: number;
   deleted: number;
   binary: boolean;
-  diff: string;
+  loadDiff: () => Promise<string>;
+  onLoadError: (err: unknown) => boolean;
   statuses?: { scope: string; label: string }[];
   lineWrap: boolean;
   variant: "commit" | "uncommitted";
+  expanded: boolean;
+  onToggle: () => void;
+  indexVersion: number;
 }
 
 function FileDiffRow(props: FileDiffRowProps) {
-  const [expanded, setExpanded] = createSignal(false);
+  let toggleButton: HTMLButtonElement | undefined;
+  let retryButton: HTMLButtonElement | undefined;
+  const [diff, setDiff] = createSignal<string | null>(null);
+  const [loadError, setLoadError] = createSignal<string | null>(null);
+  const [loading, setLoading] = createSignal(false);
+  let loadedVersion = -1;
+  let pendingVersion = -1;
   const pathLabel = () =>
     props.originalPath ? `${props.originalPath} → ${props.path}` : props.path;
+
+  const load = async (version: number, force: boolean) => {
+    if (loading()) {
+      if (props.variant === "uncommitted")
+        pendingVersion = Math.max(pendingVersion, version);
+      return;
+    }
+    if (
+      !force &&
+      diff() !== null &&
+      (props.variant === "commit" || version <= loadedVersion)
+    )
+      return;
+    if (version >= pendingVersion) pendingVersion = -1;
+    const restoreToggleFocus = document.activeElement === retryButton;
+    setLoading(true);
+    try {
+      setDiff(await props.loadDiff());
+      setLoadError(null);
+      if (restoreToggleFocus) queueMicrotask(() => toggleButton?.focus());
+    } catch (err: unknown) {
+      if (!props.onLoadError(err)) {
+        setLoadError(err instanceof Error ? err.message : "Unknown error");
+      }
+    } finally {
+      loadedVersion = version;
+      setLoading(false);
+      if (pendingVersion > loadedVersion) {
+        if (props.expanded) void load(pendingVersion, false);
+      }
+    }
+  };
+
+  const toggleExpanded = () => {
+    props.onToggle();
+  };
+
+  createEffect(() => {
+    const expanded = props.expanded;
+    const version = props.indexVersion;
+    if (!expanded) return;
+    untrack(() => void load(version, false));
+  });
 
   return (
     <div
@@ -267,13 +453,16 @@ function FileDiffRow(props: FileDiffRowProps) {
       <button
         type="button"
         class={styles.fileChangeButton}
-        aria-expanded={expanded()}
+        aria-expanded={props.expanded}
         aria-label={pathLabel()}
         title={pathLabel()}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={toggleExpanded}
+        ref={(el) => {
+          toggleButton = el;
+        }}
       >
         <span class={styles.collapseIndicator} aria-hidden="true">
-          {expanded() ? "\u25bc" : "\u25b6"}
+          {props.expanded ? "\u25bc" : "\u25b6"}
         </span>
         <span class={styles.fileChangePath} data-testid="diff-file-path">
           <Show when={props.originalPath}>
@@ -304,17 +493,57 @@ function FileDiffRow(props: FileDiffRowProps) {
           binary={props.binary}
         />
       </button>
-      <Show when={expanded()}>
+      <Show when={props.expanded}>
         <div class={styles.fileDiff}>
           <Show
-            when={props.diff}
-            fallback={<p class={styles.cleanState}>No textual diff</p>}
+            when={diff()}
+            fallback={
+              <Show when={diff() === ""}>
+                <p class={styles.cleanState}>No textual diff</p>
+              </Show>
+            }
           >
-            <UnifiedDiffBlock
-              diff={props.diff}
-              hideFileHeader
-              lineWrap={props.lineWrap}
-            />
+            {(loadedDiff) => (
+              <UnifiedDiffBlock
+                diff={loadedDiff()}
+                hideFileHeader
+                lineWrap={props.lineWrap}
+              />
+            )}
+          </Show>
+          <Show when={loadError()}>
+            {(message) => (
+              <div class={styles.fileDiffError} role="alert">
+                <span>{message()}</span>
+                <button
+                  type="button"
+                  aria-label={`Retry diff for ${pathLabel()}`}
+                  aria-disabled={loading()}
+                  onClick={() => void load(props.indexVersion, true)}
+                  ref={(el) => {
+                    retryButton = el;
+                  }}
+                >
+                  Retry
+                </button>
+                <Show when={loading()}>
+                  <span
+                    class={styles.diffLoading}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Retrying file diff...
+                  </span>
+                </Show>
+              </div>
+            )}
+          </Show>
+          <Show when={loading() && !loadError()}>
+            <p class={styles.diffLoading} role="status" aria-live="polite">
+              {diff() === null
+                ? "Loading file diff..."
+                : "Updating file diff..."}
+            </p>
           </Show>
         </div>
       </Show>

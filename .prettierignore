@@ -1,0 +1,3 @@
+# Generated API artifacts use generator-owned formatting.
+sdk/*/API.md
+sdk/*/ts/**/*.gen.ts

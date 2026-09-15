@@ -329,6 +329,21 @@ var Routes = []Route{
 		QueryParams: []string{"path"},
 	},
 	{
+		Name:   "getTaskDiffIndex",
+		Doc:    "Returns repository and changed-file metadata without loading patch bodies.",
+		Method: "GET",
+		Path:   "/api/caic/v1/tasks/{id}/diff/index",
+		Resp:   reflect.TypeFor[TaskDiffIndexResp](),
+	},
+	{
+		Name:        "getTaskFileDiff",
+		Doc:         "Returns one committed or uncommitted file patch.",
+		Method:      "GET",
+		Path:        "/api/caic/v1/tasks/{id}/diff/file",
+		Resp:        reflect.TypeFor[FileDiffResp](),
+		QueryParams: []string{"repository", "commit", "path", "originalPath"},
+	},
+	{
 		Name:   "getTaskRepoStatus",
 		Doc:    "Returns compact Git state for every repository mapped to a task.",
 		Method: "GET",

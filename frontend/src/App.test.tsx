@@ -1,10 +1,22 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sdk/types.gen";
+import type {
+  Repo,
+  PreferencesResp,
+  HarnessInfo,
+  Task,
+  ISOTimestamp,
+} from "@sdk/types.gen";
 
 // Minimal complete Task, matching what the backend now returns from createTask
 // so the app can seed its store and render the detail view immediately.
@@ -59,10 +71,12 @@ const fakeUsageESListeners: MessageListener[] = [];
 const fakeESOpenListeners: OpenListener[] = [];
 
 class FakeEventSource {
-  addEventListener = vi.fn((type: string, handler: MessageListener | OpenListener) => {
-    if (type === "message") fakeESListeners.push(handler as MessageListener);
-    if (type === "open") fakeESOpenListeners.push(handler as OpenListener);
-  });
+  addEventListener = vi.fn(
+    (type: string, handler: MessageListener | OpenListener) => {
+      if (type === "message") fakeESListeners.push(handler as MessageListener);
+      if (type === "open") fakeESOpenListeners.push(handler as OpenListener);
+    },
+  );
   close = vi.fn();
   onerror: ((e: Event) => void) | null = null;
 }
@@ -90,17 +104,23 @@ vi.mock("./api", () => ({
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
-  globalTaskEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
-    const es = new FakeEventSource();
-    // Mirror the real client: parse the SSE payload before invoking the handler.
-    es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
-    return es;
-  }),
-  globalUsageEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
-    const es = new FakeEventSource();
-    fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
-    return es;
-  }),
+  globalTaskEvents: vi.fn(
+    (handlers: { onMessage: (event: unknown) => void }) => {
+      const es = new FakeEventSource();
+      // Mirror the real client: parse the SSE payload before invoking the handler.
+      es.addEventListener("message", (e: { data: string }) =>
+        handlers.onMessage(JSON.parse(e.data)),
+      );
+      return es;
+    },
+  ),
+  globalUsageEvents: vi.fn(
+    (handlers: { onMessage: (event: unknown) => void }) => {
+      const es = new FakeEventSource();
+      fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
+      return es;
+    },
+  ),
   // Used by TaskDetail once a created task navigates into its detail route.
   taskEventStream: vi.fn(() => new FakeEventSource()),
   sendInput: vi.fn(),
@@ -109,6 +129,8 @@ vi.mock("./api", () => ({
   compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
   syncTask: vi.fn(),
   getTaskDiff: vi.fn(),
+  getTaskDiffIndex: vi.fn(),
+  getTaskFileDiff: vi.fn(),
   getTaskRepoStatus: vi.fn(() => Promise.resolve({ repositories: [] })),
   getTaskProcesses: vi.fn(),
   signalProcess: vi.fn(),
@@ -136,7 +158,9 @@ vi.mock("./gomode/notifications", () => ({
 vi.stubGlobal("EventSource", FakeEventSource);
 
 // Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
-vi.mock("./gomode/VoiceOverlay", () => ({ default: () => <div data-testid="voice-overlay" /> }));
+vi.mock("./gomode/VoiceOverlay", () => ({
+  default: () => <div data-testid="voice-overlay" />,
+}));
 
 function dispatchSSE(data: unknown) {
   const payload = { data: JSON.stringify(data) };
@@ -160,24 +184,45 @@ async function waitForTaskEventsSubscription() {
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
 import * as api from "./api";
+import { taskDiffCache } from "./diffCache";
 import * as notifications from "./gomode/notifications";
 
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
   const history = createMemoryHistory();
   history.set({ value: initial });
-  const utils = render(() => <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>);
+  const utils = render(() => (
+    <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>
+  ));
   return { history, ...utils };
 }
 
-const repoA: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
-const repoB: Repo = { path: "repos/b", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
-const newRepo: Repo = { path: "repos/new", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
+const repoA: Repo = {
+  path: "repos/a",
+  branch: "main",
+  baseBranch: { name: "main" },
+  remoteURL: "",
+};
+const repoB: Repo = {
+  path: "repos/b",
+  branch: "main",
+  baseBranch: { name: "main" },
+  remoteURL: "",
+};
+const newRepo: Repo = {
+  path: "repos/new",
+  branch: "main",
+  baseBranch: { name: "main" },
+  remoteURL: "",
+};
 
 function chipPathValues(): string[] {
-  const btns = screen.queryAllByTestId("repo-chips")[0]
+  const btns = screen
+    .queryAllByTestId("repo-chips")[0]
     ?.querySelectorAll<HTMLButtonElement>("button[data-testid^='chip-label-']");
-  return Array.from(btns ?? []).map((b) => b.dataset["testid"]?.replace("chip-label-", "") ?? "");
+  return Array.from(btns ?? []).map(
+    (b) => b.dataset["testid"]?.replace("chip-label-", "") ?? "",
+  );
 }
 
 beforeEach(() => {
@@ -194,14 +239,22 @@ beforeEach(() => {
     harness: "",
     settings: { baseImage: "", purgeDelay: 15_000_000_000 },
   } as unknown as PreferencesResp);
-  vi.mocked(api.updatePreferences).mockImplementation(async (request) => ({
-    repositories: [{ path: "repos/a" }],
-    models: {},
-    harness: "",
-    settings: request.settings,
-  } as PreferencesResp));
+  vi.mocked(api.updatePreferences).mockImplementation(
+    async (request) =>
+      ({
+        repositories: [{ path: "repos/a" }],
+        models: {},
+        harness: "",
+        settings: request.settings,
+      }) as PreferencesResp,
+  );
   vi.mocked(api.listHarnesses).mockResolvedValue([
-    { name: "claude", models: [], supportsImages: false, supportsCompact: false },
+    {
+      name: "claude",
+      models: [],
+      supportsImages: false,
+      supportsCompact: false,
+    },
   ] as unknown as HarnessInfo[]);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getVersion).mockResolvedValue({
@@ -212,12 +265,16 @@ beforeEach(() => {
   });
   vi.mocked(api.listOAuthGrants).mockResolvedValue({ grants: [] });
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
-  vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
+  vi.mocked(api.listRepoBranches).mockResolvedValue({
+    branches: [{ name: "main" }, { name: "dev", remote: "origin" }],
+  });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue(makeTask());
-  vi.mocked(api.getTaskHandoff).mockResolvedValue({ prompt: "Generated handoff prompt" });
+  vi.mocked(api.getTaskHandoff).mockResolvedValue({
+    prompt: "Generated handoff prompt",
+  });
   vi.mocked(api.getTask).mockResolvedValue(makeTask());
-  vi.mocked(api.getTaskDiff).mockResolvedValue({ diff: "", repositories: [] });
+  vi.mocked(api.getTaskDiffIndex).mockResolvedValue({ repositories: [] });
   vi.mocked(api.getTaskProcesses).mockResolvedValue({ processes: [] });
   vi.mocked(api.getTaskInfo).mockResolvedValue({
     id: "task1",
@@ -240,7 +297,9 @@ describe("App task list loading state", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [] });
 
-    await waitFor(() => expect(screen.getByText("No tasks yet.")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("No tasks yet.")).toBeInTheDocument(),
+    );
   });
 
   it("shows loading (not no tasks) for an empty list while the settled pass is in progress", async () => {
@@ -265,7 +324,9 @@ describe("App connection dot settled states", () => {
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
+    await waitFor(() =>
+      expect(dot().getAttribute("data-status")).toBe("connected"),
+    );
   });
 
   it("is yellow (settled-loading) while the pass is in progress and green after a completed status", async () => {
@@ -274,11 +335,15 @@ describe("App connection dot settled states", () => {
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
+    await waitFor(() =>
+      expect(dot().getAttribute("data-status")).toBe("settled-loading"),
+    );
 
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
+    await waitFor(() =>
+      expect(dot().getAttribute("data-status")).toBe("connected"),
+    );
   });
 
   it("is orange (settled-error) with the error tooltip after a failed status", async () => {
@@ -287,9 +352,14 @@ describe("App connection dot settled states", () => {
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
+    await waitFor(() =>
+      expect(dot().getAttribute("data-status")).toBe("settled-loading"),
+    );
 
-    dispatchSSE({ kind: "status", status: { loading: false, error: "load purged tasks: boom" } });
+    dispatchSSE({
+      kind: "status",
+      status: { loading: false, error: "load purged tasks: boom" },
+    });
 
     await waitFor(() => {
       expect(dot().getAttribute("data-status")).toBe("settled-error");
@@ -299,20 +369,141 @@ describe("App connection dot settled states", () => {
 });
 
 describe("App task-list SSE recovery", () => {
+  it("invalidates task diffs for live changes and evicts authoritative removals", async () => {
+    const invalidate = vi.spyOn(taskDiffCache, "invalidate");
+    const evictTask = vi.spyOn(taskDiffCache, "evictTask");
+    await taskDiffCache.loadIndex("omitted-cache");
+    renderApp();
+    await waitForTaskEventsSubscription();
+    const initial = makeTask({ id: "cache-events", state: "running" });
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [initial, makeTask({ id: "omitted-cache" })],
+    });
+
+    dispatchSSE({
+      kind: "patch",
+      patch: {
+        id: "cache-events",
+        diffStat: [{ path: "file.go", added: 1, deleted: 0 }],
+      },
+    });
+    dispatchSSE({ kind: "upsert", upsert: { ...initial, state: "waiting" } });
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [
+        {
+          ...initial,
+          state: "waiting",
+          diffStat: [{ path: "file.go", added: 2, deleted: 0 }],
+        },
+      ],
+    });
+
+    expect(invalidate).toHaveBeenCalledTimes(3);
+    expect(invalidate).toHaveBeenCalledWith("cache-events");
+    expect(evictTask).toHaveBeenCalledWith("omitted-cache");
+    dispatchSSE({ kind: "delete", delete: "cache-events" });
+    expect(evictTask).toHaveBeenCalledWith("cache-events");
+  });
+
+  it("evicts task diffs for every authoritative purged-state flow", async () => {
+    const evictTask = vi.spyOn(taskDiffCache, "evictTask");
+    renderApp();
+    await waitForTaskEventsSubscription();
+    const patchTask = makeTask({ id: "purged-patch", state: "running" });
+    const upsertTask = makeTask({ id: "purged-upsert", state: "running" });
+    const snapshotTask = makeTask({ id: "purged-snapshot", state: "running" });
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [patchTask, upsertTask, snapshotTask],
+    });
+
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: patchTask.id, state: "purged" },
+    });
+    dispatchSSE({ kind: "upsert", upsert: { ...upsertTask, state: "purged" } });
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [
+        { ...patchTask, state: "purged" },
+        { ...upsertTask, state: "purged" },
+        { ...snapshotTask, state: "purged" },
+      ],
+    });
+
+    expect(evictTask).toHaveBeenCalledWith("purged-patch");
+    expect(evictTask).toHaveBeenCalledWith("purged-upsert");
+    expect(evictTask).toHaveBeenCalledWith("purged-snapshot");
+  });
+
+  it("reuses a navigation-intent diff prefetch on route mount", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000);
+    taskDiffCache.evictTask("prefetched");
+    const task = makeTask({
+      id: "prefetched",
+      state: "running",
+      diffStat: [{ path: "file.go", added: 1, deleted: 0 }],
+    });
+    const { history } = renderApp("/task/@prefetched+prefetched");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const link = await screen.findByRole("link", { name: /changed file/ });
+
+    fireEvent.focus(link);
+    await waitFor(() => expect(api.getTaskDiffIndex).toHaveBeenCalledTimes(1));
+    fireEvent.click(link);
+    await waitFor(() =>
+      expect(history.get()).toBe("/task/@prefetched+prefetched/diff"),
+    );
+    expect(await screen.findByText("Repository changes")).toBeInTheDocument();
+    expect(api.getTaskDiffIndex).toHaveBeenCalledTimes(1);
+    taskDiffCache.evictTask("prefetched");
+  });
+
   it("uses fetched tasks for derived notification and quota recovery bookkeeping", async () => {
-    const blockedTask = makeTask({ id: "recovered", state: "waiting", rateLimit: { blocked: true } });
+    const blockedTask = makeTask({
+      id: "recovered",
+      state: "waiting",
+      rateLimit: { blocked: true },
+    });
     vi.mocked(api.getTask).mockResolvedValue(blockedTask);
     renderApp();
 
     await waitForTaskEventsSubscription();
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", title: "untrusted partial title", state: "waiting" } });
+    dispatchSSE({
+      kind: "patch",
+      patch: {
+        id: "recovered",
+        title: "untrusted partial title",
+        state: "waiting",
+      },
+    });
 
-    await waitFor(() => expect(screen.getByText("do something")).toBeInTheDocument());
-    expect(screen.queryByText("untrusted partial title")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("do something")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("untrusted partial title"),
+    ).not.toBeInTheDocument();
 
-    dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "recovered", state: "waiting", rateLimit: { blocked: false } }) });
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting" } });
+    dispatchSSE({
+      kind: "upsert",
+      upsert: makeTask({
+        id: "recovered",
+        state: "waiting",
+        rateLimit: { blocked: false },
+      }),
+    });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "running" },
+    });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "waiting" },
+    });
 
     await waitFor(() => {
       expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
@@ -330,21 +521,49 @@ describe("App task-list SSE recovery", () => {
 
   it("replays patches that arrive during unknown-task recovery", async () => {
     const recoveryFetch = deferred<Task>();
-    const recoveredTask = makeTask({ id: "recovered", title: "authoritative task", state: "running", rateLimit: { blocked: true } });
+    const recoveredTask = makeTask({
+      id: "recovered",
+      title: "authoritative task",
+      state: "running",
+      rateLimit: { blocked: true },
+    });
     vi.mocked(api.getTask).mockImplementationOnce(() => recoveryFetch.promise);
     renderApp();
 
     await waitForTaskEventsSubscription();
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
-    expect(document.querySelector("[data-task-id='recovered']")).not.toBeInTheDocument();
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "running" },
+    });
+    expect(
+      document.querySelector("[data-task-id='recovered']"),
+    ).not.toBeInTheDocument();
 
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting", rateLimit: { blocked: true } } });
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", rateLimit: { blocked: false } } });
+    dispatchSSE({
+      kind: "patch",
+      patch: {
+        id: "recovered",
+        state: "waiting",
+        rateLimit: { blocked: true },
+      },
+    });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", rateLimit: { blocked: false } },
+    });
     recoveryFetch.resolve(recoveredTask);
 
-    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-task-id='recovered']"),
+      ).toHaveTextContent("waiting"),
+    );
     expect(api.getTask).toHaveBeenCalledOnce();
-    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", { enabled: true });
+    expect(notifications.notifyWaiting).toHaveBeenCalledWith(
+      "recovered",
+      "authoritative task",
+      { enabled: true },
+    );
     expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
       "recovered",
       "authoritative task quota is available",
@@ -360,31 +579,58 @@ describe("App task-list SSE recovery", () => {
     renderApp();
 
     await waitForTaskEventsSubscription();
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "running" },
+    });
     dispatchSSE({ kind: "snapshot", snapshot: [snapshotTask] });
     recoveryFetch.resolve(runningTask);
 
-    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-task-id='recovered']"),
+      ).toHaveTextContent("waiting"),
+    );
     expect(api.getTask).toHaveBeenCalledOnce();
   });
 
   it("applies patches after an upsert supersedes recovery", async () => {
     const recoveryFetch = deferred<Task>();
-    const authoritativeTask = makeTask({ id: "recovered", title: "authoritative task", state: "running" });
+    const authoritativeTask = makeTask({
+      id: "recovered",
+      title: "authoritative task",
+      state: "running",
+    });
     vi.mocked(api.getTask).mockImplementationOnce(() => recoveryFetch.promise);
     renderApp();
 
     await waitForTaskEventsSubscription();
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "running" },
+    });
     dispatchSSE({ kind: "upsert", upsert: authoritativeTask });
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting" } });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "waiting" },
+    });
 
-    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
-    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", { enabled: true });
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-task-id='recovered']"),
+      ).toHaveTextContent("waiting"),
+    );
+    expect(notifications.notifyWaiting).toHaveBeenCalledWith(
+      "recovered",
+      "authoritative task",
+      { enabled: true },
+    );
 
     recoveryFetch.resolve(makeTask({ id: "recovered", state: "running" }));
     await Promise.resolve();
-    expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting");
+    expect(
+      document.querySelector("[data-task-id='recovered']"),
+    ).toHaveTextContent("waiting");
   });
 
   it("replays queued updates when recovery fetches fail", async () => {
@@ -393,11 +639,21 @@ describe("App task-list SSE recovery", () => {
     renderApp();
 
     await waitForTaskEventsSubscription();
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "running" } });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "running" },
+    });
     dispatchSSE({ kind: "snapshot", snapshot: [snapshotTask] });
-    dispatchSSE({ kind: "patch", patch: { id: "recovered", state: "waiting" } });
+    dispatchSSE({
+      kind: "patch",
+      patch: { id: "recovered", state: "waiting" },
+    });
 
-    await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-task-id='recovered']"),
+      ).toHaveTextContent("waiting"),
+    );
     expect(api.getTask).toHaveBeenCalledOnce();
   });
 
@@ -430,9 +686,15 @@ describe("App task-list SSE recovery", () => {
     expect(api.getTask).toHaveBeenNthCalledWith(1, "first");
     expect(api.getTask).toHaveBeenNthCalledWith(2, "second");
 
-    firstTask.resolve(makeTask({ id: "first", title: "first authoritative task" }));
-    secondTask.resolve(makeTask({ id: "second", title: "second authoritative task" }));
-    await waitFor(() => expect(screen.getByText("first authoritative task")).toBeInTheDocument());
+    firstTask.resolve(
+      makeTask({ id: "first", title: "first authoritative task" }),
+    );
+    secondTask.resolve(
+      makeTask({ id: "second", title: "second authoritative task" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("first authoritative task")).toBeInTheDocument(),
+    );
     expect(screen.getByText("second authoritative task")).toBeInTheDocument();
   });
 });
@@ -462,29 +724,49 @@ describe("App keyboard shortcuts", () => {
   it.each([
     {
       harnesses: [
-        { name: "claude", models: [], supportsImages: false, supportsCompact: false },
-        { name: "codex", models: [], supportsImages: false, supportsCompact: false },
+        {
+          name: "claude",
+          models: [],
+          supportsImages: false,
+          supportsCompact: false,
+        },
+        {
+          name: "codex",
+          models: [],
+          supportsImages: false,
+          supportsCompact: false,
+        },
       ],
       targetTestId: "harness-select",
       help: "Focus harness for the new task",
     },
     {
       harnesses: [
-        { name: "codex", models: [{ id: "gpt-5", effortOptions: [] }], supportsImages: false, supportsCompact: false },
+        {
+          name: "codex",
+          models: [{ id: "gpt-5", effortOptions: [] }],
+          supportsImages: false,
+          supportsCompact: false,
+        },
       ],
       targetTestId: "model-select",
       help: "Focus model for the new task",
     },
-  ])("describes the visible $targetTestId as the F3 target", async ({ harnesses, targetTestId, help }) => {
-    const user = userEvent.setup();
-    vi.mocked(api.listHarnesses).mockResolvedValue(harnesses as unknown as HarnessInfo[]);
-    renderApp();
-    await screen.findByTestId(targetTestId);
+  ])(
+    "describes the visible $targetTestId as the F3 target",
+    async ({ harnesses, targetTestId, help }) => {
+      const user = userEvent.setup();
+      vi.mocked(api.listHarnesses).mockResolvedValue(
+        harnesses as unknown as HarnessInfo[],
+      );
+      renderApp();
+      await screen.findByTestId(targetTestId);
 
-    await user.keyboard("{F1}");
+      await user.keyboard("{F1}");
 
-    expect(screen.getByText(help)).toBeInTheDocument();
-  });
+      expect(screen.getByText(help)).toBeInTheDocument();
+    },
+  );
 
   it("omits F3 from help when there is no dropdown to focus", async () => {
     const user = userEvent.setup();
@@ -493,7 +775,9 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F1}");
 
-    expect(screen.queryByText("F3", { selector: "kbd" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("F3", { selector: "kbd" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses runtime as the F3 target when no harness or model selector is visible", async () => {
@@ -513,9 +797,17 @@ describe("App keyboard shortcuts", () => {
     const runtime = await screen.findByRole("combobox", { name: "Runtime" });
 
     await user.keyboard("{F1}");
-    expect(screen.getByText("Focus runtime for the new task")).toBeInTheDocument();
-    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
-    await waitFor(() => expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument());
+    expect(
+      screen.getByText("Focus runtime for the new task"),
+    ).toBeInTheDocument();
+    (
+      screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement
+    ).close();
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("keyboard-shortcuts-dialog"),
+      ).not.toBeInTheDocument(),
+    );
 
     await user.keyboard("{F3}");
     await waitFor(() => expect(runtime).toHaveFocus());
@@ -542,7 +834,9 @@ describe("App keyboard shortcuts", () => {
     renderApp("/task/@task1+do-something");
 
     const prompt = await screen.findByTestId("task-detail-prompt");
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
 
     expect(prompt).not.toHaveFocus();
   });
@@ -555,8 +849,12 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F2}");
 
-    await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toHaveFocus());
-    expect(screen.queryByRole("combobox", { name: "Manage repositories" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("chip-label-repos/a")).toHaveFocus(),
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Manage repositories" }),
+    ).not.toBeInTheDocument();
   });
 
   it("focuses the repository add button with F2 when none are selected", async () => {
@@ -567,38 +865,65 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F2}");
 
-    await waitFor(() => expect(screen.getByTestId("add-repo-button")).toHaveFocus());
-    expect(screen.queryByRole("combobox", { name: "Manage repositories" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("add-repo-button")).toHaveFocus(),
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Manage repositories" }),
+    ).not.toBeInTheDocument();
   });
 
   it("changes harness with F3 and returns focus to the prompt", async () => {
     const user = userEvent.setup();
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "claude", models: [], supportsImages: false, supportsCompact: false },
-      { name: "codex", models: [], supportsImages: false, supportsCompact: false },
+      {
+        name: "claude",
+        models: [],
+        supportsImages: false,
+        supportsCompact: false,
+      },
+      {
+        name: "codex",
+        models: [],
+        supportsImages: false,
+        supportsCompact: false,
+      },
     ] as unknown as HarnessInfo[]);
     renderApp();
     const prompt = screen.getByTestId("prompt-input");
     prompt.focus();
 
     await user.keyboard("{F3}");
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Harness" })).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Harness" })).toHaveFocus(),
+    );
     await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue("codex"));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue(
+        "codex",
+      ),
+    );
     await waitFor(() => expect(prompt).toHaveFocus());
   });
 
   it("focuses the model with F3 when the harness is fixed", async () => {
     const user = userEvent.setup();
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "codex", models: [{ id: "gpt-5", effortOptions: [] }], supportsImages: false, supportsCompact: false },
+      {
+        name: "codex",
+        models: [{ id: "gpt-5", effortOptions: [] }],
+        supportsImages: false,
+        supportsCompact: false,
+      },
     ] as unknown as HarnessInfo[]);
     renderApp();
 
     await user.keyboard("{F3}");
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Model" })).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveFocus(),
+    );
   });
 
   it("navigates tasks with Shift+ArrowDown while editing the prompt", async () => {
@@ -613,7 +938,9 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
 
     await waitFor(() => expect(history.get()).toContain("@task1+"));
-    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("task-detail-prompt")).toHaveFocus(),
+    );
   });
 
   it("navigates with shifted arrows after clicking task-detail content", async () => {
@@ -639,7 +966,9 @@ describe("App keyboard shortcuts", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
     const cards = await waitFor(() => {
-      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+      const found = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-task-id]"),
+      );
       expect(found).toHaveLength(2);
       return found;
     });
@@ -649,15 +978,27 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{ArrowDown}");
     await waitFor(() => expect(history.get()).toContain(`@${secondId}+`));
-    await waitFor(() => expect(document.querySelector(`[data-task-id='${secondId}']`)).toHaveFocus());
+    await waitFor(() =>
+      expect(
+        document.querySelector(`[data-task-id='${secondId}']`),
+      ).toHaveFocus(),
+    );
 
     await user.keyboard("{Shift>}{ArrowUp}{/Shift}");
     await waitFor(() => expect(history.get()).toContain(`@${firstId}+`));
-    await waitFor(() => expect(document.querySelector(`[data-task-id='${firstId}']`)).toHaveFocus());
+    await waitFor(() =>
+      expect(
+        document.querySelector(`[data-task-id='${firstId}']`),
+      ).toHaveFocus(),
+    );
 
     await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
     await waitFor(() => expect(history.get()).toContain(`@${secondId}+`));
-    await waitFor(() => expect(document.querySelector(`[data-task-id='${secondId}']`)).toHaveFocus());
+    await waitFor(() =>
+      expect(
+        document.querySelector(`[data-task-id='${secondId}']`),
+      ).toHaveFocus(),
+    );
     await user.keyboard("{ArrowUp}");
     await waitFor(() => expect(history.get()).toContain(`@${firstId}+`));
   });
@@ -669,7 +1010,9 @@ describe("App keyboard shortcuts", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [task] });
     const card = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>("[data-task-id='task1']");
+      const found = document.querySelector<HTMLElement>(
+        "[data-task-id='task1']",
+      );
       if (!found) throw new Error("Task card was not rendered");
       return found;
     });
@@ -682,7 +1025,9 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(detailPrompt).toHaveFocus());
 
     await user.tab({ shift: true });
-    await waitFor(() => expect(document.querySelector("[data-task-id='task1']")).toHaveFocus());
+    await waitFor(() =>
+      expect(document.querySelector("[data-task-id='task1']")).toHaveFocus(),
+    );
   });
 
   it("keeps one visible task card in the Tab order", async () => {
@@ -693,14 +1038,18 @@ describe("App keyboard shortcuts", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
     const cards = await waitFor(() => {
-      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+      const found = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-task-id]"),
+      );
       expect(found).toHaveLength(2);
       return found;
     });
     expect(cards.map((card) => card.tabIndex)).toEqual([0, -1]);
 
     history.set({ value: `/task/@${cards[1].dataset.taskId}+selected` });
-    await waitFor(() => expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0]));
+    await waitFor(() =>
+      expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0]),
+    );
 
     await user.click(screen.getByTitle("Collapse sidebar"));
     expect(cards.map((card) => card.tabIndex)).toEqual([-1, -1]);
@@ -713,7 +1062,9 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{Escape}");
 
-    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
+    );
   });
 
   it("returns Escape from a detail prompt to the new-task prompt", async () => {
@@ -727,7 +1078,9 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
+    );
   });
 
   it("returns Escape from a task card to the new-task prompt", async () => {
@@ -736,7 +1089,9 @@ describe("App keyboard shortcuts", () => {
     vi.mocked(api.getTask).mockResolvedValue(task);
     const { history } = renderApp("/task/@task1+do-something");
     const card = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>("[data-task-id='task1']");
+      const found = document.querySelector<HTMLElement>(
+        "[data-task-id='task1']",
+      );
       if (!found) throw new Error("Task card was not rendered");
       return found;
     });
@@ -745,7 +1100,9 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
+    );
   });
 
   it("does not navigate tasks while editing the prompt", async () => {
@@ -760,7 +1117,9 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{ArrowDown}r?");
 
     expect(prompt).toHaveFocus();
-    expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("keyboard-shortcuts-dialog"),
+    ).not.toBeInTheDocument();
   });
 
   it("purges the selected task with Shift+Delete while editing its prompt", async () => {
@@ -790,17 +1149,23 @@ describe("App keyboard shortcuts", () => {
 
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "delete", delete: "task1" });
-    await waitFor(() => expect(screen.getByTestId("prompt-input")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-input")).toBeInTheDocument(),
+    );
 
     dispatchSSE({ kind: "upsert", upsert: makeTask() });
     const card = await waitFor(() => {
-      const next = document.querySelector<HTMLElement>("[data-task-id='task1']");
+      const next = document.querySelector<HTMLElement>(
+        "[data-task-id='task1']",
+      );
       if (!next) throw new Error("recreated task card was not rendered");
       return next;
     });
     await user.click(card);
 
-    expect(await screen.findByTestId("task-detail-prompt")).toBeEmptyDOMElement();
+    expect(
+      await screen.findByTestId("task-detail-prompt"),
+    ).toBeEmptyDOMElement();
   });
 
   it("requires confirmation when purging without a recovery delay", async () => {
@@ -832,10 +1197,14 @@ describe("App keyboard shortcuts", () => {
     menu.focus();
 
     await user.keyboard("{ArrowDown}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus(),
+    );
 
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveFocus();
+    expect(
+      screen.getByRole("menuitem", { name: "Keyboard shortcuts" }),
+    ).toHaveFocus();
 
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
@@ -849,26 +1218,38 @@ describe("App keyboard shortcuts", () => {
     prompt.focus();
     await user.keyboard("{F1}");
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
-    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
+    (
+      screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement
+    ).close();
     await waitFor(() => expect(prompt).toHaveFocus());
 
     const newTaskButton = screen.getByTestId("new-task-button");
     newTaskButton.focus();
     await user.keyboard("?");
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
-    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
+    (
+      screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement
+    ).close();
     await waitFor(() => expect(newTaskButton).toHaveFocus());
 
     await user.click(screen.getByTitle("Menu"));
-    await user.click(screen.getByRole("menuitem", { name: "Keyboard shortcuts" }));
+    await user.click(
+      screen.getByRole("menuitem", { name: "Keyboard shortcuts" }),
+    );
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
   });
 });
 
 describe("App repo chips: No repository", () => {
   it("notifies when a waiting task's backend rate limit clears", async () => {
-    const blockedTask = makeTask({ state: "waiting", rateLimit: { blocked: true } });
-    const recoveredTask = makeTask({ state: "waiting", rateLimit: { blocked: false } });
+    const blockedTask = makeTask({
+      state: "waiting",
+      rateLimit: { blocked: true },
+    });
+    const recoveredTask = makeTask({
+      state: "waiting",
+      rateLimit: { blocked: false },
+    });
     renderApp();
 
     await waitForTaskEventsSubscription();
@@ -879,24 +1260,41 @@ describe("App repo chips: No repository", () => {
       expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
         "task1",
         "do something quota is available",
-      { enabled: true },
+        { enabled: true },
       );
     });
   });
 
-	it("moves from a purged selected task to the next task needing input first", async () => {
+  it("moves from a purged selected task to the next task needing input first", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const killed = makeTask({ id: "a3", title: "kill me", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
-    const running = makeTask({ id: "a2", title: "running next", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
-    const asking = makeTask({ id: "a1", title: "asking next", state: "asking", repos: [{ name: "repos/a", branch: "main" }] });
+    const killed = makeTask({
+      id: "a3",
+      title: "kill me",
+      state: "running",
+      repos: [{ name: "repos/a", branch: "main" }],
+    });
+    const running = makeTask({
+      id: "a2",
+      title: "running next",
+      state: "running",
+      repos: [{ name: "repos/a", branch: "main" }],
+    });
+    const asking = makeTask({
+      id: "a1",
+      title: "asking next",
+      state: "asking",
+      repos: [{ name: "repos/a", branch: "main" }],
+    });
     vi.mocked(api.getTask).mockResolvedValue(killed);
     vi.mocked(api.purgeTask).mockResolvedValue({ status: "ok" });
     const { history } = renderApp("/task/@a3+kill-me");
 
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [killed, running, asking] });
-    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("task-detail-prompt")).toHaveFocus(),
+    );
     const selectedCard = await waitFor(() => {
       const card = document.querySelector<HTMLElement>("[data-task-id='a3']");
       if (!card) throw new Error("selected task card was not rendered");
@@ -908,12 +1306,24 @@ describe("App repo chips: No repository", () => {
 
     expect(api.purgeTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toContain("/task/@a1+"));
-    await waitFor(() => expect(document.querySelector("[data-task-id='a1']")).toHaveFocus());
+    await waitFor(() =>
+      expect(document.querySelector("[data-task-id='a1']")).toHaveFocus(),
+    );
   });
 
   it("moves from a stopped selected task to the next alive task", async () => {
-    const killed = makeTask({ id: "a3", title: "stop me", state: "waiting", repos: [{ name: "repos/a", branch: "main" }] });
-    const next = makeTask({ id: "a2", title: "next task", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
+    const killed = makeTask({
+      id: "a3",
+      title: "stop me",
+      state: "waiting",
+      repos: [{ name: "repos/a", branch: "main" }],
+    });
+    const next = makeTask({
+      id: "a2",
+      title: "next task",
+      state: "running",
+      repos: [{ name: "repos/a", branch: "main" }],
+    });
     vi.mocked(api.getTask).mockResolvedValue(killed);
     vi.mocked(api.stopTask).mockResolvedValue({ status: "stopping" });
     const { history } = renderApp("/task/@a3+stop-me");
@@ -921,8 +1331,11 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [killed, next] });
     const stopButton = await waitFor(() => {
-      const button = document.querySelector<HTMLButtonElement>("[data-task-id='a3'] [data-testid='stop-task']");
-      if (!button) throw new Error("selected task stop button was not rendered");
+      const button = document.querySelector<HTMLButtonElement>(
+        "[data-task-id='a3'] [data-testid='stop-task']",
+      );
+      if (!button)
+        throw new Error("selected task stop button was not rendered");
       return button;
     });
 
@@ -930,20 +1343,29 @@ describe("App repo chips: No repository", () => {
 
     expect(api.stopTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toContain("/task/@a2+"));
-    await waitFor(() => expect(document.querySelector("[data-task-id='a2']")).toHaveFocus());
+    await waitFor(() =>
+      expect(document.querySelector("[data-task-id='a2']")).toHaveFocus(),
+    );
   });
 
   it("returns to the new-task prompt after purging the last alive selected task", async () => {
     const user = userEvent.setup();
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const killed = makeTask({ id: "a3", title: "kill me", state: "running", repos: [{ name: "repos/a", branch: "main" }] });
+    const killed = makeTask({
+      id: "a3",
+      title: "kill me",
+      state: "running",
+      repos: [{ name: "repos/a", branch: "main" }],
+    });
     vi.mocked(api.getTask).mockResolvedValue(killed);
     vi.mocked(api.purgeTask).mockResolvedValue({ status: "ok" });
     const { history } = renderApp("/task/@a3+kill-me");
 
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [killed] });
-    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("task-detail-prompt")).toHaveFocus(),
+    );
     const selectedCard = await waitFor(() => {
       const card = document.querySelector<HTMLElement>("[data-task-id='a3']");
       if (!card) throw new Error("selected task card was not rendered");
@@ -955,25 +1377,44 @@ describe("App repo chips: No repository", () => {
 
     expect(api.purgeTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toBe("/"));
-    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
+    );
   });
 
   it.each([
-    ["diff", "/task/@task1+do-something/diff", () => vi.mocked(api.getTaskDiff).mockRejectedValue(apiError(404))],
-    ["processes", "/task/@task1+do-something/processes", () => vi.mocked(api.getTaskProcesses).mockRejectedValue(apiError(404))],
-    ["info", "/task/@task1+do-something/info", () => vi.mocked(api.getTaskInfo).mockRejectedValue(apiError(404))],
-  ] as const)("dismisses the %s pane when its task refresh returns 404", async (_name, route, rejectRefresh) => {
-    rejectRefresh();
-    const { history } = renderApp(route);
+    [
+      "diff",
+      "/task/@task1+do-something/diff",
+      () => vi.mocked(api.getTaskDiffIndex).mockRejectedValue(apiError(404)),
+    ],
+    [
+      "processes",
+      "/task/@task1+do-something/processes",
+      () => vi.mocked(api.getTaskProcesses).mockRejectedValue(apiError(404)),
+    ],
+    [
+      "info",
+      "/task/@task1+do-something/info",
+      () => vi.mocked(api.getTaskInfo).mockRejectedValue(apiError(404)),
+    ],
+  ] as const)(
+    "dismisses the %s pane when its task refresh returns 404",
+    async (_name, route, rejectRefresh) => {
+      rejectRefresh();
+      const { history } = renderApp(route);
 
-    await waitFor(() => expect(history.get()).toBe("/"));
-  });
+      await waitFor(() => expect(history.get()).toBe("/"));
+    },
+  );
 
   it("does not dismiss a task pane when its refresh returns 403", async () => {
-    vi.mocked(api.getTaskDiff).mockRejectedValue(apiError(403));
+    vi.mocked(api.getTaskDiffIndex).mockRejectedValue(apiError(403));
     const { history } = renderApp("/task/@task1+do-something/diff");
 
-    await waitFor(() => expect(screen.getByText("HTTP 403")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("HTTP 403")).toBeInTheDocument(),
+    );
     expect(history.get()).toBe("/task/@task1+do-something/diff");
   });
 
@@ -1000,13 +1441,21 @@ describe("App repo chips: No repository", () => {
       repositories: [{ path: "repos/a" }],
       harness: "codex",
       models: { claude: "sonnet", codex: "gpt-5" },
-      efforts: { claude: { sonnet: "max" }, codex: { "gpt-5": "high", "gpt-5-mini": "minimal" } },
+      efforts: {
+        claude: { sonnet: "max" },
+        codex: { "gpt-5": "high", "gpt-5-mini": "minimal" },
+      },
       settings: { baseImage: "" },
     } as unknown as PreferencesResp);
     vi.mocked(api.listHarnesses).mockResolvedValue([
       {
         name: "claude",
-        models: [{ id: "sonnet", effortOptions: ["low", "medium", "high", "xhigh", "max"] }],
+        models: [
+          {
+            id: "sonnet",
+            effortOptions: ["low", "medium", "high", "xhigh", "max"],
+          },
+        ],
         supportsImages: false,
         supportsCompact: false,
       },
@@ -1014,7 +1463,10 @@ describe("App repo chips: No repository", () => {
         name: "codex",
         models: [
           { id: "gpt-5", effortOptions: ["minimal", "low", "medium", "high"] },
-          { id: "gpt-5-mini", effortOptions: ["minimal", "low", "medium", "high"] },
+          {
+            id: "gpt-5-mini",
+            effortOptions: ["minimal", "low", "medium", "high"],
+          },
         ],
         supportsImages: false,
         supportsCompact: false,
@@ -1078,7 +1530,9 @@ describe("App repo chips: No repository", () => {
     const effort = await screen.findByRole("combobox", { name: "Effort" });
     expect(effort).toHaveValue("");
     expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "high" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "high" }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides effort controls when a model reports none", async () => {
@@ -1101,7 +1555,9 @@ describe("App repo chips: No repository", () => {
     renderApp();
 
     await waitFor(() => expect(api.listHarnesses).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("combobox", { name: "Effort" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Effort" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens the model picker on ArrowDown without navigating tasks", async () => {
@@ -1114,12 +1570,20 @@ describe("App repo chips: No repository", () => {
       settings: { baseImage: "" },
     } as unknown as PreferencesResp);
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "codex", models: [{ id: "gpt-5", effortOptions: [] }], supportsImages: false, supportsCompact: false },
+      {
+        name: "codex",
+        models: [{ id: "gpt-5", effortOptions: [] }],
+        supportsImages: false,
+        supportsCompact: false,
+      },
     ] as unknown as HarnessInfo[]);
 
     const { history } = renderApp("/");
     // Seed a task card so the global ArrowUp/Down handler would otherwise navigate.
-    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "taskX", title: "other task" })] });
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ id: "taskX", title: "other task" })],
+    });
     await screen.findByText("other task");
     const model = await screen.findByRole("button", { name: "Model" });
     model.focus();
@@ -1151,7 +1615,10 @@ describe("App repo chips: No repository", () => {
     renderApp();
 
     await waitFor(() => expect(api.listRepos).toHaveBeenCalledOnce());
-    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "taskX", title: "voice task" })] });
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ id: "taskX", title: "voice task" })],
+    });
 
     expect(await screen.findByText("#1")).toBeInTheDocument();
   });
@@ -1185,7 +1652,10 @@ describe("App repo chips: No repository", () => {
       mcpOAuthAvailable: false,
       voiceGateway: { mode: "disabled" as const },
     };
-    const enabledConfig = { ...disabledConfig, voiceGateway: { mode: "embedded" as const } };
+    const enabledConfig = {
+      ...disabledConfig,
+      voiceGateway: { mode: "embedded" as const },
+    };
     vi.mocked(api.getConfig)
       .mockResolvedValueOnce(disabledConfig)
       .mockResolvedValueOnce(enabledConfig);
@@ -1215,7 +1685,9 @@ describe("App repo chips: No repository", () => {
 
     renderApp();
 
-    await waitFor(() => expect(screen.getByTestId("voice-overlay")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("voice-overlay")).toBeInTheDocument(),
+    );
   });
 
   it("returns to the task list from the caic title", async () => {
@@ -1239,13 +1711,17 @@ describe("App repo chips: No repository", () => {
     await user.click(settingsLink);
 
     expect(history.get()).toBe("/settings");
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument();
   });
 
   it("renders settings as a routed page instead of a dialog", async () => {
     renderApp("/settings");
 
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
   });
@@ -1263,9 +1739,11 @@ describe("App repo chips: No repository", () => {
     await waitFor(() => expect(input).toHaveValue("1m30s"));
     fireEvent.change(input, { target: { value: "1m31s" } });
 
-    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
-      settings: expect.objectContaining({ purgeDelay: 91_000_000_000 }),
-    }));
+    await waitFor(() =>
+      expect(api.updatePreferences).toHaveBeenCalledWith({
+        settings: expect.objectContaining({ purgeDelay: 91_000_000_000 }),
+      }),
+    );
   });
 
   it("does not request or show remote MCP grants when MCP OAuth is unavailable", async () => {
@@ -1284,7 +1762,9 @@ describe("App repo chips: No repository", () => {
 
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
     expect(api.listOAuthGrants).not.toHaveBeenCalled();
-    expect(screen.queryByRole("heading", { name: "MCP clients" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "MCP clients" }),
+    ).not.toBeInTheDocument();
   });
 
   it("loads and shows remote MCP grants when MCP OAuth is available", async () => {
@@ -1302,7 +1782,9 @@ describe("App repo chips: No repository", () => {
     renderApp("/settings");
 
     await waitFor(() => expect(api.listOAuthGrants).toHaveBeenCalledOnce());
-    expect(screen.getByRole("heading", { name: "MCP clients" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "MCP clients" }),
+    ).toBeInTheDocument();
   });
 
   it("saves read-only custom mounts", async () => {
@@ -1313,7 +1795,15 @@ describe("App repo chips: No repository", () => {
       harness: "",
       settings: {
         baseImage: "",
-        customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", resolvedContainerPath: "/container/data", enabled: true, readOnly: false }],
+        customMounts: [
+          {
+            hostPath: "/host/data",
+            containerPath: "/container/data",
+            resolvedContainerPath: "/container/data",
+            enabled: true,
+            readOnly: false,
+          },
+        ],
       },
     } as unknown as PreferencesResp);
 
@@ -1322,11 +1812,20 @@ describe("App repo chips: No repository", () => {
     await screen.findByDisplayValue("/host/data");
     await user.click(screen.getByRole("checkbox", { name: "Read only" }));
 
-    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
-      settings: expect.objectContaining({
-        customMounts: [{ hostPath: "/host/data", containerPath: "/container/data", enabled: true, readOnly: true }],
+    await waitFor(() =>
+      expect(api.updatePreferences).toHaveBeenCalledWith({
+        settings: expect.objectContaining({
+          customMounts: [
+            {
+              hostPath: "/host/data",
+              containerPath: "/container/data",
+              enabled: true,
+              readOnly: true,
+            },
+          ],
+        }),
       }),
-    }));
+    );
   });
 
   it("renders server-derived container-path defaults", async () => {
@@ -1335,17 +1834,40 @@ describe("App repo chips: No repository", () => {
       models: {},
       harness: "",
       settings: {
-        cacheMappings: [{ hostPath: "~/.cache/example", containerPath: "", resolvedContainerPath: "/home/user/.cache/example", enabled: true }],
-        customMounts: [{ hostPath: "~/Documents", containerPath: "", resolvedContainerPath: "/home/user/Documents", enabled: true, readOnly: false }],
+        cacheMappings: [
+          {
+            hostPath: "~/.cache/example",
+            containerPath: "",
+            resolvedContainerPath: "/home/user/.cache/example",
+            enabled: true,
+          },
+        ],
+        customMounts: [
+          {
+            hostPath: "~/Documents",
+            containerPath: "",
+            resolvedContainerPath: "/home/user/Documents",
+            enabled: true,
+            readOnly: false,
+          },
+        ],
       },
     } as unknown as PreferencesResp);
 
     renderApp("/settings");
 
     await screen.findByDisplayValue("~/.cache/example");
-    expect(screen.getAllByLabelText("Container path")[0]).toHaveAttribute("placeholder", "~/.cache/example");
-    expect(screen.getByText("Uses ~/.cache/example by default")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Container path")[1]).toHaveAttribute("placeholder", "~/Documents");
+    expect(screen.getAllByLabelText("Container path")[0]).toHaveAttribute(
+      "placeholder",
+      "~/.cache/example",
+    );
+    expect(
+      screen.getByText("Uses ~/.cache/example by default"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Container path")[1]).toHaveAttribute(
+      "placeholder",
+      "~/Documents",
+    );
     expect(screen.getByText("Uses ~/Documents by default")).toBeInTheDocument();
   });
 
@@ -1353,54 +1875,81 @@ describe("App repo chips: No repository", () => {
     const user = userEvent.setup();
     renderApp("/settings");
 
-    const cacheSection = screen.getByRole("heading", { name: "Custom caches" }).parentElement;
+    const cacheSection = screen.getByRole("heading", {
+      name: "Custom caches",
+    }).parentElement;
     if (!cacheSection) throw new Error("Custom caches section is missing");
     const caches = within(cacheSection);
     await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
     await user.type(caches.getByLabelText("Host path"), "~/.cache/example");
     await user.clear(caches.getByLabelText("Container path"));
-    await user.type(caches.getByLabelText("Container path"), "/var/cache/example");
+    await user.type(
+      caches.getByLabelText("Container path"),
+      "/var/cache/example",
+    );
     await user.clear(caches.getByLabelText("Host path"));
     await user.type(caches.getByLabelText("Host path"), "~/.cache/other");
 
-    expect(caches.getByLabelText("Container path")).toHaveValue("/var/cache/example");
+    expect(caches.getByLabelText("Container path")).toHaveValue(
+      "/var/cache/example",
+    );
   });
 
   it("leaves the container path blank for a non-home host path", async () => {
     const user = userEvent.setup();
     renderApp("/settings");
 
-    const mountSection = screen.getByRole("heading", { name: "Custom mounts" }).parentElement;
+    const mountSection = screen.getByRole("heading", {
+      name: "Custom mounts",
+    }).parentElement;
     if (!mountSection) throw new Error("Custom mounts section is missing");
     const mounts = within(mountSection);
     await user.click(mounts.getByRole("button", { name: "+ Add mount" }));
     await user.type(mounts.getByLabelText("Host path"), "/srv/shared");
 
-    expect(mounts.getByLabelText("Container path")).toHaveAttribute("placeholder", "Container path");
+    expect(mounts.getByLabelText("Container path")).toHaveAttribute(
+      "placeholder",
+      "Container path",
+    );
     expect(mounts.getByLabelText("Container path")).toHaveValue("");
     await user.clear(mounts.getByLabelText("Host path"));
     await user.type(mounts.getByLabelText("Host path"), "~/../../etc");
-    expect(mounts.getByLabelText("Container path")).toHaveAttribute("placeholder", "Container path");
+    expect(mounts.getByLabelText("Container path")).toHaveAttribute(
+      "placeholder",
+      "Container path",
+    );
   });
 
   it("shows mapping validation failures and sends only editable mapping fields", async () => {
     const user = userEvent.setup();
-    vi.mocked(api.updatePreferences).mockRejectedValueOnce(new Error("cacheMappings[0]: host path must be absolute or home-relative"));
+    vi.mocked(api.updatePreferences).mockRejectedValueOnce(
+      new Error(
+        "cacheMappings[0]: host path must be absolute or home-relative",
+      ),
+    );
     renderApp("/settings");
 
-    const cacheSection = screen.getByRole("heading", { name: "Custom caches" }).parentElement;
+    const cacheSection = screen.getByRole("heading", {
+      name: "Custom caches",
+    }).parentElement;
     if (!cacheSection) throw new Error("Custom caches section is missing");
     const caches = within(cacheSection);
     await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
     await user.type(caches.getByLabelText("Host path"), "cache");
     await user.tab();
 
-    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledWith({
-      settings: expect.objectContaining({
-        cacheMappings: [{ hostPath: "cache", containerPath: "", enabled: true }],
+    await waitFor(() =>
+      expect(api.updatePreferences).toHaveBeenCalledWith({
+        settings: expect.objectContaining({
+          cacheMappings: [
+            { hostPath: "cache", containerPath: "", enabled: true },
+          ],
+        }),
       }),
-    }));
-    expect(screen.getByRole("alert")).toHaveTextContent("cacheMappings[0]: host path must be absolute or home-relative");
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "cacheMappings[0]: host path must be absolute or home-relative",
+    );
   });
 
   it("has no chips after removing the last one", async () => {
@@ -1431,7 +1980,13 @@ describe("App repo chips: No repository", () => {
     expect(chipPathValues()).toHaveLength(0);
 
     // Simulate a "repos" SSE event (e.g. CI status update) which triggers setRepos.
-    const repoAUpdated: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" }, remoteURL: "", ci: "success" as const };
+    const repoAUpdated: Repo = {
+      path: "repos/a",
+      branch: "main",
+      baseBranch: { name: "main" },
+      remoteURL: "",
+      ci: "success" as const,
+    };
     dispatchSSE({ kind: "repos", repos: [repoAUpdated] });
 
     await waitFor(() => {
@@ -1464,17 +2019,23 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({
-        harness: "pi",
-		reportedModel: "openai-codex/gpt-5.5",
-        repos: [{ name: "repos/a", branch: "fork-source" }],
-      })],
+      snapshot: [
+        makeTask({
+          harness: "pi",
+          reportedModel: "openai-codex/gpt-5.5",
+          repos: [{ name: "repos/a", branch: "fork-source" }],
+        }),
+      ],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Context actions" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
-    expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("openai-codex/gpt-5.6-terra");
+    expect(
+      screen.getByRole("button", { name: "Fork Model" }),
+    ).toHaveTextContent("openai-codex/gpt-5.6-terra");
   });
 
   it("generates an editable handoff prompt for a fork", async () => {
@@ -1483,110 +2044,181 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+      snapshot: [
+        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
+      ],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Context actions" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
     await user.click(screen.getByTestId("generate-handoff"));
 
     expect(api.getTaskHandoff).toHaveBeenCalledWith("task1");
-    await waitFor(() => expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Generated handoff prompt"));
+    await waitFor(() =>
+      expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent(
+        "Generated handoff prompt",
+      ),
+    );
     await user.clear(screen.getByTestId("fork-prompt-input"));
-    await user.type(screen.getByTestId("fork-prompt-input"), "Edited handoff prompt");
-    expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Edited handoff prompt");
+    await user.type(
+      screen.getByTestId("fork-prompt-input"),
+      "Edited handoff prompt",
+    );
+    expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent(
+      "Edited handoff prompt",
+    );
   });
 
   it("keeps ordinary fork harness selection unrestricted and unranked", async () => {
     const user = userEvent.setup();
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "claude", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "claudecode" },
-      { name: "codex", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "codex" },
+      {
+        name: "claude",
+        models: [],
+        supportsImages: false,
+        supportsCompact: false,
+        quotaGroup: "claudecode",
+      },
+      {
+        name: "codex",
+        models: [],
+        supportsImages: false,
+        supportsCompact: false,
+        quotaGroup: "codex",
+      },
       { name: "pi", models: [], supportsImages: false, supportsCompact: false },
     ] as unknown as HarnessInfo[]);
     renderApp("/task/@task1");
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+      snapshot: [
+        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
+      ],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Context actions" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
-    const harnessSelect = screen.getByRole("combobox", { name: "Fork Harness" });
-    expect(within(harnessSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "claude",
-      "codex",
-      "pi",
-    ]);
+    const harnessSelect = screen.getByRole("combobox", {
+      name: "Fork Harness",
+    });
+    expect(
+      within(harnessSelect)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["claude", "codex", "pi"]);
     expect(screen.queryByTestId("fork-target-status")).not.toBeInTheDocument();
   });
 
   it("opens an editable handoff from the quota recovery action", async () => {
     const user = userEvent.setup();
     vi.mocked(api.listHarnesses).mockResolvedValue([
-      { name: "claude", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "claudecode" },
-      { name: "codex", models: [], supportsImages: false, supportsCompact: false, quotaGroup: "codex" },
+      {
+        name: "claude",
+        models: [],
+        supportsImages: false,
+        supportsCompact: false,
+        quotaGroup: "claudecode",
+      },
+      {
+        name: "codex",
+        models: [],
+        supportsImages: false,
+        supportsCompact: false,
+        quotaGroup: "codex",
+      },
       { name: "pi", models: [], supportsImages: false, supportsCompact: false },
     ] as unknown as HarnessInfo[]);
     vi.mocked(api.getUsage).mockResolvedValue({
       local: { windows: [] },
-      providers: [{
-        provider: "codex",
-        label: "Codex",
-        logoUrl: "",
-        authKind: "oauth",
-        usageUrl: "",
-        fetchStatus: "fresh",
-        rateLimits: [{ window: "primary", usedPct: 25 }],
-      }],
+      providers: [
+        {
+          provider: "codex",
+          label: "Codex",
+          logoUrl: "",
+          authKind: "oauth",
+          usageUrl: "",
+          fetchStatus: "fresh",
+          rateLimits: [{ window: "primary", usedPct: 25 }],
+        },
+      ],
     });
-    vi.mocked(api.getTaskHandoff).mockResolvedValue({ prompt: "Quota-aware generated handoff" });
-    vi.mocked(api.forkTask).mockResolvedValue(makeTask({
-      id: "forked-task",
-      harness: "codex",
-      repos: [{ name: "repos/a", branch: "forked-branch" }],
-    }));
+    vi.mocked(api.getTaskHandoff).mockResolvedValue({
+      prompt: "Quota-aware generated handoff",
+    });
+    vi.mocked(api.forkTask).mockResolvedValue(
+      makeTask({
+        id: "forked-task",
+        harness: "codex",
+        repos: [{ name: "repos/a", branch: "forked-branch" }],
+      }),
+    );
     renderApp("/task/@task1");
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({
-        state: "waiting",
-        repos: [{ name: "repos/a", branch: "fork-source" }],
-        rateLimit: {
-          blocked: true,
-          quotaGroup: "claudecode",
-          window: "5h",
-          resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
-        },
-      })],
+      snapshot: [
+        makeTask({
+          state: "waiting",
+          repos: [{ name: "repos/a", branch: "fork-source" }],
+          rateLimit: {
+            blocked: true,
+            quotaGroup: "claudecode",
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+        }),
+      ],
     });
 
     await user.click(await screen.findByTestId("quota-recovery-detail-action"));
 
-    expect(screen.getByRole("heading", { name: "Continue after quota limit" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Continue after quota limit" }),
+    ).toBeInTheDocument();
     expect(api.getTaskHandoff).toHaveBeenCalledWith("task1");
-    await waitFor(() => expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Quota-aware generated handoff"));
+    await waitFor(() =>
+      expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent(
+        "Quota-aware generated handoff",
+      ),
+    );
     await user.clear(screen.getByTestId("fork-prompt-input"));
-    await user.type(screen.getByTestId("fork-prompt-input"), "Edited quota recovery handoff");
-    const harnessSelect = screen.getByRole("combobox", { name: "Fork Harness" });
-    expect(within(harnessSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
+    await user.type(
+      screen.getByTestId("fork-prompt-input"),
+      "Edited quota recovery handoff",
+    );
+    const harnessSelect = screen.getByRole("combobox", {
+      name: "Fork Harness",
+    });
+    expect(
+      within(harnessSelect)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
       "codex — Available · Recommended",
       "pi — Quota status unknown",
       "claude — Same exhausted quota",
     ]);
     expect(harnessSelect).toHaveValue("codex");
     fireEvent.change(harnessSelect, { target: { value: "pi" } });
-    expect(screen.getByTestId("fork-target-status")).toHaveTextContent("Selected harness: Quota status unknown");
+    expect(screen.getByTestId("fork-target-status")).toHaveTextContent(
+      "Selected harness: Quota status unknown",
+    );
     fireEvent.change(harnessSelect, { target: { value: "codex" } });
     await user.click(screen.getByTestId("fork-submit"));
 
-    expect(api.forkTask).toHaveBeenCalledWith("task1", expect.objectContaining({
-      prompt: { text: "Edited quota recovery handoff" },
-      harness: "codex",
-    }));
+    expect(api.forkTask).toHaveBeenCalledWith(
+      "task1",
+      expect.objectContaining({
+        prompt: { text: "Edited quota recovery handoff" },
+        harness: "codex",
+      }),
+    );
   });
 
   it("adopts a delayed recommendation without overwriting explicit target choices", async () => {
@@ -1615,33 +2247,39 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({
-        state: "waiting",
-        repos: [{ name: "repos/a", branch: "fork-source" }],
-        rateLimit: {
-          blocked: true,
-          quotaGroup: "claudecode",
-          window: "5h",
-          resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
-        },
-      })],
+      snapshot: [
+        makeTask({
+          state: "waiting",
+          repos: [{ name: "repos/a", branch: "fork-source" }],
+          rateLimit: {
+            blocked: true,
+            quotaGroup: "claudecode",
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+        }),
+      ],
     });
 
     await user.click(await screen.findByTestId("quota-recovery-detail-action"));
-    const harnessSelect = screen.getByRole("combobox", { name: "Fork Harness" });
+    const harnessSelect = screen.getByRole("combobox", {
+      name: "Fork Harness",
+    });
     expect(harnessSelect).toHaveValue("claude");
 
     const codexUsage = (fetchStatus: "fresh" | "stale") => ({
       local: { windows: [] },
-      providers: [{
-        provider: "codex",
-        label: "Codex",
-        logoUrl: "",
-        authKind: "oauth",
-        usageUrl: "",
-        fetchStatus,
-        rateLimits: [{ window: "primary", usedPct: 25 }],
-      }],
+      providers: [
+        {
+          provider: "codex",
+          label: "Codex",
+          logoUrl: "",
+          authKind: "oauth",
+          usageUrl: "",
+          fetchStatus,
+          rateLimits: [{ window: "primary", usedPct: 25 }],
+        },
+      ],
     });
     dispatchUsageSSE(codexUsage("fresh"));
     await waitFor(() => expect(harnessSelect).toHaveValue("codex"));
@@ -1649,7 +2287,9 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     dispatchUsageSSE(codexUsage("stale"));
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
-    const reopenedSelect = screen.getByRole("combobox", { name: "Fork Harness" });
+    const reopenedSelect = screen.getByRole("combobox", {
+      name: "Fork Harness",
+    });
     expect(reopenedSelect).toHaveValue("claude");
     fireEvent.change(reopenedSelect, { target: { value: "pi" } });
     dispatchUsageSSE(codexUsage("fresh"));
@@ -1660,43 +2300,63 @@ describe("App repo chips: No repository", () => {
     dispatchUsageSSE(codexUsage("stale"));
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
     await user.click(screen.getByRole("button", { name: "Fork Model" }));
-    await user.click(within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole("option", { name: "claude-explicit" }));
+    await user.click(
+      within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole(
+        "option",
+        { name: "claude-explicit" },
+      ),
+    );
     dispatchUsageSSE(codexUsage("fresh"));
     await Promise.resolve();
-    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
-    expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("claude-explicit");
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue(
+      "claude",
+    );
+    expect(
+      screen.getByRole("button", { name: "Fork Model" }),
+    ).toHaveTextContent("claude-explicit");
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     dispatchUsageSSE(codexUsage("stale"));
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
-    fireEvent.change(screen.getByRole("combobox", { name: "Fork Effort" }), { target: { value: "high" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Fork Effort" }), {
+      target: { value: "high" },
+    });
     dispatchUsageSSE(codexUsage("fresh"));
     await Promise.resolve();
-    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
-    expect(screen.getByRole("combobox", { name: "Fork Effort" })).toHaveValue("high");
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue(
+      "claude",
+    );
+    expect(screen.getByRole("combobox", { name: "Fork Effort" })).toHaveValue(
+      "high",
+    );
   });
 
   it("does not apply a closed recovery handoff to a later ordinary fork of the same task", async () => {
     const user = userEvent.setup();
-    const staleHandoff = deferred<Awaited<ReturnType<typeof api.getTaskHandoff>>>();
+    const staleHandoff =
+      deferred<Awaited<ReturnType<typeof api.getTaskHandoff>>>();
     vi.mocked(api.getTaskHandoff).mockReturnValueOnce(staleHandoff.promise);
-    vi.mocked(api.forkTask).mockResolvedValue(makeTask({
-      id: "ordinary-fork",
-      repos: [{ name: "repos/a", branch: "ordinary-fork" }],
-    }));
+    vi.mocked(api.forkTask).mockResolvedValue(
+      makeTask({
+        id: "ordinary-fork",
+        repos: [{ name: "repos/a", branch: "ordinary-fork" }],
+      }),
+    );
     renderApp("/task/@task1");
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({
-        state: "waiting",
-        repos: [{ name: "repos/a", branch: "fork-source" }],
-        rateLimit: {
-          blocked: true,
-          window: "5h",
-          resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
-        },
-      })],
+      snapshot: [
+        makeTask({
+          state: "waiting",
+          repos: [{ name: "repos/a", branch: "fork-source" }],
+          rateLimit: {
+            blocked: true,
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+        }),
+      ],
     });
 
     await user.click(await screen.findByTestId("quota-recovery-detail-action"));
@@ -1709,12 +2369,18 @@ describe("App repo chips: No repository", () => {
     await Promise.resolve();
 
     expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("");
-    await user.type(screen.getByTestId("fork-prompt-input"), "Ordinary fork prompt");
+    await user.type(
+      screen.getByTestId("fork-prompt-input"),
+      "Ordinary fork prompt",
+    );
     await user.click(screen.getByTestId("fork-submit"));
 
-    expect(api.forkTask).toHaveBeenCalledWith("task1", expect.objectContaining({
-      prompt: { text: "Ordinary fork prompt" },
-    }));
+    expect(api.forkTask).toHaveBeenCalledWith(
+      "task1",
+      expect.objectContaining({
+        prompt: { text: "Ordinary fork prompt" },
+      }),
+    );
   });
 
   it("does not dismiss the fork dialog when it is clicked", async () => {
@@ -1723,10 +2389,14 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+      snapshot: [
+        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
+      ],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Context actions" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
@@ -1742,14 +2412,20 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
+      snapshot: [
+        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
+      ],
     });
 
-    await user.click(await screen.findByRole("button", { name: "Context actions" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Context actions" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
-    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 400, 300));
+    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(100, 100, 400, 300),
+    );
     fireEvent.click(dialog, { clientX: 50, clientY: 50 });
 
     expect(screen.queryByTestId("fork-dialog")).not.toBeInTheDocument();
@@ -1774,13 +2450,17 @@ describe("App repo chips: No repository", () => {
         stateUpdatedAt: "2026-01-01T00:00:01Z" as ISOTimestamp,
       }),
     });
-    createResponse.resolve(makeTask({
-      state: "pending",
-      stateUpdatedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
-    }));
+    createResponse.resolve(
+      makeTask({
+        state: "pending",
+        stateUpdatedAt: "2026-01-01T00:00:00Z" as ISOTimestamp,
+      }),
+    );
 
     await waitFor(() => expect(history.get()).toContain("/task/@task1"));
-    await expect(screen.getByTestId("state-badge")).toHaveTextContent("waiting");
+    await expect(screen.getByTestId("state-badge")).toHaveTextContent(
+      "waiting",
+    );
   });
 
   it("creates task without repos when no chips are selected", async () => {
@@ -1815,7 +2495,9 @@ describe("App repo chip ordering", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
-      expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("chip-label-repos/a"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -1830,9 +2512,14 @@ describe("App repo chip ordering", () => {
 
     // Clone a new repo.
     await user.click(screen.getByTestId("clone-toggle"));
-    await user.type(screen.getByTestId("clone-url"), "https://github.com/org/new.git");
+    await user.type(
+      screen.getByTestId("clone-url"),
+      "https://github.com/org/new.git",
+    );
     await user.click(screen.getByTestId("clone-submit"));
-    await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument(),
+    );
 
     // After clone, repos/new is the single selected chip (clone replaces selection).
     await waitFor(() => {
@@ -1847,10 +2534,12 @@ describe("App repo chip ordering", () => {
     const dropdown = screen.getByTestId("add-repo-dropdown");
 
     // repos/new must appear in "All repositories" section (no Recent label next to it).
-    const groupLabels = Array.from(dropdown.children).filter((el) => el.tagName === "DIV").map(
-      (el) => el.textContent,
+    const groupLabels = Array.from(dropdown.children)
+      .filter((el) => el.tagName === "DIV")
+      .map((el) => el.textContent);
+    const options = Array.from(dropdown.querySelectorAll("button")).map(
+      (b) => b.textContent,
     );
-    const options = Array.from(dropdown.querySelectorAll("button")).map((b) => b.textContent);
 
     // repos/a is recent; repos/new is not — so Recent group should be present.
     expect(groupLabels).toContain("Recent");
@@ -1872,9 +2561,14 @@ describe("App repo chip ordering", () => {
 
     // Clone a new repo.
     await user.click(screen.getByTestId("clone-toggle"));
-    await user.type(screen.getByTestId("clone-url"), "https://github.com/org/new.git");
+    await user.type(
+      screen.getByTestId("clone-url"),
+      "https://github.com/org/new.git",
+    );
     await user.click(screen.getByTestId("clone-submit"));
-    await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument(),
+    );
 
     // Submit a task for repos/new (it's the current chip after clone).
     await user.type(screen.getByTestId("prompt-input"), "do something");
@@ -1887,15 +2581,17 @@ describe("App repo chip ordering", () => {
     const dropdown = screen.getByTestId("add-repo-dropdown");
 
     // After first task, repos/new is promoted to Recent.
-    const groupLabels = Array.from(dropdown.children).filter((el) => el.tagName === "DIV").map(
-      (el) => el.textContent,
-    );
+    const groupLabels = Array.from(dropdown.children)
+      .filter((el) => el.tagName === "DIV")
+      .map((el) => el.textContent);
     expect(groupLabels).toContain("Recent");
 
     // repos/new should now appear before the "All repositories" divider (i.e. in Recent).
     const nodes = Array.from(dropdown.children);
     const recentLabelIdx = nodes.findIndex((n) => n.textContent === "Recent");
-    const allLabelIdx = nodes.findIndex((n) => n.textContent === "All repositories");
+    const allLabelIdx = nodes.findIndex(
+      (n) => n.textContent === "All repositories",
+    );
     const newOptionIdx = nodes.findIndex((n) => n.textContent === "repos/new");
     expect(newOptionIdx).toBeGreaterThan(recentLabelIdx);
     if (allLabelIdx >= 0) {

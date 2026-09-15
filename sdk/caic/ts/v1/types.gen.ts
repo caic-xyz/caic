@@ -1311,6 +1311,55 @@ export interface DiffResp {
   repositories: GitRepositoryStatus[];
 }
 
+/** DiffIndexFileStat describes a committed file without its patch body. */
+export interface DiffIndexFileStat {
+  path: string;
+  added: number /* int */;
+  deleted: number /* int */;
+  binary?: boolean;
+}
+
+/** DiffIndexCommit describes one commit and its changed-file metadata. */
+export interface DiffIndexCommit {
+  sha: string;
+  subject: string;
+  decorations?: string;
+  authoredDate: string;
+  stat: DiffIndexFileStat[];
+}
+
+/** DiffIndexFileStatus describes one uncommitted path without its patch body. */
+export interface DiffIndexFileStatus {
+  path: string;
+  originalPath?: string;
+  indexStatus?: string;
+  worktreeStatus?: string;
+  added: number /* int */;
+  deleted: number /* int */;
+  binary: boolean;
+}
+
+/** DiffIndexRepository describes one repository in a diff index. */
+export interface DiffIndexRepository {
+  name: string;
+  branch: string;
+  upstream?: string;
+  ahead: number /* int */;
+  behind: number /* int */;
+  commits: DiffIndexCommit[];
+  uncommitted: DiffIndexFileStatus[];
+}
+
+/** TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index. */
+export interface TaskDiffIndexResp {
+  repositories: DiffIndexRepository[];
+}
+
+/** FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file. */
+export interface FileDiffResp {
+  diff: string;
+}
+
 /** GitRepositoryState summarizes the compact Git state of one task repository. */
 export interface GitRepositoryState {
   name: string;
@@ -1330,7 +1379,7 @@ export interface TaskRepoStatusResp {
   repositories: GitRepositoryState[];
 }
 
-/** ProcessInfo describes a single process running inside a task runtime instance. */
+/** ProcessInfo describes a single process running inside the task runtime instance. */
 export interface ProcessInfo {
   /** PID is the process ID. */
   pid: number /* int */;

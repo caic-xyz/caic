@@ -40,6 +40,8 @@ export const {
   getTaskCILog,
   syncTask,
   getTaskDiff,
+  getTaskDiffIndex,
+  getTaskFileDiff,
   getTaskRepoStatus,
   getTaskProcesses,
   signalProcess,

@@ -18,7 +18,7 @@ help:
 	@echo "caic - Manage multiple coding agents"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make benchmark              - Run Go benchmarks"
+	@echo "  make benchmark              - Run Go and frontend benchmarks"
 	@echo "  make check                  - Refresh generated files, build, lint, and test (non-Android)"
 	@echo "  make test-all               - Run every non-smoke test and deterministic visual check"
 	@echo "  make check-agent-logs       - Validate recent v2 task logs against genai wire DTOs"
@@ -70,8 +70,9 @@ test-all:
 check-agent-logs:
 	@go run ./backend/internal/cmd/check-agent-logs
 
-benchmark:
+benchmark: $(FRONTEND_STAMP)
 	@go test ./... -run '^$$' -bench . -benchmem
+	@pnpm benchmark
 
 fake-dev: frontend-build
 	@./scripts/run-dev.py --http $(HTTP) --fake

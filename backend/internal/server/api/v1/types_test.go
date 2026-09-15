@@ -5,6 +5,7 @@ package v1
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 )
 
@@ -152,6 +153,37 @@ func TestUserSettings(t *testing.T) {
 	})
 }
 
+func TestFileDiffReq(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, req := range []FileDiffReq{
+			{Repository: 0, Path: "frontend/src/App.tsx"},
+			{Repository: 1, Commit: "0123456789abcdef0123456789abcdef01234567", Path: "backend/main.go"},
+			{Repository: 0, Path: "renamed.go", OriginalPath: "old.go"},
+		} {
+			if err := req.Validate(); err != nil {
+				t.Errorf("Validate(%+v): %v", req, err)
+			}
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, req := range []FileDiffReq{
+			{Repository: -1, Path: "file.go"},
+			{Repository: 0},
+			{Repository: 0, Commit: "main", Path: "file.go"},
+			{Repository: 0, Commit: "0123456789abcdef0123456789abcdef01234567", Path: "new.go", OriginalPath: "old.go"},
+		} {
+			if err := req.Validate(); err == nil {
+				t.Errorf("Validate(%+v) succeeded, want error", req)
+			}
+		}
+	})
+}
+
 func TestRoutes(t *testing.T) {
 	t.Parallel()
 
@@ -166,6 +198,35 @@ func TestRoutes(t *testing.T) {
 		}
 		if len(r.QueryParams) != 1 || r.QueryParams[0] != "path" {
 			t.Fatalf("QueryParams = %v, want [path]", r.QueryParams)
+		}
+	})
+
+	t.Run("getTaskDiffIndexDeclaresIndexPath", func(t *testing.T) {
+		t.Parallel()
+		r := routeByName(t, "getTaskDiffIndex")
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.Path != "/api/caic/v1/tasks/{id}/diff/index" {
+			t.Fatalf("path = %q, want diff index path", r.Path)
+		}
+		if len(r.QueryParams) != 0 {
+			t.Fatalf("QueryParams = %v, want none", r.QueryParams)
+		}
+	})
+
+	t.Run("getTaskFileDiffDeclaresSelectorQuery", func(t *testing.T) {
+		t.Parallel()
+		r := routeByName(t, "getTaskFileDiff")
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.Path != "/api/caic/v1/tasks/{id}/diff/file" {
+			t.Fatalf("path = %q, want file diff path", r.Path)
+		}
+		want := []string{"repository", "commit", "path", "originalPath"}
+		if !slices.Equal(r.QueryParams, want) {
+			t.Fatalf("QueryParams = %v, want %v", r.QueryParams, want)
 		}
 	})
 

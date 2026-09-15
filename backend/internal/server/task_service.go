@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime/trace"
 	"sort"
 	"strings"
 	"time"
@@ -764,6 +765,98 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 		}
 	}
 	return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "tool use" + " not found"}
+}
+
+func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (*v1.TaskDiffIndexResp, error) {
+	defer trace.StartRegion(ctx, "task.diff.index").End()
+	t := entry.Task()
+	if t.RuntimeInstanceID() == "" {
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
+	}
+	primaryName := ""
+	if primary := t.Primary(); primary != nil {
+		primaryName = primary.Name
+	}
+	checkout, ok := s.taskMgr.Checkouts.Checkout(primaryName)
+	if !ok {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
+	}
+	statuses, err := checkout.RepositoryStatuses(ctx, s.log, s.runtimes, t)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
+	}
+	repos := t.ReposSnapshot()
+	if len(repos) != len(statuses) {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "repository status count mismatch"}
+	}
+	repositories := make([]v1.DiffIndexRepository, len(statuses))
+	for i := range statuses {
+		status := &statuses[i]
+		commits := make([]v1.DiffIndexCommit, len(status.Commits))
+		for j, commit := range status.Commits {
+			stat := make([]v1.DiffIndexFileStat, len(commit.Stat))
+			for k, file := range commit.Stat {
+				stat[k] = v1.DiffIndexFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary}
+			}
+			commits[j] = v1.DiffIndexCommit{
+				SHA:          commit.SHA,
+				Subject:      commit.Subject,
+				Decorations:  commit.Decorations,
+				AuthoredDate: commit.AuthoredDate,
+				Stat:         stat,
+			}
+		}
+		uncommitted := make([]v1.DiffIndexFileStatus, len(status.Uncommitted))
+		for j, file := range status.Uncommitted {
+			uncommitted[j] = v1.DiffIndexFileStatus{
+				Path:           file.Path,
+				OriginalPath:   file.OriginalPath,
+				IndexStatus:    file.IndexStatus,
+				WorktreeStatus: file.WorktreeStatus,
+				Added:          file.Added,
+				Deleted:        file.Deleted,
+				Binary:         file.Binary,
+			}
+		}
+		repositories[i] = v1.DiffIndexRepository{
+			Name:        repos[i].Name,
+			Branch:      status.Branch,
+			Upstream:    status.Upstream,
+			Ahead:       status.Ahead,
+			Behind:      status.Behind,
+			Commits:     commits,
+			Uncommitted: uncommitted,
+		}
+	}
+	return &v1.TaskDiffIndexResp{Repositories: repositories}, nil
+}
+
+func (s *taskService) taskFileDiff(ctx context.Context, entry *taskmgr.Entry, req v1.FileDiffReq) (*v1.FileDiffResp, error) {
+	defer trace.StartRegion(ctx, "task.diff.file").End()
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	t := entry.Task()
+	if t.RuntimeInstanceID() == "" {
+		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
+	}
+	repos := t.ReposSnapshot()
+	if req.Repository >= len(repos) {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("repository %d out of range", req.Repository)}
+	}
+	primaryName := ""
+	if primary := t.Primary(); primary != nil {
+		primaryName = primary.Name
+	}
+	checkout, ok := s.taskMgr.Checkouts.Checkout(primaryName)
+	if !ok {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
+	}
+	diff, err := checkout.FileDiff(ctx, s.runtimes, t, req.Repository, req.Commit, req.Path, req.OriginalPath)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return &v1.FileDiffResp{Diff: diff}, nil
 }
 
 func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path string) (*v1.DiffResp, error) {

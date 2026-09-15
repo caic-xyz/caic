@@ -1,12 +1,23 @@
 // Tests for DiffDetail repository status rendering and diff parsing utilities.
 
 import { fireEvent, render, screen } from "@solidjs/testing-library";
-import { describe, it, expect, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 
-import type { DiffResp } from "@sdk/types.gen";
+import type { FileDiffResp, TaskDiffIndexResp } from "@sdk/types.gen";
 
-const { getTaskDiffMock } = vi.hoisted(() => ({
-  getTaskDiffMock: vi.fn<() => Promise<DiffResp>>(),
+const { getTaskDiffIndexMock, getTaskFileDiffMock } = vi.hoisted(() => ({
+  getTaskDiffIndexMock: vi.fn<(id: string) => Promise<TaskDiffIndexResp>>(),
+  getTaskFileDiffMock:
+    vi.fn<
+      (
+        id: string,
+        repository: string,
+        commit: string,
+        path: string,
+        originalPath: string,
+      ) => Promise<FileDiffResp>
+    >(),
 }));
 
 vi.mock("@solidjs/router", () => ({
@@ -14,17 +25,373 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 vi.mock("../api", () => ({
-  getTaskDiff: getTaskDiffMock,
+  getTaskDiffIndex: getTaskDiffIndexMock,
+  getTaskFileDiff: getTaskFileDiffMock,
 }));
 
 import { annotateDiffLines, extractDiffPath, splitDiff } from "./diffLines";
 import DiffDetail, { elidePathAtBoundary } from "./DiffDetail";
+import { taskDiffCache } from "../diffCache";
 import styles from "./DiffDetail.module.css";
 
 describe("DiffDetail", () => {
+  beforeEach(() => {
+    getTaskDiffIndexMock.mockReset();
+    getTaskFileDiffMock.mockReset();
+    taskDiffCache.evictTask("task-1");
+  });
+
+  it("renders the index before an expanded patch resolves", async () => {
+    let resolvePatch: (response: FileDiffResp) => void = () => undefined;
+    const patch = new Promise<FileDiffResp>((resolve) => {
+      resolvePatch = resolve;
+    });
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    getTaskFileDiffMock.mockReturnValueOnce(patch);
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+
+    expect(await screen.findByText("Commits ahead (1)")).toBeInTheDocument();
+    const row = screen.getByRole("button", { name: "committed.go" });
+    expect(getTaskFileDiffMock).not.toHaveBeenCalled();
+
+    fireEvent.click(row);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading file diff...",
+    );
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("Commit subject")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
+      "task-1",
+      "0",
+      "1234567890abcdef1234567890abcdef12345678",
+      "committed.go",
+      "",
+    );
+    resolvePatch({ diff: "@@ -1 +1 @@\n-old\n+new" });
+    expect(await screen.findByText("+new")).toBeInTheDocument();
+  });
+
+  it("requests only the selector for the expanded row", async () => {
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    getTaskFileDiffMock.mockResolvedValueOnce({
+      diff: "@@ -1 +1 @@\n-old\n+new",
+    });
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", {
+      name: "old.go → working.go",
+    });
+    fireEvent.click(row);
+
+    expect(await screen.findByText("+new")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
+      "task-1",
+      "0",
+      "",
+      "working.go",
+      "old.go",
+    );
+  });
+
+  it("selects a file from the second repository by index", async () => {
+    const index = diffIndexFixture();
+    index.repositories.push({
+      name: "tools",
+      branch: "feature",
+      ahead: 0,
+      behind: 0,
+      commits: [],
+      uncommitted: [
+        {
+          path: "second.go",
+          worktreeStatus: "M",
+          added: 2,
+          deleted: 0,
+          binary: false,
+        },
+      ],
+    });
+    getTaskDiffIndexMock.mockResolvedValueOnce(index);
+    getTaskFileDiffMock.mockResolvedValueOnce({
+      diff: "@@ -0,0 +1 @@\n+second",
+    });
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "second.go" }));
+
+    expect(await screen.findByText("+second")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
+      "task-1",
+      "1",
+      "",
+      "second.go",
+      "",
+    );
+  });
+
+  it("keeps retry focus during loading and restores it to the row", async () => {
+    const user = userEvent.setup();
+    let resolveRetry: (response: FileDiffResp) => void = () => undefined;
+    const retry = new Promise<FileDiffResp>((resolve) => {
+      resolveRetry = resolve;
+    });
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    getTaskFileDiffMock
+      .mockRejectedValueOnce(new Error("patch unavailable"))
+      .mockReturnValueOnce(retry);
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "patch unavailable",
+    );
+    const retryButton = screen.getByRole("button", {
+      name: "Retry diff for committed.go",
+    });
+    retryButton.focus();
+    await user.keyboard("{Enter}");
+
+    expect(retryButton).toBeEnabled();
+    expect(retryButton).toHaveAttribute("aria-disabled", "true");
+    expect(retryButton).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Retrying file diff...",
+    );
+    resolveRetry({ diff: "@@ -1 +1 @@\n-old\n+retried" });
+    expect(await screen.findByText("+retried")).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates an in-flight request when a row is reopened", async () => {
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    getTaskFileDiffMock.mockReturnValueOnce(new Promise(() => undefined));
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    fireEvent.click(row);
+    fireEvent.click(row);
+
+    expect(screen.getByText("Loading file diff...")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses a successful patch when a row is reopened", async () => {
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    getTaskFileDiffMock.mockResolvedValueOnce({
+      diff: "@@ -1 +1 @@\n-old\n+loaded",
+    });
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    expect(await screen.findByText("+loaded")).toBeInTheDocument();
+    fireEvent.click(row);
+    fireEvent.click(row);
+
+    expect(screen.getByText("+loaded")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes stale metadata while retaining an expanded loaded row", async () => {
+    const refreshed = diffIndexFixture();
+    refreshed.repositories[0].behind = 2;
+    let resolveRefresh: (response: TaskDiffIndexResp) => void = () => undefined;
+    getTaskDiffIndexMock
+      .mockResolvedValueOnce(diffIndexFixture())
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+      );
+    getTaskFileDiffMock.mockResolvedValueOnce({
+      diff: "@@ -1 +1 @@\n-old\n+loaded",
+    });
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    expect(await screen.findByText("+loaded")).toBeInTheDocument();
+    row.focus();
+
+    taskDiffCache.invalidate("task-1");
+    expect(screen.getByText("Updating diff...")).toBeInTheDocument();
+    expect(screen.getByText("+loaded")).toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    resolveRefresh(refreshed);
+
+    expect(
+      await screen.findByText(/1 commit ahead · 2 behind/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "committed.go" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("+loaded")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "committed.go" })).toHaveFocus();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps stale metadata without claiming a failed refresh is active", async () => {
+    getTaskDiffIndexMock
+      .mockResolvedValueOnce(diffIndexFixture())
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    expect(await screen.findByText("Commits ahead (1)")).toBeInTheDocument();
+
+    taskDiffCache.invalidate("task-1");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Diff may be out of date: refresh failed",
+    );
+    expect(screen.queryByText("Updating diff...")).not.toBeInTheDocument();
+    expect(screen.getByText("Commit subject")).toBeInTheDocument();
+  });
+
+  it("clears repositories when a subscribed task cache is evicted", async () => {
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    expect(await screen.findByText("Commit subject")).toBeInTheDocument();
+
+    taskDiffCache.evictTask("task-1");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Diff unavailable",
+    );
+    expect(screen.queryByText("Commit subject")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "committed.go" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps an expanded working patch visible while its replacement loads", async () => {
+    let resolveIndex: (response: TaskDiffIndexResp) => void = () => undefined;
+    let resolvePatch: (response: FileDiffResp) => void = () => undefined;
+    getTaskDiffIndexMock
+      .mockResolvedValueOnce(diffIndexFixture())
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveIndex = resolve;
+        }),
+      );
+    getTaskFileDiffMock
+      .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+first" })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolvePatch = resolve;
+        }),
+      );
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", {
+      name: "old.go → working.go",
+    });
+    fireEvent.click(row);
+    expect(await screen.findByText("+first")).toBeInTheDocument();
+
+    taskDiffCache.invalidate("task-1");
+    expect(screen.getByText("+first")).toBeInTheDocument();
+    resolveIndex(diffIndexFixture());
+    expect(
+      await screen.findByText("Updating file diff..."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("+first")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "old.go → working.go" })).toBe(
+      row,
+    );
+    resolvePatch({ diff: "@@ -1 +1 @@\n-old\n+second" });
+    expect(await screen.findByText("+second")).toBeInTheDocument();
+    expect(screen.queryByText("+first")).not.toBeInTheDocument();
+  });
+
+  it("refreshes a working patch when metadata changes during its first load", async () => {
+    let resolveFirstPatch: (response: FileDiffResp) => void = () => undefined;
+    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    getTaskFileDiffMock
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstPatch = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "old.go → working.go" }),
+    );
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+
+    taskDiffCache.invalidate("task-1");
+    await vi.waitFor(() =>
+      expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2),
+    );
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+    resolveFirstPatch({ diff: "@@ -1 +1 @@\n-old\n+obsolete" });
+
+    expect(await screen.findByText("+current")).toBeInTheDocument();
+    expect(screen.queryByText("+obsolete")).not.toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("defers a queued working patch refresh while its row is collapsed", async () => {
+    let resolveFirstPatch: (response: FileDiffResp) => void = () => undefined;
+    const firstPatch = new Promise<FileDiffResp>((resolve) => {
+      resolveFirstPatch = resolve;
+    });
+    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    getTaskFileDiffMock
+      .mockReturnValueOnce(firstPatch)
+      .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", {
+      name: "old.go → working.go",
+    });
+    fireEvent.click(row);
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+
+    taskDiffCache.invalidate("task-1");
+    await vi.waitFor(() =>
+      expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2),
+    );
+    fireEvent.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    resolveFirstPatch({ diff: "@@ -1 +1 @@\n-old\n+obsolete" });
+    await firstPatch;
+    await Promise.resolve();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(row);
+    expect(await screen.findByText("+current")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes a file-patch 404 through task refresh handling", async () => {
+    const err = Object.assign(new Error("task not found"), { status: 404 });
+    const onTaskRefreshError = vi.fn(() => true);
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
+    getTaskFileDiffMock.mockRejectedValueOnce(err);
+
+    render(() => (
+      <DiffDetail
+        taskId="task-1"
+        taskPath="/task/task-1"
+        onTaskRefreshError={onTaskRefreshError}
+      />
+    ));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "committed.go" }),
+    );
+
+    await vi.waitFor(() => {
+      expect(onTaskRefreshError).toHaveBeenCalledWith("task-1", err);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("separates upstream commits from uncommitted files", async () => {
-    getTaskDiffMock.mockResolvedValueOnce({
-      diff: "",
+    getTaskDiffIndexMock.mockResolvedValueOnce({
       repositories: [
         {
           name: "caic",
@@ -44,7 +411,6 @@ describe("DiffDetail", () => {
                   added: 10,
                   deleted: 0,
                   binary: false,
-                  diff: "@@ -1 +1 @@\n-old view\n+new view",
                 },
               ],
             },
@@ -58,7 +424,6 @@ describe("DiffDetail", () => {
                   added: 8,
                   deleted: 0,
                   binary: false,
-                  diff: "@@ -0,0 +1 @@\n+new test",
                 },
               ],
             },
@@ -70,7 +435,6 @@ describe("DiffDetail", () => {
               added: 2,
               deleted: 1,
               binary: false,
-              diff: "@@ -1 +1,2 @@\n-old working\n+new working\n+line",
             },
             {
               path: "frontend/new.tsx",
@@ -78,7 +442,6 @@ describe("DiffDetail", () => {
               added: 1,
               deleted: 0,
               binary: false,
-              diff: "@@ -0,0 +1 @@\n+new file",
             },
             {
               path: "frontend/untracked.tsx",
@@ -87,12 +450,19 @@ describe("DiffDetail", () => {
               added: 1,
               deleted: 0,
               binary: false,
-              diff: "@@ -0,0 +1 @@\n+untracked file",
             },
           ],
         },
       ],
     });
+    getTaskFileDiffMock.mockImplementation(
+      async (_id, _repository, _commit, path) => ({
+        diff:
+          path === "frontend/view.tsx"
+            ? "@@ -1 +1 @@\n-old view\n+new view"
+            : "@@ -1 +1,2 @@\n-old working\n+new working\n+line",
+      }),
+    );
 
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
@@ -124,14 +494,14 @@ describe("DiffDetail", () => {
     expect(committedFile).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(committedFile);
     expect(committedFile).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("+new view")).toBeInTheDocument();
+    expect(await screen.findByText("+new view")).toBeInTheDocument();
 
     const workingFile = screen.getByRole("button", {
       name: /frontend\/working\.tsx/,
     });
     expect(workingFile).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(workingFile);
-    expect(screen.getByText("+new working")).toBeInTheDocument();
+    expect(await screen.findByText("+new working")).toBeInTheDocument();
   });
 
   it("retains complete long repository values", async () => {
@@ -145,8 +515,7 @@ describe("DiffDetail", () => {
       "frontend/src/components/repository-status/VeryLongOriginalFilename.tsx";
     const uncommittedPath =
       "frontend/src/components/repository-status/VeryLongRenamedFilename.tsx";
-    getTaskDiffMock.mockResolvedValueOnce({
-      diff: "",
+    getTaskDiffIndexMock.mockResolvedValueOnce({
       repositories: [
         {
           name: "caic",
@@ -165,7 +534,6 @@ describe("DiffDetail", () => {
                   added: 1,
                   deleted: 0,
                   binary: false,
-                  diff: "@@ -0,0 +1 @@\n+content",
                 },
               ],
             },
@@ -178,7 +546,6 @@ describe("DiffDetail", () => {
               added: 0,
               deleted: 0,
               binary: false,
-              diff: "",
             },
           ],
         },
@@ -203,12 +570,53 @@ describe("DiffDetail", () => {
       "title",
       `${originalPath} → ${uncommittedPath}`,
     );
-    expect(renamedFile.querySelectorAll(`.${styles.pathValue}`)).toHaveLength(2);
+    expect(renamedFile.querySelectorAll(`.${styles.pathValue}`)).toHaveLength(
+      2,
+    );
     expect(renamedFile).toHaveTextContent(
       `${originalPath} → ${uncommittedPath}`,
     );
   });
 });
+
+function diffIndexFixture(): TaskDiffIndexResp {
+  return {
+    repositories: [
+      {
+        name: "caic",
+        branch: "feature",
+        upstream: "origin/main",
+        ahead: 1,
+        behind: 0,
+        commits: [
+          {
+            sha: "1234567890abcdef1234567890abcdef12345678",
+            authoredDate: "2026-09-15",
+            subject: "Commit subject",
+            stat: [
+              {
+                path: "committed.go",
+                added: 1,
+                deleted: 1,
+                binary: false,
+              },
+            ],
+          },
+        ],
+        uncommitted: [
+          {
+            path: "working.go",
+            originalPath: "old.go",
+            worktreeStatus: "R",
+            added: 1,
+            deleted: 1,
+            binary: false,
+          },
+        ],
+      },
+    ],
+  };
+}
 
 describe("elidePathAtBoundary", () => {
   const measureCharacters = (text: string) => text.length;
@@ -225,11 +633,7 @@ describe("elidePathAtBoundary", () => {
 
   it("keeps the complete path when it fits", () => {
     expect(
-      elidePathAtBoundary(
-        "backend/internal/types.go",
-        40,
-        measureCharacters,
-      ),
+      elidePathAtBoundary("backend/internal/types.go", 40, measureCharacters),
     ).toBe("backend/internal/types.go");
   });
 

@@ -242,6 +242,14 @@ public final class ApiClient {
     public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
     }
+    /// Returns repository and changed-file metadata without loading patch bodies.
+    public func getTaskDiffIndex(id: String) async throws -> TaskDiffIndexResp {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff/index")
+    }
+    /// Returns one committed or uncommitted file patch.
+    public func getTaskFileDiff(id: String, repository: String, commit: String, path: String, originalPath: String) async throws -> FileDiffResp {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff/file?repository=\(repository.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? repository)&commit=\(commit.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? commit)&path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)&originalPath=\(originalPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? originalPath)")
+    }
     /// Returns compact Git state for every repository mapped to a task.
     public func getTaskRepoStatus(id: String) async throws -> TaskRepoStatusResp {
         try await request("GET", path: "/api/caic/v1/tasks/\(id)/repo-status")

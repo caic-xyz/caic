@@ -1477,6 +1477,55 @@ public struct DiffResp: Codable {
     public let repositories: [GitRepositoryStatus]
 }
 
+/// DiffIndexFileStat describes a committed file without its patch body.
+public struct DiffIndexFileStat: Codable {
+    public let path: String
+    public let added: Int
+    public let deleted: Int
+    public let binary: Bool?
+}
+
+/// DiffIndexCommit describes one commit and its changed-file metadata.
+public struct DiffIndexCommit: Codable {
+    public let sha: String
+    public let subject: String
+    public let decorations: String?
+    public let authoredDate: String
+    public let stat: [DiffIndexFileStat]
+}
+
+/// DiffIndexFileStatus describes one uncommitted path without its patch body.
+public struct DiffIndexFileStatus: Codable {
+    public let path: String
+    public let originalPath: String?
+    public let indexStatus: String?
+    public let worktreeStatus: String?
+    public let added: Int
+    public let deleted: Int
+    public let binary: Bool
+}
+
+/// DiffIndexRepository describes one repository in a diff index.
+public struct DiffIndexRepository: Codable {
+    public let name: String
+    public let branch: String
+    public let upstream: String?
+    public let ahead: Int
+    public let behind: Int
+    public let commits: [DiffIndexCommit]
+    public let uncommitted: [DiffIndexFileStatus]
+}
+
+/// TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index.
+public struct TaskDiffIndexResp: Codable {
+    public let repositories: [DiffIndexRepository]
+}
+
+/// FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file.
+public struct FileDiffResp: Codable {
+    public let diff: String
+}
+
 /// GitRepositoryState summarizes the compact Git state of one task repository.
 public struct GitRepositoryState: Codable {
     public let name: String
@@ -1496,7 +1545,7 @@ public struct TaskRepoStatusResp: Codable {
     public let repositories: [GitRepositoryState]
 }
 
-/// ProcessInfo describes a single process running inside a task runtime instance.
+/// ProcessInfo describes a single process running inside the task runtime instance.
 public struct ProcessInfo: Codable {
     /// PID is the process ID.
     public let pid: Int

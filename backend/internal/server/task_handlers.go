@@ -771,6 +771,36 @@ func (h *taskHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(r.Context(), w, resp, err)
 }
 
+func (h *taskHandlers) handleGetDiffIndex(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	resp, err := h.taskSvc.taskDiffIndex(r.Context(), entry)
+	writeJSONResponse(r.Context(), w, resp, err)
+}
+
+func (h *taskHandlers) handleGetFileDiff(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	repository, err := strconv.Atoi(r.URL.Query().Get("repository"))
+	if err != nil {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "repository must be an integer"})
+		return
+	}
+	resp, err := h.taskSvc.taskFileDiff(r.Context(), entry, v1.FileDiffReq{
+		Repository:   repository,
+		Commit:       r.URL.Query().Get("commit"),
+		Path:         r.URL.Query().Get("path"),
+		OriginalPath: r.URL.Query().Get("originalPath"),
+	})
+	writeJSONResponse(r.Context(), w, resp, err)
+}
+
 func (h *taskHandlers) handleTaskRepoStatus(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
@@ -890,6 +920,8 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("POST /tasks/{id}/revive", handleWithTask(h, h.taskSvc.reviveTask))
 	m.HandleFunc("POST /tasks/{id}/sync", handleWithTask(h, h.taskSvc.syncTask))
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
+	m.HandleFunc("GET /tasks/{id}/diff/index", h.handleGetDiffIndex)
+	m.HandleFunc("GET /tasks/{id}/diff/file", h.handleGetFileDiff)
 	m.HandleFunc("GET /tasks/{id}/repo-status", h.handleTaskRepoStatus)
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)

@@ -65,6 +65,8 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/handoff` | Builds an editable handoff prompt for continuing a task in a fresh agent session. |  | `TaskHandoffResp` |
 | GET | `/api/caic/v1/tasks/{id}/diff` | Returns repository status and the unified diff for a task's branch. |  | `DiffResp` |
+| GET | `/api/caic/v1/tasks/{id}/diff/index` | Returns repository and changed-file metadata without loading patch bodies. |  | `TaskDiffIndexResp` |
+| GET | `/api/caic/v1/tasks/{id}/diff/file` | Returns one committed or uncommitted file patch. |  | `FileDiffResp` |
 | GET | `/api/caic/v1/tasks/{id}/repo-status` | Returns compact Git state for every repository mapped to a task. |  | `TaskRepoStatusResp` |
 | GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
@@ -1494,6 +1496,73 @@ DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 | `diff` | `string` |  | yes |
 | `repositories` | `GitRepositoryStatus[]` |  | yes |
 
+### DiffIndexFileStat
+
+DiffIndexFileStat describes a committed file without its patch body.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `added` | `int` |  | yes |
+| `deleted` | `int` |  | yes |
+| `binary` | `boolean` |  |  |
+
+### DiffIndexCommit
+
+DiffIndexCommit describes one commit and its changed-file metadata.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sha` | `string` |  | yes |
+| `subject` | `string` |  | yes |
+| `decorations` | `string` |  |  |
+| `authoredDate` | `string` |  | yes |
+| `stat` | `DiffIndexFileStat[]` |  | yes |
+
+### DiffIndexFileStatus
+
+DiffIndexFileStatus describes one uncommitted path without its patch body.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `originalPath` | `string` |  |  |
+| `indexStatus` | `string` |  |  |
+| `worktreeStatus` | `string` |  |  |
+| `added` | `int` |  | yes |
+| `deleted` | `int` |  | yes |
+| `binary` | `boolean` |  | yes |
+
+### DiffIndexRepository
+
+DiffIndexRepository describes one repository in a diff index.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `branch` | `string` |  | yes |
+| `upstream` | `string` |  |  |
+| `ahead` | `int` |  | yes |
+| `behind` | `int` |  | yes |
+| `commits` | `DiffIndexCommit[]` |  | yes |
+| `uncommitted` | `DiffIndexFileStatus[]` |  | yes |
+
+### TaskDiffIndexResp
+
+TaskDiffIndexResp is the response for GET /api/caic/v1/tasks/{id}/diff/index.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositories` | `DiffIndexRepository[]` |  | yes |
+
+### FileDiffResp
+
+FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `diff` | `string` |  | yes |
+
 ### GitRepositoryState
 
 GitRepositoryState summarizes the compact Git state of one task repository.
@@ -1521,7 +1590,7 @@ TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.
 
 ### ProcessInfo
 
-ProcessInfo describes a single process running inside a task runtime instance.
+ProcessInfo describes a single process running inside the task runtime instance.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|

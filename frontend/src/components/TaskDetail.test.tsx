@@ -50,6 +50,8 @@ vi.mock("../api", () => ({
   compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
   syncTask: vi.fn(),
   getTaskDiff: vi.fn(),
+  getTaskDiffIndex: vi.fn(() => Promise.resolve({ repositories: [] })),
+  getTaskFileDiff: vi.fn(() => Promise.resolve({ diff: "" })),
   getTaskRepoStatus: vi.fn(() =>
     Promise.resolve({
       repositories: [
