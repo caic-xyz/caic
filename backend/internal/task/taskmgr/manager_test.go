@@ -1246,7 +1246,11 @@ func TestManager(t *testing.T) {
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, info),
 			})
-			t.Cleanup(func() { _ = m.Close() })
+			t.Cleanup(func() {
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
+			})
 			scoper := &fakeTaskMCPScoper{registry: mcptest.FakeRegistry{}}
 			if err := m.Start(scoper); err != nil {
 				t.Fatalf("Start() error: %v", err)
@@ -4452,7 +4456,6 @@ func TestManager(t *testing.T) {
 				FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000},
 				attached:    make(chan struct{}, 1),
 			}
-			t.Cleanup(backend.stop)
 			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"legacy-ambiguous\x00caic.id":      taskID.String(),
 				"legacy-ambiguous\x00caic.harness": "reconnect",
@@ -4462,6 +4465,12 @@ func TestManager(t *testing.T) {
 				LogStore:  store,
 				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
 				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
+			})
+			t.Cleanup(func() {
+				backend.stop()
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
 			})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
@@ -5149,7 +5158,11 @@ func TestManager(t *testing.T) {
 			events := make(chan runtime.Event, 1)
 			fake := &runtimetest.FakeInfo{Events: events}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
-			t.Cleanup(func() { _ = m.Close() })
+			t.Cleanup(func() {
+				if err := m.Close(); err != nil {
+					t.Error(err)
+				}
+			})
 			if err := m.Start(&fakeTaskMCPScoper{}); err != nil {
 				t.Fatal(err)
 			}
@@ -5591,7 +5604,11 @@ func TestErrTaskNotFound(t *testing.T) {
 func TestSettledLoadState(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
-	t.Cleanup(func() { _ = m.Close() })
+	t.Cleanup(func() {
+		if err := m.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	// A fresh Manager has not completed a pass, so it reports loading.
 	if loading, err := m.SettledStatus(); !loading || err != "" {
@@ -5717,7 +5734,9 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 			default:
 			}
 			m.NotifyTaskChange()
-			_ = m.Changed()
+			if err := m.Close(); err != nil {
+				t.Error(err)
+			}
 		}
 	}()
 	time.Sleep(200 * time.Millisecond)

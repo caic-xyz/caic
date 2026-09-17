@@ -172,10 +172,10 @@ func TestSmoke(t *testing.T) {
 				t.Fatalf("decode task log line %d: %v", i+1, err)
 			}
 			if string(record["t"]) == "" {
-				t.Fatalf("task log line %d has no v2 discriminator: %s", i+1, line)
+				t.Fatalf("task log line %d has no task-log discriminator: %s", i+1, line)
 			}
-			if i == 0 && (string(record["t"]) != `"caic_meta"` || string(record["version"]) != "2") {
-				t.Fatalf("task log header = %s, want v2 caic_meta", line)
+			if i == 0 && (string(record["t"]) != `"caic_meta"` || string(record["version"]) != "3") {
+				t.Fatalf("task log header = %s, want v3 caic_meta", line)
 			}
 		}
 
