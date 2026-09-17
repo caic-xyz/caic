@@ -51,12 +51,14 @@ export const MethodSubscriptionsListen: Method = "subscriptions/listen";
 
 export type NotificationMethod =
   | "notifications/subscriptions/acknowledged"
+  | "notifications/subscriptions/initial_state"
   | "notifications/resources/list_changed"
   | "notifications/resources/updated";
 /**
  * Supported values.
  */
 export const NotificationMethodSubscriptionsAcknowledged: NotificationMethod = "notifications/subscriptions/acknowledged";
+export const NotificationMethodSubscriptionsInitialState: NotificationMethod = "notifications/subscriptions/initial_state";
 export const NotificationMethodResourcesListChanged: NotificationMethod = "notifications/resources/list_changed";
 export const NotificationMethodResourcesUpdated: NotificationMethod = "notifications/resources/updated";
 
@@ -502,5 +504,21 @@ export interface SubscriptionNotificationParams {
   notifications?: SubscriptionFilter;
   /** URI identifies an updated resource. */
   uri?: string;
+}
+
+/**
+ * SubscriptionsInitialStateParams is the payload for the
+ * notifications/subscriptions/initial_state notification.
+ */
+export interface SubscriptionsInitialStateParams {
+  _meta?: { [key: string]: unknown};
+  /** URI is the subscribed target whose initial state was delivered. */
+  uri: string;
+  /**
+   * Contents is the resources/read result for the same target, so a client
+   * that applies the payload holds the post-subscription state without a
+   * second read.
+   */
+  contents: ResourceContent[];
 }
 

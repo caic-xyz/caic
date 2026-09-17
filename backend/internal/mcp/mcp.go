@@ -72,6 +72,7 @@ type NotificationMethod string
 // MCP notification method names sent by the handler.
 const (
 	NotificationMethodSubscriptionsAcknowledged NotificationMethod = "notifications/subscriptions/acknowledged"
+	NotificationMethodSubscriptionsInitialState NotificationMethod = "notifications/subscriptions/initial_state"
 	NotificationMethodResourcesListChanged      NotificationMethod = "notifications/resources/list_changed"
 	NotificationMethodResourcesUpdated          NotificationMethod = "notifications/resources/updated"
 )
@@ -756,6 +757,18 @@ type SubscriptionNotificationParams struct {
 	URI string `json:"uri,omitempty"`
 }
 
+// SubscriptionsInitialStateParams is the payload for the
+// notifications/subscriptions/initial_state notification.
+type SubscriptionsInitialStateParams struct {
+	Meta MetaObject `json:"_meta,omitempty"`
+	// URI is the subscribed target whose initial state was delivered.
+	URI string `json:"uri"`
+	// Contents is the resources/read result for the same target, so a client
+	// that applies the payload holds the post-subscription state without a
+	// second read.
+	Contents []ResourceContent `json:"contents"`
+}
+
 // HandleMCP handles one MCP HTTP request, dispatching to caic's native
 // 2026-07-28 protocol or the released Streamable HTTP compatibility handler
 // based on the request shape.
@@ -999,11 +1012,16 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	if err != nil {
 		return registryError(err)
 	}
-	// Snapshot the current resource state before acknowledging. The client may
-	// mutate resources as soon as it sees the ack; taking the baseline first
-	// establishes a happens-before edge so those mutations are detected as
-	// changes instead of being deduplicated against a post-mutation snapshot.
-	lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, p.Notifications)
+	// Read every subscribed target before acknowledging. The delivered initial
+	// state doubles as the dedup baseline for the change loop; taking it first
+	// establishes a happens-before edge so a mutation that lands as soon as the
+	// client sees the ack is still detected as a change instead of being
+	// deduplicated against a post-mutation snapshot.
+	initialReads := h.readInitialSubscriptionState(ctx, p.Notifications)
+	lastResources := ""
+	if p.Notifications.ResourcesListChanged {
+		lastResources = h.subscriptionResourcesHash(ctx)
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -1013,43 +1031,76 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
-	if !h.writeInitialSubscriptionState(ctx, stream, subID, p.Notifications) {
+	lastResourceContents, ok := h.writeInitialSubscriptionState(ctx, stream, subID, p.Notifications, initialReads)
+	if !ok {
 		return nil
 	}
 	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes, lastResources, lastResourceContents)
 	return nil
 }
 
-// writeInitialSubscriptionState emits one notification per subscribed target
-// right after the acknowledgment, forcing the client to re-read through the
-// normal resources/read path.
+// subscriptionInitialRead is the pre-ack read of one subscribed target: the
+// contents to deliver, the dedup baseline for the change loop, and a read
+// failure that delivers no initial-state payload for that target.
+type subscriptionInitialRead struct {
+	contents []ResourceContent
+	baseline string
+	readErr  error
+}
+
+// readInitialSubscriptionState reads every subscribed target through the
+// registered resources/read path before the acknowledgment is written, so
+// the delivered initial state and the dedup baseline for the change loop come
+// from the same authorized read.
+func (h *Handler) readInitialSubscriptionState(ctx context.Context, filter SubscriptionFilter) map[string]subscriptionInitialRead {
+	reads := make(map[string]subscriptionInitialRead, len(filter.ResourceSubscriptions))
+	for _, uri := range filter.ResourceSubscriptions {
+		res, err := h.Registry.ReadResource(ctx, uri)
+		if err != nil {
+			reads[uri] = subscriptionInitialRead{baseline: err.Error(), readErr: err}
+			continue
+		}
+		reads[uri] = subscriptionInitialRead{contents: res.Contents, baseline: stableJSON(res.Contents)}
+	}
+	return reads
+}
+
+// writeInitialSubscriptionState delivers the initial state of each subscribed
+// target right after the acknowledgment from the pre-ack read, closing the
+// read-then-subscribe staleness gap without classifying pre-subscribe
+// mutations as post-subscribe changes.
 //
-// This closes the read-then-subscribe staleness gap: a change that lands between
-// the client's initial resources/read and the server's subscription baseline is
-// never classified as "after subscribe", so the change loop would never report
-// it and the client would hold stale state until an unrelated change. The forced
-// post-subscribe re-read observes that change. The baseline (lastResources /
-// lastResourceContents) is left untouched, so the first real post-subscribe
-// change still deduplicates correctly and produces exactly one update.
-//
-// The draft schema's acknowledged and resources/updated notifications carry no
-// content, so re-read — not an embedded baseline payload — is the spec-conformant
-// way to deliver initial state. Re-reading also keeps authorization on the
-// normal ReadResource path rather than a divergent snapshot.
-func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter) bool {
+// Every target also receives the legacy resources/updated notification after
+// the initial_state (when one was delivered); that re-read burst is
+// intentionally kept so a client that does not consume the native notification
+// keeps today's behavior. Targets whose pre-ack read failed receive only the
+// resources/updated re-read, because they have no contents to deliver. The
+// returned baselines seed the change loop, so a genuine first post-subscribe
+// change still deduplicates correctly and produces exactly one update. Returns
+// false if a write fails so the caller skips the change loop.
+func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, reads map[string]subscriptionInitialRead) (map[string]string, bool) {
+	baselines := make(map[string]string, len(filter.ResourceSubscriptions))
 	if filter.ResourcesListChanged {
 		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
 			slog.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
-			return false
+			return baselines, false
 		}
 	}
 	for _, uri := range filter.ResourceSubscriptions {
+		read := reads[uri]
+		baselines[uri] = read.baseline
+		if read.readErr != nil {
+			slog.WarnContext(ctx, "read mcp subscription initial state", "uri", uri, "err", read.readErr)
+		} else if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsInitialState, Params: SubscriptionsInitialStateParams{Meta: mcpSubscriptionMeta(subID), URI: uri, Contents: read.contents}}); err != nil {
+			slog.WarnContext(ctx, "write mcp initial subscription state notification", "err", err)
+			return baselines, false
+		}
 		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
 			slog.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
-			return false
+			return baselines, false
 		}
 	}
-	return true
+	return baselines, true
 }
 
 type subscriptionStreamWriter interface {
@@ -1095,17 +1146,6 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscri
 			lastResourceContents[uri] = content
 		}
 	}
-}
-
-func (h *Handler) subscriptionSnapshot(ctx context.Context, filter SubscriptionFilter) (resourcesHash string, contents map[string]string) {
-	if filter.ResourcesListChanged {
-		resourcesHash = h.subscriptionResourcesHash(ctx)
-	}
-	contents = make(map[string]string, len(filter.ResourceSubscriptions))
-	for _, uri := range filter.ResourceSubscriptions {
-		contents[uri] = h.subscriptionResourceContentHash(ctx, uri)
-	}
-	return resourcesHash, contents
 }
 
 func (h *Handler) subscriptionResourcesHash(ctx context.Context) string {

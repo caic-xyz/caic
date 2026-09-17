@@ -114,6 +114,7 @@ public struct NotificationMethod: Codable, Equatable, Hashable {
     public init(_ value: String) { self.value = value }
 
     public static let SubscriptionsAcknowledged = NotificationMethod("notifications/subscriptions/acknowledged")
+    public static let SubscriptionsInitialState = NotificationMethod("notifications/subscriptions/initial_state")
     public static let ResourcesListChanged = NotificationMethod("notifications/resources/list_changed")
     public static let ResourcesUpdated = NotificationMethod("notifications/resources/updated")
 
@@ -594,5 +595,17 @@ public struct SubscriptionNotificationParams: Codable {
     public let notifications: SubscriptionFilter?
     /// URI identifies an updated resource.
     public let uri: String?
+}
+
+/// SubscriptionsInitialStateParams is the payload for the
+/// notifications/subscriptions/initial_state notification.
+public struct SubscriptionsInitialStateParams: Codable {
+    public let _meta: [String: JSONValue]?
+    /// URI is the subscribed target whose initial state was delivered.
+    public let uri: String
+    /// Contents is the resources/read result for the same target, so a client
+    /// that applies the payload holds the post-subscription state without a
+    /// second read.
+    public let contents: [ResourceContent]
 }
 

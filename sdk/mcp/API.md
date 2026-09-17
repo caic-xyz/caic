@@ -63,6 +63,7 @@ NotificationMethod is an MCP JSON-RPC notification method name.
 | Value | Description |
 |-------|-------------|
 | `notifications/subscriptions/acknowledged` |  |
+| `notifications/subscriptions/initial_state` |  |
 | `notifications/resources/list_changed` |  |
 | `notifications/resources/updated` |  |
 
@@ -490,4 +491,17 @@ SubscriptionNotificationParams is the payload for subscription notifications.
 | `_meta` | `Record<string, JSONValue>` |  |  |
 | `notifications` | `SubscriptionFilter` | Notifications is the subset of requested notification types the server accepted. |  |
 | `uri` | `string` | URI identifies an updated resource. |  |
+
+### SubscriptionsInitialStateParams
+
+SubscriptionsInitialStateParams is the payload for the
+notifications/subscriptions/initial_state notification.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `_meta` | `Record<string, JSONValue>` |  |  |
+| `uri` | `string` | URI is the subscribed target whose initial state was delivered. | yes |
+| `contents` | `ResourceContent[]` | Contents is the resources/read result for the same target, so a client
+that applies the payload holds the post-subscription state without a
+second read. | yes |
 

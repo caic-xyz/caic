@@ -2,11 +2,15 @@
 package com.fghbuild.gomode.service
 
 import com.fghbuild.gomode.sdk.v1.Settings
+import com.fghbuild.mcp.sdk.v1.CacheScope
 import com.fghbuild.mcp.sdk.v1.JSONRPCNotification
 import com.fghbuild.mcp.sdk.v1.NotificationMethod
+import com.fghbuild.mcp.sdk.v1.ResourceContent
 import com.fghbuild.mcp.sdk.v1.ResourceDescriptor
 import com.fghbuild.mcp.sdk.v1.ResourcesReadResult
+import com.fghbuild.mcp.sdk.v1.ResultType
 import com.fghbuild.mcp.sdk.v1.SubscriptionFilter
+import com.fghbuild.mcp.sdk.v1.SubscriptionsInitialStateParams
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -16,10 +20,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 interface ServiceResourceClient {
@@ -107,10 +113,27 @@ class ServiceMonitor(
     private suspend fun monitorOnce(client: ServiceResourceClient): MonitorRunResult {
         var plan = refreshPlan(client) ?: return MonitorRunResult.Disabled
         val notifications = subscriptionFilter(plan) ?: return MonitorRunResult.Static
+        val initial = InitialStateWindow()
         client.listenSubscriptions(notifications).collect { notification ->
+            val initialState = notification.initialStatePayload()
             when {
-                notification.invalidatesResource(plan) -> refreshSnapshot(client, plan)
-                notification.invalidatesResourceList(plan) -> plan = refreshPlan(client) ?: return@collect
+                initialState != null -> {
+                    initial.recordInitialState(initialState.uri, initialState.contents)
+                    if (plan.resourceURIs.all { it in initial.deliveredContents }) {
+                        applyDeliveredSnapshot(plan, initial.deliveredContents)
+                    }
+                }
+                notification.invalidatesResource(plan) -> {
+                    if (initial.consumeLegacyUpdate(notification.resourceUri())) return@collect
+                    refreshSnapshot(client, plan)
+                }
+                notification.invalidatesResourceList(plan) -> {
+                    if (initial.consumeInitialListChanged()) {
+                        plan = refreshPlanAfterLeadingListChanged(client, plan) ?: return@collect
+                    } else {
+                        plan = refreshPlan(client) ?: return@collect
+                    }
+                }
             }
         }
         return MonitorRunResult.Retry
@@ -126,11 +149,51 @@ class ServiceMonitor(
         return plan
     }
 
+    // The leading resources/list_changed arrives before the opening window's
+    // state authority (delivered payloads or the legacy re-read burst), so it
+    // re-checks the resource list without re-reading state unless the list
+    // actually changed; the list call itself predates this phase.
+    private suspend fun refreshPlanAfterLeadingListChanged(
+        client: ServiceResourceClient,
+        plan: ServiceMonitoringPlan,
+    ): ServiceMonitoringPlan? {
+        val newPlan = serviceMonitoringPlan(client.listResources())
+        if (newPlan == null) {
+            _state.value = ServiceMonitorState()
+            return null
+        }
+        if (newPlan != plan) {
+            refreshSnapshot(client, newPlan)
+        }
+        return newPlan
+    }
+
     private suspend fun refreshSnapshot(
         client: ServiceResourceClient,
         plan: ServiceMonitoringPlan,
     ) {
         val readResults = plan.resourceURIs.associateWith { uri -> client.readResource(uri) }
+        val snapshot = serviceMonitoringSnapshot(readResults, plan)
+        _state.value = ServiceMonitorState(
+            snapshot = snapshot,
+            notifications = serviceNotifications(readResults, plan),
+        )
+    }
+
+    // Exposes the delivered baseline with the same state construction as
+    // refreshSnapshot, so only the state authority changes.
+    private fun applyDeliveredSnapshot(
+        plan: ServiceMonitoringPlan,
+        delivered: Map<String, List<ResourceContent>>,
+    ) {
+        val readResults = plan.resourceURIs.associateWith { uri ->
+            ResourcesReadResult(
+                resultType = ResultType.Complete,
+                contents = delivered[uri].orEmpty(),
+                ttlMs = 0,
+                cacheScope = CacheScope.Private,
+            )
+        }
         val snapshot = serviceMonitoringSnapshot(readResults, plan)
         _state.value = ServiceMonitorState(
             snapshot = snapshot,
@@ -179,10 +242,53 @@ private fun subscriptionFilter(plan: ServiceMonitoringPlan): SubscriptionFilter?
     )
 }
 
+// Tracks the opening window of a subscription stream: the caic-native
+// initial_state payloads, the legacy resources/updated re-read burst that
+// always follows each payload, and the leading resources/list_changed
+// notification. A payload that covers every monitored URI is the authoritative
+// baseline and is exposed without a re-read; the legacy notifications that
+// follow delivered payloads are consumed without round trips, while URIs that
+// arrive without a payload keep the re-read fallback.
+private class InitialStateWindow {
+    private val contents = mutableMapOf<String, List<ResourceContent>>()
+    private val consumedUpdates = mutableSetOf<String>()
+    private var consumedListChanged = false
+
+    val deliveredContents: Map<String, List<ResourceContent>>
+        get() = contents
+
+    fun recordInitialState(uri: String, initialContents: List<ResourceContent>) {
+        contents[uri] = initialContents
+    }
+
+    fun consumeLegacyUpdate(uri: String?): Boolean {
+        if (uri == null || uri !in contents) return false
+        return consumedUpdates.add(uri)
+    }
+
+    fun consumeInitialListChanged(): Boolean {
+        if (consumedListChanged) return false
+        consumedListChanged = true
+        return true
+    }
+}
+
+private fun JSONRPCNotification.resourceUri(): String? =
+    (params as? JsonObject)?.get("uri")?.jsonPrimitive?.contentOrNull
+
+private fun JSONRPCNotification.initialStatePayload(): SubscriptionsInitialStateParams? {
+    if (method != NotificationMethod.SubscriptionsInitialState) return null
+    val params = this.params as? JsonObject ?: return null
+    return try {
+        mcpJson.decodeFromJsonElement(params)
+    } catch (_: SerializationException) {
+        null
+    }
+}
+
 private fun JSONRPCNotification.invalidatesResource(plan: ServiceMonitoringPlan): Boolean {
     if (method != NotificationMethod.ResourcesUpdated) return false
-    val uri = (params as? JsonObject)?.get("uri")?.jsonPrimitive?.contentOrNull ?: return false
-    return uri in plan.resourceSubscriptions
+    return resourceUri() in plan.resourceSubscriptions
 }
 
 private fun JSONRPCNotification.invalidatesResourceList(plan: ServiceMonitoringPlan): Boolean =
@@ -193,6 +299,8 @@ private enum class MonitorRunResult {
     Static,
     Retry,
 }
+
+private val mcpJson = Json { ignoreUnknownKeys = true }
 
 private const val InitialRetryDelayMs = 1_000L
 private const val MaxRetryDelayMs = 30_000L

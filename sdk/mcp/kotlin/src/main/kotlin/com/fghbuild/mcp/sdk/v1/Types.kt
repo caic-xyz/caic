@@ -153,6 +153,10 @@ sealed interface NotificationMethod {
         override val value = "notifications/subscriptions/acknowledged"
     }
     @Serializable
+    data object SubscriptionsInitialState : NotificationMethod {
+        override val value = "notifications/subscriptions/initial_state"
+    }
+    @Serializable
     data object ResourcesListChanged : NotificationMethod {
         override val value = "notifications/resources/list_changed"
     }
@@ -171,6 +175,7 @@ object NotificationMethodSerializer : KSerializer<NotificationMethod> {
         val v = decoder.decodeString()
         return when (v) {
             "notifications/subscriptions/acknowledged" -> NotificationMethod.SubscriptionsAcknowledged
+            "notifications/subscriptions/initial_state" -> NotificationMethod.SubscriptionsInitialState
             "notifications/resources/list_changed" -> NotificationMethod.ResourcesListChanged
             "notifications/resources/updated" -> NotificationMethod.ResourcesUpdated
             else -> NotificationMethod.Other(v)
@@ -691,5 +696,22 @@ data class SubscriptionNotificationParams(
     val notifications: SubscriptionFilter? = null,
     /** URI identifies an updated resource. */
     val uri: String? = null,
+)
+
+/**
+ * SubscriptionsInitialStateParams is the payload for the
+ * notifications/subscriptions/initial_state notification.
+ */
+@Serializable
+data class SubscriptionsInitialStateParams(
+    val _meta: Map<String, JsonElement>? = null,
+    /** URI is the subscribed target whose initial state was delivered. */
+    val uri: String,
+    /**
+     * Contents is the resources/read result for the same target, so a client
+     * that applies the payload holds the post-subscription state without a
+     * second read.
+     */
+    val contents: List<ResourceContent>,
 )
 

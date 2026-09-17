@@ -42,6 +42,7 @@ func SDKAPI() apispec.Config[string] {
 			reflect.TypeFor[SubscriptionsListenParams](),
 			reflect.TypeFor[JSONRPCNotification](),
 			reflect.TypeFor[SubscriptionNotificationParams](),
+			reflect.TypeFor[SubscriptionsInitialStateParams](),
 		},
 		DocumentExtraSeeds: true,
 		KotlinPackage:      "com.fghbuild.mcp.sdk.v1",

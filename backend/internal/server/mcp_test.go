@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -387,16 +388,58 @@ func TestMCPHandlers(t *testing.T) {
 		if !strings.Contains(data, `"resourceSubscriptions":["gomode://items"]`) {
 			t.Fatalf("subscription response = %s, want supported task resource acknowledged", data)
 		}
-		// The acknowledgment is followed by an initial state burst that forces
-		// the client to re-read each subscribed target through the authorized
-		// resources/read path, closing the read-then-subscribe staleness gap.
-		// The context is pre-cancelled, so the change loop adds nothing and the
-		// body is exactly the ack plus this deterministic burst.
+		// The context is pre-cancelled, so the change loop adds nothing and
+		// the body is the ack, the announced list change, and the delivered
+		// initial state.
 		if !strings.Contains(data, `"method":"notifications/resources/list_changed"`) {
 			t.Fatalf("subscription response = %s, want initial resources list_changed", data)
 		}
-		if !strings.Contains(data, `"method":"notifications/resources/updated"`) || !strings.Contains(data, `"uri":"gomode://items"`) {
-			t.Fatalf("subscription response = %s, want initial gomode://items update", data)
+		// The legacy re-read burst follows the delivered initial state so
+		// clients that only react to resources/updated still re-read; one
+		// notification per subscribed URI.
+		if n := strings.Count(data, `"method":"notifications/resources/updated"`); n != 1 {
+			t.Fatalf("resources/updated count = %d in %s, want 1", n, data)
+		}
+		initialIndex := strings.Index(data, `"method":"notifications/subscriptions/initial_state"`)
+		burstIndex := strings.Index(data, `"method":"notifications/resources/updated"`)
+		if initialIndex < 0 || initialIndex > burstIndex {
+			t.Fatalf("subscription response = %s, want initial state before resources/updated", data)
+		}
+		found, msg := sseInitialStateNotification(data)
+		if !found {
+			t.Fatalf("subscription response = %s, want initial state", data)
+		}
+		var initial mcp.SubscriptionsInitialStateParams
+		if b, err := json.Marshal(msg.Params); err == nil {
+			if err := json.Unmarshal(b, &initial); err != nil {
+				t.Fatalf("decode initial state: %v", err)
+			}
+		} else {
+			t.Fatalf("encode initial state params: %v", err)
+		}
+		if initial.URI != "gomode://items" {
+			t.Fatalf("initial state uri = %q, want gomode://items", initial.URI)
+		}
+		if len(initial.Contents) == 0 {
+			t.Fatalf("initial state contents = empty, want items read")
+		}
+
+		// The delivered initial state must equal what resources/read returns
+		// for the same target right after subscribing.
+		_, readResp := postMCP(t, s.mcpHandlers.protocol, "resources/read", "gomode://items", mcpRequestJSON("resources/read", `"uri":"gomode://items"`))
+		if readResp.Error != nil {
+			t.Fatalf("resources/read failed: %v", readResp.Error)
+		}
+		var read mcp.ResourcesReadResult
+		if b, err := json.Marshal(readResp.Result); err == nil {
+			if err := json.Unmarshal(b, &read); err != nil {
+				t.Fatalf("decode read result: %v", err)
+			}
+		} else {
+			t.Fatalf("encode read result: %v", err)
+		}
+		if !reflect.DeepEqual(initial.Contents, read.Contents) {
+			t.Fatalf("initial state contents = %+v, want resources/read contents %+v", initial.Contents, read.Contents)
 		}
 	})
 
@@ -414,8 +457,275 @@ func TestMCPHandlers(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		if !strings.Contains(w.Body.String(), `"uri":"gomode://notifications"`) {
-			t.Fatalf("subscription response = %s, want gomode://notifications update", w.Body.String())
+		if n := strings.Count(w.Body.String(), `"method":"notifications/resources/updated"`); n != 1 {
+			t.Fatalf("resources/updated count = %d in %s, want 1", n, w.Body.String())
+		}
+		initialIndex := strings.Index(w.Body.String(), `"method":"notifications/subscriptions/initial_state"`)
+		burstIndex := strings.Index(w.Body.String(), `"method":"notifications/resources/updated"`)
+		if initialIndex < 0 || initialIndex > burstIndex {
+			t.Fatalf("subscription response = %s, want initial state before resources/updated", w.Body.String())
+		}
+		found, msg := sseInitialStateNotification(w.Body.String())
+		if !found {
+			t.Fatalf("subscription response = %s, want initial state", w.Body.String())
+		}
+		var initial mcp.SubscriptionsInitialStateParams
+		if b, err := json.Marshal(msg.Params); err == nil {
+			if err := json.Unmarshal(b, &initial); err != nil {
+				t.Fatalf("decode initial state: %v", err)
+			}
+		} else {
+			t.Fatalf("encode initial state params: %v", err)
+		}
+		if initial.URI != "gomode://notifications" {
+			t.Fatalf("initial state uri = %q, want gomode://notifications", initial.URI)
+		}
+		if len(initial.Contents) == 0 {
+			t.Fatalf("initial state contents = empty, want notifications read")
+		}
+	})
+
+	// A remote principal without the task read scope cannot subscribe to
+	// task resources; the request is rejected as invalid params and nothing
+	// is written to the stream, initial state included.
+	t.Run("subscriptionsListenRejectsMissingScope", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		ctx = newMCPPrincipalContext(ctx, &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
+		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.protocol.HandleMCP(w, req)
+		var resp mcp.JSONRPCResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
+			t.Fatalf("response error = %+v, want invalid params scope denial: %s", resp.Error, w.Body.String())
+		}
+		if !strings.Contains(resp.Error.Message, "missing required MCP scope: ") {
+			t.Fatalf("error message = %q, want missing required MCP scope", resp.Error.Message)
+		}
+		for _, method := range []string{
+			"\"method\":\"notifications/subscriptions/acknowledged\"",
+			"\"method\":\"notifications/subscriptions/initial_state\"",
+			"\"method\":\"notifications/resources/updated\"",
+		} {
+			if strings.Contains(w.Body.String(), method) {
+				t.Fatalf("subscription response = %s, want no %s delivered for the denied scope", w.Body.String(), method)
+			}
+		}
+	})
+
+	// A subscribed URI whose scope check passes but whose initial read
+	// fails sends no initial state for it and falls back to the legacy
+	// re-read burst.
+	t.Run("subscriptionsListenFallsBackWhenInitialStateReadFails", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["caic://repos/ghost"]}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.protocol.HandleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		data := w.Body.String()
+		ackMethod := `"method":"notifications/subscriptions/acknowledged"`
+		if !strings.Contains(data, ackMethod) {
+			t.Fatalf("subscription response = %s, want acknowledgment", data)
+		}
+		if strings.Contains(data, `"method":"notifications/subscriptions/initial_state"`) {
+			t.Fatalf("subscription response = %s, want no initial state for the unreadable resource", data)
+		}
+		ackIndex := strings.Index(data, ackMethod)
+		burstIndex := strings.Index(data, `"method":"notifications/resources/updated"`)
+		if burstIndex < 0 {
+			t.Fatalf("subscription response = %s, want resources/updated fallback for the unreadable resource", data)
+		}
+		if ackIndex < 0 || ackIndex > burstIndex {
+			t.Fatalf("subscription response = %s, want acknowledgment before the resources/updated fallback", data)
+		}
+		if !strings.Contains(data, `"uri":"caic://repos/ghost"`) {
+			t.Fatalf("subscription response = %s, want the fallback to target caic://repos/ghost", data)
+		}
+	})
+
+	// The delivered initial state applies the mcpServiceItemMaxCount
+	// bounding: the payload carries only the cap and the omitted count, and
+	// the raw value of the one omitted item must not reach the wire.
+	t.Run("subscriptionsListenDeliversBoundedInitialState", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		count := mcpServiceItemMaxCount + 1
+		seeded := make([]string, 0, count)
+		for range count {
+			id := ksid.NewID()
+			insertTestTask(s, id.String(), mustNewTask(t, id, agent.Prompt{Text: "subscription initial state item"}, harness.Claude))
+			seeded = append(seeded, id.String())
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.protocol.HandleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		data := w.Body.String()
+		found, msg := sseInitialStateNotification(data)
+		if !found {
+			t.Fatalf("subscription response = %s, want initial state", data)
+		}
+		var initial mcp.SubscriptionsInitialStateParams
+		b, err := json.Marshal(msg.Params)
+		if err != nil {
+			t.Fatalf("marshal initial state params: %v", err)
+		}
+		if err := json.Unmarshal(b, &initial); err != nil {
+			t.Fatalf("decode initial state: %v", err)
+		}
+		if len(initial.Contents) != 1 {
+			t.Fatalf("initial state contents = %d, want 1", len(initial.Contents))
+		}
+		var streamItems serviceItemsOutput
+		if err := json.Unmarshal([]byte(initial.Contents[0].Text), &streamItems); err != nil {
+			t.Fatalf("decode delivered items: %v", err)
+		}
+		if len(streamItems.Items) != mcpServiceItemMaxCount {
+			t.Fatalf("delivered item count = %d, want %d", len(streamItems.Items), mcpServiceItemMaxCount)
+		}
+		if streamItems.OmittedCount != 1 {
+			t.Fatalf("delivered omitted count = %d, want 1", streamItems.OmittedCount)
+		}
+		// The delivered payload must be the same authorized read output the
+		// client gets from resources/read right after subscribing.
+		_, readResp := postMCP(t, s.mcpHandlers.protocol, "resources/read", "gomode://items", mcpRequestJSON("resources/read", `"uri":"gomode://items"`))
+		if readResp.Error != nil {
+			t.Fatalf("resources/read failed: %v", readResp.Error)
+		}
+		var read mcp.ResourcesReadResult
+		b, err = json.Marshal(readResp.Result)
+		if err != nil {
+			t.Fatalf("marshal read result: %v", err)
+		}
+		if err := json.Unmarshal(b, &read); err != nil {
+			t.Fatalf("decode read result: %v", err)
+		}
+		if !reflect.DeepEqual(initial.Contents, read.Contents) {
+			t.Fatalf("initial state contents = %+v, want resources/read contents %+v", initial.Contents, read.Contents)
+		}
+		// The one item the bounded read omits keeps its raw value off the
+		// stream.
+		delivered := make(map[string]bool, len(streamItems.Items))
+		for _, item := range streamItems.Items {
+			if delivered[item.ID] {
+				t.Fatalf("delivered item id %s appears twice", item.ID)
+			}
+			delivered[item.ID] = true
+		}
+		var omitted []string
+		for _, id := range seeded {
+			if !delivered[id] {
+				omitted = append(omitted, id)
+			}
+			if len(omitted) == 1 {
+				break
+			}
+		}
+		if len(omitted) != 1 {
+			t.Fatalf("omitted item ids = %v, want exactly one", omitted)
+		}
+		if n := strings.Count(data, omitted[0]); n != 0 {
+			t.Fatalf("stream contains %d occurrences of omitted item id %s, want 0", n, omitted[0])
+		}
+	})
+
+	// The pre-ack read that supplies the delivered initial state must run
+	// with the subscriber's context, so the task list snapshot is owner
+	// filtered: a task belonging to another owner never reaches the wire,
+	// in the delivered payload or in any later re-read burst.
+	t.Run("subscriptionsListenDeliversOwnerFilteredInitialState", func(t *testing.T) {
+		t.Parallel()
+		usersPath := filepath.Join(t.TempDir(), "users.json")
+		store, err := auth.Open(usersPath)
+		if err != nil {
+			t.Fatalf("open auth store: %v", err)
+		}
+		user, err := store.UpsertUser(&auth.User{
+			Provider:    auth.ProviderGitHub,
+			ProviderID:  "1",
+			Username:    "alice",
+			AccessToken: "forge-token",
+			AvatarURL:   "https://github.com/avatar/alice",
+		})
+		if err != nil {
+			t.Fatalf("upsert user: %v", err)
+		}
+		s := newTestRouterWithAuthHost(t, store, "", auth.NewHostState("https://caic.example.com", nil))
+		mineID := ksid.NewID()
+		mine := mustNewTask(t, mineID, agent.Prompt{Text: "subscription initial state item owned"}, harness.Claude)
+		mine.OwnerID = user.ID
+		insertTestTask(s, mineID.String(), mine)
+		otherID := ksid.NewID()
+		other := mustNewTask(t, otherID, agent.Prompt{Text: "subscription initial state item foreign"}, harness.Claude)
+		other.OwnerID = "other-owner"
+		insertTestTask(s, otherID.String(), other)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		ctx = auth.NewContext(ctx, &user)
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["gomode://items"]}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.protocol.HandleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		data := w.Body.String()
+		found, msg := sseInitialStateNotification(data)
+		if !found {
+			t.Fatalf("subscription response = %s, want initial state", data)
+		}
+		var initial mcp.SubscriptionsInitialStateParams
+		b, err := json.Marshal(msg.Params)
+		if err != nil {
+			t.Fatalf("marshal initial state params: %v", err)
+		}
+		if err := json.Unmarshal(b, &initial); err != nil {
+			t.Fatalf("decode initial state: %v", err)
+		}
+		if initial.URI != "gomode://items" {
+			t.Fatalf("initial state uri = %q, want gomode://items", initial.URI)
+		}
+		if len(initial.Contents) != 1 {
+			t.Fatalf("initial state contents = %d, want 1", len(initial.Contents))
+		}
+		var streamItems serviceItemsOutput
+		if err := json.Unmarshal([]byte(initial.Contents[0].Text), &streamItems); err != nil {
+			t.Fatalf("decode delivered items: %v", err)
+		}
+		if len(streamItems.Items) != 1 {
+			t.Fatalf("delivered item count = %d, want 1 (owner filtered): %s", len(streamItems.Items), initial.Contents[0].Text)
+		}
+		if streamItems.Items[0].ID != mineID.String() {
+			t.Fatalf("delivered item id = %q, want the subscriber's task %s", streamItems.Items[0].ID, mineID)
+		}
+		if n := strings.Count(data, otherID.String()); n != 0 {
+			t.Fatalf("stream contains %d occurrences of another owner's task id %s, want 0", n, otherID)
 		}
 	})
 
@@ -665,6 +975,23 @@ func TestMCPHandlers(t *testing.T) {
 			})
 		}
 	})
+}
+
+// sseInitialStateNotification returns the first SSE data-line notification in
+// the body that delivers the subscribed initial state.
+func sseInitialStateNotification(data string) (bool, mcp.JSONRPCNotification) {
+	for line := range strings.SplitSeq(data, "\n") {
+		payload, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+		if !ok {
+			continue
+		}
+		var msg mcp.JSONRPCNotification
+		if err := json.Unmarshal([]byte(payload), &msg); err != nil || msg.Method != mcp.NotificationMethodSubscriptionsInitialState {
+			continue
+		}
+		return true, msg
+	}
+	return false, mcp.JSONRPCNotification{}
 }
 
 func newAuthEnabledRouter(t *testing.T) (*Router, auth.User) {

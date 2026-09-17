@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"iter"
 	"log/slog"
 	"net/http"
@@ -117,46 +119,40 @@ func TestHandlerHandleMCP(t *testing.T) {
 		}
 	})
 
-	t.Run("subscription resource update uses notifier", func(t *testing.T) {
+	t.Run("subscription initial state and resource update", func(t *testing.T) {
 		registry := newSubscriptionTestRegistry()
 		h := &Handler{Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
-		server := httptest.NewServer(http.HandlerFunc(h.HandleMCP))
-		t.Cleanup(server.Close)
+		r := openSubscriptionStream(t, h, "test://resource")
 
-		ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
-		t.Cleanup(cancel)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, strings.NewReader(nativeMCPRequestJSON("subscriptions/listen", `"notifications":{"resourceSubscriptions":["test://resource"]}`)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
-		req.Header.Set("Mcp-Method", string(MethodSubscriptionsListen))
-		resp, err := server.Client().Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := resp.Body.Close(); err != nil {
-				t.Fatal(err)
-			}
-		})
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
-		}
-		r := bufio.NewReader(resp.Body)
 		ack := readSSEMessage(t, r)
 		if ack.Method != NotificationMethodSubscriptionsAcknowledged {
 			t.Fatalf("first notification = %q, want acknowledgment", ack.Method)
 		}
 
-		// An initial resource update arrives before any mutation, forcing the
-		// client to re-read and closing the read-then-subscribe staleness gap.
+		// The post-ack notification is the delivered initial state, sourced from
+		// the same pre-ack read that seeds the dedup baseline.
 		initial := readSSEMessage(t, r)
-		if initial.Method != NotificationMethodResourcesUpdated {
-			t.Fatalf("initial notification = %q, want resource update", initial.Method)
+		if initial.Method != NotificationMethodSubscriptionsInitialState {
+			t.Fatalf("second notification = %q, want initial state", initial.Method)
 		}
-		if uri := resourceUpdateURI(t, initial); uri != "test://resource" {
-			t.Fatalf("initial uri = %q, want test://resource", uri)
+		if meta := subscriptionIDFromNotification(t, initial); meta != "test" {
+			t.Fatalf("initial state subscription id = %q, want test", meta)
+		}
+		if uri := notificationParamURI(t, initial); uri != "test://resource" {
+			t.Fatalf("initial state uri = %q, want test://resource", uri)
+		}
+		if text := initialStateText(t, initial); text != "initial" {
+			t.Fatalf("initial state content = %q, want the pre-ack read value", text)
+		}
+
+		// The legacy re-read burst still follows the delivered state for clients
+		// that only react to resources/updated.
+		burst := readSSEMessage(t, r)
+		if burst.Method != NotificationMethodResourcesUpdated {
+			t.Fatalf("third notification = %q, want resource update", burst.Method)
+		}
+		if uri := resourceUpdateURI(t, burst); uri != "test://resource" {
+			t.Fatalf("resource update uri = %q, want test://resource", uri)
 		}
 
 		if separator, err := r.ReadString('\n'); err != nil || separator != "\n" {
@@ -174,15 +170,51 @@ func TestHandlerHandleMCP(t *testing.T) {
 			t.Fatalf("SSE heartbeat terminator = %q, %v; want blank line", blank, err)
 		}
 
-		// A subsequent change still produces exactly one update; the initial
-		// burst left the dedup baseline untouched, so the change is not
-		// swallowed and not duplicated.
+		// A genuine post-subscribe change produces exactly one update even
+		// though the initial state was delivered inline.
 		registry.setResource("changed")
-		got := readSSEMessage(t, r)
-		if got.Method != NotificationMethodResourcesUpdated {
-			t.Fatalf("notification = %q, want resource update", got.Method)
+		changed := readSSEMessage(t, r)
+		if changed.Method != NotificationMethodResourcesUpdated {
+			t.Fatalf("notification = %q, want resource update", changed.Method)
 		}
-		if uri := resourceUpdateURI(t, got); uri != "test://resource" {
+		if uri := resourceUpdateURI(t, changed); uri != "test://resource" {
+			t.Fatalf("uri = %q, want test://resource", uri)
+		}
+
+		// Re-signaling the same state is deduplicated against the delivered
+		// contents: no further notification may follow.
+		registry.setResource("changed")
+		duplicate := make(chan JSONRPCNotification, 1)
+		go func() {
+			if msg, err := readSSEMessageNoFatal(r); err == nil {
+				duplicate <- msg
+			}
+		}()
+		select {
+		case msg := <-duplicate:
+			t.Fatalf("notification for unchanged content: method %q", msg.Method)
+		case <-time.After(300 * time.Millisecond):
+		}
+	})
+
+	t.Run("subscription initial state falls back to re-read on read failure", func(t *testing.T) {
+		registry := newSubscriptionTestRegistry()
+		registry.readErr = errors.New("resource read unavailable")
+		h := &Handler{Registry: registry, ServerInfo: Implementation{Name: "test", Version: "1.0.0"}}
+		r := openSubscriptionStream(t, h, "test://resource")
+
+		ack := readSSEMessage(t, r)
+		if ack.Method != NotificationMethodSubscriptionsAcknowledged {
+			t.Fatalf("first notification = %q, want acknowledgment", ack.Method)
+		}
+
+		// A target the pre-ack read could not serve keeps the legacy
+		// resources/updated burst so the client still re-reads it.
+		fallback := readSSEMessage(t, r)
+		if fallback.Method != NotificationMethodResourcesUpdated {
+			t.Fatalf("second notification = %q, want resource update fallback", fallback.Method)
+		}
+		if uri := resourceUpdateURI(t, fallback); uri != "test://resource" {
 			t.Fatalf("uri = %q, want test://resource", uri)
 		}
 	})
@@ -193,6 +225,7 @@ type subscriptionTestRegistry struct {
 	resource   string
 	changes    chan struct{}
 	heartbeats chan struct{}
+	readErr    error
 	callResult RawToolResult
 	listCalls  int
 	seqCalls   int
@@ -255,6 +288,9 @@ func TestSubscriptionResourcesHash(t *testing.T) {
 func (r *subscriptionTestRegistry) ReadResource(context.Context, string) (ResourcesReadResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.readErr != nil {
+		return ResourcesReadResult{}, r.readErr
+	}
 	return ResourcesReadResult{ResultType: ResultTypeComplete, Contents: []ResourceContent{{URI: "test://resource", MimeType: "application/json", Text: r.resource}}}, nil
 }
 
@@ -303,11 +339,49 @@ func nativeMCPRequestJSON(method, paramsFields string) string {
 	return `{"jsonrpc":"2.0","id":"test","method":"` + method + `","params":{` + paramsFields + `"_meta":{"io.modelcontextprotocol/protocolVersion":"` + ProtocolVersion + `","io.modelcontextprotocol/clientInfo":{"name":"caic-test","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`
 }
 
+// openSubscriptionStream opens a subscriptions/listen SSE stream for one
+// resource target and returns the body reader.
+func openSubscriptionStream(t *testing.T, h *Handler, uri string) *bufio.Reader {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(h.HandleMCP))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, strings.NewReader(nativeMCPRequestJSON("subscriptions/listen", fmt.Sprintf(`"notifications":{"resourceSubscriptions":[%q]}`, uri))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Mcp-Protocol-Version", ProtocolVersion)
+	req.Header.Set("Mcp-Method", string(MethodSubscriptionsListen))
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	return bufio.NewReader(resp.Body)
+}
+
 func readSSEMessage(t *testing.T, r *bufio.Reader) JSONRPCNotification {
+	msg, err := readSSEMessageNoFatal(r)
+	if err != nil {
+		t.Fatalf("read SSE: %v", err)
+	}
+	return msg
+}
+
+func readSSEMessageNoFatal(r *bufio.Reader) (JSONRPCNotification, error) {
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
-			t.Fatalf("read SSE: %v", err)
+			return JSONRPCNotification{}, err
 		}
 		line = strings.TrimSpace(line)
 		data, ok := strings.CutPrefix(line, "data: ")
@@ -316,10 +390,55 @@ func readSSEMessage(t *testing.T, r *bufio.Reader) JSONRPCNotification {
 		}
 		var msg JSONRPCNotification
 		if err := json.Unmarshal([]byte(data), &msg); err != nil {
-			t.Fatalf("decode SSE data: %v", err)
+			return JSONRPCNotification{}, fmt.Errorf("decode SSE data: %w", err)
 		}
-		return msg
+		return msg, nil
 	}
+}
+
+func notificationParamURI(t *testing.T, msg JSONRPCNotification) string {
+	params, ok := msg.Params.(map[string]any)
+	if !ok {
+		t.Fatalf("params = %#v, want object", msg.Params)
+	}
+	uri, _ := params["uri"].(string)
+	return uri
+}
+
+func subscriptionIDFromNotification(t *testing.T, msg JSONRPCNotification) string {
+	params, ok := msg.Params.(map[string]any)
+	if !ok {
+		t.Fatalf("params = %#v, want object", msg.Params)
+	}
+	meta, ok := params["_meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("params missing _meta: %#v", msg.Params)
+	}
+	id, _ := meta["io.modelcontextprotocol/subscriptionId"].(string)
+	return id
+}
+
+func initialStateText(t *testing.T, msg JSONRPCNotification) string {
+	params, ok := msg.Params.(map[string]any)
+	if !ok {
+		t.Fatalf("params = %#v, want object", msg.Params)
+	}
+	contents, ok := params["contents"].([]any)
+	if !ok || len(contents) != 1 {
+		t.Fatalf("contents = %#v, want one entry", params["contents"])
+	}
+	first, ok := contents[0].(map[string]any)
+	if !ok {
+		t.Fatalf("content = %#v, want object", contents[0])
+	}
+	if uri, _ := first["uri"].(string); uri != "test://resource" {
+		t.Fatalf("content uri = %q, want test://resource", uri)
+	}
+	if mimeType, _ := first["mimeType"].(string); mimeType != "application/json" {
+		t.Fatalf("content mimeType = %q, want application/json", mimeType)
+	}
+	text, _ := first["text"].(string)
+	return text
 }
 
 func resourceUpdateURI(t *testing.T, msg JSONRPCNotification) string {

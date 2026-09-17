@@ -14,6 +14,7 @@ import com.fghbuild.mcp.sdk.v1.ResourceDescriptor
 import com.fghbuild.mcp.sdk.v1.ResourcesReadResult
 import com.fghbuild.mcp.sdk.v1.ResultType
 import com.fghbuild.mcp.sdk.v1.SubscriptionFilter
+import com.fghbuild.mcp.sdk.v1.SubscriptionsInitialStateParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -33,7 +34,9 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -151,6 +154,148 @@ class ServiceMonitorTest {
         client.emit(resourceUpdated(GoModeNotificationsResourceURI))
         advanceUntilIdle()
         assertTrue(monitor.state.value.notifications.isEmpty())
+        monitor.stop()
+    }
+
+    @Test
+    fun `delivered initial state is exposed without a re-read`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Pre-subscribe state","state":"active"}]}""")
+        }
+        val monitor = ServiceMonitor(this) { _, _ -> client }
+        monitor.start("https://service.test", serviceSettings())
+        advanceUntilIdle()
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+
+        // The server's leading list_changed re-checks the plan without a re-read.
+        client.emit(resourceListChanged())
+        advanceUntilIdle()
+        assertEquals(2, client.listCalls)
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+
+        client.emit(initialState(GoModeItemsResourceURI, """{"items":[{"id":"i1","title":"Delivered state","state":"waiting"}]}"""))
+        advanceUntilIdle()
+
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+        assertEquals("Delivered state", monitor.state.value.snapshot?.items?.single()?.title)
+        assertEquals("waiting", monitor.state.value.snapshot?.items?.single()?.state)
+
+        // The legacy re-read burst that follows a delivered payload costs no round trip.
+        client.emit(resourceUpdated(GoModeItemsResourceURI))
+        advanceUntilIdle()
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+        assertEquals("Delivered state", monitor.state.value.snapshot?.items?.single()?.title)
+
+        // A genuine post-subscribe change still re-reads.
+        client.enqueueReadResult("""{"items":[{"id":"i1","title":"Changed state","state":"failed"}]}""")
+        client.emit(resourceUpdated(GoModeItemsResourceURI))
+        advanceUntilIdle()
+        assertEquals(2, client.readURIs.size)
+        assertEquals("Changed state", monitor.state.value.snapshot?.items?.single()?.title)
+        monitor.stop()
+    }
+
+    @Test
+    fun `streams without initial state keep the re-read fallback`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Pre-subscribe state","state":"active"}]}""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Fresh state","state":"waiting"}]}""")
+        }
+        val monitor = ServiceMonitor(this) { _, _ -> client }
+        monitor.start("https://service.test", serviceSettings())
+        advanceUntilIdle()
+
+        // The leading list_changed re-checks the plan without re-reading state.
+        client.emit(resourceListChanged())
+        advanceUntilIdle()
+        assertEquals(2, client.listCalls)
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+
+        client.emit(resourceUpdated(GoModeItemsResourceURI))
+        advanceUntilIdle()
+
+        assertEquals(listOf(GoModeItemsResourceURI, GoModeItemsResourceURI), client.readURIs)
+        assertEquals("Fresh state", monitor.state.value.snapshot?.items?.single()?.title)
+        monitor.stop()
+    }
+
+    @Test
+    fun `initial list changed burst is consumed and real list changes re-plan`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Build feature","state":"active"}]}""")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Build feature","state":"active"}]}""")
+            enqueueNotificationReadResult("[]")
+        }
+        val monitor = ServiceMonitor(this) { _, _ -> client }
+        monitor.start("https://service.test", serviceSettings())
+        advanceUntilIdle()
+        assertEquals(1, client.listCalls)
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+
+        // The server's leading list_changed re-checks the plan without a re-read.
+        client.emit(resourceListChanged())
+        advanceUntilIdle()
+        assertEquals(2, client.listCalls)
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+
+        client.emit(initialState(GoModeItemsResourceURI, """{"items":[{"id":"i1","title":"Build feature","state":"active"}]}"""))
+        client.emit(resourceUpdated(GoModeItemsResourceURI))
+        advanceUntilIdle()
+        assertEquals(2, client.listCalls)
+        assertEquals(listOf(GoModeItemsResourceURI), client.readURIs)
+
+        client.resources = listOf(
+            ResourceDescriptor(uri = GoModeItemsResourceURI, name = "items", mimeType = "application/json"),
+            ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
+        )
+        client.emit(resourceListChanged())
+        advanceUntilIdle()
+        assertEquals(3, client.listCalls)
+        assertEquals(
+            listOf(GoModeItemsResourceURI, GoModeNotificationsResourceURI),
+            client.readURIs.takeLast(2),
+        )
+        monitor.stop()
+    }
+
+    @Test
+    fun `partially delivered initial state falls back to a single re-read`() = runTest {
+        val client = FakeServiceResourceClient().apply {
+            resources = listOf(
+                ResourceDescriptor(uri = GoModeItemsResourceURI, name = "items", mimeType = "application/json"),
+                ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
+            )
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Pre-subscribe state","state":"active"}]}""")
+            enqueueNotificationReadResult("[]")
+            enqueueReadResult("""{"items":[{"id":"i1","title":"Server state","state":"active"}]}""")
+            enqueueNotificationReadResult("""[{"id":"event-1","title":"Item ready","body":"Build feature needs your input."}]""")
+        }
+        val monitor = ServiceMonitor(this) { _, _ -> client }
+        monitor.start("https://service.test", serviceSettings())
+        advanceUntilIdle()
+        assertEquals(listOf(GoModeItemsResourceURI, GoModeNotificationsResourceURI), client.readURIs)
+
+        // The server's leading list_changed re-checks the plan without a re-read.
+        client.emit(resourceListChanged())
+        advanceUntilIdle()
+        assertEquals(2, client.listCalls)
+        assertEquals(2, client.readURIs.size)
+
+        // Only items is delivered; its legacy update is consumed without a re-read.
+        client.emit(initialState(GoModeItemsResourceURI, """{"items":[{"id":"i1","title":"Delivered state","state":"waiting"}]}"""))
+        advanceUntilIdle()
+        assertEquals(2, client.readURIs.size)
+
+        client.emit(resourceUpdated(GoModeItemsResourceURI))
+        advanceUntilIdle()
+        assertEquals(2, client.readURIs.size)
+
+        // The undelivered URI's update falls back to one re-read that refreshes both.
+        client.emit(resourceUpdated(GoModeNotificationsResourceURI))
+        advanceUntilIdle()
+        assertEquals(4, client.readURIs.size)
+        assertEquals("Server state", monitor.state.value.snapshot?.items?.single()?.title)
+        assertEquals(listOf("Item ready"), monitor.state.value.notifications.map { it.title })
         monitor.stop()
     }
 
@@ -363,6 +508,22 @@ class ServiceMonitorTest {
             jsonrpc = "2.0",
             method = NotificationMethod.ResourcesUpdated,
             params = buildJsonObject { put("uri", uri) },
+        )
+
+        fun resourceListChanged(): JSONRPCNotification = JSONRPCNotification(
+            jsonrpc = "2.0",
+            method = NotificationMethod.ResourcesListChanged,
+        )
+
+        fun initialState(uri: String, text: String): JSONRPCNotification = JSONRPCNotification(
+            jsonrpc = "2.0",
+            method = NotificationMethod.SubscriptionsInitialState,
+            params = Json.encodeToJsonElement(
+                SubscriptionsInitialStateParams(
+                    uri = uri,
+                    contents = listOf(ResourceContent(uri = uri, mimeType = "application/json", text = text)),
+                ),
+            ),
         )
 
         fun jsonResponse(body: String): MockResponse = MockResponse()
