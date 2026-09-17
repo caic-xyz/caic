@@ -392,11 +392,15 @@ interface FileDiffRowProps {
 function FileDiffRow(props: FileDiffRowProps) {
   let toggleButton: HTMLButtonElement | undefined;
   let retryButton: HTMLButtonElement | undefined;
+  let focusFrame: number | undefined;
   const [diff, setDiff] = createSignal<string | null>(null);
   const [loadError, setLoadError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   let loadedVersion = -1;
   let pendingVersion = -1;
+  onCleanup(() => {
+    if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
+  });
   const pathLabel = () =>
     props.originalPath ? `${props.originalPath} → ${props.path}` : props.path;
 
@@ -418,7 +422,13 @@ function FileDiffRow(props: FileDiffRowProps) {
     try {
       setDiff(await props.loadDiff());
       setLoadError(null);
-      if (restoreToggleFocus) queueMicrotask(() => toggleButton?.focus());
+      if (restoreToggleFocus) {
+        if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
+        focusFrame = requestAnimationFrame(() => {
+          focusFrame = undefined;
+          if (toggleButton?.isConnected) toggleButton.focus();
+        });
+      }
     } catch (err: unknown) {
       if (!props.onLoadError(err)) {
         setLoadError(err instanceof Error ? err.message : "Unknown error");

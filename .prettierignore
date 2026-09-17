@@ -1,3 +1,4 @@
-# Generated API artifacts use generator-owned formatting.
+# Generated artifacts and dependency locks use tool-owned formatting.
+pnpm-lock.yaml
 sdk/*/API.md
 sdk/*/ts/**/*.gen.ts

@@ -1,6 +1,6 @@
 // Tests for DiffDetail repository status rendering and diff parsing utilities.
 
-import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 
@@ -164,7 +164,7 @@ describe("DiffDetail", () => {
     );
     resolveRetry({ diff: "@@ -1 +1 @@\n-old\n+retried" });
     expect(await screen.findByText("+retried")).toBeInTheDocument();
-    expect(row).toHaveFocus();
+    await waitFor(() => expect(row).toHaveFocus());
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
   });
 
