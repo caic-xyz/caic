@@ -642,17 +642,6 @@ func marshalParams(v any) (json.RawMessage, error) {
 	return json.RawMessage(b), nil
 }
 
-// writeJSON marshals v as JSON and writes it followed by a newline.
-func writeJSON(w io.Writer, v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = w.Write(data)
-	return err
-}
-
 // writeJSONInput writes one harness command and preserves its exact NDJSON
 // payload as caic-to-harness input when the log format supports provenance.
 func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {

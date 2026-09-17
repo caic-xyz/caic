@@ -365,16 +365,16 @@ func checkCodexInput(data []byte) (string, error) {
 		return "JSONRPCRequest", err
 	}
 	if request.JSONRPC != "2.0" || request.Method == "" {
-		return "JSONRPCRequest", errors.New("Codex input is missing JSON-RPC 2.0 method")
+		return "JSONRPCRequest", errors.New("codex input is missing JSON-RPC 2.0 method")
 	}
 	if request.Method == "initialized" {
 		if request.ID != nil || len(request.Params) != 0 {
-			return "JSONRPCNotification", errors.New("Codex initialized input must be a parameterless notification")
+			return "JSONRPCNotification", errors.New("codex initialized input must be a parameterless notification")
 		}
 		return "JSONRPCNotification", nil
 	}
 	if request.ID == nil || isEmptyJSON(request.Params) {
-		return "JSONRPCRequest", fmt.Errorf("Codex request %q is missing id or params", request.Method)
+		return "JSONRPCRequest", fmt.Errorf("codex request %q is missing id or params", request.Method)
 	}
 	var dst any
 	switch request.Method {
