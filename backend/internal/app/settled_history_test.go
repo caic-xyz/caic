@@ -59,7 +59,7 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 
 func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskmgr.Manager {
 	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{
-		&modelRefreshSystem{testRuntimeBackend: &runtimetest.FakeBackend{}, Inventory: &runtimetest.FakeInventory{}},
+		&runtimetest.FakeSystem{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +81,8 @@ func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskm
 func TestRunSettledHistory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	logStore := taskslog.NewStore(testLogger(), dir)
+	log := slog.New(slog.DiscardHandler)
+	logStore := taskslog.NewStore(log, dir)
 	taskMgr := newSettledHistoryTestManager(t, logStore)
 
 	now := time.Now().UTC()
@@ -97,7 +98,7 @@ func TestRunSettledHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runSettledHistory(t.Context(), testLogger(), logStore, taskMgr); err != nil {
+	if err := runSettledHistory(t.Context(), log, logStore, taskMgr); err != nil {
 		t.Fatal(err)
 	}
 

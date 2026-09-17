@@ -236,16 +236,21 @@ def render_graph(
 
 
 def render_table(packages: list[Package]) -> list[str]:
-    lines = [
-        "## Package Dependencies",
-        "",
-        "| Package | Production backend dependencies | Test-only backend dependencies |",
-        "|---|---|---|",
-    ]
+    headers = ("Package", "Production backend dependencies", "Test-only backend dependencies")
+    rows = []
     for package in packages:
         imports = ", ".join(f"`{dep}`" for dep in package.imports) if package.imports else "None"
         test_imports = ", ".join(f"`{dep}`" for dep in package.test_imports) if package.test_imports else "None"
-        lines.append(f"| `{package.path}` | {imports} | {test_imports} |")
+        rows.append((f"`{package.path}`", imports, test_imports))
+
+    widths = tuple(max(len(cell) for cell in column) for column in zip(headers, *rows, strict=True))
+
+    def row(cells: tuple[str, str, str]) -> str:
+        return "| " + " | ".join(cell.ljust(width) for cell, width in zip(cells, widths, strict=True)) + " |"
+
+    lines = ["## Package Dependencies", "", row(headers)]
+    lines.append("| " + " | ".join("-" * width for width in widths) + " |")
+    lines.extend(row(cells) for cells in rows)
     lines.append("")
     return lines
 
@@ -295,7 +300,7 @@ def validate_generated_content(content: str) -> None:
 
 def update_markdown(content: str, check: bool) -> int:
     original = DOC_PATH.read_text(encoding="utf-8")
-    replacement = f"{START_MARKER}\n{content}\n{END_MARKER}"
+    replacement = f"{START_MARKER}\n\n{content}\n\n{END_MARKER}"
     pattern = re.compile(f"{re.escape(START_MARKER)}.*?{re.escape(END_MARKER)}", re.DOTALL)
     if not pattern.search(original):
         raise ValueError(f"{DOC_PATH} is missing generated section markers")

@@ -1,6 +1,6 @@
 // Tests for harness model inventory refresh.
 
-package app
+package server
 
 import (
 	"context"
@@ -20,8 +20,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
 func TestRefreshHarnessModels(t *testing.T) {
 	t.Parallel()
 
@@ -39,7 +37,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			"plain":      &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}},
 		})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env, false)
 
 		if runtimeBackend.launches != 1 || runtimeBackend.connects != 1 || runtimeBackend.purges != 1 {
 			t.Fatalf("runtime calls = launch %d connect %d purge %d, want 1 each", runtimeBackend.launches, runtimeBackend.connects, runtimeBackend.purges)
@@ -81,7 +79,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 		}
 		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, env, false)
 
 		cached, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").ModelInventory(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
 		if !fresh || len(cached.Models) != 1 || !slices.Equal(cached.Models[0].EffortOptions, []string{"low", "high"}) {
@@ -103,13 +101,71 @@ func TestRefreshHarnessModels(t *testing.T) {
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil, false)
 
 		if runtimeBackend.launches != 0 {
 			t.Fatalf("launches = %d, want 0 for fresh cache", runtimeBackend.launches)
 		}
 		if fetcher.target.SSHHost != "" {
 			t.Fatalf("fetch target = %q, want no fetch", fetcher.target.SSHHost)
+		}
+	})
+
+	t.Run("force_refreshes_fresh_cache", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		fetchHarness := harness.Name("fetch")
+		cache := agent.OpenHarnessCache(cacheDir + "/harnesses.json")
+		cache.SetModelInventory(fetchHarness, agent.ModelInventory{Models: []agent.Model{{ID: "cached-model"}}}, "")
+		runtimeBackend := &modelRefreshRuntime{}
+		inventory := &modelRefreshInventory{}
+		router := newModelRefreshRouter(t, runtimeBackend, inventory)
+		fetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: fetchHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "new-model"}}}}
+		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{fetchHarness: fetcher})
+
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil, true)
+
+		if runtimeBackend.launches != 1 {
+			t.Fatalf("launches = %d, want 1 for forced refresh", runtimeBackend.launches)
+		}
+		if got := fetcher.setInventory.IDs(); !slices.Equal(got, []string{"new-model"}) {
+			t.Fatalf("SetModelInventory models = %v, want refreshed models", got)
+		}
+	})
+
+	t.Run("refresh_harness_fetches_only_requested_harness", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		firstHarness := harness.Name("first")
+		secondHarness := harness.Name("second")
+		runtimeBackend := &modelRefreshRuntime{}
+		inventory := &modelRefreshInventory{}
+		router := newModelRefreshRouter(t, runtimeBackend, inventory)
+		firstFetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: firstHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "first-model"}}}}
+		secondFetcher := &modelFetchBackend{FakeBackend: &agenttest.FakeBackend{}, harness: secondHarness, inventory: agent.ModelInventory{Models: []agent.Model{{ID: "second-model"}}}}
+		taskMgr := newModelRefreshTestManager(t, router, map[harness.Name]agent.Backend{
+			firstHarness:  firstFetcher,
+			secondHarness: secondFetcher,
+		})
+		refresher := &HarnessModels{
+			Log:         slog.New(slog.DiscardHandler),
+			CacheDir:    cacheDir,
+			Router:      router,
+			TaskManager: taskMgr,
+		}
+
+		if err := refresher.Refresh(t.Context(), secondHarness); err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+
+		if runtimeBackend.harness != secondHarness {
+			t.Fatalf("launched harness = %q, want %q", runtimeBackend.harness, secondHarness)
+		}
+		if firstFetcher.target.SSHHost != "" {
+			t.Fatalf("first fetch target = %q, want no fetch", firstFetcher.target.SSHHost)
+		}
+		if secondFetcher.target.SSHHost != "refresh-second" {
+			t.Fatalf("second fetch target = %q, want refresh-second", secondFetcher.target.SSHHost)
 		}
 	})
 
@@ -136,7 +192,7 @@ func TestRefreshHarnessModels(t *testing.T) {
 			fetchHarness: fetcher,
 		})
 
-		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil)
+		refreshHarnessModels(t.Context(), slog.New(slog.DiscardHandler), cacheDir, router, taskMgr, nil, false)
 
 		if !slices.Equal(runtimeBackend.purgedIDs, []runtime.ID{"test-runtime:stale-refresh"}) {
 			t.Fatalf("purged IDs = %v, want stale-refresh", runtimeBackend.purgedIDs)
@@ -178,11 +234,6 @@ type modelRefreshSystem struct {
 	runtimetest.FakePrivilegeInfo
 }
 
-type testRuntimeBackend interface {
-	runtime.Lifecycle
-	runtime.Repository
-}
-
 func (*modelRefreshSystem) Name() runtime.Name { return "test-runtime" }
 
 type modelFetchBackend struct {
@@ -204,8 +255,11 @@ func (b *modelFetchBackend) FetchModelInventory(_ context.Context, target runtim
 }
 
 func (b *modelFetchBackend) SetModelInventory(inventory agent.ModelInventory) {
+	b.FakeBackend.SetModelInventory(inventory)
 	b.setInventory = inventory
 }
+
+var _ testRuntimeBackend = (*modelRefreshRuntime)(nil)
 
 type modelRefreshRuntime struct {
 	launches    int
@@ -215,8 +269,6 @@ type modelRefreshRuntime struct {
 	harness     harness.Name
 	purgedIDs   []runtime.ID
 }
-
-var _ testRuntimeBackend = (*modelRefreshRuntime)(nil)
 
 func (r *modelRefreshRuntime) Launch(_ context.Context, _ []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
 	r.launches++
@@ -274,12 +326,12 @@ func (*modelRefreshRuntime) Signal(_ context.Context, _ runtime.ID, _ int, _ str
 	return nil
 }
 
+var _ runtime.Inventory = (*modelRefreshInventory)(nil)
+
 type modelRefreshInventory struct {
 	instances []runtime.Instance
 	metadata  map[runtime.ID]map[runtime.MetadataKey]string
 }
-
-var _ runtime.Inventory = (*modelRefreshInventory)(nil)
 
 func (i *modelRefreshInventory) List(context.Context) ([]runtime.Instance, error) {
 	return append([]runtime.Instance(nil), i.instances...), nil

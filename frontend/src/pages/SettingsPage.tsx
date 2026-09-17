@@ -18,6 +18,7 @@ export default function SettingsPage() {
         purgeDelay={s.purgeDelay}
         setPurgeDelay={s.setPurgeDelay}
         runtimes={s.runtimes}
+        harnesses={s.harnesses}
         selectedRuntimeName={s.selectedRuntimeName}
         setSelectedRuntimeName={s.setSelectedRuntimeName}
         wellKnownCaches={s.wellKnownCaches}
@@ -43,8 +44,11 @@ export default function SettingsPage() {
         checkingUpdate={s.checkingUpdate}
         updating={s.updating}
         updateStatus={s.updateStatus}
+        refreshingHarness={s.refreshingHarness}
+        modelRefreshStatus={s.modelRefreshStatus}
         saveSettings={s.saveSettings}
         triggerServerUpdate={s.triggerServerUpdate}
+        refreshAvailableModels={s.refreshAvailableModels}
       />
     </Layout>
   );

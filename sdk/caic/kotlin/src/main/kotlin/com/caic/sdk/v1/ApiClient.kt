@@ -107,6 +107,8 @@ class ApiClient(
     suspend fun revokeOAuthGrant(grantID: String, req: RevokeOAuthGrantReq): StatusResp = request("POST", "/api/caic/v1/oauth/grants/$grantID/revoke", json.encodeToString(req))
     /** Lists available coding agent harnesses. */
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
+    /** Refreshes one coding agent model inventory, bypassing its cache. */
+    suspend fun refreshHarness(harness: String, req: RefreshHarnessReq): HarnessInfo = request("POST", "/api/caic/v1/server/harnesses/$harness/refresh", json.encodeToString(req))
     /** Lists well-known cache configurations. */
     suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/caic/v1/server/caches")
     /** Returns the latest size snapshot for well-known caches. */

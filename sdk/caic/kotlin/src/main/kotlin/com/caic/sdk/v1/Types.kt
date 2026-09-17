@@ -1183,9 +1183,14 @@ data class HarnessInfo(
     val models: List<Model>,
     val supportsImages: Boolean,
     val supportsCompact: Boolean,
+    val supportsModelRefresh: Boolean,
     /** Shared quota source; empty when harness usage cannot be inferred. */
     val quotaGroup: QuotaProvider? = null,
 )
+
+/** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */
+@Serializable
+class RefreshHarnessReq
 
 /** WellKnownCache describes a single well-known cache. */
 @Serializable

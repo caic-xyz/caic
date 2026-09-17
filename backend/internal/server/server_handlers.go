@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -47,6 +48,7 @@ type serverHandlers struct {
 	repoStatus         *ci.RepoStatusStore
 	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
+	harnessModels      *HarnessModels
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
 	gitlabOAuth        *oauthclient.ProviderConfig
@@ -339,6 +341,7 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 			return nil, fmt.Errorf("convert %s quota provider: %w", h, err)
 		}
 		inventory := b.ModelInventory()
+		_, supportsModelRefresh := b.(agent.ModelFetcher)
 		models := make([]v1.Model, 0, len(inventory.Models))
 		for _, model := range inventory.Models {
 			models = append(models, v1.Model{
@@ -347,17 +350,42 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 			})
 		}
 		out = append(out, v1.HarnessInfo{
-			Name:            name,
-			Models:          models,
-			SupportsImages:  b.SupportsImages(),
-			SupportsCompact: b.SupportsCompact(),
-			QuotaGroup:      quotaGroup,
+			Name:                 name,
+			Models:               models,
+			SupportsImages:       b.SupportsImages(),
+			SupportsCompact:      b.SupportsCompact(),
+			SupportsModelRefresh: supportsModelRefresh,
+			QuotaGroup:           quotaGroup,
 		})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {
 		return strings.Compare(string(a.Name), string(b.Name))
 	})
 	return &out, nil
+}
+
+// refreshHarness bypasses one model cache, then returns that harness inventory.
+func (h *serverHandlers) refreshHarness(ctx context.Context, req *v1.RefreshHarnessReq) (*v1.HarnessInfo, error) {
+	agentHarness, err := apiconv.AgentHarness(req.Harness)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()}
+	}
+	if h.harnessModels == nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "model refresh is unavailable"}
+	}
+	if err := h.harnessModels.Refresh(ctx, agentHarness); err != nil {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+	}
+	harnesses, err := h.listHarnesses(ctx, &api.EmptyReq{})
+	if err != nil {
+		return nil, err
+	}
+	for _, info := range *harnesses {
+		if info.Name == req.Harness {
+			return &info, nil
+		}
+	}
+	return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "harness not available"}
 }
 
 func nonNilSlice[T any](values []T) []T {
@@ -600,6 +628,7 @@ func (h *serverHandlers) routes() http.Handler {
 	m.HandleFunc("GET /server/preferences", handle(h.getPreferences))
 	m.HandleFunc("POST /server/preferences", handle(h.updatePreferences))
 	m.HandleFunc("GET /server/harnesses", handle(h.listHarnesses))
+	m.HandleFunc("POST /server/harnesses/{harness}/refresh", handle(h.refreshHarness))
 	m.HandleFunc("GET /server/caches", handle(h.listCaches))
 	m.HandleFunc("GET /server/cache-sizes", handle(h.getCacheSizes))
 	m.HandleFunc("GET /server/repos", handle(h.listRepos))

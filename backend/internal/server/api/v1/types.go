@@ -59,11 +59,25 @@ const (
 
 // HarnessInfo is the JSON representation of an available harness.
 type HarnessInfo struct {
-	Name            Harness       `json:"name"`
-	Models          []Model       `json:"models"`
-	SupportsImages  bool          `json:"supportsImages"`
-	SupportsCompact bool          `json:"supportsCompact"`
-	QuotaGroup      QuotaProvider `json:"quotaGroup,omitempty"` // Shared quota source; empty when harness usage cannot be inferred.
+	Name                 Harness       `json:"name"`
+	Models               []Model       `json:"models"`
+	SupportsImages       bool          `json:"supportsImages"`
+	SupportsCompact      bool          `json:"supportsCompact"`
+	SupportsModelRefresh bool          `json:"supportsModelRefresh"`
+	QuotaGroup           QuotaProvider `json:"quotaGroup,omitempty"` // Shared quota source; empty when harness usage cannot be inferred.
+}
+
+// RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.
+type RefreshHarnessReq struct {
+	Harness Harness `json:"-" path:"harness"`
+}
+
+// Validate checks that the harness path parameter is present.
+func (r *RefreshHarnessReq) Validate() error {
+	if r.Harness == "" {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "harness is required"}
+	}
+	return nil
 }
 
 // Model describes the configuration choices supported by a harness model.

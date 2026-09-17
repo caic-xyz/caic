@@ -92,7 +92,9 @@
   cursor: pointer;
   border: 1px solid var(--color-border);
   background: var(--color-bg-input);
-  transition: background-color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .cacheName {
@@ -237,6 +239,12 @@
 .settingsButton:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.modelRefreshActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .oauthGrantList {

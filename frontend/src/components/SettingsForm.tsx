@@ -2,7 +2,20 @@
 
 import { For, Index, Show, type Accessor, type Setter } from "solid-js";
 
-import type { CacheMappingResp, CacheSize, OAuthGrantResp, MountMappingResp, Platform, RuntimeInfo, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type {
+  CacheMappingResp,
+  CacheSize,
+  Harness,
+  HarnessInfo,
+  OAuthGrantResp,
+  MountMappingResp,
+  Platform,
+  RuntimeInfo,
+  UpdatePreferencesReq,
+  VersionResp,
+  WellKnownCachesResp,
+} from "@sdk/types.gen";
+import Button from "./Button";
 
 import { formatDuration, parseDuration } from "../duration";
 
@@ -10,7 +23,10 @@ import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
 
-function defaultContainerPath(hostPath: string, resolvedContainerPath?: string): string {
+function defaultContainerPath(
+  hostPath: string,
+  resolvedContainerPath?: string,
+): string {
   if (!resolvedContainerPath) return "";
   if (hostPath === "~" || hostPath.startsWith("~/")) return hostPath;
   return resolvedContainerPath;
@@ -26,6 +42,7 @@ interface SettingsFormProps {
   purgeDelay: Accessor<number>;
   setPurgeDelay: Setter<number>;
   runtimes: Accessor<RuntimeInfo[]>;
+  harnesses: Accessor<HarnessInfo[]>;
   selectedRuntimeName: Accessor<string>;
   setSelectedRuntimeName: (runtimeName: string) => void;
   wellKnownCaches: Accessor<Record<string, boolean | undefined>>;
@@ -51,16 +68,21 @@ interface SettingsFormProps {
   checkingUpdate: Accessor<boolean>;
   updating: Accessor<boolean>;
   updateStatus: Accessor<string>;
+  refreshingHarness: Accessor<Harness | null>;
+  modelRefreshStatus: Accessor<string>;
   saveSettings: (overrides?: SettingsOverrides) => Promise<void>;
   triggerServerUpdate: () => Promise<void>;
+  refreshAvailableModels: (harness: Harness) => Promise<void>;
 }
 
 export default function SettingsForm(props: SettingsFormProps) {
+  const refreshableHarnesses = () =>
+    props.harnesses().filter((harness) => harness.supportsModelRefresh);
   const formatBytes = (bytes: number): string => {
     if (bytes <= 0) return "0 B";
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
     const i = Math.min(Math.floor(Math.log2(bytes) / 10), units.length - 1);
-    const value = bytes / (1024 ** i);
+    const value = bytes / 1024 ** i;
     return `${value >= 10 || i === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[i]}`;
   };
   const cacheSizeLabel = (name: string): string => {
@@ -75,15 +97,29 @@ export default function SettingsForm(props: SettingsFormProps) {
     if (Number.isNaN(date.getTime())) return "Unknown";
     return date.toLocaleString();
   };
-  const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
-    props.setCacheMappings((prev) => prev.map((mapping, i) => (
-      i === index ? { ...mapping, ...update, resolvedContainerPath: undefined } : mapping
-    )));
+  const updateCacheMapping = (
+    index: number,
+    update: Partial<CacheMappingResp>,
+  ) => {
+    props.setCacheMappings((prev) =>
+      prev.map((mapping, i) =>
+        i === index
+          ? { ...mapping, ...update, resolvedContainerPath: undefined }
+          : mapping,
+      ),
+    );
   };
-  const updateCustomMount = (index: number, update: Partial<MountMappingResp>) => {
-    props.setCustomMounts((prev) => prev.map((mount, i) => (
-      i === index ? { ...mount, ...update, resolvedContainerPath: undefined } : mount
-    )));
+  const updateCustomMount = (
+    index: number,
+    update: Partial<MountMappingResp>,
+  ) => {
+    props.setCustomMounts((prev) =>
+      prev.map((mount, i) =>
+        i === index
+          ? { ...mount, ...update, resolvedContainerPath: undefined }
+          : mount,
+      ),
+    );
   };
 
   return (
@@ -91,7 +127,9 @@ export default function SettingsForm(props: SettingsFormProps) {
       <div class={styles.settingsPanel}>
         <h2 class={styles.settingsPanelTitle}>Settings</h2>
         <Show when={props.settingsError()}>
-          <p class={styles.settingsError} role="alert">{props.settingsError()}</p>
+          <p class={styles.settingsError} role="alert">
+            {props.settingsError()}
+          </p>
         </Show>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Container</h3>
@@ -121,7 +159,14 @@ export default function SettingsForm(props: SettingsFormProps) {
                 }}
               >
                 <For each={props.runtimes()}>
-                  {(rt) => <option value={rt.name} selected={rt.name === props.selectedRuntimeName()}>{rt.name}</option>}
+                  {(rt) => (
+                    <option
+                      value={rt.name}
+                      selected={rt.name === props.selectedRuntimeName()}
+                    >
+                      {rt.name}
+                    </option>
+                  )}
                 </For>
               </select>
             </label>
@@ -150,13 +195,17 @@ export default function SettingsForm(props: SettingsFormProps) {
               placeholder="Default"
               min="0"
               value={props.maxCPUs() || ""}
-              onChange={(e) => props.setMaxCPUs(parseInt(e.currentTarget.value, 10) || 0)}
+              onChange={(e) =>
+                props.setMaxCPUs(parseInt(e.currentTarget.value, 10) || 0)
+              }
               onBlur={() => {
                 void props.saveSettings();
               }}
             />
           </label>
-          <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
+          <p class={styles.settingsDescription}>
+            Maximum CPU cores for each container (0 = use default).
+          </p>
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
@@ -178,7 +227,9 @@ export default function SettingsForm(props: SettingsFormProps) {
                         const newCaches = { ...props.wellKnownCaches() };
                         newCaches[cache.name] = e.currentTarget.checked;
                         props.setWellKnownCaches(newCaches);
-                        void props.saveSettings({ wellKnownCaches: newCaches as Record<string, boolean> });
+                        void props.saveSettings({
+                          wellKnownCaches: newCaches as Record<string, boolean>,
+                        });
                       }}
                     />
                     <span class={styles.cacheName}>{cache.name}</span>
@@ -193,58 +244,114 @@ export default function SettingsForm(props: SettingsFormProps) {
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Custom caches</h3>
-          <p class={styles.settingsDescription}>Persistent host directories mounted into each container for tool caches. Leave the container path blank to use the same <code>~</code> path.</p>
+          <p class={styles.settingsDescription}>
+            Persistent host directories mounted into each container for tool
+            caches. Leave the container path blank to use the same{" "}
+            <code>~</code> path.
+          </p>
           <Index each={props.cacheMappings()}>
             {(mapping, index) => (
-              <div class={styles.cacheMappingRow} data-state={mapping().enabled ? "enabled" : "disabled"} data-testid="cache-mapping-row">
-                <label class={styles.cacheMappingToggle} title="Enable custom cache">
+              <div
+                class={styles.cacheMappingRow}
+                data-state={mapping().enabled ? "enabled" : "disabled"}
+                data-testid="cache-mapping-row"
+              >
+                <label
+                  class={styles.cacheMappingToggle}
+                  title="Enable custom cache"
+                >
                   <input
                     type="checkbox"
                     checked={mapping().enabled}
                     onChange={(e) => {
                       const enabled = e.currentTarget.checked;
-                      const newMappings = props.cacheMappings().map((item, i) => (
-                        i === index ? { ...item, enabled } : item
-                      ));
+                      const newMappings = props
+                        .cacheMappings()
+                        .map((item, i) =>
+                          i === index ? { ...item, enabled } : item,
+                        );
                       props.setCacheMappings(newMappings);
                       void props.saveSettings({ cacheMappings: newMappings });
                     }}
                   />
                   <span class={styles.visuallyHidden}>Enable custom cache</span>
                 </label>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
+                <span
+                  class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}
+                >
+                  Host path
+                </span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingHostInput}`}
                   aria-label="Host path"
                   placeholder="~/.cache/tool"
                   value={mapping().hostPath}
-                  onInput={(e) => updateCacheMapping(index, { hostPath: e.currentTarget.value })}
+                  onInput={(e) =>
+                    updateCacheMapping(index, {
+                      hostPath: e.currentTarget.value,
+                    })
+                  }
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">→</span>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
+                <span
+                  class={styles.cacheMappingArrow}
+                  data-testid="mapping-arrow"
+                >
+                  →
+                </span>
+                <span
+                  class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}
+                >
+                  Container path
+                </span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
                   aria-label="Container path"
-                  placeholder={defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath) || "Container path"}
+                  placeholder={
+                    defaultContainerPath(
+                      mapping().hostPath,
+                      mapping().resolvedContainerPath,
+                    ) || "Container path"
+                  }
                   value={mapping().containerPath}
-                  onInput={(e) => updateCacheMapping(index, { containerPath: e.currentTarget.value })}
+                  onInput={(e) =>
+                    updateCacheMapping(index, {
+                      containerPath: e.currentTarget.value,
+                    })
+                  }
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <Show when={mapping().containerPath === "" && defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)}>
-                  <span class={styles.mappingPathHint}>Uses {defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)} by default</span>
+                <Show
+                  when={
+                    mapping().containerPath === "" &&
+                    defaultContainerPath(
+                      mapping().hostPath,
+                      mapping().resolvedContainerPath,
+                    )
+                  }
+                >
+                  <span class={styles.mappingPathHint}>
+                    Uses{" "}
+                    {defaultContainerPath(
+                      mapping().hostPath,
+                      mapping().resolvedContainerPath,
+                    )}{" "}
+                    by default
+                  </span>
                 </Show>
                 <button
                   type="button"
                   class={styles.cacheMappingRemove}
                   onClick={() => {
-                    const newMappings = props.cacheMappings().filter((_, i) => i !== index);
+                    const newMappings = props
+                      .cacheMappings()
+                      .filter((_, i) => i !== index);
                     props.setCacheMappings(newMappings);
                     void props.saveSettings({ cacheMappings: newMappings });
                   }}
@@ -258,7 +365,10 @@ export default function SettingsForm(props: SettingsFormProps) {
             type="button"
             class={styles.settingsButton}
             onClick={() => {
-              props.setCacheMappings([...props.cacheMappings(), { hostPath: "", containerPath: "", enabled: true }]);
+              props.setCacheMappings([
+                ...props.cacheMappings(),
+                { hostPath: "", containerPath: "", enabled: true },
+              ]);
             }}
           >
             + Add mapping
@@ -266,62 +376,121 @@ export default function SettingsForm(props: SettingsFormProps) {
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Custom mounts</h3>
-          <p class={styles.settingsDescription}>Additional host directories mounted into each container. Leave the container path blank to use the same <code>~</code> path.</p>
+          <p class={styles.settingsDescription}>
+            Additional host directories mounted into each container. Leave the
+            container path blank to use the same <code>~</code> path.
+          </p>
           <Index each={props.customMounts()}>
             {(mount, index) => (
-              <div class={styles.cacheMappingRow} data-state={mount().enabled ? "enabled" : "disabled"} data-testid="custom-mount-row">
-                <label class={styles.cacheMappingToggle} title="Enable custom mount">
+              <div
+                class={styles.cacheMappingRow}
+                data-state={mount().enabled ? "enabled" : "disabled"}
+                data-testid="custom-mount-row"
+              >
+                <label
+                  class={styles.cacheMappingToggle}
+                  title="Enable custom mount"
+                >
                   <input
                     type="checkbox"
                     checked={mount().enabled}
                     onChange={(e) => {
                       const enabled = e.currentTarget.checked;
-                      const newMounts = props.customMounts().map((item, i) => (
-                        i === index ? { ...item, enabled } : item
-                      ));
+                      const newMounts = props
+                        .customMounts()
+                        .map((item, i) =>
+                          i === index ? { ...item, enabled } : item,
+                        );
                       props.setCustomMounts(newMounts);
                       void props.saveSettings({ customMounts: newMounts });
                     }}
                   />
                   <span class={styles.visuallyHidden}>Enable custom mount</span>
                 </label>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
+                <span
+                  class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}
+                >
+                  Host path
+                </span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingHostInput}`}
                   aria-label="Host path"
                   placeholder="~/Documents"
                   value={mount().hostPath}
-                  onInput={(e) => updateCustomMount(index, { hostPath: e.currentTarget.value })}
+                  onInput={(e) =>
+                    updateCustomMount(index, {
+                      hostPath: e.currentTarget.value,
+                    })
+                  }
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">→</span>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
+                <span
+                  class={styles.cacheMappingArrow}
+                  data-testid="mapping-arrow"
+                >
+                  →
+                </span>
+                <span
+                  class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}
+                >
+                  Container path
+                </span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
                   aria-label="Container path"
-                  placeholder={defaultContainerPath(mount().hostPath, mount().resolvedContainerPath) || "Container path"}
+                  placeholder={
+                    defaultContainerPath(
+                      mount().hostPath,
+                      mount().resolvedContainerPath,
+                    ) || "Container path"
+                  }
                   value={mount().containerPath}
-                  onInput={(e) => updateCustomMount(index, { containerPath: e.currentTarget.value })}
+                  onInput={(e) =>
+                    updateCustomMount(index, {
+                      containerPath: e.currentTarget.value,
+                    })
+                  }
                   onBlur={() => {
                     void props.saveSettings();
                   }}
                 />
-                <Show when={mount().containerPath === "" && defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)}>
-                  <span class={styles.mappingPathHint}>Uses {defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)} by default</span>
+                <Show
+                  when={
+                    mount().containerPath === "" &&
+                    defaultContainerPath(
+                      mount().hostPath,
+                      mount().resolvedContainerPath,
+                    )
+                  }
+                >
+                  <span class={styles.mappingPathHint}>
+                    Uses{" "}
+                    {defaultContainerPath(
+                      mount().hostPath,
+                      mount().resolvedContainerPath,
+                    )}{" "}
+                    by default
+                  </span>
                 </Show>
-                <label class={styles.mountOptionToggle} title="Mount read-only" data-testid="mount-read-only">
+                <label
+                  class={styles.mountOptionToggle}
+                  title="Mount read-only"
+                  data-testid="mount-read-only"
+                >
                   <input
                     type="checkbox"
                     checked={mount().readOnly ?? false}
                     onChange={(e) => {
                       const readOnly = e.currentTarget.checked;
-                      const newMounts = props.customMounts().map((item, i) => (
-                        i === index ? { ...item, readOnly } : item
-                      ));
+                      const newMounts = props
+                        .customMounts()
+                        .map((item, i) =>
+                          i === index ? { ...item, readOnly } : item,
+                        );
                       props.setCustomMounts(newMounts);
                       void props.saveSettings({ customMounts: newMounts });
                     }}
@@ -332,7 +501,9 @@ export default function SettingsForm(props: SettingsFormProps) {
                   type="button"
                   class={styles.cacheMappingRemove}
                   onClick={() => {
-                    const newMounts = props.customMounts().filter((_, i) => i !== index);
+                    const newMounts = props
+                      .customMounts()
+                      .filter((_, i) => i !== index);
                     props.setCustomMounts(newMounts);
                     void props.saveSettings({ customMounts: newMounts });
                   }}
@@ -346,7 +517,15 @@ export default function SettingsForm(props: SettingsFormProps) {
             type="button"
             class={styles.settingsButton}
             onClick={() => {
-              props.setCustomMounts([...props.customMounts(), { hostPath: "", containerPath: "", enabled: true, readOnly: false }]);
+              props.setCustomMounts([
+                ...props.customMounts(),
+                {
+                  hostPath: "",
+                  containerPath: "",
+                  enabled: true,
+                  readOnly: false,
+                },
+              ]);
             }}
           >
             + Add mount
@@ -355,23 +534,47 @@ export default function SettingsForm(props: SettingsFormProps) {
         <Show when={props.mcpOAuthAvailable()}>
           <div class={styles.settingsSection}>
             <h3 class={styles.settingsSectionTitle}>MCP clients</h3>
-            <p class={styles.settingsDescription}>Remote clients authorized to access caic through MCP OAuth.</p>
-            <Show when={!props.oauthGrantError()} fallback={
-              <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>{props.oauthGrantError()}</p>
-            }>
-              <Show when={props.oauthGrants().length > 0} fallback={
-                <p class={styles.settingsDescription}>No connected MCP clients.</p>
-              }>
+            <p class={styles.settingsDescription}>
+              Remote clients authorized to access caic through MCP OAuth.
+            </p>
+            <Show
+              when={!props.oauthGrantError()}
+              fallback={
+                <p
+                  class={styles.settingsDescription}
+                  style={{ color: "var(--color-error)" }}
+                >
+                  {props.oauthGrantError()}
+                </p>
+              }
+            >
+              <Show
+                when={props.oauthGrants().length > 0}
+                fallback={
+                  <p class={styles.settingsDescription}>
+                    No connected MCP clients.
+                  </p>
+                }
+              >
                 <div class={styles.oauthGrantList}>
                   <For each={props.oauthGrants()}>
                     {(grant) => (
-                      <div class={styles.oauthGrantCard} data-status={grant.status}>
+                      <div
+                        class={styles.oauthGrantCard}
+                        data-status={grant.status}
+                      >
                         <div class={styles.oauthGrantHeader}>
                           <div>
-                            <div class={styles.oauthGrantName}>{grant.clientName || grant.clientID}</div>
-                            <div class={styles.oauthGrantMeta}>{grant.clientID}</div>
+                            <div class={styles.oauthGrantName}>
+                              {grant.clientName || grant.clientID}
+                            </div>
+                            <div class={styles.oauthGrantMeta}>
+                              {grant.clientID}
+                            </div>
                           </div>
-                          <span class={styles.oauthGrantStatus}>{grant.status}</span>
+                          <span class={styles.oauthGrantStatus}>
+                            {grant.status}
+                          </span>
                         </div>
                         <div class={styles.oauthGrantDetails}>
                           <div>Scopes: {grant.scopes.join(", ")}</div>
@@ -389,7 +592,9 @@ export default function SettingsForm(props: SettingsFormProps) {
                               void props.revokeOAuthClientGrant(grant.id);
                             }}
                           >
-                            {props.revokingOAuthGrantID() === grant.id ? "Revoking…" : "Revoke access"}
+                            {props.revokingOAuthGrantID() === grant.id
+                              ? "Revoking…"
+                              : "Revoke access"}
                           </button>
                         </Show>
                       </div>
@@ -410,7 +615,11 @@ export default function SettingsForm(props: SettingsFormProps) {
               value={formatDuration(props.purgeDelay())}
               aria-describedby="purge-delay-description"
               onInput={(e) => {
-                e.currentTarget.setCustomValidity(parseDuration(e.currentTarget.value) === null ? "Enter a duration such as 1m31s." : "");
+                e.currentTarget.setCustomValidity(
+                  parseDuration(e.currentTarget.value) === null
+                    ? "Enter a duration such as 1m31s."
+                    : "",
+                );
               }}
               onChange={(e) => {
                 const delay = parseDuration(e.currentTarget.value);
@@ -425,7 +634,10 @@ export default function SettingsForm(props: SettingsFormProps) {
               }}
             />
           </label>
-          <p id="purge-delay-description" class={styles.settingsDescription}>How long a task remains stopped and revivable before deletion. Use duration syntax such as 1m31s; allowed range is 10s–24h.</p>
+          <p id="purge-delay-description" class={styles.settingsDescription}>
+            How long a task remains stopped and revivable before deletion. Use
+            duration syntax such as 1m31s; allowed range is 10s–24h.
+          </p>
           <label class={styles.settingsLabel}>
             <input
               type="checkbox"
@@ -438,7 +650,10 @@ export default function SettingsForm(props: SettingsFormProps) {
             />
             Auto-fix CI failures
           </label>
-          <p class={styles.settingsDescription}>When CI fails on a PR and the agent has finished, automatically start a new task to fix it.</p>
+          <p class={styles.settingsDescription}>
+            When CI fails on a PR and the agent has finished, automatically
+            start a new task to fix it.
+          </p>
           <label class={styles.settingsLabel}>
             <input
               type="checkbox"
@@ -451,34 +666,90 @@ export default function SettingsForm(props: SettingsFormProps) {
             />
             Auto-fix PRs
           </label>
-          <p class={styles.settingsDescription}>When a pull request is opened or reopened, automatically start a task to review and fix it.</p>
+          <p class={styles.settingsDescription}>
+            When a pull request is opened or reopened, automatically start a
+            task to review and fix it.
+          </p>
+        </div>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Models</h3>
+          <p class={styles.settingsDescription}>
+            Reload a coding agent’s model list. Refreshing OpenCode also
+            refreshes its models.dev cache.
+          </p>
+          <div class={styles.modelRefreshActions}>
+            <For
+              each={refreshableHarnesses()}
+              fallback={
+                <p class={styles.settingsDescription}>
+                  No installed coding agents support model refresh.
+                </p>
+              }
+            >
+              {(harness) => (
+                <Button
+                  type="button"
+                  variant="gray"
+                  disabled={props.refreshingHarness() !== null}
+                  loading={props.refreshingHarness() === harness.name}
+                  onClick={() => {
+                    void props.refreshAvailableModels(harness.name);
+                  }}
+                >
+                  Refresh {harness.name} models
+                </Button>
+              )}
+            </For>
+          </div>
+          <Show when={props.modelRefreshStatus()}>
+            <p class={styles.settingsDescription} role="status">
+              {props.modelRefreshStatus()}
+            </p>
+          </Show>
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Version</h3>
-          <Show when={props.versionInfo()} fallback={
-            <Show when={props.checkingUpdate()} fallback={
-              <Show when={props.versionCheckError()}>
-                <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>Check failed: {props.versionCheckError()}</p>
+          <Show
+            when={props.versionInfo()}
+            fallback={
+              <Show
+                when={props.checkingUpdate()}
+                fallback={
+                  <Show when={props.versionCheckError()}>
+                    <p
+                      class={styles.settingsDescription}
+                      style={{ color: "var(--color-error)" }}
+                    >
+                      Check failed: {props.versionCheckError()}
+                    </p>
+                  </Show>
+                }
+              >
+                <p class={styles.settingsDescription}>Checking for updates…</p>
               </Show>
-            }>
-              <p class={styles.settingsDescription}>Checking for updates…</p>
-            </Show>
-          }>
+            }
+          >
             {(v) => (
               <>
                 <p class={styles.settingsDescription}>
                   Current: <strong>caic v{v().current}</strong>
                   <Show when={v().latest}>
                     {" — "}
-                    <Show when={v().updateAvailable} fallback={
-                      <>latest: v{v().latest} (up to date)</>
-                    }>
+                    <Show
+                      when={v().updateAvailable}
+                      fallback={<>latest: v{v().latest} (up to date)</>}
+                    >
                       latest: <strong>v{v().latest}</strong> (update available)
                     </Show>
                   </Show>
                 </p>
                 <Show when={v().checkError}>
-                  <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>Check failed: {v().checkError}</p>
+                  <p
+                    class={styles.settingsDescription}
+                    style={{ color: "var(--color-error)" }}
+                  >
+                    Check failed: {v().checkError}
+                  </p>
                 </Show>
                 <Show when={v().autoUpdateEnabled && v().updateAvailable}>
                   <button
@@ -493,7 +764,9 @@ export default function SettingsForm(props: SettingsFormProps) {
                   </button>
                 </Show>
                 <Show when={props.updateStatus()}>
-                  <p class={styles.settingsDescription}>{props.updateStatus()}</p>
+                  <p class={styles.settingsDescription}>
+                    {props.updateStatus()}
+                  </p>
                 </Show>
               </>
             )}

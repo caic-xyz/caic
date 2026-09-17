@@ -40,6 +40,7 @@ import {
   listOAuthGrants,
   revokeOAuthGrant,
   listHarnesses,
+  refreshHarness,
   listCaches,
   getCacheSizes,
   listRepos,
@@ -198,6 +199,9 @@ function createAppStore() {
   const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
   const [versionCheckError, setVersionCheckError] = createSignal("");
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
+  const [refreshingHarness, setRefreshingHarness] =
+    createSignal<Harness | null>(null);
+  const [modelRefreshStatus, setModelRefreshStatus] = createSignal("");
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
   let latestSettingsSave = 0;
@@ -1402,6 +1406,25 @@ function createAppStore() {
     }
   }
 
+  async function refreshAvailableModels(harness: Harness) {
+    setRefreshingHarness(harness);
+    setModelRefreshStatus("");
+    try {
+      const refreshed = await refreshHarness(harness, {});
+      setHarnesses((prev) =>
+        prev.map((info) => (info.name === harness ? refreshed : info)),
+      );
+      if (selectedHarness() === harness) selectHarness(harness);
+      setModelRefreshStatus(`${harness} models refreshed.`);
+    } catch (e: unknown) {
+      setModelRefreshStatus(
+        e instanceof Error ? e.message : "Could not refresh models",
+      );
+    } finally {
+      setRefreshingHarness(null);
+    }
+  }
+
   // Navigate to a task's detail route, building the slugged path from its repo/branch/title.
   const navigateToTask = (id: string) => {
     const found = taskById(id);
@@ -1593,8 +1616,11 @@ function createAppStore() {
     checkingUpdate,
     updating,
     updateStatus,
+    refreshingHarness,
+    modelRefreshStatus,
     saveSettings,
     triggerServerUpdate,
+    refreshAvailableModels,
     // usage + connection
     usage,
     connected,

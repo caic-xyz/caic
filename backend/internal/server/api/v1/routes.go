@@ -133,6 +133,14 @@ var Routes = []Route{
 		IsArray: true,
 	},
 	{
+		Name:   "refreshHarness",
+		Doc:    "Refreshes one coding agent model inventory, bypassing its cache.",
+		Method: "POST",
+		Path:   "/api/caic/v1/server/harnesses/{harness}/refresh",
+		Req:    reflect.TypeFor[RefreshHarnessReq](),
+		Resp:   reflect.TypeFor[HarnessInfo](),
+	},
+	{
 		Name:   "listCaches",
 		Doc:    "Lists well-known cache configurations.",
 		Method: "GET",

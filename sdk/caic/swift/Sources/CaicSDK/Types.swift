@@ -729,8 +729,13 @@ public struct HarnessInfo: Codable {
     public let models: [Model]
     public let supportsImages: Bool
     public let supportsCompact: Bool
+    public let supportsModelRefresh: Bool
     /// Shared quota source; empty when harness usage cannot be inferred.
     public let quotaGroup: QuotaProvider?
+}
+
+/// RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.
+public struct RefreshHarnessReq: Codable {
 }
 
 /// WellKnownCache describes a single well-known cache.

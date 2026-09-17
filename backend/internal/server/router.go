@@ -390,7 +390,9 @@ type Dependencies struct {
 	TaskClient taskCreator // creates tasks for manual CI repair
 	Warnings   *WarningStore
 	CacheSizes *CacheSizeStore
-	FakeCI     FakeCIHook // optional fake CI simulation hook for smoke/e2e tests
+	// HarnessModels refreshes coding-agent model inventories.
+	HarnessModels *HarnessModels
+	FakeCI        FakeCIHook // optional fake CI simulation hook for smoke/e2e tests
 
 	GitHubAllowedUsers     []string
 	GitLabAllowedUsers     []string
@@ -499,6 +501,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			repoStatus:         d.RepoStatus,
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
+			harnessModels:      d.HarnessModels,
 			authStore:          d.AuthStore,
 			githubOAuth:        d.GitHubOAuth,
 			gitlabOAuth:        d.GitLabOAuth,

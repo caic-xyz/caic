@@ -16,6 +16,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/server/preferences` | Returns server and per-repository preferences. |  | `PreferencesResp` |
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
 | GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
+| POST | `/api/caic/v1/server/harnesses/{harness}/refresh` | Refreshes one coding agent model inventory, bypassing its cache. | `RefreshHarnessReq` | `HarnessInfo` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
 | GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
@@ -600,7 +601,15 @@ HarnessInfo is the JSON representation of an available harness.
 | `models` | `Model[]` |  | yes |
 | `supportsImages` | `boolean` |  | yes |
 | `supportsCompact` | `boolean` |  | yes |
+| `supportsModelRefresh` | `boolean` |  | yes |
 | `quotaGroup` | `QuotaProvider` | Shared quota source; empty when harness usage cannot be inferred. |  |
+
+### RefreshHarnessReq
+
+RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
 
 ### WellKnownCache
 

@@ -273,6 +273,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}()
 	repoStatus := ci.NewRepoStatusStore()
+	harnessModels := &server.HarnessModels{
+		Log:         log.With("cmp", "model-refresh"),
+		CacheDir:    cfg.Dirs.CacheDir,
+		Router:      runtimes,
+		TaskManager: taskMgr,
+		HarnessEnv:  cfg.Agent.HarnessEnv,
+	}
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
@@ -330,6 +337,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		TaskClient:                 botClient,
 		Warnings:                   warnings,
 		CacheSizes:                 cacheSizes,
+		HarnessModels:              harnessModels,
 		GitHubAllowedUsers:         cfg.GitHub.OAuthAllowedUsers,
 		GitLabAllowedUsers:         cfg.GitLab.OAuthAllowedUsers,
 		GoogleAllowedUsers:         cfg.Google.OAuthAllowedUsers,
@@ -478,7 +486,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			_, tk := trace.NewTask(ctx, "watch-harness-model-cache")
 			defer tk.End()
 			trace.Log(ctx, "startup", "watch-harness-model-cache: begin")
-			return watchHarnessModelCache(ctx, log.With("cmp", "model-refresh"), cfg.Dirs.CacheDir, runtimes, taskMgr, cfg.Agent.HarnessEnv)
+			return harnessModels.Watch(ctx)
 		},
 		func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "refresh-cache-sizes")

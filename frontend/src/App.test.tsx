@@ -86,6 +86,7 @@ vi.mock("./api", () => ({
   getPreferences: vi.fn(),
   updatePreferences: vi.fn(),
   listHarnesses: vi.fn(),
+  refreshHarness: vi.fn(),
   listCaches: vi.fn(() => Promise.resolve(null)),
   getCacheSizes: vi.fn(() => Promise.resolve(null)),
   getConfig: vi.fn(),
@@ -256,6 +257,13 @@ beforeEach(() => {
       supportsCompact: false,
     },
   ] as unknown as HarnessInfo[]);
+  vi.mocked(api.refreshHarness).mockResolvedValue({
+    name: "claude",
+    models: [],
+    supportsImages: false,
+    supportsCompact: false,
+    supportsModelRefresh: false,
+  } as unknown as HarnessInfo);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getVersion).mockResolvedValue({
     current: "0.0.1",
@@ -1724,6 +1732,39 @@ describe("App repo chips: No repository", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
+  });
+
+  it("refreshes models from settings", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listHarnesses).mockResolvedValue([
+      {
+        name: "opencode",
+        models: [],
+        supportsImages: true,
+        supportsCompact: true,
+        supportsModelRefresh: true,
+      },
+    ] as unknown as HarnessInfo[]);
+    vi.mocked(api.refreshHarness).mockResolvedValue({
+      name: "opencode",
+      models: [{ id: "openrouter/stealth/union-alpha", effortOptions: [] }],
+      supportsImages: true,
+      supportsCompact: true,
+      supportsModelRefresh: true,
+    } as unknown as HarnessInfo);
+    renderApp("/settings");
+    await waitFor(() => expect(api.listHarnesses).toHaveBeenCalledOnce());
+
+    await user.click(
+      await screen.findByRole("button", { name: "Refresh opencode models" }),
+    );
+
+    await waitFor(() =>
+      expect(api.refreshHarness).toHaveBeenCalledWith("opencode", {}),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "opencode models refreshed.",
+    );
   });
 
   it("saves the task purge delay", async () => {

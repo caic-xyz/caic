@@ -131,6 +131,44 @@ func TestServerHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("refresh_harness_bypasses_its_model_cache", func(t *testing.T) {
+		t.Parallel()
+		openCode := &modelFetchBackend{
+			FakeBackend: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "cached-model"}}}},
+			harness:     harness.OpenCode,
+			inventory:   agent.ModelInventory{Models: []agent.Model{{ID: "refreshed-model"}}},
+		}
+		codex := &modelFetchBackend{
+			FakeBackend: &agenttest.FakeBackend{},
+			harness:     harness.Codex,
+			inventory:   agent.ModelInventory{Models: []agent.Model{{ID: "codex-model"}}},
+		}
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.OpenCode: openCode, harness.Codex: codex})
+		s.serverHandlers.harnessModels = &HarnessModels{
+			Log:         testLogger(),
+			CacheDir:    t.TempDir(),
+			Router:      s.serverHandlers.runtimes,
+			TaskManager: s.taskMgr,
+		}
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/server/harnesses/opencode/refresh", strings.NewReader("{}"))
+		s.serverHandlers.routes().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		if codex.target.SSHHost != "" {
+			t.Fatalf("Codex fetch target = %q, want no fetch", codex.target.SSHHost)
+		}
+		var got v1.HarnessInfo
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(got.Models) != 1 || got.Models[0].ID != "refreshed-model" {
+			t.Fatalf("refreshed harness = %#v, want refreshed-model", got)
+		}
+	})
+
 	t.Run("preferences", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

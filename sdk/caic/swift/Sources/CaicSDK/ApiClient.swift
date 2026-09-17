@@ -150,6 +150,10 @@ public final class ApiClient {
     public func listHarnesses() async throws -> [HarnessInfo] {
         try await request("GET", path: "/api/caic/v1/server/harnesses")
     }
+    /// Refreshes one coding agent model inventory, bypassing its cache.
+    public func refreshHarness(harness: String, req: RefreshHarnessReq) async throws -> HarnessInfo {
+        try await request("POST", path: "/api/caic/v1/server/harnesses/\(harness)/refresh", body: try encoder.encode(req))
+    }
     /// Lists well-known cache configurations.
     public func listCaches() async throws -> WellKnownCachesResp {
         try await request("GET", path: "/api/caic/v1/server/caches")

@@ -1,6 +1,6 @@
 // Harness model inventory cache refresh and deletion watcher.
 
-package app
+package server
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -19,10 +20,49 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
-// watchHarnessModelCache refreshes stale model caches at startup, then watches
-// harnesses.json for deletion and regenerates it on demand.
-func watchHarnessModelCache(ctx context.Context, log *slog.Logger, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) error {
-	refreshHarnessModels(ctx, log, cacheDir, router, taskMgr, harnessEnv)
+// HarnessModels serializes model-inventory refreshes from startup,
+// cache deletion, and user-triggered refreshes.
+type HarnessModels struct {
+	// Log records model refresh progress.
+	Log *slog.Logger
+	// CacheDir stores the harness model inventory cache.
+	CacheDir string
+	// Router creates temporary runtimes for model discovery.
+	Router *runtime.Router
+	// TaskManager owns the configured harness backends.
+	TaskManager *taskmgr.Manager
+	// HarnessEnv supplies environment variables to each harness refresh.
+	HarnessEnv map[string][]string
+
+	mu sync.Mutex
+}
+
+// RefreshAll updates harness model inventories. force bypasses the 24-hour cache.
+func (r *HarnessModels) RefreshAll(ctx context.Context, force bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	refreshHarnessModels(ctx, r.Log, r.CacheDir, r.Router, r.TaskManager, r.HarnessEnv, force)
+}
+
+// Refresh bypasses the cache and updates one harness model inventory.
+func (r *HarnessModels) Refresh(ctx context.Context, h harness.Name) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	fetcher, ok := r.TaskManager.Backends[h].(agent.ModelFetcher)
+	if !ok {
+		return fmt.Errorf("harness %q does not support model refresh", h)
+	}
+	purgeStaleModelRefreshInstances(ctx, r.Log, r.Router)
+	cache := agent.OpenHarnessCache(filepath.Join(r.CacheDir, "harnesses.json"))
+	refreshOneHarness(ctx, r.Log, cache, r.Router, r.TaskManager, h, fetcher, r.HarnessEnv[string(h)])
+	return nil
+}
+
+// Watch refreshes stale model caches at startup, then watches harnesses.json
+// for deletion and regenerates it on demand.
+func (r *HarnessModels) Watch(ctx context.Context) error {
+	r.RefreshAll(ctx, false)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -30,11 +70,11 @@ func watchHarnessModelCache(ctx context.Context, log *slog.Logger, cacheDir stri
 	}
 	defer func() { _ = watcher.Close() }()
 
-	if err := watcher.Add(cacheDir); err != nil {
+	if err := watcher.Add(r.CacheDir); err != nil {
 		return fmt.Errorf("watch model cache directory: %w", err)
 	}
 
-	cachePath := filepath.Clean(filepath.Join(cacheDir, "harnesses.json"))
+	cachePath := filepath.Clean(filepath.Join(r.CacheDir, "harnesses.json"))
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -47,22 +87,22 @@ func watchHarnessModelCache(ctx context.Context, log *slog.Logger, cacheDir stri
 			if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 				continue
 			}
-			log.InfoContext(ctx, "cache deleted, regenerating", "path", cachePath)
-			refreshHarnessModels(ctx, log, cacheDir, router, taskMgr, harnessEnv)
+			r.Log.InfoContext(ctx, "cache deleted, regenerating", "path", cachePath)
+			r.RefreshAll(ctx, false)
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
 			}
-			log.WarnContext(ctx, "cache watcher error", "err", err)
+			r.Log.WarnContext(ctx, "cache watcher error", "err", err)
 		case <-ctx.Done():
 			return nil
 		}
 	}
 }
 
-// refreshHarnessModels checks if any harness caches are stale and refreshes
-// them by launching a temporary runtime instance.
-func refreshHarnessModels(ctx context.Context, log *slog.Logger, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string) {
+// refreshHarnessModels refreshes stale harness caches, or every cache when
+// force is true, by launching a temporary runtime instance.
+func refreshHarnessModels(ctx context.Context, log *slog.Logger, cacheDir string, router *runtime.Router, taskMgr *taskmgr.Manager, harnessEnv map[string][]string, force bool) {
 	purgeStaleModelRefreshInstances(ctx, log, router)
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
@@ -76,7 +116,7 @@ func refreshHarnessModels(ctx context.Context, log *slog.Logger, cacheDir string
 		env := harnessEnv[string(h)]
 		envHash := agent.APIKeyHash(env)
 		_, fresh := cache.ModelInventory(h, envHash)
-		if fresh {
+		if fresh && !force {
 			continue
 		}
 		refreshOneHarness(ctx, log, cache, router, taskMgr, h, fetchers[h], env)

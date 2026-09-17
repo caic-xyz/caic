@@ -856,8 +856,13 @@ export interface HarnessInfo {
   models: Model[];
   supportsImages: boolean;
   supportsCompact: boolean;
+  supportsModelRefresh: boolean;
   /** Shared quota source; empty when harness usage cannot be inferred. */
   quotaGroup?: QuotaProvider;
+}
+
+/** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */
+export interface RefreshHarnessReq {
 }
 
 /** WellKnownCache describes a single well-known cache. */

@@ -15,6 +15,7 @@ export const {
   listOAuthGrants,
   revokeOAuthGrant,
   listHarnesses,
+  refreshHarness,
   listCaches,
   getCacheSizes,
   listRepos,
