@@ -145,7 +145,7 @@ func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
 	return tasks, loadErr
 }
 
-// Open creates a JSONL log segment with a v2 metadata header, or reopens an
+// Open creates a JSONL log segment with a v3 metadata header, or reopens an
 // existing segment without rewriting its header. name must be a base
 // filename (no path separators or "."/".." elements); Open resolves it under
 // LogDir and returns the resolved path.
@@ -162,7 +162,7 @@ func (s *Store) Open(name string, header *agent.MetaMessage) (agent.LogSink, str
 		return nil, "", err
 	}
 	if created {
-		w.version = agent.LogVersionV2
+		w.version = agent.LogVersionV3
 		if err := writeMetadataHeader(w, header); err != nil {
 			return nil, "", errors.Join(err, w.Close())
 		}

@@ -2817,7 +2817,7 @@ func TestTask(t *testing.T) {
 			}{
 				{name: "v2", data: validHeader(agent.LogVersionV2, "claude")},
 				{name: "corrupt", data: []byte("not json\n")},
-				{name: "unknown", data: validHeader(agent.LogVersion(3), "claude")},
+				{name: "unknown", data: validHeader(agent.LogVersion(4), "claude")},
 				{name: "harness mismatch", data: validHeader(agent.LogVersionV1, "codex")},
 				{name: "missing"},
 			}

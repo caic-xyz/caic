@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"path/filepath"
 	"slices"
@@ -136,7 +137,7 @@ func TestFetchModels(t *testing.T) {
 			t.Fatal(err)
 		}
 		var nextID atomic.Int64
-		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID)
+		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID, agent.DiscardLogSink{Version: agent.LogVersionV1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -172,7 +173,7 @@ func TestFetchModels(t *testing.T) {
 			t.Fatal(err)
 		}
 		var nextID atomic.Int64
-		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID)
+		models, err := fetchModelsFromAppServer(t.Context(), &stdin, records, &nextID, agent.DiscardLogSink{Version: agent.LogVersionV1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +207,7 @@ func TestFetchModels(t *testing.T) {
 			t.Fatal(err)
 		}
 		var nextID atomic.Int64
-		if _, err := fetchModelsFromAppServer(t.Context(), io.Discard, records, &nextID); err == nil || !strings.Contains(err.Error(), "repeated cursor") {
+		if _, err := fetchModelsFromAppServer(t.Context(), io.Discard, records, &nextID, agent.DiscardLogSink{Version: agent.LogVersionV1}); err == nil || !strings.Contains(err.Error(), "repeated cursor") {
 			t.Fatalf("fetchModelsFromAppServer error = %v, want repeated cursor", err)
 		}
 	})
@@ -281,12 +282,37 @@ func TestHandshake(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 `
 		var stdin bytes.Buffer
-		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		log := &agenttest.LogSink{Version: agent.LogVersionV2}
+		w, models, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if w.threadID != "thread_1" || w.agentVersion != "0.133.0" || w.reportedModel != "" || w.reportedEffort != "" || len(models) != 1 {
 			t.Fatalf("v2 handshake = thread=%q model=%q effort=%q version=%q models=%v", w.threadID, w.reportedModel, w.reportedEffort, w.agentVersion, models)
+		}
+		if log.Len() != 0 {
+			t.Fatalf("v2 handshake log = %s, want no legacy stdin persistence", log.Bytes())
+		}
+	})
+	t.Run("v3_persists_every_handshake_input", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
+`
+		var stdin bytes.Buffer
+		log := &agenttest.LogSink{Version: agent.LogVersionV3}
+		if _, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log}); err != nil {
+			t.Fatal(err)
+		}
+		lines := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte{'\n'})
+		if len(lines) != 4 {
+			t.Fatalf("persisted inputs = %d, want initialize, initialized, model/list, thread/start:\n%s", len(lines), log.String())
+		}
+		for _, line := range lines {
+			if !bytes.HasPrefix(line, []byte(`{"t":"input","ts":`)) {
+				t.Fatalf("handshake record = %s, want v3 input envelope", line)
+			}
 		}
 	})
 }
@@ -306,6 +332,27 @@ func TestWireFormatCompactCommand(t *testing.T) {
 	}
 	if request.Method != "thread/compact/start" {
 		t.Fatalf("compact method = %q, want thread/compact/start", request.Method)
+	}
+}
+
+func TestWritePromptInputPersistence(t *testing.T) {
+	t.Parallel()
+	for _, version := range []agent.LogVersion{agent.LogVersionV1, agent.LogVersionV2, agent.LogVersionV3} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			t.Parallel()
+			var stdin bytes.Buffer
+			log := &agenttest.LogSink{Version: version}
+			wire := &wireFormat{threadID: "thread-1"}
+			if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
+				t.Fatal(err)
+			}
+			if version == agent.LogVersionV3 && !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
+				t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
+			}
+			if version != agent.LogVersionV3 && log.Len() != 0 {
+				t.Fatalf("v%d log = %s, want no legacy stdin persistence", version, log.Bytes())
+			}
+		})
 	}
 }
 

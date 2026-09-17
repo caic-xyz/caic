@@ -190,7 +190,7 @@ func TestStore(t *testing.T) {
 		if err := json.Unmarshal([]byte(entries[0]), &meta); err != nil {
 			t.Fatal(err)
 		}
-		if meta.Version != int(agent.LogVersionV2) || meta.Prompt != "test prompt" || meta.RequestedModel != "model-1" || meta.RequestedEffort != "high" {
+		if meta.Version != int(agent.LogVersionV3) || meta.Prompt != "test prompt" || meta.RequestedModel != "model-1" || meta.RequestedEffort != "high" {
 			t.Fatalf("unexpected metadata: %+v", meta)
 		}
 		if len(meta.Repos) != 1 || meta.Repos[0].ContainerPath != "~/src/org/repo" {
@@ -232,8 +232,8 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := second.LogVersion(); got != agent.LogVersionV2 {
-			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV2)
+		if got := second.LogVersion(); got != agent.LogVersionV3 {
+			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV3)
 		}
 		if err := second.Close(); err != nil {
 			t.Fatal(err)
@@ -243,7 +243,7 @@ func TestStore(t *testing.T) {
 			t.Fatalf("log lines = %d, want unchanged header", len(entries))
 		}
 	})
-	t.Run("OpenCreatesCanonicalV2Log", func(t *testing.T) {
+	t.Run("OpenCreatesCanonicalV3Log", func(t *testing.T) {
 		t.Parallel()
 		store := NewStore(testLogger(), t.TempDir())
 		tk := &testTask{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Codex}
@@ -251,8 +251,8 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := log.LogVersion(); got != agent.LogVersionV2 {
-			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV2)
+		if got := log.LogVersion(); got != agent.LogVersionV3 {
+			t.Fatalf("LogVersion = %d, want %d", got, agent.LogVersionV3)
 		}
 		if err := log.AppendMessage(&agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "repo", ForgePR: 1}); err != nil {
 			t.Fatal(err)
@@ -265,7 +265,7 @@ func TestStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !strings.Contains(string(got), `"t":"caic_meta"`) || !strings.Contains(string(got), `"t":"pr"`) {
-			t.Fatalf("v2 log = %s, want canonical metadata and control", got)
+			t.Fatalf("v3 log = %s, want canonical metadata and control", got)
 		}
 	})
 	t.Run("ReopenPreservesV2Authority", func(t *testing.T) {

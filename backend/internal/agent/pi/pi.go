@@ -1042,7 +1042,7 @@ func writeJSONLine(w io.Writer, v any, log agent.LogSink) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if err := agent.AppendNativeRecord(log, log.LogVersion(), data); err != nil {
+	if err := agent.AppendInputNativeRecord(log, log.LogVersion(), data); err != nil {
 		return err
 	}
 	return nil

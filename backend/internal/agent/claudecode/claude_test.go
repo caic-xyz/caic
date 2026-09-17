@@ -346,6 +346,26 @@ func TestControlConn(t *testing.T) {
 		if updated.Answers[question] != "Identity only" {
 			t.Errorf("answer = %q, want Identity only", updated.Answers[question])
 		}
+
+		log := &agenttest.LogSink{Version: agent.LogVersionV3}
+		if err := agent.AppendInputNativeRecord(log, log.LogVersion(), inner.sent[0]); err != nil {
+			t.Fatal(err)
+		}
+		var payload []byte
+		parser, err := agent.NewLogRecordParser(agent.LogVersionV3, func(data []byte) ([]agent.Message, error) {
+			payload = bytes.Clone(data)
+			return nil, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord(bytes.TrimSpace(log.Bytes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.RelayRecord || !bytes.Equal(payload, bytes.TrimSpace(inner.sent[0])) {
+			t.Fatalf("AskUserQuestion input provenance = %#v, payload = %s", record, payload)
+		}
 	})
 
 	t.Run("AutoAllowsOtherCanUseTool", func(t *testing.T) {

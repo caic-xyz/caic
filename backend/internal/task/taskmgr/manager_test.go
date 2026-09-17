@@ -255,6 +255,7 @@ type reconnectInputBackend struct {
 	attachCalls int
 	prompts     []agent.Prompt
 	opts        *agent.Options
+	attached    chan struct{}
 	cancel      context.CancelFunc
 	session     *agent.Session
 }
@@ -278,6 +279,12 @@ func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Opt
 	b.opts = opts
 	b.cancel = cancel
 	b.session = session
+	if b.attached != nil {
+		select {
+		case b.attached <- struct{}{}:
+		default:
+		}
+	}
 	b.mu.Unlock()
 	return session, nil
 }
@@ -906,7 +913,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 			Encoded: []byte("first\n"),
 		}
 		merger := newLogRelayMessageMerger(agent.ParsedTimeline{}, harness.Codex)
-		merger.v2 = true
+		merger.strictRelay = true
 		merged := merger.merge(relayTimeline)
 		if merger.err != nil || len(merged) != 1 || string(merger.relayAppend(relayTimeline)) != "first\n" {
 			t.Fatalf("header-only v2 merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
@@ -930,7 +937,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		}
 		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
 		merger.logGeneration = "old"
-		merger.v2 = true
+		merger.strictRelay = true
 		merged := merger.merge(relayTimeline)
 		if merger.err != nil || len(merged) != 2 || string(merger.relayAppend(relayTimeline)) != "marker\noutput\n" {
 			t.Fatalf("new generation merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
@@ -953,7 +960,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 			Encoded: []byte("marker\noutput\n"),
 		}
 		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
-		merger.v2 = true
+		merger.strictRelay = true
 		merged := merger.merge(relayTimeline)
 		if merger.err != nil || len(merged) != 2 || string(merger.relayAppend(relayTimeline)) != "marker\noutput\n" {
 			t.Fatalf("unmarked-to-marked merge = %#v, append = %q, err = %v", merged, merger.relayAppend(relayTimeline), merger.err)
@@ -4433,6 +4440,222 @@ func TestManager(t *testing.T) {
 			}
 			if bytes.Count(persisted, []byte(beforeRecord)) != 1 || bytes.Count(persisted, []byte(duringRecord)) != 1 {
 				t.Fatalf("persisted relay records are not exactly once:\n%s", persisted)
+			}
+		})
+		t.Run("v2_unproven_relay_tail_recovers_without_persisting_it", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			cacheDir := t.TempDir()
+			logDir := filepath.Join(cacheDir, "tasks")
+			store := taskslog.NewStore(testLogger(), logDir)
+			backend := &reconnectInputBackend{
+				FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000},
+				attached:    make(chan struct{}, 1),
+			}
+			t.Cleanup(backend.stop)
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"legacy-ambiguous\x00caic.id":      taskID.String(),
+				"legacy-ambiguous\x00caic.harness": "reconnect",
+			}}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				LogStore:  store,
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+				Backends:  map[harness.Name]agent.Backend{"reconnect": backend},
+			})
+			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
+
+			meta, err := agent.MarshalLogMessage(agent.LogVersionV2, &agent.MetaMessage{
+				MessageType: "caic_meta",
+				Version:     int(agent.LogVersionV2),
+				Prompt:      "recover legacy relay",
+				Repos:       []agent.MetaRepo{{Name: "repo/a", Branch: "caic-legacy"}},
+				Harness:     "reconnect",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			diskNative := `{"method":"thread/started","params":{"thread":{"id":"disk-thread","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
+			diskRecord := fmt.Sprintf(`{"t":"agent","ts":1.000,"msg":%s}`, diskNative)
+			logPath := filepath.Join(logDir, taskID.String()+".jsonl")
+			if err := os.MkdirAll(logDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(logPath, []byte(string(meta)+"\n"+diskRecord+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			const relayEnd = 987
+			const relayRecord = `{"t":"agent","ts":2.000,"msg":{"method":"offline"}}`
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+					return true, "alive", nil
+				},
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+					return agent.ParsedTimeline{
+						Messages: relayParsed(&agent.TextMessage{Text: "unverified offline output"}),
+						RelayRecords: []agent.RelayRecordBoundary{{
+							RelayEnd:    relayEnd,
+							MessageEnd:  1,
+							ByteEnd:     len(relayRecord) + 1,
+							Fingerprint: sha256.Sum256([]byte(relayRecord)),
+						}},
+						Encoded: []byte(relayRecord + "\n"),
+					}, relayEnd, nil
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			logs, err := store.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{
+				ID:          runtime.NewID("test-runtime", "legacy-ambiguous"),
+				AgentTarget: runtime.ConnectionTarget{SSHHost: "legacy-ambiguous"},
+				State:       "running",
+				Repos: []runtime.Repo{{
+					GitRoot: "/home/user/src/repo/a", Branch: "caic-legacy", ContainerPath: "/home/user/src/repo/a",
+				}},
+			}}, logs)
+			if err != nil {
+				t.Fatalf("ImportInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			select {
+			case <-backend.attached:
+			case <-time.After(time.Second):
+				t.Fatal("imported legacy task did not reconnect")
+			}
+			backend.mu.Lock()
+			relayOffset := backend.opts.RelayOffset
+			backend.mu.Unlock()
+			if relayOffset != relayEnd {
+				t.Fatalf("reconnect RelayOffset = %d, want %d", relayOffset, relayEnd)
+			}
+			if got := adopted[0].Task().RelayOffsetValue(); got != relayEnd {
+				t.Fatalf("Task RelayOffset = %d, want %d", got, relayEnd)
+			}
+			persisted, err := os.ReadFile(logPath) //nolint:gosec // test-controlled path.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(persisted), "unverified offline output") || strings.Contains(string(persisted), relayRecord) {
+				t.Fatalf("unverified relay tail persisted:\n%s", persisted)
+			}
+			var recovered bool
+			for _, message := range adopted[0].Task().Messages() {
+				if log, ok := message.(*agent.LogMessage); ok && strings.Contains(log.Line, "Recovered legacy relay session") {
+					recovered = true
+				}
+				if text, ok := message.(*agent.TextMessage); ok && text.Text == "unverified offline output" {
+					t.Fatal("unverified relay output was replayed")
+				}
+			}
+			if !recovered {
+				t.Fatal("legacy recovery status is not visible in task timeline")
+			}
+		})
+		t.Run("rejects_unverified_relay_tail_without_live_v2_recovery", func(t *testing.T) {
+			t.Parallel()
+			cases := []struct {
+				name       string
+				version    agent.LogVersion
+				relayAlive bool
+				readErr    error
+			}{
+				{name: "v3_mismatch", version: agent.LogVersionV3, relayAlive: true},
+				{name: "v2_dead_relay", version: agent.LogVersionV2},
+				{name: "v2_unreadable_snapshot", version: agent.LogVersionV2, relayAlive: true, readErr: errors.New("malformed relay snapshot")},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					taskID := ksid.NewID()
+					cacheDir := t.TempDir()
+					logDir := filepath.Join(cacheDir, "tasks")
+					store := taskslog.NewStore(testLogger(), logDir)
+					fake := &runtimetest.FakeInfo{Meta: map[string]string{
+						"reject-tail\x00caic.id":      taskID.String(),
+						"reject-tail\x00caic.harness": "reconnect",
+					}}
+					m := newTestManager(t, Config{
+						ServerCtx: t.Context(),
+						LogStore:  store,
+						Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+						Backends: map[harness.Name]agent.Backend{"reconnect": &agenttest.FakeBackend{
+							HarnessName: "reconnect",
+							WireFactory: codex.New("", nil).NewWire,
+						}},
+					})
+					registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
+
+					meta, err := agent.MarshalLogMessage(tc.version, &agent.MetaMessage{
+						MessageType: "caic_meta",
+						Version:     int(tc.version),
+						Prompt:      "reject unverified relay",
+						Repos:       []agent.MetaRepo{{Name: "repo/a", Branch: "caic-reject"}},
+						Harness:     "reconnect",
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					diskNative := `{"method":"thread/started","params":{"thread":{"id":"disk-thread","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
+					diskRecord := fmt.Sprintf(`{"t":"agent","ts":1.000,"msg":%s}`, diskNative)
+					original := string(meta) + "\n" + diskRecord + "\n"
+					logPath := filepath.Join(logDir, taskID.String()+".jsonl")
+					if err := os.MkdirAll(logDir, 0o750); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(logPath, []byte(original), 0o600); err != nil {
+						t.Fatal(err)
+					}
+
+					const relayRecord = `{"t":"agent","ts":2.000,"msg":{"method":"offline"}}`
+					m.relay = fakeRelayReader{
+						statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+							return tc.relayAlive, "relay state", nil
+						},
+						readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+							return agent.ParsedTimeline{
+								Messages: relayParsed(&agent.TextMessage{Text: "unverified offline output"}),
+								RelayRecords: []agent.RelayRecordBoundary{{
+									RelayEnd:    123,
+									MessageEnd:  1,
+									ByteEnd:     len(relayRecord) + 1,
+									Fingerprint: sha256.Sum256([]byte(relayRecord)),
+								}},
+								Encoded: []byte(relayRecord + "\n"),
+							}, 123, tc.readErr
+						},
+						readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+					}
+					logs, err := store.LoadUnsettled()
+					if err != nil {
+						t.Fatal(err)
+					}
+					adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{
+						ID:    runtime.NewID("test-runtime", "reject-tail"),
+						State: "running",
+						Repos: []runtime.Repo{{
+							GitRoot: "/home/user/src/repo/a", Branch: "caic-reject", ContainerPath: "/home/user/src/repo/a",
+						}},
+					}}, logs)
+					if err == nil || !strings.Contains(err.Error(), "reconcile imported relay snapshot") {
+						t.Fatalf("ImportInstances error = %v, want relay reconciliation failure", err)
+					}
+					if len(adopted) != 0 {
+						t.Fatalf("adopted = %#v, want no task", adopted)
+					}
+					persisted, err := os.ReadFile(logPath) //nolint:gosec // test-controlled path.
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := string(persisted); got != original {
+						t.Fatalf("log changed after rejected relay snapshot:\n%s", got)
+					}
+				})
 			}
 		})
 		t.Run("missing_local_log_refuses_live_reconnect", func(t *testing.T) {

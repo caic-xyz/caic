@@ -221,8 +221,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		Method:  opencode.MethodSessionPrompt,
 		Params:  params,
 	}
-	// Don't log to logW — stdin is not logged with --no-log-stdin.
-	return writeJSON(wr, req)
+	return writeJSONInput(wr, req, log)
 }
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a prompt.
@@ -447,7 +446,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		Method:  opencode.MethodInitialize,
 		Params:  initParams,
 	}
-	if err := writeJSON(stdin, initReq); err != nil {
+	if err := writeJSONInput(stdin, initReq, opts.Log); err != nil {
 		return nil, nil, fmt.Errorf("write initialize: %w", err)
 	}
 
@@ -491,7 +490,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 			Params:  params,
 		}
 	}
-	if err := writeJSON(stdin, sessionReq); err != nil {
+	if err := writeJSONInput(stdin, sessionReq, opts.Log); err != nil {
 		return nil, nil, fmt.Errorf("write session/new: %w", err)
 	}
 
@@ -526,12 +525,12 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		model = res.currentModel
 	}
 	if model != "" && model != res.currentModel {
-		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model); err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model, opts.Log); err != nil {
 			return nil, nil, err
 		}
 	}
 	if opts.Effort != "" {
-		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionEffort, opts.Effort); err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionEffort, opts.Effort, opts.Log); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -567,7 +566,7 @@ func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.S
 	return nil
 }
 
-func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string) error {
+func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string, log agent.LogSink) error {
 	option := res.configOption(id)
 	if option == nil {
 		return fmt.Errorf("opencode ACP does not expose %q for the selected model", id)
@@ -582,9 +581,9 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	if err != nil {
 		return fmt.Errorf("marshal session/set_config_option params: %w", err)
 	}
-	if err := writeJSON(stdin, opencode.JSONRPCRequest{
+	if err := writeJSONInput(stdin, opencode.JSONRPCRequest{
 		JSONRPC: "2.0", ID: res.wire.allocIDLocked(), Method: opencode.MethodSessionSetConfigOption, Params: params,
-	}); err != nil {
+	}, log); err != nil {
 		return fmt.Errorf("write session/set_config_option: %w", err)
 	}
 	resp, err := readJSONRPCResponse(ctx, records)
@@ -652,6 +651,23 @@ func writeJSON(w io.Writer, v any) error {
 	data = append(data, '\n')
 	_, err = w.Write(data)
 	return err
+}
+
+// writeJSONInput writes one harness command and preserves its exact NDJSON
+// payload as caic-to-harness input when the log format supports provenance.
+func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	if log.LogVersion() != agent.LogVersionV3 {
+		return nil
+	}
+	return agent.AppendInputNativeRecord(log, log.LogVersion(), data)
 }
 
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response

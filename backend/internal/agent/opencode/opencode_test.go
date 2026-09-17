@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -88,14 +89,15 @@ func TestHandshake(t *testing.T) {
 
 		const selectedModel = "openai/gpt-5"
 		var stdin bytes.Buffer
-		stdout := bufio.NewReader(strings.NewReader(strings.Join([]string{
+		stdout := bufio.NewReader(strings.NewReader(v2Records(strings.Join([]string{
 			`{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"promptCapabilities":{"image":true}}}}`,
 			`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[{"id":"model","type":"select","currentValue":"anthropic/claude-sonnet-4","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":4,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"high","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
-		}, "\n") + "\n"))
+		}, "\n") + "\n")))
 
-		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: &agenttest.LogSink{Version: agent.LogVersionV1}})
+		log := &agenttest.LogSink{Version: agent.LogVersionV3}
+		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: log})
 		if err != nil {
 			t.Fatalf("handshake: %v", err)
 		}
@@ -129,6 +131,15 @@ func TestHandshake(t *testing.T) {
 		if effortParams.ConfigID != genaiopencode.ConfigOptionEffort || effortParams.Value != "high" {
 			t.Fatalf("effort params = %#v", effortParams)
 		}
+		persisted := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte{'\n'})
+		if len(persisted) != 4 {
+			t.Fatalf("persisted inputs = %d, want initialize, session/new, model, effort:\n%s", len(persisted), log.String())
+		}
+		for _, record := range persisted {
+			if !bytes.HasPrefix(record, []byte(`{"t":"input","ts":`)) {
+				t.Fatalf("handshake record = %s, want v3 input envelope", record)
+			}
+		}
 	})
 
 	t.Run("v2_agent_envelopes", func(t *testing.T) {
@@ -137,14 +148,39 @@ func TestHandshake(t *testing.T) {
 {"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","models":{"currentModelId":"openai/gpt-5"}}}
 `
 		var stdin bytes.Buffer
-		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		log := &agenttest.LogSink{Version: agent.LogVersionV2}
+		hs, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/workspace", Log: log})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if hs.wire.sessionID != "session-1" || hs.currentModel != "openai/gpt-5" {
 			t.Fatalf("v2 handshake = session=%q model=%q", hs.wire.sessionID, hs.currentModel)
 		}
+		if log.Len() != 0 {
+			t.Fatalf("v2 handshake log = %s, want no legacy stdin persistence", log.Bytes())
+		}
 	})
+}
+
+func TestWritePromptInputPersistence(t *testing.T) {
+	t.Parallel()
+	for _, version := range []agent.LogVersion{agent.LogVersionV1, agent.LogVersionV2, agent.LogVersionV3} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			t.Parallel()
+			var stdin bytes.Buffer
+			log := &agenttest.LogSink{Version: version}
+			wire := &wireFormat{sessionID: "session-1"}
+			if err := wire.WritePrompt(&stdin, agent.Prompt{Text: "hello"}, log); err != nil {
+				t.Fatal(err)
+			}
+			if version == agent.LogVersionV3 && !bytes.HasPrefix(log.Bytes(), []byte(`{"t":"input","ts":`)) {
+				t.Fatalf("v3 log = %s, want input envelope", log.Bytes())
+			}
+			if version != agent.LogVersionV3 && log.Len() != 0 {
+				t.Fatalf("v%d log = %s, want no legacy stdin persistence", version, log.Bytes())
+			}
+		})
+	}
 }
 
 func TestHandshakeContinuation(t *testing.T) {

@@ -90,7 +90,7 @@ func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return AppendNativeRecord(log, LogVersionV1, data)
+	return AppendRelayNativeRecord(log, LogVersionV1, data)
 }
 
 // testParseFn is a minimal Claude-format parser for testing. It avoids
@@ -407,13 +407,13 @@ func TestSession(t *testing.T) {
 	})
 }
 
-func TestAppendNativeRecord(t *testing.T) {
+func TestAppendRelayNativeRecord(t *testing.T) {
 	t.Parallel()
 
 	t.Run("V2TerminatesWithLF", func(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{Version: LogVersionV2}
-		if err := AppendNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
+		if err := AppendRelayNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
 			t.Fatal(err)
 		}
 		got := log.Bytes()
@@ -424,6 +424,40 @@ func TestAppendNativeRecord(t *testing.T) {
 			t.Fatalf("v2 record = %q, want canonical agent envelope", got)
 		}
 	})
+}
+
+func TestDirectionalNativeRecords(t *testing.T) {
+	t.Parallel()
+	log := &testLogSink{Version: LogVersionV3}
+	if err := AppendInputNativeRecord(log, LogVersionV3, []byte(`{"method":"set_model"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendRelayNativeRecord(log, LogVersionV3, []byte(`{"type":"message"}`)); err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}), []byte{'\n'})
+	if len(lines) != 2 || !bytes.HasPrefix(lines[0], []byte(`{"t":"input","ts":`)) || !bytes.HasPrefix(lines[1], []byte(`{"t":"agent","ts":`)) {
+		t.Fatalf("directional records = %q", log.Bytes())
+	}
+	var parsedInput []byte
+	parser, err := NewLogRecordParser(LogVersionV3, func(data []byte) ([]Message, error) {
+		parsedInput = bytes.Clone(data)
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := parser.ParseRecord(lines[0])
+	if err != nil || input.RelayRecord {
+		t.Fatalf("input = %#v, %v; want non-relay record", input, err)
+	}
+	if got, want := string(parsedInput), `{"method":"set_model"}`; got != want {
+		t.Fatalf("input payload = %q, want %q", got, want)
+	}
+	relay, err := parser.ParseRecord(lines[1])
+	if err != nil || !relay.RelayRecord {
+		t.Fatalf("relay = %#v, %v; want relay record", relay, err)
+	}
 }
 
 func TestWriteMetaSession(t *testing.T) {
@@ -971,7 +1005,7 @@ func TestLogRecordParser(t *testing.T) {
 
 	t.Run("Constructor", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewLogRecordParser(LogVersion(3), testParseFn); err == nil || !strings.Contains(err.Error(), "unsupported log version 3") {
+		if _, err := NewLogRecordParser(LogVersion(4), testParseFn); err == nil || !strings.Contains(err.Error(), "unsupported log version 4") {
 			t.Fatalf("unknown version error = %v", err)
 		}
 		if _, err := NewLogRecordParser(LogVersionV1, nil); err == nil || !strings.Contains(err.Error(), "native message parser is nil") {

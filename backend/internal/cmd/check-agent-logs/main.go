@@ -1,4 +1,4 @@
-// Command check-agent-logs validates recent v2 task-log harness records against genai wire DTOs.
+// Command check-agent-logs validates recent v2 and v3 task-log harness records against genai wire DTOs.
 package main
 
 import (
@@ -112,7 +112,7 @@ func run(args []string, out io.Writer) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(out, "checked %d v2 task logs; found %d schema issues\n", checked, len(findings)); err != nil {
+	if _, err := fmt.Fprintf(out, "checked %d v2/v3 task logs; found %d schema issues\n", checked, len(findings)); err != nil {
 		return err
 	}
 	if len(findings) != 0 {
@@ -214,29 +214,35 @@ func checkFile(path string) ([]finding, bool, error) {
 	if err := json.Unmarshal(sc.Bytes(), &header); err != nil {
 		return nil, false, fmt.Errorf("decode %s:1: %w", path, err)
 	}
-	if header.Type != "caic_meta" || header.Version != int(agent.LogVersionV2) {
+	if header.Type != "caic_meta" || (header.Version != int(agent.LogVersionV2) && header.Version != int(agent.LogVersionV3)) {
 		return nil, false, nil
 	}
 	if header.Harness == "" {
-		return nil, true, fmt.Errorf("validate %s:1: v2 metadata is missing harness", path)
+		return nil, true, fmt.Errorf("validate %s:1: v%d metadata is missing harness", path, header.Version)
 	}
 
 	var findings []finding
 	openCodeMethods := make(map[string]opencodedto.Method)
 	line := 1
-	parser, err := agent.NewLogRecordParser(agent.LogVersionV2, func(message []byte) ([]agent.Message, error) {
-		if f := checkMessage(path, line, header.Harness, message, openCodeMethods); f != nil {
+	input := false
+	parser, err := agent.NewLogRecordParser(agent.LogVersion(header.Version), func(message []byte) ([]agent.Message, error) {
+		if f := checkMessage(path, line, header.Harness, message, input, openCodeMethods); f != nil {
 			findings = append(findings, *f)
 		}
 		return nil, nil
 	})
 	if err != nil {
-		return nil, true, fmt.Errorf("create v2 parser: %w", err)
+		return nil, true, fmt.Errorf("create v%d parser: %w", header.Version, err)
 	}
 	if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
 		return nil, true, fmt.Errorf("validate %s:1: %w", path, err)
 	}
 	for line++; sc.Scan(); line++ {
+		var envelope record
+		if err := json.Unmarshal(sc.Bytes(), &envelope); err != nil {
+			return nil, true, fmt.Errorf("validate %s:%d: %w", path, line, err)
+		}
+		input = envelope.Type == "input"
 		if _, err := parser.ParseRecord(sc.Bytes()); err != nil {
 			return nil, true, fmt.Errorf("validate %s:%d: %w", path, line, err)
 		}
@@ -275,7 +281,7 @@ func (z *zstdLog) Close() error {
 	return z.file.Close()
 }
 
-func checkMessage(path string, line int, harness string, message []byte, openCodeMethods map[string]opencodedto.Method) *finding {
+func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[string]opencodedto.Method) *finding {
 	if len(message) != 0 && message[0] == '"' {
 		var reason string
 		if err := json.Unmarshal(message, &reason); err == nil {
@@ -293,9 +299,17 @@ func checkMessage(path string, line int, harness string, message []byte, openCod
 	var dto string
 	switch harness {
 	case "claude":
-		dto, err = checkClaude(message)
+		if input {
+			dto, err = checkClaudeInput(message)
+		} else {
+			dto, err = checkClaude(message)
+		}
 	case "codex":
-		dto, err = checkCodex(message)
+		if input {
+			dto, err = checkCodexInput(message)
+		} else {
+			dto, err = checkCodex(message)
+		}
 	case "pi":
 		dto, err = checkPi(message)
 	case "opencode":
@@ -313,6 +327,73 @@ func checkMessage(path string, line int, harness string, message []byte, openCod
 		return nil
 	}
 	return &finding{path: path, line: line, harness: harness, dto: dto, err: err}
+}
+
+func checkClaudeInput(data []byte) (string, error) {
+	var probe struct {
+		Type claudedto.InputType `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return "InputTypeProbe", err
+	}
+	var dst any
+	switch probe.Type {
+	case claudedto.InputUser:
+		dst = &claudedto.InputUserMsg{}
+	case claudedto.InputControlRequest:
+		dst = &claudedto.InputControlRequestMsg{}
+	case claudedto.InputControlResponse:
+		dst = &claudedto.InputControlResponseMsg{}
+	case claudedto.InputKeepAlive:
+		dst = &claudedto.InputKeepAliveMsg{}
+	case claudedto.InputUpdateEnvVars:
+		dst = &claudedto.InputUpdateEnvVarsMsg{}
+	default:
+		return "InputTypeProbe", fmt.Errorf("unrecognized Claude Code input type %q; add its DTO and checker dispatch", probe.Type)
+	}
+	return fmt.Sprintf("%T", dst), strictDecode(data, dst)
+}
+
+func checkCodexInput(data []byte) (string, error) {
+	var request struct {
+		JSONRPC string           `json:"jsonrpc"`
+		ID      *json.RawMessage `json:"id"`
+		Method  string           `json:"method"`
+		Params  json.RawMessage  `json:"params"`
+	}
+	if err := strictDecode(data, &request); err != nil {
+		return "JSONRPCRequest", err
+	}
+	if request.JSONRPC != "2.0" || request.Method == "" {
+		return "JSONRPCRequest", errors.New("Codex input is missing JSON-RPC 2.0 method")
+	}
+	if request.Method == "initialized" {
+		if request.ID != nil || len(request.Params) != 0 {
+			return "JSONRPCNotification", errors.New("Codex initialized input must be a parameterless notification")
+		}
+		return "JSONRPCNotification", nil
+	}
+	if request.ID == nil || isEmptyJSON(request.Params) {
+		return "JSONRPCRequest", fmt.Errorf("Codex request %q is missing id or params", request.Method)
+	}
+	var dst any
+	switch request.Method {
+	case "initialize":
+		dst = &codexdto.InitializeParams{}
+	case "model/list":
+		dst = &codexdto.ModelListParams{}
+	case "thread/start":
+		dst = &codexdto.ThreadStartParams{}
+	case "thread/resume":
+		dst = &codexdto.ThreadResumeParams{}
+	case "turn/start":
+		dst = &codexdto.TurnStartParams{}
+	case "thread/compact/start":
+		dst = &codexdto.ThreadCompactStartParams{}
+	default:
+		return "JSONRPCRequest", fmt.Errorf("unrecognized Codex request method %q; add its DTO and checker dispatch", request.Method)
+	}
+	return fmt.Sprintf("%T", dst), strictDecode(request.Params, dst)
 }
 
 func strictDecode(data []byte, dst any) error {

@@ -1841,12 +1841,23 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		logTimeline := agent.ParsedTimeline{Messages: lt.Timeline, RelayRecords: lt.RelayRecords}
 		merger := newLogRelayMessageMerger(logTimeline, lt.Harness)
 		merger.logGeneration = lt.RelayGeneration
-		merger.v2 = lt.LogVersion == agent.LogVersionV2
+		merger.strictRelay = lt.LogVersion != agent.LogVersionV1
 		timeline := merger.merge(relayTimeline)
 		if merger.err != nil {
-			return nil, fmt.Errorf("reconcile imported relay snapshot %s: %w", taskID, merger.err)
-		}
-		if encoded := merger.relayAppend(relayTimeline); len(encoded) > 0 {
+			if lt.LogVersion != agent.LogVersionV2 || !relayAlive || !relaySnapshotRead {
+				return nil, fmt.Errorf("reconcile imported relay snapshot %s: %w", taskID, merger.err)
+			}
+			// V2 recorded both relay output and local stdin as agent records. A
+			// live relay snapshot that cannot prove physical overlap may therefore
+			// be valid even though its durable endpoint is ambiguous. Preserve the
+			// trusted local history, skip the unverified offline tail, and resume at
+			// the inspected end so only future relay output is appended.
+			timeline = append(slices.Clone(lt.Timeline), agent.TimedMessage{Message: &agent.LogMessage{
+				Line: "Recovered legacy relay session; output produced while caic was unavailable could not be verified and was not retained.",
+			}})
+			m.log.WarnContext(ctx, "relay", "msg", "legacy recovery skipped unverified relay tail",
+				"repo", relPath, "br", branch, "instance", c.ID, "reason", merger.err)
+		} else if encoded := merger.relayAppend(relayTimeline); len(encoded) > 0 {
 			log, _, err := m.logStore.Reopen(filepath.Base(lt.LogPath()), t.LogHeader())
 			if err != nil {
 				return nil, fmt.Errorf("reopen imported task log %s: %w", taskID, err)
@@ -2028,7 +2039,7 @@ type logRelayMessageMerger struct {
 	logEntries      []agent.TimedMessage
 	logRecords      []agent.RelayRecordBoundary
 	logGeneration   string
-	v2              bool
+	strictRelay     bool
 	ignoreRelayInit bool
 	relayByteStart  int
 	recordOverlap   bool
@@ -2059,7 +2070,7 @@ func newLogRelayMessageMerger(logTimeline agent.ParsedTimeline, h harness.Name) 
 
 func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agent.TimedMessage {
 	relayEntries := relayTimeline.Messages
-	if (m.v2 || m.logGeneration != "") && len(m.logRecords) == 0 {
+	if (m.strictRelay || m.logGeneration != "") && len(m.logRecords) == 0 {
 		if len(relayTimeline.RelayRecords) == 0 {
 			return slices.Clone(m.logEntries)
 		}

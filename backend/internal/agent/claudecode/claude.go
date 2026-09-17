@@ -106,7 +106,7 @@ func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) e
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return agent.AppendNativeRecord(log, log.LogVersion(), data)
+	return agent.AppendInputNativeRecord(log, log.LogVersion(), data)
 }
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a user

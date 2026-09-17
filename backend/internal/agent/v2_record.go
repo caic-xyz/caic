@@ -1,4 +1,4 @@
-// Strict canonical v2 task-log record extraction and decoding.
+// Strict canonical v2 and v3 task-log record extraction and decoding.
 
 package agent
 
@@ -19,6 +19,7 @@ type logRecordType string
 
 const (
 	logRecordAgent              logRecordType = "agent"
+	logRecordInput              logRecordType = "input"
 	logRecordMeta               logRecordType = "caic_meta"
 	logRecordDiffStat           logRecordType = "diff_stat"
 	logRecordExit               logRecordType = "exit"
@@ -83,6 +84,7 @@ func (t logRecordType) relayOwned() bool {
 
 const (
 	v2AgentRecordPrefix   = `{"t":"` + string(logRecordAgent) + `","ts":`
+	v3InputRecordPrefix   = `{"t":"` + string(logRecordInput) + `","ts":`
 	v2AgentMessagePrefix  = `,"msg":`
 	v2MaxEncodedRecordLen = 32 << 20
 	v2MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
@@ -110,8 +112,12 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 		return ParsedRecord{}, err
 	}
 	if bytes.HasPrefix(line, []byte(v2AgentRecordPrefix)) {
-		msgs, err := parseV2AgentRecord(p, line)
+		msgs, err := parseV2NativeRecord(p, line, v2AgentRecordPrefix)
 		return ParsedRecord{Messages: msgs, RelayRecord: true}, err
+	}
+	if p.version == LogVersionV3 && bytes.HasPrefix(line, []byte(v3InputRecordPrefix)) {
+		msgs, err := parseV2NativeRecord(p, line, v3InputRecordPrefix)
+		return ParsedRecord{Messages: msgs}, err
 	}
 
 	// Controls are small and retain ordinary decoding. Canonical agent records
@@ -328,8 +334,8 @@ func validateV2RecordBytes(line []byte) error {
 	return nil
 }
 
-func parseV2AgentRecord(p *LogRecordParser, line []byte) ([]TimedMessage, error) {
-	rest := line[len(v2AgentRecordPrefix):]
+func parseV2NativeRecord(p *LogRecordParser, line []byte, prefix string) ([]TimedMessage, error) {
+	rest := line[len(prefix):]
 	delimiter := bytes.IndexByte(rest, ',')
 	if delimiter < 0 || !bytes.HasPrefix(rest[delimiter:], []byte(v2AgentMessagePrefix)) {
 		return nil, errors.New("corrupt v2 agent record: invalid timestamp delimiter")
@@ -339,7 +345,7 @@ func parseV2AgentRecord(p *LogRecordParser, line []byte) ([]TimedMessage, error)
 		return nil, fmt.Errorf("corrupt v2 agent record: invalid ts: %w", err)
 	}
 
-	msgStart := len(v2AgentRecordPrefix) + delimiter + len(v2AgentMessagePrefix)
+	msgStart := len(prefix) + delimiter + len(v2AgentMessagePrefix)
 	if msgStart >= len(line) || line[len(line)-1] != '}' {
 		return nil, errors.New("corrupt v2 agent record: missing final msg or closing brace")
 	}

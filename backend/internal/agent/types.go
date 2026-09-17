@@ -805,12 +805,14 @@ const (
 	LogVersionV1 LogVersion = 1
 	// LogVersionV2 is the caic-enveloped task-log format.
 	LogVersionV2 LogVersion = 2
+	// LogVersionV3 distinguishes relay output from caic-to-harness input.
+	LogVersionV3 LogVersion = 3
 )
 
 // Validate rejects unsupported task-log versions.
 func (v LogVersion) Validate() error {
 	switch v {
-	case LogVersionV1, LogVersionV2:
+	case LogVersionV1, LogVersionV2, LogVersionV3:
 		return nil
 	default:
 		return fmt.Errorf("unsupported log version %d", v)
@@ -926,8 +928,25 @@ func (DiscardLogSink) Close() error { return nil }
 
 var _ LogSink = DiscardLogSink{}
 
-// AppendNativeRecord appends a native record in the exact physical format.
-func AppendNativeRecord(log LogSink, version LogVersion, data []byte) error {
+// AppendRelayNativeRecord appends bytes received from a relay in the exact
+// physical task-log format. Only these records are eligible for relay-offset
+// validation during live task adoption.
+func AppendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
+	return appendNativeRecord(log, version, logRecordAgent, data)
+}
+
+// AppendInputNativeRecord appends bytes caic sent to a harness's stdin in the
+// exact physical task-log format. V3 persists them separately from relay
+// output so protocol commands remain durable without becoming relay offsets.
+func AppendInputNativeRecord(log LogSink, version LogVersion, data []byte) error {
+	token := logRecordAgent
+	if version == LogVersionV3 {
+		token = logRecordInput
+	}
+	return appendNativeRecord(log, version, token, data)
+}
+
+func appendNativeRecord(log LogSink, version LogVersion, token logRecordType, data []byte) error {
 	if err := version.Validate(); err != nil {
 		return err
 	}
@@ -935,9 +954,9 @@ func AppendNativeRecord(log LogSink, version LogVersion, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	if version == LogVersionV2 {
+	if version != LogVersionV1 {
 		ts := time.Now().UTC()
-		data = fmt.Appendf(nil, `{"t":"%s","ts":%d.%03d,"msg":%s}`, logRecordAgent, ts.Unix(), ts.Nanosecond()/int(time.Millisecond), data)
+		data = fmt.Appendf(nil, `{"t":"%s","ts":%d.%03d,"msg":%s}`, token, ts.Unix(), ts.Nanosecond()/int(time.Millisecond), data)
 		data = append(data, '\n')
 	} else {
 		data = append(data, '\n')

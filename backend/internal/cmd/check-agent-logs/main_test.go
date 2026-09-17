@@ -32,9 +32,60 @@ func TestRun(t *testing.T) {
 			if err := run([]string{path}, &out); err != nil {
 				t.Fatal(err)
 			}
-			if got := out.String(); got != "checked 1 v2 task logs; found 0 schema issues\n" {
+			if got := out.String(); got != "checked 1 v2/v3 task logs; found 0 schema issues\n" {
 				t.Errorf("output = %q", got)
 			}
+		}
+	})
+
+	t.Run("v3 input and relay records", func(t *testing.T) {
+		t.Parallel()
+		path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
+			v3Meta("pi"),
+			`{"t":"input","ts":1.000,"msg":{"type":"prompt","message":"hello"}}`,
+			`{"t":"agent","ts":1.001,"msg":{"type":"agent_start"}}`,
+		}, false)
+		var out bytes.Buffer
+		if err := run([]string{path}, &out); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("v3 directional client input DTOs", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name    string
+			harness string
+			input   string
+		}{
+			{
+				name:    "claude",
+				harness: "claude",
+				input:   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`,
+			},
+			{
+				name:    "codex",
+				harness: "codex",
+				input:   `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"caic","title":"caic","version":"1"},"capabilities":{"optOutNotificationMethods":[]}}}`,
+			},
+			{
+				name:    "opencode",
+				harness: "opencode",
+				input:   `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"terminal":false},"clientInfo":{"name":"caic","title":"caic","version":"1"}}}`,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{
+					v3Meta(tc.harness),
+					`{"t":"input","ts":1.000,"msg":` + tc.input + `}`,
+				}, false)
+				var out bytes.Buffer
+				if err := run([]string{path}, &out); err != nil {
+					t.Fatal(err)
+				}
+			})
 		}
 	})
 
@@ -335,6 +386,10 @@ func TestParseFlags(t *testing.T) {
 
 func v2Meta(harness string) string {
 	return `{"t":"caic_meta","version":2,"prompt":"p","repos":[],"harness":"` + harness + `"}`
+}
+
+func v3Meta(harness string) string {
+	return `{"t":"caic_meta","version":3,"prompt":"p","repos":[],"harness":"` + harness + `"}`
 }
 
 func writeLog(t *testing.T, path string, lines []string, compressed bool) string {

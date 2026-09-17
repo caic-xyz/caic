@@ -125,7 +125,7 @@ func (s *physicalLogScanner) Scan() bool {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		if s.authority.Version == agent.LogVersionV2 && bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
+		if s.authority.Version != agent.LogVersionV1 && bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)) {
 			s.line = line
 			s.typ = "agent"
 			return true
@@ -232,7 +232,7 @@ func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string
 	var typeMeta, tMeta bool
 	result := func(err error) (string, bool, error) {
 		typ := typeValue
-		if version == agent.LogVersionV2 {
+		if version != agent.LogVersionV1 {
 			typ = tValue
 		}
 		return typ, typeMeta || tMeta, err
@@ -301,7 +301,7 @@ func decodeDiscriminatorProbe(line []byte, version agent.LogVersion) (typ string
 
 done:
 	typ = typeValue
-	if version == agent.LogVersionV2 {
+	if version != agent.LogVersionV1 {
 		typ = tValue
 	}
 	return typ, typeMeta || tMeta, nil
@@ -690,7 +690,7 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if err := authority.Version.Validate(); err != nil {
 		return agent.MetaMessage{}, logAuthority{}, err
 	}
-	if authority.Version == agent.LogVersionV2 && len(obj.duplicates) != 0 {
+	if authority.Version != agent.LogVersionV1 && len(obj.duplicates) != 0 {
 		duplicates := make([]string, 0, len(obj.duplicates))
 		for key := range obj.duplicates {
 			duplicates = append(duplicates, key)
@@ -699,7 +699,7 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("%w %q", errDuplicateRawKey, duplicates[0])
 	}
 	key := "type"
-	if authority.Version == agent.LogVersionV2 {
+	if authority.Version != agent.LogVersionV1 {
 		key = "t"
 	}
 	otherKey := "t"
@@ -753,7 +753,7 @@ func decodeSegmentMeta(line []byte, version agent.LogVersion) (string, agent.Met
 		return typ, agent.MetaMessage{}, errNotMetaRecord
 	}
 	key := "type"
-	if version == agent.LogVersionV2 {
+	if version != agent.LogVersionV1 {
 		key = "t"
 	}
 	otherKey := "t"
@@ -1177,7 +1177,7 @@ func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticL
 		for scanner.Scan() {
 			record, err := parser.ParseRecord(scanner.Bytes())
 			if err != nil {
-				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+				if record.Control || scanner.authority.Version != agent.LogVersionV1 {
 					return fmt.Errorf("parse task log %s: %w", path, err)
 				}
 				continue
@@ -1216,7 +1216,7 @@ func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (lo
 		loaded = &LoadedTask{LogVersion: scanner.authority.Version}
 		apply := func(record agent.ParsedRecord, err error) error {
 			if err != nil {
-				if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+				if record.Control || scanner.authority.Version != agent.LogVersionV1 {
 					return fmt.Errorf("parse task log %s: %w", path, err)
 				}
 				return nil
@@ -1778,7 +1778,7 @@ func scanInventoryRecords(path string, scanner *physicalLogScanner, lt *LoadedTa
 		}
 		record, err := parser.ParseRecord(scanner.Bytes())
 		if err != nil {
-			if record.Control || scanner.authority.Version == agent.LogVersionV2 {
+			if record.Control || scanner.authority.Version != agent.LogVersionV1 {
 				return fmt.Errorf("parse task log %s: %w", path, err)
 			}
 			continue

@@ -108,7 +108,7 @@ func mustJSON(t *testing.T, v any) string {
 	case *agent.MetaMessage:
 		version = m.Version
 	}
-	if version == int(agent.LogVersionV2) {
+	if version == int(agent.LogVersionV2) || version == int(agent.LogVersionV3) {
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal(b, &raw); err != nil {
 			t.Fatal(err)
@@ -238,7 +238,7 @@ func TestReadLogAuthority(t *testing.T) {
 		{name: "MissingHeader", lines: []string{`{"type":"assistant"}`}},
 		{name: "CorruptHeader", lines: []string{`{"type":"caic_meta"`}},
 		{name: "MissingVersion", lines: []string{meta(t, 0, harness.Claude)}},
-		{name: "FutureVersion", lines: []string{meta(t, 3, harness.Claude)}},
+		{name: "FutureVersion", lines: []string{meta(t, 4, harness.Claude)}},
 		{name: "ChangedVersion", lines: []string{meta(t, 1, harness.Claude), meta(t, 2, harness.Claude)}},
 		{name: "ChangedHarness", lines: []string{meta(t, 1, harness.Claude), meta(t, 1, harness.Codex)}},
 		{name: "WrongLaterDiscriminator", lines: []string{meta(t, 1, harness.Claude), `{"t":"caic_meta","version":1,"prompt":"task","repos":[],"harness":"claude"}`}},
@@ -791,6 +791,48 @@ func TestTsToTime(t *testing.T) {
 	}
 	if got.Location() != time.UTC {
 		t.Error("tsToTime should return UTC")
+	}
+}
+
+func TestV3DirectionalNativeLoad(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const input = `{"type":"control_response","response":{"request_id":"ask-1","answer":"Identity only"}}`
+	const output = `{"type":"assistant","text":"thanks"}`
+	writeLogFile(t, dir, "task.jsonl",
+		mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta",
+			Version:     int(agent.LogVersionV3),
+			Prompt:      "task",
+			Harness:     harness.Claude,
+		}),
+		`{"t":"input","ts":1.000,"msg":`+input+`}`,
+		`{"t":"agent","ts":2.000,"msg":`+output+`}`,
+	)
+	tasks, err := NewStore(testLogger(), dir).LoadUnsettled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("loaded tasks = %d, want 1", len(tasks))
+	}
+	var native [][]byte
+	if err := tasks[0].LoadMessagesWithResolver(func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		if h != harness.Claude {
+			return nil, fmt.Errorf("harness = %q, want %q", h, harness.Claude)
+		}
+		return func(data []byte) ([]agent.Message, error) {
+			native = append(native, bytes.Clone(data))
+			return nil, nil
+		}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(native) != 2 || string(native[0]) != input || string(native[1]) != output {
+		t.Fatalf("native timeline = %q, want input then output", native)
+	}
+	if len(tasks[0].RelayRecords) != 1 {
+		t.Fatalf("relay records = %#v, want only relay output", tasks[0].RelayRecords)
 	}
 }
 

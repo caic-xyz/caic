@@ -220,7 +220,7 @@ func (c *conn) SendRaw(data []byte) error {
 	if isMCPResponse(data) {
 		return nil
 	}
-	return AppendNativeRecord(c.log, c.version, data)
+	return AppendInputNativeRecord(c.log, c.version, data)
 }
 
 func (c *conn) SendCompact(instructions string) error {
@@ -491,7 +491,7 @@ func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage
 		if parseErr != nil {
 			return nil, nil, parseErr
 		}
-		if r.parser.version == LogVersionV2 {
+		if r.parser.version != LogVersionV1 {
 			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
 				return nil, nil, fmt.Errorf("write log: %w", writeErr)
 			}
@@ -525,7 +525,7 @@ func NewLogRecordParser(version LogVersion, parseNative func([]byte) ([]Message,
 // exact version. Classification belongs to this parser so task-log consumers
 // never duplicate or guess control vocabulary.
 func (p *LogRecordParser) ParseRecord(line []byte) (ParsedRecord, error) {
-	if p.version == LogVersionV2 {
+	if p.version != LogVersionV1 {
 		return parseV2Record(p, line)
 	}
 	return parseV1Record(p, line)
@@ -801,7 +801,7 @@ func defaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 		}
 		n++
 		parsed, err := parser.ParseRecord(line)
-		if version == LogVersionV2 && err != nil {
+		if version != LogVersionV1 && err != nil {
 			return fmt.Errorf("parse v2 relay record: %w", err)
 		}
 		if writeErr := sink.AppendNative(record); writeErr != nil {
@@ -847,7 +847,7 @@ func RelayScript(version LogVersion) ([]byte, error) {
 	if err := version.Validate(); err != nil {
 		return nil, err
 	}
-	if version == LogVersionV2 {
+	if version != LogVersionV1 {
 		return relay.ScriptV2, nil
 	}
 	return relay.Script, nil
@@ -1265,13 +1265,13 @@ func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		}
 		parsed, parseErr := parser.ParseRecord(line)
 		if parseErr != nil {
-			if parser.version == LogVersionV2 || parsed.Control {
+			if parser.version != LogVersionV1 || parsed.Control {
 				return timeline, offset, fmt.Errorf("parse relay record: %w", parseErr)
 			}
 			slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
 			continue
 		}
-		if parser.version == LogVersionV2 {
+		if parser.version != LogVersionV1 {
 			timeline.Encoded = append(timeline.Encoded, record...)
 		}
 		if parsed.RelayGeneration != "" {
@@ -1428,7 +1428,7 @@ func yieldMessages(r io.Reader, parser *LogRecordParser, skipFirst bool, src str
 			}
 			record, parseErr := parser.ParseRecord(line)
 			if parseErr != nil {
-				if parser.version == LogVersionV2 || record.Control {
+				if parser.version != LogVersionV1 || record.Control {
 					yield(TimedMessage{}, fmt.Errorf("parse relay record: %w", parseErr))
 					return
 				}

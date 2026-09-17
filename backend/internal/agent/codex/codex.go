@@ -193,7 +193,7 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	if err != nil {
 		return nil, fmt.Errorf("construct model-list reader: %w", err)
 	}
-	models, err := fetchModelsFromAppServer(ctx, stdin, records, &nextID)
+	models, err := fetchModelsFromAppServer(ctx, stdin, records, &nextID, agent.DiscardLogSink{Version: agent.LogVersionV1})
 	if err != nil {
 		return nil, fmt.Errorf("codex model/list: %w", err)
 	}
@@ -317,13 +317,12 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, log agent.LogSink
 		Method:  "turn/start",
 		Params:  params,
 	}
-	// Don't log to logW — stdin is not logged with --no-log-stdin.
-	return writeJSON(wr, req)
+	return writeJSONInput(wr, req, log)
 }
 
 // WriteCompact implements agent.CompactCommand by sending a thread/compact/start
 // JSON-RPC request. Codex compacts the context window for the current thread.
-func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ agent.LogSink) error {
+func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.threadID == "" {
@@ -339,7 +338,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ agent.LogSink) error
 		Method:  "thread/compact/start",
 		Params:  params,
 	}
-	return writeJSON(wr, req)
+	return writeJSONInput(wr, req, log)
 }
 
 // ParseMessage wraps the package-level parseMessage with two interceptions:
@@ -440,7 +439,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
 	}
 
-	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID)
+	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID, opts.Log)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -470,7 +469,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 			Params:  params,
 		}
 	}
-	if err := writeJSON(stdin, threadReq); err != nil {
+	if err := writeJSONInput(stdin, threadReq, opts.Log); err != nil {
 		return nil, nil, nil, fmt.Errorf("write thread/start: %w", err)
 	}
 
@@ -497,7 +496,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	return w, models, records.Reader(), nil
 }
 
-func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, nextID *atomic.Int64) ([]codex.ModelInfo, error) {
+func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, nextID *atomic.Int64, log agent.LogSink) ([]codex.ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -538,7 +537,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *age
 		Method:  "initialize",
 		Params:  initParams,
 	}
-	if err := writeJSON(stdin, initReq); err != nil {
+	if err := writeJSONInput(stdin, initReq, log); err != nil {
 		return nil, fmt.Errorf("write initialize: %w", err)
 	}
 
@@ -548,7 +547,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *age
 	}
 
 	// 2. Send initialized notification.
-	if err := writeJSON(stdin, codex.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
+	if err := writeJSONInput(stdin, codex.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}, log); err != nil {
 		return nil, fmt.Errorf("write initialized: %w", err)
 	}
 
@@ -560,7 +559,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *age
 		if err != nil {
 			return nil, fmt.Errorf("marshal model/list params: %w", err)
 		}
-		if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}); err != nil {
+		if err := writeJSONInput(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}, log); err != nil {
 			return nil, fmt.Errorf("write model/list: %w", err)
 		}
 		mlResp, err := readJSONRPCResponse(ctx, records)
@@ -608,6 +607,23 @@ func writeJSON(w io.Writer, v any) error {
 	data = append(data, '\n')
 	_, err = w.Write(data)
 	return err
+}
+
+// writeJSONInput writes one harness command and preserves its exact NDJSON
+// payload as caic-to-harness input when the log format supports provenance.
+func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	if log.LogVersion() != agent.LogVersionV3 {
+		return nil
+	}
+	return agent.AppendInputNativeRecord(log, log.LogVersion(), data)
 }
 
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
