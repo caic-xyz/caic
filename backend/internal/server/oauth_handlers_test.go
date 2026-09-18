@@ -255,26 +255,26 @@ func TestOAuthServer(t *testing.T) {
 
 			// Verify client identity is shown as unverified, with redirect URI and client ID.
 			if !strings.Contains(flat, "Claude Code") {
-				t.Errorf("markup missing client name: %s", body)
+				t.Errorf("body missing client name: %s", body)
 			}
 			if !strings.Contains(flat, "self-declared") {
-				t.Errorf("markup missing unverified client warning: %s", body)
+				t.Errorf("body missing unverified client warning: %s", body)
 			}
 			if !strings.Contains(flat, "https://claude.ai/api/mcp/auth_callback") {
-				t.Errorf("markup missing redirect URI: %s", body)
+				t.Errorf("body missing redirect URI: %s", body)
 			}
 			if !strings.Contains(flat, registered.ClientID) {
-				t.Errorf("markup missing client ID: %s", body)
+				t.Errorf("body missing client ID: %s", body)
 			}
 
 			// Verify username.
 			if !strings.Contains(flat, user2.Username) {
-				t.Errorf("markup missing username %q: %s", user2.Username, body)
+				t.Errorf("body missing username %q: %s", user2.Username, body)
 			}
 
 			// Verify provider.
 			if !strings.Contains(flat, "GitHub") {
-				t.Errorf("markup missing provider: %s", body)
+				t.Errorf("body missing provider: %s", body)
 			}
 
 			// Verify the avatar does not load a third-party URL and leak OAuth request details.
@@ -284,56 +284,56 @@ func TestOAuthServer(t *testing.T) {
 
 			// Verify resource.
 			if !strings.Contains(flat, "caic.example.com/api/caic/v1/mcp") {
-				t.Errorf("markup missing resource URL: %s", body)
+				t.Errorf("body missing resource URL: %s", body)
 			}
 
 			// Verify scope descriptions.
 			if !strings.Contains(flat, "caic:mcp.read") {
-				t.Error("markup missing scope caic:mcp.read")
+				t.Error("body missing scope caic:mcp.read")
 			}
 			if !strings.Contains(flat, "Use basic MCP tools including usage and non-task resources") {
-				t.Error("markup missing scope description for caic:mcp.read")
+				t.Error("body missing scope description for caic:mcp.read")
 			}
 			if !strings.Contains(flat, "caic:tasks.read") {
-				t.Error("markup missing scope caic:tasks.read")
+				t.Error("body missing scope caic:tasks.read")
 			}
 			if !strings.Contains(flat, "Read task information") {
-				t.Error("markup missing scope description for caic:tasks.read")
+				t.Error("body missing scope description for caic:tasks.read")
 			}
 			if !strings.Contains(flat, `type="checkbox" name="scope" value="caic:tasks.create" form="consent-form"`) {
-				t.Error("markup missing selectable task creation scope attached to consent form")
+				t.Error("body missing selectable task creation scope attached to consent form")
 			}
 			if !strings.Contains(flat, `type="checkbox" name="scope" value="caic:tasks.write" form="consent-form"`) {
-				t.Error("markup missing selectable write scope attached to consent form")
+				t.Error("body missing selectable write scope attached to consent form")
 			}
 			if !strings.Contains(flat, "Manage repositories") {
-				t.Error("markup missing repos write scope description")
+				t.Error("body missing repos write scope description")
 			}
 
 			// Verify security warning.
 			if !strings.Contains(flat, "caic MCP only") {
-				t.Error("markup missing security warning")
+				t.Error("body missing security warning")
 			}
 			if !strings.Contains(flat, "GitHub") && !strings.Contains(flat, "GitLab") {
-				t.Error("markup missing forge credential disclaimer")
+				t.Error("body missing forge credential disclaimer")
 			}
 
 			// Verify consent token is present.
 			if !strings.Contains(flat, `name="consent_token"`) {
-				t.Error("markup missing consent_token field")
+				t.Error("body missing consent_token field")
 			}
 
 			// Verify form action.
 			if !strings.Contains(flat, `id="consent-form" method="post" action="https://caic.example.com/oauth/authorize"`) {
-				t.Error("markup missing consent form action")
+				t.Error("body missing consent form action")
 			}
 
 			// Verify Deny and Authorize buttons.
 			if !strings.Contains(flat, "Deny") {
-				t.Error("markup missing Deny button")
+				t.Error("body missing Deny button")
 			}
 			if !strings.Contains(flat, "Authorize") {
-				t.Error("markup missing Authorize button")
+				t.Error("body missing Authorize button")
 			}
 			if w.Header().Get("Cache-Control") != "no-store" {
 				t.Errorf("Cache-Control = %q, want no-store", w.Header().Get("Cache-Control"))
