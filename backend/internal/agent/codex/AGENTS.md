@@ -40,6 +40,40 @@ Wire type names in the genai package match the upstream Rust definitions:
 When updating wire types, update `github.com/maruel/genai` and diff against
 the upstream Rust definitions to find new fields, item types, or notification methods.
 
+## Native subagent evidence
+
+An earlier Codex CLI 0.154.0 recording from the same CLI contained only a
+receiverless `wait`; the current recording contains both that wait and a completed
+activity spawn, and the minimized fixture pins both.
+
+The Codex CLI 0.154.0 recording uses the app-server transport, and it reports
+delegation through two item types, both of which `native_subagent.go` maps:
+
+- `subAgentActivity` (`started`, `interacted`, `interrupted`, `completed`) is
+  how a spawn and its lifecycle are reported. Its identity is the
+  `agentThreadId`, and `agentPath` names the agent (`/root/readme_joke`). The
+  standardized recording shows `started` followed by `completed` for one agent.
+- `collabAgentToolCall` covers the collaboration tools: a `spawnAgent` call with
+  `receiverThreadIds` maps each receiver thread to a card, and `agentsStates`
+  entries settle threads the session has already seen for `wait`, `sendInput`,
+  `resumeAgent`, `closeAgent`, and similar calls. A `wait` with empty
+  `receiverThreadIds` and empty `agentsStates`, which the recording also
+  contains, is not evidence of anything and produces no card.
+
+Legacy multi-agent v1 traffic from the same CLI may report a spawn through
+either type, and both use the agent thread ID as the canonical identity, so one
+agent can never produce two cards. It is not an unsupported verdict: the matching
+`rust-v0.154.0` source implements `spawn_agent` and collaboration tool events.
+When present, preserve the tool name, sender thread ID, receiver thread IDs,
+prompt, agent states, and item status. `wait`, `send_message`, and other
+coordination tools are not spawns; a missing receiver or prompt must remain
+unknown rather than being invented.
+
+The authoritative mapping is
+https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/event_mapping.rs:
+it emits `spawn_agent` items from spawn begin/end events and separate `wait`,
+send-input, close, and resume items.
+
 ## References
 
 Source code:

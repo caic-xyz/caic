@@ -37,11 +37,11 @@ import (
 //   - ResultMessage        — turn/completed, error notification
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func parseMessage(line []byte) ([]agent.Message, error) {
+func parseMessage(line []byte) ([]agent.Message, decodedItem, error) {
 	// Fast probe: check for "type" (caic-injected) vs "method"/"id" (JSON-RPC).
 	var probe codex.MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
-		return nil, fmt.Errorf("unmarshal probe: %w", err)
+		return nil, decodedItem{}, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
 	// caic-injected lines have a "type" field (not "jsonrpc").
@@ -50,47 +50,47 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 		case "caic_session":
 			m, err := agent.DecodeV1MetaSessionMessage(line)
 			if err != nil {
-				return nil, err
+				return nil, decodedItem{}, err
 			}
 			return []agent.Message{&agent.InitMessage{
 				SessionID:      m.SessionID,
 				ReportedModel:  m.ReportedModel,
 				ReportedEffort: m.ReportedEffort,
 				Version:        m.AgentVersion,
-			}}, nil
+			}}, decodedItem{}, nil
 		case "caic_diff_stat":
 			var m agent.DiffStatMessage
 			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, err
+				return nil, decodedItem{}, err
 			}
-			return []agent.Message{&m}, nil
+			return []agent.Message{&m}, decodedItem{}, nil
 		case "caic_exit":
 			var m agent.ExitMessage
 			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, err
+				return nil, decodedItem{}, err
 			}
-			return []agent.Message{&m}, nil
+			return []agent.Message{&m}, decodedItem{}, nil
 		default:
-			return []agent.Message{&agent.RawMessage{MessageType: probe.Type, Raw: append([]byte(nil), line...)}}, nil
+			return []agent.Message{&agent.RawMessage{MessageType: probe.Type, Raw: append([]byte(nil), line...)}}, decodedItem{}, nil
 		}
 	}
 
 	// JSON-RPC response (has "id").
 	if probe.ID != nil {
-		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, decodedItem{}, nil
 	}
 
 	// JSON-RPC notification — dispatch on method.
 	var msg codex.JSONRPCMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, fmt.Errorf("unmarshal jsonrpc: %w", err)
+		return nil, decodedItem{}, fmt.Errorf("unmarshal jsonrpc: %w", err)
 	}
 
 	switch msg.Method {
 	case codex.MethodThreadStarted:
 		var p codex.ThreadStartedNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("thread/started params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("thread/started params: %w", err)
 		}
 		return []agent.Message{&agent.InitMessage{
 			SessionID:      p.Thread.ID,
@@ -98,15 +98,15 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			ReportedModel:  p.Thread.Model,
 			Version:        p.Thread.CLIVersion,
 			ReportedEffort: string(p.Thread.ReasoningEffort),
-		}}, nil
+		}}, decodedItem{}, nil
 
 	case codex.MethodTurnStarted:
-		return nil, nil
+		return nil, decodedItem{}, nil
 
 	case codex.MethodTurnCompleted:
 		var p codex.TurnCompletedNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("turn/completed params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("turn/completed params: %w", err)
 		}
 		durationMs := int64(0)
 		if p.Turn.Duration != nil {
@@ -124,90 +124,99 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 				IsError:     true,
 				Result:      errMsg,
 				DurationMs:  durationMs,
-			}}, nil
+			}}, decodedItem{}, nil
 		default: // completed, inProgress
 			return []agent.Message{&agent.ResultMessage{
 				MessageType: "result",
 				Subtype:     "result",
 				DurationMs:  durationMs,
-			}}, nil
+			}}, decodedItem{}, nil
 		}
 
-	case codex.MethodItemStarted:
-		return parseItemStarted(&msg)
-
-	case codex.MethodItemCompleted:
-		return parseItemCompleted(&msg)
+	case codex.MethodItemStarted, codex.MethodItemCompleted:
+		raw, typ, err := decodeItem(msg.Method, msg.Params)
+		if err != nil {
+			return nil, decodedItem{}, err
+		}
+		var msgs []agent.Message
+		if msg.Method == codex.MethodItemStarted {
+			msgs, err = parseItemStarted(&msg, raw, typ)
+		} else {
+			msgs, err = parseItemCompleted(&msg, raw, typ)
+		}
+		return msgs, decodedItem{raw: raw, typ: typ}, err
 
 	case codex.MethodItemDelta:
 		var p codex.AgentMessageDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("item/agentMessage/delta params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("item/agentMessage/delta params: %w", err)
 		}
-		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta}}, nil
+		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta}}, decodedItem{}, nil
 
 	case codex.MethodErrorNotification:
 		var p codex.ErrorNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("error notification params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("error notification params: %w", err)
 		}
 		if p.WillRetry || p.Error == nil {
-			return nil, nil
+			return nil, decodedItem{}, nil
 		}
 		return []agent.Message{&agent.ResultMessage{
 			MessageType: "result",
 			Subtype:     "result",
 			IsError:     true,
 			Result:      p.Error.Message,
-		}}, nil
+		}}, decodedItem{}, nil
 
 	case codex.MethodAccountRateLimitsUpdated:
-		return parseAccountRateLimitsUpdated(msg.Params)
+		msgs, err := parseAccountRateLimitsUpdated(msg.Params)
+		return msgs, decodedItem{}, err
 
 	case codex.MethodThreadGoalUpdated:
-		return parseThreadGoalUpdated(msg.Params)
+		msgs, err := parseThreadGoalUpdated(msg.Params)
+		return msgs, decodedItem{}, err
 	case codex.MethodThreadGoalCleared:
 		var p codex.ThreadGoalClearedNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("thread/goal/cleared params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("thread/goal/cleared params: %w", err)
 		}
-		return nil, nil
+		return nil, decodedItem{}, nil
 
 	case codex.MethodReasoningSummaryTextDelta:
 		var p codex.ReasoningSummaryTextDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("item/reasoning/summaryTextDelta params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("item/reasoning/summaryTextDelta params: %w", err)
 		}
-		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta}}, nil
+		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta}}, decodedItem{}, nil
 
 	case codex.MethodCommandOutputDelta:
 		var p codex.CommandExecutionOutputDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("commandExecution/outputDelta params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("commandExecution/outputDelta params: %w", err)
 		}
-		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Delta}}, nil
+		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Delta}}, decodedItem{}, nil
 
 	case codex.MethodMcpToolCallProgress:
 		var p codex.McpToolCallProgressNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("mcpToolCall/progress params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("mcpToolCall/progress params: %w", err)
 		}
-		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Message}}, nil
+		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Message}}, decodedItem{}, nil
 
 	case codex.MethodThreadStatusChanged:
 		var p codex.ThreadStatusChangedNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("thread/status/changed params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("thread/status/changed params: %w", err)
 		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
 			Subtype:     string(p.Status.Type),
-		}}, nil
+		}}, decodedItem{}, nil
 
 	case codex.MethodModelRerouted:
 		var p codex.ModelReroutedNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
-			return nil, fmt.Errorf("model/rerouted params: %w", err)
+			return nil, decodedItem{}, fmt.Errorf("model/rerouted params: %w", err)
 		}
 		detail := p.FromModel + " → " + p.ToModel
 		if p.Reason != "" {
@@ -218,10 +227,10 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			Subtype:       agent.SystemSubtypeModelRerouted,
 			Detail:        detail,
 			ReportedModel: p.ToModel,
-		}}, nil
+		}}, decodedItem{}, nil
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, decodedItem{}, nil
 	}
 }
 
@@ -398,27 +407,37 @@ func codexReachedQuotaWindow(reason codex.RateLimitReachedType) string {
 	}
 }
 
-// parseItemStarted handles item/started notifications.
-func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
-	var p codex.ItemStartedNotification
-	if err := json.Unmarshal(msg.Params, &p); err != nil {
-		return nil, fmt.Errorf("item/started params: %w", err)
+// decodeItem reads the routed item of an item/started or item/completed
+// notification: the raw item for the typed decode, and the item type that routes
+// it. The stateful native-subagent adapter reads that item, so the conversion
+// hands it over instead of making the adapter decode the notification again.
+func decodeItem(method codex.Method, params json.RawMessage) (json.RawMessage, codex.ItemType, error) {
+	var p struct {
+		Item json.RawMessage `json:"item"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, "", fmt.Errorf("%s params: %w", method, err)
 	}
 	var h codex.ItemHeader
 	if err := json.Unmarshal(p.Item, &h); err != nil {
-		return nil, fmt.Errorf("item/started header: %w", err)
+		return nil, "", fmt.Errorf("%s header: %w", method, err)
 	}
-	switch h.Type {
+	return p.Item, h.Type, nil
+}
+
+// parseItemStarted handles item/started notifications.
+func parseItemStarted(msg *codex.JSONRPCMessage, raw json.RawMessage, typ codex.ItemType) ([]agent.Message, error) {
+	switch typ {
 	case codex.ItemTypeUserMessage:
 		var item codex.UserMessageItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started userMessage: %w", err)
 		}
 		return []agent.Message{userInputFromContent(item.Content)}, nil
 
 	case codex.ItemTypeCommandExecution:
 		var item codex.CommandExecutionItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started commandExecution: %w", err)
 		}
 		input, err := json.Marshal(map[string]string{"command": item.Command, "cwd": item.Cwd})
@@ -433,7 +452,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeFileChange:
 		var item codex.FileChangeItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started fileChange: %w", err)
 		}
 		input, err := json.Marshal(item.Changes)
@@ -450,7 +469,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeMCPToolCall:
 		var item codex.McpToolCallItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started mcpToolCall: %w", err)
 		}
 		if _, ok := agent.WidgetToolNames[item.Tool]; ok {
@@ -464,7 +483,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeDynamicToolCall:
 		var item codex.DynamicToolCallItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started dynamicToolCall: %w", err)
 		}
 		return []agent.Message{&agent.ToolUseMessage{
@@ -475,7 +494,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeCollabAgentToolCall:
 		var item codex.CollabAgentToolCallItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started collabAgentToolCall: %w", err)
 		}
 		toolName := string(item.Tool)
@@ -494,7 +513,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeImageGeneration:
 		var item codex.ImageGenerationItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/started imageGeneration: %w", err)
 		}
 		input, err := json.Marshal(map[string]string{"revisedPrompt": item.RevisedPrompt})
@@ -513,16 +532,8 @@ func parseItemStarted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 }
 
 // parseItemCompleted handles item/completed notifications.
-func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
-	var p codex.ItemCompletedNotification
-	if err := json.Unmarshal(msg.Params, &p); err != nil {
-		return nil, fmt.Errorf("item/completed params: %w", err)
-	}
-	var h codex.ItemHeader
-	if err := json.Unmarshal(p.Item, &h); err != nil {
-		return nil, fmt.Errorf("item/completed header: %w", err)
-	}
-	switch h.Type {
+func parseItemCompleted(msg *codex.JSONRPCMessage, raw json.RawMessage, typ codex.ItemType) ([]agent.Message, error) {
+	switch typ {
 	case codex.ItemTypeUserMessage:
 		// Codex emits userMessage for both item/started and item/completed.
 		// The started item is enough to show the prompt and avoids duplicates.
@@ -530,14 +541,14 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeAgentMessage:
 		var item codex.AgentMessageItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed agentMessage: %w", err)
 		}
 		return []agent.Message{&agent.TextMessage{Text: item.Text, Phase: string(item.Phase)}}, nil
 
 	case codex.ItemTypeReasoning:
 		var item codex.ReasoningItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed reasoning: %w", err)
 		}
 		text := strings.Join(item.Summary, "\n")
@@ -545,14 +556,14 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypePlan:
 		var item codex.PlanItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed plan: %w", err)
 		}
 		return []agent.Message{&agent.TextMessage{Text: item.Text}}, nil
 
 	case codex.ItemTypeCommandExecution:
 		var item codex.CommandExecutionItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed commandExecution: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
@@ -563,14 +574,14 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeFileChange:
 		var item codex.FileChangeItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed fileChange: %w", err)
 		}
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: item.ID}}, nil
 
 	case codex.ItemTypeMCPToolCall:
 		var item codex.McpToolCallItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed mcpToolCall: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
@@ -581,7 +592,7 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeDynamicToolCall:
 		var item codex.DynamicToolCallItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed dynamicToolCall: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
@@ -592,7 +603,7 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeCollabAgentToolCall:
 		var item codex.CollabAgentToolCallItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed collabAgentToolCall: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
@@ -603,7 +614,7 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeContextCompaction:
 		var item codex.ContextCompactionThreadItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed contextCompaction: %w", err)
 		}
 		return []agent.Message{&agent.SystemMessage{
@@ -613,7 +624,7 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeWebSearch:
 		var item codex.WebSearchItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed webSearch: %w", err)
 		}
 		input, err := json.Marshal(map[string]string{"query": item.Query})
@@ -627,7 +638,7 @@ func parseItemCompleted(msg *codex.JSONRPCMessage) ([]agent.Message, error) {
 
 	case codex.ItemTypeImageGeneration:
 		var item codex.ImageGenerationItem
-		if err := json.Unmarshal(p.Item, &item); err != nil {
+		if err := json.Unmarshal(raw, &item); err != nil {
 			return nil, fmt.Errorf("item/completed imageGeneration: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}

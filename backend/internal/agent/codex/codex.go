@@ -210,14 +210,19 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
-	wire := &wireFormat{threadID: opts.ResumeSessionID, requestedEffort: opts.Effort, suppressUserInput: true}
+	wire := &wireFormat{
+		threadID:          opts.ResumeSessionID,
+		requestedEffort:   opts.Effort,
+		suppressUserInput: true,
+		nativeSubagents:   newNativeSubagents(),
+	}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
-	return &wireFormat{}
+	return &wireFormat{nativeSubagents: newNativeSubagents()}
 }
 
 func codexAppServerArgs() []string {
@@ -274,6 +279,7 @@ func modelsForModelInfo(models []string, modelInfo []codex.ModelInfo) []agent.Mo
 // request ID counter, accumulated token usage from thread/tokenUsage/updated,
 // and the requested reasoning effort level.
 type wireFormat struct {
+	nativeSubagents   nativeSubagents
 	threadID          string
 	requestedEffort   string // Requested effort sent with each turn/start request.
 	suppressUserInput bool
@@ -399,10 +405,15 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return []agent.Message{usageMsg}, nil
 	}
 
-	msgs, err := parseMessage(line)
+	msgs, record, err := parseMessage(line)
 	if err != nil {
 		return nil, err
 	}
+	native, err := w.nativeSubagents.parse(record)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, native...)
 	out := msgs[:0]
 	for _, msg := range msgs {
 		if _, ok := msg.(*agent.UserInputMessage); ok && w.suppressUserInput {
@@ -433,7 +444,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{requestedEffort: opts.Effort}
+	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: newNativeSubagents()}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)

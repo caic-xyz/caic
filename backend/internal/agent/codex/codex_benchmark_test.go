@@ -21,7 +21,7 @@ func BenchmarkParseAccountRateLimitsUpdated(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := parseMessage(line); err != nil {
+		if _, _, err := parseMessage(line); err != nil {
 			b.Fatal(err)
 		}
 	}

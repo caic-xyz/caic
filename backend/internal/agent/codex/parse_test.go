@@ -19,7 +19,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ThreadStarted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53","cliVersion":"1.0","createdAt":1771690198,"cwd":"/repo","model":"gpt-5.6-terra","modelProvider":"openai","reasoningEffort":"high","path":"/repo","preview":"fix","source":"user","status":{"type":"idle"},"updatedAt":1771690200}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ThreadStartedMissingSettings", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"thread","model":null,"reasoningEffort":null}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("CaicSession", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"type":"caic_session","session_id":"thread-1","model":"gpt-5.4","agent_version":"1.2.3"}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("TurnStarted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_1","status":"inProgress"}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +93,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedUserMessage", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt","text_elements":[]}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +111,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedUserMessageSuppressed", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt","text_elements":[]}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +122,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("TurnCompleted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed","durationMs":532000}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("TurnFailed", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"failed","error":{"message":"rate limit exceeded"}}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedCommandExecution", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","cwd":"/repo","status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -195,7 +195,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedCommandExecution", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"durationMs":150.5,"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedAgentMessage", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_3","type":"agentMessage","text":"Done.","status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +234,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedAgentMessagePhase", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_3","type":"agentMessage","text":"Here is my answer.","phase":"final_answer","status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -255,7 +255,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedReasoning", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_0","type":"reasoning","summary":["**Scanning...**"],"content":[]},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,7 +273,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedFileChangeAdd", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_4","type":"fileChange","changes":[{"path":"docs/foo.md","kind":{"type":"add"},"diff":""}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -294,7 +294,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedFileChangeAdd", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_4","type":"fileChange","changes":[{"path":"docs/foo.md","kind":{"type":"add"},"diff":""}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -312,7 +312,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedFileChangeUpdate", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_5","type":"fileChange","changes":[{"path":"src/main.go","kind":{"type":"update"},"diff":""}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -333,7 +333,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedFileChangeUpdate", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_5","type":"fileChange","changes":[{"path":"src/main.go","kind":{"type":"update"},"diff":""}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -351,7 +351,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedDynamicToolCall", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"dyn_1","type":"dynamicToolCall","tool":"my_tool","arguments":{"key":"val"},"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +374,7 @@ func TestParseMessage(t *testing.T) {
 		success := true
 		_ = success // used inline in JSON
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"dyn_1","type":"dynamicToolCall","tool":"my_tool","status":"completed","success":true},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -395,7 +395,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedDynamicToolCallFailure", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"dyn_2","type":"dynamicToolCall","tool":"my_tool","status":"failed","success":false},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -413,7 +413,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedCollabAgentToolCall", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"collab_1","type":"collabAgentToolCall","tool":"delegate","status":"inProgress","senderThreadId":"thread-1","prompt":"do the thing"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -442,7 +442,7 @@ func TestParseMessage(t *testing.T) {
 		t.Parallel()
 		// When Tool is empty, Name should default to "collabAgent".
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"collab_2","type":"collabAgentToolCall","status":"inProgress","prompt":"hello"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -460,7 +460,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedCollabAgentToolCallSuccess", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"collab_1","type":"collabAgentToolCall","tool":"delegate","status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -481,7 +481,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedCollabAgentToolCallFailed", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"collab_3","type":"collabAgentToolCall","tool":"delegate","status":"failed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -502,7 +502,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedMcpToolCallWidget", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"w1","type":"mcpToolCall","server":"widget","tool":"show_widget","status":"inProgress","arguments":{"title":"demo_chart","widget_code":"<p>Hello</p>"}},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -526,7 +526,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemStartedMcpToolCallNonWidget", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"m1","type":"mcpToolCall","server":"fs","tool":"read_file","status":"inProgress","arguments":{"path":"/tmp/a"}},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -544,7 +544,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedContextCompaction", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"cc_1","type":"contextCompaction"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -562,7 +562,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemCompletedWebSearch", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_6","type":"webSearch","query":"golang generics","status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -587,7 +587,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemUpdated", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/updated","params":{"item":{"id":"item_1","type":"commandExecution","aggregatedOutput":"partial..."},"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -605,7 +605,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ReasoningSummaryTextDelta", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/reasoning/summaryTextDelta","params":{"threadId":"t1","turnId":"turn_1","itemId":"item_0","delta":"Let me think...","summaryIndex":0}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -624,7 +624,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ItemDelta", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"t1","turnId":"turn_1","itemId":"item_3","delta":"Hello "}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -642,7 +642,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("JSONRPCResponse", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","id":1,"result":{"thread":{"id":"t1"}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -660,7 +660,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("DiffStat", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"foo.go","added":10,"deleted":2}],"ts":1719500000.5}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -681,7 +681,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ErrorNotificationWillRetry", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"rate limit"},"willRetry":true,"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -692,7 +692,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ErrorNotificationFatal", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"out of quota"},"willRetry":false,"threadId":"t1","turnId":"turn_1"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -713,7 +713,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("AccountRateLimitsUpdated", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1735689720.5},"secondary":{"usedPercent":85,"windowDurationMins":10080,"resetsAt":1736294520},"rateLimitReachedType":"rate_limit_reached"}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -744,7 +744,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("AccountCreditsDepleted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1735689720},"rateLimitReachedType":"workspace_owner_credits_depleted"}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -769,7 +769,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ThreadGoalUsageLimited", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"thread/goal/updated","params":{"threadId":"t1","goal":{"threadId":"t1","objective":"work","status":"usageLimited","tokensUsed":1,"timeUsedSeconds":2,"createdAt":3,"updatedAt":4}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -787,7 +787,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ThreadGoalActive", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"thread/goal/updated","params":{"threadId":"t1","goal":{"threadId":"t1","objective":"work","status":"active","tokensUsed":1,"timeUsedSeconds":2,"createdAt":3,"updatedAt":4}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -799,7 +799,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("ThreadGoalCleared", func(t *testing.T) {
 		t.Parallel()
 		line := []byte(`{"method":"thread/goal/cleared","params":{"threadId":"thread-1"}}`)
-		msgs, err := parseMessage(line)
+		msgs, _, err := parseMessage(line)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -810,7 +810,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("AccountIndividualLimit", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"individualLimit":{"limit":"100","used":"100","remainingPercent":0,"resetsAt":1735689720},"spendControlReached":true}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -828,7 +828,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("AccountSpendControlReached", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"spendControlReached":true}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -846,7 +846,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("AccountSpendControlRecovered", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"spendControlReached":false}}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -864,14 +864,14 @@ func TestParseMessage(t *testing.T) {
 	t.Run("MalformedRateLimits", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":[]}}`
-		if _, err := parseMessage([]byte(input)); err == nil {
+		if _, _, err := parseMessage([]byte(input)); err == nil {
 			t.Fatal("parseMessage succeeded, want malformed params error")
 		}
 	})
 	t.Run("UnknownMethod", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"future/event","params":{"data":"something"}}`
-		msgs, err := parseMessage([]byte(input))
+		msgs, _, err := parseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -914,7 +914,7 @@ func TestParseMessage(t *testing.T) {
 		}
 		got := make([]agent.Message, 0, len(wantTypes))
 		for i, line := range lines {
-			msgs, err := parseMessage([]byte(line))
+			msgs, _, err := parseMessage([]byte(line))
 			if err != nil {
 				t.Fatalf("line %d: %v", i, err)
 			}
