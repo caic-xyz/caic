@@ -118,30 +118,7 @@ func TestSmoke(t *testing.T) {
 
 		// Poll until the task reaches "waiting" after the in-container smoke
 		// agent responds through the relay.
-		waitForTaskState := func(id, want string) v1.Task {
-			deadline := time.After(10 * time.Minute)
-			var task v1.Task
-			for {
-				var tasks []v1.Task
-				getJSON(t, baseURL, "/api/caic/v1/tasks", &tasks)
-				for _, tk := range tasks {
-					if tk.ID.String() == id {
-						task = tk
-						break
-					}
-				}
-				if string(task.State) == want {
-					return task
-				}
-				select {
-				case <-deadline:
-					t.Fatalf("task %s: timed out waiting for state %q, current: %q", id, want, task.State)
-				case <-time.After(500 * time.Millisecond):
-				}
-			}
-		}
-
-		task := waitForTaskState(taskID, "waiting")
+		task := waitForTaskState(t, smoke, taskID, "waiting")
 		if task.NumTurns != 1 {
 			t.Fatalf("task %s: NumTurns = %d, want 1; error=%q", taskID, task.NumTurns, task.Error)
 		}
@@ -184,7 +161,7 @@ func TestSmoke(t *testing.T) {
 			runtimeID := task.Runtime.ID
 			baseURL = smoke.restart()
 
-			restored := waitForTaskState(taskID, "waiting")
+			restored := waitForTaskState(t, smoke, taskID, "waiting")
 			if restored.Runtime.ID != runtimeID {
 				t.Errorf("task %s: runtime ID = %q after restart, want %q", taskID, restored.Runtime.ID, runtimeID)
 			}
@@ -192,7 +169,7 @@ func TestSmoke(t *testing.T) {
 			postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/input", v1.InputReq{
 				Prompt: v1.Prompt{Text: resumePrompt},
 			}, nil)
-			task = waitForTaskState(taskID, "waiting")
+			task = waitForTaskState(t, smoke, taskID, "waiting")
 			if task.NumTurns != 2 {
 				t.Errorf("task %s: NumTurns = %d after restart, want 2; error=%q", taskID, task.NumTurns, task.Error)
 			}
@@ -212,7 +189,7 @@ func TestSmoke(t *testing.T) {
 		if forkID == "" {
 			t.Fatal("fork response has empty task ID")
 		}
-		forkTask := waitForTaskState(forkID, "waiting")
+		forkTask := waitForTaskState(t, smoke, forkID, "waiting")
 		if forkTask.NumTurns != 1 {
 			t.Fatalf("fork task %s: NumTurns = %d, want 1; error=%q", forkID, forkTask.NumTurns, forkTask.Error)
 		}
@@ -246,9 +223,9 @@ func TestSmoke(t *testing.T) {
 			}
 		}
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/stop", nil, nil)
-		waitForTaskState(forkID, "stopped")
+		waitForTaskState(t, smoke, forkID, "stopped")
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+forkID+"/purge", nil, nil)
-		waitForTaskState(forkID, "purged")
+		waitForTaskState(t, smoke, forkID, "purged")
 		forkPurgeCtx, forkPurgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		if err := smoketest.WaitForRuntimeGone(forkPurgeCtx, smoketest.SmokeRuntime(), forkRuntimeID); err != nil {
 			forkPurgeCancel()
@@ -259,7 +236,7 @@ func TestSmoke(t *testing.T) {
 
 		// Stop the task.
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
-		task = waitForTaskState(taskID, "stopped")
+		task = waitForTaskState(t, smoke, taskID, "stopped")
 		t.Logf("task %s reached 'stopped'", taskID)
 
 		// Purge the task.
@@ -268,7 +245,7 @@ func TestSmoke(t *testing.T) {
 			t.Fatalf("task %s has no runtime ID before purge", taskID)
 		}
 		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
-		waitForTaskState(taskID, "purged")
+		waitForTaskState(t, smoke, taskID, "purged")
 		purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), runtimeID); err != nil {
 			purgeCancel()
@@ -302,7 +279,7 @@ func TestSmoke(t *testing.T) {
 			}
 			first := history()
 			baseURL = smoke.restart()
-			waitForTaskState(taskID, "purged")
+			waitForTaskState(t, smoke, taskID, "purged")
 			second := history()
 			for name, history := range map[string]string{"before restart": first, "after restart": second} {
 				for _, want := range []string{"event: ready", initialPrompt, "smoke agent received: " + initialPrompt, resumePrompt, "smoke agent received: " + resumePrompt} {
@@ -376,7 +353,25 @@ func (s *smokeServer) start() {
 		s.t.Fatalf("listen: %v", err)
 	}
 
-	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), s.rootDir, s.cfg)
+	// CAIC_SMOKE_LOG writes the fixture's server logs to a file, which is how a
+	// host-dependent smoke failure gets diagnosed.
+	var logWriter io.Writer = io.Discard
+	var logOptions *slog.HandlerOptions
+	if path := os.Getenv("CAIC_SMOKE_LOG"); path != "" {
+		logFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // path comes from the test operator.
+		if err != nil {
+			s.t.Fatalf("open CAIC_SMOKE_LOG %s: %v", path, err)
+		}
+		s.t.Cleanup(func() {
+			if err := logFile.Close(); err != nil {
+				s.t.Error(err)
+			}
+		})
+		logWriter = logFile
+		logOptions = &slog.HandlerOptions{Level: slog.LevelDebug}
+	}
+
+	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(logWriter, logOptions)), s.rootDir, s.cfg)
 	if err != nil {
 		cancel()
 		if closeErr := ln.Close(); closeErr != nil {
@@ -411,9 +406,38 @@ func (s *smokeServer) stop() {
 	}
 }
 
-// startSmokeServer creates an isolated real-runtime smoke fixture and starts
-// its initial server instance.
+// serverFixture configures one isolated real-runtime server fixture.
+type serverFixture struct {
+	// backends overrides the agent backends. Empty uses the standard caic set.
+	backends map[harness.Name]agent.Backend
+	// harnessEnv builds the per-harness container environment from the fixture's
+	// run token.
+	harnessEnv func(runToken string) map[string][]string
+}
+
+// startSmokeServer creates the deterministic real-runtime smoke fixture.
 func startSmokeServer(t *testing.T) *smokeServer {
+	// Use deterministic no-LLM agents, but run them inside real md containers
+	// through the normal relay over SSH.
+	sb := smoketest.NewSmokeBackend(harness.Codex)
+	sbFork := smoketest.NewSmokeBackend(harness.Pi)
+	return startServerFixture(t, serverFixture{
+		backends: map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
+		harnessEnv: func(runToken string) map[string][]string {
+			return map[string][]string{
+				// Re-injected into each instance's ~/.env; the fork section of
+				// the test verifies the fork gets the target harness's marker
+				// after md rewrites ~/.env.
+				string(sb.Harness()):     {"CAIC_SMOKE_FORK_ENV=" + runToken + "-codex"},
+				string(sbFork.Harness()): {"CAIC_SMOKE_FORK_ENV=" + runToken + "-pi"},
+			}
+		},
+	})
+}
+
+// startServerFixture creates an isolated real-runtime fixture and starts its
+// initial server instance.
+func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 	ctx := t.Context()
 
 	// Create isolated temp dirs for config, cache, and md state.
@@ -440,22 +464,21 @@ func startSmokeServer(t *testing.T) *smokeServer {
 		t.Fatalf("init smoke repos: %v", err)
 	}
 
-	// Pre-populate harness model cache so startup does not launch unrelated
-	// model-refresh containers. The task below still launches a real md
-	// container and agent relay.
-	if err := smoketest.InitSmokeHarnessCache(cacheDir); err != nil {
-		t.Fatalf("init harness cache: %v", err)
-	}
-
 	runToken, err := smoketest.NewSmokeRunToken()
 	if err != nil {
 		t.Fatalf("create smoke run token: %v", err)
 	}
 
-	// Use a deterministic no-LLM agent, but run it inside the real md
-	// container through the normal relay over SSH.
-	sb := smoketest.NewSmokeBackend(harness.Codex)
-	sbFork := smoketest.NewSmokeBackend(harness.Pi)
+	harnessEnv := map[string][]string(nil)
+	if fx.harnessEnv != nil {
+		harnessEnv = fx.harnessEnv(runToken)
+	}
+	// Pre-populate the harness model cache so startup does not launch unrelated
+	// model-refresh containers.
+	if err := smoketest.InitSmokeHarnessCache(cacheDir); err != nil {
+		t.Fatalf("init harness cache: %v", err)
+	}
+
 	s := &smokeServer{
 		t:        t,
 		rootDir:  filepath.Dir(clone),
@@ -470,14 +493,8 @@ func startSmokeServer(t *testing.T) *smokeServer {
 				Metadata:   runtime.Metadata{runtime.MetadataSmokeRun: runToken},
 			},
 			Agent: server.AgentConfig{
-				Backends: map[harness.Name]agent.Backend{sb.Harness(): sb, sbFork.Harness(): sbFork},
-				HarnessEnv: map[string][]string{
-					// Re-injected into each instance's ~/.env; the fork section of
-					// the test verifies the fork gets the target harness's marker
-					// after md rewrites ~/.env.
-					string(sb.Harness()):     {"CAIC_SMOKE_FORK_ENV=" + runToken + "-codex"},
-					string(sbFork.Harness()): {"CAIC_SMOKE_FORK_ENV=" + runToken + "-pi"},
-				},
+				Backends:   fx.backends,
+				HarnessEnv: harnessEnv,
 			},
 			LLM: server.LLMConfig{
 				Disable: true,
@@ -498,6 +515,54 @@ func startSmokeServer(t *testing.T) *smokeServer {
 	})
 	s.start()
 	return s
+}
+
+// smokeTaskTimeout bounds one smoke task's wait for a state or a runtime.
+const smokeTaskTimeout = 10 * time.Minute
+
+// waitForTaskState polls the task list until the task reaches want.
+func waitForTaskState(t *testing.T, s *smokeServer, taskID, want string) v1.Task {
+	t.Helper()
+	deadline := time.Now().Add(smokeTaskTimeout)
+	for {
+		task := findTask(t, s, taskID)
+		if string(task.State) == want {
+			return task
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task %s: timed out waiting for state %q, current %q error %q", taskID, want, task.State, task.Error)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// waitForTaskRuntime polls the task list until the task's container is assigned.
+func waitForTaskRuntime(t *testing.T, s *smokeServer, taskID string) runtime.ID {
+	t.Helper()
+	deadline := time.Now().Add(smokeTaskTimeout)
+	for {
+		task := findTask(t, s, taskID)
+		if task.Runtime.ID != "" {
+			return runtime.ID(task.Runtime.ID)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task %s: timed out waiting for a runtime instance", taskID)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// findTask returns the task list entry for taskID, or the zero task.
+func findTask(t *testing.T, s *smokeServer, taskID string) v1.Task {
+	t.Helper()
+	var tasks []v1.Task
+	getJSON(t, s.baseURL, "/api/caic/v1/tasks", &tasks)
+	for _, task := range tasks {
+		if task.ID.String() == taskID {
+			return task
+		}
+	}
+	return v1.Task{}
 }
 
 // waitForReady polls GET /api/caic/v1/server/config until it returns 200.

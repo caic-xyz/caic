@@ -209,12 +209,7 @@ func deploySmokeAgent(ctx context.Context, target runtime.ConnectionTarget) erro
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
-	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, "mkdir -p "+agent.RelayDir+" && cat > "+smokeAgentPath) //nolint:gosec // target and path are internally controlled.
-	cmd.Stdin = bytes.NewReader([]byte(smokeAgentScript))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("deploy smoke agent: %w: %s", err, out)
-	}
-	return nil
+	return writeContainerFile(ctx, target.SSHHost, smokeAgentPath, []byte(smokeAgentScript))
 }
 
 // InitSmokeRepos creates two local repositories for the runtime smoke test.

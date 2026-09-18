@@ -1,4 +1,4 @@
-// Records agent session traces through relay.py for golden-file tests.
+// Records and validates agent session traces through relay.py for golden-file tests.
 //
 // Usage:
 //
@@ -13,6 +13,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -53,14 +54,20 @@ var backends = map[string]agent.Backend{
 type scenario struct {
 	prompt    string
 	askAnswer string
+	// wantNative marks a scenario that must record native subagent activity, so a
+	// regeneration that lost the delegation fails instead of publishing evidence
+	// that proves nothing.
+	wantNative bool
 }
 
 var scenarios = map[string]scenario{
 	"native-subagent-joke": {
-		prompt: `Use a native subagent to tell a joke about README.md. Do not perform the task yourself; delegate it and return the subagent's result.`,
+		prompt:     `Use a native subagent to tell a joke about README.md. Do not perform the task yourself; delegate it and return the subagent's result.`,
+		wantNative: true,
 	},
 	"native-subagent-workflow": {
-		prompt: `Call the subagent tool exactly once with a workflowScript that runs one 'delegate' agent to tell a short original joke about README.md, then return the agent result. Do not call the tool more than once and do not tell the joke yourself.`,
+		prompt:     `Call the subagent tool exactly once with a workflowScript that runs one 'delegate' agent to tell a short original joke about README.md, then return the agent result. Do not call the tool more than once and do not tell the joke yourself.`,
+		wantNative: true,
 	},
 	"ask-user-question": {
 		prompt:    `Before editing any files, call AskUserQuestion with one question. The header must be "Greeting", the question must be "Which greeting should main.go print?", and the options must be "Hello" and "Hi". After I answer, update main.go to print that greeting, then run cat main.go.`,
@@ -208,7 +215,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scen
 	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr, localOutputPath(relayDir, local), wire, sc.askAnswer, version); err != nil {
 		return err
 	}
-	return writeGoldenFile(ctx, ctr, workDir, relayDir, local, b, sc.prompt, outputPath, version)
+	return writeGoldenFile(ctx, ctr, workDir, relayDir, local, b, sc, outputPath, version)
 }
 
 // localOutputPath returns the host path of the recording's output.jsonl.
@@ -592,8 +599,9 @@ func askUserQuestionUpdatedInput(raw map[string]json.RawMessage, answer string) 
 }
 
 // writeGoldenFile copies output.jsonl from the container, sanitizes it,
-// writes the JSONL trace, and generates the .golden.md markdown file.
-func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local bool, b agent.Backend, promptText, outputPath string, version agent.LogVersion) error {
+// writes the JSONL trace, validates the evidence it records, and generates the
+// .golden.md markdown file.
+func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local bool, b agent.Backend, sc scenario, outputPath string, version agent.LogVersion) error {
 	localOutput := filepath.Join(workDir, "output.jsonl")
 	if local {
 		localOutput = filepath.Join(relayDir, "output.jsonl")
@@ -609,8 +617,14 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 		return fmt.Errorf("read output: %w", err)
 	}
 
-	sanitized, err := buildGoldenContent(raw, b.Harness(), promptText, version)
+	sanitized, err := buildGoldenContent(raw, b.Harness(), sc.prompt, version)
 	if err != nil {
+		return err
+	}
+
+	// Validate before publishing: a scenario that must delegate may not replace
+	// the retained golden files with evidence-free content.
+	if err := validateGoldenRecording(outputPath, sanitized, version, b, sc.wantNative); err != nil {
 		return err
 	}
 
@@ -639,6 +653,42 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 		return fmt.Errorf("write golden md: %w", err)
 	}
 	slog.InfoContext(ctx, "Golden markdown saved", "path", mdPath)
+	return nil
+}
+
+// validateGoldenRecording replays a recording through the recorder's own wire
+// and reports the native-subagent lifecycle it contains. wantNative requires the
+// recording to hold at least one native observation, so a scenario that asks the
+// harness to delegate cannot publish evidence that proves nothing.
+func validateGoldenRecording(path, sanitized string, version agent.LogVersion, b agent.Backend, wantNative bool) error {
+	parser, err := agent.NewLogRecordParser(version, b.NewWire().ParseMessage)
+	if err != nil {
+		return err
+	}
+	var statuses []string
+	scanner := bufio.NewScanner(strings.NewReader(sanitized))
+	scanner.Buffer(make([]byte, 64*1024), 32<<20)
+	for scanner.Scan() {
+		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
+			continue
+		}
+		record, err := parser.ParseRecord(scanner.Bytes())
+		if err != nil {
+			return fmt.Errorf("parse recording %s: %w", path, err)
+		}
+		for _, message := range record.Messages {
+			if subagent, ok := message.Message.(*agent.NativeSubagentMessage); ok {
+				statuses = append(statuses, string(subagent.Subagent.Status))
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read recording %s: %w", path, err)
+	}
+	slog.Info("recording native activity", "path", path, "harness", b.Harness(), "observations", len(statuses), "statuses", statuses)
+	if wantNative && len(statuses) == 0 {
+		return fmt.Errorf("%s recorded no native subagent activity for %s", path, b.Harness())
+	}
 	return nil
 }
 

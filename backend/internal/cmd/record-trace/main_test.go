@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 )
@@ -170,6 +172,53 @@ func TestAnswerClaudeControlRequest(t *testing.T) {
 		}
 		if len(got.Response.Response.UpdatedInput) != 0 {
 			t.Fatalf("UpdatedInput = %s, want empty", got.Response.Response.UpdatedInput)
+		}
+	})
+}
+
+// TestValidateGoldenRecording pins the recorder's evidence check: a scenario that
+// must delegate is rejected when its recording carries no native subagent
+// observation, while a scenario that does not delegate accepts one.
+func TestValidateGoldenRecording(t *testing.T) {
+	t.Parallel()
+	claude, ok := backends[string(harness.Claude)]
+	if !ok {
+		t.Fatalf("no %s backend registered", harness.Claude)
+	}
+	const (
+		header = `{"t":"caic_meta","version":3,"prompt":"delegate a joke","repos":[],"harness":"claude"}`
+		// The Claude task_started record is the native delegation evidence.
+		delegation = `{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"task_started","task_id":"task-1","tool_use_id":"spawn-1","description":"Tell a joke","subagent_type":"general-purpose","task_type":"local_agent","prompt":"Tell a joke about README.md","uuid":"u","session_id":"s"}}`
+		unrelated  = `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"no delegation here"}]}}}`
+		footer     = `{"t":"result","state":"completed"}`
+	)
+	record := func(lines ...string) string {
+		return strings.Join(lines, "\n") + "\n"
+	}
+
+	t.Run("DelegatingScenario", func(t *testing.T) {
+		t.Parallel()
+		if err := validateGoldenRecording("recording.jsonl", record(header, delegation, footer), agent.LogVersionV3, claude, true); err != nil {
+			t.Fatalf("validateGoldenRecording = %v, want the delegation accepted", err)
+		}
+	})
+	t.Run("MissingDelegation", func(t *testing.T) {
+		t.Parallel()
+		err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), agent.LogVersionV3, claude, true)
+		if err == nil || !strings.Contains(err.Error(), "no native subagent activity") {
+			t.Fatalf("validateGoldenRecording = %v, want a missing-delegation failure", err)
+		}
+	})
+	t.Run("ScenarioWithoutNativeEvidence", func(t *testing.T) {
+		t.Parallel()
+		if err := validateGoldenRecording("recording.jsonl", record(header, unrelated, footer), agent.LogVersionV3, claude, false); err != nil {
+			t.Fatalf("validateGoldenRecording = %v, want a non-delegating scenario accepted", err)
+		}
+	})
+	t.Run("UnparseableRecording", func(t *testing.T) {
+		t.Parallel()
+		if err := validateGoldenRecording("recording.jsonl", record(header, `{"t":"agent","ts":1.000,"msg":{"broken"}}`), agent.LogVersionV3, claude, false); err == nil {
+			t.Fatal("validateGoldenRecording accepted an unparseable recording")
 		}
 	})
 }

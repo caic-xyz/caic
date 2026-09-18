@@ -43,6 +43,9 @@ const (
 	EventKindRateLimit       EventKind = "rateLimit"
 	EventKindStats           EventKind = "stats"
 	EventKindCommitSnapshot  EventKind = "commitSnapshot"
+
+	// TODO: remove subagentStart and subagentEnd with their payload types and
+	// EventMessage fields once SDK consumers no longer switch on the kinds.
 )
 
 // TaskHistoryStreamError reports that task history could not be replayed.
