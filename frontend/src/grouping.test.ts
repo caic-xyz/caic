@@ -157,8 +157,18 @@ describe("groupMessages", () => {
       usageEvent(),
       { kind: "thinking", ts: 0, thinking: { text: "hmm" } },
       { kind: "subagentStart", ts: 0, subagentStart: { taskID: "sa1", description: "explore" } },
+      {
+        kind: "nativeSubagent",
+        ts: 0,
+        nativeSubagent: { id: "sa1", toolUseID: "t1", scope: "agent", status: "running" },
+      },
       toolUseEvent("t2", "Bash"),
       { kind: "subagentEnd", ts: 0, subagentEnd: { taskID: "sa1", status: "completed" } },
+      {
+        kind: "nativeSubagent",
+        ts: 0,
+        nativeSubagent: { id: "sa1", toolUseID: "t1", scope: "agent", status: "completed" },
+      },
     ]);
     // Thinking is absorbed into the merged tool group; no standalone thinking group.
     const toolGroup = groups.find((g) => g.kind === "action");

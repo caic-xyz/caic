@@ -396,6 +396,7 @@ function groupMessagesAfter(
       }
       case "subagentStart":
       case "subagentEnd":
+      case "nativeSubagent":
         // Skip: subagent lifecycle events are not rendered yet. Explicitly
         // listed to avoid creating OTHER groups that act as hard barriers.
         break;

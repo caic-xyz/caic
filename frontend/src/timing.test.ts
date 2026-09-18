@@ -61,15 +61,22 @@ describe("deriveTaskTimings", () => {
 
   it("tracks the previous visual event for single-event block durations", () => {
     const initialInput = input(1_000, "initial prompt");
+    const nativeActivity: EventMessage = {
+      kind: "nativeSubagent",
+      ts: 2_200,
+      nativeSubagent: { id: "sub-1", status: "running", scope: "agent" },
+    };
     const assistantText: EventMessage = { kind: "text", ts: 2_500, text: { text: "done" } };
 
     const timings = deriveTaskTimings([
       initialInput,
       { kind: "system", ts: 2_000, system: { subtype: "idle" } },
+      nativeActivity,
       assistantText,
     ]);
 
     expect(timings.previousEventTs.get(assistantText)).toBe(1_000);
+    expect(timings.previousEventTs.has(nativeActivity)).toBe(false);
   });
 
   it("leaves unfinished waits and initial prompts without a duration", () => {
