@@ -253,24 +253,6 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			}}
 		}
 		return nil
-	case *agent.SubagentStartMessage:
-		return []v1.EventMessage{{
-			Kind: v1.EventKindSubagentStart,
-			Ts:   ts,
-			SubagentStart: &v1.EventSubagentStart{
-				TaskID:      m.TaskID,
-				Description: m.Description,
-			},
-		}}
-	case *agent.SubagentEndMessage:
-		return []v1.EventMessage{{
-			Kind: v1.EventKindSubagentEnd,
-			Ts:   ts,
-			SubagentEnd: &v1.EventSubagentEnd{
-				TaskID: m.TaskID,
-				Status: m.Status,
-			},
-		}}
 	case *agent.NativeSubagentMessage:
 		return []v1.EventMessage{{
 			Kind: v1.EventKindNativeSubagent,

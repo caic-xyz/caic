@@ -75,18 +75,6 @@ func v1ExportParseFn(line []byte) ([]Message, error) {
 			return nil, err
 		}
 		return []Message{&m}, nil
-	case "subagent_start":
-		var m SubagentStartMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return []Message{&m}, nil
-	case "subagent_end":
-		var m SubagentEndMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return []Message{&m}, nil
 	case "native_subagent":
 		var m NativeSubagentMessage
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -307,22 +295,6 @@ func TestRenderDiscussion(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertContains(t, md, "⚠️ Tool error: command not found")
-		})
-
-		t.Run("subagent_events", func(t *testing.T) {
-			t.Parallel()
-			lines := v1ExportFixture([]string{
-				v1MetaLine("task", "pi"),
-				`{"type":"subagent_start","task_id":"sub1","description":"analyze logs"}`,
-				`{"type":"subagent_end","task_id":"sub1","status":"completed"}`,
-			})
-
-			md, err := renderDiscussionV1Fixture(lines)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertContains(t, md, "### 🤖 Subagent: analyze logs")
-			assertContains(t, md, "### Subagent completed")
 		})
 
 		t.Run("native_subagent_activity", func(t *testing.T) {

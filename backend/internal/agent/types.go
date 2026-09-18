@@ -544,24 +544,6 @@ type ToolOutputDeltaMessage struct {
 // Type implements Message.
 func (m *ToolOutputDeltaMessage) Type() string { return "tool_output_delta" }
 
-// SubagentStartMessage is emitted when a subagent task begins.
-type SubagentStartMessage struct {
-	TaskID      string `json:"task_id"`
-	Description string `json:"description"`
-}
-
-// Type implements Message.
-func (m *SubagentStartMessage) Type() string { return "subagent_start" }
-
-// SubagentEndMessage is emitted when a subagent task completes, fails, or stops.
-type SubagentEndMessage struct {
-	TaskID string `json:"task_id"`
-	Status string `json:"status"` // "completed", "failed", "stopped"
-}
-
-// Type implements Message.
-func (m *SubagentEndMessage) Type() string { return "subagent_end" }
-
 // NativeSubagentStatus describes the lifecycle state a harness actually
 // reported for a native subagent. Unknown means the harness proved the spawn
 // but did not expose a lifecycle state; it is not an inferred running state.

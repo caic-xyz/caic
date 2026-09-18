@@ -178,12 +178,6 @@ func renderMsg(b *strings.Builder, msg Message) {
 			fmt.Fprintf(b, "⚠️ Tool error: %s\n\n", m.Error)
 		}
 
-	case *SubagentStartMessage:
-		fmt.Fprintf(b, "### 🤖 Subagent: %s\n\n", m.Description)
-
-	case *SubagentEndMessage:
-		fmt.Fprintf(b, "### Subagent %s\n\n", m.Status)
-
 	case *NativeSubagentMessage:
 		// Canonical native activity carries the harness-reported facts; render
 		// the observed status, not an inferred outcome.

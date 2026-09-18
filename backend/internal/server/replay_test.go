@@ -262,64 +262,6 @@ func TestGenericConvertThinking(t *testing.T) {
 	}
 }
 
-func TestGenericConvertSubagentEvents(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		msg   agent.Message
-		kind  v1.EventKind
-		check func(t *testing.T, ev v1.EventMessage)
-	}{
-		{
-			name: "start",
-			msg:  &agent.SubagentStartMessage{TaskID: "task-1", Description: "Explore code"},
-			kind: v1.EventKindSubagentStart,
-			check: func(t *testing.T, ev v1.EventMessage) {
-				if ev.SubagentStart == nil {
-					t.Fatal("subagentStart payload is nil")
-				}
-				if ev.SubagentStart.TaskID != "task-1" {
-					t.Errorf("taskID = %q, want %q", ev.SubagentStart.TaskID, "task-1")
-				}
-				if ev.SubagentStart.Description != "Explore code" {
-					t.Errorf("description = %q, want %q", ev.SubagentStart.Description, "Explore code")
-				}
-			},
-		},
-		{
-			name: "end",
-			msg:  &agent.SubagentEndMessage{TaskID: "task-1", Status: "completed"},
-			kind: v1.EventKindSubagentEnd,
-			check: func(t *testing.T, ev v1.EventMessage) {
-				if ev.SubagentEnd == nil {
-					t.Fatal("subagentEnd payload is nil")
-				}
-				if ev.SubagentEnd.TaskID != "task-1" {
-					t.Errorf("taskID = %q, want %q", ev.SubagentEnd.TaskID, "task-1")
-				}
-				if ev.SubagentEnd.Status != "completed" {
-					t.Errorf("status = %q, want %q", ev.SubagentEnd.Status, "completed")
-				}
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			gt := apiconv.NewToolTimingTracker(harness.Claude, nil)
-			events := gt.ConvertMessage(tt.msg, time.Now())
-			if len(events) != 1 {
-				t.Fatalf("got %d events, want 1", len(events))
-			}
-			if events[0].Kind != tt.kind {
-				t.Errorf("kind = %q, want %q", events[0].Kind, tt.kind)
-			}
-			tt.check(t, events[0])
-		})
-	}
-}
-
 func TestGenericConvertNativeSubagentEvent(t *testing.T) {
 	t.Parallel()
 
