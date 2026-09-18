@@ -1,8 +1,12 @@
 // Unit tests for Go Mode service-instance settings.
 package com.fghbuild.gomode.data
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -11,7 +15,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 class SettingsRepositoryTest {
     // Deadlock guard around inherently-async DataStore reads. StateFlow makes these waits
@@ -19,11 +22,28 @@ class SettingsRepositoryTest {
     // cold first read on a saturated CI runner does not flake.
     private val settleTimeoutMs = 10_000L
 
-    private fun createRepo(): SettingsRepository {
-        val file = File.createTempFile("gomode_test_prefs", ".preferences_pb")
-        val dataStore = PreferenceDataStoreFactory.create { file }
-        return SettingsRepository(dataStore)
+    // In-memory DataStore for unit tests. This class exercises SettingsRepository logic,
+    // not androidx file persistence. The real PreferenceDataStoreFactory reads a temp file
+    // and runs a background update loop on top of a file watcher; in CI that loop has
+    // repeatedly stopped emitting (the edit completed, yet the data flow produced nothing
+    // for the full 10s guard), which flakes these tests nondeterministically.
+    private class InMemoryPreferencesDataStore : DataStore<Preferences> {
+        private val current = MutableStateFlow(emptyPreferences())
+
+        override val data: Flow<Preferences> = current
+
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            while (true) {
+                val before = current.value
+                val after = transform(before)
+                if (current.compareAndSet(before, after)) {
+                    return after
+                }
+            }
+        }
     }
+
+    private fun createRepo(): SettingsRepository = SettingsRepository(InMemoryPreferencesDataStore())
 
     // Awaits the first settings state matching [predicate]. On timeout, surfaces what we were
     // waiting for and the last observed StateFlow value so a CI flake is diagnosable.
