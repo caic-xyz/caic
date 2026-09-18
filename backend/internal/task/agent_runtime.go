@@ -134,6 +134,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task, skipSideEffects b
 		Logger:             r.Log,
 		Target:             target,
 		RelayOffset:        t.RelayOffsetValue(),
+		WarmHistory:        true,
 		ResumeSessionID:    sessionID,
 		Effort:             t.RequestedEffort,
 		PendingUserActions: t.PendingUserActions(),

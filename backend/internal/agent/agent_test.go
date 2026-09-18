@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // testWire implements WireFormat for testing.
@@ -928,6 +930,33 @@ func TestReadRelayTailRecords(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("fingerprint excludes the trailing newline", func(t *testing.T) {
+		t.Parallel()
+		// The adoption overlap filter compares this value against fingerprints
+		// stored in the task log, so the basis is one record line without its
+		// newline: hashing the encoded record instead silently broke overlap
+		// detection while leaving every synthetic test consistent with itself.
+		line := `{"t":"agent","ts":1.000,"msg":{"type":"text","text":"hi"}}`
+		parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		timeline, _, err := readRelayTailRecords(strings.NewReader(line+"\n"), parser, 0, false, "ctr", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(timeline.RelayRecords) != 1 {
+			t.Fatalf("relay records = %d, want 1", len(timeline.RelayRecords))
+		}
+		got := timeline.RelayRecords[0].Fingerprint
+		if want := sha256.Sum256([]byte(line)); got != want {
+			t.Fatalf("fingerprint = %x, want sha256 of the line without the newline %x", got, want)
+		}
+		if withNewline := sha256.Sum256([]byte(line + "\n")); got == withNewline {
+			t.Fatal("fingerprint hashed the newline-terminated record")
+		}
+	})
 }
 
 func TestRelayGenerationCommand(t *testing.T) {
@@ -1598,3 +1627,168 @@ func TestLogRecordParser(t *testing.T) {
 		}
 	})
 }
+
+// TestWarmRelayHistory covers the history an adopted session warms from and the
+// failure that must abort the attach: the read ends exactly at the attach offset,
+// because records in the gap would otherwise be parsed twice, a fresh session
+// reads nothing, and an unreadable relay is reported rather than attaching with
+// empty correlation state.
+func TestWarmRelayHistory(t *testing.T) {
+	t.Parallel()
+	// This container cannot be resolved, so every relay read fails fast.
+	const unreachable = "caic-warm-history-test-unreachable"
+
+	t.Run("fresh session reads no history", func(t *testing.T) {
+		t.Parallel()
+		// A zero offset must return before any relay read, so the container is
+		// never reached.
+		if err := WarmRelayHistory(t.Context(), unreachable, LogVersionV3, &testWire{}, 0, maxWarmHistoryBytes); err != nil {
+			t.Fatalf("zero offset warm = %v, want no read", err)
+		}
+	})
+
+	t.Run("reads the window ending at the attach offset", func(t *testing.T) {
+		t.Parallel()
+		cmd, start := relaySnapshotCommand(t.Context(), "container", maxWarmHistoryBytes, 1000)
+		if start != 0 {
+			t.Fatalf("start = %d, want 0 for a file smaller than the bound", start)
+		}
+		command := strings.Join(cmd.Args, " ")
+		if !strings.Contains(command, "head -c 1000") {
+			t.Fatalf("warm command = %q, want a read bounded by the attach offset", command)
+		}
+		if strings.Contains(command, "tail -c") {
+			t.Fatalf("warm command = %q, want no tail for a file smaller than the bound", command)
+		}
+		cmd, start = relaySnapshotCommand(t.Context(), "container", maxWarmHistoryBytes, 3*maxWarmHistoryBytes)
+		if start != 2*maxWarmHistoryBytes {
+			t.Fatalf("start = %d, want the bounded window start", start)
+		}
+		command = strings.Join(cmd.Args, " ")
+		if !strings.Contains(command, "head -c 31457280") || !strings.Contains(command, "tail -c 10485760") {
+			t.Fatalf("warm command = %q, want the bounded window", command)
+		}
+	})
+
+	t.Run("reports an unreadable relay", func(t *testing.T) {
+		t.Parallel()
+		if err := WarmRelayHistory(t.Context(), unreachable, LogVersionV3, &testWire{}, 1024, maxWarmHistoryBytes); err == nil {
+			t.Fatal("warm read of an unreachable container succeeded")
+		}
+	})
+}
+
+// TestAttachRelaySession covers the warm-history precondition: attaching with a
+// stateful wire that could not be warmed would leave the completions its restored
+// history implies uncorrelated, so the attach fails instead of continuing.
+func TestAttachRelaySession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fails instead of attaching unwarmed", func(t *testing.T) {
+		t.Parallel()
+		// This container cannot be resolved, so the warm read fails fast.
+		const unreachable = "caic-warm-history-test-unreachable"
+		opts := &Options{
+			Logger:      testLogger(),
+			Target:      runtime.ConnectionTarget{SSHHost: unreachable},
+			RelayOffset: 1024,
+			WarmHistory: true,
+			Log:         &testLogSink{Version: LogVersionV3},
+		}
+		session, err := AttachRelaySession(t.Context(), opts, &testWire{}, nil)
+		if err == nil {
+			if session != nil {
+				_ = session.Close()
+			}
+			t.Fatal("attach succeeded despite an unwarmed relay history")
+		}
+		if session != nil {
+			t.Fatal("attach returned a session for a failed warm read")
+		}
+		if !strings.Contains(err.Error(), "warm relay history") {
+			t.Fatalf("error = %v, want the warm history failure", err)
+		}
+	})
+}
+
+// TestReadWarmHistoryPayload covers the retry that keeps a failed transfer out of
+// the caller's parser state: a transfer that fails after transferring a prefix
+// must not contribute records to a wire whose usage and output accumulators are
+// not all idempotent, and a transfer that never succeeds must be reported.
+func TestReadWarmHistoryPayload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keeps only the successful attempt", func(t *testing.T) {
+		t.Parallel()
+		record := func(id string) string {
+			return `{"t":"agent","ts":1.000,"msg":{"type":"native_subagent","subagent":{"id":"` + id + `","status":"running"}}}` + "\n"
+		}
+		partial := []byte(record("from-the-failed-attempt"))
+		complete := []byte(record("from-the-successful-attempt"))
+
+		attempts := 0
+		payload, err := readWarmHistoryPayload(t.Context(), func() ([]byte, error) {
+			attempts++
+			if attempts == 1 {
+				// A transfer that produced bytes and then failed, exactly the case a
+				// naive retry would have parsed twice.
+				return partial, errors.New("relay read interrupted")
+			}
+			return complete, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attempts != warmHistoryAttempts {
+			t.Fatalf("attempts = %d, want %d", attempts, warmHistoryAttempts)
+		}
+		if !bytes.Equal(payload, complete) {
+			t.Fatalf("payload = %q, want only the successful attempt's records", payload)
+		}
+
+		// Parsing the returned payload must feed the wire once, with the successful
+		// records only.
+		wire := &countingWire{}
+		warmParser, err := NewLogRecordParser(LogVersionV3, wire.ParseMessage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := scanRelayTailRecords(bytes.NewReader(payload), warmParser, 0, false, "ctr", "", nil); err != nil {
+			t.Fatal(err)
+		}
+		if wire.lines != 1 || !strings.Contains(wire.last, "from-the-successful-attempt") {
+			t.Fatalf("wire saw %d records (last %q), want exactly the successful attempt", wire.lines, wire.last)
+		}
+	})
+
+	t.Run("reports a persistent failure", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		payload, err := readWarmHistoryPayload(t.Context(), func() ([]byte, error) {
+			calls++
+			return []byte("partial\n"), errors.New("relay unavailable")
+		})
+		if err == nil || payload != nil {
+			t.Fatalf("payload = %q err = %v, want a reported failure", payload, err)
+		}
+		if calls != warmHistoryAttempts {
+			t.Fatalf("calls = %d, want %d", calls, warmHistoryAttempts)
+		}
+	})
+}
+
+// countingWire records how many lines reached the wire.
+type countingWire struct {
+	lines int
+	last  string
+}
+
+func (w *countingWire) ParseMessage(line []byte) ([]Message, error) {
+	w.lines++
+	w.last = string(line)
+	return nil, nil
+}
+
+func (*countingWire) WritePrompt(io.Writer, Prompt, LogSink) error { return nil }
+
+func (*countingWire) WriteCompact(io.Writer, string, LogSink) error { return nil }

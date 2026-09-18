@@ -85,6 +85,11 @@ type Options struct {
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
 	RelayOffset     int64 // Byte offset into relay output.jsonl for AttachRelay.
+	// WarmHistory replays the retained relay tail through the wire before the
+	// live stream starts. Stateful wire formats (native-subagent adapters)
+	// otherwise begin with empty correlation state after a restart or relay
+	// adoption, which would duplicate cards and leave settled work running.
+	WarmHistory bool
 	// PendingUserActions is the restored user-facing work that still needs
 	// input after AttachRelay reconnects. It must not contain backend-only
 	// protocol state such as keepalive, auto-allow, or environment control
@@ -1174,6 +1179,105 @@ func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParse
 	if err != nil {
 		return ParsedTimeline{}, 0, err
 	}
+	timeline, offset, err := readRelaySnapshot(ctx, container, parser, maxBytes, size, generation)
+	if err != nil {
+		return timeline, offset, err
+	}
+	currentGeneration, err := relayOutputGeneration(ctx, container)
+	if err != nil {
+		return timeline, offset, err
+	}
+	if currentGeneration != generation {
+		return ParsedTimeline{}, 0, errors.New("relay output generation changed during snapshot")
+	}
+	return timeline, offset, nil
+}
+
+// retainRelayPayload reads one relay range of at most bound bytes into a single
+// exactly sized allocation, so retention neither grows by doubling nor
+// over-allocates for a short read. The relay snapshot command bounds its output by
+// the range end, so the reader is never expected to hold more than bound. It is
+// the same code the warm-history benchmark measures.
+func retainRelayPayload(r io.Reader, bound int64) ([]byte, error) {
+	if bound < 0 {
+		bound = 0
+	}
+	payload := make([]byte, bound)
+	n, err := io.ReadFull(r, payload)
+	switch {
+	case err == nil:
+		return payload, nil
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		// The retained file was shorter than the requested range.
+		return payload[:n], nil
+	default:
+		return nil, err
+	}
+}
+
+// FetchRelayRange returns the retained relay bytes in
+// [max(0, end-maxBytes), end), never reading bytes the relay wrote after end, so
+// a caller can resume at end. A leading partial record is dropped. It transfers
+// bytes without parsing them, which lets a caller retry a failed read without
+// touching its parser state.
+func FetchRelayRange(ctx context.Context, container string, maxBytes, end int64) ([]byte, error) {
+	if end < 0 {
+		return nil, errors.New("relay range end must not be negative")
+	}
+	if maxBytes < 0 {
+		return nil, errors.New("relay range size must not be negative")
+	}
+	generation, err := relayOutputGeneration(ctx, container)
+	if err != nil {
+		return nil, err
+	}
+	cmd, start := relaySnapshotCommand(ctx, container, maxBytes, end)
+	skipFirst, err := relayTailNeedsLeadingSkip(ctx, container, start)
+	if err != nil {
+		return nil, err
+	}
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("relay stdout pipe: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start relay read: %w", err)
+	}
+	// The command transfers at most end-start bytes, so the retained payload is
+	// sized once instead of growing by doubling.
+	payload, readErr := retainRelayPayload(pipe, end-start)
+	if waitErr := cmd.Wait(); readErr == nil && waitErr != nil {
+		readErr = fmt.Errorf("relay read: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	if readErr != nil {
+		return nil, readErr
+	}
+	currentGeneration, err := relayOutputGeneration(ctx, container)
+	if err != nil {
+		return nil, err
+	}
+	if currentGeneration != generation {
+		return nil, errors.New("relay output generation changed during snapshot")
+	}
+	data := payload
+	if skipFirst {
+		newline := bytes.IndexByte(data, '\n')
+		if newline < 0 {
+			return nil, nil
+		}
+		data = data[newline+1:]
+	}
+	return data, nil
+}
+
+// readRelaySnapshot reads and parses the relay byte range that
+// relaySnapshotCommand transfers for size bytes and returns the parsed timeline
+// plus the physical offset the read stopped at. generation is the relay output
+// generation observed before the read; the caller owns that round trip so it can
+// also verify the generation did not change.
+func readRelaySnapshot(ctx context.Context, container string, parser *LogRecordParser, maxBytes, size int64, generation string) (timeline ParsedTimeline, offset int64, err error) {
 	cmd, start := relaySnapshotCommand(ctx, container, maxBytes, size)
 	skipFirst, err := relayTailNeedsLeadingSkip(ctx, container, start)
 	if err != nil {
@@ -1193,13 +1297,6 @@ func ReadRelayTail(ctx context.Context, container string, parser *LogRecordParse
 	}
 	if err := cmd.Wait(); err != nil {
 		return timeline, offset, fmt.Errorf("relay read: %w", err)
-	}
-	currentGeneration, err := relayOutputGeneration(ctx, container)
-	if err != nil {
-		return timeline, offset, err
-	}
-	if currentGeneration != generation {
-		return ParsedTimeline{}, 0, errors.New("relay output generation changed during snapshot")
 	}
 	return timeline, offset, nil
 }
@@ -1240,6 +1337,34 @@ func relayGenerationCommand(ctx context.Context, container string) *exec.Cmd {
 // readRelayTailRecords parses one stat-bounded relay snapshot and returns the
 // exact physical offset consumed, including a skipped partial tail record.
 func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src, generation string) (timeline ParsedTimeline, offset int64, err error) {
+	offset, err = scanRelayTailRecords(r, parser, start, skipFirst, src, generation, func(parsed ParsedRecord, line, encoded []byte, byteEnd int64, currentGeneration string) {
+		if parser.version != LogVersionV1 {
+			timeline.Encoded = append(timeline.Encoded, encoded...)
+		}
+		timeline.Messages = append(timeline.Messages, parsed.Messages...)
+		if parsed.RelayRecord {
+			timeline.RelayRecords = append(timeline.RelayRecords, RelayRecordBoundary{
+				Generation: currentGeneration,
+				RelayEnd:   byteEnd,
+				MessageEnd: len(timeline.Messages),
+				ByteEnd:    len(timeline.Encoded),
+				// Fingerprint the record without its trailing newline: the
+				// adoption overlap filter compares these values against
+				// fingerprints stored in the task log, so the basis must not
+				// change.
+				Fingerprint: sha256.Sum256(line),
+			})
+		}
+	})
+	return timeline, offset, err
+}
+
+// scanRelayTailRecords is the shared relay record loop. visit may be nil to
+// discard parsed records; it receives the parsed record, the record line without
+// its trailing newline (the fingerprint basis), the encoded record with the
+// newline, the physical offset after the record, and the relay generation in
+// effect. currentGeneration is seeded from the caller's pre-read observation.
+func scanRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, skipFirst bool, src, generation string, visit func(ParsedRecord, []byte, []byte, int64, string)) (offset int64, err error) {
 	reader := bufio.NewReaderSize(r, 1<<20)
 	offset = start
 	currentGeneration := generation
@@ -1247,13 +1372,13 @@ func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		record, readErr := readNDJSONRecord(reader)
 		offset += int64(len(record))
 		if errors.Is(readErr, io.EOF) {
-			return timeline, offset, nil
+			return offset, nil
 		}
 		if errors.Is(readErr, io.ErrUnexpectedEOF) {
-			return timeline, offset - int64(len(record)), nil
+			return offset - int64(len(record)), nil
 		}
 		if readErr != nil {
-			return timeline, offset, fmt.Errorf("read relay record: %w", readErr)
+			return offset, fmt.Errorf("read relay record: %w", readErr)
 		}
 		line := record[:len(record)-1]
 		if skipFirst {
@@ -1266,26 +1391,16 @@ func readRelayTailRecords(r io.Reader, parser *LogRecordParser, start int64, ski
 		parsed, parseErr := parser.ParseRecord(line)
 		if parseErr != nil {
 			if parser.version != LogVersionV1 || parsed.Control {
-				return timeline, offset, fmt.Errorf("parse relay record: %w", parseErr)
+				return offset, fmt.Errorf("parse relay record: %w", parseErr)
 			}
 			slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
 			continue
 		}
-		if parser.version != LogVersionV1 {
-			timeline.Encoded = append(timeline.Encoded, record...)
-		}
 		if parsed.RelayGeneration != "" {
 			currentGeneration = parsed.RelayGeneration
 		}
-		timeline.Messages = append(timeline.Messages, parsed.Messages...)
-		if parsed.RelayRecord {
-			timeline.RelayRecords = append(timeline.RelayRecords, RelayRecordBoundary{
-				Generation:  currentGeneration,
-				RelayEnd:    offset,
-				MessageEnd:  len(timeline.Messages),
-				ByteEnd:     len(timeline.Encoded),
-				Fingerprint: sha256.Sum256(line),
-			})
+		if visit != nil {
+			visit(parsed, line, record, offset, currentGeneration)
 		}
 	}
 }
@@ -1471,6 +1586,15 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err := opts.Log.LogVersion().Validate(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
+	if opts.WarmHistory {
+		// A session that attaches with an empty stateful wire cannot correlate
+		// the completions its restored history implies, which is the defect the
+		// warm-up exists to prevent, so a failure here aborts the attach instead
+		// of continuing in that state. The caller's recovery path retries.
+		if err := WarmRelayHistory(ctx, sshHost, opts.Log.LogVersion(), wire, opts.RelayOffset, maxWarmHistoryBytes); err != nil {
+			return nil, fmt.Errorf("warm relay history: %w", err)
+		}
+	}
 	c := NewConn(ctx, opts.Logger, stdin, opts.Log, wire)
 	if wrap != nil {
 		c, err = wrap(c)
@@ -1488,6 +1612,70 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 
 	log := opts.Logger.With("target", sshHost)
 	return NewSession(ctx, cmd, c, stdout, opts.MsgCh, log), nil
+}
+
+// maxWarmHistoryBytes bounds the relay history replayed through a wire before
+// attach, matching the adoption snapshot bound.
+const maxWarmHistoryBytes = 10 << 20
+
+// warmHistoryAttempts is how many times a warm read is tried before the attach
+// gives up. The second attempt absorbs a transient relay read failure.
+const warmHistoryAttempts = 2
+
+// WarmRelayHistory replays the relay records that precede the attach offset
+// through wire, discarding the resulting messages, so a stateful wire format
+// keeps the correlation state its history implies after a restart or relay
+// adoption. endOffset must be the offset the live attach will resume from:
+// reading further would send those records through the wire twice, and the
+// second copy would be idempotent and never reach the task timeline. A failure is
+// returned, after one retry to absorb a transient relay read, because attaching
+// with empty correlation state is the defect this exists to prevent.
+func WarmRelayHistory(ctx context.Context, container string, version LogVersion, wire WireFormat, endOffset, maxBytes int64) error {
+	if endOffset <= 0 {
+		// A fresh session: the live attach already replays everything from the
+		// start, so there is no history to warm and nothing to double-process.
+		return nil
+	}
+	// Fetch first, then replay once: a failed transfer must not leave partial
+	// state in the caller's wire, whose accumulators (usage, output, reasoning)
+	// are not all idempotent.
+	payload, err := readWarmHistoryPayload(ctx, func() ([]byte, error) {
+		return FetchRelayRange(ctx, container, maxBytes, endOffset)
+	})
+	if err != nil {
+		return err
+	}
+	parser, err := NewLogRecordParser(version, wire.ParseMessage)
+	if err != nil {
+		return err
+	}
+	// The parsed timeline is intentionally discarded: the task timeline is
+	// restored from the task log, not re-appended here, so the nil visitor keeps
+	// the parser's side effects and nothing else.
+	_, err = scanRelayTailRecords(bytes.NewReader(payload), parser, 0, false, container, "", nil)
+	return err
+}
+
+// readWarmHistoryPayload fetches the warm payload, retrying once. Only a
+// successful fetch is returned, so a failed attempt cannot contribute partial
+// records to the caller's parser state.
+func readWarmHistoryPayload(ctx context.Context, fetch func() ([]byte, error)) ([]byte, error) {
+	var lastErr error
+	for attempt := range warmHistoryAttempts {
+		payload, err := fetch()
+		if err == nil {
+			return payload, nil
+		}
+		lastErr = err
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if attempt+1 < warmHistoryAttempts {
+			slog.Warn("relay", "msg", "warming relay history failed, retrying", "attempt", attempt+1, "err", err)
+		}
+	}
+	// The caller reports the exhausted failure; do not claim another attempt here.
+	return nil, lastErr
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin
