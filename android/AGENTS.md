@@ -51,6 +51,13 @@ Use `make check` for non-Android repo validation. Use `make android-e2e` for
 instrumented Android flows. Use `make screenshots-check` for deterministic visual
 coverage and `make screenshots-update` to accept intentional baseline changes.
 
+Robolectric unit tests run without network access: the test modules resolve
+`org.robolectric:android-all-instrumented` through Gradle and point Robolectric's offline
+resolver at the staged jar, instead of letting Robolectric download it from Maven Central
+while the tests run. `robolectricAndroidAll` in `gradle/libs.versions.toml` names the jar
+version; update it together with `robolectric` or `compileSdk` when either moves, because a
+mismatch fails the tests with `Path is not a file: ...android-all-instrumented-<version>.jar`.
+
 For module-focused Android e2e:
 
 ```bash

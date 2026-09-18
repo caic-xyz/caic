@@ -48,6 +48,27 @@ detekt {
     parallel = true
 }
 
+// Robolectric resolves the Android runtime jar for its tests by downloading it from Maven Central
+// while the unit tests run, so a repository hiccup aborts a test class mid-build. Resolve the same
+// artifact through Gradle and point Robolectric's offline resolver at it instead: the jar is
+// checksum-verified and cached with the rest of the build, and the tests need no network access.
+val robolectricSdkJar = configurations.create("robolectricSdkJar") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+val robolectricSdkJarDir = layout.buildDirectory.dir("robolectric-sdk-jars")
+
+val stageRobolectricSdkJar = tasks.register<Sync>("stageRobolectricSdkJar") {
+    from(robolectricSdkJar)
+    into(robolectricSdkJarDir)
+}
+
+tasks.withType<Test>().configureEach {
+    dependsOn(stageRobolectricSdkJar)
+    systemProperty("robolectric.dependency.dir", robolectricSdkJarDir.get().asFile.absolutePath)
+}
+
 dependencies {
     // Coroutines — Flow-based API for async BLE operations (exposed to consumers).
     api(libs.kotlinx.coroutines.core)
@@ -61,4 +82,5 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)
+    add(robolectricSdkJar.name, libs.robolectric.android.all)
 }
