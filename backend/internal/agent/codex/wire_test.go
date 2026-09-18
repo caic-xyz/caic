@@ -397,7 +397,7 @@ func TestRecordHandshakeContinuation(t *testing.T) {
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 {"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"next","cliVersion":"1.0"}}}
 `
-	_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, strings.NewReader(responses), "")
+	_, continuation, err := New("", nil).RecordHandshake(t.Context(), io.Discard, strings.NewReader(responses), "/workspace", "", agent.LogVersionV1)
 	if err != nil {
 		t.Fatal(err)
 	}

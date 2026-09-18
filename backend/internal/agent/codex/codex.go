@@ -69,10 +69,10 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake
 // (initialize → initialized → thread/start) for golden-file trace recording.
-func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, dir, model string, version agent.LogVersion) (agent.WireFormat, io.Reader, error) {
 	br := bufio.NewReaderSize(stdout, 1<<16)
-	log := agent.DiscardLogSink{Version: agent.LogVersionV1}
-	wire, _, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model, Log: log})
+	log := agent.DiscardLogSink{Version: version}
+	wire, _, continuation, err := handshake(ctx, stdin, br, &agent.Options{Dir: dir, Model: model, Log: log})
 	if err != nil {
 		return nil, nil, err
 	}

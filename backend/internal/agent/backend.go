@@ -128,11 +128,13 @@ type PrePromptWriter interface {
 
 // RecordHandshaker is implemented by backends that perform a bidirectional
 // handshake over stdin/stdout before writing prompts (e.g. ACP-based agents
-// like OpenCode). The returned io.Reader replaces the original stdout for
-// subsequent reads (it may be a buffered reader that consumed bytes beyond
-// the handshake response).
+// like OpenCode). dir is the working directory the recorded harness must run
+// in, and version selects the physical relay record format the caller recorded,
+// so the handshake unwraps the same records the session will read. The returned
+// io.Reader replaces the original stdout for subsequent reads (it may be a
+// buffered reader that consumed bytes beyond the handshake response).
 type RecordHandshaker interface {
-	RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (WireFormat, io.Reader, error)
+	RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, dir, model string, version LogVersion) (WireFormat, io.Reader, error)
 }
 
 // Base provides default implementations for metadata-only Backend methods.

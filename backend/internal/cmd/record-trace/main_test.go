@@ -15,6 +15,34 @@ import (
 	claudedto "github.com/maruel/genai/providers/claudecode"
 )
 
+// TestRelayAttachArgsMatchProduction pins the flag set every recording mode passes to
+// the relay. The client logs the prompt it writes to the agent's stdin, so a recording
+// without --no-log-stdin would classify those bytes as agent output instead.
+func TestRelayAttachArgsMatchProduction(t *testing.T) {
+	t.Parallel()
+	for _, dir := range []string{"/workspace", t.TempDir()} {
+		args := relayAttachArgs(dir, []string{"--model", "test-model"})
+		want := []string{"serve-attach", "--dir", dir, "--no-log-stdin", "--", "--model", "test-model"}
+		if !slices.Equal(args, want) {
+			t.Fatalf("relayAttachArgs(%q) = %v, want %v", dir, args, want)
+		}
+	}
+}
+
+// TestHarnessWorkDir pins the directory each recording mode hands the harness: a
+// containerized harness must be told the container path, while --local runs on this
+// machine and keeps the host checkout.
+func TestHarnessWorkDir(t *testing.T) {
+	t.Parallel()
+	host := t.TempDir()
+	if got := harnessWorkDir(true, host); got != host {
+		t.Fatalf("harnessWorkDir(local) = %q, want %q", got, host)
+	}
+	if got := harnessWorkDir(false, host); got != "/workspace" {
+		t.Fatalf("harnessWorkDir(container) = %q, want the container work dir", got)
+	}
+}
+
 func TestBuildPodmanRunArgs(t *testing.T) {
 	t.Run("valid_mounts_logged_in_account", func(t *testing.T) {
 		home := t.TempDir()
