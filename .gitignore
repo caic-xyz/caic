@@ -11,6 +11,7 @@ node_modules/
 /frontend/coverage/
 /package-lock.json
 /test-results/
+/visual-screenshots-failures/
 /tmp/
 go.work
 go.work.sum

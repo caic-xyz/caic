@@ -74,7 +74,13 @@ make android-stop-emulator
 
 `make android-start-emulator` runs setup first. Starting the headless emulator is
 cheap; for Android E2E work, start it and run the focused test instead of
-skipping local validation.
+skipping local validation. The dev container ships the emulator, a system image,
+`ANDROID_HOME`, and `/dev/kvm`, so do not assume Android validation is
+unavailable: `make android-sdk` (or `python3 scripts/android_sdk.py check`) is
+the readiness probe, `adb devices` shows a running emulator, and
+`make android-check`, `make android-e2e`, `make screenshots-check`, and
+`make screenshots-check-android` all run here. Only the runtime containers
+(`md`/podman) may be unavailable.
 
 `make android-e2e` reuses a sole ready emulator, USB device, or Wi-Fi adb
 device. Set `ANDROID_SERIAL` when more than one device is connected. The test

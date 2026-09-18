@@ -103,10 +103,17 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Start emulator
         run: python3 scripts/android_start_emulator.py
       - name: Run E2E tests
         run: make android-e2e
+      # Parked with the ci.yml job: the step stays and starts only once the repository
+      # variable CAIC_RENDER_SCREENSHOTS is set to true.
+      - name: Render documentation screenshots
+        if: ${{ vars.CAIC_RENDER_SCREENSHOTS == 'true' }}
+        run: make screenshots-generate-android
       - name: Upload E2E logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
@@ -117,4 +124,6 @@ jobs:
             android/*/build/outputs/androidTest-results/connected/**
             sdk/halo/build/reports/androidTests/connected/**
             sdk/halo/build/outputs/androidTest-results/connected/**
+            test-results/
+            visual-screenshots-failures/**
           retention-days: 7

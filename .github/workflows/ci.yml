@@ -66,6 +66,38 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out,frontend/coverage/lcov.info
 
+  # Parked: the job stays and starts only once the repository variable
+  # CAIC_RENDER_SCREENSHOTS is set to true, because rendering the documentation
+  # screenshots is not a signal the project wants on pull requests yet.
+  screenshots:
+    name: "screenshots: ubuntu-latest"
+    if: ${{ vars.CAIC_RENDER_SCREENSHOTS == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/setup@v2
+        with:
+          cache: true
+          install: false
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Render frontend documentation screenshots
+        id: screenshots
+        run: make screenshots-generate-frontend
+      - name: Upload screenshot failure artifacts
+        if: failure() && steps.screenshots.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-failure-artifacts
+          path: |
+            test-results/
+            visual-screenshots-failures/
+          if-no-files-found: ignore
+          retention-days: 3
+
   smoke:
     name: "smoke: ubuntu-latest"
     runs-on: ubuntu-latest

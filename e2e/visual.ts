@@ -26,6 +26,12 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
           animation: none !important;
           transition: none !important;
         }
+        /* Rounded corners of captured controls land on fractional pixels and
+           whose edge antialiasing then varies between otherwise identical
+           renders, so the captured surfaces render square. */
+        [data-testid="prompt-input"],
+        [data-testid="attach-images"],
+        [data-testid="submit-task"],
         [data-testid="task-message-area"] {
           border-radius: 0 !important;
         }
@@ -50,7 +56,11 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
           width: 4rem !important;
         }
         button[title="Back to task"] svg,
-        button[title="Collapse sidebar"] svg {
+        button[title="Collapse sidebar"] svg,
+        [data-testid="attach-images"] svg,
+        [data-testid="submit-task"] svg {
+          /* Antialiasing of these icons varies between otherwise identical
+             renders, which fails the repeatability comparison. */
           shape-rendering: crispEdges;
         }
         [data-testid="timing-duration"] > span {

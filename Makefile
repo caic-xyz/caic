@@ -1,6 +1,6 @@
 # Build, benchmark, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help benchmark build check check-agent-logs fake-dev test test-all smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e playwright-browser screenshots-check screenshots-update android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help benchmark build check check-agent-logs fake-dev test test-all smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e playwright-browser screenshots-check screenshots-check-frontend screenshots-check-android screenshots-generate-frontend screenshots-generate-android screenshots-update android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -28,6 +28,10 @@ help:
 	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
 	@echo "  make frontend-e2e           - Run Playwright end-to-end tests"
 	@echo "  make screenshots-check      - Verify deterministic frontend and Android screenshots"
+	@echo "  make screenshots-check-frontend - Verify only the frontend screenshots (no emulator)"
+	@echo "  make screenshots-check-android  - Verify only the Android screenshots (needs the emulator)"
+	@echo "  make screenshots-generate-frontend - Render the frontend screenshots without comparing"
+	@echo "  make screenshots-generate-android  - Render the Android screenshots without comparing"
 	@echo "  make screenshots-update     - Explicitly update deterministic screenshot baselines"
 	@echo "  make smoke                  - Run real runtime smoke test"
 	@echo "  make smoke-voice            - Run local voice WebRTC smoke test"
@@ -188,6 +192,28 @@ screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser android-se
 	@pnpm build
 	@python3 scripts/android_start_emulator.py --auto-reuse
 	@python3 scripts/visual_screenshots.py check
+
+# Platform-specific variants. Check compares against the tracked baselines, which
+# encode the development container's font stack, so it is a maintainer check.
+# Generate only renders, which is what CI runs so a stale generator cannot rot
+# silently without pretending the baselines are portable.
+screenshots-check-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
+	@pnpm build
+	@python3 scripts/visual_screenshots.py check --platform frontend
+
+# The Android variant renders the committed frontend bundle the app hosts, so it
+# needs no pnpm or SDK step.
+screenshots-check-android: android-setup-emulator
+	@python3 scripts/android_start_emulator.py --auto-reuse
+	@python3 scripts/visual_screenshots.py check --platform android
+
+screenshots-generate-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
+	@pnpm build
+	@python3 scripts/visual_screenshots.py generate --platform frontend
+
+screenshots-generate-android: android-setup-emulator
+	@python3 scripts/android_start_emulator.py --auto-reuse
+	@python3 scripts/visual_screenshots.py generate --platform android
 
 screenshots-update: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
 	@pnpm build

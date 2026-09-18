@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Check or update deterministic frontend and Android documentation screenshots."""
+"""Render, check, or update deterministic frontend and Android documentation screenshots.
+
+Baseline comparison is a maintainer check: the tracked images encode the
+development container's font stack, so comparing renders from a different host
+reports typeface differences that are not product regressions. The generate mode
+renders without comparing, which is what CI gates so a stale generator cannot
+rot silently."""
 
 import argparse
 import os
@@ -18,7 +24,10 @@ BASELINE_DIRS = {
 }
 IMAGE_SUFFIXES = frozenset({".avif", ".png", ".webp"})
 VISUAL_SEED = "caic-visual-v1"
-FAILURE_DIR = ROOT_DIR / "test-results" / "visual-screenshots"
+# Playwright deletes test-results/ at the start of every run, so failed renders
+# live beside it instead of inside it: they have to survive a re-run to be
+# inspected, and CI uploads this directory when a check fails.
+FAILURE_DIR = ROOT_DIR / "visual-screenshots-failures"
 MAX_LUMA_DELTA = 2
 MAX_LUMA_ERROR_PER_MILLION_PIXELS = 20
 
@@ -205,7 +214,7 @@ def replace_baselines(source_dir: Path, baseline_dir: Path) -> None:
 
 
 def preserve_failure(platform: str, first: Path, second: Path) -> Path:
-    """Preserve failed render passes in the ignored test-results directory."""
+    """Preserve failed render passes in the ignored failure directory."""
     destination = FAILURE_DIR / platform
     if destination.exists():
         shutil.rmtree(destination)
@@ -216,7 +225,7 @@ def preserve_failure(platform: str, first: Path, second: Path) -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("check", "update"))
+    parser.add_argument("mode", choices=("check", "update", "generate"))
     parser.add_argument(
         "--platform",
         choices=("all", "android", "frontend"),
@@ -228,13 +237,18 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    for executable in ("ffmpeg", "ffprobe"):
-        if shutil.which(executable) is None:
-            print(
-                f"{executable} is required for deterministic screenshot comparison",
-                file=sys.stderr,
-            )
-            return 1
+    if args.mode != "generate":
+        # Only the comparison modes decode images, so this precheck belongs to
+        # them. The renderers need ffmpeg independently (the documentation
+        # screenshots are encoded to webp), so every environment that runs a
+        # renderer, including the generate targets in CI, installs it.
+        for executable in ("ffmpeg", "ffprobe"):
+            if shutil.which(executable) is None:
+                print(
+                    f"{executable} is required for deterministic screenshot comparison",
+                    file=sys.stderr,
+                )
+                return 1
 
     platforms = tuple(BASELINE_DIRS) if args.platform == "all" else (args.platform,)
     renderers = {"android": render_android, "frontend": render_frontend}
@@ -243,6 +257,13 @@ def main() -> int:
         for platform in platforms:
             first = tmp_dir / platform / "first"
             second = tmp_dir / platform / "second"
+            if args.mode == "generate":
+                # A single pass: CI only needs the generators to run, and a
+                # repeatability failure here would be an environment problem.
+                print(f"Rendering {platform} screenshots...")
+                renderers[platform](first)
+                print(f"{platform} screenshots rendered.")
+                continue
             print(f"Rendering {platform} screenshots (pass 1/2)...")
             renderers[platform](first)
             print(f"Rendering {platform} screenshots (pass 2/2)...")
@@ -260,6 +281,8 @@ def main() -> int:
                 differences = compare_images(first, baseline_dir, f"{platform} baseline")
                 if differences:
                     print("\n".join(differences), file=sys.stderr)
+                    artifacts = preserve_failure(platform, first, second)
+                    print(f"Failed render artifacts: {artifacts}", file=sys.stderr)
                     print("Run 'make screenshots-update' to accept intentional changes.", file=sys.stderr)
                     return 1
                 print(f"{platform} screenshots are deterministic and match their baselines.")
