@@ -82,6 +82,8 @@ import PromptInput from "./PromptInput";
 import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
+import NativeSubagents, { NativeActivityStatus } from "./NativeSubagents";
+import { NativeActivityTracker, type NativeActivity } from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
 import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
@@ -871,6 +873,23 @@ export default function TaskDetail(props: Props) {
     }
   }
 
+  // One tracker per mount folds canonical native activity across turns,
+  // compaction, and replaced history without regrouping the transcript.
+  const nativeTracker = new NativeActivityTracker();
+  const nativeActivities = createMemo(() => nativeTracker.derive(messages()));
+  const nativeSettled = () => !isActive();
+  // Correlate canonical native activity with the tool card that spawned it.
+  const nativeByToolUseID = createMemo(() => {
+    const byTool = new Map<string, NativeActivity[]>();
+    for (const activity of nativeActivities()) {
+      if (!activity.toolUseID) continue;
+      const list = byTool.get(activity.toolUseID);
+      if (list) list.push(activity);
+      else byTool.set(activity.toolUseID, [activity]);
+    }
+    return byTool;
+  });
+
   return (
     <div class={styles.container}>
       <div
@@ -1357,6 +1376,8 @@ export default function TaskDetail(props: Props) {
                           pendingAction={pendingAction}
                           model={props.model ?? null}
                           turnTiming={(event) => turnTimingsByResultEvent().get(event)}
+                          nativeByToolUseID={nativeByToolUseID}
+                          nativeSettled={nativeSettled}
                         />
                       </div>
                     </div>
@@ -1366,6 +1387,7 @@ export default function TaskDetail(props: Props) {
             );
           }}
         </Index>
+        <NativeSubagents activities={nativeActivities()} settled={nativeSettled()} />
         <Show when={messages().length === 0}>
           <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>
@@ -1527,6 +1549,8 @@ function GroupContent(props: {
   pendingAction?: () => string | null;
   model: string | null;
   turnTiming: (event: EventMessage) => TurnTiming | undefined;
+  nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
+  nativeSettled: () => boolean;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
   const group = props.group;
@@ -1573,6 +1597,8 @@ function GroupContent(props: {
             events={group().events}
             onClearAndExecutePlan={props.isWaiting() ? props.onClearAndExecutePlan : undefined}
             pendingAction={props.pendingAction}
+            nativeByToolUseID={props.nativeByToolUseID}
+            nativeSettled={props.nativeSettled}
           />
         </Show>
       </Match>
@@ -1823,6 +1849,8 @@ function ToolMessageGroup(props: {
   events?: EventMessage[];
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
+  nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
+  nativeSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
@@ -1850,6 +1878,8 @@ function ToolMessageGroup(props: {
             onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)}
             onClearAndExecutePlan={props.onClearAndExecutePlan}
             pendingAction={props.pendingAction}
+            nativeActivity={props.nativeByToolUseID().get(calls()[0].use.toolUseID)}
+            nativeSettled={props.nativeSettled}
           />
         }
       >
@@ -1878,6 +1908,8 @@ function ToolMessageGroup(props: {
                     onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
                     suppressPlanContent={true}
                     pendingAction={props.pendingAction}
+                    nativeActivity={props.nativeByToolUseID().get(call().use.toolUseID)}
+                    nativeSettled={props.nativeSettled}
                   />
                 )}
               </Index>
@@ -2124,6 +2156,8 @@ function ToolCallCard(props: {
   onClearAndExecutePlan?: () => void;
   pendingAction?: () => string | null;
   suppressPlanContent?: boolean;
+  nativeActivity?: NativeActivity[];
+  nativeSettled?: () => boolean;
 }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
@@ -2172,6 +2206,14 @@ function ToolCallCard(props: {
                 <span class={styles.toolPending} />
               </Show>
               {props.call.use.name}
+              <For each={props.nativeActivity ?? []}>
+                {(activity) => (
+                  <NativeActivityStatus
+                    activity={activity}
+                    settled={props.nativeSettled?.() ?? false}
+                  />
+                )}
+              </For>
               <Show when={detail()}>
                 <span class={styles.toolDetail}>{detail()}</span>
               </Show>

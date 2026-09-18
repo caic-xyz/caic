@@ -1,7 +1,7 @@
 // Tests for TaskDetail navigation, prompts, and SSE connection behaviour.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { type JSX } from "solid-js";
 
@@ -412,6 +412,60 @@ describe("TaskDetail", () => {
     );
     expect(added.className).toMatch(/lineAdded/);
     expect(deleted.className).toMatch(/lineDeleted/);
+  });
+
+  it("shows canonical native status on the tool call that spawned it", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      const events: EventMessage[] = [
+        {
+          kind: "toolUse",
+          ts: 1_000,
+          toolUse: {
+            toolUseID: "spawn-1",
+            name: "Agent",
+            detail: "Joke about README.md",
+            input: { description: "Joke about README.md" },
+          },
+        },
+        {
+          kind: "nativeSubagent",
+          ts: 2_000,
+          nativeSubagent: {
+            id: "child-1",
+            toolUseID: "spawn-1",
+            label: "Joke about README.md",
+            status: "running",
+          },
+        },
+        {
+          kind: "nativeSubagent",
+          ts: 3_000,
+          nativeSubagent: {
+            id: "child-1",
+            status: "completed",
+            result: "Read me before you judge me.",
+          },
+        },
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByText, getByTestId } = renderTaskDetail();
+
+    // The canonical task-wide panel renders the lifecycle once.
+    const panel = getByTestId("native-subagents");
+    expect(within(panel).getByText("Completed")).toBeInTheDocument();
+    expect(within(panel).getByText("Read me before you judge me.")).toBeInTheDocument();
+    // The spawning tool call carries the same correlated status.
+    const call = getByText("Agent").closest("details");
+    if (!call) throw new Error("tool card must have a details element");
+    expect(within(call).getByText("Completed")).toBeInTheDocument();
   });
 
   it("shows elapsed time on a single-event message block", () => {
