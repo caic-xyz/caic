@@ -720,8 +720,8 @@ func toAgentUsage(u *pi.MessageUsage) agent.Usage {
 	// Anthropic reports it. A positive remainder is therefore a mixed response
 	// whose first expiry is five minutes. Other providers do not report an
 	// applied duration, so leave their TTL unknown:
-	// https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/types.ts
-	// https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/anthropic-messages.ts
+	// https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/types.ts
+	// https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/api/anthropic-messages.ts
 	switch {
 	case u.CacheWrite1h > 0 && u.CacheWrite1h == u.CacheWrite:
 		usage.CacheTTLSeconds = 3600
