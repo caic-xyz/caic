@@ -361,7 +361,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
   for (let i = 0; i < 2; i++) {
     await expect(headerStats.nth(i)).toBeHidden();
   }
-  const taskStatistics = detailHeader.getByRole("button", { name: "Task statistics" });
+  // Task statistics is a router link to the task's stats route, not a button.
+  const taskStatistics = detailHeader.getByRole("link", { name: "Task statistics" });
   await expect(taskStatistics).toBeVisible();
   const titleBox = await detailHeader
     .locator(":scope > span")

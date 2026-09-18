@@ -35,7 +35,9 @@ if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]];
   exit 1
 fi
 
-# Classify added, copied, modified, and renamed files for focused checks.
+# Classify added, copied, modified, and renamed files for focused checks. Only a file
+# named AGENTS.md (or its CLAUDE.md symlink, which the symlink check skips) is exempt
+# from formatting: a doc whose name merely ends in AGENTS.md is a normal source file.
 format_files=()
 eslint_files=()
 go_files=()
@@ -44,7 +46,7 @@ python_files=()
 while IFS= read -r -d '' file; do
   if [[ ! -L "$file" ]]; then
     case "$file" in
-      *AGENTS.md)
+      AGENTS.md | */AGENTS.md)
         ;;
       *.css | *.html | *.json | *.md | *.mjs | *.ts | *.tsx | *.yaml | *.yml)
         format_files+=("$file")
