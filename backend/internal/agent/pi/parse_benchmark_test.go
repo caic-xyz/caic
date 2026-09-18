@@ -127,3 +127,47 @@ func benchmarkMessageUpdateLine(b *testing.B, accumulatedBytes int) []byte {
 	}
 	return data
 }
+
+// BenchmarkParseSubagentToolExecStart covers delegation classification, which
+// probes the extension-owned invocation shape before an orchestration is
+// recognized. A single spawn is the common case; a workflowScript spawn is the
+// current orchestration shape.
+func BenchmarkParseSubagentToolExecStart(b *testing.B) {
+	for _, test := range []struct {
+		name string
+		args string
+	}{
+		{"single", `{"agent":"delegate","task":"Tell a short joke about README.md."}`},
+		{"workflow", `{"workflowScript":"const r = await runs.run('joke', { agent: 'delegate', task: 'Tell a joke.' });"}`},
+		{"action", `{"action":"list"}`},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			line := []byte(`{"type":"tool_execution_start","toolCallId":"call_1","toolName":"subagent","args":` + test.args + `}`)
+			parser := New("", nil).NewWire().ParseMessage
+			b.ReportAllocs()
+			b.SetBytes(int64(len(line)))
+			b.ResetTimer()
+			for range b.N {
+				if _, err := parser(line); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParseSubagentWaitEnd covers settling a delegated run from the
+// extension's completion list.
+func BenchmarkParseSubagentWaitEnd(b *testing.B) {
+	line := []byte(`{"type":"tool_execution_end","toolCallId":"call_2","toolName":"subagent_wait","result":{"content":[{"type":"text","text":"Waited for run test-run; done. Outcome: 1 complete."}],"isError":false,"details":{"mode":"management","results":[],"completions":[{"runId":"test-run","agent":"delegate","mode":"single","state":"complete","success":true,"results":[{"agent":"delegate","success":true,"outputState":"present","model":"openai-codex/gpt-5.6-terra"}]}]}}}`)
+	parser := New("", nil).NewWire().ParseMessage
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		if _, err := parser(line); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

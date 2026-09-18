@@ -27,12 +27,12 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 | `message_update` (`thinking_delta`) | ThinkingDeltaMessage |
 | `message_update` (`toolcall_start`) | (skipped — no arguments yet; ToolUse comes from `tool_execution_start`) |
 | `message_end` | TextMessage / ThinkingMessage consolidated from final assistant content |
-| `tool_execution_start` | ToolUseMessage (+ SubagentStartMessage for subagent spawns) |
+| `tool_execution_start` | ToolUseMessage |
 
 `toolcall_start` must stay skipped: it precedes `message_end` and would split
 the message's streaming deltas from its consolidated content in the frontend
 (duplicated assistant text) and duplicate the tool card.
-| `tool_execution_end` | ToolResultMessage (+ SubagentEndMessage and result output for subagents) |
+| `tool_execution_end` | ToolResultMessage (+ result output for subagents) |
 | `agent_end` | ResultMessage (with usage, duration, numTurns) |
 | `turn_end` | UsageMessage (also increments turn counter) |
 | `extension_ui_request` | (auto-respond on stdin) |
@@ -41,16 +41,68 @@ the message's streaming deltas from its consolidated content in the frontend
 
 Pi tool names need normalization to caic canonical names (similar to OpenCode).
 
-## Subagents
+## Core protocol and subagent extension
 
-Pi's `subagent` tool (normalized to `Agent`) spawns subagents singly, as a
-parallel batch (`tasks[]`), or as a phased chain (`chain[]`); introspection
-calls (`action: list`/`status`) spawn none. `subagent.go` parses these shapes.
-A spawning call emits a `SubagentStartMessage` (driving the frontend progress
-panel, like Claude Code) alongside the tool-use, and `tool_execution_end` emits
-a `SubagentEndMessage` plus the aggregated result text as tool output. The
-`(running...)` progress placeholder is suppressed so the success result is
-surfaced whole.
+Pi core 0.85.1 owns the RPC JSONL envelope and generic tool lifecycle only.
+Its versioned event union is
+https://github.com/earendil-works/pi/blob/v0.85.1/packages/agent/src/types.ts;
+`tool_execution_start` and `tool_execution_end` carry a tool call ID, tool
+name, arguments or result, and error flag. Core Pi does not define a
+`subagent` or `subagent_wait` tool.
+
+The installed `subagent` and `subagent_wait` behavior is extension-owned, not
+a core Pi protocol. The `nicobailon/pi-subagents` source inspected at
+https://github.com/nicobailon/pi-subagents/blob/07bd09e0f93a19caee3c39e3cf4069c70ee8dbcd/src/extension/index.ts
+registers `subagent`; its
+https://github.com/nicobailon/pi-subagents/blob/07bd09e0f93a19caee3c39e3cf4069c70ee8dbcd/src/runs/background/wait-tool.ts
+registers its wait tool (named `bg_wait` at that revision). Therefore names
+and result fields such as run IDs, modes, completion lists, output state, and
+orchestration vocabulary are extension-defined. The standardized recording's
+`subagent_wait` name is from the installed extension version, and is not a
+core Pi RPC event type.
+
+The Pi 0.85.1 standardized recording proves one extension-owned `subagent`
+invocation after a non-spawning `action:list`: the generic core start event
+carries the extension's invocation arguments; its end event carries the
+extension's run ID and mode; `subagent_wait` later reports the extension's
+terminal state, success, agent, model, and output state.
+
+`native_subagent.go` is the stateful adapter from those events to the canonical
+`agent.NativeSubagent` lifecycle. A spawn requires a recognized invocation
+shape, never merely a tool name that resembles delegation:
+
+- `{ agent, task }` is one agent-scope card. The card is created by the tool end
+  that reports the run ID (the start record only stores the delegation metadata);
+  an async tool end (a reported `asyncId` or `background`) only acknowledges
+  dispatch and marks it running, and the run settles from a
+  `subagent_wait`/`bg_wait` completion.
+- `{ workflowScript }` is one explicit batch-scope card. The installed 0.56.0
+  extension removed the legacy top-level `tasks` and `chain` inputs, which stay
+  parseable for historical logs only. A workflow reports no per-agent lifecycle,
+  so its card is never presented as per-agent progress.
+- `{ action }` management calls (`list`, `status`, steering) never spawn, and a
+  `bg_wait` completion whose mode is not a subagent orchestration is ignored.
+
+One card is keyed by the extension's run ID whenever a record reports one, and
+by the tool call ID only for a synchronous or legacy run without one; the start
+record carries no run ID, so it stores the delegation metadata and the end record
+that reports the run creates the card. A restart or relay adoption also replays
+the relay history that precedes the attach offset through the same wire
+(`agent.Options.WarmHistory`), which keeps that metadata available for the end
+record and lets the other adapters resolve records that continue after the
+restart.
+
+A completion can report the structured `error` and the artifact paths where the
+extension wrote the run's output; it never carries the output text, because the
+extension documents that the text stays in its artifact files and its wait result
+content only summarises the run. The card therefore shows the error, or references
+the output artifact, instead of claiming a result the harness never reported.
+
+Completion states map to the canonical statuses: `complete`/`completed` settle
+to completed or failed from the reported success and exit codes,
+`failed`/`error` to failed, `interrupted`/`stopped`/`cancelled` to interrupted,
+and `paused` to the non-terminal paused state, because the extension can resume
+a paused run. An unrecognized state stays unknown instead of being invented.
 
 ## Upstream Source
 
@@ -61,25 +113,25 @@ Type definitions in `github.com/maruel/genai/providers/pi` follow the upstream T
 - `packages/coding-agent/src/modes/rpc/rpc-types.ts` — RPC command/response types
 
 When updating wire types, update `github.com/maruel/genai` and diff against
-https://github.com/badlogic/pi-mono to find new commands, event types, or fields.
+https://github.com/earendil-works/pi to find new commands, event types, or fields.
 
 ## References
 
 Source code:
-- https://github.com/badlogic/pi-mono
-- https://github.com/badlogic/pi-mono/tree/e266507b606b9552fa277252644054afd4384b11: source revision inspected for the prompt-cache behavior below
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/types.ts: cache-retention and usage types
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/anthropic-messages.ts: Anthropic cache controls and duration buckets
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/openai-responses.ts: OpenAI Responses cache-key and retention mapping
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/ai/src/api/bedrock-converse-stream.ts: Bedrock cache-point and retention mapping
+- https://github.com/earendil-works/pi
+- https://github.com/earendil-works/pi/tree/d981de1229ef899957bbe968bc8dcda02a21f477: Pi 0.85.1 source revision inspected for the prompt-cache behavior below
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/types.ts: cache-retention and usage types
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/api/anthropic-messages.ts: Anthropic cache controls and duration buckets
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/api/openai-responses.ts: OpenAI Responses cache-key and retention mapping
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/api/bedrock-converse-stream.ts: Bedrock cache-point and retention mapping
 
 npm package:
 - https://www.npmjs.com/package/@mariozechner/pi-coding-agent
 
 Documentation:
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/coding-agent/docs/environment-variables.md: Pi and provider environment variables
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/coding-agent/docs/providers.md: provider credentials and configuration
-- https://github.com/badlogic/pi-mono/blob/e266507b606b9552fa277252644054afd4384b11/packages/coding-agent/docs/models.md: custom-provider cache compatibility controls
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/environment-variables.md: Pi and provider environment variables
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/providers.md: provider credentials and configuration
+- https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/models.md: custom-provider cache compatibility controls
 
 ## Prompt Cache Controls
 

@@ -162,18 +162,18 @@ func validateUnknownEventRemainder(dec *json.Decoder) error {
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - UserInputMessage     — prompt command (stdin logged by relay)
 //   - RawMessage           — unrecognised event types
-func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, error) {
+func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedRecord, error) {
 	// caic-injected lines and stdin commands.
 	switch typ {
 	case pi.EventType("caic_model_info"):
 		// Handled by wireFormat.ParseMessage; skip in stateless replay.
-		return nil, nil
+		return nil, decodedRecord{}, nil
 
 	case pi.CmdPrompt:
 		// Stdin prompt command logged by relay; convert to UserInputMessage.
 		var cmd pi.PromptCmd
 		if err := json.Unmarshal(line, &cmd); err != nil {
-			return nil, fmt.Errorf("unmarshal prompt cmd: %w", err)
+			return nil, decodedRecord{}, fmt.Errorf("unmarshal prompt cmd: %w", err)
 		}
 		ui := &agent.UserInputMessage{Text: cmd.Message}
 		for _, img := range cmd.Images {
@@ -182,45 +182,50 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, error) {
 				Data:      img.Data,
 			})
 		}
-		return []agent.Message{ui}, nil
+		return []agent.Message{ui}, decodedRecord{}, nil
 
 	case pi.CmdCompact:
 		// Stdin compact command logged by relay; skip during replay.
-		return nil, nil
+		return nil, decodedRecord{}, nil
 
 	case pi.EventType("caic_diff_stat"):
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
+			return nil, decodedRecord{}, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&m}, decodedRecord{}, nil
 
 	case pi.EventType("caic_exit"):
 		var m agent.ExitMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
+			return nil, decodedRecord{}, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&m}, decodedRecord{}, nil
 
 	case pi.EventMessageUpdate:
-		return parseMessageUpdate(line)
+		msgs, err := parseMessageUpdate(line)
+		return msgs, decodedRecord{}, err
 
 	case pi.EventToolExecStart:
-		return parseToolExecStart(line)
+		msgs, ev, err := parseToolExecStart(line)
+		return msgs, decodedRecord{start: ev}, err
 
 	case pi.EventToolExecUpdate:
-		return parseToolExecUpdate(line)
+		msgs, err := parseToolExecUpdate(line)
+		return msgs, decodedRecord{}, err
 
 	case pi.EventToolExecEnd:
-		return parseToolExecEnd(line)
+		msgs, ev, err := parseToolExecEnd(line)
+		return msgs, decodedRecord{end: ev}, err
 
 	case pi.EventAgentStart, pi.EventMessageStart, pi.EventMessageEnd, pi.EventTurnStart:
 		// Lifecycle events with no semantic content; skip.
-		return nil, nil
+		return nil, decodedRecord{}, nil
 
 	case pi.EventResponse:
 		// Command responses (e.g. set_model ack); skip unless error.
-		return parseResponse(line)
+		msgs, err := parseResponse(line)
+		return msgs, decodedRecord{}, err
 
 	case pi.EventExtensionUI:
 		// Extension UI requests are passed through as RawMessage.
@@ -228,7 +233,7 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, error) {
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(pi.EventExtensionUI),
 			Raw:         append([]byte(nil), line...),
-		}}, nil
+		}}, decodedRecord{}, nil
 
 	case pi.EventAgentEnd, pi.EventTurnEnd,
 		pi.EventAgentSettled, pi.EventAutoRetryStart, pi.EventAutoRetryEnd,
@@ -240,17 +245,17 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, error) {
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
-		}}, nil
+		}}, decodedRecord{}, nil
 
 	default:
 		if typ == "" {
-			return nil, nil
+			return nil, decodedRecord{}, nil
 		}
 		// Preserve unrecognized events and logged stdin commands.
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(typ),
 			Raw:         append([]byte(nil), line...),
-		}}, nil
+		}}, decodedRecord{}, nil
 	}
 }
 
@@ -293,11 +298,12 @@ func messagesFromAssistantMessageEvent(delta *pi.AssistantMessageEvent, line []b
 	return nil, nil
 }
 
-// parseToolExecStart converts a tool_execution_start event.
-func parseToolExecStart(line []byte) ([]agent.Message, error) {
+// parseToolExecStart renders a tool start and returns the decoded record for the
+// native-subagent adapter.
+func parseToolExecStart(line []byte) ([]agent.Message, *pi.ToolExecStartEvent, error) {
 	var ev pi.ToolExecStartEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("unmarshal tool_execution_start: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal tool_execution_start: %w", err)
 	}
 	name := normalizeToolName(ev.ToolName)
 
@@ -306,28 +312,15 @@ func parseToolExecStart(line []byte) ([]agent.Message, error) {
 		var err error
 		input, err = json.Marshal(ev.Args)
 		if err != nil {
-			return nil, fmt.Errorf("marshal tool exec args: %w", err)
+			return nil, nil, fmt.Errorf("marshal tool exec args: %w", err)
 		}
 	}
 
 	if _, ok := agent.WidgetToolNames[name]; ok {
-		return []agent.Message{agent.NewWidgetMessage(ev.ToolCallID, input)}, nil
+		return []agent.Message{agent.NewWidgetMessage(ev.ToolCallID, input)}, &ev, nil
 	}
 	use := newToolUseMessage(ev.ToolCallID, ev.ToolName, name, input)
-	// Spawning subagents emits a SubagentStartMessage so the live progress panel
-	// surfaces the orchestration; introspection calls (list/status) spawn none.
-	if strings.EqualFold(ev.ToolName, subagentToolName) {
-		if info := parseSubagentArgs(input); len(info.Spawns) > 0 {
-			return []agent.Message{
-				&agent.SubagentStartMessage{
-					TaskID:      ev.ToolCallID,
-					Description: subagentDescription(info.Kind, info.Spawns),
-				},
-				use,
-			}, nil
-		}
-	}
-	return []agent.Message{use}, nil
+	return []agent.Message{use}, &ev, nil
 }
 
 // parseToolExecUpdate converts a tool_execution_update event to a streaming
@@ -349,13 +342,13 @@ func parseToolExecUpdate(line []byte) ([]agent.Message, error) {
 	}}, nil
 }
 
-// parseToolExecEnd converts a tool_execution_end event. Subagent tool calls also
-// emit a SubagentEndMessage to close out the progress panel, and surface their
-// aggregated result text as tool output so the orchestration outcome is visible.
-func parseToolExecEnd(line []byte) ([]agent.Message, error) {
+// parseToolExecEnd converts tool completion and exposes delegation output, and
+// returns the decoded record for the native-subagent adapter, which correlates
+// the native run lifecycle.
+func parseToolExecEnd(line []byte) ([]agent.Message, *pi.ToolExecEndEvent, error) {
 	var ev pi.ToolExecEndEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
-		return nil, fmt.Errorf("unmarshal tool_execution_end: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal tool_execution_end: %w", err)
 	}
 	resultText := ev.Result.Text()
 	res := &agent.ToolResultMessage{ToolUseID: ev.ToolCallID}
@@ -367,12 +360,9 @@ func parseToolExecEnd(line []byte) ([]agent.Message, error) {
 		}
 	}
 	if !strings.EqualFold(ev.ToolName, subagentToolName) {
-		return []agent.Message{res}, nil
+		return []agent.Message{res}, &ev, nil
 	}
-	msgs := []agent.Message{&agent.SubagentEndMessage{
-		TaskID: ev.ToolCallID,
-		Status: subagentStatus(ev.IsError, resultText),
-	}}
+	var msgs []agent.Message
 	// On success the result body (review findings, plan, etc.) is the subagent's
 	// output; surface it in the tool card. Failures already render via res.Error.
 	// Relies on running-placeholder updates being suppressed so the output-length
@@ -380,7 +370,7 @@ func parseToolExecEnd(line []byte) ([]agent.Message, error) {
 	if !ev.IsError && resultText != "" {
 		msgs = append(msgs, &agent.ToolOutputDeltaMessage{ToolUseID: ev.ToolCallID, Delta: resultText})
 	}
-	return append(msgs, res), nil
+	return append(msgs, res), &ev, nil
 }
 
 // parseResponse handles response envelopes. A failed prompt is terminal since
@@ -481,13 +471,29 @@ type subagentInfo struct {
 }
 
 // parseSubagentArgs decodes a subagent tool call's arguments into a structured
-// view. It recognises the single, parallel-batch, and chain orchestration
-// shapes, and the action-based introspection calls (list/status) which spawn
-// no subagents.
+// view. It recognises the single, parallel-batch, chain, and workflow-script
+// orchestration shapes, and the action-based introspection calls (list/status)
+// which spawn no subagents.
 func parseSubagentArgs(raw json.RawMessage) subagentInfo {
 	var args pi.SubagentToolArgs
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
 		return subagentInfo{}
+	}
+	if args.Action != "" {
+		return subagentInfo{Kind: "action", Action: args.Action}
+	}
+	// workflowScript is the installed extension's current orchestration shape.
+	// Legacy parallel and chain arguments were removed from the public tool, but
+	// historical logs still replay through the shapes below. The byte probe keeps
+	// ordinary single spawns from paying for a second unmarshal; a false positive
+	// cannot fabricate a workflow because the decoded field stays empty.
+	if bytes.Contains(raw, []byte(`"workflowScript"`)) {
+		var workflow struct {
+			WorkflowScript string `json:"workflowScript"`
+		}
+		if json.Unmarshal(raw, &workflow) == nil && workflow.WorkflowScript != "" {
+			return subagentInfo{Kind: "workflow"}
+		}
 	}
 	spawns := subagentSpawns(&args)
 	switch {
@@ -497,8 +503,6 @@ func parseSubagentArgs(raw json.RawMessage) subagentInfo {
 		return subagentInfo{Kind: "parallel", Spawns: spawns}
 	case len(spawns) > 0:
 		return subagentInfo{Kind: "single", Spawns: spawns}
-	case args.Action != "":
-		return subagentInfo{Kind: "action", Action: args.Action}
 	default:
 		return subagentInfo{}
 	}
@@ -541,10 +545,14 @@ func subagentSpawns(a *pi.SubagentToolArgs) []agent.SubagentSpawn {
 	return out
 }
 
-// subagentDescription summarises a subagent spawn for the live progress panel,
-// e.g. "reviewer — Review the last commit" for a single spawn or
-// "chain · reviewer ×3, worker" for an orchestration.
+// subagentDescription summarises a subagent spawn for its canonical card,
+// e.g. "reviewer — Review the last commit" for a single spawn,
+// "chain · reviewer ×3, worker" for an orchestration of known steps, or the
+// orchestration kind when the extension exposed no per-step detail.
 func subagentDescription(kind string, spawns []agent.SubagentSpawn) string {
+	if len(spawns) == 0 {
+		return kind
+	}
 	if len(spawns) == 1 {
 		s := spawns[0]
 		detail := s.Label
@@ -574,15 +582,6 @@ func subagentDescription(kind string, spawns []agent.SubagentSpawn) string {
 		}
 	}
 	return kind + " · " + strings.Join(parts, ", ")
-}
-
-// subagentStatus derives a terminal status ("completed"/"failed") from a
-// subagent tool result, matching the SubagentEndMessage status vocabulary.
-func subagentStatus(isError bool, resultText string) string {
-	if isError || strings.HasPrefix(strings.TrimSpace(resultText), "❌") {
-		return "failed"
-	}
-	return "completed"
 }
 
 // firstLine returns the first non-empty line of s, trimmed.

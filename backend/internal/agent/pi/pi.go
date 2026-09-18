@@ -117,14 +117,14 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{}
+	wire := &piWireFormat{nativeSubagents: newNativeSubagents()}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
-	return &piWireFormat{}
+	return &piWireFormat{nativeSubagents: newNativeSubagents()}
 }
 
 // WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
@@ -146,7 +146,7 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 }
 
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{}
+	wire := &piWireFormat{nativeSubagents: newNativeSubagents()}
 
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 	var relayArgs []string
@@ -415,11 +415,12 @@ const maxTrackedToolOutputs = 1024
 // type-dispatched JSONL protocol. It holds per-session state: a start time for
 // duration tracking and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
-	mu        sync.Mutex
-	initSent  bool
-	sessionID string
-	startTime time.Time // When the prompt was written.
-	numTurns  int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+	nativeSubagents nativeSubagents
+	mu              sync.Mutex
+	initSent        bool
+	sessionID       string
+	startTime       time.Time // When the prompt was written.
+	numTurns        int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
 
 	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
 
@@ -527,10 +528,16 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := parseMessageTyped(typ, line)
+	msgs, record, err := parseMessageTyped(typ, line)
 	if err != nil {
 		return nil, err
 	}
+
+	native, err := w.nativeSubagents.parse(record)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, native...)
 
 	// For tool output deltas, compute incremental deltas since Pi's
 	// tool_execution_update events carry the full accumulated output.

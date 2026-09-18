@@ -154,46 +154,21 @@ func TestNew(t *testing.T) {
 			}
 		})
 	})
-	t.Run("subagent status", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			if got := subagentStatus(false, "2/2 succeeded"); got != "completed" {
-				t.Fatalf("got %q, want completed", got)
-			}
-		})
-		t.Run("error", func(t *testing.T) {
-			t.Parallel()
-			if got := subagentStatus(true, ""); got != "failed" {
-				t.Fatalf("got %q, want failed", got)
-			}
-			if got := subagentStatus(false, "❌ Chain failed at step 2"); got != "failed" {
-				t.Fatalf("got %q, want failed", got)
-			}
-		})
-	})
 	t.Run("subagent start", func(t *testing.T) {
 		t.Parallel()
-		t.Run("subagent spawn emits start and tool use", func(t *testing.T) {
+		t.Run("subagent spawn emits one tool use", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"c1","toolName":"subagent","args":{"agent":"reviewer","task":"Review"}}`)
-			msgs, err := parseToolExecStart(line)
+			msgs, _, err := parseToolExecStart(line)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(msgs) != 2 {
-				t.Fatalf("got %d messages, want 2: %#v", len(msgs), msgs)
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want one tool message", len(msgs))
 			}
-			start, ok := msgs[0].(*agent.SubagentStartMessage)
-			if !ok {
-				t.Fatalf("msgs[0] = %T, want SubagentStartMessage", msgs[0])
-			}
-			if start.TaskID != "c1" || start.Description != "reviewer — Review" {
-				t.Fatalf("start = %+v", start)
-			}
-			use, ok := msgs[1].(*agent.ToolUseMessage)
+			use, ok := msgs[0].(*agent.ToolUseMessage)
 			if !ok || use.Name != "Agent" {
-				t.Fatalf("msgs[1] = %#v, want ToolUseMessage named Agent", msgs[1])
+				t.Fatalf("tool = %#v", msgs[0])
 			}
 			if use.Detail != "reviewer — Review" || use.InputView.Kind != agent.ToolInputSubagents || len(use.InputView.Subagents) != 1 {
 				t.Fatalf("tool display = detail %q, view %#v", use.Detail, use.InputView)
@@ -202,7 +177,7 @@ func TestNew(t *testing.T) {
 		t.Run("subagent introspection emits only tool use", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"c2","toolName":"subagent","args":{"action":"list"}}`)
-			msgs, err := parseToolExecStart(line)
+			msgs, _, err := parseToolExecStart(line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +191,7 @@ func TestNew(t *testing.T) {
 		t.Run("regular tool emits only tool use", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_start","toolCallId":"c3","toolName":"bash","args":{"command":"ls"}}`)
-			msgs, err := parseToolExecStart(line)
+			msgs, _, err := parseToolExecStart(line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,48 +202,43 @@ func TestNew(t *testing.T) {
 	})
 	t.Run("subagent end", func(t *testing.T) {
 		t.Parallel()
-		t.Run("subagent success emits end, output, and result", func(t *testing.T) {
+		t.Run("subagent success emits output and result", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"subagent","result":{"content":[{"type":"text","text":"2/2 succeeded\n\nfindings"}]},"isError":false}`)
-			msgs, err := parseToolExecEnd(line)
-			if err != nil {
-				t.Fatal(err)
-			}
-			end, ok := msgs[0].(*agent.SubagentEndMessage)
-			if !ok || end.TaskID != "c1" || end.Status != "completed" {
-				t.Fatalf("msgs[0] = %#v, want completed SubagentEndMessage", msgs[0])
-			}
-			out, ok := msgs[1].(*agent.ToolOutputDeltaMessage)
-			if !ok || out.Delta == "" {
-				t.Fatalf("msgs[1] = %#v, want non-empty ToolOutputDeltaMessage", msgs[1])
-			}
-			if _, ok := msgs[2].(*agent.ToolResultMessage); !ok {
-				t.Fatalf("msgs[2] = %T, want ToolResultMessage", msgs[2])
-			}
-		})
-		t.Run("subagent failure emits end and error result without output", func(t *testing.T) {
-			t.Parallel()
-			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"subagent","result":{"content":[{"type":"text","text":"❌ failed"}]},"isError":true}`)
-			msgs, err := parseToolExecEnd(line)
+			msgs, _, err := parseToolExecEnd(line)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(msgs) != 2 {
-				t.Fatalf("got %d messages, want 2 (end, result): %#v", len(msgs), msgs)
+				t.Fatalf("messages = %d, want an output delta and a result", len(msgs))
 			}
-			end, ok := msgs[0].(*agent.SubagentEndMessage)
-			if !ok || end.Status != "failed" {
-				t.Fatalf("msgs[0] = %#v, want failed SubagentEndMessage", msgs[0])
+			out, ok := msgs[0].(*agent.ToolOutputDeltaMessage)
+			if !ok || out.Delta == "" {
+				t.Fatalf("messages[0] = %#v, want non-empty ToolOutputDeltaMessage", msgs[0])
 			}
-			res, ok := msgs[1].(*agent.ToolResultMessage)
+			if _, ok := msgs[1].(*agent.ToolResultMessage); !ok {
+				t.Fatalf("messages[1] = %T, want ToolResultMessage", msgs[1])
+			}
+		})
+		t.Run("subagent failure emits error result without output", func(t *testing.T) {
+			t.Parallel()
+			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"subagent","result":{"content":[{"type":"text","text":"❌ failed"}]},"isError":true}`)
+			msgs, _, err := parseToolExecEnd(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("got %d messages, want result", len(msgs))
+			}
+			res, ok := msgs[0].(*agent.ToolResultMessage)
 			if !ok || res.Error == "" {
-				t.Fatalf("msgs[1] = %#v, want ToolResultMessage with error", msgs[1])
+				t.Fatalf("messages[0] = %#v, want ToolResultMessage with error", msgs[0])
 			}
 		})
 		t.Run("regular tool emits only result", func(t *testing.T) {
 			t.Parallel()
 			line := []byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"bash","result":{"content":[{"type":"text","text":"ok"}]},"isError":false}`)
-			msgs, err := parseToolExecEnd(line)
+			msgs, _, err := parseToolExecEnd(line)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,9 +283,13 @@ func TestNew(t *testing.T) {
 			return msgs
 		}
 
+		// The start record carries no run ID, so the adapter remembers the
+		// delegation but emits no card until the run identity is known.
 		start := feed(`{"type":"tool_execution_start","toolCallId":"c1","toolName":"subagent","args":{"agent":"reviewer","task":"Review"}}`)
-		if _, ok := start[0].(*agent.SubagentStartMessage); !ok {
-			t.Fatalf("start[0] = %T, want SubagentStartMessage", start[0])
+		for _, m := range start {
+			if native, ok := m.(*agent.NativeSubagentMessage); ok {
+				t.Fatalf("start emitted %#v, want only the tool call", native.Subagent)
+			}
 		}
 
 		if msgs := feed(`{"type":"tool_execution_update","toolCallId":"c1","toolName":"subagent","partialResult":{"content":[{"type":"text","text":"(running...)"}]}}`); len(msgs) != 0 {
@@ -327,8 +301,11 @@ func TestNew(t *testing.T) {
 		var output string
 		for _, m := range end {
 			switch v := m.(type) {
-			case *agent.SubagentEndMessage:
+			case *agent.NativeSubagentMessage:
 				gotEnd = true
+				if v.Subagent.Status != agent.NativeSubagentStatusCompleted || v.Subagent.ID != "pi:tool:c1" {
+					t.Fatalf("sync end = %#v, want a completed tool-keyed card", v.Subagent)
+				}
 			case *agent.ToolOutputDeltaMessage:
 				output = v.Delta
 			case *agent.ToolResultMessage:
@@ -336,7 +313,7 @@ func TestNew(t *testing.T) {
 			}
 		}
 		if !gotEnd || !gotResult {
-			t.Fatalf("end messages = %#v, want SubagentEnd + ToolResult", end)
+			t.Fatalf("end messages = %#v, want a native completion and a tool result", end)
 		}
 		if output != "1/1 succeeded\n\nLooks good." {
 			t.Fatalf("output = %q, want full result text", output)
@@ -919,7 +896,8 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseMessageTyped(typ, line)
+	msgs, _, err := parseMessageTyped(typ, line)
+	return msgs, err
 }
 
 func TestParseMessage(t *testing.T) {
