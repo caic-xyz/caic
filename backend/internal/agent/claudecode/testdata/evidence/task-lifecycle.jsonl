@@ -1,0 +1,4 @@
+{"t":"caic_meta","version":2,"prompt":"Sanitized historical Claude task lifecycle evidence.","repos":[],"harness":"claude"}
+{"t":"agent","ts":1.000,"msg":{"type":"system","subtype":"task_started","task_id":"test-task","tool_use_id":"test-tool-use","description":"go test ./...","is_backgrounded":false,"task_type":"local_bash","uuid":"test-uuid","session_id":"test-session"}}
+{"t":"agent","ts":2.000,"msg":{"type":"system","subtype":"task_notification","task_id":"test-task","tool_use_id":"test-tool-use","status":"completed","output_file":"","summary":"go test ./...","uuid":"test-uuid","session_id":"test-session"}}
+{"t":"result","state":"completed"}

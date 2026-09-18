@@ -16,6 +16,35 @@ Claude Code headless:
 - git clone https://github.com/anthropics/claude-agent-sdk-python for SDK types (`src/claude_agent_sdk/types.py`)
 - git clone https://github.com/anthropics/claude-agent-sdk-python to get the SDK and understand types, in particular `src/claude_agent_sdk/types.py`
 
+## Native subagent evidence
+
+Claude Code 2.1.270 completed the standardized native-subagent request in a
+local CLI recording (not an md relay): `system/task_started` with
+`task_type: "local_agent"` carries `task_id`, `tool_use_id`, `subagent_type`,
+and the child prompt; `system/task_updated` reports `patch.status`; the
+matching `system/task_notification` carries the terminal status and summary.
+The retained v3 fixture is minimized from that recording and includes the
+child stream message that carries `parent_tool_use_id`, which cannot settle the
+parent lifecycle. Earlier account quota errors delayed but did not invalidate
+this evidence.
+
+`native_subagent.go` keys one canonical card per native `task_id`, which every
+task record carries, and uses the parent tool use ID only for tool-card
+correlation; a card is created from task records, never from the tool use alone,
+so a resumed session cannot split one agent into two cards. It maps the reported
+task statuses onto the canonical lifecycle: `running`/`in_progress` runs, `paused` is the resumable non-terminal
+state, `completed`/`failed` settle, `killed`/`stopped`/`interrupted` are
+interruptions, and `pending` or anything unrecognized stays unknown.
+
+A sanitized historical v2 task record proves the observable lifecycle:
+`system/task_started` carries `task_id`, `tool_use_id`, `description`,
+`is_backgrounded`, and `task_type`; the matching `system/task_notification`
+carries the IDs, terminal `status`, `summary`, and `output_file`. That source
+record's `task_type` is `local_bash`, so task events alone do not prove a
+model subagent: only `task_type: "local_agent"` establishes one.
+`system/task_updated` can expose `patch.status`. These records do not expose
+a separately versioned child identity.
+
 Claude Code plugins:
 - https://code.claude.com/docs/en/plugins: plugin creation, `--plugin-dir`, plugin structure overview
 - https://code.claude.com/docs/en/plugins-reference: full schema for plugin.json, MCP/LSP/hooks config, debugging

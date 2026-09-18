@@ -151,23 +151,29 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 
 // parseMessageWithTracker decodes a single Claude Code NDJSON line with
 // optional widget tracking. When wt is non-nil, content_block_start and
-// input_json_delta events for widget tools produce WidgetDeltaMessage.
-func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
+// input_json_delta events for widget tools produce WidgetDeltaMessage. It returns
+// the decoded records of the line so the native-subagent adapter reads the
+// fields the canonical conversion drops without decoding the line again.
+func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, decodedLine, error) {
 	var env claudecode.OutputTypeProbe
 	if err := json.Unmarshal(line, &env); err != nil {
-		return nil, fmt.Errorf("unmarshal envelope: %w", err)
+		return nil, decodedLine{}, fmt.Errorf("unmarshal envelope: %w", err)
 	}
+	var record decodedLine
 	switch env.Type {
 	case claudecode.OutputSystem:
-		return parseSystem(line, env.Subtype)
+		msgs, err := parseSystem(line, env.Subtype, &record)
+		return msgs, record, err
 	case claudecode.OutputAssistant:
-		return parseAssistant(line)
+		msgs, err := parseAssistant(line)
+		return msgs, record, err
 	case claudecode.OutputUser:
-		return parseUser(line)
+		msgs, err := parseUser(line, &record)
+		return msgs, record, err
 	case claudecode.OutputResult:
 		var w claudecode.OutputResultMsg
 		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
+			return nil, record, err
 		}
 		usage := toAgentUsage(&w.Usage)
 		usage.ReasoningOutputTokens = resultThinkingTokens(line)
@@ -183,13 +189,14 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 			TotalCostUSD:  w.TotalCostUSD,
 			Usage:         usage,
 			UUID:          w.UUID,
-		}}, nil
+		}}, record, nil
 	case claudecode.OutputStreamEvent:
-		return parseStreamEvent(line, wt)
+		msgs, err := parseStreamEvent(line, wt)
+		return msgs, record, err
 	case claudecode.OutputRateLimitEvent:
 		var w claudecode.OutputRateLimitEventMsg
 		if err := json.Unmarshal(line, &w); err != nil {
-			return nil, err
+			return nil, record, err
 		}
 		// Claude Code rate-limit events describe its OAuth subscription. Keep
 		// them under claudecode rather than anthropic, which represents direct
@@ -204,35 +211,36 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 			QuotaProvider:   agent.QuotaProviderClaudeCode,
 			QuotaLabel:      "Claude Code",
 			QuotaWindow:     canonicalQuotaWindow(w.RateLimitInfo.RateLimitType),
-		}}, nil
+		}}, record, nil
 	case claudecode.OutputControlRequest:
-		return parseControlRequest(line)
+		msgs, err := parseControlRequest(line)
+		return msgs, record, err
 	case agent.PendingUserActionMessageType:
 		var m agent.PendingUserActionMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
+			return nil, record, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&m}, record, nil
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
+			return nil, record, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&m}, record, nil
 	case "caic_stripped_env":
 		var m agent.StrippedEnvMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
+			return nil, record, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&m}, record, nil
 	case "caic_exit":
 		var m agent.ExitMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
+			return nil, record, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&m}, record, nil
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, record, nil
 	}
 }
 
@@ -303,7 +311,7 @@ func decodeAskUserQuestionInput(raw json.RawMessage) (claudecode.AskUserQuestion
 	return input, err == nil
 }
 
-func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
+func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Message, error) {
 	if claudecode.SystemSubtype(subtype) == claudecode.SystemInit {
 		var w claudecode.OutputInitMsg
 		if err := json.Unmarshal(line, &w); err != nil {
@@ -326,24 +334,15 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 		return nil, err
 	}
 	switch w.Subtype {
-	case claudecode.SystemTaskStarted:
-		return []agent.Message{&agent.SubagentStartMessage{
-			TaskID:      w.TaskID,
-			Description: w.Description,
-		}}, nil
-	case "task_updated":
-		if w.Patch.Status != "" {
-			return []agent.Message{&agent.SubagentEndMessage{
-				TaskID: w.TaskID,
-				Status: string(w.Patch.Status),
-			}}, nil
-		}
+	case claudecode.SystemTaskStarted, "task_updated", claudecode.SystemTaskNotification:
+		// Lifecycle correlation belongs to the stateful adapter, which requires
+		// task_type "local_agent" as proof, so hand it the decoded record rather
+		// than let it decode the same line again. These records also describe shell
+		// tasks, so they stay out of the transcript: rendering them would add
+		// "[task_started]" noise and split surrounding tool groups, and they are
+		// not subagent evidence on their own.
+		record.system = &w
 		return nil, nil
-	case claudecode.SystemTaskNotification:
-		return []agent.Message{&agent.SubagentEndMessage{
-			TaskID: w.TaskID,
-			Status: w.Status,
-		}}, nil
 	case claudecode.SystemStatus, claudecode.SystemTaskProgress, claudecode.SystemCommandsChanged, claudecode.SystemTurnDuration:
 		return nil, nil
 	default:
@@ -521,11 +520,14 @@ func rawObject(m map[string]json.RawMessage) (json.RawMessage, error) {
 	return b, nil
 }
 
-func parseUser(line []byte) ([]agent.Message, error) {
+func parseUser(line []byte, record *decodedLine) ([]agent.Message, error) {
 	var w claudecode.OutputUserMsg
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
+	// A user record is the only wire record that settles a delegation, so the
+	// stateful adapter correlates on the decode made here instead of repeating it.
+	record.user = &w
 	// Claude Code sets isSynthetic on user messages injected by the runtime
 	// (e.g. skill context injections). These are internal and should not be
 	// shown to the end user.

@@ -28,11 +28,12 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// wireFormat holds per-session Claude Code parsing state: widget tracking and
-// reasoning-token accounting. A fresh instance is
-// created for every session so this state can't leak between concurrent
+// wireFormat holds per-session Claude Code parsing state: widget tracking,
+// reasoning-token accounting, and native-subagent correlation. A fresh instance
+// is created for every session so this state can't leak between concurrent
 // Claude Code tasks sharing the registered Backend singleton.
 type wireFormat struct {
+	nativeSubagents              nativeSubagents
 	widgetTracker                *WidgetTracker
 	pendingReasoningOutputTokens int
 	pendingReasoningEstimate     int
@@ -41,10 +42,13 @@ type wireFormat struct {
 var _ agent.WireFormat = (*wireFormat)(nil)
 var _ agent.CompactCommand = (*wireFormat)(nil)
 
-// newWireFormat builds a live wireFormat with a fresh widget tracker for use
-// by Start and AttachRelay. Schema drift is checked offline by check-agent-logs.
+// newWireFormat builds a live wireFormat with fresh per-session state for use by
+// Start and AttachRelay. Schema drift is checked offline by check-agent-logs.
 func newWireFormat() *wireFormat {
-	return &wireFormat{widgetTracker: NewWidgetTracker()}
+	return &wireFormat{
+		nativeSubagents: newNativeSubagents(),
+		widgetTracker:   NewWidgetTracker(),
+	}
 }
 
 // ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
@@ -52,10 +56,15 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if estimate, ok := systemThinkingTokenEstimate(line); ok {
 		w.pendingReasoningEstimate += estimate
 	}
-	msgs, err := parseMessageWithTracker(line, w.widgetTracker)
+	msgs, record, err := parseMessageWithTracker(line, w.widgetTracker)
 	if err != nil {
 		return nil, err
 	}
+	native, err := w.nativeSubagents.parse(record, msgs)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, native...)
 	for _, msg := range msgs {
 		switch m := msg.(type) {
 		case *agent.UsageMessage:
@@ -227,8 +236,7 @@ func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Se
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
-	// Schema drift is checked offline by check-agent-logs.
-	return &wireFormat{widgetTracker: NewWidgetTracker()}
+	return newWireFormat()
 }
 
 // hasOAuth reports whether Claude Code has an OAuth session configured

@@ -20,7 +20,8 @@ import (
 // tracking. Used only by tests; production streaming uses
 // parseMessageWithTracker directly.
 func parseMessage(line []byte) ([]agent.Message, error) {
-	return parseMessageWithTracker(line, nil)
+	msgs, _, err := parseMessageWithTracker(line, nil)
+	return msgs, err
 }
 
 func TestToAgentUsage(t *testing.T) {
@@ -52,7 +53,7 @@ func TestWidgetTrackerBounds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := parseMessageWithTracker(line, wt); err != nil {
+		if _, _, err := parseMessageWithTracker(line, wt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -610,67 +611,20 @@ func TestParseMessage(t *testing.T) {
 			}
 		}
 	})
-	t.Run("SystemTaskStarted", func(t *testing.T) {
+	t.Run("TaskEventsAreNotTranscriptMessages", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"system","subtype":"task_started","session_id":"s1","uuid":"u1","task_id":"task-abc","description":"Explore codebase"}`
-		msgs, err := parseMessage([]byte(line))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("got %d messages, want 1", len(msgs))
-		}
-		m, ok := msgs[0].(*agent.SubagentStartMessage)
-		if !ok {
-			t.Fatalf("got %T, want *agent.SubagentStartMessage", msgs[0])
-		}
-		if m.TaskID != "task-abc" {
-			t.Errorf("task_id = %q, want %q", m.TaskID, "task-abc")
-		}
-		if m.Description != "Explore codebase" {
-			t.Errorf("description = %q, want %q", m.Description, "Explore codebase")
-		}
-	})
-	t.Run("SystemTaskNotification", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"system","subtype":"task_notification","session_id":"s1","uuid":"u1","task_id":"task-abc","status":"completed"}`
-		msgs, err := parseMessage([]byte(line))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("got %d messages, want 1", len(msgs))
-		}
-		m, ok := msgs[0].(*agent.SubagentEndMessage)
-		if !ok {
-			t.Fatalf("got %T, want *agent.SubagentEndMessage", msgs[0])
-		}
-		if m.TaskID != "task-abc" {
-			t.Errorf("task_id = %q, want %q", m.TaskID, "task-abc")
-		}
-		if m.Status != "completed" {
-			t.Errorf("status = %q, want %q", m.Status, "completed")
-		}
-	})
-	t.Run("SystemTaskUpdated", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"system","subtype":"task_updated","session_id":"s1","uuid":"u1","task_id":"task-abc","patch":{"status":"completed","end_time":1780832660165}}`
-		msgs, err := parseMessage([]byte(line))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("got %d messages, want 1", len(msgs))
-		}
-		m, ok := msgs[0].(*agent.SubagentEndMessage)
-		if !ok {
-			t.Fatalf("got %T, want *agent.SubagentEndMessage", msgs[0])
-		}
-		if m.TaskID != "task-abc" {
-			t.Errorf("task_id = %q, want %q", m.TaskID, "task-abc")
-		}
-		if m.Status != "completed" {
-			t.Errorf("status = %q, want %q", m.Status, "completed")
+		// Task lifecycle belongs to the stateful adapter, which requires
+		// task_type "local_agent". Shell tasks must not surface as system noise
+		// that splits tool groups in the transcript.
+		for _, subtype := range []string{"task_started", "task_updated", "task_notification"} {
+			line := `{"type":"system","subtype":"` + subtype + `","task_id":"shell","task_type":"local_bash"}`
+			msgs, err := parseMessage([]byte(line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 0 {
+				t.Fatalf("%s messages = %#v, want none", subtype, msgs)
+			}
 		}
 	})
 	t.Run("SystemThinkingTokens", func(t *testing.T) {
@@ -907,7 +861,7 @@ func TestParseMessage(t *testing.T) {
 		t.Parallel()
 		wt := NewWidgetTracker()
 		line := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_2","name":"show_widget"}}}`
-		msgs, err := parseMessageWithTracker([]byte(line), wt)
+		msgs, _, err := parseMessageWithTracker([]byte(line), wt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -923,12 +877,12 @@ func TestParseMessage(t *testing.T) {
 		wt := NewWidgetTracker()
 		// Register a widget block.
 		start := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_3","name":"show_widget"}}}`
-		if _, err := parseMessageWithTracker([]byte(start), wt); err != nil {
+		if _, _, err := parseMessageWithTracker([]byte(start), wt); err != nil {
 			t.Fatal(err)
 		}
 		// Send partial JSON with widget_code.
 		delta := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"widget_code\":\"<h1>Hi"}}}`
-		msgs, err := parseMessageWithTracker([]byte(delta), wt)
+		msgs, _, err := parseMessageWithTracker([]byte(delta), wt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -962,11 +916,11 @@ func TestParseMessage(t *testing.T) {
 		t.Parallel()
 		wt := NewWidgetTracker()
 		start := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_4","name":"show_widget"}}}`
-		if _, err := parseMessageWithTracker([]byte(start), wt); err != nil {
+		if _, _, err := parseMessageWithTracker([]byte(start), wt); err != nil {
 			t.Fatal(err)
 		}
 		stop := `{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`
-		msgs, err := parseMessageWithTracker([]byte(stop), wt)
+		msgs, _, err := parseMessageWithTracker([]byte(stop), wt)
 		if err != nil {
 			t.Fatal(err)
 		}
