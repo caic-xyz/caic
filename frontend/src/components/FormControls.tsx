@@ -52,8 +52,12 @@ export function HarnessControls(props: {
     const nextHarness = props.harnesses[next];
     if (nextHarness) props.onHarness(nextHarness.name);
   };
-  const modelOptions = () => (props.harnesses.find((h) => h.name === props.harness)?.models ?? [])
-    .map((model) => ({ value: model.id, label: model.id as JSX.Element, search: model.id }));
+  const modelOptions = () =>
+    (props.harnesses.find((h) => h.name === props.harness)?.models ?? []).map((model) => ({
+      value: model.id,
+      label: model.id as JSX.Element,
+      search: model.id,
+    }));
   const efforts = () => {
     const harness = props.harnesses.find((h) => h.name === props.harness);
     const model = harness?.models.find((candidate) => candidate.id === props.model);
@@ -66,7 +70,9 @@ export function HarnessControls(props: {
           aria-label={label("Harness")}
           aria-keyshortcuts={props.harnessKeyShortcuts}
           data-testid={props.labelPrefix ? "fork-harness-select" : "harness-select"}
-          title={props.harnessKeyShortcuts ? `Choose harness (${props.harnessKeyShortcuts})` : undefined}
+          title={
+            props.harnessKeyShortcuts ? `Choose harness (${props.harnessKeyShortcuts})` : undefined
+          }
           value={props.harness}
           onChange={(e) => props.onHarness(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -81,7 +87,11 @@ export function HarnessControls(props: {
           }}
         >
           <For each={props.harnesses}>
-            {(h) => <option value={h.name} selected={h.name === props.harness}>{props.harnessOptionLabel?.(h) ?? h.name}</option>}
+            {(h) => (
+              <option value={h.name} selected={h.name === props.harness}>
+                {props.harnessOptionLabel?.(h) ?? h.name}
+              </option>
+            )}
           </For>
         </ControlSelect>
       </Show>
@@ -105,9 +115,15 @@ export function HarnessControls(props: {
           value={props.effort}
           onChange={(e) => props.onEffort(e.currentTarget.value)}
         >
-          <option value="" selected={props.effort === ""}>Default effort</option>
+          <option value="" selected={props.effort === ""}>
+            Default effort
+          </option>
           <For each={efforts()}>
-            {(e) => <option value={e} selected={e === props.effort}>{e}</option>}
+            {(e) => (
+              <option value={e} selected={e === props.effort}>
+                {e}
+              </option>
+            )}
           </For>
         </ControlSelect>
       </Show>

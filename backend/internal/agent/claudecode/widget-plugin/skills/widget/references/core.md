@@ -17,16 +17,16 @@
 Use the system font stack everywhere:
 
 ```css
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 ```
 
-| Role | Size | Weight |
-|------|------|--------|
-| Title / heading | 18px | 600 |
-| Subheading | 14px | 600 |
-| Body text | 14px | 400 |
-| Caption / label | 12px | 500 |
-| Monospace code | 13px | 400 |
+| Role            | Size | Weight |
+| --------------- | ---- | ------ |
+| Title / heading | 18px | 600    |
+| Subheading      | 14px | 600    |
+| Body text       | 14px | 400    |
+| Caption / label | 12px | 500    |
+| Monospace code  | 13px | 400    |
 
 Monospace stack: `'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace`.
 
@@ -76,14 +76,14 @@ Scripts may load libraries only from these CDNs:
 
 Common libraries and their CDN URLs:
 
-| Library | URL |
-|---------|-----|
-| Chart.js 4 | `https://cdn.jsdelivr.net/npm/chart.js@4` |
-| D3.js 7 | `https://cdn.jsdelivr.net/npm/d3@7` |
-| Three.js | `https://cdn.jsdelivr.net/npm/three@latest` |
-| KaTeX | `https://cdn.jsdelivr.net/npm/katex@latest/dist/katex.min.js` |
-| Mermaid | `https://cdn.jsdelivr.net/npm/mermaid@latest/dist/mermaid.min.js` |
-| Tone.js | `https://cdn.jsdelivr.net/npm/tone@latest` |
+| Library    | URL                                                               |
+| ---------- | ----------------------------------------------------------------- |
+| Chart.js 4 | `https://cdn.jsdelivr.net/npm/chart.js@4`                         |
+| D3.js 7    | `https://cdn.jsdelivr.net/npm/d3@7`                               |
+| Three.js   | `https://cdn.jsdelivr.net/npm/three@latest`                       |
+| KaTeX      | `https://cdn.jsdelivr.net/npm/katex@latest/dist/katex.min.js`     |
+| Mermaid    | `https://cdn.jsdelivr.net/npm/mermaid@latest/dist/mermaid.min.js` |
+| Tone.js    | `https://cdn.jsdelivr.net/npm/tone@latest`                        |
 
 **No other external sources.** No `fetch()`, `XMLHttpRequest`, or WebSocket.
 All data must be inline.

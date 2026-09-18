@@ -53,27 +53,19 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
   await expect(row).toHaveAttribute("title", path);
 
   await expect
-    .poll(async () =>
-      displayedPath.evaluate((el) => getComputedStyle(el).whiteSpace),
-    )
+    .poll(async () => displayedPath.evaluate((el) => getComputedStyle(el).whiteSpace))
     .toBe("nowrap");
   await expect
     .poll(async () =>
       row.evaluate((button) => {
-        const pathEl = button.querySelector<HTMLElement>(
-          '[data-testid="diff-file-path"]',
-        );
+        const pathEl = button.querySelector<HTMLElement>('[data-testid="diff-file-path"]');
         const addedEl = Array.from(button.querySelectorAll("span")).find(
           (span) => span.textContent === "+27",
         );
         if (!pathEl || !addedEl) return Number.POSITIVE_INFINITY;
         const pathBox = pathEl.getBoundingClientRect();
         const addedBox = addedEl.getBoundingClientRect();
-        return Math.abs(
-          pathBox.top +
-            pathBox.height / 2 -
-            (addedBox.top + addedBox.height / 2),
-        );
+        return Math.abs(pathBox.top + pathBox.height / 2 - (addedBox.top + addedBox.height / 2));
       }),
     )
     .toBeLessThan(2);
@@ -86,15 +78,11 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
       const additionBox = await additionOnly.boundingBox();
       const deletionBox = await deleted.boundingBox();
       if (!additionBox || !deletionBox) return Number.POSITIVE_INFINITY;
-      return Math.abs(
-        additionBox.x + additionBox.width - (deletionBox.x + deletionBox.width),
-      );
+      return Math.abs(additionBox.x + additionBox.width - (deletionBox.x + deletionBox.width));
     })
     .toBeLessThan(1);
   await expect
-    .poll(async () =>
-      page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-    )
+    .poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     .toBe(true);
 });
 

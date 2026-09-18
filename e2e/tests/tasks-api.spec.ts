@@ -23,20 +23,24 @@ test("task diff reports repository git status", async ({ api }) => {
     upstream: "origin/main",
     ahead: 1,
     behind: 0,
-    commits: [{
-      sha: "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
-      subject: "Add task activity summary",
-      authoredDate: "2026-09-01T10:30:00Z",
-      stat: [{ path: "cmd/caic/main.go", added: 8, deleted: 0 }],
-    }],
-    uncommitted: [{
-      path: "frontend/src/App.tsx",
-      worktreeStatus: "M",
-      added: 4,
-      deleted: 2,
-      binary: false,
-      diff: "",
-    }],
+    commits: [
+      {
+        sha: "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
+        subject: "Add task activity summary",
+        authoredDate: "2026-09-01T10:30:00Z",
+        stat: [{ path: "cmd/caic/main.go", added: 8, deleted: 0 }],
+      },
+    ],
+    uncommitted: [
+      {
+        path: "frontend/src/App.tsx",
+        worktreeStatus: "M",
+        added: 4,
+        deleted: 2,
+        binary: false,
+        diff: "",
+      },
+    ],
   });
 });
 
@@ -46,17 +50,19 @@ test("task repository status reports compact git state", async ({ api }) => {
 
   const status = await api.getTaskRepoStatus(id);
   expect(status).toEqual({
-    repositories: [{
-      name: task.repos![0].name,
-      branch: expect.stringMatching(/^caic-\d+$/),
-      ahead: 1,
-      behind: 0,
-      changedFiles: 2,
-      added: 12,
-      deleted: 2,
-      uncommittedFiles: 1,
-      conflicts: 0,
-    }],
+    repositories: [
+      {
+        name: task.repos![0].name,
+        branch: expect.stringMatching(/^caic-\d+$/),
+        ahead: 1,
+        behind: 0,
+        changedFiles: 2,
+        added: 12,
+        deleted: 2,
+        uncommittedFiles: 1,
+        conflicts: 0,
+      },
+    ],
   });
 });
 

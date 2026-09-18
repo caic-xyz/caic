@@ -1,17 +1,17 @@
 // End-to-end tests for the task lifecycle using a fake backend.
-import {
-  test,
-  expect,
-  waitForTaskState,
-  fillContentEditable,
-  createTaskAPI,
-} from "../helpers";
+import { test, expect, waitForTaskState, fillContentEditable, createTaskAPI } from "../helpers";
 
-test("create task, verify streaming text and result, then purge", async ({ page, api, uniquePrompt }) => {
+test("create task, verify streaming text and result, then purge", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
   await page.goto("/");
 
   // Wait for repos to load (a chip appears in the strip).
-  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  await expect(
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
+  ).toBeVisible();
 
   // Use a unique prompt to avoid collisions with parallel tests.
   const prompt = uniquePrompt("FAKE_LIFECYCLE e2e lifecycle");
@@ -93,7 +93,10 @@ test("setup logs remain visible after task-detail replay", async ({ page, api },
   await page.screenshot({ path: testInfo.outputPath("task-setup-logs.png") });
 });
 
-test("task detail desktop layout wraps timed controls and avoids pane overflow", async ({ page, api }) => {
+test("task detail desktop layout wraps timed controls and avoids pane overflow", async ({
+  page,
+  api,
+}) => {
   await page.setViewportSize({ width: 950, height: 800 });
   const id = await createTaskAPI(api, "Fix a desktop overflow regression");
   await waitForTaskState(api, id, "waiting", 30_000);
@@ -107,43 +110,67 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
   await test.step("timing and Raw controls wrap message content", async () => {
     const rawButton = page.getByRole("button", { name: "raw", exact: true }).nth(1);
     await expect(rawButton).toBeAttached();
-    await expect.poll(async () => rawButton.evaluate((button) => {
-      const toolbar = button.parentElement;
-      const message = toolbar?.parentElement?.parentElement;
-      return message ? getComputedStyle(message).paddingRight : null;
-    })).toBe("0px");
-    await expect.poll(async () => rawButton.evaluate((button) => {
-      const toolbar = button.parentElement;
-      const content = toolbar?.parentElement?.parentElement?.parentElement;
-      const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement?.parentElement;
-      return timing ? getComputedStyle(timing).float : null;
-    })).toBe("right");
+    await expect
+      .poll(async () =>
+        rawButton.evaluate((button) => {
+          const toolbar = button.parentElement;
+          const message = toolbar?.parentElement?.parentElement;
+          return message ? getComputedStyle(message).paddingRight : null;
+        }),
+      )
+      .toBe("0px");
+    await expect
+      .poll(async () =>
+        rawButton.evaluate((button) => {
+          const toolbar = button.parentElement;
+          const content = toolbar?.parentElement?.parentElement?.parentElement;
+          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")
+            ?.parentElement?.parentElement;
+          return timing ? getComputedStyle(timing).float : null;
+        }),
+      )
+      .toBe("right");
 
     await rawButton.hover();
-    await expect.poll(async () => rawButton.evaluate((button) => {
-      const toolbar = button.parentElement;
-      const content = toolbar?.parentElement?.parentElement?.parentElement;
-      const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement?.parentElement;
-      return timing ? getComputedStyle(timing).opacity : null;
-    })).toBe("0");
+    await expect
+      .poll(async () =>
+        rawButton.evaluate((button) => {
+          const toolbar = button.parentElement;
+          const content = toolbar?.parentElement?.parentElement?.parentElement;
+          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")
+            ?.parentElement?.parentElement;
+          return timing ? getComputedStyle(timing).opacity : null;
+        }),
+      )
+      .toBe("0");
   });
 
   await test.step("detail pane has no extra gutters or horizontal overflow", async () => {
-    await expect.poll(async () => messageArea.evaluate((el) => getComputedStyle(el).overflowX)).toBe("hidden");
-    await expect.poll(async () => taskList.evaluate((list) => {
-      const detail = document.querySelector('[data-testid="detail-pane"]');
-      if (!detail) return Number.POSITIVE_INFINITY;
-      return detail.getBoundingClientRect().left - list.getBoundingClientRect().right;
-    })).toBeLessThanOrEqual(8);
+    await expect
+      .poll(async () => messageArea.evaluate((el) => getComputedStyle(el).overflowX))
+      .toBe("hidden");
+    await expect
+      .poll(async () =>
+        taskList.evaluate((list) => {
+          const detail = document.querySelector('[data-testid="detail-pane"]');
+          if (!detail) return Number.POSITIVE_INFINITY;
+          return detail.getBoundingClientRect().left - list.getBoundingClientRect().right;
+        }),
+      )
+      .toBeLessThanOrEqual(8);
 
     await page.getByTitle("Collapse sidebar").click();
     const expandButton = page.getByTitle("Expand sidebar");
     await expect(expandButton).toBeVisible();
-    await expect.poll(async () => expandButton.evaluate((button) => {
-      const detail = document.querySelector('[data-testid="detail-pane"]');
-      if (!detail) return Number.POSITIVE_INFINITY;
-      return detail.getBoundingClientRect().left - button.getBoundingClientRect().right;
-    })).toBeLessThanOrEqual(8);
+    await expect
+      .poll(async () =>
+        expandButton.evaluate((button) => {
+          const detail = document.querySelector('[data-testid="detail-pane"]');
+          if (!detail) return Number.POSITIVE_INFINITY;
+          return detail.getBoundingClientRect().left - button.getBoundingClientRect().right;
+        }),
+      )
+      .toBeLessThanOrEqual(8);
     await expect(detailPane).toBeVisible();
   });
 });
@@ -152,7 +179,9 @@ test("add-repo dropdown is visible and not clipped by overflow", async ({ page }
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  await expect(
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
+  ).toBeVisible();
 
   // The add-repo button should be present (at least one repo is not yet selected).
   const addBtn = page.getByTestId("add-repo-button");

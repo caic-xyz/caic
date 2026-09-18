@@ -8,23 +8,15 @@ import styles from "./UnifiedDiffBlock.module.css";
 
 describe("UnifiedDiffBlock", () => {
   it("applies the line-wrap class when enabled", () => {
-    const { container } = render(() => (
-      <UnifiedDiffBlock diff="+long changed line" lineWrap />
-    ));
+    const { container } = render(() => <UnifiedDiffBlock diff="+long changed line" lineWrap />);
 
-    expect(container.querySelector("pre")?.className).toContain(
-      styles.lineWrap,
-    );
+    expect(container.querySelector("pre")?.className).toContain(styles.lineWrap);
   });
 
   it("leaves line wrapping off by default", () => {
-    const { container } = render(() => (
-      <UnifiedDiffBlock diff="+long changed line" />
-    ));
+    const { container } = render(() => <UnifiedDiffBlock diff="+long changed line" />);
 
-    expect(container.querySelector("pre")?.className).not.toContain(
-      styles.lineWrap,
-    );
+    expect(container.querySelector("pre")?.className).not.toContain(styles.lineWrap);
   });
 
   it("trims transport headers while retaining file metadata", () => {
@@ -51,9 +43,7 @@ describe("UnifiedDiffBlock", () => {
     expect(screen.getByText("rename from old.ts")).toBeInTheDocument();
     expect(screen.getByText("rename to new.ts")).toBeInTheDocument();
     expect(screen.getByText("@@ -1 +1 @@")).toBeInTheDocument();
-    expect(
-      screen.queryByText("diff --git a/old.ts b/new.ts"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("diff --git a/old.ts b/new.ts")).not.toBeInTheDocument();
     expect(screen.queryByText("index 111..222 100755")).not.toBeInTheDocument();
     expect(screen.queryByText("--- a/old.ts")).not.toBeInTheDocument();
     expect(screen.queryByText("+++ b/new.ts")).not.toBeInTheDocument();

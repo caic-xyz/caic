@@ -99,7 +99,10 @@ class FakePeerConnection extends EventTarget {
           } as RTCSessionDescription;
           const reflexiveCandidateEvent = new Event("icecandidate");
           Object.defineProperty(reflexiveCandidateEvent, "candidate", {
-            value: { candidate: "candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000" },
+            value: {
+              candidate:
+                "candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000",
+            },
           });
           this.dispatchEvent(reflexiveCandidateEvent);
         }, FakePeerConnection.reflexiveCandidateDelayMs);
@@ -150,7 +153,10 @@ beforeEach(() => {
   mcpMocks.mcpServerInstructions.mockResolvedValue("instructions");
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection as unknown as typeof RTCPeerConnection);
   vi.stubGlobal("AudioContext", FakeAudioContext as unknown as typeof AudioContext);
-  vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1),
+  );
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: {
@@ -191,13 +197,15 @@ describe("VoiceSession", () => {
     ]);
     expect(tools.map((tool) => tool.name)).toEqual(["hang_up", "tasks_list"]);
 
-    expect(() => voiceToolDeclarations([
-      {
-        name: "hang_up",
-        description: "Unexpected MCP tool",
-        inputSchema: { type: "object", properties: {} },
-      },
-    ])).toThrow('MCP tool "hang_up" conflicts with the reserved voice command.');
+    expect(() =>
+      voiceToolDeclarations([
+        {
+          name: "hang_up",
+          description: "Unexpected MCP tool",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ]),
+    ).toThrow('MCP tool "hang_up" conflicts with the reserved voice command.');
 
     const session = new VoiceSession();
     await (session as unknown as VoiceSessionToolCallHandler)._handleToolCall({
@@ -241,9 +249,7 @@ describe("VoiceSession", () => {
   });
 
   it("starts with an empty baseline when service-item loading fails", async () => {
-    mcpMocks.mcpReadAdvertisedTextResource.mockRejectedValue(
-      new Error("resource unavailable"),
-    );
+    mcpMocks.mcpReadAdvertisedTextResource.mockRejectedValue(new Error("resource unavailable"));
     const session = new VoiceSession();
 
     await session.connect();
@@ -251,9 +257,7 @@ describe("VoiceSession", () => {
 
     expect(sdkMocks.voiceRTCOffer).toHaveBeenCalled();
     const sent = FakePeerConnection.dataChannels[0]?.send.mock.calls[0]?.[0];
-    expect(JSON.parse(sent as string).context.text).toBe(
-      "No visible service items.",
-    );
+    expect(JSON.parse(sent as string).context.text).toBe("No visible service items.");
   });
 
   it("waits briefly for a reflexive candidate without waiting for ICE completion", async () => {
@@ -320,8 +324,12 @@ describe("voice network recovery", () => {
   it("fetches a fresh service-item snapshot for reconnect setup", async () => {
     vi.useFakeTimers();
     mcpMocks.mcpReadAdvertisedTextResource
-      .mockResolvedValueOnce('{"items":[{"id":"1","title":"Old state","state":"running","needsAttention":false}]}')
-      .mockResolvedValueOnce('{"items":[{"id":"1","title":"Fresh state","state":"waiting","needsAttention":true}]}');
+      .mockResolvedValueOnce(
+        '{"items":[{"id":"1","title":"Old state","state":"running","needsAttention":false}]}',
+      )
+      .mockResolvedValueOnce(
+        '{"items":[{"id":"1","title":"Fresh state","state":"waiting","needsAttention":true}]}',
+      );
     const session = new VoiceSession();
     try {
       await session.connect();
@@ -399,13 +407,11 @@ describe("voice network recovery", () => {
 
 describe("buildRecoveryContext", () => {
   it("preserves finalized chronological transcript and bounded service context", () => {
-    const context = buildRecoveryContext(
-      [
-        { speaker: "user", text: "first", final: true },
-        { speaker: "assistant", text: "second", final: true },
-        { speaker: "user", text: "partial", final: false },
-      ],
-    );
+    const context = buildRecoveryContext([
+      { speaker: "user", text: "first", final: true },
+      { speaker: "assistant", text: "second", final: true },
+      { speaker: "user", text: "partial", final: false },
+    ]);
 
     expect(context).toContain("do not treat this as a new user turn");
     expect(context).toContain("user: first\nassistant: second");
@@ -428,11 +434,10 @@ describe("buildRecoveryContext", () => {
 
 describe("summarizeSDPCandidates", () => {
   it("summarizes candidate host, port, and type", () => {
-    const sdp = "v=0\r\na=candidate:1 1 udp 2130706431 70.51.33.231 42602 typ srflx raddr 192.168.1.123 rport 42602\r\na=candidate:2 1 udp 2130706431 192.168.1.123 42602 typ host\r\n";
+    const sdp =
+      "v=0\r\na=candidate:1 1 udp 2130706431 70.51.33.231 42602 typ srflx raddr 192.168.1.123 rport 42602\r\na=candidate:2 1 udp 2130706431 192.168.1.123 42602 typ host\r\n";
 
-    expect(summarizeSDPCandidates(sdp)).toBe(
-      "70.51.33.231:42602 srflx, 192.168.1.123:42602 host",
-    );
+    expect(summarizeSDPCandidates(sdp)).toBe("70.51.33.231:42602 srflx, 192.168.1.123:42602 host");
   });
 
   it("reports none when SDP has no candidates", () => {

@@ -14,9 +14,7 @@ export default function GoModeBrowserShell() {
 
   return (
     <Show when={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}>
-      <VoiceOverlay
-        tasks={s.tasks}
-      />
+      <VoiceOverlay tasks={s.tasks} />
     </Show>
   );
 }

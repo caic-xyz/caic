@@ -7,10 +7,12 @@ import { createSignal, Show } from "solid-js";
 
 import ModalDialog from "./ModalDialog";
 
-function renderDialog(props: Partial<{
-  dismissOnBackdrop: boolean;
-  dismissOnEscape: boolean;
-}> = {}) {
+function renderDialog(
+  props: Partial<{
+    dismissOnBackdrop: boolean;
+    dismissOnEscape: boolean;
+  }> = {},
+) {
   const onClose = vi.fn();
   render(() => (
     <ModalDialog {...props} onClose={onClose} data-testid="modal-dialog">
@@ -51,7 +53,9 @@ describe("ModalDialog", () => {
       const [open, setOpen] = createSignal(false);
       return (
         <>
-          <button type="button" onClick={() => setOpen(true)}>Open dialog</button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open dialog
+          </button>
           <Show when={open()}>
             <ModalDialog onClose={() => setOpen(false)} data-testid="modal-dialog">
               <button type="button">Inside dialog</button>
@@ -75,7 +79,9 @@ describe("ModalDialog", () => {
       const [open, setOpen] = createSignal(false);
       return (
         <>
-          <button type="button" data-task-id="task-1" onClick={() => setOpen(true)}>Open task dialog</button>
+          <button type="button" data-task-id="task-1" onClick={() => setOpen(true)}>
+            Open task dialog
+          </button>
           <Show when={open()}>
             <ModalDialog onClose={() => setOpen(false)} data-testid="modal-dialog">
               <p>Dialog content</p>
@@ -101,7 +107,9 @@ describe("ModalDialog", () => {
       const [open, setOpen] = createSignal(false);
       return (
         <>
-          <button type="button" onClick={() => setOpen(true)}>Open dialog</button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open dialog
+          </button>
           <button type="button">Elsewhere</button>
           <Show when={open()}>
             <ModalDialog onClose={() => setOpen(false)} data-testid="modal-dialog">
@@ -120,7 +128,9 @@ describe("ModalDialog", () => {
     elsewhere.focus();
 
     await waitFor(() => expect(screen.queryByTestId("modal-dialog")).not.toBeInTheDocument());
-    await new Promise((resolve) => { requestAnimationFrame(resolve); });
+    await new Promise((resolve) => {
+      requestAnimationFrame(resolve);
+    });
     expect(elsewhere).toHaveFocus();
   });
 

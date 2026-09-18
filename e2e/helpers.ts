@@ -79,10 +79,7 @@ export async function fillContentEditable(
 // Utility: create a task via API and return its ID.
 // ---------------------------------------------------------------------------
 
-export async function createTaskAPI(
-  api: APIClient,
-  prompt: string,
-): Promise<string> {
+export async function createTaskAPI(api: APIClient, prompt: string): Promise<string> {
   const repos = await api.listRepos();
   expect(repos.length).toBeGreaterThan(0);
   const harnesses = await api.listHarnesses();

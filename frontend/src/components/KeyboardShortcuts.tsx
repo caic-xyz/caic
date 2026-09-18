@@ -27,13 +27,13 @@ const promptShortcuts = [
   { keys: "Esc", action: "Focus the new-task prompt" },
 ];
 
-const taskActionShortcuts = [
-  { keys: "Shift + Delete", action: "Purge the selected task" },
-];
+const taskActionShortcuts = [{ keys: "Shift + Delete", action: "Purge the selected task" }];
 
 function isEditing(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement
-    && target.closest("input, textarea, select, [contenteditable='true'], [role='textbox']") !== null;
+  return (
+    target instanceof HTMLElement &&
+    target.closest("input, textarea, select, [contenteditable='true'], [role='textbox']") !== null
+  );
 }
 
 export default function KeyboardShortcuts(props: Props) {
@@ -43,13 +43,14 @@ export default function KeyboardShortcuts(props: Props) {
 
   const navigationShortcuts = () => {
     const harnesses = s.harnesses();
-    const f3 = harnesses.length > 1
-      ? { keys: "F3", action: "Focus harness for the new task" }
-      : harnesses.find((harness) => harness.name === s.selectedHarness())?.models.length
-        ? { keys: "F3", action: "Focus model for the new task" }
-        : s.runtimes().length > 1
-          ? { keys: "F3", action: "Focus runtime for the new task" }
-          : null;
+    const f3 =
+      harnesses.length > 1
+        ? { keys: "F3", action: "Focus harness for the new task" }
+        : harnesses.find((harness) => harness.name === s.selectedHarness())?.models.length
+          ? { keys: "F3", action: "Focus model for the new task" }
+          : s.runtimes().length > 1
+            ? { keys: "F3", action: "Focus runtime for the new task" }
+            : null;
     return [
       { keys: "F2", action: "Focus repositories for the new task" },
       ...(f3 ? [f3] : []),
@@ -63,7 +64,9 @@ export default function KeyboardShortcuts(props: Props) {
       shortcutOpener.focus();
       return;
     }
-    taskCards().find((card) => card.dataset.taskId === shortcutOpenerTaskId)?.focus();
+    taskCards()
+      .find((card) => card.dataset.taskId === shortcutOpenerTaskId)
+      ?.focus();
   }
 
   function focusNewTaskControl(selector: string) {
@@ -84,21 +87,29 @@ export default function KeyboardShortcuts(props: Props) {
         document.querySelector<HTMLElement>("[data-testid='task-detail-prompt']")?.focus();
         return;
       }
-      const currentCard = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
-        .find((el) => el.dataset.taskId === task.id);
+      const currentCard = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]")).find(
+        (el) => el.dataset.taskId === task.id,
+      );
       currentCard?.focus();
     });
   }
 
   const taskCards = () => Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
 
-  function navigateTask(delta: number, focusPrompt: boolean, currentTaskId: string | null | undefined = s.selectedId()) {
+  function navigateTask(
+    delta: number,
+    focusPrompt: boolean,
+    currentTaskId: string | null | undefined = s.selectedId(),
+  ) {
     const cards = taskCards();
     if (cards.length === 0) return;
     const current = cards.findIndex((el) => el.dataset.taskId === currentTaskId);
-    const next = current === -1
-      ? (delta > 0 ? 0 : cards.length - 1)
-      : (current + delta + cards.length) % cards.length;
+    const next =
+      current === -1
+        ? delta > 0
+          ? 0
+          : cards.length - 1
+        : (current + delta + cards.length) % cards.length;
     openTaskFromCard(cards[next], focusPrompt);
   }
 
@@ -114,7 +125,9 @@ export default function KeyboardShortcuts(props: Props) {
       if (document.querySelector("dialog[open]")) return;
 
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const taskPrompt = target?.closest("[data-testid='task-detail-prompt'], [data-testid='prompt-input']");
+      const taskPrompt = target?.closest(
+        "[data-testid='task-detail-prompt'], [data-testid='prompt-input']",
+      );
       const focusedCard = target?.matches("[data-task-id]") ? target : null;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -126,9 +139,11 @@ export default function KeyboardShortcuts(props: Props) {
         navigateTask(event.key === "ArrowDown" ? 1 : -1, false, focusedCard.dataset.taskId);
         return;
       }
-      if (event.shiftKey
-        && (taskPrompt || !isEditing(target))
-        && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      if (
+        event.shiftKey &&
+        (taskPrompt || !isEditing(target)) &&
+        (event.key === "ArrowDown" || event.key === "ArrowUp")
+      ) {
         event.preventDefault();
         navigateTask(event.key === "ArrowDown" ? 1 : -1, true);
         return;
@@ -147,12 +162,16 @@ export default function KeyboardShortcuts(props: Props) {
       }
       if (event.key === "F2") {
         event.preventDefault();
-        focusNewTaskControl("[data-testid='repo-chips'] [data-testid^='chip-label-'], [data-testid='add-repo-button']");
+        focusNewTaskControl(
+          "[data-testid='repo-chips'] [data-testid^='chip-label-'], [data-testid='add-repo-button']",
+        );
         return;
       }
       if (event.key === "F3") {
         event.preventDefault();
-        focusNewTaskControl("[data-testid='harness-select'], [data-testid='model-select'], [data-testid='effort-select'], [data-testid='runtime-select']");
+        focusNewTaskControl(
+          "[data-testid='harness-select'], [data-testid='model-select'], [data-testid='effort-select'], [data-testid='runtime-select']",
+        );
         return;
       }
       if (event.key === "Delete" && event.shiftKey) {
@@ -185,11 +204,16 @@ export default function KeyboardShortcuts(props: Props) {
         data-testid="keyboard-shortcuts-dialog"
       >
         <h2 class={styles.title}>Keyboard shortcuts</h2>
-        <p class={styles.intro}>Move between task cards and prompts without leaving the keyboard. Local menus and dialogs handle Escape first.</p>
+        <p class={styles.intro}>
+          Move between task cards and prompts without leaving the keyboard. Local menus and dialogs
+          handle Escape first.
+        </p>
         <ShortcutSection title="Navigation" shortcuts={navigationShortcuts()} />
         <ShortcutSection title="While typing" shortcuts={promptShortcuts} />
         <ShortcutSection title="Task actions" shortcuts={taskActionShortcuts} />
-        <button type="button" class={styles.closeButton} onClick={() => props.onOpenChange(false)}>Close</button>
+        <button type="button" class={styles.closeButton} onClick={() => props.onOpenChange(false)}>
+          Close
+        </button>
       </ModalDialog>
     </Show>
   );
@@ -203,7 +227,9 @@ function ShortcutSection(props: { title: string; shortcuts: { keys: string; acti
         <For each={props.shortcuts}>
           {(shortcut) => (
             <div class={styles.shortcutRow}>
-              <dt class={styles.keys}><kbd>{shortcut.keys}</kbd></dt>
+              <dt class={styles.keys}>
+                <kbd>{shortcut.keys}</kbd>
+              </dt>
               <dd class={styles.action}>{shortcut.action}</dd>
             </div>
           )}

@@ -5,7 +5,7 @@
 Always use a `viewBox` attribute — never fixed `width`/`height` in pixels:
 
 ```html
-<svg viewBox="0 0 800 500" style="width:100%; height:auto;">
+<svg viewBox="0 0 800 500" style="width:100%; height:auto;"></svg>
 ```
 
 ### Safety Checklist
@@ -20,12 +20,12 @@ Always use a `viewBox` attribute — never fixed `width`/`height` in pixels:
 SVG text width is unpredictable. Use these character-width constants for
 layout calculations:
 
-| Font size | Avg char width | Suitable for |
-|-----------|---------------|--------------|
-| 14px | 8.4px | Body text, labels |
-| 13px | 7.8px | Small labels |
-| 12px | 7.2px | Annotations |
-| 11px | 6.6px | Fine print |
+| Font size | Avg char width | Suitable for      |
+| --------- | -------------- | ----------------- |
+| 14px      | 8.4px          | Body text, labels |
+| 13px      | 7.8px          | Small labels      |
+| 12px      | 7.2px          | Annotations       |
+| 11px      | 6.6px          | Fine print        |
 
 Calculate label width: `text.length * avgCharWidth + 16px` (padding).
 
@@ -43,7 +43,7 @@ Define reusable classes in the `<style>` block:
   rx: 6;
 }
 .node-text {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   fill: var(--text-primary);
   dominant-baseline: central;
@@ -72,13 +72,27 @@ Define arrow markers in a `<defs>` block at the top of the SVG:
 
 ```html
 <defs>
-  <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5"
-          markerWidth="10" markerHeight="7" orient="auto-start-reverse">
-    <polygon points="0 0, 10 3.5, 0 7" fill="var(--border)"/>
+  <marker
+    id="arrow"
+    viewBox="0 0 10 7"
+    refX="10"
+    refY="3.5"
+    markerWidth="10"
+    markerHeight="7"
+    orient="auto-start-reverse"
+  >
+    <polygon points="0 0, 10 3.5, 0 7" fill="var(--border)" />
   </marker>
-  <marker id="arrow-highlight" viewBox="0 0 10 7" refX="10" refY="3.5"
-          markerWidth="10" markerHeight="7" orient="auto-start-reverse">
-    <polygon points="0 0, 10 3.5, 0 7" fill="var(--primary)"/>
+  <marker
+    id="arrow-highlight"
+    viewBox="0 0 10 7"
+    refX="10"
+    refY="3.5"
+    markerWidth="10"
+    markerHeight="7"
+    orient="auto-start-reverse"
+  >
+    <polygon points="0 0, 10 3.5, 0 7" fill="var(--primary)" />
   </marker>
 </defs>
 ```
@@ -90,11 +104,11 @@ Use with: `marker-end="url(#arrow)"` on `<line>` or `<path>` elements.
 - **Straight lines:** Use `<line>` for simple connections.
 - **Curved paths:** Use `<path>` with cubic Bézier for organic flow:
   ```html
-  <path d="M100,50 C150,50 150,150 200,150" class="connector" marker-end="url(#arrow)"/>
+  <path d="M100,50 C150,50 150,150 200,150" class="connector" marker-end="url(#arrow)" />
   ```
 - **Orthogonal paths:** Use `<path>` with horizontal/vertical segments:
   ```html
-  <path d="M100,50 H150 V150 H200" class="connector" marker-end="url(#arrow)"/>
+  <path d="M100,50 H150 V150 H200" class="connector" marker-end="url(#arrow)" />
   ```
 
 ## Fill Rules
@@ -111,7 +125,7 @@ to groups for positioning:
 
 ```html
 <g transform="translate(100, 50)">
-  <rect class="node-rect" width="160" height="40"/>
+  <rect class="node-rect" width="160" height="40" />
   <text class="node-text" x="80" y="20" text-anchor="middle">Label</text>
 </g>
 ```

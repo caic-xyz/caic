@@ -5,14 +5,14 @@ Compares `oauth/oauthclient` against the Go team's `golang.org/x/oauth2`
 
 ## Scope & Maturity
 
-|                          | `oauth/oauthclient`                        | `golang.org/x/oauth2`                             |
-| ------------------------ | ------------------------------------------ | ------------------------------------------------- |
-| **Code volume**          | ~410 lines (client.go + provider.go)       | ~3,500 lines core + 25+ provider endpoint packages |
-| **Age / maintenance**    | Project-internal, ~1 year                  | Since 2014, Go team, widely used                   |
-| **Dependencies**         | stdlib only                                | stdlib + `cloud.google.com/go/compute/metadata`    |
-| **License**              | Apache 2.0                                 | BSD-style                                          |
-| **Implemented RFCs**     | 6749 (auth code + refresh), 7636 (PKCE)    | 6749, 6750, 7636, 7009, 7662, 8628, 8693           |
-| **OAuth grants**         | Authorization code + refresh               | Auth code, password, refresh, device, JWT, client credentials |
+|                       | `oauth/oauthclient`                     | `golang.org/x/oauth2`                                         |
+| --------------------- | --------------------------------------- | ------------------------------------------------------------- |
+| **Code volume**       | ~410 lines (client.go + provider.go)    | ~3,500 lines core + 25+ provider endpoint packages            |
+| **Age / maintenance** | Project-internal, ~1 year               | Since 2014, Go team, widely used                              |
+| **Dependencies**      | stdlib only                             | stdlib + `cloud.google.com/go/compute/metadata`               |
+| **License**           | Apache 2.0                              | BSD-style                                                     |
+| **Implemented RFCs**  | 6749 (auth code + refresh), 7636 (PKCE) | 6749, 6750, 7636, 7009, 7662, 8628, 8693                      |
+| **OAuth grants**      | Authorization code + refresh            | Auth code, password, refresh, device, JWT, client credentials |
 
 ## Architecture
 
@@ -95,6 +95,7 @@ as `application/x-www-form-urlencoded` parameters. This works for GitHub and
 GitLab (both accept params) but is fragile for arbitrary providers.
 
 **`x/oauth2`**: has `AuthStyle` with three modes:
+
 - `AuthStyleAutoDetect` — tries `AuthStyleInHeader` (HTTP Basic) first, falls back to `AuthStyleInParams`
 - `AuthStyleInParams` — POST body parameters (same as oauthclient)
 - `AuthStyleInHeader` — HTTP Basic Authorization header
@@ -202,16 +203,16 @@ still owns serialization.
 
 ## Summary of Trade-offs
 
-| Trade-off                | `oauthclient` chose                         | `x/oauth2` chose                                   |
-| ------------------------ | ------------------------------------------- | --------------------------------------------------- |
-| **Simplicity vs power**  | Simplicity: free functions, no abstractions  | Power: interfaces, wrappers, lifecycle management   |
-| **Token lifecycle**      | Refresh via `TokenRefresher` in middleware   | Library-managed: auto-refresh, caching, expiry delta |
-| **Dependencies**         | Zero (stdlib only)                          | One external dep (Google metadata)                   |
-| **Error visibility**     | Structured `RetrieveError`                  | Structured `RetrieveError`                           |
-| **Provider coverage**    | GitHub + GitLab with userinfo parsing       | 25+ endpoint constants, no userinfo                 |
-| **HTTP integration**     | None                                        | `http.Client` with auto-refresh transport            |
-| **Extensibility**        | Fixed function signatures                   | `AuthCodeOption` interface                           |
-| **Content negotiation**  | JSON + form-encoded fallback                | JSON + form-encoded                                 |
+| Trade-off               | `oauthclient` chose                         | `x/oauth2` chose                                     |
+| ----------------------- | ------------------------------------------- | ---------------------------------------------------- |
+| **Simplicity vs power** | Simplicity: free functions, no abstractions | Power: interfaces, wrappers, lifecycle management    |
+| **Token lifecycle**     | Refresh via `TokenRefresher` in middleware  | Library-managed: auto-refresh, caching, expiry delta |
+| **Dependencies**        | Zero (stdlib only)                          | One external dep (Google metadata)                   |
+| **Error visibility**    | Structured `RetrieveError`                  | Structured `RetrieveError`                           |
+| **Provider coverage**   | GitHub + GitLab with userinfo parsing       | 25+ endpoint constants, no userinfo                  |
+| **HTTP integration**    | None                                        | `http.Client` with auto-refresh transport            |
+| **Extensibility**       | Fixed function signatures                   | `AuthCodeOption` interface                           |
+| **Content negotiation** | JSON + form-encoded fallback                | JSON + form-encoded                                  |
 
 ## What `oauthclient` omits at the moment
 

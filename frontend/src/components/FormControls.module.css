@@ -87,7 +87,9 @@
   color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .toggleChip:has(input:checked) {

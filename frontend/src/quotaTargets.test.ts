@@ -2,20 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import type {
-  HarnessInfo,
-  ISOTimestamp,
-  QuotaProvider,
-  UsageResp,
-} from "@sdk/types.gen";
+import type { HarnessInfo, ISOTimestamp, QuotaProvider, UsageResp } from "@sdk/types.gen";
 import { quotaRecoveryTargets } from "./quotaTargets";
 
 const now = Date.parse("2026-09-11T12:00:00Z");
 
-function harness(
-  name: HarnessInfo["name"],
-  quotaGroup?: QuotaProvider,
-): HarnessInfo {
+function harness(name: HarnessInfo["name"], quotaGroup?: QuotaProvider): HarnessInfo {
   return {
     name,
     models: [],
@@ -47,9 +39,7 @@ function usage(
         {
           window: "primary",
           usedPct: group.usedPct,
-          ...(group.resetsAt
-            ? { resetsAt: group.resetsAt as ISOTimestamp }
-            : {}),
+          ...(group.resetsAt ? { resetsAt: group.resetsAt as ISOTimestamp } : {}),
         },
       ],
     })),
@@ -101,17 +91,13 @@ describe("quotaRecoveryTargets", () => {
     expect(targets).toHaveLength(2);
     expect(targets.every((target) => target.status === "unknown")).toBe(true);
     expect(targets.every((target) => target.recommended === false)).toBe(true);
-    expect(targets.every((target) => !target.label.includes("Available"))).toBe(
-      true,
-    );
+    expect(targets.every((target) => !target.label.includes("Available"))).toBe(true);
   });
 
   it("does not claim an expired exhausted snapshot is available", () => {
     const [target] = quotaRecoveryTargets(
       [harness("codex", "codex")],
-      usage([
-        { provider: "codex", usedPct: 100, resetsAt: "2026-09-11T11:00:00Z" },
-      ]),
+      usage([{ provider: "codex", usedPct: 100, resetsAt: "2026-09-11T11:00:00Z" }]),
       "claudecode",
       "codex",
       now,
@@ -121,20 +107,17 @@ describe("quotaRecoveryTargets", () => {
     expect(target.label).toBe("Quota status unknown");
   });
 
-  it.each(["stale", "error"] as const)(
-    "treats %s provider data as unknown",
-    (fetchStatus) => {
-      const [target] = quotaRecoveryTargets(
-        [harness("codex", "codex")],
-        usage([{ provider: "codex", usedPct: 25, fetchStatus }]),
-        "claudecode",
-        "codex",
-        now,
-      );
+  it.each(["stale", "error"] as const)("treats %s provider data as unknown", (fetchStatus) => {
+    const [target] = quotaRecoveryTargets(
+      [harness("codex", "codex")],
+      usage([{ provider: "codex", usedPct: 25, fetchStatus }]),
+      "claudecode",
+      "codex",
+      now,
+    );
 
-      expect(target.status).toBe("unknown");
-      expect(target.recommended).toBe(false);
-      expect(target.label).toBe("Quota status unknown");
-    },
-  );
+    expect(target.status).toBe("unknown");
+    expect(target.recommended).toBe(false);
+    expect(target.label).toBe("Quota status unknown");
+  });
 });

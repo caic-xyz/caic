@@ -85,7 +85,12 @@ export default function VoiceOverlay(props: Props) {
           if (notification !== null) session.injectText(notification);
         }
         const prevCI = prevCIStatuses.get(task.id);
-        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
+        if (
+          prevCI !== undefined &&
+          prevCI !== "failure" &&
+          task.ciStatus === "failure" &&
+          taskNumber !== undefined
+        ) {
           session.injectText(buildTaskCIContext(task, taskNumber));
         }
       }
@@ -105,9 +110,7 @@ export default function VoiceOverlay(props: Props) {
   // -----------------------------------------------------------------------
 
   const isActive = () =>
-    session.state.connected ||
-    session.state.connectStatus !== null ||
-    session.state.error !== null;
+    session.state.connected || session.state.connectStatus !== null || session.state.error !== null;
 
   // -----------------------------------------------------------------------
   // Event handlers
@@ -125,14 +128,15 @@ export default function VoiceOverlay(props: Props) {
   onMount(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
-        event.defaultPrevented
-        || event.repeat
-        || event.ctrlKey
-        || event.metaKey
-        || event.altKey
-        || event.key !== "F4"
-        || document.querySelector("dialog[open]")
-      ) return;
+        event.defaultPrevented ||
+        event.repeat ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.key !== "F4" ||
+        document.querySelector("dialog[open]")
+      )
+        return;
 
       event.preventDefault();
       void handleMicClick();
@@ -148,53 +152,61 @@ export default function VoiceOverlay(props: Props) {
 
   return (
     <>
-    <div style={{ height: `${spacerHeight()}px`, "flex-shrink": "0" }} aria-hidden="true" />
-    <div class={styles.panel} ref={panelRef} role="region" aria-label="Voice assistant">
-      <div class={styles.panelInner}>
-      {/* Idle state: mic button right-aligned */}
-      <Show when={!isActive()}>
-        <div class={styles.rowEnd}>
-          <button
-            type="button"
-            class={styles.micButton}
-            onClick={() => handleMicClick()}
-            title="Connect voice assistant"
-            aria-label="Connect voice assistant"
-          >
-            <MicIcon width="1.1em" height="1.1em" />
-          </button>
-        </div>
-      </Show>
+      <div style={{ height: `${spacerHeight()}px`, "flex-shrink": "0" }} aria-hidden="true" />
+      <div class={styles.panel} ref={panelRef} role="region" aria-label="Voice assistant">
+        <div class={styles.panelInner}>
+          {/* Idle state: mic button right-aligned */}
+          <Show when={!isActive()}>
+            <div class={styles.rowEnd}>
+              <button
+                type="button"
+                class={styles.micButton}
+                onClick={() => handleMicClick()}
+                title="Connect voice assistant"
+                aria-label="Connect voice assistant"
+              >
+                <MicIcon width="1.1em" height="1.1em" />
+              </button>
+            </div>
+          </Show>
 
-      <Show when={session.state.error !== null && session.state.error} keyed>
-        {(err) => (
-          <ErrorPanel error={err} onRetry={() => handleMicClick()} />
-        )}
-      </Show>
-      <Show
-        when={session.state.error === null && session.state.connectStatus !== null && session.state.connectStatus}
-        keyed
-      >
-        {(status) => <ConnectingPanel status={status} onDisconnect={() => session.disconnect()} />}
-      </Show>
-      <Show
-        when={
-          session.state.error === null &&
-          session.state.connectStatus === null &&
-          (session.state.connected || session.state.listening || session.state.speaking)
-        }
-      >
-        <ActivePanel
-          state={session.state}
-          onDisconnect={() => session.disconnect()}
-          onToggleMute={() => session.toggleMute()}
-          onSelectInput={(id) => { void session.selectInputDevice(id); }}
-          onSelectOutput={(id) => { session.selectOutputDevice(id); }}
-          onClearTranscript={() => session.clearTranscript()}
-        />
-      </Show>
+          <Show when={session.state.error !== null && session.state.error} keyed>
+            {(err) => <ErrorPanel error={err} onRetry={() => handleMicClick()} />}
+          </Show>
+          <Show
+            when={
+              session.state.error === null &&
+              session.state.connectStatus !== null &&
+              session.state.connectStatus
+            }
+            keyed
+          >
+            {(status) => (
+              <ConnectingPanel status={status} onDisconnect={() => session.disconnect()} />
+            )}
+          </Show>
+          <Show
+            when={
+              session.state.error === null &&
+              session.state.connectStatus === null &&
+              (session.state.connected || session.state.listening || session.state.speaking)
+            }
+          >
+            <ActivePanel
+              state={session.state}
+              onDisconnect={() => session.disconnect()}
+              onToggleMute={() => session.toggleMute()}
+              onSelectInput={(id) => {
+                void session.selectInputDevice(id);
+              }}
+              onSelectOutput={(id) => {
+                session.selectOutputDevice(id);
+              }}
+              onClearTranscript={() => session.clearTranscript()}
+            />
+          </Show>
+        </div>
       </div>
-    </div>
     </>
   );
 }
@@ -318,9 +330,7 @@ function AudioDevicePicker(props: {
           onChange={(e) => props.onSelectInput(e.currentTarget.value)}
           aria-label="Microphone"
         >
-          <For each={props.inputs}>
-            {(d) => <option value={d.deviceId}>🎤 {d.label}</option>}
-          </For>
+          <For each={props.inputs}>{(d) => <option value={d.deviceId}>🎤 {d.label}</option>}</For>
         </select>
       )}
       {props.outputs.length > 1 && (
@@ -330,9 +340,7 @@ function AudioDevicePicker(props: {
           onChange={(e) => props.onSelectOutput(e.currentTarget.value)}
           aria-label="Speaker"
         >
-          <For each={props.outputs}>
-            {(d) => <option value={d.deviceId}>🔊 {d.label}</option>}
-          </For>
+          <For each={props.outputs}>{(d) => <option value={d.deviceId}>🔊 {d.label}</option>}</For>
         </select>
       )}
     </div>
@@ -393,7 +401,12 @@ function TranscriptLog(props: { transcript: TranscriptEntry[]; onClear: () => vo
             ×
           </button>
         </div>
-        <div class={styles.transcriptList} ref={(el) => { listRef = el; }}>
+        <div
+          class={styles.transcriptList}
+          ref={(el) => {
+            listRef = el;
+          }}
+        >
           <For each={props.transcript}>
             {(entry) => (
               <div class={styles.transcriptEntry}>

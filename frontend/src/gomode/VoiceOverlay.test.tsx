@@ -7,27 +7,29 @@ import { createSignal } from "solid-js";
 
 import type { Task } from "@sdk/types.gen";
 
-const { connectMock, disconnectMock, injectTextMock, taskNumberForIDMock, voiceState } = vi.hoisted(() => ({
-  connectMock: vi.fn(),
-  disconnectMock: vi.fn(),
-  injectTextMock: vi.fn(),
-  taskNumberForIDMock: vi.fn((id: string) => id === "new-task" ? 2 : 1),
-  voiceState: {
-    connectStatus: null,
-    connected: false,
-    listening: false,
-    speaking: false,
-    muted: false,
-    activeTool: null,
-    transcript: [],
-    micLevel: 0,
-    error: null,
-    audioInputs: [],
-    audioOutputs: [],
-    selectedInputId: "",
-    selectedOutputId: "",
-  },
-}));
+const { connectMock, disconnectMock, injectTextMock, taskNumberForIDMock, voiceState } = vi.hoisted(
+  () => ({
+    connectMock: vi.fn(),
+    disconnectMock: vi.fn(),
+    injectTextMock: vi.fn(),
+    taskNumberForIDMock: vi.fn((id: string) => (id === "new-task" ? 2 : 1)),
+    voiceState: {
+      connectStatus: null,
+      connected: false,
+      listening: false,
+      speaking: false,
+      muted: false,
+      activeTool: null,
+      transcript: [],
+      micLevel: 0,
+      error: null,
+      audioInputs: [],
+      audioOutputs: [],
+      selectedInputId: "",
+      selectedOutputId: "",
+    },
+  }),
+);
 
 vi.mock("./VoiceSession", () => ({
   voiceSession: {
@@ -76,11 +78,7 @@ function task(id: string, title: string): Task {
 describe("VoiceOverlay connection", () => {
   it("calls connect() on mic button click", async () => {
     const user = userEvent.setup();
-    render(() => (
-      <VoiceOverlay
-        tasks={() => []}
-      />
-    ));
+    render(() => <VoiceOverlay tasks={() => []} />);
 
     const micButton = screen.getByRole("button", { name: /voice/i });
     await user.click(micButton);
@@ -90,11 +88,7 @@ describe("VoiceOverlay connection", () => {
 
   it("starts voice mode when F4 is pressed", async () => {
     const user = userEvent.setup();
-    render(() => (
-      <VoiceOverlay
-        tasks={() => []}
-      />
-    ));
+    render(() => <VoiceOverlay tasks={() => []} />);
 
     await user.keyboard("{F4}");
 
@@ -106,9 +100,7 @@ describe("VoiceOverlay connection", () => {
     render(() => (
       <>
         <input aria-label="Prompt" />
-        <VoiceOverlay
-          tasks={() => []}
-        />
+        <VoiceOverlay tasks={() => []} />
       </>
     ));
 
@@ -121,11 +113,7 @@ describe("VoiceOverlay connection", () => {
   it("stops voice mode when F4 is pressed while connected", async () => {
     const user = userEvent.setup();
     voiceState.connected = true;
-    render(() => (
-      <VoiceOverlay
-        tasks={() => []}
-      />
-    ));
+    render(() => <VoiceOverlay tasks={() => []} />);
 
     await user.keyboard("{F4}");
 
@@ -136,11 +124,7 @@ describe("VoiceOverlay connection", () => {
   it("injects newly created tasks into an active voice session", async () => {
     voiceState.connected = true;
     const [tasks, setTasks] = createSignal([task("existing-task", "Existing work")]);
-    render(() => (
-      <VoiceOverlay
-        tasks={tasks}
-      />
-    ));
+    render(() => <VoiceOverlay tasks={tasks} />);
 
     expect(injectTextMock).not.toHaveBeenCalled();
     setTasks((current) => [...current, task("new-task", "New work")]);

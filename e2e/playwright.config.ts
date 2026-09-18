@@ -11,9 +11,7 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
 
 export default defineConfig({
   testDir: "./tests",
-  testIgnore: includeVisuals
-    ? []
-    : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
+  testIgnore: includeVisuals ? [] : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
   timeout: 60_000,
   webServer: {
     command: "../scripts/run-dev.py --http :8090 --fake",
@@ -27,11 +25,7 @@ export default defineConfig({
     deviceScaleFactor: 1,
     launchOptions: includeVisuals
       ? {
-          args: [
-            "--disable-gpu",
-            "--disable-gpu-rasterization",
-            "--num-raster-threads=1",
-          ],
+          args: ["--disable-gpu", "--disable-gpu-rasterization", "--num-raster-threads=1"],
         }
       : undefined,
     locale: "en-US",

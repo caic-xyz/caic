@@ -25,6 +25,7 @@ $ANDROID_HOME/emulator/emulator -avd caic_test \
 ```
 
 Flags:
+
 - `-no-window`: no GUI (required in headless/SSH environments)
 - `-no-audio`: skip host audio (emulator mic sends silence; see Limitations)
 - `-gpu swiftshader_indirect`: software rendering (works without GPU passthrough)
@@ -227,14 +228,14 @@ with the key or network, not the app.
 
 ## Common Issues
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| "API key not valid" on WebRTC close | Backend's `GEMINI_API_KEY` is wrong or expired | Verify the backend env var and restart the backend |
-| "Voice auth failed" error in app | `GEMINI_API_KEY` not set on backend | Set the env var and restart the backend |
-| "Server URL is not configured" | Empty server URL in app settings | Configure in Settings screen |
-| Gradle lock timeout | Stale Gradle daemon holding locks | `pkill -f GradleDaemon; find ~/.gradle/caches -name '*.lock' -delete` |
-| "more than one device/emulator" | Physical device + emulator both connected | Use `-s <device-id>` with all adb commands |
-| App shows "Listening..." but no response | Emulator mic sends silence; VAD never triggers | Expected — use text injection or physical device |
+| Symptom                                  | Cause                                          | Fix                                                                   |
+| ---------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------- |
+| "API key not valid" on WebRTC close      | Backend's `GEMINI_API_KEY` is wrong or expired | Verify the backend env var and restart the backend                    |
+| "Voice auth failed" error in app         | `GEMINI_API_KEY` not set on backend            | Set the env var and restart the backend                               |
+| "Server URL is not configured"           | Empty server URL in app settings               | Configure in Settings screen                                          |
+| Gradle lock timeout                      | Stale Gradle daemon holding locks              | `pkill -f GradleDaemon; find ~/.gradle/caches -name '*.lock' -delete` |
+| "more than one device/emulator"          | Physical device + emulator both connected      | Use `-s <device-id>` with all adb commands                            |
+| App shows "Listening..." but no response | Emulator mic sends silence; VAD never triggers | Expected — use text injection or physical device                      |
 
 ## Suggested Improvements
 

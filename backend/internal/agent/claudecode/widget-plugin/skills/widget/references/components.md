@@ -8,24 +8,23 @@ properties from `core.md` and color ramps from `colors.md`.
 Container for grouped content:
 
 ```html
-<div style="
+<div
+  style="
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-">
-  <div style="font-size:14px; font-weight:600; color:var(--text-primary)">
-    Card Title
-  </div>
-  <div style="font-size:14px; color:var(--text-secondary)">
-    Card body text.
-  </div>
+"
+>
+  <div style="font-size:14px; font-weight:600; color:var(--text-primary)">Card Title</div>
+  <div style="font-size:14px; color:var(--text-secondary)">Card body text.</div>
 </div>
 ```
 
 Variants:
+
 - **Default:** `border: 1px solid var(--border)`
 - **Highlighted:** `border: 1px solid var(--primary); background: var(--primary-bg)`
 - **Grouped cards:** Use a parent `display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px`
@@ -51,14 +50,20 @@ Variants:
   color: #fff;
   border-color: var(--primary);
 }
-.btn-primary:hover { opacity: 0.9; }
-.btn-primary:active { opacity: 0.8; }
+.btn-primary:hover {
+  opacity: 0.9;
+}
+.btn-primary:active {
+  opacity: 0.8;
+}
 .btn-secondary {
   background: var(--surface);
   color: var(--text-primary);
   border-color: var(--border);
 }
-.btn-secondary:hover { background: var(--border); }
+.btn-secondary:hover {
+  background: var(--border);
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -70,21 +75,23 @@ Variants:
 For displaying KPIs or statistics:
 
 ```html
-<div style="
+<div
+  style="
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
-">
-  <div style="
+"
+>
+  <div
+    style="
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
     text-align: center;
-  ">
+  "
+  >
     <div style="font-size:24px; font-weight:600; color:var(--primary)">42</div>
-    <div style="font-size:12px; color:var(--text-secondary); margin-top:4px">
-      Active Users
-    </div>
+    <div style="font-size:12px; color:var(--text-secondary); margin-top:4px">Active Users</div>
   </div>
 </div>
 ```
@@ -137,9 +144,10 @@ For displaying KPIs or statistics:
 ```
 
 Pair with a value label:
+
 ```html
 <div style="display:flex; align-items:center; gap:12px">
-  <input type="range" class="range" min="0" max="100" value="50" id="slider">
+  <input type="range" class="range" min="0" max="100" value="50" id="slider" />
   <span id="slider-val" style="font-size:14px; color:var(--text-primary); min-width:3ch">50</span>
 </div>
 ```
@@ -195,7 +203,9 @@ Pair with a value label:
   color: var(--primary);
   border-bottom-color: var(--primary);
 }
-.tab:hover { color: var(--text-primary); }
+.tab:hover {
+  color: var(--text-primary);
+}
 ```
 
 ## Skeleton / Loading
@@ -210,8 +220,12 @@ For content that loads after script execution (e.g., chart rendering):
   border-radius: 4px;
 }
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 ```
 
@@ -248,7 +262,8 @@ In the script, hide the skeleton and show the canvas once the chart renders.
 ### Badge
 
 ```html
-<span style="
+<span
+  style="
   display: inline-block;
   padding: 2px 8px;
   font-size: 12px;
@@ -256,5 +271,7 @@ In the script, hide the skeleton and show the canvas once the chart renders.
   border-radius: 4px;
   background: var(--primary-bg);
   color: var(--primary);
-">Badge</span>
+"
+  >Badge</span
+>
 ```

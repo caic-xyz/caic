@@ -44,10 +44,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Wait for repos to load.
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
   // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
@@ -78,8 +75,12 @@ test("generate documentation screenshots", async ({ page, api }) => {
     expect(arrow.x + arrow.width).toBeLessThanOrEqual(containerInput.x);
     expect(containerInput.x + containerInput.width).toBeLessThanOrEqual(readOnly.x);
     expect(readOnly.x + readOnly.width).toBeLessThanOrEqual(remove.x);
-    expect(Math.abs(arrow.y + arrow.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(1);
-    expect(Math.abs(readOnly.y + readOnly.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(arrow.y + arrow.height / 2 - (containerInput.y + containerInput.height / 2)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(readOnly.y + readOnly.height / 2 - (containerInput.y + containerInput.height / 2)),
+    ).toBeLessThanOrEqual(1);
   }
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -88,10 +89,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
   // Create tasks that will reach different states for a populated task list.
@@ -110,33 +108,21 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await waitForTaskState(api, id1, "waiting", 30_000);
 
   // Task 2: plan mode — "plan" triggers plan mode.
-  const id2 = await createTaskAPI(
-    api,
-    "Plan the rate limiting implementation for API endpoints",
-  );
+  const id2 = await createTaskAPI(api, "Plan the rate limiting implementation for API endpoints");
   await waitForTaskState(api, id2, "has_plan", 30_000);
 
   // Task 3: ask mode — "which" triggers ask mode.
-  const id3 = await createTaskAPI(
-    api,
-    "Which storage backend should we use for session data?",
-  );
+  const id3 = await createTaskAPI(api, "Which storage backend should we use for session data?");
   await waitForTaskState(api, id3, "asking", 30_000);
 
   // Task 4: widget — "FAKE_WIDGET" triggers widget mode.
-  const id4 = await createTaskAPI(
-    api,
-    "FAKE_WIDGET Explain light refraction in water",
-  );
+  const id4 = await createTaskAPI(api, "FAKE_WIDGET Explain light refraction in water");
   await waitForTaskState(api, id4, "waiting", 30_000);
 
   // Reload to get fresh state.
   await page.goto("/");
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
   // Wait for task cards to appear.
@@ -148,14 +134,18 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
-  await expect(page.getByTestId("task-setup").locator("summary")).toContainText(/(?:\d+ms|\d+\.\d+s)/);
+  await expect(page.getByTestId("task-setup").locator("summary")).toContainText(
+    /(?:\d+ms|\d+\.\d+s)/,
+  );
   const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
   await expect(toolSummary).toBeVisible({ timeout: 10_000 });
   await toolSummary.click();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
   await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
-  const desktopHeaderStats = page.getByTestId("task-detail-header").getByTestId("repo-state-diff-stats");
+  const desktopHeaderStats = page
+    .getByTestId("task-detail-header")
+    .getByTestId("repo-state-diff-stats");
   await expect(desktopHeaderStats).toHaveCount(2);
   for (let i = 0; i < 2; i++) {
     await expect(desktopHeaderStats.nth(i)).toBeVisible();
@@ -188,9 +178,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     const iframe = page.locator("iframe[title='light_refraction_in_water']");
     await expect(iframe).toBeVisible({ timeout: 10_000 });
 
-    const frame = page.frameLocator(
-      "iframe[title='light_refraction_in_water']",
-    );
+    const frame = page.frameLocator("iframe[title='light_refraction_in_water']");
     const widgetBody = frame.locator("body");
     const slider = frame.locator("#slider");
     await expect(slider).toBeVisible();
@@ -222,9 +210,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
       await stabilizeWidget(animationBody);
 
       // Sweep angle from 5° to 85° in steps, capturing each frame.
-      const angles = [
-        5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85,
-      ];
+      const angles = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85];
       const settleWidgetFrame = () =>
         animationBody.evaluate(
           () =>
@@ -300,10 +286,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Reload to get fresh state.
   await page.goto("/");
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
 
   // Find the VNC task and navigate to it.
@@ -338,10 +321,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Screenshot 7: Mobile — task detail at phone viewport.
   await page.goto("/");
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
   const bugFixCard2 = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard2).toBeVisible({ timeout: 10_000 });
@@ -377,9 +357,16 @@ test("generate documentation screenshots", async ({ page, api }) => {
   expect(repositoryStateBox).not.toBeNull();
   expect(taskStatisticsBox).not.toBeNull();
   expect(
-    Math.abs(repositoryStateBox!.y + repositoryStateBox!.height / 2 - taskStatisticsBox!.y - taskStatisticsBox!.height / 2),
+    Math.abs(
+      repositoryStateBox!.y +
+        repositoryStateBox!.height / 2 -
+        taskStatisticsBox!.y -
+        taskStatisticsBox!.height / 2,
+    ),
   ).toBeLessThanOrEqual(1);
-  await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect
+    .poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth))
+    .toBe(true);
   await captureScreenshot(page, "task-detail-header-compact.png");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -387,70 +374,60 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Screenshot 9: Scrolled task list — bottom alpha fade cues more cards.
   const scrollTaskIds: string[] = [];
   for (let i = 1; i <= 8; i++) {
-    const id = await createTaskAPI(
-      api,
-      `Scroll gradient demo task ${String(i).padStart(2, "0")}`,
-    );
+    const id = await createTaskAPI(api, `Scroll gradient demo task ${String(i).padStart(2, "0")}`);
     scrollTaskIds.push(id);
   }
-  await Promise.all(
-    scrollTaskIds.map((id) => waitForTaskState(api, id, "waiting", 30_000)),
-  );
+  await Promise.all(scrollTaskIds.map((id) => waitForTaskState(api, id, "waiting", 30_000)));
 
   await page.goto("/");
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
   await expect(page.locator("[data-task-id]").first()).toBeVisible({
     timeout: 10_000,
   });
-  await expect.poll(async () => {
-    const statuses = await page.getByTestId("ci-status").evaluateAll((nodes) =>
-      nodes.map((node) => (node as HTMLElement).dataset.status)
-    );
-    return statuses.length > 0 && statuses.every((status) => status === "success");
-  }, { timeout: 15_000 }).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const statuses = await page
+          .getByTestId("ci-status")
+          .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.status));
+        return statuses.length > 0 && statuses.every((status) => status === "success");
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
   const taskList = page.getByTestId("task-list");
-  await expect.poll(async () =>
-    taskList.evaluate((el) => el.scrollHeight - el.clientHeight),
-  ).toBeGreaterThan(0);
+  await expect
+    .poll(async () => taskList.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeGreaterThan(0);
   await taskList.evaluate((el) => {
     el.scrollTop = Math.min(260, el.scrollHeight - el.clientHeight);
     el.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
-  await expect.poll(async () =>
-    taskList.evaluate((el) => el.scrollTop),
-  ).toBeGreaterThan(0);
-  await expect.poll(async () =>
-    taskList.evaluate((el) => getComputedStyle(el, "::before").opacity),
-  ).toBe("1");
+  await expect.poll(async () => taskList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect
+    .poll(async () => taskList.evaluate((el) => getComputedStyle(el, "::before").opacity))
+    .toBe("1");
   await captureScreenshot(page, "task-list-scrolled.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(
-    page
-      .getByTestId("repo-chips")
-      .locator("[data-testid^='chip-label-']")
-      .first(),
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
   ).toBeVisible();
   const mobileTaskList = page.getByTestId("task-list");
-  await expect.poll(async () =>
-    mobileTaskList.evaluate((el) => el.scrollHeight - el.clientHeight),
-  ).toBeGreaterThan(0);
+  await expect
+    .poll(async () => mobileTaskList.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeGreaterThan(0);
   await mobileTaskList.evaluate((el) => {
     el.scrollTop = Math.min(280, el.scrollHeight - el.clientHeight);
     el.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
-  await expect.poll(async () =>
-    mobileTaskList.evaluate((el) => el.scrollTop),
-  ).toBeGreaterThan(0);
-  await expect.poll(async () =>
-    mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity),
-  ).toBe("1");
+  await expect.poll(async () => mobileTaskList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect
+    .poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity))
+    .toBe("1");
   await captureScreenshot(page, "task-list-scrolled-mobile.png");
 
   await convertPngsToWebp(screenshotDir);

@@ -40,18 +40,22 @@ export default function TaskDetailPage() {
               ciStatus={t()?.ciStatus}
               ciChecks={t()?.ciChecks}
               harness={t()?.harness ?? ""}
-			  model={t()?.reportedModel || t()?.requestedModel}
+              model={t()?.reportedModel || t()?.requestedModel}
               costUSD={t()?.costUSD}
               cumulativeInputTokens={t()?.cumulativeInputTokens}
               cumulativeOutputTokens={t()?.cumulativeOutputTokens}
               cumulativeCacheCreationInputTokens={t()?.cumulativeCacheCreationInputTokens}
               cumulativeCacheReadInputTokens={t()?.cumulativeCacheReadInputTokens}
-			  stoppedDiskUsedBytes={t()?.stoppedDiskUsedBytes ?? -1}
+              stoppedDiskUsedBytes={t()?.stoppedDiskUsedBytes ?? -1}
               diffStat={t()?.diffStat}
               vncPort={t()?.runtime.vncPort ?? 0}
               sudoPassword={t()?.runtime.sudoPassword}
-              supportsImages={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages}
-              supportsCompact={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact}
+              supportsImages={
+                s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages
+              }
+              supportsCompact={
+                s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact
+              }
               rateLimit={t()?.rateLimit}
               now={s.now()}
               onStop={s.handleStop}
@@ -60,7 +64,8 @@ export default function TaskDetailPage() {
               onFork={s.handleFork}
               onQuotaRecovery={s.handleQuotaRecovery}
               parentTaskID={t()?.parentTaskID}
-              childTasks={s.tasks()
+              childTasks={s
+                .tasks()
                 .filter((candidate) => candidate.parentTaskID === taskId)
                 .map((candidate) => ({ id: candidate.id, title: candidate.title }))}
               onClose={() => s.navigate("/")}

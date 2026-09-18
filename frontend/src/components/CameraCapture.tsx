@@ -24,7 +24,9 @@ export default function CameraCapture(props: Props) {
 
   async function startCamera(facing: "environment" | "user") {
     // Stop any existing stream before switching.
-    stream()?.getTracks().forEach((t) => t.stop());
+    stream()
+      ?.getTracks()
+      .forEach((t) => t.stop());
     try {
       const s = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: facing },
@@ -50,7 +52,9 @@ export default function CameraCapture(props: Props) {
   });
 
   onCleanup(() => {
-    stream()?.getTracks().forEach((t) => t.stop());
+    stream()
+      ?.getTracks()
+      .forEach((t) => t.stop());
   });
 
   function switchCamera() {
@@ -76,16 +80,26 @@ export default function CameraCapture(props: Props) {
   }
 
   return (
-    <ModalDialog
-      class={styles.dialog}
-      onClose={props.onClose}
-    >
+    <ModalDialog class={styles.dialog} onClose={props.onClose}>
       {error() ? (
         <p class={styles.error}>{error()}</p>
       ) : (
         <>
-          <video ref={(el) => { videoRef = el; }} class={styles.video} autoplay playsinline muted />
-          <canvas ref={(el) => { canvasRef = el; }} class={styles.canvas} />
+          <video
+            ref={(el) => {
+              videoRef = el;
+            }}
+            class={styles.video}
+            autoplay
+            playsinline
+            muted
+          />
+          <canvas
+            ref={(el) => {
+              canvasRef = el;
+            }}
+            class={styles.canvas}
+          />
         </>
       )}
       <div class={styles.actions}>
@@ -94,10 +108,10 @@ export default function CameraCapture(props: Props) {
             <SwitchCameraIcon width="1.4em" height="1.4em" />
           </button>
         </Show>
-        {!error() && (
-          <button class={styles.captureBtn} onClick={capture} title="Take photo" />
-        )}
-        <button class={styles.closeBtn} onClick={() => props.onClose()}>Cancel</button>
+        {!error() && <button class={styles.captureBtn} onClick={capture} title="Take photo" />}
+        <button class={styles.closeBtn} onClick={() => props.onClose()}>
+          Cancel
+        </button>
       </div>
     </ModalDialog>
   );

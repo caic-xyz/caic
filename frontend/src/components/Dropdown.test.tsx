@@ -18,13 +18,21 @@ describe("Dropdown", () => {
           onOpenChange={setOpen}
           content={
             <div role="menu">
-              <button type="button" role="menuitem">First action</button>
-              <button type="button" role="menuitem" disabled>Disabled action</button>
-              <button type="button" role="menuitem">Last action</button>
+              <button type="button" role="menuitem">
+                First action
+              </button>
+              <button type="button" role="menuitem" disabled>
+                Disabled action
+              </button>
+              <button type="button" role="menuitem">
+                Last action
+              </button>
             </div>
           }
         >
-          <button type="button" onClick={() => setOpen(true)}>Open menu</button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open menu
+          </button>
         </Dropdown>
       );
     }
@@ -35,7 +43,9 @@ describe("Dropdown", () => {
 
     await user.keyboard("{ArrowDown}");
     await screen.findByRole("menu");
-    await vi.waitFor(() => expect(screen.getByRole("menuitem", { name: "First action" })).toHaveFocus());
+    await vi.waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "First action" })).toHaveFocus(),
+    );
 
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Last action" })).toHaveFocus();
@@ -46,7 +56,9 @@ describe("Dropdown", () => {
     await user.keyboard("{Escape}");
     trigger.focus();
     await user.keyboard("{ArrowUp}");
-    await vi.waitFor(() => expect(screen.getByRole("menuitem", { name: "Last action" })).toHaveFocus());
+    await vi.waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Last action" })).toHaveFocus(),
+    );
   });
 
   it("closes on Escape and restores focus to its trigger", async () => {
@@ -60,7 +72,9 @@ describe("Dropdown", () => {
           onOpenChange={setOpen}
           content={<button type="button">Menu action</button>}
         >
-          <button type="button" onClick={() => setOpen(true)}>Open menu</button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open menu
+          </button>
         </Dropdown>
       );
     }

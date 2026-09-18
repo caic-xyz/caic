@@ -1,18 +1,15 @@
 // E2E tests for image attachment: API image support and screenshot capture UI flow.
-import {
-  test,
-  expect,
-  createTaskAPI,
-  waitForTaskState,
-  fillContentEditable,
-} from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
 
 // Minimal 1×1 transparent PNG encoded as base64, used as a lightweight test fixture
 // when we need valid image bytes to send via the API.
 const TINY_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
 
-test("API: images are accepted in task inputs when harness supports them", async ({ api, uniquePrompt }) => {
+test("API: images are accepted in task inputs when harness supports them", async ({
+  api,
+  uniquePrompt,
+}) => {
   const id = await createTaskAPI(api, uniquePrompt("image-api"));
   await waitForTaskState(api, id, "waiting");
 
@@ -89,9 +86,9 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
   await taskCard.click();
 
   // Wait for the agent's first response before touching the input.
-  await expect(
-    page.getByText("Why do programmers prefer dark mode?").first(),
-  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Why do programmers prefer dark mode?").first()).toBeVisible({
+    timeout: 15_000,
+  });
 
   // Scope all input interactions to the task-detail form to avoid ambiguity
   // with the sidebar's prompt-input which also has an "Attach images" button.
@@ -108,7 +105,10 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
   await expect(thumbnail).toBeVisible({ timeout: 5_000 });
 
   // Send the screenshot together with a text message.
-  await fillContentEditable(detailForm.getByRole("textbox", { name: "Send message to agent..." }), "here is a screenshot");
+  await fillContentEditable(
+    detailForm.getByRole("textbox", { name: "Send message to agent..." }),
+    "here is a screenshot",
+  );
   await detailForm.getByTestId("send-input").click();
 
   // After a successful send the input images are cleared, so the preview-strip

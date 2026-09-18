@@ -1,6 +1,12 @@
 // Pure grouping and turn-splitting logic for agent event streams.
 
-import type { EventMessage, EventToolUse, EventToolResult, EventAsk, EventResult } from "@sdk/types.gen";
+import type {
+  EventMessage,
+  EventToolUse,
+  EventToolResult,
+  EventAsk,
+  EventResult,
+} from "@sdk/types.gen";
 
 export interface MessageGroup {
   kind: "text" | "action" | "ask" | "userInput" | "widget" | "other";
@@ -58,7 +64,6 @@ export interface Session {
   durationMs: number;
 }
 
-
 // Returns true if ev starts a new session.
 export function isSessionBoundary(ev: EventMessage): boolean {
   return ev.kind === "init" || (ev.kind === "system" && ev.system?.subtype === "compact_boundary");
@@ -114,7 +119,11 @@ function groupMessagesAfter(
           // Text immediately after a thinking-only group: absorb thinking into this text group
           // so it renders as a collapsed block inside the text rather than a separate top-level item.
           const thinkingGroup = groups.pop();
-          groups.push({ kind: "text", events: [...(thinkingGroup?.events ?? []), ev], toolCalls: [] });
+          groups.push({
+            kind: "text",
+            events: [...(thinkingGroup?.events ?? []), ev],
+            toolCalls: [],
+          });
         } else {
           groups.push({ kind: "text", events: [ev], toolCalls: [] });
         }
@@ -127,7 +136,11 @@ function groupMessagesAfter(
         } else if (last && last.kind === "action" && last.toolCalls.length === 0) {
           // Text immediately after a thinking-only group: absorb thinking into this text group.
           const thinkingGroup = groups.pop();
-          groups.push({ kind: "text", events: [...(thinkingGroup?.events ?? []), ev], toolCalls: [] });
+          groups.push({
+            kind: "text",
+            events: [...(thinkingGroup?.events ?? []), ev],
+            toolCalls: [],
+          });
         } else {
           groups.push({ kind: "text", events: [ev], toolCalls: [] });
         }
@@ -214,7 +227,10 @@ function groupMessagesAfter(
         let askGroup: MessageGroup | undefined;
         for (let i = groups.length - 1; i >= 0; i--) {
           const g = groups[i];
-          if (g.kind === "ask" && !g.answerText) { askGroup = g; break; }
+          if (g.kind === "ask" && !g.answerText) {
+            askGroup = g;
+            break;
+          }
           if (g.kind !== "other") break; // stop at non-other boundaries
         }
         if (askGroup) {
@@ -256,10 +272,13 @@ function groupMessagesAfter(
         // the previous message. Pi streams thinking and text deltas, then
         // emits the consolidated thinking and text at message_end.
         const last = lastGroup();
-        if (last && last.toolCalls.length === 0 &&
-            last.events.some((e) => e.kind === "thinkingDelta") &&
-            (last.kind === "action" ||
-             (last.kind === "text" && !last.events.some((e) => e.kind === "text")))) {
+        if (
+          last &&
+          last.toolCalls.length === 0 &&
+          last.events.some((e) => e.kind === "thinkingDelta") &&
+          (last.kind === "action" ||
+            (last.kind === "text" && !last.events.some((e) => e.kind === "text")))
+        ) {
           last.events.push(ev);
         } else {
           groups.push({ kind: "action", events: [ev], toolCalls: [] });
@@ -297,7 +316,8 @@ function groupMessagesAfter(
         // already in the task state — skip them to avoid noisy "other" groups.
         // model_rerouted and other informational subtypes are rendered via MessageItem.
         const sub = ev.system?.subtype;
-        if (sub === "active" || sub === "idle" || sub === "notLoaded" || sub === "system_error") break;
+        if (sub === "active" || sub === "idle" || sub === "notLoaded" || sub === "system_error")
+          break;
         groups.push({ kind: "other", events: [ev], toolCalls: [] });
         break;
       }
@@ -317,7 +337,9 @@ function groupMessagesAfter(
             widgetGroup.widgetHTML = (widgetGroup.widgetHTML ?? "") + (ev.widgetDelta?.delta ?? "");
           } else {
             groups.push({
-              kind: "widget", events: [ev], toolCalls: [],
+              kind: "widget",
+              events: [ev],
+              toolCalls: [],
               widgetToolUseID: id,
               widgetHTML: ev.widgetDelta?.delta ?? "",
               widgetDone: false,
@@ -343,7 +365,9 @@ function groupMessagesAfter(
             widgetGroup.widgetHTML = ev.widget.html;
           } else {
             groups.push({
-              kind: "widget", events: [ev], toolCalls: [],
+              kind: "widget",
+              events: [ev],
+              toolCalls: [],
               widgetToolUseID: id,
               widgetTitle: ev.widget.title,
               widgetHTML: ev.widget.html,
@@ -421,7 +445,11 @@ function groupMessagesAfter(
       }
       if (thinkingEvents.length > 0) {
         // New action group with absorbed thinking events prepended.
-        merged.push({ kind: "action", events: [...thinkingEvents, ...g.events], toolCalls: g.toolCalls });
+        merged.push({
+          kind: "action",
+          events: [...thinkingEvents, ...g.events],
+          toolCalls: g.toolCalls,
+        });
         continue;
       }
     } else if (g.kind === "action" && g.toolCalls.length === 0) {
@@ -437,7 +465,9 @@ function groupMessagesAfter(
       // inside the collapsed tool block, not as a standalone ThinkingCard.
       const last = merged[merged.length - 1];
       if (last && last.kind === "action" && last.toolCalls.length > 0) {
-        const thinkingEvs = g.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
+        const thinkingEvs = g.events.filter(
+          (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
+        );
         if (thinkingEvs.length > 0) {
           last.events.push(...thinkingEvs);
           g.events = g.events.filter((e) => e.kind !== "thinking" && e.kind !== "thinkingDelta");
@@ -460,19 +490,26 @@ function groupMessagesAfter(
   const renderedText = (g: MessageGroup) => {
     const final = g.events.findLast((e) => e.kind === "text");
     if (final) return final.text?.text ?? "";
-    return g.events.filter((e) => e.kind === "textDelta").map((e) => e.textDelta?.text ?? "").join("");
+    return g.events
+      .filter((e) => e.kind === "textDelta")
+      .map((e) => e.textDelta?.text ?? "")
+      .join("");
   };
   const isBlankTextEv = (e: EventMessage) =>
     (e.kind === "text" && (e.text?.text ?? "").trim() === "") ||
     (e.kind === "textDelta" && (e.textDelta?.text ?? "").trim() === "");
   const droppableEmptyGroup = (g: MessageGroup, events: EventMessage[]) =>
     (g.kind === "text" || (g.kind === "action" && g.toolCalls.length === 0)) &&
-    events.length > 0 && events.every((e) => e.kind === "usage" || isBlankTextEv(e));
+    events.length > 0 &&
+    events.every((e) => e.kind === "usage" || isBlankTextEv(e));
 
   const finalGroups: MessageGroup[] = [];
   let holder: MessageGroup | undefined;
   let pendingIdx = -1;
-  const resetRun = () => { holder = undefined; pendingIdx = -1; };
+  const resetRun = () => {
+    holder = undefined;
+    pendingIdx = -1;
+  };
 
   for (const g of merged) {
     if (g.kind !== "text" && g.kind !== "action") {
@@ -510,7 +547,10 @@ function groupMessagesAfter(
         kind: "action",
         events: [...first.events.filter(isThinkingEv), ...think],
         toolCalls: [],
-        timingSegments: [dropFirstRest ? first.events : first.events.filter(isThinkingEv), timingSegment],
+        timingSegments: [
+          dropFirstRest ? first.events : first.events.filter(isThinkingEv),
+          timingSegment,
+        ],
       };
       finalGroups[firstIdx] = h;
       holder = h;
@@ -535,8 +575,13 @@ function groupMessagesAfter(
     const group = finalGroups[i];
     const result = group.events.find((event) => event.kind === "result")?.result;
     const previous = finalGroups[i - 1];
-    if (result && !result.isError && result.result.trim() !== "" &&
-        previous.kind === "text" && renderedText(previous).trim() === result.result.trim()) {
+    if (
+      result &&
+      !result.isError &&
+      result.result.trim() !== "" &&
+      previous.kind === "text" &&
+      renderedText(previous).trim() === result.result.trim()
+    ) {
       group.resultReplacesText = true;
       finalGroups.splice(i - 1, 1);
       i--;
@@ -546,7 +591,9 @@ function groupMessagesAfter(
   // Mark tool calls as implicitly done when later events prove completion.
   // Within a group, every non-last non-background call is done (the agent
   // moved on to the next call). Entire non-last groups are fully done.
-  const lastActionGroupIdx = finalGroups.findLastIndex((g) => g.kind === "action" && g.toolCalls.length > 0);
+  const lastActionGroupIdx = finalGroups.findLastIndex(
+    (g) => g.kind === "action" && g.toolCalls.length > 0,
+  );
   for (let i = 0; i < finalGroups.length; i++) {
     const g = finalGroups[i];
     if (g.kind !== "action" || g.toolCalls.length === 0) continue;
@@ -588,10 +635,15 @@ export class IncrementalMessageGrouper {
     const previous = this.result;
     if (previous && this.previousLength <= msgs.length) {
       const newEvents = msgs.slice(this.previousLength);
-      const canExtend = newEvents.length > 0 && newEvents.every((ev) =>
-        ev.kind === "thinkingDelta" || ev.kind === "textDelta" ||
-        ev.kind === "toolOutputDelta" || ev.kind === "widgetDelta",
-      );
+      const canExtend =
+        newEvents.length > 0 &&
+        newEvents.every(
+          (ev) =>
+            ev.kind === "thinkingDelta" ||
+            ev.kind === "textDelta" ||
+            ev.kind === "toolOutputDelta" ||
+            ev.kind === "widgetDelta",
+        );
       if (canExtend && previous.length > 0) {
         const result = [...previous];
         const mutableGroup = (index: number): MessageGroup => {
@@ -604,7 +656,10 @@ export class IncrementalMessageGrouper {
         const appendGroup = (group: MessageGroup): void => {
           const previousGroupIndex = result.length - 1;
           const previousGroup = result[previousGroupIndex];
-          if (previousGroup.kind === "action" && previousGroup.toolCalls.some((call) => !call.done)) {
+          if (
+            previousGroup.kind === "action" &&
+            previousGroup.toolCalls.some((call) => !call.done)
+          ) {
             const mutable = mutableGroup(previousGroupIndex);
             mutable.toolCalls = mutable.toolCalls.map((call) =>
               call.done ? call : { ...call, done: true },
@@ -663,7 +718,9 @@ export class IncrementalMessageGrouper {
               }
               if (!found) {
                 appendGroup({
-                  kind: "widget", events: [ev], toolCalls: [],
+                  kind: "widget",
+                  events: [ev],
+                  toolCalls: [],
                   widgetToolUseID: id,
                   widgetHTML: ev.widgetDelta?.delta ?? "",
                   widgetDone: false,
@@ -830,18 +887,40 @@ export type MsgItem =
 // All turns in this list are collapsible (caller handles the live turn separately).
 // inPastSession: true when building turns for an expanded past session — items receive
 // indent markers so the renderer can draw a visual left-border hierarchy.
-export function buildTurnItems(turns: Turn[], expandedTurnKeys: ReadonlySet<string>, sessionKey: string, inPastSession = false): MsgItem[] {
+export function buildTurnItems(
+  turns: Turn[],
+  expandedTurnKeys: ReadonlySet<string>,
+  sessionKey: string,
+  inPastSession = false,
+): MsgItem[] {
   const items: MsgItem[] = [];
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i];
     const turnKey = `${sessionKey}:turn:${i}:${turn.groups[0]?.events[0]?.ts ?? ""}`;
     if (expandedTurnKeys.has(turnKey)) {
-      items.push({ kind: "expandedHeader", turn, turnKey, key: `hdr:${turnKey}`, ...(inPastSession ? { indent: "session" as const } : {}) });
+      items.push({
+        kind: "expandedHeader",
+        turn,
+        turnKey,
+        key: `hdr:${turnKey}`,
+        ...(inPastSession ? { indent: "session" as const } : {}),
+      });
       for (let j = 0; j < turn.groups.length; j++) {
-        items.push({ kind: "group", group: turn.groups[j], isLive: false, key: `${turnKey}-g${j}`, indent: "turn" });
+        items.push({
+          kind: "group",
+          group: turn.groups[j],
+          isLive: false,
+          key: `${turnKey}-g${j}`,
+          indent: "turn",
+        });
       }
     } else {
-      items.push({ kind: "elided", turn, key: turnKey, ...(inPastSession ? { indent: "session" as const } : {}) });
+      items.push({
+        kind: "elided",
+        turn,
+        key: turnKey,
+        ...(inPastSession ? { indent: "session" as const } : {}),
+      });
     }
   }
   return items;
@@ -849,7 +928,11 @@ export function buildTurnItems(turns: Turn[], expandedTurnKeys: ReadonlySet<stri
 
 // Builds flat items for past (non-current) sessions.
 // Each past session is elided to a single row by default; click to expand.
-export function buildPastSessionItems(sessions: Session[], expandedSessionKeys: ReadonlySet<string>, expandedTurnKeys: ReadonlySet<string>): MsgItem[] {
+export function buildPastSessionItems(
+  sessions: Session[],
+  expandedSessionKeys: ReadonlySet<string>,
+  expandedTurnKeys: ReadonlySet<string>,
+): MsgItem[] {
   const items: MsgItem[] = [];
   for (let i = 0; i < sessions.length; i++) {
     const session = sessions[i];
@@ -893,12 +976,19 @@ export function toolCallDurations(events: readonly EventMessage[]): ReadonlyMap<
   return durations;
 }
 
-export function toolResultDurationMs(result: EventToolResult, startTs: number, resultTs: number): number | null {
+export function toolResultDurationMs(
+  result: EventToolResult,
+  startTs: number,
+  resultTs: number,
+): number | null {
   if (result.duration > 0) return result.duration * 1000;
   return startTs > 0 && resultTs > startTs ? resultTs - startTs : null;
 }
 
-export function toolCallDurationMs(call: ToolCall, durations: ReadonlyMap<string, number>): number | null {
+export function toolCallDurationMs(
+  call: ToolCall,
+  durations: ReadonlyMap<string, number>,
+): number | null {
   if (call.result) {
     const explicit = toolResultDurationMs(call.result, 0, 0);
     if (explicit !== null) return explicit;

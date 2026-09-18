@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v1.0.0). Leave empty to auto-increment patch version.'
+        description: "Version tag (e.g. v1.0.0). Leave empty to auto-increment patch version."
         required: false
         type: string
 

@@ -15,7 +15,11 @@ type CacheMock = {
   put: ReturnType<typeof vi.fn>;
 };
 
-function loadFetchHandler(cache: CacheMock, fetchMock: typeof fetch, workerURL = "https://quick.caic.xyz/sw.js?build=%2Fassets%2Findex-new.js") {
+function loadFetchHandler(
+  cache: CacheMock,
+  fetchMock: typeof fetch,
+  workerURL = "https://quick.caic.xyz/sw.js?build=%2Fassets%2Findex-new.js",
+) {
   const listeners = new Map<string, unknown>();
   const open = vi.fn(async () => cache);
   vm.runInNewContext(workerSource, {
@@ -34,7 +38,8 @@ function loadFetchHandler(cache: CacheMock, fetchMock: typeof fetch, workerURL =
     },
   });
   const handler = listeners.get("fetch");
-  if (typeof handler !== "function") throw new Error("service worker did not register a fetch handler");
+  if (typeof handler !== "function")
+    throw new Error("service worker did not register a fetch handler");
   return { handler: handler as FetchHandler, open };
 }
 
@@ -43,7 +48,9 @@ function fetchEvent(request: Request) {
   return {
     event: {
       request,
-      respondWith: (next: Promise<Response>) => { response = next; },
+      respondWith: (next: Promise<Response>) => {
+        response = next;
+      },
     },
     response: () => response,
   };

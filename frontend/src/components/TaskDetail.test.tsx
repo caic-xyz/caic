@@ -99,9 +99,7 @@ const baseProps = {
   onError: () => {},
 };
 
-function renderTaskDetail(
-  props: Partial<Parameters<typeof TaskDetail>[0]> = {},
-) {
+function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
   return render(() => (
     <HostModeProvider>
       <TaskDetail {...baseProps} {...props} />
@@ -166,9 +164,10 @@ describe("TaskDetail", () => {
   it("links task statistics to the full detail route", () => {
     renderTaskDetail();
 
-    expect(
-      screen.getByRole("link", { name: "Task statistics" }),
-    ).toHaveAttribute("href", "/task/@abc+test-task/stats");
+    expect(screen.getByRole("link", { name: "Task statistics" })).toHaveAttribute(
+      "href",
+      "/task/@abc+test-task/stats",
+    );
   });
 
   it("keeps header Git line totals when its capped title ellipsizes", async () => {
@@ -181,9 +180,7 @@ describe("TaskDetail", () => {
       scrollWidth: { configurable: true, value: 320 },
     });
     window.dispatchEvent(new Event("resize"));
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     const link = await screen.findByRole("link", {
       name: /my-repo: 2 changed files/,
@@ -196,16 +193,13 @@ describe("TaskDetail", () => {
 
     const repoLink = await screen.findByRole("link", { name: "my-repo" });
     const headerMeta = repoLink.parentElement;
-    if (!headerMeta)
-      throw new Error("repository link is missing its header context");
+    if (!headerMeta) throw new Error("repository link is missing its header context");
     Object.defineProperties(headerMeta, {
       clientWidth: { configurable: true, value: 160 },
       scrollWidth: { configurable: true, value: 320 },
     });
     window.dispatchEvent(new Event("resize"));
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     const diffLink = await screen.findByRole("link", {
       name: /my-repo: 2 changed files/,
@@ -237,9 +231,7 @@ describe("TaskDetail", () => {
     const link = await screen.findByRole("link", {
       name: /my-repo: 2 changed files/,
     });
-    await waitFor(() =>
-      expect(link).not.toHaveAttribute("data-elide-diff-stats"),
-    );
+    await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
   });
 
   it("copies only the selected fenced code block", async () => {
@@ -273,9 +265,7 @@ describe("TaskDetail", () => {
       const copyButton = screen.getByRole("button", {
         name: "Copy code block",
       });
-      expect(copyButton.parentElement?.className).toMatch(
-        /singleLineCodeBlock/,
-      );
+      expect(copyButton.parentElement?.className).toMatch(/singleLineCodeBlock/);
 
       await user.click(copyButton);
       expect(writeText).toHaveBeenCalledWith("const answer = 42;\n");
@@ -293,24 +283,24 @@ describe("TaskDetail", () => {
       childTasks: [{ id: "child", title: "Review tests" }],
     });
 
-    expect(
-      screen.getByRole("navigation", { name: "Task hierarchy" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Task hierarchy" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Parent task" })).toHaveAttribute(
       "href",
       "/task/@parent",
     );
-    expect(
-      screen.getByRole("link", { name: "Child: Review tests" }),
-    ).toHaveAttribute("href", "/task/@child");
+    expect(screen.getByRole("link", { name: "Child: Review tests" })).toHaveAttribute(
+      "href",
+      "/task/@child",
+    );
   });
 
   it("uses a child ID when its title is empty", () => {
     renderTaskDetail({ childTasks: [{ id: "untitled-child", title: "" }] });
 
-    expect(
-      screen.getByRole("link", { name: "Child: untitled-child" }),
-    ).toHaveAttribute("href", "/task/@untitled-child");
+    expect(screen.getByRole("link", { name: "Child: untitled-child" })).toHaveAttribute(
+      "href",
+      "/task/@untitled-child",
+    );
   });
 
   it("offers quota recovery without replacing the normal task actions", async () => {
@@ -328,9 +318,7 @@ describe("TaskDetail", () => {
       onFork,
     });
 
-    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent(
-      "5h quota resets in 42m",
-    );
+    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent("5h quota resets in 42m");
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
     expect(onQuotaRecovery).toHaveBeenCalledWith("abc");
 
@@ -350,12 +338,8 @@ describe("TaskDetail", () => {
       onQuotaRecovery: vi.fn(),
     });
 
-    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent(
-      "Agent quota exhausted",
-    );
-    expect(
-      screen.queryByTestId("quota-recovery-detail-action"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("quota-recovery-detail")).toHaveTextContent("Agent quota exhausted");
+    expect(screen.queryByTestId("quota-recovery-detail-action")).not.toBeInTheDocument();
   });
 
   it("repository state diff link href ends with /diff", async () => {
@@ -369,9 +353,7 @@ describe("TaskDetail", () => {
   it("clicking a repository state marker navigates to the diff", async () => {
     const user = userEvent.setup();
     renderTaskDetail();
-    await user.click(
-      await screen.findByRole("link", { name: /my-repo: 2 changed files/ }),
-    );
+    await user.click(await screen.findByRole("link", { name: /my-repo: 2 changed files/ }));
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
 
@@ -426,8 +408,7 @@ describe("TaskDetail", () => {
       (_, element) => element?.textContent === '+\tfmt.Println("Hi, World!")',
     );
     const deleted = getByText(
-      (_, element) =>
-        element?.textContent === '-\tfmt.Println("Hello, World!")',
+      (_, element) => element?.textContent === '-\tfmt.Println("Hello, World!")',
     );
     expect(added.className).toMatch(/lineAdded/);
     expect(deleted.className).toMatch(/lineDeleted/);
@@ -620,12 +601,8 @@ describe("TaskDetail", () => {
     renderTaskDetail();
 
     expect(screen.getByTestId("turn-duration")).toHaveTextContent("0:01");
-    await user.click(
-      screen.getByRole("button", { name: "Turn invocation details" }),
-    );
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent(
-      "turn-model",
-    );
+    await user.click(screen.getByRole("button", { name: "Turn invocation details" }));
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("turn-model");
   });
 
   it("opens invocation details from a collapsed turn without expanding it", async () => {
@@ -658,9 +635,7 @@ describe("TaskDetail", () => {
       name: "Turn invocation details",
     });
     await user.click(collapsedTurn);
-    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent(
-      "collapsed-model",
-    );
+    expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("collapsed-model");
     expect(screen.queryByText("collapsed response")).not.toBeInTheDocument();
   });
 
@@ -716,11 +691,9 @@ describe("TaskDetail", () => {
 
     const { getAllByText } = renderTaskDetail();
 
-    expect(
-      getAllByText("0s").some((duration) =>
-        duration.className.includes("turnDuration"),
-      ),
-    ).toBe(true);
+    expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(
+      true,
+    );
   });
 
   it("summarizes every turn in the collapsed session details", async () => {
@@ -794,16 +767,12 @@ describe("TaskDetail", () => {
 
     expect(getByText(/2 turns/).className).toMatch(/turnSummaryText/);
     expect(getByText("0:05").className).toMatch(/sessionDuration/);
-    await user.click(
-      screen.getByRole("button", { name: "Session invocation details" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
     const dialog = screen.getByTestId("session-invocation-dialog");
     expect(dialog).toHaveTextContent("Combined turn time0:05");
     expect(dialog).toHaveTextContent("Combined API time0:02");
     expect(dialog).toHaveTextContent("Time awaiting user response0:59");
-    expect(dialog).toHaveTextContent(
-      "Generated change6 file changes · +30 −8 · 1 binary",
-    );
+    expect(dialog).toHaveTextContent("Generated change6 file changes · +30 −8 · 1 binary");
     expect(dialog).toHaveTextContent("Cost$0.0000");
     expect(dialog).toHaveTextContent("New input300t");
     expect(queryByText("first response")).not.toBeInTheDocument();
@@ -825,8 +794,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows the complete task error", () => {
-    const error =
-      "Error: failed to load extension from a very long runtime path";
+    const error = "Error: failed to load extension from a very long runtime path";
     const { getByRole, getByText } = renderTaskDetail({
       taskState: "failed",
       error,
@@ -887,20 +855,12 @@ describe("TaskDetail", () => {
     });
 
     expect(getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
-    expect(
-      getByText("fetch origin then rebase on origin/main"),
-    ).toBeInTheDocument();
+    expect(getByText("fetch origin then rebase on origin/main")).toBeInTheDocument();
     expect(getByText("Setup logs")).toBeInTheDocument();
     expect(getByTestId("task-setup")).toHaveAttribute("open");
-    expect(getByTestId("task-setup-logs")).toHaveTextContent(
-      "starting runtime",
-    );
-    expect(getByTestId("task-message-area")).toContainElement(
-      getByTestId("task-setup"),
-    );
-    expect(getByTestId("task-message-area")).toHaveTextContent(
-      "agent extension failed to load",
-    );
+    expect(getByTestId("task-setup-logs")).toHaveTextContent("starting runtime");
+    expect(getByTestId("task-message-area")).toContainElement(getByTestId("task-setup"));
+    expect(getByTestId("task-message-area")).toHaveTextContent("agent extension failed to load");
   });
 
   it("shows zero instead of an implausible reconstructed setup duration", () => {
@@ -1085,8 +1045,7 @@ describe("SSE connection", () => {
     });
 
     const { getByRole } = renderTaskDetail();
-    if (!onMessage || !onReady || !onReset)
-      throw new Error("SSE callbacks not captured");
+    if (!onMessage || !onReady || !onReset) throw new Error("SSE callbacks not captured");
     const emitCompletedTurn = (prompt: string, text: string, ts: number) => {
       onMessage?.({ kind: "userInput", ts, userInput: { text: prompt } });
       onMessage?.({ kind: "text", ts: ts + 1, text: { text } });
@@ -1152,9 +1111,7 @@ describe("SSE connection", () => {
     if (!historyError) throw new Error("history error callback not captured");
     historyError({ message: "task history is unavailable" });
 
-    expect(onError).toHaveBeenCalledWith(
-      "Task history error: task history is unavailable",
-    );
+    expect(onError).toHaveBeenCalledWith("Task history error: task history is unavailable");
     expect(created[0].close).toHaveBeenCalledOnce();
     if (!created[0].onerror) throw new Error("onerror not set");
     created[0].onerror(new Event("error"));
@@ -1305,9 +1262,7 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2026-07-10T13:00:00Z").toLocaleTimeString();
-    expect(document.body.textContent).toContain(
-      `resets in 2 days at ${resetTime}`,
-    );
+    expect(document.body.textContent).toContain(`resets in 2 days at ${resetTime}`);
   });
 
   it("labels a reset on the next calendar day as tomorrow", () => {
@@ -1332,9 +1287,7 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2026-07-09T13:00:00Z").toLocaleTimeString();
-    expect(document.body.textContent).toContain(
-      `resets tomorrow at ${resetTime}`,
-    );
+    expect(document.body.textContent).toContain(`resets tomorrow at ${resetTime}`);
   });
 
   it("does not render empty usage metadata", () => {
@@ -1399,9 +1352,7 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain(
       "codex · 100t new · 200t cache write · 700t cache read · 40t out",
     );
-    expect(
-      document.querySelectorAll('[aria-label="Timing details"]'),
-    ).toHaveLength(0);
+    expect(document.querySelectorAll('[aria-label="Timing details"]')).toHaveLength(0);
   });
 
   it("replayed textDelta events render once the SSE ready marker arrives", () => {
@@ -1482,9 +1433,7 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain(
-      "first batch then second batch",
-    );
+    expect(document.body.textContent).toContain("first batch then second batch");
   });
 
   it("live ask events render immediately so the user can answer", () => {

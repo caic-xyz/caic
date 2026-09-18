@@ -11,8 +11,21 @@ import TaskCard from "./TaskCard";
 import { getTaskRepoStatus } from "../api";
 
 vi.mock("@solidjs/router", () => ({
-  A: (linkProps: { href: string; class?: string; title?: string; onClick?: (event: MouseEvent) => void; children: JSX.Element }) => (
-    <a class={linkProps.class} href={linkProps.href} title={linkProps.title} onClick={(event) => linkProps.onClick?.(event)}>{linkProps.children}</a>
+  A: (linkProps: {
+    href: string;
+    class?: string;
+    title?: string;
+    onClick?: (event: MouseEvent) => void;
+    children: JSX.Element;
+  }) => (
+    <a
+      class={linkProps.class}
+      href={linkProps.href}
+      title={linkProps.title}
+      onClick={(event) => linkProps.onClick?.(event)}
+    >
+      {linkProps.children}
+    </a>
   ),
 }));
 
@@ -56,13 +69,17 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
 
 describe("TaskCard", () => {
   it("renders every repository and branch before Git status is available", () => {
-    render(() => <TaskCard {...props({
-      runtime: undefined,
-      repos: [
-        { name: "repo/primary", branch: "caic-1" },
-        { name: "repo/extra", branch: "caic-2" },
-      ],
-    })} />);
+    render(() => (
+      <TaskCard
+        {...props({
+          runtime: undefined,
+          repos: [
+            { name: "repo/primary", branch: "caic-1" },
+            { name: "repo/extra", branch: "caic-2" },
+          ],
+        })}
+      />
+    ));
 
     const rows = screen.getAllByTestId("task-card-repo-state");
     expect(rows).toHaveLength(2);
@@ -73,17 +90,19 @@ describe("TaskCard", () => {
 
   it("shows the complete repository-state component in the bottom row", async () => {
     vi.mocked(getTaskRepoStatus).mockResolvedValueOnce({
-      repositories: [{
-        name: "repo",
-        branch: "task-branch",
-        ahead: 1,
-        behind: 0,
-        changedFiles: 2,
-        added: 12,
-        deleted: 3,
-        uncommittedFiles: 1,
-        conflicts: 0,
-      }],
+      repositories: [
+        {
+          name: "repo",
+          branch: "task-branch",
+          ahead: 1,
+          behind: 0,
+          changedFiles: 2,
+          added: 12,
+          deleted: 3,
+          uncommittedFiles: 1,
+          conflicts: 0,
+        },
+      ],
     });
     render(() => <TaskCard {...props()} />);
 
@@ -99,14 +118,20 @@ describe("TaskCard", () => {
   });
 
   it("does not invent a TTL when only a legacy cache expiry is available", () => {
-    render(() => <TaskCard {...props({
-      state: "waiting",
-      cacheExpiresAt: "2026-07-08T11:55:00Z",
-    })} />);
+    render(() => (
+      <TaskCard
+        {...props({
+          state: "waiting",
+          cacheExpiresAt: "2026-07-08T11:55:00Z",
+        })}
+      />
+    ));
 
     fireEvent.focus(screen.getByRole("button", { name: "waiting" }));
 
-    expect(screen.getByText("Prompt cache likely expired — continuing may use more tokens")).toBeInTheDocument();
+    expect(
+      screen.getByText("Prompt cache likely expired — continuing may use more tokens"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/TTL/)).not.toBeInTheDocument();
   });
 
@@ -307,12 +332,14 @@ describe("TaskCard", () => {
     unmount();
 
     render(() => (
-      <TaskCard {...props({
-        state: "waiting",
-        onStop: vi.fn(),
-        onPurge: vi.fn(),
-        purgeModifierActive: true,
-      })} />
+      <TaskCard
+        {...props({
+          state: "waiting",
+          onStop: vi.fn(),
+          onPurge: vi.fn(),
+          purgeModifierActive: true,
+        })}
+      />
     ));
 
     expect(screen.getByRole("button", { name: "Purge" })).toBeInTheDocument();

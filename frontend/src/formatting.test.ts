@@ -2,7 +2,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatElapsed, staleStateColor, stateColor, toolCallDetail } from "./formatting";
+import {
+  formatBytes,
+  formatElapsed,
+  staleStateColor,
+  stateColor,
+  toolCallDetail,
+} from "./formatting";
 
 describe("formatBytes", () => {
   it("formats resident memory using binary units", () => {
@@ -59,7 +65,14 @@ describe("toolCallDetail", () => {
   });
 
   it("summarises Pi path-based file tools", () => {
-    expect(toolCallDetail("read", { path: "gomode/docs/SERVER_LIBRARY.md" })).toBe("SERVER_LIBRARY.md");
-    expect(toolCallDetail("edit", { path: "gomode/docs/SERVER_LIBRARY.md", edits: [{ oldText: "a", newText: "b" }] })).toBe("SERVER_LIBRARY.md");
+    expect(toolCallDetail("read", { path: "gomode/docs/SERVER_LIBRARY.md" })).toBe(
+      "SERVER_LIBRARY.md",
+    );
+    expect(
+      toolCallDetail("edit", {
+        path: "gomode/docs/SERVER_LIBRARY.md",
+        edits: [{ oldText: "a", newText: "b" }],
+      }),
+    ).toBe("SERVER_LIBRARY.md");
   });
 });

@@ -69,15 +69,18 @@ describe("TaskList", () => {
   let resize: ResizeObserverCallback;
 
   beforeEach(() => {
-    vi.stubGlobal("ResizeObserver", class ResizeObserverMock {
-      constructor(callback: ResizeObserverCallback) {
-        resize = callback;
-      }
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserverMock {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
 
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    });
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
       return 0;
@@ -117,7 +120,9 @@ describe("TaskList", () => {
 
     selectTask("2");
 
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" }));
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" }),
+    );
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
   });
 

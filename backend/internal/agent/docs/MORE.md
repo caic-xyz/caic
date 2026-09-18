@@ -7,16 +7,19 @@ roadmap, not a description of current behaviour.
 ## Capability Pattern (established)
 
 Capabilities are added without breaking the `WireFormat` interface (`WritePrompt`
-+ `ParseMessage`). Two pieces work together, using **compact** as the worked
-example:
+
+- `ParseMessage`). Two pieces work together, using **compact** as the worked
+  example:
 
 1. An **optional interface** on `WireFormat` carries the wire write:
+
    ```go
    // agent/agent.go
    type CompactCommand interface {
        WriteCompact(w io.Writer, instructions string, logW io.Writer) error
    }
    ```
+
    A backend opts in by implementing it; backends that don't are unaffected.
 
 2. The **`Backend` advertises** the capability to clients with a plain bool
@@ -31,18 +34,18 @@ plus a `Supports*` bool the UI can gate on.
 Wire mechanism per provider. `✅` = implemented in caic. `?` = needs
 investigation. `N/A` = not supported by provider.
 
-| Feature            | Claude Code              | Codex                       | OpenCode                     | Pi  |
-|--------------------|--------------------------|-----------------------------|------------------------------|-----|
-| Compact            | ✅ `/compact` msg        | ✅ `thread/compact/start`   | ✅ `/compact` prompt         | ✅  |
-| Context usage      | ✅ per-turn usage        | ✅ `tokenUsage/updated`     | ✅ `usage_update`            | ✅  |
-| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | ?   |
-| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | ?   |
-| Steer              | N/A                      | `turn/steer`                | N/A                          | ?   |
-| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | ?   |
-| Session resume     | `--resume`               | N/A                         | `unstable_resumeSession`     | ?   |
-| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | ?   |
-| Code review        | N/A                      | `review/start`              | N/A                          | ?   |
-| Rollback           | N/A                      | `thread/rollback`           | N/A                          | ?   |
+| Feature        | Claude Code        | Codex                     | OpenCode                 | Pi  |
+| -------------- | ------------------ | ------------------------- | ------------------------ | --- |
+| Compact        | ✅ `/compact` msg  | ✅ `thread/compact/start` | ✅ `/compact` prompt     | ✅  |
+| Context usage  | ✅ per-turn usage  | ✅ `tokenUsage/updated`   | ✅ `usage_update`        | ✅  |
+| Interrupt      | `ControlInterrupt` | `turn/interrupt`          | `session/cancel`         | ?   |
+| Model switch   | `ControlSetModel`  | `turn/start` model param  | `session/set_model`      | ?   |
+| Steer          | N/A                | `turn/steer`              | N/A                      | ?   |
+| Session fork   | N/A                | `thread/fork`             | `unstable_forkSession`   | ?   |
+| Session resume | `--resume`         | N/A                       | `unstable_resumeSession` | ?   |
+| Mode switch    | N/A                | N/A                       | `session/set_mode`       | ?   |
+| Code review    | N/A                | `review/start`            | N/A                      | ?   |
+| Rollback       | N/A                | `thread/rollback`         | N/A                      | ?   |
 
 Context usage is surfaced today via per-turn token counts plus the model's
 context-window limit (`ContextWindowLimit`), not the provider-specific

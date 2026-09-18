@@ -43,7 +43,7 @@ archives:
       - src: '{{ if eq .Os "darwin" }}contrib/com.caic.caic.plist{{ end }}'
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 changelog:
   use: git

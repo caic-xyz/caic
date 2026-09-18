@@ -57,9 +57,7 @@ describe("DiffDetail", () => {
 
     fireEvent.click(row);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Loading file diff...",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("Loading file diff...");
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
     expect(screen.getByText("Commit subject")).toBeInTheDocument();
     expect(getTaskFileDiffMock).toHaveBeenCalledWith(
@@ -87,13 +85,7 @@ describe("DiffDetail", () => {
 
     expect(await screen.findByText("+new")).toBeInTheDocument();
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
-    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
-      "task-1",
-      "0",
-      "",
-      "working.go",
-      "old.go",
-    );
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "0", "", "working.go", "old.go");
   });
 
   it("selects a file from the second repository by index", async () => {
@@ -123,13 +115,7 @@ describe("DiffDetail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "second.go" }));
 
     expect(await screen.findByText("+second")).toBeInTheDocument();
-    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
-      "task-1",
-      "1",
-      "",
-      "second.go",
-      "",
-    );
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "1", "", "second.go", "");
   });
 
   it("keeps retry focus during loading and restores it to the row", async () => {
@@ -147,9 +133,7 @@ describe("DiffDetail", () => {
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "patch unavailable",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("patch unavailable");
     const retryButton = screen.getByRole("button", {
       name: "Retry diff for committed.go",
     });
@@ -159,9 +143,7 @@ describe("DiffDetail", () => {
     expect(retryButton).toBeEnabled();
     expect(retryButton).toHaveAttribute("aria-disabled", "true");
     expect(retryButton).toHaveFocus();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Retrying file diff...",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("Retrying file diff...");
     resolveRetry({ diff: "@@ -1 +1 @@\n-old\n+retried" });
     expect(await screen.findByText("+retried")).toBeInTheDocument();
     await waitFor(() => expect(row).toHaveFocus());
@@ -203,13 +185,11 @@ describe("DiffDetail", () => {
     const refreshed = diffIndexFixture();
     refreshed.repositories[0].behind = 2;
     let resolveRefresh: (response: TaskDiffIndexResp) => void = () => undefined;
-    getTaskDiffIndexMock
-      .mockResolvedValueOnce(diffIndexFixture())
-      .mockReturnValueOnce(
-        new Promise((resolve) => {
-          resolveRefresh = resolve;
-        }),
-      );
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
     getTaskFileDiffMock.mockResolvedValueOnce({
       diff: "@@ -1 +1 @@\n-old\n+loaded",
     });
@@ -226,12 +206,11 @@ describe("DiffDetail", () => {
     expect(row).toHaveAttribute("aria-expanded", "true");
     resolveRefresh(refreshed);
 
-    expect(
-      await screen.findByText(/1 commit ahead · 2 behind/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "committed.go" }),
-    ).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByText(/1 commit ahead · 2 behind/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "committed.go" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     expect(screen.getByText("+loaded")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "committed.go" })).toHaveFocus();
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
@@ -258,25 +237,19 @@ describe("DiffDetail", () => {
     expect(await screen.findByText("Commit subject")).toBeInTheDocument();
 
     taskDiffCache.evictTask("task-1");
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Diff unavailable",
-    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Diff unavailable");
     expect(screen.queryByText("Commit subject")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "committed.go" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "committed.go" })).not.toBeInTheDocument();
   });
 
   it("keeps an expanded working patch visible while its replacement loads", async () => {
     let resolveIndex: (response: TaskDiffIndexResp) => void = () => undefined;
     let resolvePatch: (response: FileDiffResp) => void = () => undefined;
-    getTaskDiffIndexMock
-      .mockResolvedValueOnce(diffIndexFixture())
-      .mockReturnValueOnce(
-        new Promise((resolve) => {
-          resolveIndex = resolve;
-        }),
-      );
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveIndex = resolve;
+      }),
+    );
     getTaskFileDiffMock
       .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+first" })
       .mockReturnValueOnce(
@@ -294,13 +267,9 @@ describe("DiffDetail", () => {
     taskDiffCache.invalidate("task-1");
     expect(screen.getByText("+first")).toBeInTheDocument();
     resolveIndex(diffIndexFixture());
-    expect(
-      await screen.findByText("Updating file diff..."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Updating file diff...")).toBeInTheDocument();
     expect(screen.getByText("+first")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "old.go → working.go" })).toBe(
-      row,
-    );
+    expect(screen.getByRole("button", { name: "old.go → working.go" })).toBe(row);
     resolvePatch({ diff: "@@ -1 +1 @@\n-old\n+second" });
     expect(await screen.findByText("+second")).toBeInTheDocument();
     expect(screen.queryByText("+first")).not.toBeInTheDocument();
@@ -317,15 +286,11 @@ describe("DiffDetail", () => {
       )
       .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "old.go → working.go" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "old.go → working.go" }));
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
 
     taskDiffCache.invalidate("task-1");
-    await vi.waitFor(() =>
-      expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2),
-    );
+    await vi.waitFor(() => expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2));
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
     resolveFirstPatch({ diff: "@@ -1 +1 @@\n-old\n+obsolete" });
 
@@ -351,9 +316,7 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
 
     taskDiffCache.invalidate("task-1");
-    await vi.waitFor(() =>
-      expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2),
-    );
+    await vi.waitFor(() => expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2));
     fireEvent.click(row);
     expect(row).toHaveAttribute("aria-expanded", "false");
     resolveFirstPatch({ diff: "@@ -1 +1 @@\n-old\n+obsolete" });
@@ -373,15 +336,9 @@ describe("DiffDetail", () => {
     getTaskFileDiffMock.mockRejectedValueOnce(err);
 
     render(() => (
-      <DiffDetail
-        taskId="task-1"
-        taskPath="/task/task-1"
-        onTaskRefreshError={onTaskRefreshError}
-      />
+      <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />
     ));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "committed.go" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "committed.go" }));
 
     await vi.waitFor(() => {
       expect(onTaskRefreshError).toHaveBeenCalledWith("task-1", err);
@@ -455,30 +412,23 @@ describe("DiffDetail", () => {
         },
       ],
     });
-    getTaskFileDiffMock.mockImplementation(
-      async (_id, _repository, _commit, path) => ({
-        diff:
-          path === "frontend/view.tsx"
-            ? "@@ -1 +1 @@\n-old view\n+new view"
-            : "@@ -1 +1,2 @@\n-old working\n+new working\n+line",
-      }),
-    );
+    getTaskFileDiffMock.mockImplementation(async (_id, _repository, _commit, path) => ({
+      diff:
+        path === "frontend/view.tsx"
+          ? "@@ -1 +1 @@\n-old view\n+new view"
+          : "@@ -1 +1,2 @@\n-old working\n+new working\n+line",
+    }));
 
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("origin/main")).toBeInTheDocument();
-    expect(screen.getByText(/2 commits ahead/)).toHaveTextContent(
-      "2 commits ahead · 1 behind",
-    );
+    expect(screen.getByText(/2 commits ahead/)).toHaveTextContent("2 commits ahead · 1 behind");
     expect(screen.getByText("Commits ahead (2)")).toBeInTheDocument();
     expect(screen.getByText("12345678")).toHaveClass(styles.commitSha);
-    expect(screen.getByText("2026-09-03")).toHaveAttribute(
-      "datetime",
-      "2026-09-03",
+    expect(screen.getByText("2026-09-03")).toHaveAttribute("datetime", "2026-09-03");
+    expect(screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3")).toHaveClass(
+      styles.commitDecorations,
     );
-    expect(
-      screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3"),
-    ).toHaveClass(styles.commitDecorations);
     expect(screen.getByText("Surface git status")).toBeInTheDocument();
     expect(screen.getByText("+10")).toHaveClass(styles.added);
     expect(screen.getAllByText("1 file changed")).toHaveLength(2);
@@ -507,14 +457,10 @@ describe("DiffDetail", () => {
   it("retains complete long repository values", async () => {
     const branch = "feature/surface-complete-container-repository-status";
     const upstream = "origin/feature/with-a-very-long-upstream-branch-name";
-    const subject =
-      "Describe every committed file without truncating the complete commit subject";
-    const committedPath =
-      "frontend/src/components/repository-status/VeryLongCommittedFilename.tsx";
-    const originalPath =
-      "frontend/src/components/repository-status/VeryLongOriginalFilename.tsx";
-    const uncommittedPath =
-      "frontend/src/components/repository-status/VeryLongRenamedFilename.tsx";
+    const subject = "Describe every committed file without truncating the complete commit subject";
+    const committedPath = "frontend/src/components/repository-status/VeryLongCommittedFilename.tsx";
+    const originalPath = "frontend/src/components/repository-status/VeryLongOriginalFilename.tsx";
+    const uncommittedPath = "frontend/src/components/repository-status/VeryLongRenamedFilename.tsx";
     getTaskDiffIndexMock.mockResolvedValueOnce({
       repositories: [
         {
@@ -560,22 +506,11 @@ describe("DiffDetail", () => {
     const committedFile = screen.getByTitle(committedPath);
     expect(committedFile).toHaveAttribute("title", committedPath);
     expect(committedFile).toHaveAccessibleName(committedPath);
-    expect(
-      committedFile.querySelector(`.${styles.pathValue}`),
-    ).toHaveTextContent(committedPath);
-    const renamedFile = screen.getByTitle(
-      `${originalPath} → ${uncommittedPath}`,
-    );
-    expect(renamedFile).toHaveAttribute(
-      "title",
-      `${originalPath} → ${uncommittedPath}`,
-    );
-    expect(renamedFile.querySelectorAll(`.${styles.pathValue}`)).toHaveLength(
-      2,
-    );
-    expect(renamedFile).toHaveTextContent(
-      `${originalPath} → ${uncommittedPath}`,
-    );
+    expect(committedFile.querySelector(`.${styles.pathValue}`)).toHaveTextContent(committedPath);
+    const renamedFile = screen.getByTitle(`${originalPath} → ${uncommittedPath}`);
+    expect(renamedFile).toHaveAttribute("title", `${originalPath} → ${uncommittedPath}`);
+    expect(renamedFile.querySelectorAll(`.${styles.pathValue}`)).toHaveLength(2);
+    expect(renamedFile).toHaveTextContent(`${originalPath} → ${uncommittedPath}`);
   });
 });
 
@@ -632,18 +567,14 @@ describe("elidePathAtBoundary", () => {
   });
 
   it("keeps the complete path when it fits", () => {
-    expect(
-      elidePathAtBoundary("backend/internal/types.go", 40, measureCharacters),
-    ).toBe("backend/internal/types.go");
+    expect(elidePathAtBoundary("backend/internal/types.go", 40, measureCharacters)).toBe(
+      "backend/internal/types.go",
+    );
   });
 
   it("keeps the complete basename when only the basename fits", () => {
     expect(
-      elidePathAtBoundary(
-        "backend/internal/server/oauth_handlers_test.go",
-        22,
-        measureCharacters,
-      ),
+      elidePathAtBoundary("backend/internal/server/oauth_handlers_test.go", 22, measureCharacters),
     ).toBe("oauth_handlers_test.go");
   });
 });
@@ -708,12 +639,8 @@ describe("annotateDiffLines", () => {
 
     const lines = annotateDiffLines(diff);
 
-    expect(lines.find((line) => line.text === "--- old heading")?.kind).toBe(
-      "deleted",
-    );
-    expect(lines.find((line) => line.text === "+++ new heading")?.kind).toBe(
-      "added",
-    );
+    expect(lines.find((line) => line.text === "--- old heading")?.kind).toBe("deleted");
+    expect(lines.find((line) => line.text === "+++ new heading")?.kind).toBe("added");
   });
 
   it("marks matching added and deleted blocks as moved", () => {
@@ -734,9 +661,7 @@ describe("annotateDiffLines", () => {
 
     const lines = annotateDiffLines(diff);
 
-    expect(lines.filter((line) => line.kind === "movedDeleted")).toHaveLength(
-      3,
-    );
+    expect(lines.filter((line) => line.kind === "movedDeleted")).toHaveLength(3);
     expect(lines.filter((line) => line.kind === "movedAdded")).toHaveLength(3);
   });
 
@@ -753,11 +678,9 @@ describe("annotateDiffLines", () => {
 
     const lines = annotateDiffLines(diff);
 
-    expect(
-      lines.some(
-        (line) => line.kind === "movedDeleted" || line.kind === "movedAdded",
-      ),
-    ).toBe(false);
+    expect(lines.some((line) => line.kind === "movedDeleted" || line.kind === "movedAdded")).toBe(
+      false,
+    );
   });
 
   it("marks paired added and deleted lines that only change whitespace", () => {
@@ -775,21 +698,17 @@ describe("annotateDiffLines", () => {
 
     const lines = annotateDiffLines(diff);
 
+    expect(lines.find((line) => line.text === "-const value = alpha + beta;")?.whitespaceOnly).toBe(
+      true,
+    );
     expect(
-      lines.find((line) => line.text === "-const value = alpha + beta;")
-        ?.whitespaceOnly,
+      lines.find((line) => line.text === "+const value = alpha  + beta;")?.whitespaceOnly,
     ).toBe(true);
     expect(
-      lines.find((line) => line.text === "+const value = alpha  + beta;")
-        ?.whitespaceOnly,
-    ).toBe(true);
-    expect(
-      lines.find((line) => line.text === "-const changedText = alpha;")
-        ?.whitespaceOnly,
+      lines.find((line) => line.text === "-const changedText = alpha;")?.whitespaceOnly,
     ).toBeUndefined();
     expect(
-      lines.find((line) => line.text === "+const changedText = beta;")
-        ?.whitespaceOnly,
+      lines.find((line) => line.text === "+const changedText = beta;")?.whitespaceOnly,
     ).toBeUndefined();
   });
 
@@ -816,9 +735,7 @@ describe("annotateDiffLines", () => {
       "+}",
     ].join("\n");
 
-    const movedDeleted = annotateDiffLines(diff).filter(
-      (line) => line.kind === "movedDeleted",
-    );
+    const movedDeleted = annotateDiffLines(diff).filter((line) => line.kind === "movedDeleted");
 
     expect(movedDeleted[0].movedVariant).toBe(0);
     expect(movedDeleted[3].movedVariant).toBe(1);
@@ -847,11 +764,7 @@ describe("splitDiff", () => {
     const files = splitDiff(raw);
 
     expect(files).toHaveLength(2);
-    expect(
-      files[0].lines.filter((line) => line.kind === "movedDeleted"),
-    ).toHaveLength(3);
-    expect(
-      files[1].lines.filter((line) => line.kind === "movedAdded"),
-    ).toHaveLength(3);
+    expect(files[0].lines.filter((line) => line.kind === "movedDeleted")).toHaveLength(3);
+    expect(files[1].lines.filter((line) => line.kind === "movedAdded")).toHaveLength(3);
   });
 });

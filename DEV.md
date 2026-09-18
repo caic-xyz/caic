@@ -103,9 +103,9 @@ reattach the backend by restarting the server — the relay is alive and
 
 ### Common Failure Modes
 
-| Symptom | Likely Cause | Recovery |
-|---------|-------------|----------|
-| Socket exists but PID stale | Agent subprocess crashed, daemon still alive | Kill stale pid, `rm -f /tmp/caic-relay/relay.sock`, restart relay |
-| No socket, container running | Relay daemon died (OOM, crash) | Check `relay.log`, revive the task |
-| Relay alive but attach fails | Race between check and attach | Backend automatically falls back to `--resume` |
-| Graceful stop times out | Agent subprocess ignores SIGINT/SIGTERM | Relay escalates to SIGKILL; check `relay.log` for the shutdown watchdog trace |
+| Symptom                      | Likely Cause                                 | Recovery                                                                      |
+| ---------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------- |
+| Socket exists but PID stale  | Agent subprocess crashed, daemon still alive | Kill stale pid, `rm -f /tmp/caic-relay/relay.sock`, restart relay             |
+| No socket, container running | Relay daemon died (OOM, crash)               | Check `relay.log`, revive the task                                            |
+| Relay alive but attach fails | Race between check and attach                | Backend automatically falls back to `--resume`                                |
+| Graceful stop times out      | Agent subprocess ignores SIGINT/SIGTERM      | Relay escalates to SIGKILL; check `relay.log` for the shutdown watchdog trace |

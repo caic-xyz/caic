@@ -1,11 +1,5 @@
 // E2E tests for ExitPlanMode "Clear and execute plan" button and AskUserQuestion card.
-import {
-  test,
-  expect,
-  waitForTaskState,
-  fillContentEditable,
-  type APIClient,
-} from "../helpers";
+import { test, expect, waitForTaskState, fillContentEditable, type APIClient } from "../helpers";
 
 // Submit a task via the UI and poll until the task ID is available via the API.
 async function submitAndGetId(
@@ -25,7 +19,11 @@ async function submitAndGetId(
   return taskId;
 }
 
-test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, api, uniquePrompt }) => {
+test("FAKE_PLAN: clear-plan button appears and restarts task", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
   await page.goto("/");
 
   // Wait for repos to load.
@@ -50,14 +48,21 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   await expect(page.getByTestId("plan-content")).toBeVisible();
 
   // Fill in a non-empty prompt so restart doesn't try to read the container plan file.
-  await fillContentEditable(page.getByTestId("task-detail-form").getByRole("textbox", { name: "Send message to agent..." }), "execute now");
+  await fillContentEditable(
+    page.getByTestId("task-detail-form").getByRole("textbox", { name: "Send message to agent..." }),
+    "execute now",
+  );
 
   // Click the button; the task restarts and settles back to waiting.
   await clearBtn.click();
   await waitForTaskState(api, taskId, "waiting", 20_000);
 });
 
-test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({ page, api, uniquePrompt }) => {
+test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
   await page.goto("/");
 
   // Wait for repos to load.
@@ -89,7 +94,7 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
   // The ask turn is collapsed once the new turn completes, so we verify the
   // round-trip via the visible response rather than the collapsed submitted
   // answer div.
-  await expect(
-    page.getByText("A SQL query walks into a bar").first(),
-  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("A SQL query walks into a bar").first()).toBeVisible({
+    timeout: 10_000,
+  });
 });

@@ -44,8 +44,12 @@ const naturalCompare = (a: string, b: string) =>
 
 /** Sort tasks according to sidebar grouping: active by ID desc, stopped/purged by last state change desc. */
 export function sortTasks(tasks: Task[]): Task[] {
-  const stopped = tasks.filter((t) => t.state === "stopped" || t.state === "crashed" || t.state === "stopping");
-  const purged = tasks.filter((t) => t.state === "purged" || t.state === "failed" || t.state === "purging");
+  const stopped = tasks.filter(
+    (t) => t.state === "stopped" || t.state === "crashed" || t.state === "stopping",
+  );
+  const purged = tasks.filter(
+    (t) => t.state === "purged" || t.state === "failed" || t.state === "purging",
+  );
   const active = tasks.filter((t) => !stopped.includes(t) && !purged.includes(t));
 
   // Sort by length first (longer = larger numeric value), then lexicographically.
@@ -56,7 +60,8 @@ export function sortTasks(tasks: Task[]): Task[] {
     if (lc !== 0) return lc;
     return b.id > a.id ? 1 : b.id < a.id ? -1 : 0;
   };
-  const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
+  const stateUpdatedDesc = (a: Task, b: Task) =>
+    b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
   active.sort(idDesc);
   stopped.sort(stateUpdatedDesc);
   purged.sort(stateUpdatedDesc);
@@ -79,14 +84,15 @@ function ciDotURL(repo: Repo): string | undefined {
   if (repo.ci === "failure") {
     const failed = repo.ciChecks?.find((c) => NON_PASSING.has(c.conclusion));
     if (failed) {
-      if (isGitLab) return `https://gitlab.com/${failed.owner}/${failed.repo}/-/jobs/${failed.jobID}`;
-      if (failed.runID && failed.jobID) return `https://github.com/${failed.owner}/${failed.repo}/actions/runs/${failed.runID}/job/${failed.jobID}`;
+      if (isGitLab)
+        return `https://gitlab.com/${failed.owner}/${failed.repo}/-/jobs/${failed.jobID}`;
+      if (failed.runID && failed.jobID)
+        return `https://github.com/${failed.owner}/${failed.repo}/actions/runs/${failed.runID}/job/${failed.jobID}`;
     }
   }
   if (!repo.remoteURL) return undefined;
   return isGitLab ? repo.remoteURL + "/-/pipelines" : repo.remoteURL + "/actions";
 }
-
 
 export default function TaskList(props: TaskListProps) {
   let listRef: HTMLDivElement | undefined;
@@ -146,7 +152,8 @@ export default function TaskList(props: TaskListProps) {
       if (lc !== 0) return lc;
       return b.id > a.id ? 1 : b.id < a.id ? -1 : 0;
     };
-    const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
+    const stateUpdatedDesc = (a: Task, b: Task) =>
+      b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
     const sortedGroups = Object.values(groups).sort((a, b) => naturalCompare(a.repo, b.repo));
     for (const g of sortedGroups) {
       g.active.sort(idDesc);
@@ -229,14 +236,16 @@ export default function TaskList(props: TaskListProps) {
     onCleanup(() => document.removeEventListener("focusin", trackFocusedTask));
   });
 
-  const taskCards = () => Array.from(listRef?.querySelectorAll<HTMLElement>("[data-task-id]") ?? []);
+  const taskCards = () =>
+    Array.from(listRef?.querySelectorAll<HTMLElement>("[data-task-id]") ?? []);
 
   const scrollSelectedTaskIntoView = () => {
     const selectedId = props.selectedId;
     if (!selectedId || !props.sidebarOpen()) return;
     requestAnimationFrame(() => {
       if (props.selectedId !== selectedId || !props.sidebarOpen()) return;
-      taskCards().find((card) => card.dataset.taskId === selectedId)
+      taskCards()
+        .find((card) => card.dataset.taskId === selectedId)
         ?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
   };
@@ -255,7 +264,9 @@ export default function TaskList(props: TaskListProps) {
     requestAnimationFrame(() => {
       updateScrollFade();
       if (document.activeElement !== document.body || !lastFocusedTaskId) return;
-      taskCards().find((card) => card.dataset.taskId === lastFocusedTaskId)?.focus();
+      taskCards()
+        .find((card) => card.dataset.taskId === lastFocusedTaskId)
+        ?.focus();
     });
   });
 
@@ -270,61 +281,71 @@ export default function TaskList(props: TaskListProps) {
       if (!task) throw new Error(`Missing task ${id}`);
       return task;
     });
-    return <TaskCard
-      id={t().id}
-      title={t().title}
-      forkedFromTaskID={t().forkedFromTaskID}
-      parentTaskID={t().parentTaskID}
-      state={t().state}
-      stateUpdatedAt={t().stateUpdatedAt}
-      repos={t().repos}
-      harness={t().harness}
-		model={t().reportedModel || t().requestedModel}
-		effort={t().reportedEffort || t().requestedEffort}
-      costUSD={t().costUSD}
-      duration={t().duration}
-      numTurns={t().numTurns}
-      activeInputTokens={t().activeInputTokens}
-      activeCacheReadTokens={t().activeCacheReadTokens}
-      cumulativeInputTokens={t().cumulativeInputTokens}
-      cumulativeCacheCreationInputTokens={t().cumulativeCacheCreationInputTokens}
-      cumulativeCacheReadInputTokens={t().cumulativeCacheReadInputTokens}
-      cumulativeOutputTokens={t().cumulativeOutputTokens}
-      contextWindowLimit={t().contextWindowLimit}
-      cacheTTLSeconds={t().cacheTTLSeconds}
-      cacheExpiresAt={t().cacheExpiresAt}
-      turnStartedAt={t().turnStartedAt}
-      diffStat={t().diffStat}
-      error={t().error}
-      inPlanMode={t().inPlanMode}
-      runtime={t().runtime}
-      gitHubToken={t().gitHubToken}
-      forgePR={t().forgePR}
-      ciStatus={t().ciStatus}
-      ciChecks={t().ciChecks}
-      autoFixPR={props.autoFixPR()}
-      rateLimit={t().rateLimit}
-      selected={props.selectedId === t().id}
-      tabIndex={props.sidebarOpen() && (props.selectedId === t().id || (props.selectedId === null && firstVisibleTaskId() === t().id)) ? 0 : -1}
-      now={props.now}
-      onClick={() => props.onSelect(t().id)}
-      onStop={() => props.onStop(t().id)}
-      onPurge={() => props.onPurge(t().id)}
-      onRevive={() => props.onRevive(t().id)}
-      purgeModifierActive={purgeModifierActive()}
-      onFork={() => props.onFork(t().id)}
-      onQuotaRecovery={() => props.onQuotaRecovery(t().id)}
-      onError={props.onError}
-      supportsCompact={props.supportsCompact(t().harness)}
-      actionLoading={props.actionId() === t().id}
-      voiceNumber={props.voiceConnected() ? props.getTaskNumber(t().id) : undefined}
-    />;
+    return (
+      <TaskCard
+        id={t().id}
+        title={t().title}
+        forkedFromTaskID={t().forkedFromTaskID}
+        parentTaskID={t().parentTaskID}
+        state={t().state}
+        stateUpdatedAt={t().stateUpdatedAt}
+        repos={t().repos}
+        harness={t().harness}
+        model={t().reportedModel || t().requestedModel}
+        effort={t().reportedEffort || t().requestedEffort}
+        costUSD={t().costUSD}
+        duration={t().duration}
+        numTurns={t().numTurns}
+        activeInputTokens={t().activeInputTokens}
+        activeCacheReadTokens={t().activeCacheReadTokens}
+        cumulativeInputTokens={t().cumulativeInputTokens}
+        cumulativeCacheCreationInputTokens={t().cumulativeCacheCreationInputTokens}
+        cumulativeCacheReadInputTokens={t().cumulativeCacheReadInputTokens}
+        cumulativeOutputTokens={t().cumulativeOutputTokens}
+        contextWindowLimit={t().contextWindowLimit}
+        cacheTTLSeconds={t().cacheTTLSeconds}
+        cacheExpiresAt={t().cacheExpiresAt}
+        turnStartedAt={t().turnStartedAt}
+        diffStat={t().diffStat}
+        error={t().error}
+        inPlanMode={t().inPlanMode}
+        runtime={t().runtime}
+        gitHubToken={t().gitHubToken}
+        forgePR={t().forgePR}
+        ciStatus={t().ciStatus}
+        ciChecks={t().ciChecks}
+        autoFixPR={props.autoFixPR()}
+        rateLimit={t().rateLimit}
+        selected={props.selectedId === t().id}
+        tabIndex={
+          props.sidebarOpen() &&
+          (props.selectedId === t().id ||
+            (props.selectedId === null && firstVisibleTaskId() === t().id))
+            ? 0
+            : -1
+        }
+        now={props.now}
+        onClick={() => props.onSelect(t().id)}
+        onStop={() => props.onStop(t().id)}
+        onPurge={() => props.onPurge(t().id)}
+        onRevive={() => props.onRevive(t().id)}
+        purgeModifierActive={purgeModifierActive()}
+        onFork={() => props.onFork(t().id)}
+        onQuotaRecovery={() => props.onQuotaRecovery(t().id)}
+        onError={props.onError}
+        supportsCompact={props.supportsCompact(t().harness)}
+        actionLoading={props.actionId() === t().id}
+        voiceNumber={props.voiceConnected() ? props.getTaskNumber(t().id) : undefined}
+      />
+    );
   };
 
   return (
     <>
       <div
-        ref={(el) => { listRef = el; }}
+        ref={(el) => {
+          listRef = el;
+        }}
         class={`${styles.list} ${props.selectedId !== null ? styles.narrow : ""} ${props.sidebarOpen() ? "" : styles.hidden} ${scrolledFromTop() ? styles.scrolledFromTop : ""}`}
         data-testid="task-list"
         onScroll={updateScrollFade}
@@ -332,11 +353,19 @@ export default function TaskList(props: TaskListProps) {
         <div class={styles.header}>
           <h2>Tasks</h2>
           <Show when={props.selectedId !== null}>
-            <button class={styles.collapseBtn} onClick={() => props.setSidebarOpen(false)} title="Collapse sidebar"><LeftPanelClose width={20} height={20} /></button>
+            <button
+              class={styles.collapseBtn}
+              onClick={() => props.setSidebarOpen(false)}
+              title="Collapse sidebar"
+            >
+              <LeftPanelClose width={20} height={20} />
+            </button>
           </Show>
         </div>
         <Show when={props.tasks().length === 0}>
-          <p class={styles.placeholder}>{props.tasksLoading() || props.settledLoading() ? "Loading..." : "No tasks yet."}</p>
+          <p class={styles.placeholder}>
+            {props.tasksLoading() || props.settledLoading() ? "Loading..." : "No tasks yet."}
+          </p>
         </Show>
         <For each={groupRepos()}>
           {(repo) => {
@@ -348,56 +377,91 @@ export default function TaskList(props: TaskListProps) {
             const repoMeta = () => props.repos().find((r) => r.path === repo);
             const stoppedKey = `stopped-${repo}`;
             const purgedKey = `purged-${repo}`;
-            const selectedInStopped = () => !!props.selectedId && group().stopped.some((t) => t.id === props.selectedId);
-            const selectedInPurged = () => !!props.selectedId && group().purged.some((t) => t.id === props.selectedId);
+            const selectedInStopped = () =>
+              !!props.selectedId && group().stopped.some((t) => t.id === props.selectedId);
+            const selectedInPurged = () =>
+              !!props.selectedId && group().purged.some((t) => t.id === props.selectedId);
             return (
-            <div class={styles.repoGroup}>
-              <div class={styles.repoGroupHeader}>
-                {repo || "Other"}
-                <Show when={repoMeta()} keyed>
-                  {(meta) => (
-                    <Show when={meta.ci} keyed>
-                      {(status) => <>
-                        <CIDot status={status as CIStatus} checks={meta.ciChecks} href={ciDotURL(meta)} />
-                        <Show when={status === "failure" && props.autoFixCI()}>
-                          <span class={styles.autoBadge} title="Auto-fix CI enabled">auto</span>
-                        </Show>
-                        <Show when={status === "failure" && !props.autoFixCI() && props.onFixCI}>
-                          <button class={styles.fixCIBtn} title="Fix CI" onClick={(e) => { e.stopPropagation(); props.onFixCI?.(repo); }}>Fix CI</button>
-                        </Show>
-                      </>}
-                    </Show>
-                  )}
+              <div class={styles.repoGroup}>
+                <div class={styles.repoGroupHeader}>
+                  {repo || "Other"}
+                  <Show when={repoMeta()} keyed>
+                    {(meta) => (
+                      <Show when={meta.ci} keyed>
+                        {(status) => (
+                          <>
+                            <CIDot
+                              status={status as CIStatus}
+                              checks={meta.ciChecks}
+                              href={ciDotURL(meta)}
+                            />
+                            <Show when={status === "failure" && props.autoFixCI()}>
+                              <span class={styles.autoBadge} title="Auto-fix CI enabled">
+                                auto
+                              </span>
+                            </Show>
+                            <Show
+                              when={status === "failure" && !props.autoFixCI() && props.onFixCI}
+                            >
+                              <button
+                                class={styles.fixCIBtn}
+                                title="Fix CI"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  props.onFixCI?.(repo);
+                                }}
+                              >
+                                Fix CI
+                              </button>
+                            </Show>
+                          </>
+                        )}
+                      </Show>
+                    )}
+                  </Show>
+                </div>
+                <For each={group().active.map((task) => task.id)}>{renderTask}</For>
+
+                <Show when={group().stopped.length > 0}>
+                  <button class={styles.subGroupHeader} onClick={() => toggleExpanded(stoppedKey)}>
+                    {expanded().has(stoppedKey) || selectedInStopped() ? (
+                      <ArrowDropDown width={18} height={18} />
+                    ) : (
+                      <ArrowRight width={18} height={18} />
+                    )}
+                    Stopped ({group().stopped.length})
+                  </button>
+                  <Show when={expanded().has(stoppedKey) || selectedInStopped()}>
+                    <For each={group().stopped.map((task) => task.id)}>{renderTask}</For>
+                  </Show>
+                </Show>
+
+                <Show when={group().purged.length > 0}>
+                  <button class={styles.subGroupHeader} onClick={() => toggleExpanded(purgedKey)}>
+                    {expanded().has(purgedKey) || selectedInPurged() ? (
+                      <ArrowDropDown width={18} height={18} />
+                    ) : (
+                      <ArrowRight width={18} height={18} />
+                    )}
+                    Purged ({group().purged.length})
+                  </button>
+                  <Show when={expanded().has(purgedKey) || selectedInPurged()}>
+                    <For each={group().purged.map((task) => task.id)}>{renderTask}</For>
+                  </Show>
                 </Show>
               </div>
-              <For each={group().active.map((task) => task.id)}>{renderTask}</For>
-              
-              <Show when={group().stopped.length > 0}>
-                <button class={styles.subGroupHeader} onClick={() => toggleExpanded(stoppedKey)}>
-                  {expanded().has(stoppedKey) || selectedInStopped() ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
-                  Stopped ({group().stopped.length})
-                </button>
-                <Show when={expanded().has(stoppedKey) || selectedInStopped()}>
-                  <For each={group().stopped.map((task) => task.id)}>{renderTask}</For>
-                </Show>
-              </Show>
-
-              <Show when={group().purged.length > 0}>
-                <button class={styles.subGroupHeader} onClick={() => toggleExpanded(purgedKey)}>
-                  {expanded().has(purgedKey) || selectedInPurged() ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
-                  Purged ({group().purged.length})
-                </button>
-                <Show when={expanded().has(purgedKey) || selectedInPurged()}>
-                  <For each={group().purged.map((task) => task.id)}>{renderTask}</For>
-                </Show>
-              </Show>
-            </div>
             );
           }}
         </For>
       </div>
       <Show when={!props.sidebarOpen() && props.selectedId !== null}>
-        <button class={styles.expandBtn} onClick={() => props.setSidebarOpen(true)} title="Expand sidebar"><LeftPanelOpen width={20} height={20} /></button>
+        <button
+          class={styles.expandBtn}
+          onClick={() => props.setSidebarOpen(true)}
+          title="Expand sidebar"
+        >
+          <LeftPanelOpen width={20} height={20} />
+        </button>
       </Show>
     </>
   );

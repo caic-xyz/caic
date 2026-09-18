@@ -1,6 +1,14 @@
 // SolidJS task event timeline primitive: owns SSE lifecycle, replay buffering, and live publication.
 
-import { batch, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import {
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  untrack,
+  type Accessor,
+} from "solid-js";
 
 import type { EventMessage } from "@sdk/types.gen";
 
@@ -25,11 +33,13 @@ function isTerminalTaskState(state: string): boolean {
 }
 
 function shouldFlushBufferedEvent(ev: EventMessage): boolean {
-  return ev.kind === "result"
-    || ev.kind === "ask"
-    || ev.kind === "userInput"
-    || ev.kind === "error"
-    || isSessionBoundary(ev);
+  return (
+    ev.kind === "result" ||
+    ev.kind === "ask" ||
+    ev.kind === "userInput" ||
+    ev.kind === "error" ||
+    isSessionBoundary(ev)
+  );
 }
 
 export function createTaskEventTimeline(options: TaskEventTimelineOptions): TaskEventTimeline {

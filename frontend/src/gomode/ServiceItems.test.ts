@@ -6,37 +6,41 @@ import { initialServiceContext } from "./ServiceItems";
 
 describe("initialServiceContext", () => {
   it("formats references, attention, and omitted-item guidance", () => {
-    const context = initialServiceContext(JSON.stringify({
-      items: [
-        {
-          id: "1",
-          reference: "Task #3",
-          title: "Review plan",
-          state: "has_plan",
-          needsAttention: true,
-        },
-      ],
-      moreItemsHint: "Call tasks_list and follow nextCursor until absent.",
-      omittedCount: 4,
-    }));
+    const context = initialServiceContext(
+      JSON.stringify({
+        items: [
+          {
+            id: "1",
+            reference: "Task #3",
+            title: "Review plan",
+            state: "has_plan",
+            needsAttention: true,
+          },
+        ],
+        moreItemsHint: "Call tasks_list and follow nextCursor until absent.",
+        omittedCount: 4,
+      }),
+    );
 
     expect(context).toBe(
-      "Current service items:\n"
-      + "- Task #3: Review plan (has_plan, needs attention)\n"
-      + "- … 4 more items omitted. Call tasks_list and follow nextCursor until absent.",
+      "Current service items:\n" +
+        "- Task #3: Review plan (has_plan, needs attention)\n" +
+        "- … 4 more items omitted. Call tasks_list and follow nextCursor until absent.",
     );
   });
 
   it("bounds item count and reports locally omitted items", () => {
-    const context = initialServiceContext(JSON.stringify({
-      items: Array.from({ length: 25 }, (_, index) => ({
-        id: `${index}`,
-        title: `Item ${index}`,
-        state: "active",
-        needsAttention: false,
-      })),
-      moreItemsHint: "Use the list tool.",
-    }));
+    const context = initialServiceContext(
+      JSON.stringify({
+        items: Array.from({ length: 25 }, (_, index) => ({
+          id: `${index}`,
+          title: `Item ${index}`,
+          state: "active",
+          needsAttention: false,
+        })),
+        moreItemsHint: "Use the list tool.",
+      }),
+    );
 
     expect(context).toContain("Item 19");
     expect(context).not.toContain("Item 20");

@@ -28,8 +28,7 @@ export default function Button(props: ButtonProps) {
       {...rest}
     >
       <Show when={local.loading}>
-        <span class={styles.spinner} />
-        {" "}
+        <span class={styles.spinner} />{" "}
       </Show>
       {local.children}
     </button>

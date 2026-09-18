@@ -91,9 +91,7 @@ describe("StatsIcon", () => {
       <MemoryRouter>
         <Route
           path="*"
-          component={() => (
-            <StatsIcon href="/task/@task/stats" stats={[]} usage={usage} />
-          )}
+          component={() => <StatsIcon href="/task/@task/stats" stats={[]} usage={usage} />}
         />
       </MemoryRouter>
     ));
@@ -121,11 +119,7 @@ describe("StatsIcon", () => {
           <Route
             path="*"
             component={() => (
-              <StatsIcon
-                href="/task/@task/stats"
-                stats={longHistory}
-                usage={usage}
-              />
+              <StatsIcon href="/task/@task/stats" stats={longHistory} usage={usage} />
             )}
           />
         </MemoryRouter>
@@ -196,25 +190,16 @@ describe("StatsIcon", () => {
     expect(cpuChart).toBeInTheDocument();
     const cpuDots = Array.from(cpuChart.querySelectorAll("circle"));
     expect(
-      cpuDots.every(
-        (dot) =>
-          Number(dot.getAttribute("cy")) >= Number(dot.getAttribute("r")),
-      ),
+      cpuDots.every((dot) => Number(dot.getAttribute("cy")) >= Number(dot.getAttribute("r"))),
     ).toBe(true);
     const cpuScaleLabels = Array.from(
       cpuChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
       (label) => label.textContent,
     );
     expect(cpuScaleLabels).toEqual(["0%", "141%"]);
-    expect(
-      await findByLabelText("Memory utilization over time"),
-    ).toBeInTheDocument();
-    const rxChart = await findByLabelText(
-      "Network receive throughput over time",
-    );
-    const txChart = await findByLabelText(
-      "Network transmit throughput over time",
-    );
+    expect(await findByLabelText("Memory utilization over time")).toBeInTheDocument();
+    const rxChart = await findByLabelText("Network receive throughput over time");
+    const txChart = await findByLabelText("Network transmit throughput over time");
     expect(resources).toHaveTextContent("RX/s1.0 KB/s");
     expect(resources).toHaveTextContent("TX/s0 B/s");
     expect(resources).not.toHaveTextContent("network chart shows throughput");
@@ -230,15 +215,15 @@ describe("StatsIcon", () => {
         (label) => label.textContent,
       ),
     ).toEqual(["0 B/s", "1.0 KB/s"]);
-    expect(
-      rxChart.querySelector('[aria-label="y-axis tick label"]'),
-    ).toHaveAttribute("text-anchor", "end");
-    expect(
-      txChart.querySelector('[aria-label="y-axis tick label"]'),
-    ).toHaveAttribute("text-anchor", "start");
-    expect(
-      await findByLabelText("Writable disk usage over time"),
-    ).toBeInTheDocument();
+    expect(rxChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute(
+      "text-anchor",
+      "end",
+    );
+    expect(txChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute(
+      "text-anchor",
+      "start",
+    );
+    expect(await findByLabelText("Writable disk usage over time")).toBeInTheDocument();
     const titles = Array.from(
       resources.querySelectorAll("title"),
       (title) => title.textContent ?? "",
@@ -282,12 +267,7 @@ describe("StatsIcon", () => {
       },
     ];
     const { findByTestId } = render(() => (
-      <StatsContent
-        events={[]}
-        stats={irregularStats}
-        turns={[]}
-        usage={usage}
-      />
+      <StatsContent events={[]} stats={irregularStats} turns={[]} usage={usage} />
     ));
     const resources = await findByTestId("resource-charts");
     await user.click(within(resources).getByText("Exact samples (2)"));

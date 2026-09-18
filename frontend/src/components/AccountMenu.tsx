@@ -32,8 +32,17 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
           <Show when={hasAuth() && auth.user()}>
             <span class={styles.dropdownUser}>{user().username}</span>
           </Show>
-          <A class={styles.dropdownItem} href="/settings" role="menuitem" onClick={() => setMenuOpen(false)}>
-            <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
+          <A
+            class={styles.dropdownItem}
+            href="/settings"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+          >
+            <SettingsIcon
+              width="1em"
+              height="1em"
+              style={{ "vertical-align": "middle", "margin-right": "0.4em" }}
+            />
             Settings
           </A>
           <button
@@ -42,12 +51,24 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
             role="menuitem"
             title="Keyboard shortcuts (? or F1)"
             aria-keyshortcuts="? F1"
-            onClick={() => { setMenuOpen(false); props.onKeyboardShortcuts(); }}
+            onClick={() => {
+              setMenuOpen(false);
+              props.onKeyboardShortcuts();
+            }}
           >
             Keyboard shortcuts
           </button>
           <Show when={hasAuth() && auth.user()}>
-            <button class={styles.dropdownItem} role="menuitem" onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
+            <button
+              class={styles.dropdownItem}
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                void auth.logout();
+              }}
+            >
+              Sign out
+            </button>
           </Show>
         </div>
       }
@@ -60,12 +81,15 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
         aria-controls="account-menu"
         title={hasAuth() && auth.user() ? user().username : "Menu"}
       >
-        <Show when={hasAuth() && auth.user()} fallback={
-          <PersonIcon width="1.3em" height="1.3em" />
-        }>
-          <Show when={user().avatarURL} keyed fallback={
-            <span class={styles.avatarInitials}>{initials()}</span>
-          }>
+        <Show
+          when={hasAuth() && auth.user()}
+          fallback={<PersonIcon width="1.3em" height="1.3em" />}
+        >
+          <Show
+            when={user().avatarURL}
+            keyed
+            fallback={<span class={styles.avatarInitials}>{initials()}</span>}
+          >
             {(url) => <img src={url} alt={user().username} class={styles.avatarImg} />}
           </Show>
         </Show>

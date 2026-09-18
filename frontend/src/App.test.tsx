@@ -1,22 +1,10 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type {
-  Repo,
-  PreferencesResp,
-  HarnessInfo,
-  Task,
-  ISOTimestamp,
-} from "@sdk/types.gen";
+import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sdk/types.gen";
 
 // Minimal complete Task, matching what the backend now returns from createTask
 // so the app can seed its store and render the detail view immediately.
@@ -71,12 +59,10 @@ const fakeUsageESListeners: MessageListener[] = [];
 const fakeESOpenListeners: OpenListener[] = [];
 
 class FakeEventSource {
-  addEventListener = vi.fn(
-    (type: string, handler: MessageListener | OpenListener) => {
-      if (type === "message") fakeESListeners.push(handler as MessageListener);
-      if (type === "open") fakeESOpenListeners.push(handler as OpenListener);
-    },
-  );
+  addEventListener = vi.fn((type: string, handler: MessageListener | OpenListener) => {
+    if (type === "message") fakeESListeners.push(handler as MessageListener);
+    if (type === "open") fakeESOpenListeners.push(handler as OpenListener);
+  });
   close = vi.fn();
   onerror: ((e: Event) => void) | null = null;
 }
@@ -105,23 +91,17 @@ vi.mock("./api", () => ({
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
-  globalTaskEvents: vi.fn(
-    (handlers: { onMessage: (event: unknown) => void }) => {
-      const es = new FakeEventSource();
-      // Mirror the real client: parse the SSE payload before invoking the handler.
-      es.addEventListener("message", (e: { data: string }) =>
-        handlers.onMessage(JSON.parse(e.data)),
-      );
-      return es;
-    },
-  ),
-  globalUsageEvents: vi.fn(
-    (handlers: { onMessage: (event: unknown) => void }) => {
-      const es = new FakeEventSource();
-      fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
-      return es;
-    },
-  ),
+  globalTaskEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
+    const es = new FakeEventSource();
+    // Mirror the real client: parse the SSE payload before invoking the handler.
+    es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
+    return es;
+  }),
+  globalUsageEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
+    const es = new FakeEventSource();
+    fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
+    return es;
+  }),
   // Used by TaskDetail once a created task navigates into its detail route.
   taskEventStream: vi.fn(() => new FakeEventSource()),
   sendInput: vi.fn(),
@@ -192,9 +172,7 @@ import * as notifications from "./gomode/notifications";
 function renderApp(initial = "/") {
   const history = createMemoryHistory();
   history.set({ value: initial });
-  const utils = render(() => (
-    <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>
-  ));
+  const utils = render(() => <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>);
   return { history, ...utils };
 }
 
@@ -221,9 +199,7 @@ function chipPathValues(): string[] {
   const btns = screen
     .queryAllByTestId("repo-chips")[0]
     ?.querySelectorAll<HTMLButtonElement>("button[data-testid^='chip-label-']");
-  return Array.from(btns ?? []).map(
-    (b) => b.dataset["testid"]?.replace("chip-label-", "") ?? "",
-  );
+  return Array.from(btns ?? []).map((b) => b.dataset["testid"]?.replace("chip-label-", "") ?? "");
 }
 
 beforeEach(() => {
@@ -305,9 +281,7 @@ describe("App task list loading state", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [] });
 
-    await waitFor(() =>
-      expect(screen.getByText("No tasks yet.")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText("No tasks yet.")).toBeInTheDocument());
   });
 
   it("shows loading (not no tasks) for an empty list while the settled pass is in progress", async () => {
@@ -332,9 +306,7 @@ describe("App connection dot settled states", () => {
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
-    await waitFor(() =>
-      expect(dot().getAttribute("data-status")).toBe("connected"),
-    );
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
   });
 
   it("is yellow (settled-loading) while the pass is in progress and green after a completed status", async () => {
@@ -343,15 +315,11 @@ describe("App connection dot settled states", () => {
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
-    await waitFor(() =>
-      expect(dot().getAttribute("data-status")).toBe("settled-loading"),
-    );
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
 
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
-    await waitFor(() =>
-      expect(dot().getAttribute("data-status")).toBe("connected"),
-    );
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
   });
 
   it("is orange (settled-error) with the error tooltip after a failed status", async () => {
@@ -360,9 +328,7 @@ describe("App connection dot settled states", () => {
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
-    await waitFor(() =>
-      expect(dot().getAttribute("data-status")).toBe("settled-loading"),
-    );
+    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
 
     dispatchSSE({
       kind: "status",
@@ -462,9 +428,7 @@ describe("App task-list SSE recovery", () => {
     fireEvent.focus(link);
     await waitFor(() => expect(api.getTaskDiffIndex).toHaveBeenCalledTimes(1));
     fireEvent.click(link);
-    await waitFor(() =>
-      expect(history.get()).toBe("/task/@prefetched+prefetched/diff"),
-    );
+    await waitFor(() => expect(history.get()).toBe("/task/@prefetched+prefetched/diff"));
     expect(await screen.findByText("Repository changes")).toBeInTheDocument();
     expect(api.getTaskDiffIndex).toHaveBeenCalledTimes(1);
     taskDiffCache.evictTask("prefetched");
@@ -489,12 +453,8 @@ describe("App task-list SSE recovery", () => {
       },
     });
 
-    await waitFor(() =>
-      expect(screen.getByText("do something")).toBeInTheDocument(),
-    );
-    expect(
-      screen.queryByText("untrusted partial title"),
-    ).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("do something")).toBeInTheDocument());
+    expect(screen.queryByText("untrusted partial title")).not.toBeInTheDocument();
 
     dispatchSSE({
       kind: "upsert",
@@ -519,11 +479,9 @@ describe("App task-list SSE recovery", () => {
         "do something quota is available",
         { enabled: true },
       );
-      expect(notifications.notifyWaiting).toHaveBeenCalledWith(
-        "recovered",
-        "do something",
-        { enabled: true },
-      );
+      expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "do something", {
+        enabled: true,
+      });
     });
   });
 
@@ -543,9 +501,7 @@ describe("App task-list SSE recovery", () => {
       kind: "patch",
       patch: { id: "recovered", state: "running" },
     });
-    expect(
-      document.querySelector("[data-task-id='recovered']"),
-    ).not.toBeInTheDocument();
+    expect(document.querySelector("[data-task-id='recovered']")).not.toBeInTheDocument();
 
     dispatchSSE({
       kind: "patch",
@@ -562,16 +518,12 @@ describe("App task-list SSE recovery", () => {
     recoveryFetch.resolve(recoveredTask);
 
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-task-id='recovered']"),
-      ).toHaveTextContent("waiting"),
+      expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"),
     );
     expect(api.getTask).toHaveBeenCalledOnce();
-    expect(notifications.notifyWaiting).toHaveBeenCalledWith(
-      "recovered",
-      "authoritative task",
-      { enabled: true },
-    );
+    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", {
+      enabled: true,
+    });
     expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
       "recovered",
       "authoritative task quota is available",
@@ -595,9 +547,7 @@ describe("App task-list SSE recovery", () => {
     recoveryFetch.resolve(runningTask);
 
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-task-id='recovered']"),
-      ).toHaveTextContent("waiting"),
+      expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"),
     );
     expect(api.getTask).toHaveBeenCalledOnce();
   });
@@ -624,21 +574,15 @@ describe("App task-list SSE recovery", () => {
     });
 
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-task-id='recovered']"),
-      ).toHaveTextContent("waiting"),
+      expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"),
     );
-    expect(notifications.notifyWaiting).toHaveBeenCalledWith(
-      "recovered",
-      "authoritative task",
-      { enabled: true },
-    );
+    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", {
+      enabled: true,
+    });
 
     recoveryFetch.resolve(makeTask({ id: "recovered", state: "running" }));
     await Promise.resolve();
-    expect(
-      document.querySelector("[data-task-id='recovered']"),
-    ).toHaveTextContent("waiting");
+    expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting");
   });
 
   it("replays queued updates when recovery fetches fail", async () => {
@@ -658,9 +602,7 @@ describe("App task-list SSE recovery", () => {
     });
 
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-task-id='recovered']"),
-      ).toHaveTextContent("waiting"),
+      expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"),
     );
     expect(api.getTask).toHaveBeenCalledOnce();
   });
@@ -694,15 +636,9 @@ describe("App task-list SSE recovery", () => {
     expect(api.getTask).toHaveBeenNthCalledWith(1, "first");
     expect(api.getTask).toHaveBeenNthCalledWith(2, "second");
 
-    firstTask.resolve(
-      makeTask({ id: "first", title: "first authoritative task" }),
-    );
-    secondTask.resolve(
-      makeTask({ id: "second", title: "second authoritative task" }),
-    );
-    await waitFor(() =>
-      expect(screen.getByText("first authoritative task")).toBeInTheDocument(),
-    );
+    firstTask.resolve(makeTask({ id: "first", title: "first authoritative task" }));
+    secondTask.resolve(makeTask({ id: "second", title: "second authoritative task" }));
+    await waitFor(() => expect(screen.getByText("first authoritative task")).toBeInTheDocument());
     expect(screen.getByText("second authoritative task")).toBeInTheDocument();
   });
 });
@@ -764,9 +700,7 @@ describe("App keyboard shortcuts", () => {
     "describes the visible $targetTestId as the F3 target",
     async ({ harnesses, targetTestId, help }) => {
       const user = userEvent.setup();
-      vi.mocked(api.listHarnesses).mockResolvedValue(
-        harnesses as unknown as HarnessInfo[],
-      );
+      vi.mocked(api.listHarnesses).mockResolvedValue(harnesses as unknown as HarnessInfo[]);
       renderApp();
       await screen.findByTestId(targetTestId);
 
@@ -783,9 +717,7 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F1}");
 
-    expect(
-      screen.queryByText("F3", { selector: "kbd" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("F3", { selector: "kbd" })).not.toBeInTheDocument();
   });
 
   it("uses runtime as the F3 target when no harness or model selector is visible", async () => {
@@ -805,16 +737,10 @@ describe("App keyboard shortcuts", () => {
     const runtime = await screen.findByRole("combobox", { name: "Runtime" });
 
     await user.keyboard("{F1}");
-    expect(
-      screen.getByText("Focus runtime for the new task"),
-    ).toBeInTheDocument();
-    (
-      screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement
-    ).close();
+    expect(screen.getByText("Focus runtime for the new task")).toBeInTheDocument();
+    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
     await waitFor(() =>
-      expect(
-        screen.queryByTestId("keyboard-shortcuts-dialog"),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument(),
     );
 
     await user.keyboard("{F3}");
@@ -842,9 +768,7 @@ describe("App keyboard shortcuts", () => {
     renderApp("/task/@task1+do-something");
 
     const prompt = await screen.findByTestId("task-detail-prompt");
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     expect(prompt).not.toHaveFocus();
   });
@@ -857,12 +781,8 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F2}");
 
-    await waitFor(() =>
-      expect(screen.getByTestId("chip-label-repos/a")).toHaveFocus(),
-    );
-    expect(
-      screen.queryByRole("combobox", { name: "Manage repositories" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toHaveFocus());
+    expect(screen.queryByRole("combobox", { name: "Manage repositories" })).not.toBeInTheDocument();
   });
 
   it("focuses the repository add button with F2 when none are selected", async () => {
@@ -873,12 +793,8 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F2}");
 
-    await waitFor(() =>
-      expect(screen.getByTestId("add-repo-button")).toHaveFocus(),
-    );
-    expect(
-      screen.queryByRole("combobox", { name: "Manage repositories" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("add-repo-button")).toHaveFocus());
+    expect(screen.queryByRole("combobox", { name: "Manage repositories" })).not.toBeInTheDocument();
   });
 
   it("changes harness with F3 and returns focus to the prompt", async () => {
@@ -902,15 +818,11 @@ describe("App keyboard shortcuts", () => {
     prompt.focus();
 
     await user.keyboard("{F3}");
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Harness" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Harness" })).toHaveFocus());
     await user.keyboard("{ArrowDown}{Enter}");
 
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue(
-        "codex",
-      ),
+      expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue("codex"),
     );
     await waitFor(() => expect(prompt).toHaveFocus());
   });
@@ -929,9 +841,7 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F3}");
 
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Model" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Model" })).toHaveFocus());
   });
 
   it("navigates tasks with Shift+ArrowDown while editing the prompt", async () => {
@@ -946,9 +856,7 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
 
     await waitFor(() => expect(history.get()).toContain("@task1+"));
-    await waitFor(() =>
-      expect(screen.getByTestId("task-detail-prompt")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
   });
 
   it("navigates with shifted arrows after clicking task-detail content", async () => {
@@ -974,9 +882,7 @@ describe("App keyboard shortcuts", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
     const cards = await waitFor(() => {
-      const found = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-task-id]"),
-      );
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
       expect(found).toHaveLength(2);
       return found;
     });
@@ -987,25 +893,19 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{ArrowDown}");
     await waitFor(() => expect(history.get()).toContain(`@${secondId}+`));
     await waitFor(() =>
-      expect(
-        document.querySelector(`[data-task-id='${secondId}']`),
-      ).toHaveFocus(),
+      expect(document.querySelector(`[data-task-id='${secondId}']`)).toHaveFocus(),
     );
 
     await user.keyboard("{Shift>}{ArrowUp}{/Shift}");
     await waitFor(() => expect(history.get()).toContain(`@${firstId}+`));
     await waitFor(() =>
-      expect(
-        document.querySelector(`[data-task-id='${firstId}']`),
-      ).toHaveFocus(),
+      expect(document.querySelector(`[data-task-id='${firstId}']`)).toHaveFocus(),
     );
 
     await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
     await waitFor(() => expect(history.get()).toContain(`@${secondId}+`));
     await waitFor(() =>
-      expect(
-        document.querySelector(`[data-task-id='${secondId}']`),
-      ).toHaveFocus(),
+      expect(document.querySelector(`[data-task-id='${secondId}']`)).toHaveFocus(),
     );
     await user.keyboard("{ArrowUp}");
     await waitFor(() => expect(history.get()).toContain(`@${firstId}+`));
@@ -1018,9 +918,7 @@ describe("App keyboard shortcuts", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [task] });
     const card = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>(
-        "[data-task-id='task1']",
-      );
+      const found = document.querySelector<HTMLElement>("[data-task-id='task1']");
       if (!found) throw new Error("Task card was not rendered");
       return found;
     });
@@ -1033,9 +931,7 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(detailPrompt).toHaveFocus());
 
     await user.tab({ shift: true });
-    await waitFor(() =>
-      expect(document.querySelector("[data-task-id='task1']")).toHaveFocus(),
-    );
+    await waitFor(() => expect(document.querySelector("[data-task-id='task1']")).toHaveFocus());
   });
 
   it("keeps one visible task card in the Tab order", async () => {
@@ -1046,18 +942,14 @@ describe("App keyboard shortcuts", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
     const cards = await waitFor(() => {
-      const found = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-task-id]"),
-      );
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
       expect(found).toHaveLength(2);
       return found;
     });
     expect(cards.map((card) => card.tabIndex)).toEqual([0, -1]);
 
     history.set({ value: `/task/@${cards[1].dataset.taskId}+selected` });
-    await waitFor(() =>
-      expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0]),
-    );
+    await waitFor(() => expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0]));
 
     await user.click(screen.getByTitle("Collapse sidebar"));
     expect(cards.map((card) => card.tabIndex)).toEqual([-1, -1]);
@@ -1070,9 +962,7 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{Escape}");
 
-    await waitFor(() =>
-      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
   });
 
   it("returns Escape from a detail prompt to the new-task prompt", async () => {
@@ -1086,9 +976,7 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    await waitFor(() =>
-      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
   });
 
   it("returns Escape from a task card to the new-task prompt", async () => {
@@ -1097,9 +985,7 @@ describe("App keyboard shortcuts", () => {
     vi.mocked(api.getTask).mockResolvedValue(task);
     const { history } = renderApp("/task/@task1+do-something");
     const card = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>(
-        "[data-task-id='task1']",
-      );
+      const found = document.querySelector<HTMLElement>("[data-task-id='task1']");
       if (!found) throw new Error("Task card was not rendered");
       return found;
     });
@@ -1108,9 +994,7 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    await waitFor(() =>
-      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
   });
 
   it("does not navigate tasks while editing the prompt", async () => {
@@ -1125,9 +1009,7 @@ describe("App keyboard shortcuts", () => {
     await user.keyboard("{ArrowDown}r?");
 
     expect(prompt).toHaveFocus();
-    expect(
-      screen.queryByTestId("keyboard-shortcuts-dialog"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("keyboard-shortcuts-dialog")).not.toBeInTheDocument();
   });
 
   it("purges the selected task with Shift+Delete while editing its prompt", async () => {
@@ -1157,23 +1039,17 @@ describe("App keyboard shortcuts", () => {
 
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "delete", delete: "task1" });
-    await waitFor(() =>
-      expect(screen.getByTestId("prompt-input")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toBeInTheDocument());
 
     dispatchSSE({ kind: "upsert", upsert: makeTask() });
     const card = await waitFor(() => {
-      const next = document.querySelector<HTMLElement>(
-        "[data-task-id='task1']",
-      );
+      const next = document.querySelector<HTMLElement>("[data-task-id='task1']");
       if (!next) throw new Error("recreated task card was not rendered");
       return next;
     });
     await user.click(card);
 
-    expect(
-      await screen.findByTestId("task-detail-prompt"),
-    ).toBeEmptyDOMElement();
+    expect(await screen.findByTestId("task-detail-prompt")).toBeEmptyDOMElement();
   });
 
   it("requires confirmation when purging without a recovery delay", async () => {
@@ -1205,14 +1081,10 @@ describe("App keyboard shortcuts", () => {
     menu.focus();
 
     await user.keyboard("{ArrowDown}");
-    await waitFor(() =>
-      expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus());
 
     await user.keyboard("{ArrowDown}");
-    expect(
-      screen.getByRole("menuitem", { name: "Keyboard shortcuts" }),
-    ).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveFocus();
 
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
@@ -1226,24 +1098,18 @@ describe("App keyboard shortcuts", () => {
     prompt.focus();
     await user.keyboard("{F1}");
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
-    (
-      screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement
-    ).close();
+    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
     await waitFor(() => expect(prompt).toHaveFocus());
 
     const newTaskButton = screen.getByTestId("new-task-button");
     newTaskButton.focus();
     await user.keyboard("?");
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
-    (
-      screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement
-    ).close();
+    (screen.getByTestId("keyboard-shortcuts-dialog") as HTMLDialogElement).close();
     await waitFor(() => expect(newTaskButton).toHaveFocus());
 
     await user.click(screen.getByTitle("Menu"));
-    await user.click(
-      screen.getByRole("menuitem", { name: "Keyboard shortcuts" }),
-    );
+    await user.click(screen.getByRole("menuitem", { name: "Keyboard shortcuts" }));
     expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument();
   });
 });
@@ -1300,9 +1166,7 @@ describe("App repo chips: No repository", () => {
 
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [killed, running, asking] });
-    await waitFor(() =>
-      expect(screen.getByTestId("task-detail-prompt")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
     const selectedCard = await waitFor(() => {
       const card = document.querySelector<HTMLElement>("[data-task-id='a3']");
       if (!card) throw new Error("selected task card was not rendered");
@@ -1314,9 +1178,7 @@ describe("App repo chips: No repository", () => {
 
     expect(api.purgeTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toContain("/task/@a1+"));
-    await waitFor(() =>
-      expect(document.querySelector("[data-task-id='a1']")).toHaveFocus(),
-    );
+    await waitFor(() => expect(document.querySelector("[data-task-id='a1']")).toHaveFocus());
   });
 
   it("moves from a stopped selected task to the next alive task", async () => {
@@ -1342,8 +1204,7 @@ describe("App repo chips: No repository", () => {
       const button = document.querySelector<HTMLButtonElement>(
         "[data-task-id='a3'] [data-testid='stop-task']",
       );
-      if (!button)
-        throw new Error("selected task stop button was not rendered");
+      if (!button) throw new Error("selected task stop button was not rendered");
       return button;
     });
 
@@ -1351,9 +1212,7 @@ describe("App repo chips: No repository", () => {
 
     expect(api.stopTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toContain("/task/@a2+"));
-    await waitFor(() =>
-      expect(document.querySelector("[data-task-id='a2']")).toHaveFocus(),
-    );
+    await waitFor(() => expect(document.querySelector("[data-task-id='a2']")).toHaveFocus());
   });
 
   it("returns to the new-task prompt after purging the last alive selected task", async () => {
@@ -1371,9 +1230,7 @@ describe("App repo chips: No repository", () => {
 
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [killed] });
-    await waitFor(() =>
-      expect(screen.getByTestId("task-detail-prompt")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
     const selectedCard = await waitFor(() => {
       const card = document.querySelector<HTMLElement>("[data-task-id='a3']");
       if (!card) throw new Error("selected task card was not rendered");
@@ -1385,9 +1242,7 @@ describe("App repo chips: No repository", () => {
 
     expect(api.purgeTask).toHaveBeenCalledWith("a3");
     await waitFor(() => expect(history.get()).toBe("/"));
-    await waitFor(() =>
-      expect(screen.getByTestId("prompt-input")).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
   });
 
   it.each([
@@ -1420,9 +1275,7 @@ describe("App repo chips: No repository", () => {
     vi.mocked(api.getTaskDiffIndex).mockRejectedValue(apiError(403));
     const { history } = renderApp("/task/@task1+do-something/diff");
 
-    await waitFor(() =>
-      expect(screen.getByText("HTTP 403")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText("HTTP 403")).toBeInTheDocument());
     expect(history.get()).toBe("/task/@task1+do-something/diff");
   });
 
@@ -1538,9 +1391,7 @@ describe("App repo chips: No repository", () => {
     const effort = await screen.findByRole("combobox", { name: "Effort" });
     expect(effort).toHaveValue("");
     expect(screen.getByRole("option", { name: "low" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "high" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "high" })).not.toBeInTheDocument();
   });
 
   it("hides effort controls when a model reports none", async () => {
@@ -1563,9 +1414,7 @@ describe("App repo chips: No repository", () => {
     renderApp();
 
     await waitFor(() => expect(api.listHarnesses).toHaveBeenCalledOnce());
-    expect(
-      screen.queryByRole("combobox", { name: "Effort" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Effort" })).not.toBeInTheDocument();
   });
 
   it("opens the model picker on ArrowDown without navigating tasks", async () => {
@@ -1693,9 +1542,7 @@ describe("App repo chips: No repository", () => {
 
     renderApp();
 
-    await waitFor(() =>
-      expect(screen.getByTestId("voice-overlay")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId("voice-overlay")).toBeInTheDocument());
   });
 
   it("returns to the task list from the caic title", async () => {
@@ -1719,17 +1566,13 @@ describe("App repo chips: No repository", () => {
     await user.click(settingsLink);
 
     expect(history.get()).toBe("/settings");
-    expect(
-      screen.getByRole("heading", { name: "Settings" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   });
 
   it("renders settings as a routed page instead of a dialog", async () => {
     renderApp("/settings");
 
-    expect(
-      screen.getByRole("heading", { name: "Settings" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
   });
@@ -1755,16 +1598,10 @@ describe("App repo chips: No repository", () => {
     renderApp("/settings");
     await waitFor(() => expect(api.listHarnesses).toHaveBeenCalledOnce());
 
-    await user.click(
-      await screen.findByRole("button", { name: "Refresh opencode models" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Refresh opencode models" }));
 
-    await waitFor(() =>
-      expect(api.refreshHarness).toHaveBeenCalledWith("opencode", {}),
-    );
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "opencode models refreshed.",
-    );
+    await waitFor(() => expect(api.refreshHarness).toHaveBeenCalledWith("opencode", {}));
+    expect(await screen.findByRole("status")).toHaveTextContent("opencode models refreshed.");
   });
 
   it("saves the task purge delay", async () => {
@@ -1803,9 +1640,7 @@ describe("App repo chips: No repository", () => {
 
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
     expect(api.listOAuthGrants).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("heading", { name: "MCP clients" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "MCP clients" })).not.toBeInTheDocument();
   });
 
   it("loads and shows remote MCP grants when MCP OAuth is available", async () => {
@@ -1823,9 +1658,7 @@ describe("App repo chips: No repository", () => {
     renderApp("/settings");
 
     await waitFor(() => expect(api.listOAuthGrants).toHaveBeenCalledOnce());
-    expect(
-      screen.getByRole("heading", { name: "MCP clients" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP clients" })).toBeInTheDocument();
   });
 
   it("saves read-only custom mounts", async () => {
@@ -1902,9 +1735,7 @@ describe("App repo chips: No repository", () => {
       "placeholder",
       "~/.cache/example",
     );
-    expect(
-      screen.getByText("Uses ~/.cache/example by default"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Uses ~/.cache/example by default")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Container path")[1]).toHaveAttribute(
       "placeholder",
       "~/Documents",
@@ -1924,16 +1755,11 @@ describe("App repo chips: No repository", () => {
     await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
     await user.type(caches.getByLabelText("Host path"), "~/.cache/example");
     await user.clear(caches.getByLabelText("Container path"));
-    await user.type(
-      caches.getByLabelText("Container path"),
-      "/var/cache/example",
-    );
+    await user.type(caches.getByLabelText("Container path"), "/var/cache/example");
     await user.clear(caches.getByLabelText("Host path"));
     await user.type(caches.getByLabelText("Host path"), "~/.cache/other");
 
-    expect(caches.getByLabelText("Container path")).toHaveValue(
-      "/var/cache/example",
-    );
+    expect(caches.getByLabelText("Container path")).toHaveValue("/var/cache/example");
   });
 
   it("leaves the container path blank for a non-home host path", async () => {
@@ -1964,9 +1790,7 @@ describe("App repo chips: No repository", () => {
   it("shows mapping validation failures and sends only editable mapping fields", async () => {
     const user = userEvent.setup();
     vi.mocked(api.updatePreferences).mockRejectedValueOnce(
-      new Error(
-        "cacheMappings[0]: host path must be absolute or home-relative",
-      ),
+      new Error("cacheMappings[0]: host path must be absolute or home-relative"),
     );
     renderApp("/settings");
 
@@ -1982,9 +1806,7 @@ describe("App repo chips: No repository", () => {
     await waitFor(() =>
       expect(api.updatePreferences).toHaveBeenCalledWith({
         settings: expect.objectContaining({
-          cacheMappings: [
-            { hostPath: "cache", containerPath: "", enabled: true },
-          ],
+          cacheMappings: [{ hostPath: "cache", containerPath: "", enabled: true }],
         }),
       }),
     );
@@ -2069,14 +1891,12 @@ describe("App repo chips: No repository", () => {
       ],
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Context actions" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
-    expect(
-      screen.getByRole("button", { name: "Fork Model" }),
-    ).toHaveTextContent("openai-codex/gpt-5.6-terra");
+    expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent(
+      "openai-codex/gpt-5.6-terra",
+    );
   });
 
   it("generates an editable handoff prompt for a fork", async () => {
@@ -2085,31 +1905,20 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [
-        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
-      ],
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Context actions" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
     await user.click(screen.getByTestId("generate-handoff"));
 
     expect(api.getTaskHandoff).toHaveBeenCalledWith("task1");
     await waitFor(() =>
-      expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent(
-        "Generated handoff prompt",
-      ),
+      expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Generated handoff prompt"),
     );
     await user.clear(screen.getByTestId("fork-prompt-input"));
-    await user.type(
-      screen.getByTestId("fork-prompt-input"),
-      "Edited handoff prompt",
-    );
-    expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent(
-      "Edited handoff prompt",
-    );
+    await user.type(screen.getByTestId("fork-prompt-input"), "Edited handoff prompt");
+    expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("Edited handoff prompt");
   });
 
   it("keeps ordinary fork harness selection unrestricted and unranked", async () => {
@@ -2135,14 +1944,10 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [
-        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
-      ],
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Context actions" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const harnessSelect = screen.getByRole("combobox", {
@@ -2219,9 +2024,7 @@ describe("App repo chips: No repository", () => {
 
     await user.click(await screen.findByTestId("quota-recovery-detail-action"));
 
-    expect(
-      screen.getByRole("heading", { name: "Continue after quota limit" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Continue after quota limit" })).toBeInTheDocument();
     expect(api.getTaskHandoff).toHaveBeenCalledWith("task1");
     await waitFor(() =>
       expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent(
@@ -2229,10 +2032,7 @@ describe("App repo chips: No repository", () => {
       ),
     );
     await user.clear(screen.getByTestId("fork-prompt-input"));
-    await user.type(
-      screen.getByTestId("fork-prompt-input"),
-      "Edited quota recovery handoff",
-    );
+    await user.type(screen.getByTestId("fork-prompt-input"), "Edited quota recovery handoff");
     const harnessSelect = screen.getByRole("combobox", {
       name: "Fork Harness",
     });
@@ -2342,19 +2142,14 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
     await user.click(screen.getByRole("button", { name: "Fork Model" }));
     await user.click(
-      within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole(
-        "option",
-        { name: "claude-explicit" },
-      ),
+      within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole("option", {
+        name: "claude-explicit",
+      }),
     );
     dispatchUsageSSE(codexUsage("fresh"));
     await Promise.resolve();
-    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue(
-      "claude",
-    );
-    expect(
-      screen.getByRole("button", { name: "Fork Model" }),
-    ).toHaveTextContent("claude-explicit");
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
+    expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("claude-explicit");
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     dispatchUsageSSE(codexUsage("stale"));
@@ -2364,18 +2159,13 @@ describe("App repo chips: No repository", () => {
     });
     dispatchUsageSSE(codexUsage("fresh"));
     await Promise.resolve();
-    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue(
-      "claude",
-    );
-    expect(screen.getByRole("combobox", { name: "Fork Effort" })).toHaveValue(
-      "high",
-    );
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
+    expect(screen.getByRole("combobox", { name: "Fork Effort" })).toHaveValue("high");
   });
 
   it("does not apply a closed recovery handoff to a later ordinary fork of the same task", async () => {
     const user = userEvent.setup();
-    const staleHandoff =
-      deferred<Awaited<ReturnType<typeof api.getTaskHandoff>>>();
+    const staleHandoff = deferred<Awaited<ReturnType<typeof api.getTaskHandoff>>>();
     vi.mocked(api.getTaskHandoff).mockReturnValueOnce(staleHandoff.promise);
     vi.mocked(api.forkTask).mockResolvedValue(
       makeTask({
@@ -2410,10 +2200,7 @@ describe("App repo chips: No repository", () => {
     await Promise.resolve();
 
     expect(screen.getByTestId("fork-prompt-input")).toHaveTextContent("");
-    await user.type(
-      screen.getByTestId("fork-prompt-input"),
-      "Ordinary fork prompt",
-    );
+    await user.type(screen.getByTestId("fork-prompt-input"), "Ordinary fork prompt");
     await user.click(screen.getByTestId("fork-submit"));
 
     expect(api.forkTask).toHaveBeenCalledWith(
@@ -2430,14 +2217,10 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [
-        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
-      ],
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Context actions" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
@@ -2453,20 +2236,14 @@ describe("App repo chips: No repository", () => {
     await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
-      snapshot: [
-        makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] }),
-      ],
+      snapshot: [makeTask({ repos: [{ name: "repos/a", branch: "fork-source" }] })],
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Context actions" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Context actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Fork" }));
 
     const dialog = screen.getByTestId("fork-dialog");
-    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(
-      new DOMRect(100, 100, 400, 300),
-    );
+    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 400, 300));
     fireEvent.click(dialog, { clientX: 50, clientY: 50 });
 
     expect(screen.queryByTestId("fork-dialog")).not.toBeInTheDocument();
@@ -2499,9 +2276,7 @@ describe("App repo chips: No repository", () => {
     );
 
     await waitFor(() => expect(history.get()).toContain("/task/@task1"));
-    await expect(screen.getByTestId("state-badge")).toHaveTextContent(
-      "waiting",
-    );
+    await expect(screen.getByTestId("state-badge")).toHaveTextContent("waiting");
   });
 
   it("creates task without repos when no chips are selected", async () => {
@@ -2536,9 +2311,7 @@ describe("App repo chip ordering", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
-      expect(
-        screen.queryByTestId("chip-label-repos/a"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
     });
   });
 
@@ -2553,14 +2326,9 @@ describe("App repo chip ordering", () => {
 
     // Clone a new repo.
     await user.click(screen.getByTestId("clone-toggle"));
-    await user.type(
-      screen.getByTestId("clone-url"),
-      "https://github.com/org/new.git",
-    );
+    await user.type(screen.getByTestId("clone-url"), "https://github.com/org/new.git");
     await user.click(screen.getByTestId("clone-submit"));
-    await waitFor(() =>
-      expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
 
     // After clone, repos/new is the single selected chip (clone replaces selection).
     await waitFor(() => {
@@ -2578,9 +2346,7 @@ describe("App repo chip ordering", () => {
     const groupLabels = Array.from(dropdown.children)
       .filter((el) => el.tagName === "DIV")
       .map((el) => el.textContent);
-    const options = Array.from(dropdown.querySelectorAll("button")).map(
-      (b) => b.textContent,
-    );
+    const options = Array.from(dropdown.querySelectorAll("button")).map((b) => b.textContent);
 
     // repos/a is recent; repos/new is not — so Recent group should be present.
     expect(groupLabels).toContain("Recent");
@@ -2602,14 +2368,9 @@ describe("App repo chip ordering", () => {
 
     // Clone a new repo.
     await user.click(screen.getByTestId("clone-toggle"));
-    await user.type(
-      screen.getByTestId("clone-url"),
-      "https://github.com/org/new.git",
-    );
+    await user.type(screen.getByTestId("clone-url"), "https://github.com/org/new.git");
     await user.click(screen.getByTestId("clone-submit"));
-    await waitFor(() =>
-      expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
 
     // Submit a task for repos/new (it's the current chip after clone).
     await user.type(screen.getByTestId("prompt-input"), "do something");
@@ -2630,9 +2391,7 @@ describe("App repo chip ordering", () => {
     // repos/new should now appear before the "All repositories" divider (i.e. in Recent).
     const nodes = Array.from(dropdown.children);
     const recentLabelIdx = nodes.findIndex((n) => n.textContent === "Recent");
-    const allLabelIdx = nodes.findIndex(
-      (n) => n.textContent === "All repositories",
-    );
+    const allLabelIdx = nodes.findIndex((n) => n.textContent === "All repositories");
     const newOptionIdx = nodes.findIndex((n) => n.textContent === "repos/new");
     expect(newOptionIdx).toBeGreaterThan(recentLabelIdx);
     if (allLabelIdx >= 0) {

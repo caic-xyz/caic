@@ -43,7 +43,12 @@ export default function CloneRepoDialog(props: Props) {
           class={styles.input}
           data-testid="clone-url"
           autofocus
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
         />
       </label>
       <label class={styles.label}>
@@ -56,13 +61,35 @@ export default function CloneRepoDialog(props: Props) {
           disabled={props.loading}
           class={styles.input}
           data-testid="clone-path"
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
         />
       </label>
-      <Show when={props.error}><p class={styles.error}>{props.error}</p></Show>
+      <Show when={props.error}>
+        <p class={styles.error}>{props.error}</p>
+      </Show>
       <div class={styles.actions}>
-        <button type="button" class={styles.cancelBtn} onClick={() => props.onClose()} disabled={props.loading}>Cancel</button>
-        <Button type="button" onClick={submit} disabled={props.loading || !url().trim()} loading={props.loading} data-testid="clone-submit">Clone</Button>
+        <button
+          type="button"
+          class={styles.cancelBtn}
+          onClick={() => props.onClose()}
+          disabled={props.loading}
+        >
+          Cancel
+        </button>
+        <Button
+          type="button"
+          onClick={submit}
+          disabled={props.loading || !url().trim()}
+          loading={props.loading}
+          data-testid="clone-submit"
+        >
+          Clone
+        </Button>
       </div>
     </ModalDialog>
   );

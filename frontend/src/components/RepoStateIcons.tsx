@@ -28,47 +28,22 @@ export function repoStateLabel(state?: GitRepositoryState): string {
   if (!state) return "";
   const labels: string[] = [];
   if (state.changedFiles > 0)
-    labels.push(
-      countLabel(state.changedFiles, "changed file", "changed files"),
-    );
-  if (state.added > 0)
-    labels.push(countLabel(state.added, "addition", "additions"));
-  if (state.deleted > 0)
-    labels.push(countLabel(state.deleted, "deletion", "deletions"));
-  if (state.conflicts > 0)
-    labels.push(countLabel(state.conflicts, "conflict", "conflicts"));
+    labels.push(countLabel(state.changedFiles, "changed file", "changed files"));
+  if (state.added > 0) labels.push(countLabel(state.added, "addition", "additions"));
+  if (state.deleted > 0) labels.push(countLabel(state.deleted, "deletion", "deletions"));
+  if (state.conflicts > 0) labels.push(countLabel(state.conflicts, "conflict", "conflicts"));
   if (state.operation) labels.push(`${state.operation} in progress`);
   if (state.uncommittedFiles > 0)
-    labels.push(
-      countLabel(
-        state.uncommittedFiles,
-        "uncommitted file",
-        "uncommitted files",
-      ),
-    );
+    labels.push(countLabel(state.uncommittedFiles, "uncommitted file", "uncommitted files"));
   if (state.ahead > 0)
-    labels.push(
-      countLabel(
-        state.ahead,
-        "commit ahead of upstream",
-        "commits ahead of upstream",
-      ),
-    );
+    labels.push(countLabel(state.ahead, "commit ahead of upstream", "commits ahead of upstream"));
   if (state.behind > 0)
-    labels.push(
-      countLabel(
-        state.behind,
-        "commit behind upstream",
-        "commits behind upstream",
-      ),
-    );
+    labels.push(countLabel(state.behind, "commit behind upstream", "commits behind upstream"));
   return labels.join(", ");
 }
 
 // diffStatState adapts a task-level diff stat when live repository status is unavailable.
-export function diffStatState(
-  files?: readonly DiffFileStat[],
-): GitRepositoryState | undefined {
+export function diffStatState(files?: readonly DiffFileStat[]): GitRepositoryState | undefined {
   if (!files?.length) return undefined;
   return {
     name: "",
@@ -87,8 +62,7 @@ function DiffStats(props: { state?: GitRepositoryState }) {
   return (
     <Show when={(props.state?.changedFiles ?? 0) > 0}>
       <span class={styles.diffStats} data-testid="repo-state-diff-stats">
-        {props.state?.changedFiles}f{" "}
-        <span class={styles.added}>+{props.state?.added}</span>{" "}
+        {props.state?.changedFiles}f <span class={styles.added}>+{props.state?.added}</span>{" "}
         <span class={styles.deleted}>&minus;{props.state?.deleted}</span>
       </span>
     </Show>
@@ -187,12 +161,8 @@ export default function RepoStateIcons(props: Props) {
             ref={(element) => {
               markerRef = element;
             }}
-            aria-label={
-              props.state?.name ? `${props.state.name}: ${label()}` : label()
-            }
-            title={
-              props.state?.name ? `${props.state.name}: ${label()}` : label()
-            }
+            aria-label={props.state?.name ? `${props.state.name}: ${label()}` : label()}
+            title={props.state?.name ? `${props.state.name}: ${label()}` : label()}
             onFocus={() => props.onNavigateIntent?.()}
             onPointerEnter={() => props.onNavigateIntent?.()}
             onPointerDown={() => props.onNavigateIntent?.()}

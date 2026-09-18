@@ -9,5 +9,9 @@ export function Layout(props: { children?: JSX.Element }) {
 }
 
 export function DetailPane(props: { children?: JSX.Element }) {
-  return <div class={styles.detailPane} data-testid="detail-pane">{props.children}</div>;
+  return (
+    <div class={styles.detailPane} data-testid="detail-pane">
+      {props.children}
+    </div>
+  );
 }

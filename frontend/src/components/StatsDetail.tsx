@@ -6,10 +6,7 @@ import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?sol
 
 import type { EventMessage, EventStats } from "@sdk/types.gen";
 
-import {
-  IncrementalToolTimingTracker,
-  type ToolTimingSummary,
-} from "../taskStats";
+import { IncrementalToolTimingTracker, type ToolTimingSummary } from "../taskStats";
 import type { TurnTiming } from "../timing";
 import styles from "./StatsDetail.module.css";
 
@@ -85,9 +82,7 @@ function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
 
 export function StatsContent(props: StatsContentProps) {
   const toolTimingTracker = new IncrementalToolTimingTracker();
-  const toolSummaries = createMemo(() =>
-    toolTimingTracker.derive(props.events),
-  );
+  const toolSummaries = createMemo(() => toolTimingTracker.derive(props.events));
   const usage = createMemo<UsageDetails>(() => {
     const fromTurns = sumTurnUsage(props.turns);
     if (!props.usage) return fromTurns;
@@ -104,16 +99,12 @@ export function StatsContent(props: StatsContentProps) {
   const cacheHitRate = () => {
     const details = usage();
     const input =
-      details.inputTokens +
-      details.cacheWriteInputTokens +
-      details.cacheReadInputTokens;
+      details.inputTokens + details.cacheWriteInputTokens + details.cacheReadInputTokens;
     return input > 0 ? details.cacheReadInputTokens / input : 0;
   };
   const costPerMillionTokens = () => {
     const details = usage();
-    return details.totalTokens > 0
-      ? (details.costUSD * 1_000_000) / details.totalTokens
-      : 0;
+    return details.totalTokens > 0 ? (details.costUSD * 1_000_000) / details.totalTokens : 0;
   };
 
   return (
@@ -134,9 +125,7 @@ export function StatsContent(props: StatsContentProps) {
               title="Input tokens written to the provider prompt cache"
             >
               <span class={styles.usageLabel}>Cache write</span>
-              <strong>
-                {formatUsageTokens(usage().cacheWriteInputTokens)}
-              </strong>
+              <strong>{formatUsageTokens(usage().cacheWriteInputTokens)}</strong>
             </div>
             <div
               class={styles.usageMetric}
@@ -190,25 +179,14 @@ export function StatsContent(props: StatsContentProps) {
         <section class={styles.section} data-testid="task-analytics-charts">
           <h2 class={styles.sectionTitle}>Analytics</h2>
           <Suspense fallback={<div class={styles.noData}>Loading charts…</div>}>
-            <StatsCharts
-              stats={noStats}
-              turns={props.turns}
-              tools={toolSummaries()}
-            />
+            <StatsCharts stats={noStats} turns={props.turns} tools={toolSummaries()} />
           </Suspense>
         </section>
       </Show>
       <section class={styles.section}>
         <h2 class={styles.sectionTitle}>Resources</h2>
-        <Show
-          when={props.stats.length > 0}
-          fallback={<div class={styles.noData}>No data yet</div>}
-        >
-          <Suspense
-            fallback={
-              <div class={styles.noData}>Loading resource history…</div>
-            }
-          >
+        <Show when={props.stats.length > 0} fallback={<div class={styles.noData}>No data yet</div>}>
+          <Suspense fallback={<div class={styles.noData}>Loading resource history…</div>}>
             <StatsCharts stats={props.stats} turns={noTurns} tools={noTools} />
           </Suspense>
         </Show>

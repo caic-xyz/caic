@@ -3,9 +3,7 @@
 import { createApiClient as createMcpApiClient } from "@mcp-sdk/api.gen";
 
 const MCP_PROTOCOL_VERSION = "2026-07-28";
-const mcpApi = createMcpApiClient((path, init) =>
-  fetch(`/api/caic/v1/mcp${path}`, init),
-);
+const mcpApi = createMcpApiClient((path, init) => fetch(`/api/caic/v1/mcp${path}`, init));
 
 type JsonObject = Record<string, unknown>;
 
@@ -81,10 +79,7 @@ export async function mcpListTools(): Promise<McpToolDescriptor[]> {
   const tools: McpToolDescriptor[] = [];
   let cursor: string | undefined;
   do {
-    const result = (await mcpRequest(
-      "tools/list",
-      cursor === undefined ? {} : { cursor },
-    )) as {
+    const result = (await mcpRequest("tools/list", cursor === undefined ? {} : { cursor })) as {
       tools: McpToolDescriptor[];
       nextCursor?: string;
     };
@@ -97,16 +92,11 @@ export async function mcpListTools(): Promise<McpToolDescriptor[]> {
 }
 
 /** Read a text resource when its URI is advertised to this scoped client. */
-export async function mcpReadAdvertisedTextResource(
-  uri: string,
-): Promise<string | null> {
+export async function mcpReadAdvertisedTextResource(uri: string): Promise<string | null> {
   let cursor: string | undefined;
   let advertised = false;
   do {
-    const page = (await mcpRequest(
-      "resources/list",
-      cursor === undefined ? {} : { cursor },
-    )) as {
+    const page = (await mcpRequest("resources/list", cursor === undefined ? {} : { cursor })) as {
       resources: Array<{ uri: string }>;
       nextCursor?: string;
     };
@@ -126,10 +116,7 @@ export interface McpToolResult {
   isError?: boolean;
 }
 
-export async function mcpCallTool(
-  name: string,
-  args: JsonObject,
-): Promise<McpToolResult> {
+export async function mcpCallTool(name: string, args: JsonObject): Promise<McpToolResult> {
   const result = (await mcpRequest(
     "tools/call",
     { name, arguments: args },
@@ -140,8 +127,7 @@ export async function mcpCallTool(
     isError?: boolean;
   };
   return {
-    structuredContent:
-      result.structuredContent ?? textContentAsStructuredError(result.content),
+    structuredContent: result.structuredContent ?? textContentAsStructuredError(result.content),
     isError: result.isError,
   };
 }
@@ -184,9 +170,7 @@ function collectMcpParamHeaders(
 function encodeMcpHeaderValue(value: string): string {
   if (isPlainMcpHeaderValue(value)) return value;
   const bytes = new TextEncoder().encode(value);
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join(
-    "",
-  );
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   return `=?base64?${btoa(binary)}?=`;
 }
 

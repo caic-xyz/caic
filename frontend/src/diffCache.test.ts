@@ -16,8 +16,7 @@ const selector = (taskId: string, commit: string): FileDiffSelector => ({
 
 describe("DiffCache", () => {
   const loadIndex = vi.fn<(taskId: string) => Promise<TaskDiffIndexResp>>();
-  const loadPatch =
-    vi.fn<(selector: FileDiffSelector) => Promise<FileDiffResp>>();
+  const loadPatch = vi.fn<(selector: FileDiffSelector) => Promise<FileDiffResp>>();
   let cache: DiffCache;
 
   beforeEach(() => {
@@ -196,9 +195,7 @@ describe("DiffCache", () => {
     const unsubscribe = cache.subscribe("task-1", () => undefined);
     const oldRequest = cache.loadIndex("task-1");
     cache.evictTask("task-1");
-    await expect(cache.loadIndex("task-1")).rejects.toThrow(
-      "replacement unavailable",
-    );
+    await expect(cache.loadIndex("task-1")).rejects.toThrow("replacement unavailable");
 
     resolveOld({
       repositories: [

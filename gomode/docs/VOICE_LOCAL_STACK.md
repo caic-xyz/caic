@@ -317,7 +317,7 @@ Run runtime smoke on the target Mac and focus on target-specific measurements:
 - Configure `backend = "local-stack"` and omit `[local_stack.asr]` and
   `[local_stack.llm]` for the managed defaults.
 - Run `go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m
-  ./gomode/voicegateway/voicertc/`.
+./gomode/voicegateway/voicertc/`.
 - Confirm managed llama.cpp and KittenTTS setup succeeds; report setup problems
   separately from latency measurements.
 - Capture ASR latency, LLM turn latency, and tool-call behavior from the smoke

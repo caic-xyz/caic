@@ -139,9 +139,10 @@ export function toolCallDetail(name: string, input: Record<string, unknown>): st
     case "websearch":
       return typeof input.query === "string" ? input.query : "";
     case "notebookedit":
-      return typeof input.notebook_path === "string" ? input.notebook_path.replace(/^.*\//, "") : "";
+      return typeof input.notebook_path === "string"
+        ? input.notebook_path.replace(/^.*\//, "")
+        : "";
     default:
       return "";
   }
 }
-

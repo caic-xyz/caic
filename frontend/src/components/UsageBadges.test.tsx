@@ -4,7 +4,13 @@ import { describe, it, expect } from "vitest";
 import { render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 
-import { QuotaProviderAnthropic, QuotaProviderDeepSeek, type UsageResp, type ProviderQuota, type ISOTimestamp } from "@sdk/types.gen";
+import {
+  QuotaProviderAnthropic,
+  QuotaProviderDeepSeek,
+  type UsageResp,
+  type ProviderQuota,
+  type ISOTimestamp,
+} from "@sdk/types.gen";
 
 import UsageBadges from "./UsageBadges";
 import styles from "./UsageBadges.module.css";
@@ -19,7 +25,13 @@ function makeBalance(total: number, currency = "USD", granted?: number, toppedUp
   return { currency, total, granted, toppedUp };
 }
 
-function makeExtra(isEnabled: boolean, usedCredits: number, monthlyLimit: number, usedPct: number, currency = "USD") {
+function makeExtra(
+  isEnabled: boolean,
+  usedCredits: number,
+  monthlyLimit: number,
+  usedPct: number,
+  currency = "USD",
+) {
   return { currency, isEnabled, usedCredits, monthlyLimit, usedPct };
 }
 
@@ -53,8 +65,16 @@ describe("UsageBadges", () => {
 
   it("renders a pill per provider", () => {
     const u = makeUsage([
-      makeProvider({ provider: QuotaProviderAnthropic, label: "Anthropic", rateLimits: [makeRateLimit("5h", 45)] }),
-      makeProvider({ provider: QuotaProviderDeepSeek, label: "DeepSeek", balance: makeBalance(110, "CNY") }),
+      makeProvider({
+        provider: QuotaProviderAnthropic,
+        label: "Anthropic",
+        rateLimits: [makeRateLimit("5h", 45)],
+      }),
+      makeProvider({
+        provider: QuotaProviderDeepSeek,
+        label: "DeepSeek",
+        balance: makeBalance(110, "CNY"),
+      }),
     ]);
     const [usage] = createSignal<UsageResp>(u);
     const { container } = render(() => <UsageBadges usage={usage} now={now} />);
@@ -97,7 +117,7 @@ describe("UsageBadges", () => {
 
   describe("balance badges", () => {
     it("shows USD balance with $", () => {
-      const u = makeUsage([makeProvider({ balance: makeBalance(25.50, "USD") })]);
+      const u = makeUsage([makeProvider({ balance: makeBalance(25.5, "USD") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("$25.50");

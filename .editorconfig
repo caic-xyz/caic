@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Prettier wraps at this column. .prettierrc.json pins the same value so the formatter
+# does not depend on editor configuration. Go is formatted by gofmt, which does not wrap
+# by width, and Python keeps the 120-column budget from pyproject.toml.
+[*.{css,html,json,mjs,ts,tsx,yaml,yml}]
+max_line_length = 100
+
+[*.py]
+max_line_length = 120

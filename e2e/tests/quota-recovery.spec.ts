@@ -1,13 +1,7 @@
 // E2E tests for guided quota recovery on desktop and mobile task paths.
 
 import type { APIClient, Page } from "../helpers";
-import {
-  test,
-  expect,
-  createTaskAPI,
-  waitForTaskState,
-  fillContentEditable,
-} from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
 
 async function createQuotaBlockedTask(api: APIClient, prompt: string) {
   const id = await createTaskAPI(api, prompt);
@@ -24,7 +18,9 @@ async function finishRecovery(page: Page, api: APIClient, sourceID: string, prom
   const dialog = page.getByTestId("fork-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Continue after quota limit" })).toBeVisible();
-  await expect(page.getByTestId("fork-prompt-input")).toContainText("Continue this task after quota exhaustion");
+  await expect(page.getByTestId("fork-prompt-input")).toContainText(
+    "Continue this task after quota exhaustion",
+  );
   await fillContentEditable(page.getByTestId("fork-prompt-input"), prompt);
   await page.getByTestId("fork-submit").click();
 
@@ -41,9 +37,16 @@ async function finishRecovery(page: Page, api: APIClient, sourceID: string, prom
   return { forkedID, info };
 }
 
-test("desktop quota recovery continues in a fork and preserves the source", async ({ page, api, uniquePrompt }) => {
+test("desktop quota recovery continues in a fork and preserves the source", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const source = await createQuotaBlockedTask(api, uniquePrompt("FAKE_QUOTA_RECOVERY desktop source"));
+  const source = await createQuotaBlockedTask(
+    api,
+    uniquePrompt("FAKE_QUOTA_RECOVERY desktop source"),
+  );
   expect(source.rateLimit?.quotaGroup).toBe("claudecode");
   await page.goto(`/task/@${source.id}`);
 
@@ -74,9 +77,16 @@ test("desktop quota recovery continues in a fork and preserves the source", asyn
   expect(unchangedSource.runtime.id).toBe(source.runtime.id);
 });
 
-test("mobile quota recovery opens from task detail and navigates to the fork", async ({ page, api, uniquePrompt }) => {
+test("mobile quota recovery opens from task detail and navigates to the fork", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const source = await createQuotaBlockedTask(api, uniquePrompt("FAKE_QUOTA_RECOVERY mobile source"));
+  const source = await createQuotaBlockedTask(
+    api,
+    uniquePrompt("FAKE_QUOTA_RECOVERY mobile source"),
+  );
   await page.goto(`/task/@${source.id}`);
 
   await expect(page.getByTestId("task-list")).toBeHidden();

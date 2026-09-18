@@ -26,7 +26,9 @@ export default function Tooltip(props: Props) {
     }
   }
 
-  function dismiss() { setShow(false); }
+  function dismiss() {
+    setShow(false);
+  }
 
   createEffect(() => {
     if (show()) {
@@ -68,10 +70,7 @@ export default function Tooltip(props: Props) {
   const disabled = () => props.disabled || !props.text;
 
   return (
-    <Show
-      when={!disabled()}
-      fallback={<span class={wrapperClass()}>{props.children}</span>}
-    >
+    <Show when={!disabled()} fallback={<span class={wrapperClass()}>{props.children}</span>}>
       <span
         ref={wrapperRef}
         class={wrapperClass()}
@@ -82,12 +81,20 @@ export default function Tooltip(props: Props) {
         onFocus={() => setShow(true)}
         onBlur={() => setShow(false)}
         onClick={() => setShow((v) => !v)}
-        onKeyDown={(e) => { if (e.key === "Escape") setShow(false); if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShow((v) => !v); } }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setShow(false);
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setShow((v) => !v);
+          }
+        }}
       >
         {props.children}
         <Show when={show()}>
           <Portal>
-            <span ref={popupRef} class={styles.popup}>{props.text ?? ""}</span>
+            <span ref={popupRef} class={styles.popup}>
+              {props.text ?? ""}
+            </span>
           </Portal>
         </Show>
       </span>

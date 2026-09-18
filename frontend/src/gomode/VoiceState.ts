@@ -7,7 +7,9 @@ import type { TaskNumberMap } from "../TaskNumberMap";
 /** Whether a voice gateway session is currently connected. */
 export const [voiceConnected, setVoiceConnected] = createSignal(false);
 
-const [taskNumberMap, setTaskNumberMap] = createSignal<TaskNumberMap | null>(null, { equals: false });
+const [taskNumberMap, setTaskNumberMap] = createSignal<TaskNumberMap | null>(null, {
+  equals: false,
+});
 
 /** Publishes the active map after every voice task-number synchronization. */
 export function setVoiceTaskNumberMap(map: TaskNumberMap | null): void {

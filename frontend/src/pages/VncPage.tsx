@@ -24,7 +24,13 @@ export default function VncPage() {
         };
         return (
           <DetailPane>
-            <Suspense fallback={<div style={{ padding: "1rem", color: "var(--color-text-muted)" }}>Loading VNC viewer…</div>}>
+            <Suspense
+              fallback={
+                <div style={{ padding: "1rem", color: "var(--color-text-muted)" }}>
+                  Loading VNC viewer…
+                </div>
+              }
+            >
               <VncViewer
                 taskId={taskId}
                 repo={t()?.repos?.[0]?.name ?? ""}

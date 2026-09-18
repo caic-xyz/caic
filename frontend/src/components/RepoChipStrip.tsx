@@ -27,16 +27,12 @@ interface Props {
 
 export default function RepoChipStrip(props: Props) {
   // Branch options, loaded lazily per repo when its picker opens.
-  const [branchCache, setBranchCache] = createSignal<
-    Record<string, BranchInfo[]>
-  >({});
+  const [branchCache, setBranchCache] = createSignal<Record<string, BranchInfo[]>>({});
 
   function loadBranches(path: string) {
     listRepoBranches(path)
       .then((r) => setBranchCache((c) => ({ ...c, [path]: r.branches })))
-      .catch((err: unknown) =>
-        console.error("Failed to load repository branches", err),
-      );
+      .catch((err: unknown) => console.error("Failed to load repository branches", err));
   }
 
   function branchActionLabel(action: BranchInfo["action"]) {
@@ -54,8 +50,7 @@ export default function RepoChipStrip(props: Props) {
     return (
       <span class={styles.branchOption}>
         <span>
-          <span class={selectStyles.optionMuted}>Default</span> (
-          {remote ? `${remote}/` : ""}
+          <span class={selectStyles.optionMuted}>Default</span> ({remote ? `${remote}/` : ""}
           {branch})
         </span>{" "}
         {branchActionLabel("branch_off")}
@@ -70,9 +65,7 @@ export default function RepoChipStrip(props: Props) {
         <span class={styles.branchOption}>
           <span class={styles.branchOptionName}>
             {b.name}
-            {b.remote && (
-              <span class={selectStyles.optionMuted}> ({b.remote})</span>
-            )}
+            {b.remote && <span class={selectStyles.optionMuted}> ({b.remote})</span>}
           </span>{" "}
           {branchActionLabel(b.action)}
         </span>
@@ -82,9 +75,7 @@ export default function RepoChipStrip(props: Props) {
   }
 
   const addRepoOptions = (): SearchableOption[] => {
-    const selectedPaths = new Set(
-      props.selectedRepos().map((repo) => repo.path),
-    );
+    const selectedPaths = new Set(props.selectedRepos().map((repo) => repo.path));
     const recent = [...props.availableRecent()]
       .filter((repo) => !selectedPaths.has(repo.path))
       .sort((a, b) => (a.path < b.path ? -1 : 1))

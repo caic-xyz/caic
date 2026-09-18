@@ -100,13 +100,13 @@ ships a device-side app.
 
 ## Target Display Mapping
 
-| Service-neutral state | Halo display |
-|-----------------------|--------------|
-| Active | Spinner + concise status |
-| Attention needed | Yellow dot + hosted-service label |
-| Question | Question mark + hosted-service label |
-| Failed | Red X + error snippet |
-| Complete | Checkmark flash |
+| Service-neutral state | Halo display                         |
+| --------------------- | ------------------------------------ |
+| Active                | Spinner + concise status             |
+| Attention needed      | Yellow dot + hosted-service label    |
+| Question              | Question mark + hosted-service label |
+| Failed                | Red X + error snippet                |
+| Complete              | Checkmark flash                      |
 
 Halo's display is 256x256 and round. Keep text compact; use `TxSprite` for state
 badges and `TxPlainText` for labels.
@@ -121,11 +121,11 @@ badges and `TxPlainText` for labels.
 
 ## Reference Sources
 
-| Resource | Path |
-|----------|------|
-| Brilliant docs | `https://github.com/brilliantlabsAR/docs` |
-| Brilliant SDK (Dart) | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/flutter/packages` |
-| Brilliant SDK (Python) | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/python/packages` |
-| Halo emulator | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/python/packages/halo_emulator` |
-| Halo emulator runner | [`scripts/halo-emulator.py`](../../scripts/halo-emulator.py) |
-| Frame-2 firmware | Private repo, not cloned |
+| Resource               | Path                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| Brilliant docs         | `https://github.com/brilliantlabsAR/docs`                                                  |
+| Brilliant SDK (Dart)   | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/flutter/packages`              |
+| Brilliant SDK (Python) | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/python/packages`               |
+| Halo emulator          | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/python/packages/halo_emulator` |
+| Halo emulator runner   | [`scripts/halo-emulator.py`](../../scripts/halo-emulator.py)                               |
+| Frame-2 firmware       | Private repo, not cloned                                                                   |

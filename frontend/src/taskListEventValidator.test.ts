@@ -14,13 +14,17 @@ const wire = (json: string): unknown => JSON.parse(json);
 
 describe("validateTaskListEvent settled status", () => {
   it("preserves loading=true on a kind=status event", () => {
-    const ev = validateTaskListEvent(wire('{"kind":"status","status":{"loading":true,"error":""}}'));
+    const ev = validateTaskListEvent(
+      wire('{"kind":"status","status":{"loading":true,"error":""}}'),
+    );
     expect(ev.kind).toBe("status");
     expect(ev.status).toEqual({ loading: true, error: "" });
   });
 
   it("preserves the error on a failed kind=status event", () => {
-    const ev = validateTaskListEvent(wire('{"kind":"status","status":{"loading":false,"error":"load purged tasks: boom"}}'));
+    const ev = validateTaskListEvent(
+      wire('{"kind":"status","status":{"loading":false,"error":"load purged tasks: boom"}}'),
+    );
     expect(ev.kind).toBe("status");
     expect(ev.status?.loading).toBe(false);
     expect(ev.status?.error).toBe("load purged tasks: boom");

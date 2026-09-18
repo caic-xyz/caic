@@ -4,7 +4,17 @@ import { describe, it, expect } from "vitest";
 
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
-import { IncrementalMessageGrouper, groupMessages, groupTurns, groupSessions, turnSummary, toolCallDurationMs, toolCallDurations, buildTurnItems, buildPastSessionItems } from "./grouping";
+import {
+  IncrementalMessageGrouper,
+  groupMessages,
+  groupTurns,
+  groupSessions,
+  turnSummary,
+  toolCallDurationMs,
+  toolCallDurations,
+  buildTurnItems,
+  buildPastSessionItems,
+} from "./grouping";
 
 function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };
@@ -20,19 +30,37 @@ function textDeltaEvent(text: string): EventMessage {
 
 function usageEvent(): EventMessage {
   return {
-    kind: "usage", ts: 0,
-    usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
+    kind: "usage",
+    ts: 0,
+    usage: {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      reportedModel: "test",
+    },
   };
 }
 
 function resultEvent(): EventMessage {
   return {
-    kind: "result", ts: 0,
+    kind: "result",
+    ts: 0,
     result: {
-      subtype: "success", isError: false, result: "done",
-      totalCostUSD: 0.01, duration: 1.0, durationAPI: 0.9,
+      subtype: "success",
+      isError: false,
+      result: "done",
+      totalCostUSD: 0.01,
+      duration: 1.0,
+      durationAPI: 0.9,
       numTurns: 1,
-      usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        reportedModel: "test",
+      },
     },
   };
 }
@@ -76,10 +104,7 @@ describe("groupMessages", () => {
   });
 
   it("tool is marked done when its toolResult arrives", () => {
-    const groups = groupMessages([
-      toolUseEvent("t1", "Bash"),
-      toolResultEvent("t1"),
-    ]);
+    const groups = groupMessages([toolUseEvent("t1", "Bash"), toolResultEvent("t1")]);
     expect(groups[0].toolCalls[0].done).toBe(true);
     expect(groups[0].toolCalls[0].result?.toolUseID).toBe("t1");
   });
@@ -256,7 +281,12 @@ describe("groupMessages", () => {
       toolResultEvent(id),
       usageEvent(),
     ];
-    const events: EventMessage[] = [...turn(1, "t1"), ...turn(10, "t2"), ...turn(20, "t3"), resultEvent()];
+    const events: EventMessage[] = [
+      ...turn(1, "t1"),
+      ...turn(10, "t2"),
+      ...turn(20, "t3"),
+      resultEvent(),
+    ];
     const groups = groupMessages(events);
     expect(groups).toHaveLength(3);
     const holder = groups[0];
@@ -296,7 +326,9 @@ describe("groupMessages", () => {
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(0);
     expect(groups[0].timingSegments).toHaveLength(2);
-    expect(groups[0].timingSegments?.flat().filter((event) => event.kind === "usage")).toHaveLength(1);
+    expect(groups[0].timingSegments?.flat().filter((event) => event.kind === "usage")).toHaveLength(
+      1,
+    );
     expect(groups[1].kind).toBe("text");
   });
 
@@ -334,7 +366,9 @@ describe("groupMessages", () => {
     expect(groups[0].events.filter(isThinking)).toHaveLength(4);
     expect(groups[1].toolCalls).toHaveLength(3);
     expect(groups[2].kind).toBe("text");
-    expect(groups[2].events.findLast((e) => e.kind === "text")?.text?.text).toBe("I read the file.");
+    expect(groups[2].events.findLast((e) => e.kind === "text")?.text?.text).toBe(
+      "I read the file.",
+    );
     expect(groups[2].events.some(isThinking)).toBe(false);
     // Turn 3 has no coalescing partner: stays its own thinking+text group.
     expect(groups[3].kind).toBe("text");
@@ -462,20 +496,29 @@ describe("groupMessages", () => {
 
   it("userInput after ask+result is grouped with the ask", () => {
     const askEvent: EventMessage = {
-      kind: "ask", ts: 1,
+      kind: "ask",
+      ts: 1,
       ask: {
         toolUseID: "ask_1",
         questions: [{ question: "Which?", options: [{ label: "A" }, { label: "B" }] }],
       },
     };
-    const groups = groupMessages([askEvent, resultEvent(), { kind: "userInput", ts: 3, userInput: { text: "A" } }]);
+    const groups = groupMessages([
+      askEvent,
+      resultEvent(),
+      { kind: "userInput", ts: 3, userInput: { text: "A" } },
+    ]);
     const askGroup = groups.find((g) => g.kind === "ask");
     expect(askGroup?.answerText).toBe("A");
   });
 
   it("rateLimit warning creates other group", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
+      {
+        kind: "rateLimit",
+        ts: 1,
+        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 },
+      },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0].kind).toBe("other");
@@ -483,19 +526,41 @@ describe("groupMessages", () => {
 
   it("filters repeated rateLimit warnings with the same displayed percentage", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
+      {
+        kind: "rateLimit",
+        ts: 1,
+        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 },
+      },
       { kind: "text", ts: 1.5, text: { text: "working" } },
-      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 } },
-      { kind: "rateLimit", ts: 3, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.81 } },
+      {
+        kind: "rateLimit",
+        ts: 2,
+        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 },
+      },
+      {
+        kind: "rateLimit",
+        ts: 3,
+        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.81 },
+      },
     ]);
 
-    expect(groups.filter((group) => group.events.some((event) => event.kind === "rateLimit"))).toHaveLength(2);
+    expect(
+      groups.filter((group) => group.events.some((event) => event.kind === "rateLimit")),
+    ).toHaveLength(2);
   });
 
   it("keeps matching rateLimit warning percentages for different quota windows", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
-      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.8 } },
+      {
+        kind: "rateLimit",
+        ts: 1,
+        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 },
+      },
+      {
+        kind: "rateLimit",
+        ts: 2,
+        rateLimit: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.8 },
+      },
     ]);
 
     expect(groups).toHaveLength(2);
@@ -504,29 +569,62 @@ describe("groupMessages", () => {
   it("filters a live warning that repeats the previous completed turn", () => {
     const grouper = new IncrementalMessageGrouper();
     grouper.resetAfter([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
+      {
+        kind: "rateLimit",
+        ts: 1,
+        rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 },
+      },
       resultEvent(),
     ]);
 
-    expect(grouper.group([
-      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 } },
-    ])).toHaveLength(0);
-    expect(grouper.group([
-      { kind: "rateLimit", ts: 2, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 } },
-      { kind: "rateLimit", ts: 3, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.81 } },
-    ])).toHaveLength(1);
+    expect(
+      grouper.group([
+        {
+          kind: "rateLimit",
+          ts: 2,
+          rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 },
+        },
+      ]),
+    ).toHaveLength(0);
+    expect(
+      grouper.group([
+        {
+          kind: "rateLimit",
+          ts: 2,
+          rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.804 },
+        },
+        {
+          kind: "rateLimit",
+          ts: 3,
+          rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.81 },
+        },
+      ]),
+    ).toHaveLength(1);
   });
 
   it("rateLimit allowed is filtered out", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed", rateLimitType: "five_hour", utilization: 0.3 } },
+      {
+        kind: "rateLimit",
+        ts: 1,
+        rateLimit: { status: "allowed", rateLimitType: "five_hour", utilization: 0.3 },
+      },
     ]);
     expect(groups).toHaveLength(0);
   });
 
   it("rateLimit rejected creates other group", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "rejected", resetsAt: "2024-03-21T04:26:40Z" as ISOTimestamp, rateLimitType: "seven_day", utilization: 1.0 } },
+      {
+        kind: "rateLimit",
+        ts: 1,
+        rateLimit: {
+          status: "rejected",
+          resetsAt: "2024-03-21T04:26:40Z" as ISOTimestamp,
+          rateLimitType: "seven_day",
+          utilization: 1.0,
+        },
+      },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0].kind).toBe("other");
@@ -536,10 +634,32 @@ describe("groupMessages", () => {
 describe("groupSessions", () => {
   it("splits on init events", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("session 1"),
       resultEvent(),
-      { kind: "init", ts: 2, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 2,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s2",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("session 2"),
     ];
     const sessions = groupSessions(msgs);
@@ -552,7 +672,18 @@ describe("groupSessions", () => {
 
   it("splits on compact_boundary system events", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("before compact"),
       resultEvent(),
       { kind: "system", ts: 2, system: { subtype: "compact_boundary" } },
@@ -565,11 +696,7 @@ describe("groupSessions", () => {
   });
 
   it("no boundary events produces one session with no boundaryEvent", () => {
-    const msgs: EventMessage[] = [
-      textDeltaEvent("hello"),
-      resultEvent(),
-      textDeltaEvent("world"),
-    ];
+    const msgs: EventMessage[] = [textDeltaEvent("hello"), resultEvent(), textDeltaEvent("world")];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].boundaryEvent).toBeUndefined();
@@ -581,7 +708,18 @@ describe("groupSessions", () => {
     // It must appear in the same session as the init, not as a phantom "Compacted session".
     const msgs: EventMessage[] = [
       { kind: "userInput", ts: 0, userInput: { text: "hello" } },
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("response"),
     ];
     const sessions = groupSessions(msgs);
@@ -596,11 +734,33 @@ describe("groupSessions", () => {
     // After a session result, the user types a message, then a new init arrives.
     // The userInput should appear in session 2 (the one it triggered), not session 1.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
-      { kind: "init", ts: 3, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 3,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s2",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("session 2 response"),
     ];
     const sessions = groupSessions(msgs);
@@ -615,11 +775,33 @@ describe("groupSessions", () => {
     // After carrying the userInput into the next session, the resulting turn should have
     // textCount > 0 (agent replied), so turnSummary does not return "empty turn".
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("first response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
-      { kind: "init", ts: 3, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 3,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s2",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("second response"),
       resultEvent(),
     ];
@@ -631,7 +813,18 @@ describe("groupSessions", () => {
 
   it("userInput before compact_boundary is carried into the compacted session", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("first response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "continue" } },
@@ -648,11 +841,33 @@ describe("groupSessions", () => {
     // Claude Code re-invocations within the same conversation reuse the same sessionID.
     // Only a different sessionID or compact_boundary should create a new top-level group.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("first response"),
       resultEvent(),
       { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
-      { kind: "init", ts: 3, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 3,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("second response"),
       resultEvent(),
     ];
@@ -663,7 +878,18 @@ describe("groupSessions", () => {
 
   it("boundary event alone produces a session with empty turns", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
@@ -672,7 +898,18 @@ describe("groupSessions", () => {
 
   it("session toolCount and textCount aggregate turns", () => {
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       toolUseEvent("t1", "Read"),
       resultEvent(),
       textDeltaEvent("text"),
@@ -687,14 +924,26 @@ describe("groupSessions", () => {
   it("session duration sums turn runtimes instead of elapsed wall time", () => {
     const firstResult = resultEvent();
     const secondResult = resultEvent();
-    if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
+    if (!firstResult.result || !secondResult.result)
+      throw new Error("result fixture is missing payload");
     firstResult.ts = 3_000;
     firstResult.result.duration = 2;
     secondResult.ts = 65_000;
     secondResult.result.duration = 3;
 
     const sessions = groupSessions([
-      { kind: "init", ts: 1_000, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1_000,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("first response"),
       firstResult,
       { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
@@ -711,10 +960,12 @@ describe("groupTurns", () => {
     const completion = resultEvent();
     if (!completion.result) throw new Error("result fixture is missing payload");
     completion.result.result = "Finished the requested change.";
-    const turns = groupTurns(groupMessages([
-      { kind: "text", ts: 1, text: { text: "Finished the requested change." } },
-      completion,
-    ]));
+    const turns = groupTurns(
+      groupMessages([
+        { kind: "text", ts: 1, text: { text: "Finished the requested change." } },
+        completion,
+      ]),
+    );
 
     expect(turns).toHaveLength(1);
     expect(turns[0].textCount).toBe(1);
@@ -777,19 +1028,30 @@ describe("groupTurns", () => {
   it("durationMs uses result.duration directly (per-invocation, not cumulative)", () => {
     // ResultMessage.DurationMs is per-invocation wall-clock time for that turn.
     const makeResult = (duration: number): EventMessage => ({
-      kind: "result", ts: 0,
+      kind: "result",
+      ts: 0,
       result: {
-        subtype: "success", isError: false, result: "done",
-        totalCostUSD: 0.01, duration, durationAPI: duration * 0.9,
+        subtype: "success",
+        isError: false,
+        result: "done",
+        totalCostUSD: 0.01,
+        duration,
+        durationAPI: duration * 0.9,
         numTurns: 1,
-        usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, reportedModel: "test" },
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          reportedModel: "test",
+        },
       },
     });
     const events: EventMessage[] = [
       textDeltaEvent("turn 1"),
-      makeResult(1.0),  // turn 1 took 1s
+      makeResult(1.0), // turn 1 took 1s
       textDeltaEvent("turn 2"),
-      makeResult(3.0),  // turn 2 took 3s
+      makeResult(3.0), // turn 2 took 3s
     ];
     const groups = groupMessages(events);
     const turns = groupTurns(groups);
@@ -810,7 +1072,9 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Bash", input: {} } },
       { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "t1", duration: 0.125 } },
     ]);
-    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(125);
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(
+      125,
+    );
   });
 
   it("falls back to event timestamps", () => {
@@ -818,7 +1082,9 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
       { kind: "toolResult", ts: 1_037, toolResult: { toolUseID: "t1", duration: 0 } },
     ]);
-    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(37);
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(
+      37,
+    );
   });
 
   it("returns no duration when timing metadata is unavailable", () => {
@@ -826,7 +1092,9 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 0, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
       { kind: "toolResult", ts: 0, toolResult: { toolUseID: "t1", duration: 0 } },
     ]);
-    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBeNull();
+    expect(
+      toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events)),
+    ).toBeNull();
   });
 });
 
@@ -913,10 +1181,32 @@ describe("buildPastSessionItems", () => {
     // Past sessions are memoized via createMemo in TaskDetail. If keys change
     // identity between calls, the keyed Match components remount and cause flickering.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 1, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 1,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("session 1"),
       resultEvent(),
-      { kind: "init", ts: 2, init: { reportedModel: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 2,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s2",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("session 2"),
     ];
     const sessions = groupSessions(msgs);
@@ -932,7 +1222,18 @@ describe("buildPastSessionItems", () => {
     // When a past session is collapsed (sessionElided), its key must not change
     // across recomputation frames, otherwise the elided row remounts.
     const msgs: EventMessage[] = [
-      { kind: "init", ts: 10, init: { reportedModel: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      {
+        kind: "init",
+        ts: 10,
+        init: {
+          reportedModel: "m",
+          agentVersion: "1",
+          sessionID: "s1",
+          tools: [],
+          cwd: "/",
+          harness: "claude",
+        },
+      },
       textDeltaEvent("text"),
       resultEvent(),
     ];
@@ -959,13 +1260,15 @@ describe("performance benchmarks", () => {
   function generateThinkingDeltas(count: number): EventMessage[] {
     const msgs: EventMessage[] = [
       {
-        kind: "thinking", ts: 1777988039500,
+        kind: "thinking",
+        ts: 1777988039500,
         thinking: { text: "Let me think about this..." },
       },
     ];
     for (let i = 0; i < count; i++) {
       msgs.push({
-        kind: "thinkingDelta", ts: 1777988039509 + i,
+        kind: "thinkingDelta",
+        ts: 1777988039509 + i,
         thinkingDelta: { text: `word${i} ` },
       });
     }

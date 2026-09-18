@@ -3,7 +3,13 @@
 import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 
-import type { ProviderQuota, QuotaRateLimit, QuotaBalance, QuotaExtraUsage, UsageResp } from "@sdk/types.gen";
+import type {
+  ProviderQuota,
+  QuotaRateLimit,
+  QuotaBalance,
+  QuotaExtraUsage,
+  UsageResp,
+} from "@sdk/types.gen";
 
 import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
@@ -55,7 +61,9 @@ function extraTooltip(extra: QuotaExtraUsage): string {
 function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; label: string }) {
   const tip = () => {
     const reset = formatReset(props.rl.resetsAt, props.now());
-    return reset ? `${props.label} ${props.rl.window}: ${Math.round(props.rl.usedPct)}% — Resets ${reset}` : undefined;
+    return reset
+      ? `${props.label} ${props.rl.window}: ${Math.round(props.rl.usedPct)}% — Resets ${reset}`
+      : undefined;
   };
   return (
     <Tooltip text={tip()}>
@@ -68,10 +76,7 @@ function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; labe
 
 function ProviderIcon(props: { logoUrl?: string; label: string }) {
   return (
-    <Show
-      when={props.logoUrl}
-      fallback={<span class={styles.providerLabel}>{props.label}</span>}
-    >
+    <Show when={props.logoUrl} fallback={<span class={styles.providerLabel}>{props.label}</span>}>
       {(url) => <img class={styles.providerLogo} src={url()} alt={props.label} />}
     </Show>
   );
@@ -135,15 +140,14 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
   );
 }
 
-export default function UsageBadges(props: { usage: Accessor<UsageResp | null>; now: Accessor<number> }) {
+export default function UsageBadges(props: {
+  usage: Accessor<UsageResp | null>;
+  now: Accessor<number>;
+}) {
   return (
     <span class={styles.usageRow}>
       <Show when={props.usage()} keyed>
-        {(u) => (
-          <For each={u.providers}>
-            {(pq) => <ProviderPill pq={pq} now={props.now} />}
-          </For>
-        )}
+        {(u) => <For each={u.providers}>{(pq) => <ProviderPill pq={pq} now={props.now} />}</For>}
       </Show>
     </span>
   );

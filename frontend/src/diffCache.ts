@@ -130,11 +130,7 @@ export class DiffCache {
   revalidateIndex(taskId: string): Promise<TaskDiffIndexResp> {
     const entry = this.indexes.get(taskId);
     if (entry?.request) return entry.request;
-    if (
-      entry?.data &&
-      !entry.stale &&
-      Date.now() - entry.validatedAt <= this.options.freshnessMs
-    ) {
+    if (entry?.data && !entry.stale && Date.now() - entry.validatedAt <= this.options.freshnessMs) {
       this.touch(entry);
       return Promise.resolve(entry.data);
     }
@@ -146,10 +142,7 @@ export class DiffCache {
     const key = patchKey(selector);
     const cached = this.patches.get(key);
     const generation = this.indexes.get(selector.taskId)?.generation ?? 0;
-    if (
-      cached &&
-      (selector.commit !== "" || cached.generation === generation)
-    ) {
+    if (cached && (selector.commit !== "" || cached.generation === generation)) {
       this.touch(cached);
       return cached.request;
     }
@@ -187,8 +180,7 @@ export class DiffCache {
       entry.stale = true;
       this.emit(entry);
     }
-    if (entry?.listeners.size)
-      void this.loadIndex(taskId).catch(() => undefined);
+    if (entry?.listeners.size) void this.loadIndex(taskId).catch(() => undefined);
   }
 
   evictTask(taskId: string): void {
@@ -252,9 +244,7 @@ export class DiffCache {
 
   private prunePatches(): void {
     while (this.patches.size > this.options.patchLimit) {
-      const candidate = [...this.patches.entries()].sort(
-        (a, b) => a[1].used - b[1].used,
-      )[0];
+      const candidate = [...this.patches.entries()].sort((a, b) => a[1].used - b[1].used)[0];
       if (!candidate) return;
       this.patches.delete(candidate[0]);
     }
@@ -294,9 +284,6 @@ export const taskDiffCache = new DiffCache({
     ),
 });
 
-export const prefetchTaskDiff = (taskId: string) =>
-  taskDiffCache.loadIndex(taskId);
-export const invalidateTaskDiff = (taskId: string) =>
-  taskDiffCache.invalidate(taskId);
-export const evictTaskDiff = (taskId: string) =>
-  taskDiffCache.evictTask(taskId);
+export const prefetchTaskDiff = (taskId: string) => taskDiffCache.loadIndex(taskId);
+export const invalidateTaskDiff = (taskId: string) => taskDiffCache.invalidate(taskId);
+export const evictTaskDiff = (taskId: string) => taskDiffCache.evictTask(taskId);

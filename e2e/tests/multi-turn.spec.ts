@@ -12,9 +12,9 @@ test("multi-turn: send input cycles to next joke", async ({ page, api }) => {
   await taskCard.click();
 
   // First joke should be visible.
-  await expect(
-    page.getByText("Why do programmers prefer dark mode?").first(),
-  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Why do programmers prefer dark mode?").first()).toBeVisible({
+    timeout: 15_000,
+  });
 
   // Send input after a measurable user wait to trigger the second turn.
   await page.waitForTimeout(1100);
@@ -22,9 +22,9 @@ test("multi-turn: send input cycles to next joke", async ({ page, api }) => {
   await waitForTaskState(api, id, "waiting", 20_000);
 
   // Second joke: "A SQL query walks into a bar..."
-  await expect(
-    page.getByText("A SQL query walks into a bar").first(),
-  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("A SQL query walks into a bar").first()).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(page.getByRole("button", { name: /1 message.*0:01$/ })).toBeVisible();
   await expect(page.getByText(/^wait (?:[1-9]\d*ms|\d+:[0-5]\d(?::[0-5]\d)?)$/)).toBeVisible();
 });
@@ -60,14 +60,8 @@ test("concurrent tasks run independently", async ({ api }) => {
   expect(task1.repos![0].branch).not.toBe(task2.repos![0].branch);
 
   // Purge both.
-  await Promise.all([
-    api.purgeTask(id1),
-    api.purgeTask(id2),
-  ]);
-  await Promise.all([
-    waitForTaskState(api, id1, "purged"),
-    waitForTaskState(api, id2, "purged"),
-  ]);
+  await Promise.all([api.purgeTask(id1), api.purgeTask(id2)]);
+  await Promise.all([waitForTaskState(api, id1, "purged"), waitForTaskState(api, id2, "purged")]);
 });
 
 test("SSE event stream delivers text deltas", async ({ page, api, baseURL }) => {
@@ -81,33 +75,41 @@ test("SSE event stream delivers text deltas", async ({ page, api, baseURL }) => 
 
   // Expose a callback so the browser can signal when SSE history replay ends.
   let resolveReady!: () => void;
-  const sseReady = new Promise<void>((res) => { resolveReady = res; });
+  const sseReady = new Promise<void>((res) => {
+    resolveReady = res;
+  });
   await page.exposeFunction("__sseReady", () => resolveReady());
 
   // Collect only live events (after the server "ready" sentinel).
-  const eventsPromise = page.evaluate(async ({ taskId, base }) => {
-    return new Promise<string[]>((resolve) => {
-      const collected: string[] = [];
-      let live = false;
-      const es = new EventSource(`${base}/api/caic/v1/tasks/${taskId}/events`);
-      es.addEventListener("ready", () => {
-        live = true;
-        (window as unknown as { __sseReady: () => void }).__sseReady();
-      });
-      es.addEventListener("message", (e) => {
-        const msg = JSON.parse(e.data);
-        if (live) {
-          collected.push(msg.kind);
-          if (msg.kind === "result") {
-            es.close();
-            resolve(collected);
+  const eventsPromise = page.evaluate(
+    async ({ taskId, base }) => {
+      return new Promise<string[]>((resolve) => {
+        const collected: string[] = [];
+        let live = false;
+        const es = new EventSource(`${base}/api/caic/v1/tasks/${taskId}/events`);
+        es.addEventListener("ready", () => {
+          live = true;
+          (window as unknown as { __sseReady: () => void }).__sseReady();
+        });
+        es.addEventListener("message", (e) => {
+          const msg = JSON.parse(e.data);
+          if (live) {
+            collected.push(msg.kind);
+            if (msg.kind === "result") {
+              es.close();
+              resolve(collected);
+            }
           }
-        }
+        });
+        // Safety timeout.
+        setTimeout(() => {
+          es.close();
+          resolve(collected);
+        }, 15_000);
       });
-      // Safety timeout.
-      setTimeout(() => { es.close(); resolve(collected); }, 15_000);
-    });
-  }, { taskId: id, base: baseURL! });
+    },
+    { taskId: id, base: baseURL! },
+  );
 
   // Wait until SSE history replay is done and the stream is live.
   await sseReady;

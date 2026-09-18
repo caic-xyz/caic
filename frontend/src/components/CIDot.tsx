@@ -17,12 +17,22 @@ function checkSummary(status: CIStatus, checks?: ForgeCheck[]): string {
   if (!checks || checks.length === 0) return `CI: ${status}`;
   const done = checks.filter((c) => c.status === "completed").length;
   const lines = checks.map((c) => {
-    const icon = c.status === "completed"
-      ? (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped" ? "\u2713" : "\u2717")
-      : c.status === "in_progress" ? "\u25B6" : "\u25CB";
-    const label = c.status === "completed"
-      ? (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped" ? "passed" : (c.conclusion || "failed"))
-      : c.status === "in_progress" ? "running" : "queued";
+    const icon =
+      c.status === "completed"
+        ? c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped"
+          ? "\u2713"
+          : "\u2717"
+        : c.status === "in_progress"
+          ? "\u25B6"
+          : "\u25CB";
+    const label =
+      c.status === "completed"
+        ? c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped"
+          ? "passed"
+          : c.conclusion || "failed"
+        : c.status === "in_progress"
+          ? "running"
+          : "queued";
     return `${icon} ${c.name}: ${label}`;
   });
   const header = `CI: ${done}/${checks.length} completed`;
@@ -45,7 +55,18 @@ export default function CIDot(props: CIDotProps) {
         keyed
         fallback={<span class={cls()} data-status={props.status} data-testid="ci-status" />}
       >
-        {(url) => <a class={cls()} href={url} target="_blank" rel="noopener" aria-label="CI status" data-status={props.status} data-testid="ci-status" onClick={(e) => e.stopPropagation()} />}
+        {(url) => (
+          <a
+            class={cls()}
+            href={url}
+            target="_blank"
+            rel="noopener"
+            aria-label="CI status"
+            data-status={props.status}
+            data-testid="ci-status"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
       </Show>
     </Tooltip>
   );

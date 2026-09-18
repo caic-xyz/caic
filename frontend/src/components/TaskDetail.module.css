@@ -247,8 +247,6 @@ a.headerPR:hover {
   overflow-y: auto;
 }
 
-
-
 .actionError {
   font-size: 0.8rem;
   color: var(--color-danger);
@@ -409,16 +407,25 @@ a.headerPR:hover {
 }
 
 .rawCopyBtn .copyIcon,
-.codeCopyBtn .copyIcon { display: block; }
+.codeCopyBtn .copyIcon {
+  display: block;
+}
 
 .rawCopyBtn .checkIcon,
-.codeCopyBtn .checkIcon { display: none; }
+.codeCopyBtn .checkIcon {
+  display: none;
+}
 
 .rawCopyBtn.copied .copyIcon,
-.codeCopyBtn.copied .copyIcon { display: none; }
+.codeCopyBtn.copied .copyIcon {
+  display: none;
+}
 
 .rawCopyBtn.copied .checkIcon,
-.codeCopyBtn.copied .checkIcon { display: block; color: var(--color-success); }
+.codeCopyBtn.copied .checkIcon {
+  display: block;
+  color: var(--color-success);
+}
 
 .rawText {
   white-space: pre-wrap;
@@ -457,9 +464,15 @@ a.headerPR:hover {
   line-height: 1.3;
 }
 
-.markdown h1 { font-size: 1.3em; }
-.markdown h2 { font-size: 1.15em; }
-.markdown h3 { font-size: 1.05em; }
+.markdown h1 {
+  font-size: 1.3em;
+}
+.markdown h2 {
+  font-size: 1.15em;
+}
+.markdown h3 {
+  font-size: 1.05em;
+}
 
 .markdown ul,
 .markdown ol {
@@ -683,11 +696,20 @@ a.headerPR:hover {
   color: var(--color-text-secondary);
 }
 
-.sudoCopyBtn .copyIcon { display: block; }
-.sudoCopyBtn .checkIcon { display: none; }
+.sudoCopyBtn .copyIcon {
+  display: block;
+}
+.sudoCopyBtn .checkIcon {
+  display: none;
+}
 
-.sudoCopyBtn.copied .copyIcon { display: none; }
-.sudoCopyBtn.copied .checkIcon { display: block; color: var(--color-success); }
+.sudoCopyBtn.copied .copyIcon {
+  display: none;
+}
+.sudoCopyBtn.copied .checkIcon {
+  display: block;
+  color: var(--color-success);
+}
 
 .ciStatus {
   font-size: 0.75rem;
@@ -1175,7 +1197,9 @@ a.ciStatus:hover {
 }
 
 @keyframes toolSpin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .toolPending {
@@ -1473,7 +1497,6 @@ a.ciStatus:hover {
   .headerTitle {
     display: block;
   }
-
 
   .messageArea {
     min-height: 0;

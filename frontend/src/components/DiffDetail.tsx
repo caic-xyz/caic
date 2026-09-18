@@ -1,14 +1,6 @@
 // Full-page repository status with shared stale-refresh metadata and persistent lazy file rows.
 
-import {
-  createSignal,
-  createEffect,
-  For,
-  Show,
-  onMount,
-  onCleanup,
-  untrack,
-} from "solid-js";
+import { createSignal, createEffect, For, Show, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
@@ -43,9 +35,7 @@ type ViewRepository = Omit<DiffIndexRepository, "commits" | "uncommitted"> & {
   uncommitted: ViewFileStatus[];
 };
 
-function indexedRepositories(
-  repositories: DiffIndexRepository[],
-): ViewRepository[] {
+function indexedRepositories(repositories: DiffIndexRepository[]): ViewRepository[] {
   return repositories.map((repo, repositoryIndex) => ({
     ...repo,
     id: `${repositoryIndex}\0${repo.name}`,
@@ -88,9 +78,7 @@ export default function DiffDetail(props: Props) {
       );
       setLoading(snapshot.loading && snapshot.data === null);
       setStale(snapshot.loading && snapshot.data !== null);
-      setUnavailable(
-        snapshot.data === null && !snapshot.loading && snapshot.error === null,
-      );
+      setUnavailable(snapshot.data === null && !snapshot.loading && snapshot.error === null);
       setIndexVersion(snapshot.version);
       setError(
         snapshot.error && snapshot.data === null
@@ -203,27 +191,16 @@ export default function DiffDetail(props: Props) {
                 <section class={styles.repoStatus}>
                   <div class={styles.repoHeading}>
                     <span class={styles.headerRepo}>{repo.name}</span>
-                    <span class={styles.branchName}>
-                      {repo.branch || "detached HEAD"}
-                    </span>
+                    <span class={styles.branchName}>{repo.branch || "detached HEAD"}</span>
                     <span class={styles.branchArrow} aria-hidden="true">
                       →
                     </span>
-                    <span class={styles.upstreamName}>
-                      {repo.upstream ?? "no upstream"}
-                    </span>
+                    <span class={styles.upstreamName}>{repo.upstream ?? "no upstream"}</span>
                   </div>
                   <div class={styles.divergence}>
-                    <Show
-                      when={repo.upstream}
-                      fallback="No upstream tracking branch configured"
-                    >
-                      {repo.ahead} {repo.ahead === 1 ? "commit" : "commits"}{" "}
-                      ahead
-                      <Show when={repo.behind > 0}>
-                        {" "}
-                        · {repo.behind} behind
-                      </Show>
+                    <Show when={repo.upstream} fallback="No upstream tracking branch configured">
+                      {repo.ahead} {repo.ahead === 1 ? "commit" : "commits"} ahead
+                      <Show when={repo.behind > 0}> · {repo.behind} behind</Show>
                     </Show>
                   </div>
 
@@ -231,40 +208,24 @@ export default function DiffDetail(props: Props) {
                     <h2>Commits ahead ({repo.commits.length})</h2>
                     <Show
                       when={repo.commits.length > 0}
-                      fallback={
-                        <p class={styles.cleanState}>
-                          No commits ahead of upstream
-                        </p>
-                      }
+                      fallback={<p class={styles.cleanState}>No commits ahead of upstream</p>}
                     >
                       <div class={styles.commitList}>
                         <For each={repo.commits}>
                           {(commit) => (
                             <article class={styles.commit}>
-                              <span
-                                class={styles.commitGraph}
-                                aria-hidden="true"
-                              >
+                              <span class={styles.commitGraph} aria-hidden="true">
                                 <span />
                               </span>
                               <div class={styles.commitHeading}>
-                                <code class={styles.commitSha}>
-                                  {commit.sha.slice(0, 8)}
-                                </code>
+                                <code class={styles.commitSha}>{commit.sha.slice(0, 8)}</code>
                                 <Show when={commit.decorations}>
-                                  <span class={styles.commitDecorations}>
-                                    {commit.decorations}
-                                  </span>
+                                  <span class={styles.commitDecorations}>{commit.decorations}</span>
                                 </Show>
-                                <time
-                                  class={styles.commitDate}
-                                  dateTime={commit.authoredDate}
-                                >
+                                <time class={styles.commitDate} dateTime={commit.authoredDate}>
                                   {commit.authoredDate}
                                 </time>
-                                <span class={styles.commitSubject}>
-                                  {commit.subject}
-                                </span>
+                                <span class={styles.commitSubject}>{commit.subject}</span>
                               </div>
                               <Show when={commit.stat.length > 0}>
                                 <div class={styles.commitStat}>
@@ -279,18 +240,14 @@ export default function DiffDetail(props: Props) {
                                           loadDiff={() =>
                                             taskDiffCache.loadPatch({
                                               taskId: props.taskId,
-                                              repository:
-                                                String(repositoryIndex()),
+                                              repository: String(repositoryIndex()),
                                               commit: commit.sha,
                                               path: file.path,
                                               originalPath: "",
                                             })
                                           }
                                           onLoadError={(err) =>
-                                            props.onTaskRefreshError?.(
-                                              props.taskId,
-                                              err,
-                                            ) ?? false
+                                            props.onTaskRefreshError?.(props.taskId, err) ?? false
                                           }
                                           lineWrap={lineWrap()}
                                           variant="commit"
@@ -303,10 +260,7 @@ export default function DiffDetail(props: Props) {
                                   </For>
                                   <div class={styles.commitSummary}>
                                     {commit.stat.length}{" "}
-                                    {commit.stat.length === 1
-                                      ? "file"
-                                      : "files"}{" "}
-                                    changed
+                                    {commit.stat.length === 1 ? "file" : "files"} changed
                                   </div>
                                 </div>
                               </Show>
@@ -321,9 +275,7 @@ export default function DiffDetail(props: Props) {
                     <h2>Uncommitted changes ({repo.uncommitted.length})</h2>
                     <Show
                       when={repo.uncommitted.length > 0}
-                      fallback={
-                        <p class={styles.cleanState}>Working tree clean</p>
-                      }
+                      fallback={<p class={styles.cleanState}>Working tree clean</p>}
                     >
                       <div class={styles.uncommittedList}>
                         <For each={repo.uncommitted}>
@@ -345,10 +297,7 @@ export default function DiffDetail(props: Props) {
                                   })
                                 }
                                 onLoadError={(err) =>
-                                  props.onTaskRefreshError?.(
-                                    props.taskId,
-                                    err,
-                                  ) ?? false
+                                  props.onTaskRefreshError?.(props.taskId, err) ?? false
                                 }
                                 statuses={statusLabels(file)}
                                 lineWrap={lineWrap()}
@@ -406,15 +355,10 @@ function FileDiffRow(props: FileDiffRowProps) {
 
   const load = async (version: number, force: boolean) => {
     if (loading()) {
-      if (props.variant === "uncommitted")
-        pendingVersion = Math.max(pendingVersion, version);
+      if (props.variant === "uncommitted") pendingVersion = Math.max(pendingVersion, version);
       return;
     }
-    if (
-      !force &&
-      diff() !== null &&
-      (props.variant === "commit" || version <= loadedVersion)
-    )
+    if (!force && diff() !== null && (props.variant === "commit" || version <= loadedVersion))
       return;
     if (version >= pendingVersion) pendingVersion = -1;
     const restoreToggleFocus = document.activeElement === retryButton;
@@ -497,11 +441,7 @@ function FileDiffRow(props: FileDiffRowProps) {
             </For>
           </span>
         </Show>
-        <FileCounts
-          added={props.added}
-          deleted={props.deleted}
-          binary={props.binary}
-        />
+        <FileCounts added={props.added} deleted={props.deleted} binary={props.binary} />
       </button>
       <Show when={props.expanded}>
         <div class={styles.fileDiff}>
@@ -514,11 +454,7 @@ function FileDiffRow(props: FileDiffRowProps) {
             }
           >
             {(loadedDiff) => (
-              <UnifiedDiffBlock
-                diff={loadedDiff()}
-                hideFileHeader
-                lineWrap={props.lineWrap}
-              />
+              <UnifiedDiffBlock diff={loadedDiff()} hideFileHeader lineWrap={props.lineWrap} />
             )}
           </Show>
           <Show when={loadError()}>
@@ -537,11 +473,7 @@ function FileDiffRow(props: FileDiffRowProps) {
                   Retry
                 </button>
                 <Show when={loading()}>
-                  <span
-                    class={styles.diffLoading}
-                    role="status"
-                    aria-live="polite"
-                  >
+                  <span class={styles.diffLoading} role="status" aria-live="polite">
                     Retrying file diff...
                   </span>
                 </Show>
@@ -550,9 +482,7 @@ function FileDiffRow(props: FileDiffRowProps) {
           </Show>
           <Show when={loading() && !loadError()}>
             <p class={styles.diffLoading} role="status" aria-live="polite">
-              {diff() === null
-                ? "Loading file diff..."
-                : "Updating file diff..."}
+              {diff() === null ? "Loading file diff..." : "Updating file diff..."}
             </p>
           </Show>
         </div>
@@ -632,21 +562,12 @@ export function elidePathAtBoundary(
   }
 
   const filenameWithEllipsis = `…/${filename}`;
-  return measureText(filenameWithEllipsis) <= availableWidth
-    ? filenameWithEllipsis
-    : filename;
+  return measureText(filenameWithEllipsis) <= availableWidth ? filenameWithEllipsis : filename;
 }
 
-function FileCounts(props: {
-  added: number;
-  deleted: number;
-  binary: boolean;
-}) {
+function FileCounts(props: { added: number; deleted: number; binary: boolean }) {
   return (
-    <Show
-      when={!props.binary}
-      fallback={<span class={styles.binary}>binary</span>}
-    >
+    <Show when={!props.binary} fallback={<span class={styles.binary}>binary</span>}>
       <span class={styles.fileCounts}>
         <Show when={props.added > 0}>
           <span class={styles.added}>+{props.added}</span>

@@ -75,20 +75,13 @@ describe("SearchableSelect", () => {
     const user = userEvent.setup();
     render(() => (
       <dialog open data-testid="dialog">
-        <SearchableSelect
-          ariaLabel="Pick"
-          value="a"
-          options={options}
-          onChange={vi.fn()}
-        />
+        <SearchableSelect ariaLabel="Pick" value="a" options={options} onChange={vi.fn()} />
       </dialog>
     ));
 
     await user.click(screen.getByRole("button", { name: "Pick" }));
 
-    expect(screen.getByRole("listbox").closest("dialog")).toBe(
-      screen.getByTestId("dialog"),
-    );
+    expect(screen.getByRole("listbox").closest("dialog")).toBe(screen.getByTestId("dialog"));
   });
 
   it("calls onOpen when the popup opens", async () => {
@@ -136,9 +129,7 @@ describe("SearchableSelect", () => {
     expect(scrollIntoView.mock.contexts).toContain(
       screen.getByRole("option", { name: "Option 29" }),
     );
-    expect(
-      screen.getByRole("combobox", { name: "Deep picker" }),
-    ).toHaveAttribute(
+    expect(screen.getByRole("combobox", { name: "Deep picker" })).toHaveAttribute(
       "aria-activedescendant",
       expect.stringContaining("-opt-29"),
     );
@@ -160,13 +151,9 @@ describe("SearchableSelect", () => {
     await user.click(screen.getByRole("button", { name: "Pick" }));
     const input = screen.getByRole("combobox", { name: "Pick" });
     await user.type(input, "bra");
-    expect(
-      screen.queryByRole("option", { name: "Alpha" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Alpha" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Bravo" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "Default" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Default" })).not.toBeInTheDocument();
   });
 
   it("prefers matches in a path base name", async () => {
@@ -184,14 +171,12 @@ describe("SearchableSelect", () => {
     ));
 
     await user.click(screen.getByRole("button", { name: "Repository" }));
-    await user.type(
-      screen.getByRole("combobox", { name: "Repository" }),
-      "foo",
-    );
+    await user.type(screen.getByRole("combobox", { name: "Repository" }), "foo");
 
-    expect(
-      screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual(["foo/foobar", "foo/bar"]);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "foo/foobar",
+      "foo/bar",
+    ]);
   });
 
   it("selects the first match on Enter after filtering", async () => {

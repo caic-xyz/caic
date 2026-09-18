@@ -7,13 +7,7 @@ export interface FileDiff {
 }
 
 export type DiffLineKind =
-  | "context"
-  | "added"
-  | "deleted"
-  | "hunk"
-  | "header"
-  | "movedAdded"
-  | "movedDeleted";
+  "context" | "added" | "deleted" | "hunk" | "header" | "movedAdded" | "movedDeleted";
 
 export interface DiffLine {
   text: string;
@@ -88,7 +82,11 @@ function stripGitHeaderTab(path: string): string {
   return tab === -1 ? path : path.slice(0, tab);
 }
 
-function diffGitSidePath(section: string, side: "a" | "b", usesSidePrefixes: boolean): string | null {
+function diffGitSidePath(
+  section: string,
+  side: "a" | "b",
+  usesSidePrefixes: boolean,
+): string | null {
   const git = section.match(/^diff --git (.+)$/m);
   const paths = git ? splitDiffGitPaths(git[1]) : null;
   if (!paths) return null;
@@ -171,7 +169,11 @@ export function annotateDiffLines(diff: string): DiffLine[] {
     }
   }
 
-  const movedBlocks = findMovedBlocks(deletedByLineIndex, addedByLineIndex, addedLineIndexesByContent);
+  const movedBlocks = findMovedBlocks(
+    deletedByLineIndex,
+    addedByLineIndex,
+    addedLineIndexesByContent,
+  );
   movedBlocks.forEach((block, blockIndex) => {
     const movedVariant = (blockIndex % 2) as 0 | 1;
     for (const lineIndex of block.addedLineIndexes) {
@@ -189,7 +191,8 @@ export function annotateDiffLines(diff: string): DiffLine[] {
 
 function lineKind(line: string, inHunk: boolean): DiffLineKind {
   if (line.startsWith("@@")) return "hunk";
-  const isFileHeader = !inHunk && (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ "));
+  const isFileHeader =
+    !inHunk && (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ "));
   if (line.startsWith("diff --git ") || isFileHeader) return "header";
   if (line.startsWith("+")) return "added";
   if (line.startsWith("-")) return "deleted";
@@ -233,7 +236,9 @@ function markWhitespaceOnlyChangeGroup(
     const addedLineIndex = addedLineIndexes.find((candidate) => {
       if (usedAddedLineIndexes.has(candidate)) return false;
       const addedContent = lines[candidate].text.slice(1);
-      return addedContent !== deletedContent && removeWhitespace(addedContent) === normalizedDeleted;
+      return (
+        addedContent !== deletedContent && removeWhitespace(addedContent) === normalizedDeleted
+      );
     });
     if (addedLineIndex === undefined) continue;
 
@@ -318,7 +323,10 @@ function expandMovedBlock(
   return { addedLineIndexes, deletedLineIndexes };
 }
 
-function countMovedBlockAlnum(block: MovedBlock, deletedByLineIndex: Map<number, ChangeLine>): number {
+function countMovedBlockAlnum(
+  block: MovedBlock,
+  deletedByLineIndex: Map<number, ChangeLine>,
+): number {
   let count = 0;
   for (const lineIndex of block.deletedLineIndexes) {
     const content = deletedByLineIndex.get(lineIndex)?.content ?? "";
@@ -331,11 +339,7 @@ function countAlnum(text: string): number {
   let count = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
-    if (
-      (c >= 48 && c <= 57) ||
-      (c >= 65 && c <= 90) ||
-      (c >= 97 && c <= 122)
-    ) {
+    if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) {
       count++;
     }
   }

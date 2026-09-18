@@ -30,16 +30,29 @@ export function setVoiceActive(active: boolean): void {
  * Show a browser notification that an agent is waiting for input.
  * Only fires if the page is not currently visible (user tabbed away).
  */
-export function notifyWaiting(taskId: string, taskName: string, options: NotificationOptions): void {
+export function notifyWaiting(
+  taskId: string,
+  taskName: string,
+  options: NotificationOptions,
+): void {
   showNotification(taskId, `${taskName} is ready`, `caic-waiting-${taskId}`, options);
 }
 
 /** Show a service-supplied notification title for a task. */
-export function notifyServiceEvent(taskId: string, title: string, options: NotificationOptions): void {
+export function notifyServiceEvent(
+  taskId: string,
+  title: string,
+  options: NotificationOptions,
+): void {
   showNotification(taskId, title, `caic-event-${taskId}`, options);
 }
 
-function showNotification(taskId: string, title: string, tag: string, options: NotificationOptions): void {
+function showNotification(
+  taskId: string,
+  title: string,
+  tag: string,
+  options: NotificationOptions,
+): void {
   if (!canNotify(options) || document.visibilityState === "visible" || voiceActive) return;
   dismissNotification(taskId);
   const n = new Notification(title, { tag });

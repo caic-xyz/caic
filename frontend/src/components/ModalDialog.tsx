@@ -31,7 +31,9 @@ export default function ModalDialog(props: Props) {
         const active = document.activeElement;
         if (active !== null && active !== document.body && !dialogRef.contains(active)) return;
         const currentTaskCard = openerTaskId
-          ? [...document.querySelectorAll<HTMLElement>("[data-task-id]")].find((card) => card.dataset.taskId === openerTaskId)
+          ? [...document.querySelectorAll<HTMLElement>("[data-task-id]")].find(
+              (card) => card.dataset.taskId === openerTaskId,
+            )
           : undefined;
         if (props.restoreFocus) props.restoreFocus();
         else (opener?.isConnected ? opener : currentTaskCard)?.focus();
@@ -51,8 +53,11 @@ export default function ModalDialog(props: Props) {
     const handleClick = (event: MouseEvent) => {
       if (props.dismissOnBackdrop === false) return;
       const bounds = dialogRef.getBoundingClientRect();
-      const clickedInsideDialog = event.clientX >= bounds.left && event.clientX <= bounds.right
-        && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
+      const clickedInsideDialog =
+        event.clientX >= bounds.left &&
+        event.clientX <= bounds.right &&
+        event.clientY >= bounds.top &&
+        event.clientY <= bounds.bottom;
       if (!clickedInsideDialog) handleClose();
     };
 
@@ -71,7 +76,13 @@ export default function ModalDialog(props: Props) {
   });
 
   return (
-    <dialog ref={(el) => { dialogRef = el; }} class={`${styles.dialog} ${props.class ?? ""}`} data-testid={props["data-testid"]}>
+    <dialog
+      ref={(el) => {
+        dialogRef = el;
+      }}
+      class={`${styles.dialog} ${props.class ?? ""}`}
+      data-testid={props["data-testid"]}
+    >
       {props.children}
     </dialog>
   );

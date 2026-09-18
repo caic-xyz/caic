@@ -23,7 +23,9 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
   const [copied, setCopied] = createSignal(false);
   const message = () => (props.error instanceof Error ? props.error.message : String(props.error));
   const report = createMemo(() => currentErrorReport(props.error));
-  createEffect(() => console.error("caic frontend ErrorBoundary caught a render error.\n" + report()));
+  createEffect(() =>
+    console.error("caic frontend ErrorBoundary caught a render error.\n" + report()),
+  );
 
   async function copyDiagnosticDetails() {
     try {
@@ -41,8 +43,12 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
       <p class={styles.errorTitle}>Something went wrong.</p>
       <pre class={styles.errorMessage}>{message()}</pre>
       <div class={styles.errorActions}>
-        <Button type="button" variant="gray" onClick={props.reset}>Try again</Button>
-        <Button type="button" variant="gray" onClick={() => window.location.reload()}>Reload page</Button>
+        <Button type="button" variant="gray" onClick={props.reset}>
+          Try again
+        </Button>
+        <Button type="button" variant="gray" onClick={() => window.location.reload()}>
+          Reload page
+        </Button>
         <Button type="button" variant="gray" onClick={() => void copyDiagnosticDetails()}>
           {copied() ? "Copied details" : "Copy diagnostic details"}
         </Button>
@@ -63,29 +69,45 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
 // (yellow) > pass completed (green).
 type ConnectionStatus = "disconnected" | "settled-error" | "settled-loading" | "connected";
 
-function connectionStatus(connected: boolean, settledError: string, settledLoading: boolean): ConnectionStatus {
+function connectionStatus(
+  connected: boolean,
+  settledError: string,
+  settledLoading: boolean,
+): ConnectionStatus {
   if (!connected) return "disconnected";
   if (settledError !== "") return "settled-error";
   if (settledLoading) return "settled-loading";
   return "connected";
 }
 
-function ConnectionDot(props: { connected: boolean; settledLoading: boolean; settledError: string }) {
+function ConnectionDot(props: {
+  connected: boolean;
+  settledLoading: boolean;
+  settledError: string;
+}) {
   const status = () => connectionStatus(props.connected, props.settledError, props.settledLoading);
   const classFor = (s: ConnectionStatus) => {
     switch (s) {
-      case "disconnected": return styles.dotDisconnected;
-      case "settled-error": return styles.dotSettledError;
-      case "settled-loading": return styles.dotSettledLoading;
-      case "connected": return styles.dotConnected;
+      case "disconnected":
+        return styles.dotDisconnected;
+      case "settled-error":
+        return styles.dotSettledError;
+      case "settled-loading":
+        return styles.dotSettledLoading;
+      case "connected":
+        return styles.dotConnected;
     }
   };
   const titleFor = (s: ConnectionStatus) => {
     switch (s) {
-      case "disconnected": return "Disconnected";
-      case "settled-error": return props.settledError;
-      case "settled-loading": return "Loading history…";
-      case "connected": return "Connected";
+      case "disconnected":
+        return "Disconnected";
+      case "settled-error":
+        return props.settledError;
+      case "settled-loading":
+        return "Loading history…";
+      case "connected":
+        return "Connected";
     }
   };
   return (
@@ -110,11 +132,23 @@ function Shell(props: { children?: JSX.Element }) {
       <div class={styles.app}>
         <header class={styles.navbar}>
           <h1 class={styles.title}>
-            <button class={styles.titleButton} type="button" onClick={() => s.navigate("/")} title="New task" data-testid="new-task-button">caic</button>
+            <button
+              class={styles.titleButton}
+              type="button"
+              onClick={() => s.navigate("/")}
+              title="New task"
+              data-testid="new-task-button"
+            >
+              caic
+            </button>
           </h1>
           <span class={styles.subtitle}>Coding Agents in Containers</span>
           <UsageBadges usage={s.usage} now={s.now} />
-          <ConnectionDot connected={s.connected()} settledLoading={s.settledLoading()} settledError={s.settledError()} />
+          <ConnectionDot
+            connected={s.connected()}
+            settledLoading={s.settledLoading()}
+            settledError={s.settledError()}
+          />
           <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
         </header>
 
@@ -127,7 +161,10 @@ function Shell(props: { children?: JSX.Element }) {
             loading={s.cloning()}
             error={s.cloneError()}
             onClone={s.submitClone}
-            onClose={() => { s.setCloneOpen(false); s.setCloneError(""); }}
+            onClose={() => {
+              s.setCloneOpen(false);
+              s.setCloneError("");
+            }}
           />
         </Show>
 

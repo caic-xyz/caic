@@ -53,35 +53,40 @@ export default function WidgetCard(props: { group: MessageGroup }) {
   }
 
   // Post content when HTML changes, widget completes, or iframe becomes ready.
-  createEffect(on(
-    () => [props.group.widgetHTML, props.group.widgetDone, iframeReady()] as const,
-    ([html, done, ready]) => {
-      if (!html || !ready) return;
-      const final = !!done;
-      if (html !== lastPostedHTML) {
-        lastPostedHTML = html;
-        postContent(html, final);
-      } else if (final) {
-        // HTML unchanged but just became done — run scripts.
-        iframeRef?.contentWindow?.postMessage({ type: "runScripts" }, "*");
-      }
-    },
-  ));
+  createEffect(
+    on(
+      () => [props.group.widgetHTML, props.group.widgetDone, iframeReady()] as const,
+      ([html, done, ready]) => {
+        if (!html || !ready) return;
+        const final = !!done;
+        if (html !== lastPostedHTML) {
+          lastPostedHTML = html;
+          postContent(html, final);
+        } else if (final) {
+          // HTML unchanged but just became done — run scripts.
+          iframeRef?.contentWindow?.postMessage({ type: "runScripts" }, "*");
+        }
+      },
+    ),
+  );
 
   // Mirror content to fullscreen iframe when it's open and ready.
-  createEffect(on(
-    () => [props.group.widgetHTML, props.group.widgetDone, fullscreenReady(), fullscreen()] as const,
-    ([html, done, ready, fs]) => {
-      if (!html || !ready || !fs) return;
-      const final = !!done;
-      if (html !== lastPostedFullscreenHTML) {
-        lastPostedFullscreenHTML = html;
-        postFullscreenContent(html, final);
-      } else if (final) {
-        fullscreenIframeRef?.contentWindow?.postMessage({ type: "runScripts" }, "*");
-      }
-    },
-  ));
+  createEffect(
+    on(
+      () =>
+        [props.group.widgetHTML, props.group.widgetDone, fullscreenReady(), fullscreen()] as const,
+      ([html, done, ready, fs]) => {
+        if (!html || !ready || !fs) return;
+        const final = !!done;
+        if (html !== lastPostedFullscreenHTML) {
+          lastPostedFullscreenHTML = html;
+          postFullscreenContent(html, final);
+        } else if (final) {
+          fullscreenIframeRef?.contentWindow?.postMessage({ type: "runScripts" }, "*");
+        }
+      },
+    ),
+  );
 
   // Close fullscreen on Escape.
   function onKeyDown(e: KeyboardEvent) {
@@ -91,15 +96,17 @@ export default function WidgetCard(props: { group: MessageGroup }) {
   }
 
   // Reset fullscreen iframe state when closing.
-  createEffect(on(
-    () => fullscreen(),
-    (fs) => {
-      if (!fs) {
-        setFullscreenReady(false);
-        lastPostedFullscreenHTML = "";
-      }
-    },
-  ));
+  createEffect(
+    on(
+      () => fullscreen(),
+      (fs) => {
+        if (!fs) {
+          setFullscreenReady(false);
+          lastPostedFullscreenHTML = "";
+        }
+      },
+    ),
+  );
 
   window.addEventListener("message", onMessage);
   window.addEventListener("keydown", onKeyDown);
@@ -113,8 +120,15 @@ export default function WidgetCard(props: { group: MessageGroup }) {
       <div class={styles.widgetCard}>
         <div class={styles.widgetHeader}>
           <span class={styles.widgetTitle}>{props.group.widgetTitle || "Widget"}</span>
-          <span class={styles.widgetBadge}>{props.group.widgetDone ? "\u2713" : "\u25CF streaming"}</span>
-          <button class={styles.fullscreenBtn} onClick={() => setFullscreen(true)} title="Fullscreen" aria-label="Fullscreen">
+          <span class={styles.widgetBadge}>
+            {props.group.widgetDone ? "\u2713" : "\u25CF streaming"}
+          </span>
+          <button
+            class={styles.fullscreenBtn}
+            onClick={() => setFullscreen(true)}
+            title="Fullscreen"
+            aria-label="Fullscreen"
+          >
             {"\u26F6"}
           </button>
         </div>
@@ -130,11 +144,23 @@ export default function WidgetCard(props: { group: MessageGroup }) {
       <Show when={fullscreen()}>
         <Portal>
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to close button and Escape key */}
-          <div class={styles.fullscreenOverlay} onClick={(e) => { if (e.target === e.currentTarget) setFullscreen(false); }}>
+          <div
+            class={styles.fullscreenOverlay}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setFullscreen(false);
+            }}
+          >
             <div class={styles.fullscreenHeader}>
               <span class={styles.widgetTitle}>{props.group.widgetTitle || "Widget"}</span>
-              <span class={styles.widgetBadge}>{props.group.widgetDone ? "\u2713" : "\u25CF streaming"}</span>
-              <button class={styles.fullscreenCloseBtn} onClick={() => setFullscreen(false)} title="Close fullscreen" aria-label="Close fullscreen">
+              <span class={styles.widgetBadge}>
+                {props.group.widgetDone ? "\u2713" : "\u25CF streaming"}
+              </span>
+              <button
+                class={styles.fullscreenCloseBtn}
+                onClick={() => setFullscreen(false)}
+                title="Close fullscreen"
+                aria-label="Close fullscreen"
+              >
                 {"\u2715"}
               </button>
             </div>

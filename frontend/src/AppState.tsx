@@ -77,11 +77,7 @@ function jitteredDelay(base: number): number {
   return base * (0.75 + Math.random() * 0.5);
 }
 
-const inputNeededTaskStates = new Set<TaskState>([
-  "waiting",
-  "asking",
-  "has_plan",
-]);
+const inputNeededTaskStates = new Set<TaskState>(["waiting", "asking", "has_plan"]);
 const otherAliveTaskStates = new Set<TaskState>([
   "pending",
   "branching",
@@ -100,9 +96,7 @@ function confirmImmediatePurge(task: Task): boolean {
 }
 
 type PendingTaskUpdate =
-  | { kind: "patch"; patch: Record<string, unknown> }
-  | { kind: "replace" }
-  | { kind: "delete" };
+  { kind: "patch"; patch: Record<string, unknown> } | { kind: "replace" } | { kind: "delete" };
 
 type TaskRecovery = {
   updates: PendingTaskUpdate[];
@@ -111,8 +105,7 @@ type TaskRecovery = {
 function taskDiffChanged(previous: Task, next: Task): boolean {
   return (
     previous.state !== next.state ||
-    JSON.stringify(previous.diffStat ?? []) !==
-      JSON.stringify(next.diffStat ?? [])
+    JSON.stringify(previous.diffStat ?? []) !== JSON.stringify(next.diffStat ?? [])
   );
 }
 
@@ -177,30 +170,25 @@ function createAppStore() {
   const [maxCPUs, setMaxCPUs] = createSignal(0);
   const [purgeDelay, setPurgeDelay] = createSignal(0);
   const [containerPlatform, setContainerPlatform] = createSignal("");
-  const [wellKnownCaches, setWellKnownCaches] = createSignal<
-    Record<string, boolean | undefined>
-  >({});
+  const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>(
+    {},
+  );
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<
     WellKnownCachesResp["wellKnown"]
   >([]);
   const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<
     Record<string, CacheSize | undefined>
   >({});
-  const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>(
-    [],
-  );
+  const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
   const [settingsError, setSettingsError] = createSignal("");
   const [oauthGrants, setOAuthGrants] = createSignal<OAuthGrantResp[]>([]);
   const [oauthGrantError, setOAuthGrantError] = createSignal("");
-  const [revokingOAuthGrantID, setRevokingOAuthGrantID] = createSignal<
-    string | null
-  >(null);
+  const [revokingOAuthGrantID, setRevokingOAuthGrantID] = createSignal<string | null>(null);
   const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
   const [versionCheckError, setVersionCheckError] = createSignal("");
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
-  const [refreshingHarness, setRefreshingHarness] =
-    createSignal<Harness | null>(null);
+  const [refreshingHarness, setRefreshingHarness] = createSignal<Harness | null>(null);
   const [modelRefreshStatus, setModelRefreshStatus] = createSignal("");
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
@@ -209,19 +197,14 @@ function createAppStore() {
 
   createEffect(() => {
     const available = runtimes();
-    if (
-      available.length > 0 &&
-      !available.some((rt) => rt.name === selectedRuntimeName())
-    ) {
+    if (available.length > 0 && !available.some((rt) => rt.name === selectedRuntimeName())) {
       setSelectedRuntimeName(available[0].name);
     }
   });
 
   /** Build the current settings payload for updatePreferences, with optional overrides. */
   const currentSettings = (
-    overrides: Partial<
-      Parameters<typeof updatePreferences>[0]["settings"]
-    > = {},
+    overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {},
   ) => {
     const settings = {
       autoFixOnCIFailure: autoFixCI(),
@@ -242,9 +225,7 @@ function createAppStore() {
         cacheMappings: settings.cacheMappings.map(
           ({ resolvedContainerPath: _, ...mapping }) => mapping,
         ),
-        customMounts: settings.customMounts.map(
-          ({ resolvedContainerPath: _, ...mount }) => mount,
-        ),
+        customMounts: settings.customMounts.map(({ resolvedContainerPath: _, ...mount }) => mount),
       },
     };
   };
@@ -258,14 +239,12 @@ function createAppStore() {
   const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
 
   // Per-task input drafts survive task switching.
-  const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(
-    new Map(),
-  );
+  const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
 
   // Per-task image drafts survive task switching.
-  const [inputImageDrafts, setInputImageDrafts] = createSignal<
-    Map<string, APIImageData[]>
-  >(new Map());
+  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(
+    new Map(),
+  );
 
   function removeTaskDrafts(id: string) {
     setInputDrafts((prev) => {
@@ -283,24 +262,17 @@ function createAppStore() {
   }
 
   // Transient server warnings shown as auto-dismissing toasts.
-  const [warnings, setWarnings] = createSignal<
-    { id: number; message: string }[]
-  >([]);
+  const [warnings, setWarnings] = createSignal<{ id: number; message: string }[]>([]);
   let nextWarningId = 0;
   function showWarning(message: string) {
     const id = nextWarningId++;
     setWarnings((prev) => [...prev, { id, message }]);
-    setTimeout(
-      () => setWarnings((prev) => prev.filter((w) => w.id !== id)),
-      8000,
-    );
+    setTimeout(() => setWarnings((prev) => prev.filter((w) => w.id !== id)), 8000);
   }
-  const dismissWarning = (id: number) =>
-    setWarnings((prev) => prev.filter((w) => w.id !== id));
+  const dismissWarning = (id: number) => setWarnings((prev) => prev.filter((w) => w.id !== id));
 
   const harnessSupportsImages = () =>
-    harnesses().find((h) => h.name === selectedHarness())?.supportsImages ??
-    false;
+    harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
   const selectRuntimeName = (runtimeName: string) => {
     setSelectedRuntimeName(runtimeName);
@@ -318,9 +290,7 @@ function createAppStore() {
     setCustomMounts(settings.customMounts ?? []);
   };
 
-  const applyResolvedContainerPaths = (
-    settings: PreferencesResp["settings"],
-  ) => {
+  const applyResolvedContainerPaths = (settings: PreferencesResp["settings"]) => {
     setCacheMappings((current) =>
       current.map((mapping, i) => {
         const saved = settings.cacheMappings?.[i];
@@ -368,8 +338,7 @@ function createAppStore() {
     setGitHubTokenAvailable(config.gitHubTokenAvailable);
     setMCPOAuthAvailable(config.mcpOAuthAvailable);
     setVoiceGatewayAvailable(config.voiceGateway.mode !== "disabled");
-    const displayName =
-      config.displayName || window.location.hostname.split(".")[0];
+    const displayName = config.displayName || window.location.hostname.split(".")[0];
     document.title = `${displayName} — caic`;
   };
 
@@ -386,14 +355,11 @@ function createAppStore() {
     const id = selectedId();
     return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
   };
-  const taskById = (id: string): Task | undefined =>
-    tasks().find((t) => t.id === id);
+  const taskById = (id: string): Task | undefined => tasks().find((t) => t.id === id);
 
   function tasksInSidebarOrder(): Task[] {
     const byId = new Map(tasks().map((t) => [t.id, t]));
-    const ordered = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-task-id]"),
-    )
+    const ordered = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
       .map((el) => el.dataset.taskId ?? "")
       .map((id) => byId.get(id))
       .filter((t): t is Task => t !== undefined);
@@ -417,18 +383,16 @@ function createAppStore() {
 
   function focusTaskCard(id: string) {
     requestAnimationFrame(() => {
-      const card = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-task-id]"),
-      ).find((el) => el.dataset.taskId === id);
+      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]")).find(
+        (el) => el.dataset.taskId === id,
+      );
       card?.focus();
     });
   }
 
   function focusPrompt() {
     requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>("[data-testid='prompt-input']")
-        ?.focus();
+      document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus();
     });
   }
 
@@ -468,8 +432,7 @@ function createAppStore() {
   // In-memory per-harness model and per-harness/model effort preferences from the server.
   let prefModels: Record<string, string> = {};
   let prefEfforts: EffortPreferences = {};
-  const getPrefModel = (harness: string): string | undefined =>
-    prefModels[harness];
+  const getPrefModel = (harness: string): string | undefined => prefModels[harness];
   const setPrefModel = (harness: string, model: string) => {
     if (model) prefModels[harness] = model;
     else delete prefModels[harness];
@@ -493,15 +456,12 @@ function createAppStore() {
   const selectedModelForHarness = (harness: string) => {
     const models = harnesses().find((x) => x.name === harness)?.models ?? [];
     const model = getPrefModel(harness);
-    return model && models.some((candidate) => candidate.id === model)
-      ? model
-      : "";
+    return model && models.some((candidate) => candidate.id === model) ? model : "";
   };
   const selectedEffortForModel = (harness: string, model: string) => {
     const harnessInfo = harnesses().find((x) => x.name === harness);
     const options =
-      harnessInfo?.models.find((candidate) => candidate.id === model)
-        ?.effortOptions ?? [];
+      harnessInfo?.models.find((candidate) => candidate.id === model)?.effortOptions ?? [];
     const effort = getPrefEffort(harness, model);
     return effort && options.includes(effort) ? effort : "";
   };
@@ -533,14 +493,10 @@ function createAppStore() {
   };
   const checkAndNotify = (task: Task) => {
     const needsInput =
-      task.state === "waiting" ||
-      task.state === "asking" ||
-      task.state === "has_plan";
+      task.state === "waiting" || task.state === "asking" || task.state === "has_plan";
     const prevState = prevStates.get(task.id);
     const prevNeedsInput =
-      prevState === "waiting" ||
-      prevState === "asking" ||
-      prevState === "has_plan";
+      prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
     if (needsInput && prevState === "running") {
       notifyWaiting(task.id, task.title, {
         enabled: hostMode.browserNotificationsEnabled(),
@@ -580,9 +536,7 @@ function createAppStore() {
   };
 
   const updateWellKnownCacheSizes = (sizes: CacheSize[]) => {
-    setWellKnownCacheSizes(
-      Object.fromEntries(sizes.map((size) => [size.name, size])),
-    );
+    setWellKnownCacheSizes(Object.fromEntries(sizes.map((size) => [size.name, size])));
   };
 
   // Fetch version, MCP grant, and cache size info when the settings page opens.
@@ -599,9 +553,7 @@ function createAppStore() {
           getCacheSizes().catch(() => null),
           initialMcpOAuthAvailable
             ? listOAuthGrants().catch((e: unknown) => {
-                setOAuthGrantError(
-                  e instanceof Error ? e.message : "Could not load MCP clients",
-                );
+                setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
                 return null;
               })
             : Promise.resolve(null),
@@ -610,9 +562,7 @@ function createAppStore() {
         if (sizes) updateWellKnownCacheSizes(sizes.wellKnown);
         if (grants) setOAuthGrants(grants.grants);
       } catch (e: unknown) {
-        setVersionCheckError(
-          e instanceof Error ? e.message : "Version check failed",
-        );
+        setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
       } finally {
         setCheckingUpdate(false);
       }
@@ -681,11 +631,7 @@ function createAppStore() {
         if (update.kind === "patch") applyTaskPatch(id, update.patch);
       }
       const latestBoundary = replayFrom === 0 ? null : updates[replayFrom - 1];
-      if (
-        task === null &&
-        getTaskError !== null &&
-        latestBoundary?.kind !== "replace"
-      ) {
+      if (task === null && getTaskError !== null && latestBoundary?.kind !== "replace") {
         // Only a definitive not-found is authoritative. Transient errors, 403s,
         // and 5xx responses keep the route so auth and server state can recover.
         dismissSelectedTaskOnNotFound(id, getTaskError);
@@ -719,18 +665,15 @@ function createAppStore() {
     dataLoaded = true;
     void (async () => {
       try {
-        const [data, prefs, h, config, usageData, cachesData, cacheSizesData] =
-          await Promise.all([
-            listRepos(),
-            getPreferences().catch(() => null),
-            listHarnesses().catch(() => [] as HarnessInfo[]),
-            getConfig().catch(() => null),
-            getUsage().catch(() => null),
-            listCaches().catch(
-              () => null,
-            ) as Promise<WellKnownCachesResp | null>,
-            getCacheSizes().catch(() => null),
-          ]);
+        const [data, prefs, h, config, usageData, cachesData, cacheSizesData] = await Promise.all([
+          listRepos(),
+          getPreferences().catch(() => null),
+          listHarnesses().catch(() => [] as HarnessInfo[]),
+          getConfig().catch(() => null),
+          getUsage().catch(() => null),
+          listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
+          getCacheSizes().catch(() => null),
+        ]);
         if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
         if (cacheSizesData) updateWellKnownCacheSizes(cacheSizesData.wellKnown);
         const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
@@ -754,13 +697,10 @@ function createAppStore() {
           prefEfforts = prefs?.efforts ?? {};
           const prefHarness = prefs?.harness ?? "";
           const harness =
-            prefHarness && h.find((x) => x.name === prefHarness)
-              ? prefHarness
-              : (h[0]?.name ?? "");
+            prefHarness && h.find((x) => x.name === prefHarness) ? prefHarness : (h[0]?.name ?? "");
           selectHarness(harness);
         }
-        if (prefs?.settings?.baseImage)
-          setSelectedImage(prefs.settings.baseImage);
+        if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
         if (config) applyServerConfig(config);
         if (prefs?.settings) applySettings(prefs.settings);
         if (usageData) setUsage(usageData);
@@ -800,8 +740,7 @@ function createAppStore() {
       return false;
     }
     const initialScriptSrc =
-      document.querySelector<HTMLScriptElement>("script[src^='/assets/']")
-        ?.src ?? "";
+      document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
 
     function onOpen() {
       setConnected(true);
@@ -811,13 +750,9 @@ function createAppStore() {
       taskES = globalTaskEvents({
         onMessage: (event) => {
           if (event.kind === "snapshot" && event.snapshot) {
-            const snapshotByID = new Map(
-              event.snapshot.map((task) => [task.id, task]),
-            );
+            const snapshotByID = new Map(event.snapshot.map((task) => [task.id, task]));
             for (const task of event.snapshot) {
-              const previous = tasks().find(
-                (candidate) => candidate.id === task.id,
-              );
+              const previous = tasks().find((candidate) => candidate.id === task.id);
               updateTaskDiffCache(previous, task);
             }
             for (const id of taskRecoveries.keys()) {
@@ -860,8 +795,7 @@ function createAppStore() {
             // Authoritative removal: if the deleted task is the one being viewed,
             // leave its now-dead detail route.
             if (event.delete === selectedId()) navigate("/", { replace: true });
-            if (taskRecoveries.has(event.delete))
-              queueTaskUpdate(event.delete, { kind: "delete" });
+            if (taskRecoveries.has(event.delete)) queueTaskUpdate(event.delete, { kind: "delete" });
             prevStates.delete(event.delete);
             removeTaskDrafts(event.delete);
             evictTaskDiff(event.delete);
@@ -1102,16 +1036,14 @@ function createAppStore() {
       .slice(0, recentCount())
       .filter(
         (r) =>
-          !forkSourceRepoPaths().has(r.path) &&
-          !forkExtraRepos().some((s) => s.path === r.path),
+          !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path),
       );
   const forkAvailableRest = () =>
     repos()
       .slice(recentCount())
       .filter(
         (r) =>
-          !forkSourceRepoPaths().has(r.path) &&
-          !forkExtraRepos().some((s) => s.path === r.path),
+          !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path),
       );
   const forkTargets = () => {
     const source = tasks().find((task) => task.id === forkTaskId());
@@ -1124,26 +1056,20 @@ function createAppStore() {
     );
   };
   const forkHarnesses = () =>
-    forkQuotaRecovery()
-      ? forkTargets().map((target) => target.harness)
-      : harnesses();
+    forkQuotaRecovery() ? forkTargets().map((target) => target.harness) : harnesses();
   const forkHarnessLabel = (harness: HarnessInfo) => {
     if (!forkQuotaRecovery()) return harness.name;
-    const target = forkTargets().find(
-      (candidate) => candidate.harness.name === harness.name,
-    );
+    const target = forkTargets().find((candidate) => candidate.harness.name === harness.name);
     return target ? `${harness.name} — ${target.label}` : harness.name;
   };
   const forkSelectedTargetLabel = () =>
-    forkTargets().find((target) => target.harness.name === forkHarness())
-      ?.label ?? "Quota status unknown";
+    forkTargets().find((target) => target.harness.name === forkHarness())?.label ??
+    "Quota status unknown";
 
   createEffect(() => {
     if (!forkQuotaRecovery() || forkTargetTouched) return;
-    const recommended = forkTargets().find((target) => target.recommended)
-      ?.harness.name;
-    if (recommended && recommended !== forkHarness())
-      applyForkHarness(recommended);
+    const recommended = forkTargets().find((target) => target.recommended)?.harness.name;
+    if (recommended && recommended !== forkHarness()) applyForkHarness(recommended);
   });
 
   function openFork(id: string, quotaRecovery: boolean): number {
@@ -1204,13 +1130,10 @@ function createAppStore() {
       }
     } catch (e) {
       if (forkTaskId() === id && forkDialogGeneration === generation) {
-        setForkHandoffError(
-          e instanceof Error ? e.message : "Could not generate handoff",
-        );
+        setForkHandoffError(e instanceof Error ? e.message : "Could not generate handoff");
       }
     } finally {
-      if (forkTaskId() === id && forkDialogGeneration === generation)
-        setForkHandoffLoading(false);
+      if (forkTaskId() === id && forkDialogGeneration === generation) setForkHandoffLoading(false);
     }
   }
 
@@ -1273,18 +1196,9 @@ function createAppStore() {
         const current = repos();
         const idx = current.findIndex((r) => r.path === primary);
         if (idx > 0) {
-          setRepos([
-            current[idx],
-            ...current.slice(0, idx),
-            ...current.slice(idx + 1),
-          ]);
+          setRepos([current[idx], ...current.slice(0, idx), ...current.slice(idx + 1)]);
         }
-        setRecentCount(
-          Math.min(
-            recentCount() + (idx > recentCount() - 1 ? 1 : 0),
-            current.length,
-          ),
-        );
+        setRecentCount(Math.min(recentCount() + (idx > recentCount() - 1 ? 1 : 0), current.length));
       }
     }
     try {
@@ -1351,9 +1265,7 @@ function createAppStore() {
   }
 
   function saveSettings(
-    overrides: Partial<
-      Parameters<typeof updatePreferences>[0]["settings"]
-    > = {},
+    overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {},
   ): Promise<void> {
     const saveID = ++latestSettingsSave;
     const settings = currentSettings(overrides);
@@ -1361,13 +1273,10 @@ function createAppStore() {
     settingsSaveQueue = settingsSaveQueue.then(async () => {
       try {
         const preferences = await updatePreferences(settings);
-        if (saveID === latestSettingsSave)
-          applyResolvedContainerPaths(preferences.settings);
+        if (saveID === latestSettingsSave) applyResolvedContainerPaths(preferences.settings);
       } catch (e: unknown) {
         if (saveID === latestSettingsSave)
-          setSettingsError(
-            e instanceof Error ? e.message : "Could not save settings",
-          );
+          setSettingsError(e instanceof Error ? e.message : "Could not save settings");
       }
     });
     return settingsSaveQueue;
@@ -1381,9 +1290,7 @@ function createAppStore() {
       const grants = await listOAuthGrants();
       setOAuthGrants(grants.grants);
     } catch (e: unknown) {
-      setOAuthGrantError(
-        e instanceof Error ? e.message : "Could not revoke MCP client",
-      );
+      setOAuthGrantError(e instanceof Error ? e.message : "Could not revoke MCP client");
     } finally {
       setRevokingOAuthGrantID(null);
     }
@@ -1411,15 +1318,11 @@ function createAppStore() {
     setModelRefreshStatus("");
     try {
       const refreshed = await refreshHarness(harness, {});
-      setHarnesses((prev) =>
-        prev.map((info) => (info.name === harness ? refreshed : info)),
-      );
+      setHarnesses((prev) => prev.map((info) => (info.name === harness ? refreshed : info)));
       if (selectedHarness() === harness) selectHarness(harness);
       setModelRefreshStatus(`${harness} models refreshed.`);
     } catch (e: unknown) {
-      setModelRefreshStatus(
-        e instanceof Error ? e.message : "Could not refresh models",
-      );
+      setModelRefreshStatus(e instanceof Error ? e.message : "Could not refresh models");
     } finally {
       setRefreshingHarness(null);
     }
@@ -1633,16 +1536,11 @@ const AppStateContext = createContext<AppStore>();
 
 export function AppStateProvider(props: { children: JSX.Element }) {
   const store = createAppStore();
-  return (
-    <AppStateContext.Provider value={store}>
-      {props.children}
-    </AppStateContext.Provider>
-  );
+  return <AppStateContext.Provider value={store}>{props.children}</AppStateContext.Provider>;
 }
 
 export function useAppState(): AppStore {
   const ctx = useContext(AppStateContext);
-  if (!ctx)
-    throw new Error("useAppState must be used within an AppStateProvider");
+  if (!ctx) throw new Error("useAppState must be used within an AppStateProvider");
   return ctx;
 }

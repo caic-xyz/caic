@@ -60,7 +60,9 @@ export default function VncViewer(props: Props) {
         rfb.removeEventListener("disconnect", onDisconnect);
         rfb.removeEventListener("connect", onConnect);
         rfb.disconnect();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     });
   });
 
@@ -80,10 +82,18 @@ export default function VncViewer(props: Props) {
   }
 
   return (
-    <div ref={containerRef} class={styles.container} classList={{ [styles.fullscreen]: fullscreen() }}>
+    <div
+      ref={containerRef}
+      class={styles.container}
+      classList={{ [styles.fullscreen]: fullscreen() }}
+    >
       <div class={styles.header}>
         <Show when={!fullscreen()}>
-          <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
+          <button
+            class={styles.backBtn}
+            onClick={() => navigate(props.taskPath)}
+            title="Back to task"
+          >
             <ArrowBackIcon width={20} height={20} />
           </button>
           <span class={styles.headerMeta}>
@@ -91,7 +101,11 @@ export default function VncViewer(props: Props) {
             <span class={styles.headerBranch}>{props.branch}</span>
           </span>
         </Show>
-        <button class={styles.backBtn} onClick={toggleFullscreen} title={fullscreen() ? "Exit fullscreen" : "Fullscreen"}>
+        <button
+          class={styles.backBtn}
+          onClick={toggleFullscreen}
+          title={fullscreen() ? "Exit fullscreen" : "Fullscreen"}
+        >
           <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} />}>
             <FullscreenExitIcon width={20} height={20} />
           </Show>

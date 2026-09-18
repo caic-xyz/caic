@@ -25,21 +25,11 @@ describe("taskPath", () => {
 describe("taskIdFromPath", () => {
   it("extracts IDs from task subroutes", () => {
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug")).toBe("abc123");
-    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/diff")).toBe(
-      "abc123",
-    );
-    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/processes")).toBe(
-      "abc123",
-    );
-    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/stats")).toBe(
-      "abc123",
-    );
-    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/vnc")).toBe(
-      "abc123",
-    );
-    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/info")).toBe(
-      "abc123",
-    );
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/diff")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/processes")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/stats")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/vnc")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/info")).toBe("abc123");
   });
 
   it("extracts IDs from slugless task subroutes", () => {

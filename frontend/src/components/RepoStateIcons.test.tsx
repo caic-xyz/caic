@@ -17,12 +17,10 @@ vi.mock("@solidjs/router", () => ({
         if (typeof props.onFocus === "function") props.onFocus(event);
       }}
       onPointerEnter={(event) => {
-        if (typeof props.onPointerEnter === "function")
-          props.onPointerEnter(event);
+        if (typeof props.onPointerEnter === "function") props.onPointerEnter(event);
       }}
       onPointerDown={(event) => {
-        if (typeof props.onPointerDown === "function")
-          props.onPointerDown(event);
+        if (typeof props.onPointerDown === "function") props.onPointerDown(event);
       }}
     >
       {props.children}
@@ -104,9 +102,7 @@ it("elides line totals when its row overflows", async () => {
   });
   window.dispatchEvent(new Event("resize"));
 
-  await waitFor(() =>
-    expect(marker).toHaveAttribute("data-elide-diff-stats", ""),
-  );
+  await waitFor(() => expect(marker).toHaveAttribute("data-elide-diff-stats", ""));
   expect(marker).toHaveAccessibleName(
     "4 changed files, 17 additions, 2 deletions, 3 uncommitted files, 1 commit ahead of upstream",
   );

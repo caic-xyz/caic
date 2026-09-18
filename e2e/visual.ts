@@ -7,11 +7,7 @@ const visualTime = "2026-09-02T12:00:00.000Z";
 
 export const screenshotDir =
   process.env.CAIC_SCREENSHOT_DIR ??
-  path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "screenshots",
-    "frontend",
-  );
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "screenshots", "frontend");
 
 export async function prepareVisualPage(page: Page): Promise<void> {
   await page.clock.setFixedTime(visualTime);
@@ -87,10 +83,7 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   });
 }
 
-export async function captureScreenshot(
-  page: Page,
-  filename: string,
-): Promise<void> {
+export async function captureScreenshot(page: Page, filename: string): Promise<void> {
   await waitForVisualReadiness(page);
   await page.screenshot({
     caret: "hide",

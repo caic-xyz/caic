@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import type { EventMessage } from "@sdk/types.gen";
 
-import { deriveTaskTimings, formatTimingDuration, IncrementalEventTimingTracker, IncrementalTaskTimingTracker } from "./timing";
+import {
+  deriveTaskTimings,
+  formatTimingDuration,
+  IncrementalEventTimingTracker,
+  IncrementalTaskTimingTracker,
+} from "./timing";
 
 function result(ts: number, duration: number): EventMessage {
   return {
@@ -82,7 +87,18 @@ describe("deriveTaskTimings", () => {
     completed.result.usage.reportedModel = "";
 
     const timings = deriveTaskTimings([
-      { kind: "init", ts: 1_000, init: { reportedModel: "session-model", agentVersion: "test", sessionID: "session", tools: [], cwd: "", harness: "test" } },
+      {
+        kind: "init",
+        ts: 1_000,
+        init: {
+          reportedModel: "session-model",
+          agentVersion: "test",
+          sessionID: "session",
+          tools: [],
+          cwd: "",
+          harness: "test",
+        },
+      },
       completed,
     ]);
 
@@ -94,7 +110,11 @@ describe("deriveTaskTimings", () => {
     const changeStat = { files: 3, added: 14, deleted: 2, binaryFiles: 1 };
 
     const timings = deriveTaskTimings([
-      { kind: "commitSnapshot", ts: 1_000, commitSnapshot: { baseline: true, repositoryCommits: [] } },
+      {
+        kind: "commitSnapshot",
+        ts: 1_000,
+        commitSnapshot: { baseline: true, repositoryCommits: [] },
+      },
       completed,
       { kind: "commitSnapshot", ts: 2_100, commitSnapshot: { repositoryCommits: [], changeStat } },
     ]);
@@ -124,16 +144,21 @@ describe("IncrementalEventTimingTracker", () => {
   it("processes only appended events in a large streaming block", () => {
     const tracker = new IncrementalEventTimingTracker();
     const first = input(1_000, "prompt");
-    const events = [first, ...Array.from({ length: 65_000 }, (_, index): EventMessage => ({
-      kind: "textDelta",
-      ts: index + 2_000,
-      textDelta: { text: "delta" },
-    }))];
+    const events = [
+      first,
+      ...Array.from({ length: 65_000 }, (_, index): EventMessage => ({
+        kind: "textDelta",
+        ts: index + 2_000,
+        textDelta: { text: "delta" },
+      })),
+    ];
     expect(tracker.derive(events).range).toEqual({ start: 1_000, end: 66_999 });
 
     Object.defineProperty(first, "ts", {
       configurable: true,
-      get: () => { throw new Error("retained event was rescanned"); },
+      get: () => {
+        throw new Error("retained event was rescanned");
+      },
     });
     events.push({ kind: "text", ts: 70_000, text: { text: "done" } });
 
@@ -196,7 +221,9 @@ describe("IncrementalTaskTimingTracker", () => {
 
     Object.defineProperty(messages[0], "ts", {
       configurable: true,
-      get: () => { throw new Error("retained message was rescanned"); },
+      get: () => {
+        throw new Error("retained message was rescanned");
+      },
     });
     messages.push(input(70_000, "again"));
 

@@ -57,9 +57,18 @@ a.providerPill:hover {
   white-space: nowrap;
 }
 
-.green  { background: var(--color-success-bg); color: var(--color-success-text); }
-.yellow { background: var(--color-warning-bg); color: var(--color-warning-text); }
-.red    { background: var(--color-danger-bg);  color: var(--color-danger-text);  }
+.green {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.yellow {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.red {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
 
 .disabled {
   background: var(--color-surface-variant);

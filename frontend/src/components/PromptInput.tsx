@@ -138,7 +138,9 @@ export default function PromptInput(props: Props) {
         <div class={styles.trailing}>
           <Show when={props.supportsImages}>
             <input
-              ref={(el) => { fileInputRef = el; }}
+              ref={(el) => {
+                fileInputRef = el;
+              }}
               type="file"
               multiple
               accept="image/png,image/jpeg,image/gif,image/webp"
@@ -165,7 +167,12 @@ export default function PromptInput(props: Props) {
                     Take photo
                   </button>
                   <Show when={!!navigator.mediaDevices?.getDisplayMedia}>
-                    <button class={styles.menuItem} role="menuitem" onClick={handleScreenshot} data-testid="screenshot-menu-item">
+                    <button
+                      class={styles.menuItem}
+                      role="menuitem"
+                      onClick={handleScreenshot}
+                      data-testid="screenshot-menu-item"
+                    >
                       <ScreenshotIcon width="1.1em" height="1.1em" />
                       Screenshot
                     </button>
@@ -177,7 +184,14 @@ export default function PromptInput(props: Props) {
                 </div>
               }
             >
-              <Button type="button" variant="gray" disabled={props.disabled} aria-label="Attach images" onClick={handleAttachClick} data-testid="attach-images">
+              <Button
+                type="button"
+                variant="gray"
+                disabled={props.disabled}
+                aria-label="Attach images"
+                onClick={handleAttachClick}
+                data-testid="attach-images"
+              >
                 <AttachIcon width="1.2em" height="1.2em" />
               </Button>
             </Dropdown>
@@ -194,7 +208,13 @@ export default function PromptInput(props: Props) {
             {(img, idx) => (
               <div class={styles.imageThumb}>
                 <img src={`data:${img.mediaType};base64,${img.data}`} alt="attached" />
-                <button class={styles.imageRemove} onClick={() => removeImage(idx())} aria-label="Remove">&times;</button>
+                <button
+                  class={styles.imageRemove}
+                  onClick={() => removeImage(idx())}
+                  aria-label="Remove"
+                >
+                  &times;
+                </button>
               </div>
             )}
           </For>

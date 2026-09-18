@@ -43,9 +43,7 @@ describe("AutoResizeTextarea", () => {
   it("calls onInput when typing", async () => {
     const user = userEvent.setup();
     const onInput = vi.fn();
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="" onInput={onInput} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={onInput} />);
     await user.click(getByRole("textbox"));
     await user.keyboard("a");
     expect(onInput).toHaveBeenCalledWith("a");
@@ -91,9 +89,7 @@ describe("AutoResizeTextarea", () => {
 
   it("extracts newlines from div-wrapped lines", async () => {
     const onInput = vi.fn();
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="" onInput={onInput} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={onInput} />);
     const el = getByRole("textbox");
     // Simulate Chrome's contentEditable behaviour: wrapping lines in <div>.
     el.innerHTML = "line1<div>line2</div><div>line3</div>";
@@ -102,9 +98,7 @@ describe("AutoResizeTextarea", () => {
   });
 
   it("places the caret at the end on programmatic focus", async () => {
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="hello" onInput={() => {}} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="hello" onInput={() => {}} />);
     const el = getByRole("textbox");
 
     el.focus();
@@ -114,9 +108,7 @@ describe("AutoResizeTextarea", () => {
   });
 
   it("restores the last caret position on keyboard focus", async () => {
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="hello" onInput={() => {}} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="hello" onInput={() => {}} />);
     const el = getByRole("textbox");
     el.focus();
     await Promise.resolve();

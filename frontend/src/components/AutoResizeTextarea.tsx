@@ -41,9 +41,10 @@ export default function AutoResizeTextarea(props: Props) {
   function restoreCaret() {
     if (pointerFocus) return;
     const generation = ++focusGeneration;
-    const previousRange = savedRange && editable.contains(savedRange.commonAncestorContainer)
-      ? savedRange.cloneRange()
-      : undefined;
+    const previousRange =
+      savedRange && editable.contains(savedRange.commonAncestorContainer)
+        ? savedRange.cloneRange()
+        : undefined;
     queueMicrotask(() => {
       if (generation !== focusGeneration || document.activeElement !== editable) return;
       const selection = window.getSelection();
@@ -60,7 +61,9 @@ export default function AutoResizeTextarea(props: Props) {
 
   function handlePointerDown() {
     pointerFocus = true;
-    queueMicrotask(() => { pointerFocus = false; });
+    queueMicrotask(() => {
+      pointerFocus = false;
+    });
   }
 
   function handleBlur() {
@@ -138,7 +141,6 @@ export default function AutoResizeTextarea(props: Props) {
       onFocus={restoreCaret}
       onBlur={handleBlur}
     />
-
   );
 }
 

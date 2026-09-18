@@ -4,25 +4,25 @@
 
 Choose the diagram type based on the user's intent:
 
-| User verb | Diagram type | Best for |
-|-----------|-------------|----------|
-| "explain", "how does" | Flowchart | Processes, algorithms, decision trees |
-| "compare", "relationship" | Structural | Architecture, hierarchies, ER diagrams |
-| "illustrate", "show" | Illustrative | Concepts, metaphors, artistic diagrams |
-| "plan", "timeline" | Timeline / Gantt | Project phases, sequences |
-| "break down" | Tree / hierarchy | Decomposition, org charts |
+| User verb                 | Diagram type     | Best for                               |
+| ------------------------- | ---------------- | -------------------------------------- |
+| "explain", "how does"     | Flowchart        | Processes, algorithms, decision trees  |
+| "compare", "relationship" | Structural       | Architecture, hierarchies, ER diagrams |
+| "illustrate", "show"      | Illustrative     | Concepts, metaphors, artistic diagrams |
+| "plan", "timeline"        | Timeline / Gantt | Project phases, sequences              |
+| "break down"              | Tree / hierarchy | Decomposition, org charts              |
 
 ## Complexity Budget
 
 Keep diagrams readable. Limits per type:
 
-| Type | Max nodes | Max connectors | Max depth |
-|------|-----------|---------------|-----------|
-| Flowchart | 15 | 20 | 6 |
-| Structural | 20 | 25 | 4 |
-| Illustrative | 12 | 15 | 3 |
-| Timeline | 10 phases | — | 2 |
-| Tree | 20 | 19 | 5 |
+| Type         | Max nodes | Max connectors | Max depth |
+| ------------ | --------- | -------------- | --------- |
+| Flowchart    | 15        | 20             | 6         |
+| Structural   | 20        | 25             | 4         |
+| Illustrative | 12        | 15             | 3         |
+| Timeline     | 10 phases | —              | 2         |
+| Tree         | 20        | 19             | 5         |
 
 If content exceeds these limits, split into multiple diagrams or add
 a "detail" toggle (show/hide secondary nodes via script).
@@ -69,8 +69,17 @@ a "detail" toggle (show/hide secondary nodes via script).
 - Use a grid or hierarchical layout (parent-child).
 - Group related components in dashed boundary boxes:
   ```html
-  <rect class="boundary" x="..." y="..." width="..." height="..."
-        fill="none" stroke="var(--border)" stroke-dasharray="4,4" rx="8"/>
+  <rect
+    class="boundary"
+    x="..."
+    y="..."
+    width="..."
+    height="..."
+    fill="none"
+    stroke="var(--border)"
+    stroke-dasharray="4,4"
+    rx="8"
+  />
   ```
 - Label boundaries with a title positioned at the top-left inside.
 

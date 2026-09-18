@@ -27,12 +27,14 @@ export function deriveNetworkRates(stats: readonly EventStats[]): NetworkRateSam
     const elapsedSeconds = previous ? (sample.ts - previous.ts) / 1000 : 0;
     return {
       ts: sample.ts,
-      rxBytesPerSecond: previous && elapsedSeconds > 0 && sample.netRx >= previous.netRx
-        ? (sample.netRx - previous.netRx) / elapsedSeconds
-        : null,
-      txBytesPerSecond: previous && elapsedSeconds > 0 && sample.netTx >= previous.netTx
-        ? (sample.netTx - previous.netTx) / elapsedSeconds
-        : null,
+      rxBytesPerSecond:
+        previous && elapsedSeconds > 0 && sample.netRx >= previous.netRx
+          ? (sample.netRx - previous.netRx) / elapsedSeconds
+          : null,
+      txBytesPerSecond:
+        previous && elapsedSeconds > 0 && sample.netTx >= previous.netTx
+          ? (sample.netTx - previous.netTx) / elapsedSeconds
+          : null,
     };
   });
 }
@@ -46,15 +48,19 @@ export class IncrementalToolTimingTracker {
   private dirty = false;
 
   derive(events: readonly EventMessage[]): ToolTimingSummary[] {
-    if (events.length < this.processed || (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)) {
+    if (
+      events.length < this.processed ||
+      (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)
+    ) {
       this.clear();
     }
     for (let i = this.processed; i < events.length; i++) this.append(events[i]);
     this.processed = events.length;
     this.lastProcessed = events.at(-1) ?? null;
     if (this.dirty) {
-      this.summaries = Array.from(this.totals.values(), (summary) => ({ ...summary }))
-        .sort((a, b) => b.durationMs - a.durationMs || a.name.localeCompare(b.name));
+      this.summaries = Array.from(this.totals.values(), (summary) => ({ ...summary })).sort(
+        (a, b) => b.durationMs - a.durationMs || a.name.localeCompare(b.name),
+      );
       this.dirty = false;
     }
     return this.summaries;

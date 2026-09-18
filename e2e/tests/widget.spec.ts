@@ -5,7 +5,9 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  await expect(
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
+  ).toBeVisible();
 
   const prompt = uniquePrompt("FAKE_WIDGET");
 
@@ -17,7 +19,9 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   const messages = page.getByTestId("task-message-area");
 
   // The widget card should appear with the title.
-  await expect(messages.getByText("light_refraction_in_water", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(messages.getByText("light_refraction_in_water", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
 
   // A sandboxed iframe should be present (the widget renderer).
   const iframe = messages.locator("iframe[title='light_refraction_in_water']");

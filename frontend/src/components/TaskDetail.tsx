@@ -72,18 +72,9 @@ import {
   type Turn,
 } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
-import {
-  formatBytes,
-  formatElapsed,
-  formatTokens,
-  toolCallDetail,
-} from "../formatting";
+import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown } from "../quota";
-import {
-  IncrementalTaskTimingTracker,
-  formatTimingDuration,
-  type TurnTiming,
-} from "../timing";
+import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
 import type { ToolCall } from "../grouping";
 import { Marked, Renderer, type Tokens } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -93,16 +84,11 @@ import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
-import TurnInvocationIcon, {
-  SessionInvocationIcon,
-} from "./TurnInvocationIcon";
+import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
 import WidgetCard from "./WidgetCard";
 import Dropdown from "./Dropdown";
 import TaskActionsMenu from "./TaskActionsMenu";
-import RepoStateIcons, {
-  diffStatState,
-  repoStateLabel,
-} from "./RepoStateIcons";
+import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import { prefetchTaskDiff } from "../diffCache";
 import styles from "./TaskDetail.module.css";
 
@@ -207,11 +193,7 @@ function checkDuration(c: ForgeCheck, now: number): string {
 
 function checkStatusLabel(c: ForgeCheck): string {
   if (c.status === "completed") {
-    if (
-      c.conclusion === "success" ||
-      c.conclusion === "neutral" ||
-      c.conclusion === "skipped"
-    )
+    if (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped")
       return "passed";
     return c.conclusion || "failed";
   }
@@ -220,8 +202,7 @@ function checkStatusLabel(c: ForgeCheck): string {
 }
 
 function checkJobURL(c: ForgeCheck, forge?: string): string | undefined {
-  if (forge === "gitlab")
-    return `https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}`;
+  if (forge === "gitlab") return `https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}`;
   if (c.runID && c.jobID)
     return `https://github.com/${c.owner}/${c.repo}/actions/runs/${c.runID}/job/${c.jobID}`;
   return undefined;
@@ -229,9 +210,7 @@ function checkJobURL(c: ForgeCheck, forge?: string): string | undefined {
 
 function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
   if (!remoteURL) return undefined;
-  return forge === "gitlab"
-    ? `${remoteURL}/-/pipelines`
-    : `${remoteURL}/actions`;
+  return forge === "gitlab" ? `${remoteURL}/-/pipelines` : `${remoteURL}/actions`;
 }
 
 export default function TaskDetail(props: Props) {
@@ -244,9 +223,9 @@ export default function TaskDetail(props: Props) {
   });
   const messages = timeline.messages;
   const [sending, setSending] = createSignal(false);
-  const [pendingAction, setPendingAction] = createSignal<
-    "sync" | "restart" | "compact" | null
-  >(null);
+  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(
+    null,
+  );
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
@@ -265,8 +244,7 @@ export default function TaskDetail(props: Props) {
     if (!headerRef) return false;
     const headerItems = Array.from(headerRef.children).filter(
       (child): child is HTMLElement =>
-        child instanceof HTMLElement &&
-        getComputedStyle(child).display !== "none",
+        child instanceof HTMLElement && getComputedStyle(child).display !== "none",
     );
     const first = headerItems[0]?.getBoundingClientRect();
     const firstCenter = first && first.top + first.height / 2;
@@ -280,8 +258,7 @@ export default function TaskDetail(props: Props) {
   }
 
   function scheduleHeaderGitStatsElision() {
-    if (headerGitStatsFrame !== undefined)
-      cancelAnimationFrame(headerGitStatsFrame);
+    if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
     setElideHeaderGitStats(false);
     headerGitStatsFrame = requestAnimationFrame(() => {
       headerGitStatsFrame = undefined;
@@ -294,8 +271,7 @@ export default function TaskDetail(props: Props) {
     window.addEventListener("resize", scheduleHeaderGitStatsElision);
     onCleanup(() => {
       window.removeEventListener("resize", scheduleHeaderGitStatsElision);
-      if (headerGitStatsFrame !== undefined)
-        cancelAnimationFrame(headerGitStatsFrame);
+      if (headerGitStatsFrame !== undefined) cancelAnimationFrame(headerGitStatsFrame);
     });
   });
 
@@ -347,10 +323,7 @@ export default function TaskDetail(props: Props) {
   function setPromptRef(element: HTMLElement) {
     if (!initialPromptFocusPending) return;
     initialPromptFocusPending = false;
-    if (
-      !props.autoFocusPrompt ||
-      window.matchMedia("(hover: none) and (pointer: coarse)").matches
-    )
+    if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches)
       return;
     requestAnimationFrame(() => {
       if (element.isConnected) element.focus();
@@ -363,9 +336,7 @@ export default function TaskDetail(props: Props) {
       event.stopPropagation();
       props.onClose();
       requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>("[data-testid='prompt-input']")
-          ?.focus();
+        document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus();
       });
       return;
     }
@@ -375,9 +346,9 @@ export default function TaskDetail(props: Props) {
     // Task updates can replace the card while this handler runs. Focus the
     // current card after Solid has applied that update.
     requestAnimationFrame(() => {
-      const card = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-task-id]"),
-      ).find((candidate) => candidate.dataset.taskId === props.taskId);
+      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]")).find(
+        (candidate) => candidate.dataset.taskId === props.taskId,
+      );
       card?.focus();
     });
   }
@@ -420,24 +391,16 @@ export default function TaskDetail(props: Props) {
   });
 
   // Expansion state for collapsed past turns and sessions. Persisted per task across remounts.
-  const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<
-    ReadonlySet<string>
-  >(
+  const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<ReadonlySet<string>>(
     expandedTurnsByTask.get(props.taskId) ?? new Set<string>(), // eslint-disable-line solid/reactivity -- initial value; createEffect below syncs on taskId changes
   );
-  const [expandedSessionKeys, setExpandedSessionKeys] = createSignal<
-    ReadonlySet<string>
-  >(
+  const [expandedSessionKeys, setExpandedSessionKeys] = createSignal<ReadonlySet<string>>(
     expandedSessionsByTask.get(props.taskId) ?? new Set<string>(), // eslint-disable-line solid/reactivity -- initial value
   );
   // Sync expansion state when taskId changes.
   createEffect(() => {
-    setExpandedTurnKeys(
-      expandedTurnsByTask.get(props.taskId) ?? new Set<string>(),
-    );
-    setExpandedSessionKeys(
-      expandedSessionsByTask.get(props.taskId) ?? new Set<string>(),
-    );
+    setExpandedTurnKeys(expandedTurnsByTask.get(props.taskId) ?? new Set<string>());
+    setExpandedSessionKeys(expandedSessionsByTask.get(props.taskId) ?? new Set<string>());
   });
   // Expanding/collapsing a past turn or session replaces its row with a different
   // number of rows, shifting every row after it. Since those rows are matched by
@@ -447,17 +410,13 @@ export default function TaskDetail(props: Props) {
   // same data-anchor-key and correct scrollTop so it lands back at that offset.
   function anchoredToggleTurn(e: MouseEvent, key: string) {
     const anchorKey = `turn:${key}`;
-    const beforeTop = (
-      e.currentTarget as HTMLElement | null
-    )?.getBoundingClientRect().top;
+    const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
     toggleTurn(key);
     restoreAnchor(anchorKey, beforeTop);
   }
   function anchoredToggleSession(e: MouseEvent, key: string) {
     const anchorKey = `session:${key}`;
-    const beforeTop = (
-      e.currentTarget as HTMLElement | null
-    )?.getBoundingClientRect().top;
+    const beforeTop = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect().top;
     toggleSession(key);
     restoreAnchor(anchorKey, beforeTop);
   }
@@ -561,11 +520,7 @@ export default function TaskDetail(props: Props) {
   const hasInitialPromptEvent = createMemo(() => {
     const history = messages();
     const firstInput = history.findIndex((event) => event.kind === "userInput");
-    if (
-      firstInput < 0 ||
-      history[firstInput].userInput?.text !== props.initialPrompt
-    )
-      return false;
+    if (firstInput < 0 || history[firstInput].userInput?.text !== props.initialPrompt) return false;
     return !history
       .slice(0, firstInput)
       .some(
@@ -591,11 +546,7 @@ export default function TaskDetail(props: Props) {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     const history = messages();
-    if (
-      taskId !== setupTaskId ||
-      epoch !== setupEpoch ||
-      history.length < setupProcessed
-    ) {
+    if (taskId !== setupTaskId || epoch !== setupEpoch || history.length < setupProcessed) {
       setupTaskId = taskId;
       setupEpoch = epoch;
       setupProcessed = 0;
@@ -607,10 +558,7 @@ export default function TaskDetail(props: Props) {
       const event = history[i];
       if (event.kind === "log" && event.log) setupLogs.push(event);
       if (firstInit === null && event.kind === "init") firstInit = event;
-      if (
-        (event.kind === "init" || event.kind === "userInput") &&
-        event.ts > 0
-      ) {
+      if ((event.kind === "init" || event.kind === "userInput") && event.ts > 0) {
         firstSetupEndTs = Math.min(firstSetupEndTs, event.ts);
       }
     }
@@ -645,9 +593,7 @@ export default function TaskDetail(props: Props) {
     const sessions = allCompletedSessions();
     return sessions.length > 0 ? sessions[sessions.length - 1] : null;
   });
-  const currentSessionCompletedTurns = createMemo(
-    () => currentSessionEntry()?.turns ?? [],
-  );
+  const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
   // Boundary event for the current session from completed messages.
   const currentSessionBoundaryFromCompleted = createMemo(
     () => currentSessionEntry()?.boundaryEvent,
@@ -682,11 +628,7 @@ export default function TaskDetail(props: Props) {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     const start = splitIdx();
-    if (
-      taskId !== groupedTaskId ||
-      epoch !== groupedEpoch ||
-      start !== groupedSplitIdx
-    ) {
+    if (taskId !== groupedTaskId || epoch !== groupedEpoch || start !== groupedSplitIdx) {
       groupedTaskId = taskId;
       groupedEpoch = epoch;
       groupedSplitIdx = start;
@@ -703,11 +645,7 @@ export default function TaskDetail(props: Props) {
   // <Match when={..} keyed> pattern uses reference equality as the DOM key, and new
   // object identities on every flush would cause remounting (flickering + unclickable).
   const pastSessionItems = createMemo(() =>
-    buildPastSessionItems(
-      pastSessions(),
-      expandedSessionKeys(),
-      expandedTurnKeys(),
-    ),
+    buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys()),
   );
   // Whether a live turn is currently streaming. Mirrors Android's hasLiveTurn.
   const hasLiveTurn = createMemo(() => currentGroups().length > 0);
@@ -774,9 +712,7 @@ export default function TaskDetail(props: Props) {
   // Last ask group: only the most recent ask is interactive.
   // Flatten all groups from all sessions + current live turn for ask detection.
   const allGroups = createMemo(() => {
-    const sessionGroups = allCompletedSessions().flatMap((s) =>
-      s.turns.flatMap((t) => t.groups),
-    );
+    const sessionGroups = allCompletedSessions().flatMap((s) => s.turns.flatMap((t) => t.groups));
     return [...sessionGroups, ...currentGroups()];
   });
   const lastAskGroup = createMemo((): MessageGroup | null => {
@@ -829,8 +765,7 @@ export default function TaskDetail(props: Props) {
   };
 
   // Detail SSE can show an ask before the task-list SSE patches the task state.
-  const isPendingAsk = () =>
-    props.taskState === "pending" && hasUnansweredAsk();
+  const isPendingAsk = () => props.taskState === "pending" && hasUnansweredAsk();
 
   const isActive = () => {
     const s = props.taskState;
@@ -852,8 +787,7 @@ export default function TaskDetail(props: Props) {
     props.taskState === "asking" ||
     props.taskState === "has_plan" ||
     isPendingAsk();
-  const isRecoverable = () =>
-    props.taskState === "stopped" || props.taskState === "crashed";
+  const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
   const canSendInput = () => isActive() && props.taskState !== "purging";
   const prURL = () => {
     const owner = props.forgeOwner;
@@ -922,10 +856,7 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  async function runAction(
-    name: "sync" | "restart" | "compact",
-    fn: () => Promise<unknown>,
-  ) {
+  async function runAction(name: "sync" | "restart" | "compact", fn: () => Promise<unknown>) {
     if (pendingAction()) return;
     setPendingAction(name);
     setActionError(null);
@@ -949,11 +880,7 @@ export default function TaskDetail(props: Props) {
           headerRef = element;
         }}
       >
-        <button
-          class={styles.closeBtn}
-          onClick={() => props.onClose()}
-          title="Close"
-        >
+        <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close">
           <CloseIcon width={20} height={20} />
         </button>
         <Show when={props.title}>
@@ -969,23 +896,13 @@ export default function TaskDetail(props: Props) {
             when={props.remoteURL}
             fallback={<span class={styles.headerRepo}>{props.repo}</span>}
           >
-            <a
-              class={styles.headerRepo}
-              href={props.remoteURL}
-              target="_blank"
-              rel="noopener"
-            >
+            <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">
               {props.repo}
             </a>
           </Show>
           <span class={styles.headerBranch}>{props.branch}</span>
           <Show when={prURL()}>
-            <a
-              class={styles.headerPR}
-              href={prURL()}
-              target="_blank"
-              rel="noopener"
-            >
+            <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">
               {prLabel()}
             </a>
           </Show>
@@ -993,8 +910,7 @@ export default function TaskDetail(props: Props) {
             {(() => {
               const s = props.ciStatus as CIStatus;
               const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
-              const actionsURL = () =>
-                ciActionsURL(props.remoteURL, props.forge);
+              const actionsURL = () => ciActionsURL(props.remoteURL, props.forge);
               return (
                 <>
                   <Show
@@ -1004,9 +920,7 @@ export default function TaskDetail(props: Props) {
                         when={actionsURL()}
                         keyed
                         fallback={
-                          <span
-                            class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
-                          >
+                          <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
                             {ciLabel(s, props.ciChecks)}
                           </span>
                         }
@@ -1025,9 +939,7 @@ export default function TaskDetail(props: Props) {
                     }
                   >
                     <details class={styles.ciDetails}>
-                      <summary
-                        class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
-                      >
+                      <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
                         {ciLabel(s, props.ciChecks)}
                       </summary>
                       <div class={styles.ciDropdown}>
@@ -1049,15 +961,9 @@ export default function TaskDetail(props: Props) {
                                 when={jobURL()}
                                 keyed
                                 fallback={
-                                  <div
-                                    class={`${styles.ciCheckRow} ${statusCls}`}
-                                  >
-                                    <span class={styles.ciCheckName}>
-                                      {c.name}
-                                    </span>
-                                    <span class={styles.ciCheckStatus}>
-                                      {checkStatusLabel(c)}
-                                    </span>
+                                  <div class={`${styles.ciCheckRow} ${statusCls}`}>
+                                    <span class={styles.ciCheckName}>{c.name}</span>
+                                    <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
                                     <Show when={c.startedAt || c.queuedAt}>
                                       <span class={styles.ciCheckDuration}>
                                         {checkDuration(c, Date.now())}
@@ -1073,12 +979,8 @@ export default function TaskDetail(props: Props) {
                                     target="_blank"
                                     rel="noopener"
                                   >
-                                    <span class={styles.ciCheckName}>
-                                      {c.name}
-                                    </span>
-                                    <span class={styles.ciCheckStatus}>
-                                      {checkStatusLabel(c)}
-                                    </span>
+                                    <span class={styles.ciCheckName}>{c.name}</span>
+                                    <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
                                     <Show when={c.startedAt || c.queuedAt}>
                                       <span class={styles.ciCheckDuration}>
                                         {checkDuration(c, Date.now())}
@@ -1145,9 +1047,7 @@ export default function TaskDetail(props: Props) {
                 state={diffStatState(props.diffStat)}
                 href={`${location.pathname}/diff`}
                 elideDiffStats={elideHeaderGitStats()}
-                onNavigateIntent={() =>
-                  void prefetchTaskDiff(props.taskId).catch(() => undefined)
-                }
+                onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
               />
             </Show>
           </span>
@@ -1198,11 +1098,7 @@ export default function TaskDetail(props: Props) {
             Plan Mode
           </span>
         </Show>
-        <Show
-          when={
-            props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0
-          }
-        >
+        <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
           <span
             class={styles.stoppedDiskUsage}
             title="Writable disk space retained by this stopped task"
@@ -1215,8 +1111,7 @@ export default function TaskDetail(props: Props) {
           stats={statsHistory()}
           usage={{
             inputTokens: props.cumulativeInputTokens ?? 0,
-            cacheWriteInputTokens:
-              props.cumulativeCacheCreationInputTokens ?? 0,
+            cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
             cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
             outputTokens: props.cumulativeOutputTokens ?? 0,
             costUSD: props.costUSD ?? 0,
@@ -1253,9 +1148,8 @@ export default function TaskDetail(props: Props) {
             </h4>
             <p class={styles.quotaRecoveryText}>
               {props.rateLimit?.window || "Current"} quota resets in{" "}
-              {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}
-              . You can keep this task unchanged and continue its workspace in a
-              new agent.
+              {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this
+              task unchanged and continue its workspace in a new agent.
             </p>
           </div>
           <Show when={props.onQuotaRecovery && props.repo}>
@@ -1281,10 +1175,7 @@ export default function TaskDetail(props: Props) {
       </Show>
       <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
         {(prompt) => (
-          <section
-            class={styles.taskPrompt}
-            aria-labelledby="task-prompt-title"
-          >
+          <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
             <h4 id="task-prompt-title" class={styles.taskPromptTitle}>
               Prompt
             </h4>
@@ -1301,18 +1192,10 @@ export default function TaskDetail(props: Props) {
         data-testid="task-message-area"
       >
         <Show when={setupLogLines().length > 0}>
-          <details
-            class={styles.taskSetup}
-            open={!hasSessionStarted()}
-            data-testid="task-setup"
-          >
+          <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
             <summary class={styles.taskSetupTitle}>
               <span>Setup logs</span>
-              <TimingIcon
-                events={setupInfo().events}
-                range={setupInfo().range}
-                showZero
-              />
+              <TimingIcon events={setupInfo().events} range={setupInfo().range} showZero />
             </summary>
             <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">
               {setupLogLines().join("\n")}
@@ -1335,34 +1218,25 @@ export default function TaskDetail(props: Props) {
                 ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>)
                 : null;
             const elided = () =>
-              item().kind === "elided"
-                ? (item() as Extract<MsgItem, { kind: "elided" }>)
-                : null;
+              item().kind === "elided" ? (item() as Extract<MsgItem, { kind: "elided" }>) : null;
             const expHdr = () =>
               item().kind === "expandedHeader"
                 ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>)
                 : null;
             const grpItem = () =>
-              item().kind === "group"
-                ? (item() as Extract<MsgItem, { kind: "group" }>)
-                : null;
+              item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null;
             return (
               <Switch>
                 {/* Collapsed past session: single clickable row. */}
                 <Match when={sessElided()} keyed>
                   {(se) => (
-                    <div
-                      class={styles.sessionElided}
-                      data-anchor-key={`session:${se.sessionKey}`}
-                    >
+                    <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
                       <button
                         type="button"
                         class={styles.sessionToggle}
                         onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
                       >
-                        <span class={styles.turnSummaryText}>
-                          {sessionSummary(se.session)}
-                        </span>
+                        <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
                         <span class={styles.sessionDuration}>
                           {se.session.durationMs > 0
                             ? formatTimingDuration(se.session.durationMs)
@@ -1388,9 +1262,7 @@ export default function TaskDetail(props: Props) {
                         class={styles.sessionToggle}
                         onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
                       >
-                        <span class={styles.turnSummaryText}>
-                          {sessionSummary(sh.session)}
-                        </span>
+                        <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
                         <span class={styles.sessionDuration}>
                           {sh.session.durationMs > 0
                             ? formatTimingDuration(sh.session.durationMs)
@@ -1420,22 +1292,13 @@ export default function TaskDetail(props: Props) {
                         class={styles.turnToggle}
                         onClick={(ev) => anchoredToggleTurn(ev, e.key)}
                       >
-                        <span class={styles.turnSummaryText}>
-                          {turnSummary(e.turn)}
-                        </span>
+                        <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
                         <span class={styles.turnDuration}>
-                          {e.turn.durationMs > 0
-                            ? formatTimingDuration(e.turn.durationMs)
-                            : "0s"}
+                          {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
                         </span>
                       </button>
                       <Show when={turnTiming(e.turn)} keyed>
-                        {(turn) => (
-                          <TurnInvocationIcon
-                            turn={turn}
-                            model={props.model ?? null}
-                          />
-                        )}
+                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
                       </Show>
                     </div>
                   )}
@@ -1452,22 +1315,13 @@ export default function TaskDetail(props: Props) {
                         class={styles.turnToggle}
                         onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
                       >
-                        <span class={styles.turnSummaryText}>
-                          {turnSummary(h.turn)}
-                        </span>
+                        <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
                         <span class={styles.turnDuration}>
-                          {h.turn.durationMs > 0
-                            ? formatTimingDuration(h.turn.durationMs)
-                            : "0s"}
+                          {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
                         </span>
                       </button>
                       <Show when={turnTiming(h.turn)} keyed>
-                        {(turn) => (
-                          <TurnInvocationIcon
-                            turn={turn}
-                            model={props.model ?? null}
-                          />
-                        )}
+                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
                       </Show>
                     </div>
                   )}
@@ -1475,20 +1329,13 @@ export default function TaskDetail(props: Props) {
                 {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
                 <Match when={grpItem()}>
                   {(gi) => (
-                    <div
-                      class={
-                        gi().indent === "turn" ? styles.indentTurn : undefined
-                      }
-                    >
+                    <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
                       <div class={styles.timedItemContent}>
                         <Show
                           when={
                             hasGroupTiming(gi().group) &&
-                            !gi().group.events.some(
-                              (event) => event.kind === "result",
-                            ) &&
-                            (gi().group.kind !== "action" ||
-                              gi().group.toolCalls.length !== 1)
+                            !gi().group.events.some((event) => event.kind === "result") &&
+                            (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
                           }
                         >
                           <span class={styles.messageTiming}>
@@ -1509,9 +1356,7 @@ export default function TaskDetail(props: Props) {
                           onClearAndExecutePlan={clearAndExecutePlan}
                           pendingAction={pendingAction}
                           model={props.model ?? null}
-                          turnTiming={(event) =>
-                            turnTimingsByResultEvent().get(event)
-                          }
+                          turnTiming={(event) => turnTimingsByResultEvent().get(event)}
                         />
                       </div>
                     </div>
@@ -1544,9 +1389,7 @@ export default function TaskDetail(props: Props) {
             onSubmit={sendInput}
             onKeyDown={handlePromptNavigation}
             placeholder={
-              isRecoverable()
-                ? "Revive or fork to continue..."
-                : "Send message to agent..."
+              isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."
             }
             disabled={!canSendInput()}
             class={styles.textInput}
@@ -1699,10 +1542,7 @@ function GroupContent(props: {
           />
         )}
       </Match>
-      <Match
-        when={group().kind === "userInput" && group().events[0]?.userInput}
-        keyed
-      >
+      <Match when={group().kind === "userInput" && group().events[0]?.userInput} keyed>
         {(ui) => (
           <div class={styles.userInputMsg}>
             <Markdown text={ui.text} />
@@ -1731,9 +1571,7 @@ function GroupContent(props: {
             toolCalls={group().toolCalls}
             taskId={props.taskId}
             events={group().events}
-            onClearAndExecutePlan={
-              props.isWaiting() ? props.onClearAndExecutePlan : undefined
-            }
+            onClearAndExecutePlan={props.isWaiting() ? props.onClearAndExecutePlan : undefined}
             pendingAction={props.pendingAction}
           />
         </Show>
@@ -1746,13 +1584,7 @@ function GroupContent(props: {
       </Match>
       <Match when={group().kind === "other"}>
         <For each={group().events}>
-          {(ev) => (
-            <MessageItem
-              ev={ev}
-              model={props.model}
-              turnTiming={props.turnTiming(ev)}
-            />
-          )}
+          {(ev) => <MessageItem ev={ev} model={props.model} turnTiming={props.turnTiming(ev)} />}
         </For>
       </Match>
     </Switch>
@@ -1765,10 +1597,8 @@ function hasGroupTiming(group: MessageGroup): boolean {
       group.toolCalls.length > 0 ||
       group.events.some(
         (event) =>
-          (event.kind === "thinking" &&
-            (event.thinking?.text ?? "").trim() !== "") ||
-          (event.kind === "thinkingDelta" &&
-            (event.thinkingDelta?.text ?? "").trim() !== ""),
+          (event.kind === "thinking" && (event.thinking?.text ?? "").trim() !== "") ||
+          (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
       )
     );
   }
@@ -1776,20 +1606,14 @@ function hasGroupTiming(group: MessageGroup): boolean {
     return group.events.some(
       (event) =>
         (event.kind === "text" && (event.text?.text ?? "").trim() !== "") ||
-        (event.kind === "textDelta" &&
-          (event.textDelta?.text ?? "").trim() !== "") ||
-        (event.kind === "thinking" &&
-          (event.thinking?.text ?? "").trim() !== "") ||
-        (event.kind === "thinkingDelta" &&
-          (event.thinkingDelta?.text ?? "").trim() !== ""),
+        (event.kind === "textDelta" && (event.textDelta?.text ?? "").trim() !== "") ||
+        (event.kind === "thinking" && (event.thinking?.text ?? "").trim() !== "") ||
+        (event.kind === "thinkingDelta" && (event.thinkingDelta?.text ?? "").trim() !== ""),
     );
   }
   return (
     group.kind !== "other" ||
-    group.events.some(
-      (event) =>
-        event.kind !== "usage" && event.system?.subtype !== "step_start",
-    )
+    group.events.some((event) => event.kind !== "usage" && event.system?.subtype !== "step_start")
   );
 }
 
@@ -1865,13 +1689,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   return (
     <Switch>
       <Match when={rl()?.status === "rejected"}>
-        <div
-          class={
-            rl()?.isUsingOverage
-              ? styles.rateLimitWarning
-              : styles.rateLimitRejected
-          }
-        >
+        <div class={rl()?.isUsingOverage ? styles.rateLimitWarning : styles.rateLimitRejected}>
           {rejectedLabel()}
           {resetsLabel()}
         </div>
@@ -1893,8 +1711,7 @@ function usageMetaParts(u: EventUsage): string[] {
     tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
   if (u.cacheReadInputTokens > 0)
     tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
-  if (u.outputTokens > 0)
-    tokenParts.push(`${formatTokens(u.outputTokens)} out`);
+  if (u.outputTokens > 0) tokenParts.push(`${formatTokens(u.outputTokens)} out`);
   if ((u.reasoningOutputTokens ?? 0) > 0) {
     tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
   }
@@ -1902,11 +1719,7 @@ function usageMetaParts(u: EventUsage): string[] {
   return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
 }
 
-function MessageItem(props: {
-  ev: EventMessage;
-  model: string | null;
-  turnTiming?: TurnTiming;
-}) {
+function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming?: TurnTiming }) {
   return (
     <Switch>
       <Match when={props.ev.rateLimit}>
@@ -1949,11 +1762,7 @@ function MessageItem(props: {
       </Match>
       <Match when={props.ev.result} keyed>
         {(result) => (
-          <ResultCard
-            result={result}
-            model={props.model}
-            turnTiming={props.turnTiming}
-          />
+          <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />
         )}
       </Match>
       <Match when={props.ev.error} keyed>
@@ -1966,27 +1775,18 @@ function MessageItem(props: {
   );
 }
 
-function ResultCard(props: {
-  result: EventResult;
-  model: string | null;
-  turnTiming?: TurnTiming;
-}) {
+function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: TurnTiming }) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
     const parts: string[] = [];
-    if (current.totalCostUSD > 0)
-      parts.push(`$${current.totalCostUSD.toFixed(4)}`);
+    if (current.totalCostUSD > 0) parts.push(`$${current.totalCostUSD.toFixed(4)}`);
     if (current.numTurns > 0)
-      parts.push(
-        `${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`,
-      );
+      parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
     return parts.join(" · ");
   });
   return (
-    <div
-      class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}
-    >
+    <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
       <Show when={props.turnTiming} keyed>
         {(turn) => (
           <div class={styles.resultHeader}>
@@ -2028,16 +1828,12 @@ function ToolMessageGroup(props: {
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
   const thinkingEvents = () =>
-    (props.events ?? []).filter(
-      (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
-    );
+    (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
   // Compute accumulated tool output deltas per toolUseID from the group events.
   const outputDeltaEvents = (toolUseID: string) =>
     (props.events ?? []).filter(
-      (e) =>
-        e.kind === "toolOutputDelta" &&
-        e.toolOutputDelta?.toolUseID === toolUseID,
+      (e) => e.kind === "toolOutputDelta" && e.toolOutputDelta?.toolUseID === toolUseID,
     );
   return (
     <Show when={calls().length > 0}>
@@ -2061,9 +1857,7 @@ function ToolMessageGroup(props: {
           <details
             class={styles.toolGroup}
             open={isOpen()}
-            onToggle={(e) =>
-              detailsOpenState.set(groupKey(), e.currentTarget.open)
-            }
+            onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
           >
             <summary>
               {calls().filter((c) => c.done).length}/{calls().length} tools:{" "}
@@ -2081,9 +1875,7 @@ function ToolMessageGroup(props: {
                     durationMs={toolCallDurationMs(call(), durations())}
                     outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
                     open={detailsOpenState.get(call().use.toolUseID) ?? false}
-                    onToggle={(v) =>
-                      detailsOpenState.set(call().use.toolUseID, v)
-                    }
+                    onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
                     suppressPlanContent={true}
                     pendingAction={props.pendingAction}
                   />
@@ -2091,10 +1883,7 @@ function ToolMessageGroup(props: {
               </Index>
             </div>
           </details>
-          <Show
-            when={calls().find((c) => c.use.planContent)?.use.planContent}
-            keyed
-          >
+          <Show when={calls().find((c) => c.use.planContent)?.use.planContent} keyed>
             {(plan) => (
               <div class={styles.planAction}>
                 <div class={styles.planContent} data-testid="plan-content">
@@ -2168,11 +1957,7 @@ function ThinkingCard(props: { events: EventMessage[] }) {
 // widget HTML as text instead of calling show_widget).
 function looksLikeHTML(text: string): boolean {
   const trimmed = text.trimStart();
-  return (
-    trimmed.startsWith("<style") ||
-    trimmed.startsWith("<div") ||
-    trimmed.startsWith("<!--")
-  );
+  return trimmed.startsWith("<style") || trimmed.startsWith("<div") || trimmed.startsWith("<!--");
 }
 
 // Renders raw HTML inside a shadow DOM so its styles cannot leak out and
@@ -2191,9 +1976,7 @@ function ShadowHTML(props: { html: string }) {
 // Renders a text group, combining textDelta fragments into a single view.
 function TextMessageGroup(props: { events: EventMessage[] }) {
   const thinkingEvents = createMemo(() =>
-    props.events.filter(
-      (e) => e.kind === "thinking" || e.kind === "thinkingDelta",
-    ),
+    props.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta"),
   );
   const text = createMemo(() => {
     const finalEv = props.events.findLast((e) => e.kind === "text");
@@ -2230,11 +2013,7 @@ function TextMessageGroup(props: { events: EventMessage[] }) {
 // Returns true if every value in the object is a scalar (string, number, boolean, null).
 function isFlat(obj: Record<string, unknown>): boolean {
   return Object.values(obj).every(
-    (v) =>
-      v === null ||
-      typeof v === "string" ||
-      typeof v === "number" ||
-      typeof v === "boolean",
+    (v) => v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean",
   );
 }
 
@@ -2249,11 +2028,7 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
   return (
     <Show
       when={flat()}
-      fallback={
-        <pre class={styles.toolBlockPre}>
-          {JSON.stringify(props.input, null, 2)}
-        </pre>
-      }
+      fallback={<pre class={styles.toolBlockPre}>{JSON.stringify(props.input, null, 2)}</pre>}
     >
       <div class={styles.toolInputList}>
         <For each={Object.entries(props.input)}>
@@ -2276,9 +2051,7 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-function FileChangesInputView(props: {
-  files: NonNullable<EventToolInputView["files"]>;
-}) {
+function FileChangesInputView(props: { files: NonNullable<EventToolInputView["files"]> }) {
   return (
     <div class={styles.fileChangesInput}>
       <For each={props.files}>
@@ -2299,26 +2072,16 @@ function ToolInputView(props: { view: EventToolInputView }) {
       <Match when={props.view.kind === "fileChanges" && props.view.files} keyed>
         {(files) => <FileChangesInputView files={files} />}
       </Match>
-      <Match
-        when={props.view.kind === "subagents" && props.view.subagents}
-        keyed
-      >
+      <Match when={props.view.kind === "subagents" && props.view.subagents} keyed>
         {(spawns) => <SubagentSpawns spawns={spawns} />}
       </Match>
     </Switch>
   );
 }
 
-function ToolCallInput(props: {
-  input: Record<string, unknown>;
-  inputView?: EventToolInputView;
-}) {
+function ToolCallInput(props: { input: Record<string, unknown>; inputView?: EventToolInputView }) {
   return (
-    <Show
-      when={props.inputView}
-      keyed
-      fallback={<GenericToolCallInput input={props.input} />}
-    >
+    <Show when={props.inputView} keyed fallback={<GenericToolCallInput input={props.input} />}>
       {(view) => <ToolInputView view={view} />}
     </Show>
   );
@@ -2362,10 +2125,7 @@ function ToolCallCard(props: {
   pendingAction?: () => string | null;
   suppressPlanContent?: boolean;
 }) {
-  const [loadedInput, setLoadedInput] = createSignal<Record<
-    string,
-    unknown
-  > | null>(null);
+  const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
 
   const durationMs = () => props.durationMs;
@@ -2373,17 +2133,13 @@ function ToolCallCard(props: {
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
   const detail = () =>
-    props.call.use.detail ||
-    toolCallDetail(props.call.use.name, effectiveInput());
+    props.call.use.detail || toolCallDetail(props.call.use.name, effectiveInput());
   const showLoadBtn = () => props.call.use.inputTruncated && !loadedInput();
 
   async function loadInput() {
     setLoading(true);
     try {
-      const resp = await getTaskToolInput(
-        props.taskId,
-        props.call.use.toolUseID,
-      );
+      const resp = await getTaskToolInput(props.taskId, props.call.use.toolUseID);
       setLoadedInput(resp.input as Record<string, unknown>);
     } finally {
       setLoading(false);
@@ -2407,10 +2163,7 @@ function ToolCallCard(props: {
                     when={props.call.use.background}
                     fallback={<span class={styles.toolDone}>&#10003;</span>}
                   >
-                    <span
-                      class={styles.toolBackground}
-                      title="Running in background"
-                    >
+                    <span class={styles.toolBackground} title="Running in background">
                       &#8943;
                     </span>
                   </Show>
@@ -2440,18 +2193,9 @@ function ToolCallCard(props: {
         </Show>
         <Show
           when={showLoadBtn()}
-          fallback={
-            <ToolCallInput
-              input={effectiveInput()}
-              inputView={props.call.use.inputView}
-            />
-          }
+          fallback={<ToolCallInput input={effectiveInput()} inputView={props.call.use.inputView} />}
         >
-          <button
-            class={styles.loadInputBtn}
-            onClick={loadInput}
-            disabled={loading()}
-          >
+          <button class={styles.loadInputBtn} onClick={loadInput} disabled={loading()}>
             {loading() ? "Loading…" : "Load input"}
           </button>
         </Show>
@@ -2460,16 +2204,11 @@ function ToolCallCard(props: {
         </Show>
         <Show when={(props.outputDeltaEvents?.length ?? 0) > 0}>
           <pre class={styles.toolOutputDelta}>
-            {props.outputDeltaEvents
-              ?.map((e) => e.toolOutputDelta?.delta ?? "")
-              .join("")}
+            {props.outputDeltaEvents?.map((e) => e.toolOutputDelta?.delta ?? "").join("")}
           </pre>
         </Show>
       </details>
-      <Show
-        when={!props.suppressPlanContent && props.call.use.planContent}
-        keyed
-      >
+      <Show when={!props.suppressPlanContent && props.call.use.planContent} keyed>
         {(plan) => (
           <div class={styles.planAction}>
             <div class={styles.planContent} data-testid="plan-content">
@@ -2599,17 +2338,11 @@ function AskQuestionCard(props: {
   onSubmit: (text: string) => void;
 }) {
   const questions = () => props.ask.questions;
-  const [selections, setSelections] = createSignal<Map<number, Set<string>>>(
-    new Map(),
-  );
-  const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(
-    new Map(),
-  );
+  const [selections, setSelections] = createSignal<Map<number, Set<string>>>(new Map());
+  const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(new Map());
   // eslint-disable-next-line solid/reactivity -- toolUseID is immutable per ask instance
   const toolUseID = props.ask.toolUseID;
-  const [submitted, setSubmitted] = createSignal(
-    pendingAskAnswers.has(toolUseID),
-  );
+  const [submitted, setSubmitted] = createSignal(pendingAskAnswers.has(toolUseID));
   const answered = () => props.answerText !== undefined || submitted();
 
   // Clean up pending entry once the server confirms the answer via SSE.
@@ -2682,13 +2415,7 @@ function AskQuestionCard(props: {
   const canInteract = (): boolean => props.interactive && !answered();
 
   return (
-    <div
-      class={
-        canInteract()
-          ? `${styles.askGroup} ${styles.askGroupActive}`
-          : styles.askGroup
-      }
-    >
+    <div class={canInteract() ? `${styles.askGroup} ${styles.askGroupActive}` : styles.askGroup}>
       <For each={questions()}>
         {(q: AskQuestion, qIdx: Accessor<number>) => (
           <div class={styles.askQuestion}>
@@ -2699,26 +2426,19 @@ function AskQuestionCard(props: {
             <div class={styles.askOptions}>
               <For each={q.options}>
                 {(opt) => {
-                  const selected = (): boolean =>
-                    selections().get(qIdx())?.has(opt.label) ?? false;
+                  const selected = (): boolean => selections().get(qIdx())?.has(opt.label) ?? false;
                   return (
                     <button
                       class={
-                        selected()
-                          ? `${styles.askChip} ${styles.askChipSelected}`
-                          : styles.askChip
+                        selected() ? `${styles.askChip} ${styles.askChipSelected}` : styles.askChip
                       }
                       disabled={!canInteract()}
-                      onClick={() =>
-                        toggleOption(qIdx(), opt.label, q.multiSelect ?? false)
-                      }
+                      onClick={() => toggleOption(qIdx(), opt.label, q.multiSelect ?? false)}
                       data-testid={`ask-option-${opt.label}`}
                     >
                       <span class={styles.askChipLabel}>{opt.label}</span>
                       <Show when={opt.description}>
-                        <span class={styles.askChipDesc}>
-                          {opt.description}
-                        </span>
+                        <span class={styles.askChipDesc}>{opt.description}</span>
                       </Show>
                     </button>
                   );
@@ -2732,9 +2452,7 @@ function AskQuestionCard(props: {
                     : styles.askChip
                 }
                 disabled={!canInteract()}
-                onClick={() =>
-                  toggleOption(qIdx(), "__other__", q.multiSelect ?? false)
-                }
+                onClick={() => toggleOption(qIdx(), "__other__", q.multiSelect ?? false)}
               >
                 <span class={styles.askChipLabel}>Other</span>
               </button>
@@ -2752,19 +2470,13 @@ function AskQuestionCard(props: {
         )}
       </For>
       <Show when={canInteract()}>
-        <button
-          class={styles.askSubmit}
-          onClick={() => handleSubmit()}
-          data-testid="ask-submit"
-        >
+        <button class={styles.askSubmit} onClick={() => handleSubmit()} data-testid="ask-submit">
           Submit
         </button>
       </Show>
       <Show when={answered()}>
         <div class={styles.askSubmitted} data-testid="ask-submitted-answer">
-          {props.answerText ??
-            pendingAskAnswers.get(toolUseID) ??
-            formatAnswer()}
+          {props.answerText ?? pendingAskAnswers.get(toolUseID) ?? formatAnswer()}
         </div>
       </Show>
     </div>

@@ -3,7 +3,11 @@
 import type { EventMessage } from "@sdk/types.gen";
 import { describe, expect, it } from "vitest";
 
-import { deriveNetworkRates, deriveToolTimingSummaries, IncrementalToolTimingTracker } from "./taskStats";
+import {
+  deriveNetworkRates,
+  deriveToolTimingSummaries,
+  IncrementalToolTimingTracker,
+} from "./taskStats";
 
 function toolUse(id: string, name: string, ts: number): EventMessage {
   return { kind: "toolUse", ts, toolUse: { toolUseID: id, name, input: {} } };
@@ -42,16 +46,52 @@ describe("task stats", () => {
       { name: "Bash", calls: 1, durationMs: 500 },
     ]);
     const unchanged = tracker.derive(extended);
-    expect(tracker.derive([...extended, { kind: "text", ts: 5_000, text: { text: "done" } }])).toBe(unchanged);
-    expect(tracker.derive([toolUse("write", "Write", 5_000), toolResult("write", 5_250, 0)]))
-      .toEqual([{ name: "Write", calls: 1, durationMs: 250 }]);
+    expect(tracker.derive([...extended, { kind: "text", ts: 5_000, text: { text: "done" } }])).toBe(
+      unchanged,
+    );
+    expect(
+      tracker.derive([toolUse("write", "Write", 5_000), toolResult("write", 5_250, 0)]),
+    ).toEqual([{ name: "Write", calls: 1, durationMs: 250 }]);
   });
 
   it("derives network throughput without spanning counter resets", () => {
     const stats = [
-      { ts: 1_000, cpuPerc: 0, memUsed: 0, memLimit: 0, memPerc: 0, netRx: 1_000, netTx: 500, blockRead: 0, blockWrite: 0, diskUsed: 0 },
-      { ts: 3_000, cpuPerc: 0, memUsed: 0, memLimit: 0, memPerc: 0, netRx: 3_000, netTx: 1_500, blockRead: 0, blockWrite: 0, diskUsed: 0 },
-      { ts: 4_000, cpuPerc: 0, memUsed: 0, memLimit: 0, memPerc: 0, netRx: 100, netTx: 50, blockRead: 0, blockWrite: 0, diskUsed: 0 },
+      {
+        ts: 1_000,
+        cpuPerc: 0,
+        memUsed: 0,
+        memLimit: 0,
+        memPerc: 0,
+        netRx: 1_000,
+        netTx: 500,
+        blockRead: 0,
+        blockWrite: 0,
+        diskUsed: 0,
+      },
+      {
+        ts: 3_000,
+        cpuPerc: 0,
+        memUsed: 0,
+        memLimit: 0,
+        memPerc: 0,
+        netRx: 3_000,
+        netTx: 1_500,
+        blockRead: 0,
+        blockWrite: 0,
+        diskUsed: 0,
+      },
+      {
+        ts: 4_000,
+        cpuPerc: 0,
+        memUsed: 0,
+        memLimit: 0,
+        memPerc: 0,
+        netRx: 100,
+        netTx: 50,
+        blockRead: 0,
+        blockWrite: 0,
+        diskUsed: 0,
+      },
     ];
 
     expect(deriveNetworkRates(stats)).toEqual([

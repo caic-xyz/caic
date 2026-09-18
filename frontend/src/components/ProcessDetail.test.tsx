@@ -53,7 +53,9 @@ describe("ProcessDetail", () => {
     process.startedAt = new Date(Date.now() - 90_000).toISOString() as ISOTimestamp;
     vi.mocked(getTaskProcesses).mockResolvedValue({ processes: [process] });
 
-    render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
+    render(() => (
+      <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />
+    ));
 
     expect(await screen.findByText("1m 30s")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
@@ -74,11 +76,7 @@ describe("buildTree", () => {
   });
 
   it("multiple root processes", () => {
-    const procs = [
-      p(1, 0, "bash"),
-      p(2, 0, "ssh"),
-      p(10, 1, "sleep"),
-    ];
+    const procs = [p(1, 0, "bash"), p(2, 0, "ssh"), p(10, 1, "sleep")];
     const tree = buildTree(procs);
     // Roots: 1 (with child 10) and 2 (no children).
     expect(tree).toHaveLength(2);
@@ -96,12 +94,7 @@ describe("buildTree", () => {
   });
 
   it("nested parent-child chain", () => {
-    const procs = [
-      p(1, 0, "init"),
-      p(10, 1, "bash"),
-      p(100, 10, "make"),
-      p(1000, 100, "gcc"),
-    ];
+    const procs = [p(1, 0, "init"), p(10, 1, "bash"), p(100, 10, "make"), p(1000, 100, "gcc")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
     expect(tree[0].pid).toBe(1);
@@ -114,12 +107,7 @@ describe("buildTree", () => {
   });
 
   it("multiple children under same parent", () => {
-    const procs = [
-      p(1, 0, "bash"),
-      p(10, 1, "make"),
-      p(11, 1, "gcc"),
-      p(12, 1, "ld"),
-    ];
+    const procs = [p(1, 0, "bash"), p(10, 1, "make"), p(11, 1, "gcc"), p(12, 1, "ld")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
     expect(tree[0].children).toHaveLength(3);
@@ -128,10 +116,7 @@ describe("buildTree", () => {
 
   it("processes whose ppid refers outside the list become roots", () => {
     // ppid 999 is not in the list, so 10 becomes a root.
-    const procs = [
-      p(10, 999, "orphan"),
-      p(11, 10, "child-of-orphan"),
-    ];
+    const procs = [p(10, 999, "orphan"), p(11, 10, "child-of-orphan")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
     expect(tree[0].pid).toBe(10);
@@ -140,9 +125,7 @@ describe("buildTree", () => {
   });
 
   it("preserves all ProcessInfo fields on tree nodes", () => {
-    const procs = [
-      p(5, 0, "myprocess"),
-    ];
+    const procs = [p(5, 0, "myprocess")];
     procs[0].user = "root";
     procs[0].state = "R";
     procs[0].cpu = 12.5;
@@ -166,12 +149,7 @@ describe("buildTree", () => {
 
   it("handles unordered input correctly", () => {
     // Children listed before parents should still nest correctly.
-    const procs = [
-      p(100, 10, "gcc"),
-      p(10, 1, "make"),
-      p(1, 0, "bash"),
-      p(11, 1, "ld"),
-    ];
+    const procs = [p(100, 10, "gcc"), p(10, 1, "make"), p(1, 0, "bash"), p(11, 1, "ld")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
     expect(tree[0].pid).toBe(1);

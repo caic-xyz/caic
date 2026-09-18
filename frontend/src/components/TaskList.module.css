@@ -15,9 +15,19 @@
   min-height: 0;
   opacity: 1;
   /* Fade only the bottom edge of the scroll viewport. */
-  -webkit-mask-image: linear-gradient(to bottom, var(--color-mask-opaque) calc(100% - var(--task-list-bottom-fade)), transparent);
-  mask-image: linear-gradient(to bottom, var(--color-mask-opaque) calc(100% - var(--task-list-bottom-fade)), transparent);
-  transition: width 150ms ease-out, opacity 150ms ease-out;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    var(--color-mask-opaque) calc(100% - var(--task-list-bottom-fade)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    var(--color-mask-opaque) calc(100% - var(--task-list-bottom-fade)),
+    transparent
+  );
+  transition:
+    width 150ms ease-out,
+    opacity 150ms ease-out;
 }
 
 .list::before {
@@ -30,7 +40,11 @@
   /* Do not reserve layout space; this veil should only overlay scrolled cards. */
   margin-bottom: calc(-1 * var(--task-list-top-fade));
   pointer-events: none;
-  background: linear-gradient(to bottom, rgb(var(--color-bg-app-rgb) / 0.9), rgb(var(--color-bg-app-rgb) / 0));
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--color-bg-app-rgb) / 0.9),
+    rgb(var(--color-bg-app-rgb) / 0)
+  );
   opacity: 0;
   transition: opacity 120ms ease-out;
 }

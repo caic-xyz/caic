@@ -52,75 +52,75 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 
 ### Startup (`backend/internal/server/startup.go`)
 
-| Scope | Type | Name |
-|---|---|---|
-| Whole startup | `trace.NewTask` | `server.startup` |
-| Phase 1 — repo discovery | `trace.StartRegion` | `discover-repos` |
-| Phase 1 — log loading | `trace.StartRegion` | `load-logs` |
-| Phase 1 — container listing | `trace.StartRegion` | `list-containers` |
-| Phase 2 — per-repo init | `trace.StartRegion` | `repo-executor-init` |
-| Phase 3 — load purged tasks | `trace.StartRegion` | `load-purged-tasks` |
-| Phase 4 — adopt containers | `trace.StartRegion` | `adopt-containers` |
-| Per-container adoption | `trace.NewTask` | `adopt-container` |
-| Container label check | `trace.StartRegion` | `caic-label` |
-| Relay liveness probe | `trace.StartRegion` | `relay-status` |
-| Relay output read | `trace.StartRegion` | `relay-read` |
-| Log message restore | `trace.StartRegion` | `load-messages` |
-| Adoption metadata | `trace.Logf` | container/repo/branch per container |
+| Scope                       | Type                | Name                                |
+| --------------------------- | ------------------- | ----------------------------------- |
+| Whole startup               | `trace.NewTask`     | `server.startup`                    |
+| Phase 1 — repo discovery    | `trace.StartRegion` | `discover-repos`                    |
+| Phase 1 — log loading       | `trace.StartRegion` | `load-logs`                         |
+| Phase 1 — container listing | `trace.StartRegion` | `list-containers`                   |
+| Phase 2 — per-repo init     | `trace.StartRegion` | `repo-executor-init`                |
+| Phase 3 — load purged tasks | `trace.StartRegion` | `load-purged-tasks`                 |
+| Phase 4 — adopt containers  | `trace.StartRegion` | `adopt-containers`                  |
+| Per-container adoption      | `trace.NewTask`     | `adopt-container`                   |
+| Container label check       | `trace.StartRegion` | `caic-label`                        |
+| Relay liveness probe        | `trace.StartRegion` | `relay-status`                      |
+| Relay output read           | `trace.StartRegion` | `relay-read`                        |
+| Log message restore         | `trace.StartRegion` | `load-messages`                     |
+| Adoption metadata           | `trace.Logf`        | container/repo/branch per container |
 
 ### Task lifecycle (`backend/internal/server/tasks.go`)
 
-| Trigger | Type | Name |
-|---|---|---|
-| `POST /tasks` goroutine | `trace.NewTask` | `task.create:{id}` |
-| `POST /tasks/{id}/stop` goroutine | `trace.NewTask` | `task.stop:{id}` |
-| `POST /tasks/{id}/revive` goroutine | `trace.NewTask` | `task.revive:{id}` |
-| `POST /tasks/{id}/fork` goroutine | `trace.NewTask` | `task.fork:{src}->{dst}` |
-| `watchSession` goroutine | `trace.NewTask` | `session.watch:{id}` |
+| Trigger                             | Type            | Name                     |
+| ----------------------------------- | --------------- | ------------------------ |
+| `POST /tasks` goroutine             | `trace.NewTask` | `task.create:{id}`       |
+| `POST /tasks/{id}/stop` goroutine   | `trace.NewTask` | `task.stop:{id}`         |
+| `POST /tasks/{id}/revive` goroutine | `trace.NewTask` | `task.revive:{id}`       |
+| `POST /tasks/{id}/fork` goroutine   | `trace.NewTask` | `task.fork:{src}->{dst}` |
+| `watchSession` goroutine            | `trace.NewTask` | `session.watch:{id}`     |
 
 ### Task runner and checkout operations (`backend/internal/task/runner.go`, `backend/internal/repo/checkout.go`)
 
-| Method | Type | Name |
-|---|---|---|
-| `Start` | `trace.NewTask` | `task.start:{id}` |
-| `Start` — container setup | `trace.StartRegion` | `setup` |
-| `Start` — SSH + git push | `trace.StartRegion` | `phase-a-launch` |
-| `Start` — agent launch | `trace.StartRegion` | `phase-b-connect` |
-| `Start` — agent process | `trace.StartRegion` | `agent-session` |
-| `Cleanup` | `trace.NewTask` | `task.cleanup:{id}` |
-| `StopTask` | `trace.NewTask` | `task.stop:{id}` |
-| `ReviveTask` | `trace.NewTask` | `task.revive:{id}` |
-| `Reconnect` | `trace.NewTask` | `task.reconnect:{id}` |
-| `RestartSession` | `trace.NewTask` | `task.restart:{id}` |
-| `ClearContextSession` | `trace.NewTask` | `task.clear-context:{id}` |
-| `StartSession` | `trace.NewTask` | `task.start-session:{id}` |
-| `ForkTask` | `trace.NewTask` | `task.fork:{src}->{dst}` |
-| `SyncToOrigin` — fetch | `trace.StartRegion` | `sync-fetch` |
-| `SyncToDefault` — fetch | `trace.StartRegion` | `sync-default-fetch` |
+| Method                    | Type                | Name                      |
+| ------------------------- | ------------------- | ------------------------- |
+| `Start`                   | `trace.NewTask`     | `task.start:{id}`         |
+| `Start` — container setup | `trace.StartRegion` | `setup`                   |
+| `Start` — SSH + git push  | `trace.StartRegion` | `phase-a-launch`          |
+| `Start` — agent launch    | `trace.StartRegion` | `phase-b-connect`         |
+| `Start` — agent process   | `trace.StartRegion` | `agent-session`           |
+| `Cleanup`                 | `trace.NewTask`     | `task.cleanup:{id}`       |
+| `StopTask`                | `trace.NewTask`     | `task.stop:{id}`          |
+| `ReviveTask`              | `trace.NewTask`     | `task.revive:{id}`        |
+| `Reconnect`               | `trace.NewTask`     | `task.reconnect:{id}`     |
+| `RestartSession`          | `trace.NewTask`     | `task.restart:{id}`       |
+| `ClearContextSession`     | `trace.NewTask`     | `task.clear-context:{id}` |
+| `StartSession`            | `trace.NewTask`     | `task.start-session:{id}` |
+| `ForkTask`                | `trace.NewTask`     | `task.fork:{src}->{dst}`  |
+| `SyncToOrigin` — fetch    | `trace.StartRegion` | `sync-fetch`              |
+| `SyncToDefault` — fetch   | `trace.StartRegion` | `sync-default-fetch`      |
 
 ### Container operations (`backend/internal/runtime/mdruntime/backend.go`)
 
-| Method | Type | Name |
-|---|---|---|
-| `Launch` | `trace.StartRegion` | `container.launch` |
+| Method    | Type                | Name                |
+| --------- | ------------------- | ------------------- |
+| `Launch`  | `trace.StartRegion` | `container.launch`  |
 | `Connect` | `trace.StartRegion` | `container.connect` |
-| `Diff` | `trace.StartRegion` | `container.diff` |
-| `Fetch` | `trace.StartRegion` | `container.fetch` |
-| `Stop` | `trace.StartRegion` | `container.stop` |
-| `Purge` | `trace.StartRegion` | `container.purge` |
-| `Revive` | `trace.StartRegion` | `container.revive` |
-| `Fork` | `trace.StartRegion` | `container.fork` |
+| `Diff`    | `trace.StartRegion` | `container.diff`    |
+| `Fetch`   | `trace.StartRegion` | `container.fetch`   |
+| `Stop`    | `trace.StartRegion` | `container.stop`    |
+| `Purge`   | `trace.StartRegion` | `container.purge`   |
+| `Revive`  | `trace.StartRegion` | `container.revive`  |
+| `Fork`    | `trace.StartRegion` | `container.fork`    |
 
 ### Background loops (`backend/internal/server/server.go`)
 
-| Loop | Type | Name |
-|---|---|---|
+| Loop                    | Type                | Name         |
+| ----------------------- | ------------------- | ------------ |
 | `pushStats` (every 5 s) | `trace.StartRegion` | `poll-stats` |
 
 ### Canary (`backend/cmd/caic/main.go`)
 
-| When | Type | Name |
-|---|---|---|
+| When                      | Type        | Name              |
+| ------------------------- | ----------- | ----------------- |
 | Right after `trace.Start` | `trace.Log` | `[trace] started` |
 
 Used to confirm that user annotations are being captured by the trace writer.

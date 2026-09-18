@@ -150,7 +150,10 @@
   padding: 0.1rem 0.35rem;
   border-radius: var(--radius-sm);
   color: var(--color-warning-text);
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .signalBtn:hover:not(:disabled) {

@@ -1,6 +1,14 @@
 // Go Mode host-mode context: exposes native bridge capabilities, including voice state, to the hosted frontend.
 
-import { createContext, createSignal, onCleanup, onMount, useContext, type Accessor, type JSX } from "solid-js";
+import {
+  createContext,
+  createSignal,
+  onCleanup,
+  onMount,
+  useContext,
+  type Accessor,
+  type JSX,
+} from "solid-js";
 import { useLocation, type SearchParams } from "@solidjs/router";
 
 declare global {
@@ -43,7 +51,8 @@ export function HostModeProvider(props: { children: JSX.Element }) {
 
   onMount(() => {
     if (!isGoModeHost()) return;
-    const updateNativeVoiceState = () => setNativeVoiceSessionConnected(nativeVoiceConnected(window.goModeHost));
+    const updateNativeVoiceState = () =>
+      setNativeVoiceSessionConnected(nativeVoiceConnected(window.goModeHost));
     updateNativeVoiceState();
     window.addEventListener("gomodevoicechange", updateNativeVoiceState);
     onCleanup(() => window.removeEventListener("gomodevoicechange", updateNativeVoiceState));

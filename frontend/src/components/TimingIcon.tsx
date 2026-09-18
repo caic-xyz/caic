@@ -79,7 +79,8 @@ export default function TimingIcon(props: Props) {
       lines.push(`Combined elements: ${formatTimingDuration(combinedMs)}`);
     } else if (result && result.duration > 0) {
       lines.push(`Turn: ${formatTimingDuration(result.duration * 1000)}`);
-      if (result.durationAPI > 0) lines.push(`API: ${formatTimingDuration(result.durationAPI * 1000)}`);
+      if (result.durationAPI > 0)
+        lines.push(`API: ${formatTimingDuration(result.durationAPI * 1000)}`);
     } else if (hasRange && !hasWait) {
       lines.push(`Element: ${formatTimingDuration(end - start)}`);
     }
@@ -113,7 +114,12 @@ export default function TimingIcon(props: Props) {
         <Tooltip text={text} class={styles.tooltip}>
           <span class={styles.content} aria-label="Timing details" data-testid="timing-duration">
             <Show when={displayedDuration()} keyed>
-              {(duration) => <span class={styles.value}>{duration.prefix}{duration.ms === 0 ? "0s" : formatTimingDuration(duration.ms)}</span>}
+              {(duration) => (
+                <span class={styles.value}>
+                  {duration.prefix}
+                  {duration.ms === 0 ? "0s" : formatTimingDuration(duration.ms)}
+                </span>
+              )}
             </Show>
           </span>
         </Tooltip>

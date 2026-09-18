@@ -9,7 +9,10 @@
   max-height: 15rem;
   opacity: 1;
   overflow: visible;
-  transition: max-height 150ms ease-out, opacity 150ms ease-out, margin-bottom 150ms ease-out;
+  transition:
+    max-height 150ms ease-out,
+    opacity 150ms ease-out,
+    margin-bottom 150ms ease-out;
 }
 
 .promptInput {

@@ -12,7 +12,6 @@
   border: 2px solid var(--color-selected);
 }
 
-
 .contextMenu {
   position: fixed;
   z-index: 100;
@@ -258,7 +257,9 @@ a.featureIconBadge:focus-visible {
   padding: 0.1rem;
   line-height: 1;
   border-radius: var(--radius-sm);
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .purgeIcon {
@@ -310,7 +311,9 @@ a.featureIconBadge:focus-visible {
 }
 
 @keyframes purge-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .card:hover .purgeBtn,
@@ -370,5 +373,4 @@ a.featureIconBadge:focus-visible {
   .reviveIcon {
     padding: 0.4rem;
   }
-
 }

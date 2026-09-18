@@ -48,8 +48,7 @@ export default function StatsIcon(props: {
   const latest = () => props.stats.at(-1);
   const maxNet = () => {
     let max = 1;
-    for (const stat of props.stats)
-      max = Math.max(max, stat.netRx + stat.netTx);
+    for (const stat of props.stats) max = Math.max(max, stat.netRx + stat.netTx);
     return max;
   };
   const maxDisk = () => {
@@ -112,11 +111,7 @@ export default function StatsIcon(props: {
           width="6"
           height={Math.round(diskRatio() * 8)}
           rx="1"
-          fill={
-            hasStats()
-              ? diskColor(latest()?.diskUsed ?? 0)
-              : "var(--color-border)"
-          }
+          fill={hasStats() ? diskColor(latest()?.diskUsed ?? 0) : "var(--color-border)"}
         />
       </svg>
       <Show when={tokens() > 0}>

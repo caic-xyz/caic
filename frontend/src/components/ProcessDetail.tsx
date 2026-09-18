@@ -41,10 +41,15 @@ export function buildTree(procs: ProcessInfo[]): ProcessNode[] {
 // State color mapping for process state characters.
 function stateColor(state: string): string {
   switch (state) {
-    case "R": return "var(--color-success)";
-    case "D": case "Z": return "var(--color-danger)";
-    case "T": return "var(--color-warning-text)";
-    default: return "var(--color-text-muted)";
+    case "R":
+      return "var(--color-success)";
+    case "D":
+    case "Z":
+      return "var(--color-danger)";
+    case "T":
+      return "var(--color-warning-text)";
+    default:
+      return "var(--color-text-muted)";
   }
 }
 
@@ -79,7 +84,10 @@ function ProcessRow(props: RowProps) {
       <tr>
         <td class={`${styles.td} ${styles.actions}`}>
           <div class={styles.actionsRow}>
-            <span class={styles.treeToggle} style={{ width: `${indent()}px`, "min-width": `${indent()}px` }}>
+            <span
+              class={styles.treeToggle}
+              style={{ width: `${indent()}px`, "min-width": `${indent()}px` }}
+            >
               <Show when={hasChildren()}>
                 <button
                   class={styles.toggleBtn}
@@ -116,7 +124,9 @@ function ProcessRow(props: RowProps) {
         <td class={styles.td}>{props.node.pgrp}</td>
         <td class={styles.td}>{props.node.user}</td>
         <td class={styles.td}>
-          <span class={styles.state} style={{ color: stateColor(props.node.state) }}>{props.node.state}</span>
+          <span class={styles.state} style={{ color: stateColor(props.node.state) }}>
+            {props.node.state}
+          </span>
         </td>
         <td class={styles.td}>{props.node.priority}</td>
         <td class={styles.td}>{props.node.nice}</td>
@@ -127,7 +137,9 @@ function ProcessRow(props: RowProps) {
         <td class={styles.td}>{formatBytes(props.node.rssBytes)}</td>
         <td class={styles.td}>{formatElapsed(props.node.cpuTime / 1_000_000)}</td>
         <td class={styles.td}>{formatTime(props.node.startedAt)}</td>
-        <td class={styles.td}>{formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}</td>
+        <td class={styles.td}>
+          {formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}
+        </td>
         <td class={`${styles.td} ${styles.cmd}`}>{props.node.command}</td>
       </tr>
       <Show when={hasChildren() && !isCollapsed()}>
@@ -215,7 +227,8 @@ export default function ProcessDetail(props: Props) {
       await signalProcess(id, String(pid), { signal: sig });
       await refresh();
     } catch (e: unknown) {
-      if (!onTaskRefreshError?.(id, e)) setError(e instanceof Error ? e.message : "Failed to send signal");
+      if (!onTaskRefreshError?.(id, e))
+        setError(e instanceof Error ? e.message : "Failed to send signal");
     } finally {
       setSignallingPid(null);
     }
@@ -224,7 +237,11 @@ export default function ProcessDetail(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
+        <button
+          class={styles.backBtn}
+          onClick={() => navigate(props.taskPath)}
+          title="Back to task"
+        >
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span class={styles.headerMeta}>
@@ -240,13 +257,12 @@ export default function ProcessDetail(props: Props) {
           <div class={styles.error}>{error()}</div>
         </Show>
         <Show when={!loading() && !error()}>
-          <Show when={tree()} keyed fallback={
-            <div class={styles.empty}>No running processes</div>
-          }>
+          <Show when={tree()} keyed fallback={<div class={styles.empty}>No running processes</div>}>
             {(roots) => (
-              <Show when={roots.length > 0} fallback={
-                <div class={styles.empty}>No running processes</div>
-              }>
+              <Show
+                when={roots.length > 0}
+                fallback={<div class={styles.empty}>No running processes</div>}
+              >
                 <table class={styles.table}>
                   <thead>
                     <tr>

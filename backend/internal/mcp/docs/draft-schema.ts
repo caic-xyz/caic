@@ -9,13 +9,7 @@
 /**
  * @category Common Types
  */
-export type JSONValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JSONObject
-  | JSONArray;
+export type JSONValue = string | number | boolean | null | JSONObject | JSONArray;
 
 /**
  * @category Common Types
@@ -34,10 +28,7 @@ export type JSONArray = JSONValue[];
  *
  * @category JSON-RPC
  */
-export type JSONRPCMessage =
-  | JSONRPCRequest
-  | JSONRPCNotification
-  | JSONRPCResponse;
+export type JSONRPCMessage = JSONRPCRequest | JSONRPCNotification | JSONRPCResponse;
 
 /** @internal */
 export const LATEST_PROTOCOL_VERSION = "2026-07-28";
@@ -390,10 +381,7 @@ export const UNSUPPORTED_PROTOCOL_VERSION = -32004;
  *
  * @category Errors
  */
-export interface UnsupportedProtocolVersionError extends Omit<
-  JSONRPCErrorResponse,
-  "error"
-> {
+export interface UnsupportedProtocolVersionError extends Omit<JSONRPCErrorResponse, "error"> {
   error: Error & {
     code: typeof UNSUPPORTED_PROTOCOL_VERSION;
     data: {
@@ -420,10 +408,7 @@ export interface UnsupportedProtocolVersionError extends Omit<
  *
  * @category Errors
  */
-export interface MissingRequiredClientCapabilityError extends Omit<
-  JSONRPCErrorResponse,
-  "error"
-> {
+export interface MissingRequiredClientCapabilityError extends Omit<JSONRPCErrorResponse, "error"> {
   error: Error & {
     code: typeof MISSING_REQUIRED_CLIENT_CAPABILITY;
     data: {
@@ -444,16 +429,10 @@ export interface MissingRequiredClientCapabilityError extends Omit<
 export type EmptyResult = Result;
 
 /** @internal */
-export type InputRequest =
-  | CreateMessageRequest
-  | ListRootsRequest
-  | ElicitRequest;
+export type InputRequest = CreateMessageRequest | ListRootsRequest | ElicitRequest;
 
 /** @internal */
-export type InputResponse =
-  | CreateMessageResult
-  | ListRootsResult
-  | ElicitResult;
+export type InputResponse = CreateMessageResult | ListRootsResult | ElicitResult;
 
 /**
  * A map of server-initiated requests that the client must fulfill.
@@ -1080,8 +1059,7 @@ export interface ListResourceTemplatesRequest extends PaginatedRequest {
  *
  * @category `resources/templates/list`
  */
-export interface ListResourceTemplatesResult
-  extends PaginatedResult, CacheableResult {
+export interface ListResourceTemplatesResult extends PaginatedResult, CacheableResult {
   resourceTemplates: ResourceTemplate[];
 }
 
@@ -1920,14 +1898,7 @@ export interface LoggingMessageNotification extends JSONRPCNotification {
  * @category Common Types
  */
 export type LoggingLevel =
-  | "debug"
-  | "info"
-  | "notice"
-  | "warning"
-  | "error"
-  | "critical"
-  | "alert"
-  | "emergency";
+  "debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency";
 
 /* Sampling */
 /**
@@ -2103,11 +2074,7 @@ export interface SamplingMessage {
  * @category `sampling/createMessage`
  */
 export type SamplingMessageContentBlock =
-  | TextContent
-  | ImageContent
-  | AudioContent
-  | ToolUseContent
-  | ToolResultContent;
+  TextContent | ImageContent | AudioContent | ToolUseContent | ToolResultContent;
 
 /**
  * Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
@@ -2150,11 +2117,7 @@ export interface Annotations {
  * @category Content
  */
 export type ContentBlock =
-  | TextContent
-  | ImageContent
-  | AudioContent
-  | ResourceLink
-  | EmbeddedResource;
+  TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource;
 
 /**
  * Text provided to or from an LLM.
@@ -2697,9 +2660,7 @@ export interface ElicitRequestURLParams {
  *
  * @category `elicitation/create`
  */
-export type ElicitRequestParams =
-  | ElicitRequestFormParams
-  | ElicitRequestURLParams;
+export type ElicitRequestParams = ElicitRequestFormParams | ElicitRequestURLParams;
 
 /**
  * A request from the server to elicit additional information from the user via the client.
@@ -2720,11 +2681,7 @@ export interface ElicitRequest {
  *
  * @category `elicitation/create`
  */
-export type PrimitiveSchemaDefinition =
-  | StringSchema
-  | NumberSchema
-  | BooleanSchema
-  | EnumSchema;
+export type PrimitiveSchemaDefinition = StringSchema | NumberSchema | BooleanSchema | EnumSchema;
 
 /**
  * @example Email input schema
@@ -2848,9 +2805,7 @@ export interface TitledSingleSelectEnumSchema {
  * @category `elicitation/create`
  */
 // Combined single selection enumeration
-export type SingleSelectEnumSchema =
-  | UntitledSingleSelectEnumSchema
-  | TitledSingleSelectEnumSchema;
+export type SingleSelectEnumSchema = UntitledSingleSelectEnumSchema | TitledSingleSelectEnumSchema;
 
 /**
  * Schema for multiple-selection enumeration without display titles for options.
@@ -2948,9 +2903,7 @@ export interface TitledMultiSelectEnumSchema {
  * @category `elicitation/create`
  */
 // Combined multiple selection enumeration
-export type MultiSelectEnumSchema =
-  | UntitledMultiSelectEnumSchema
-  | TitledMultiSelectEnumSchema;
+export type MultiSelectEnumSchema = UntitledMultiSelectEnumSchema | TitledMultiSelectEnumSchema;
 
 /**
  * Use {@link TitledSingleSelectEnumSchema} instead.
@@ -2975,10 +2928,7 @@ export interface LegacyTitledEnumSchema {
  * @category `elicitation/create`
  */
 // Union type for all enum schemas
-export type EnumSchema =
-  | SingleSelectEnumSchema
-  | MultiSelectEnumSchema
-  | LegacyTitledEnumSchema;
+export type EnumSchema = SingleSelectEnumSchema | MultiSelectEnumSchema | LegacyTitledEnumSchema;
 
 /**
  * The result returned by the client for an {@link ElicitRequest| elicitation/create} request.

@@ -36,7 +36,10 @@ export class IncrementalEventTimingTracker {
   private inputEvent: EventMessage | null = null;
 
   derive(events: readonly EventMessage[]): EventTimingSummary {
-    if (events.length < this.processed || (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)) {
+    if (
+      events.length < this.processed ||
+      (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)
+    ) {
       this.clear();
     }
     for (let i = this.processed; i < events.length; i++) {
@@ -104,13 +107,24 @@ export class IncrementalTaskTimingTracker {
       this.previousTs = event.ts;
     }
     if (event.kind === "result" && event.result) {
-      const turn = { event, result: event.result, reportedModel: this.reportedModel, changeStat: null, waitMs: null } satisfies TurnTiming;
+      const turn = {
+        event,
+        result: event.result,
+        reportedModel: this.reportedModel,
+        changeStat: null,
+        waitMs: null,
+      } satisfies TurnTiming;
       this.turns.push(turn);
       this.latestTurn = turn;
       this.waitingTurn = turn;
       return;
     }
-    if (event.kind === "commitSnapshot" && event.commitSnapshot && !event.commitSnapshot.baseline && this.latestTurn !== null) {
+    if (
+      event.kind === "commitSnapshot" &&
+      event.commitSnapshot &&
+      !event.commitSnapshot.baseline &&
+      this.latestTurn !== null
+    ) {
       this.latestTurn.changeStat = event.commitSnapshot.changeStat ?? null;
       return;
     }

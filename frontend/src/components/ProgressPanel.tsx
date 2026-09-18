@@ -57,7 +57,11 @@ export default function ProgressPanel(props: { messages: EventMessage[] }) {
   // Auto-collapse when all todos done and no active agents.
   createEffect(() => {
     const t = todos();
-    if (t.length > 0 && t.every((item) => item.status === "completed") && activeAgents().length === 0) {
+    if (
+      t.length > 0 &&
+      t.every((item) => item.status === "completed") &&
+      activeAgents().length === 0
+    ) {
       detailsOpenState.set(DETAILS_KEY, false);
     }
   });
