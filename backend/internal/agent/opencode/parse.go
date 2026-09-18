@@ -34,10 +34,10 @@ import (
 //   - SystemMessage        — current_mode_update
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func parseMessage(line []byte) ([]agent.Message, error) {
+func parseMessage(line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
 	var probe opencode.MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
-		return nil, fmt.Errorf("unmarshal probe: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
 	// caic-injected lines have a "type" field.
@@ -46,150 +46,157 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 		case "caic_session":
 			m, err := agent.DecodeV1MetaSessionMessage(line)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			return []agent.Message{&agent.InitMessage{
 				SessionID:      m.SessionID,
 				ReportedModel:  m.ReportedModel,
 				ReportedEffort: m.ReportedEffort,
 				Version:        m.AgentVersion,
-			}}, nil
+			}}, nil, nil
 		case "caic_init":
 			var ci CaicInit
 			if err := json.Unmarshal(line, &ci); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			return []agent.Message{&agent.InitMessage{
 				SessionID:     ci.SessionID,
 				ReportedModel: ci.ReportedModel,
 				Version:       ci.Version,
-			}}, nil
+			}}, nil, nil
 		case "caic_diff_stat":
 			var m agent.DiffStatMessage
 			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			return []agent.Message{&m}, nil
+			return []agent.Message{&m}, nil, nil
 		case "caic_exit":
 			var m agent.ExitMessage
 			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			return []agent.Message{&m}, nil
+			return []agent.Message{&m}, nil, nil
 		default:
-			return []agent.Message{&agent.RawMessage{MessageType: probe.Type, Raw: append([]byte(nil), line...)}}, nil
+			return []agent.Message{&agent.RawMessage{MessageType: probe.Type, Raw: append([]byte(nil), line...)}}, nil, nil
 		}
 	}
 
 	// JSON-RPC response (has "id").
 	if probe.ID != nil {
-		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 
 	// JSON-RPC notification — dispatch on method.
 	var msg opencode.JSONRPCMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, fmt.Errorf("unmarshal jsonrpc: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal jsonrpc: %w", err)
 	}
 
 	switch msg.Method {
 	case opencode.MethodSessionUpdate:
-		return parseSessionUpdate(msg.Params, line)
+		msgs, toolCall, err := parseSessionUpdate(msg.Params, line)
+		return msgs, toolCall, err
 
 	case opencode.MethodSessionRequestPermission:
 		// Permission requests are handled by wireFormat (auto-approve).
 		// In the stateless parser, emit as RawMessage.
-		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil, nil
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 }
 
 // parseSessionUpdate dispatches on the sessionUpdate discriminator.
-func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, error) {
+func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
 	var sup opencode.SessionUpdateParams
 	if err := json.Unmarshal(params, &sup); err != nil {
-		return nil, fmt.Errorf("session/update params: %w", err)
+		return nil, nil, fmt.Errorf("session/update params: %w", err)
 	}
 
 	var probe opencode.UpdateProbe
 	if err := json.Unmarshal(sup.Update, &probe); err != nil {
-		return nil, fmt.Errorf("session/update probe: %w", err)
+		return nil, nil, fmt.Errorf("session/update probe: %w", err)
 	}
 
 	switch probe.SessionUpdate {
 	case opencode.UpdateAgentMessageChunk:
 		var u opencode.AgentMessageChunkUpdate
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
-			return nil, fmt.Errorf("agent_message_chunk: %w", err)
+			return nil, nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
-		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil
+		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil, nil
 
 	case opencode.UpdateAgentThoughtChunk:
 		var u opencode.AgentThoughtChunkUpdate
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
-			return nil, fmt.Errorf("agent_thought_chunk: %w", err)
+			return nil, nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
-		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil
+		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil, nil
 
 	case opencode.UpdateUserMessageChunk:
 		var u opencode.UserMessageChunkUpdate
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
-			return nil, fmt.Errorf("user_message_chunk: %w", err)
+			return nil, nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
-		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil
+		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil, nil
 
-	case opencode.UpdateToolCall:
-		return parseToolCall(sup.Update)
-
-	case opencode.UpdateToolCallUpdate:
-		return parseToolCallUpdate(sup.Update)
+	case opencode.UpdateToolCall, opencode.UpdateToolCallUpdate:
+		// The announcement and the update carry the same fields, so decode once
+		// and hand the same value to the conversion and to native correlation.
+		var u opencode.ToolCallUpdateUpdate
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", probe.SessionUpdate, err)
+		}
+		var msgs []agent.Message
+		if probe.SessionUpdate == opencode.UpdateToolCall {
+			msgs = parseToolCall(&u)
+		} else {
+			msgs = parseToolCallUpdate(&u)
+		}
+		return msgs, &u, nil
 
 	case opencode.UpdatePlan:
-		return parsePlanUpdate(sup.Update)
+		msgs, err := parsePlanUpdate(sup.Update)
+		return msgs, nil, err
 
 	case opencode.UpdateUsageUpdate:
 		var u opencode.UsageUpdateUpdate
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
-			return nil, fmt.Errorf("usage_update: %w", err)
+			return nil, nil, fmt.Errorf("usage_update: %w", err)
 		}
 		return []agent.Message{&agent.UsageMessage{
 			ContextWindow: u.Size,
-		}}, nil
+		}}, nil, nil
 
 	case opencode.UpdateCurrentModeUpdate:
 		var u opencode.CurrentModeUpdate
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
-			return nil, fmt.Errorf("current_mode_update: %w", err)
+			return nil, nil, fmt.Errorf("current_mode_update: %w", err)
 		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
 			Subtype:     "mode_update",
 			Detail:      u.CurrentModeID,
-		}}, nil
+		}}, nil, nil
 
 	case opencode.UpdateSessionInfoUpdate:
-		return nil, nil // cosmetic, skip
+		return nil, nil, nil // cosmetic, skip
 
 	case opencode.UpdateAvailableCommandsUpdate, opencode.UpdateConfigOptionUpdate:
-		return nil, nil // internal, skip
+		return nil, nil, nil // internal, skip
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(probe.SessionUpdate), Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(probe.SessionUpdate), Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 }
 
-// parseToolCall handles tool_call session updates (initial tool announcement).
-func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
-	var u opencode.ToolCallUpdate
-	if err := json.Unmarshal(data, &u); err != nil {
-		return nil, fmt.Errorf("tool_call: %w", err)
-	}
-
+// parseToolCall handles tool_call session updates (initial tool announcement),
+// rendering the update its caller decoded.
+func parseToolCall(u *opencode.ToolCallUpdateUpdate) []agent.Message {
 	// Check for widget tool.
 	if _, ok := agent.WidgetToolNames[u.Title]; ok {
-		return []agent.Message{agent.NewWidgetMessage(u.ToolCallID, u.RawInput)}, nil
+		return []agent.Message{agent.NewWidgetMessage(u.ToolCallID, u.RawInput)}
 	}
 
 	use := &agent.ToolUseMessage{
@@ -198,27 +205,23 @@ func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
 		Input:     u.RawInput,
 	}
 	addEditInputView(use)
-	return []agent.Message{use}, nil
+	return []agent.Message{use}
 }
 
-// parseToolCallUpdate handles tool_call_update session updates (progress/completion).
+// parseToolCallUpdate handles tool_call_update session updates (progress/completion),
+// rendering the update its caller decoded.
 //
 // When the update transitions to in_progress, it also emits a ToolUseMessage
 // with the real tool input. This is necessary because the initial tool_call
 // notification has an empty rawInput ({}); the actual arguments only arrive
 // in the tool_call_update.
-func parseToolCallUpdate(data json.RawMessage) ([]agent.Message, error) {
-	var u opencode.ToolCallUpdateUpdate
-	if err := json.Unmarshal(data, &u); err != nil {
-		return nil, fmt.Errorf("tool_call_update: %w", err)
-	}
-
+func parseToolCallUpdate(u *opencode.ToolCallUpdateUpdate) []agent.Message {
 	switch u.Status {
 	case opencode.StatusCompleted:
-		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID}}, nil
+		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID}}
 	case opencode.StatusFailed:
-		errMsg := extractToolError(&u)
-		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}, nil
+		errMsg := extractToolError(u)
+		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}
 	case opencode.StatusInProgress:
 		var msgs []agent.Message
 		// Emit a ToolUseMessage with the real input when available.
@@ -232,15 +235,15 @@ func parseToolCallUpdate(data json.RawMessage) ([]agent.Message, error) {
 			msgs = append(msgs, use)
 		}
 		// Also emit output delta if content is available.
-		if delta := extractToolOutputDelta(&u); delta != "" {
+		if delta := extractToolOutputDelta(u); delta != "" {
 			msgs = append(msgs, &agent.ToolOutputDeltaMessage{
 				ToolUseID: u.ToolCallID,
 				Delta:     delta,
 			})
 		}
-		return msgs, nil
+		return msgs
 	default:
-		return nil, nil
+		return nil
 	}
 }
 

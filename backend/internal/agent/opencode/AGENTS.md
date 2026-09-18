@@ -38,6 +38,31 @@ Type names in `github.com/maruel/genai/providers/opencode` follow the upstream A
 When updating wire types, update `github.com/maruel/genai` and diff against
 `agent.ts` to find new session update types or fields.
 
+## Native subagent evidence
+
+The OpenCode 1.18.31 standardized recording drove caic's own ACP transport and
+used the native `task` tool: a `tool_call` session update with `title: "task"`
+and `kind: "think"` (empty `rawInput`), the in-progress `tool_call_update` that
+carries the structured `description`/`subagent_type`/`prompt` input, and the
+completed update with the child `<task>` output. Those three records are the
+retained v3 fixture, so the adapter is exercised on the transport production
+actually uses. Earlier evidence came from `opencode run --format json`, whose
+event envelope differs from ACP; do not treat those outer event names as ACP
+fields.
+
+`native_subagent.go` recognizes delegation only from that ACP task identity plus
+structured input: a pending update proves nothing, a normalized display name
+such as `Agent` is not proof, and an unrelated tool call never creates a
+lifecycle. The matching `v1.18.31` source is the authority for ACP: retain only
+the tool-call ID, title/kind, input, lifecycle status, and completion output
+that its `session/update` tool events expose. The child session ID and parent
+session ID from the run trace are useful correlation evidence but are not yet a
+promised ACP contract.
+
+The authoritative ACP projection is
+https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/acp/event.ts,
+which emits `tool_call` and `tool_call_update` session updates from tool parts.
+
 ## Key Design Decisions
 
 - **Upstream naming**: Go types mirror ACP SDK naming (e.g. `AgentMessageChunkUpdate`,

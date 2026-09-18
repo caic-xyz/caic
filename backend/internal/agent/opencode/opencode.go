@@ -139,14 +139,14 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	if opts.ResumeSessionID == "" {
 		return nil, errors.New("opencode: missing session ID for relay attach")
 	}
-	wire := &wireFormat{sessionID: opts.ResumeSessionID}
+	wire := &wireFormat{sessionID: opts.ResumeSessionID, nativeSubagents: newNativeSubagents()}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
-	return &wireFormat{}
+	return &wireFormat{nativeSubagents: newNativeSubagents()}
 }
 
 // FetchModelInventory implements agent.ModelFetcher.
@@ -177,8 +177,9 @@ const maxAccumulatedOutputBytes = 1 << 20
 // It holds per-session state: the session ID, a request ID counter,
 // accumulated token usage, and image support flag.
 type wireFormat struct {
-	sessionID     string // Set during handshake; read-only after.
-	supportsImage bool   // Set during handshake; read-only after.
+	nativeSubagents nativeSubagents
+	sessionID       string // Set during handshake; read-only after.
+	supportsImage   bool   // Set during handshake; read-only after.
 
 	mu            sync.Mutex
 	nextID        int64
@@ -289,10 +290,15 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := parseMessage(line)
+	msgs, toolCall, err := parseMessage(line)
 	if err != nil {
 		return nil, err
 	}
+	native, err := w.nativeSubagents.parse(toolCall)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, native...)
 	// Accumulate text/thinking deltas for synthetic final messages.
 	for _, msg := range msgs {
 		switch m := msg.(type) {
@@ -422,7 +428,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{}
+	w := &wireFormat{nativeSubagents: newNativeSubagents()}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct relay reader: %w", err)
