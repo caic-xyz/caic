@@ -55,6 +55,26 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("native subagent preserves only harness-reported lifecycle facts", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.OpenCode, nil)
+		events := tracker.ConvertMessage(&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
+			ID:      "child-1",
+			GroupID: "spawn-1",
+			Label:   "reviewer",
+			Prompt:  "Review the change",
+			Status:  agent.NativeSubagentStatusCompleted,
+			Result:  "No findings.",
+		}}, time.Unix(1, 0))
+		if len(events) != 1 || events[0].Kind != v1.EventKindNativeSubagent || events[0].NativeSubagent == nil {
+			t.Fatalf("events = %#v", events)
+		}
+		got := events[0].NativeSubagent
+		if got.ID != "child-1" || got.GroupID != "spawn-1" || got.Label != "reviewer" || got.Prompt != "Review the change" || got.Status != "completed" || got.Result != "No findings." {
+			t.Fatalf("native subagent = %#v", got)
+		}
+	})
+
 	t.Run("tool use includes harness normalized subagent display", func(t *testing.T) {
 		t.Parallel()
 		tracker := NewToolTimingTracker(harness.Pi, nil)

@@ -216,6 +216,7 @@ EventKind identifies the type of SSE event.
 | `thinkingDelta` |  |
 | `subagentStart` |  |
 | `subagentEnd` |  |
+| `nativeSubagent` |  |
 | `log` |  |
 | `toolOutputDelta` |  |
 | `widget` |  |
@@ -223,6 +224,28 @@ EventKind identifies the type of SSE event.
 | `rateLimit` |  |
 | `stats` |  |
 | `commitSnapshot` |  |
+
+### EventNativeSubagentScope
+
+EventNativeSubagentScope distinguishes a single agent from aggregate batch evidence.
+
+| Value | Description |
+|-------|-------------|
+| `agent` |  |
+| `batch` |  |
+
+### EventNativeSubagentStatus
+
+EventNativeSubagentStatus is the observed native lifecycle, independent of CAIC task state.
+
+| Value | Description |
+|-------|-------------|
+| `completed` |  |
+| `failed` |  |
+| `interrupted` |  |
+| `paused` |  |
+| `running` |  |
+| `unknown` |  |
 
 ### EventRateLimitStatus
 
@@ -1203,7 +1226,10 @@ EventThinkingDelta is a streaming thinking fragment.
 
 ### EventSubagentStart
 
-EventSubagentStart is emitted when a subagent task begins.
+EventSubagentStart is emitted when a subagent task begins. It is the legacy
+harness-agnostic shape: no current parser produces it, and clients should
+render EventNativeSubagent instead. It stays in the v1 event union and the
+generated SDKs so existing clients that switch on these kinds keep compiling.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -1213,11 +1239,32 @@ EventSubagentStart is emitted when a subagent task begins.
 ### EventSubagentEnd
 
 EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+It is the legacy harness-agnostic shape: no current parser produces it, and
+clients should render EventNativeSubagent instead. It stays in the v1 event
+union and the generated SDKs so existing clients that switch on these kinds
+keep compiling.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `taskID` | `string` |  | yes |
 | `status` | `string` | "completed", "failed", "stopped" | yes |
+
+### EventNativeSubagent
+
+EventNativeSubagent is one task-local lifecycle update for a harness native
+subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
+Optional fields remain absent when the harness did not expose them.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  |  |
+| `scope` | `EventNativeSubagentScope` |  |  |
+| `id` | `string` |  | yes |
+| `groupID` | `string` |  |  |
+| `label` | `string` |  |  |
+| `prompt` | `string` |  |  |
+| `status` | `EventNativeSubagentStatus` |  | yes |
+| `result` | `string` |  |  |
 
 ### EventLog
 
@@ -1348,6 +1395,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `thinkingDelta` | `EventThinkingDelta` |  |  |
 | `subagentStart` | `EventSubagentStart` |  |  |
 | `subagentEnd` | `EventSubagentEnd` |  |  |
+| `nativeSubagent` | `EventNativeSubagent` |  |  |
 | `log` | `EventLog` |  |  |
 | `toolOutputDelta` | `EventToolOutputDelta` |  |  |
 | `widget` | `EventWidget` |  |  |

@@ -35,6 +35,7 @@ const (
 	EventKindThinkingDelta   EventKind = "thinkingDelta"
 	EventKindSubagentStart   EventKind = "subagentStart"
 	EventKindSubagentEnd     EventKind = "subagentEnd"
+	EventKindNativeSubagent  EventKind = "nativeSubagent"
 	EventKindLog             EventKind = "log"
 	EventKindToolOutputDelta EventKind = "toolOutputDelta"
 	EventKindWidget          EventKind = "widget"
@@ -71,6 +72,7 @@ type EventMessage struct {
 	ThinkingDelta   *EventThinkingDelta   `json:"thinkingDelta,omitempty"`
 	SubagentStart   *EventSubagentStart   `json:"subagentStart,omitempty"`
 	SubagentEnd     *EventSubagentEnd     `json:"subagentEnd,omitempty"`
+	NativeSubagent  *EventNativeSubagent  `json:"nativeSubagent,omitempty"`
 	Log             *EventLog             `json:"log,omitempty"`
 	ToolOutputDelta *EventToolOutputDelta `json:"toolOutputDelta,omitempty"`
 	Widget          *EventWidget          `json:"widget,omitempty"`
@@ -271,16 +273,59 @@ type EventThinkingDelta struct {
 	Text string `json:"text"`
 }
 
-// EventSubagentStart is emitted when a subagent task begins.
+// EventSubagentStart is emitted when a subagent task begins. It is the legacy
+// harness-agnostic shape: no current parser produces it, and clients should
+// render EventNativeSubagent instead. It stays in the v1 event union and the
+// generated SDKs so existing clients that switch on these kinds keep compiling.
 type EventSubagentStart struct {
 	TaskID      string `json:"taskID"`
 	Description string `json:"description"`
 }
 
 // EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+// It is the legacy harness-agnostic shape: no current parser produces it, and
+// clients should render EventNativeSubagent instead. It stays in the v1 event
+// union and the generated SDKs so existing clients that switch on these kinds
+// keep compiling.
 type EventSubagentEnd struct {
 	TaskID string `json:"taskID"`
 	Status string `json:"status"` // "completed", "failed", "stopped"
+}
+
+// EventNativeSubagentStatus is the observed native lifecycle, independent of CAIC task state.
+type EventNativeSubagentStatus string
+
+// Observed lifecycle states; unknown does not imply execution.
+const (
+	EventNativeSubagentStatusCompleted   EventNativeSubagentStatus = "completed"
+	EventNativeSubagentStatusFailed      EventNativeSubagentStatus = "failed"
+	EventNativeSubagentStatusInterrupted EventNativeSubagentStatus = "interrupted"
+	EventNativeSubagentStatusPaused      EventNativeSubagentStatus = "paused"
+	EventNativeSubagentStatusRunning     EventNativeSubagentStatus = "running"
+	EventNativeSubagentStatusUnknown     EventNativeSubagentStatus = "unknown"
+)
+
+// EventNativeSubagentScope distinguishes a single agent from aggregate batch evidence.
+type EventNativeSubagentScope string
+
+// Native activity scopes distinguish individual and aggregate observations.
+const (
+	EventNativeSubagentScopeAgent EventNativeSubagentScope = "agent"
+	EventNativeSubagentScopeBatch EventNativeSubagentScope = "batch"
+)
+
+// EventNativeSubagent is one task-local lifecycle update for a harness native
+// subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
+// Optional fields remain absent when the harness did not expose them.
+type EventNativeSubagent struct {
+	ToolUseID string                    `json:"toolUseID,omitempty"`
+	Scope     EventNativeSubagentScope  `json:"scope,omitempty"`
+	ID        string                    `json:"id"`
+	GroupID   string                    `json:"groupID,omitempty"`
+	Label     string                    `json:"label,omitempty"`
+	Prompt    string                    `json:"prompt,omitempty"`
+	Status    EventNativeSubagentStatus `json:"status"`
+	Result    string                    `json:"result,omitempty"`
 }
 
 // EventLog is a provisioning/startup log line from the runtime backend.

@@ -320,6 +320,31 @@ func TestGenericConvertSubagentEvents(t *testing.T) {
 	}
 }
 
+func TestGenericConvertNativeSubagentEvent(t *testing.T) {
+	t.Parallel()
+
+	gt := apiconv.NewToolTimingTracker(harness.Claude, nil)
+	events := gt.ConvertMessage(&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
+		ID:        "child-1",
+		ToolUseID: "spawn-1",
+		Scope:     agent.NativeSubagentScopeBatch,
+		Label:     "Explore code",
+		Prompt:    "Explore the repository",
+		Status:    agent.NativeSubagentStatusPaused,
+		Result:    "paused for input",
+	}}, time.Now())
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Kind != v1.EventKindNativeSubagent || events[0].NativeSubagent == nil {
+		t.Fatalf("event = %#v, want a native subagent payload", events[0])
+	}
+	got := events[0].NativeSubagent
+	if got.ID != "child-1" || got.ToolUseID != "spawn-1" || got.Scope != v1.EventNativeSubagentScopeBatch || got.Label != "Explore code" || got.Prompt != "Explore the repository" || got.Status != v1.EventNativeSubagentStatusPaused || got.Result != "paused for input" {
+		t.Fatalf("native subagent = %#v", got)
+	}
+}
+
 func TestGenericConvertRawMessageFiltered(t *testing.T) {
 	t.Parallel()
 	gt := apiconv.NewToolTimingTracker(harness.Claude, nil)

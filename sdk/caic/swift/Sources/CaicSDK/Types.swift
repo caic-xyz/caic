@@ -187,6 +187,7 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let ThinkingDelta = EventKind("thinkingDelta")
     public static let SubagentStart = EventKind("subagentStart")
     public static let SubagentEnd = EventKind("subagentEnd")
+    public static let NativeSubagent = EventKind("nativeSubagent")
     public static let Log = EventKind("log")
     public static let ToolOutputDelta = EventKind("toolOutputDelta")
     public static let Widget = EventKind("widget")
@@ -196,6 +197,52 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let CommitSnapshot = EventKind("commitSnapshot")
 
     public static func other(_ value: String) -> EventKind { EventKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct EventNativeSubagentScope: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Agent = EventNativeSubagentScope("agent")
+    public static let Batch = EventNativeSubagentScope("batch")
+
+    public static func other(_ value: String) -> EventNativeSubagentScope { EventNativeSubagentScope(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct EventNativeSubagentStatus: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Completed = EventNativeSubagentStatus("completed")
+    public static let Failed = EventNativeSubagentStatus("failed")
+    public static let Interrupted = EventNativeSubagentStatus("interrupted")
+    public static let Paused = EventNativeSubagentStatus("paused")
+    public static let Running = EventNativeSubagentStatus("running")
+    public static let Unknown = EventNativeSubagentStatus("unknown")
+
+    public static func other(_ value: String) -> EventNativeSubagentStatus { EventNativeSubagentStatus(value) }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
@@ -1230,17 +1277,38 @@ public struct EventThinkingDelta: Codable {
     public let text: String
 }
 
-/// EventSubagentStart is emitted when a subagent task begins.
+/// EventSubagentStart is emitted when a subagent task begins. It is the legacy
+/// harness-agnostic shape: no current parser produces it, and clients should
+/// render EventNativeSubagent instead. It stays in the v1 event union and the
+/// generated SDKs so existing clients that switch on these kinds keep compiling.
 public struct EventSubagentStart: Codable {
     public let taskID: String
     public let description: String
 }
 
 /// EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+/// It is the legacy harness-agnostic shape: no current parser produces it, and
+/// clients should render EventNativeSubagent instead. It stays in the v1 event
+/// union and the generated SDKs so existing clients that switch on these kinds
+/// keep compiling.
 public struct EventSubagentEnd: Codable {
     public let taskID: String
     /// "completed", "failed", "stopped"
     public let status: String
+}
+
+/// EventNativeSubagent is one task-local lifecycle update for a harness native
+/// subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
+/// Optional fields remain absent when the harness did not expose them.
+public struct EventNativeSubagent: Codable {
+    public let toolUseID: String?
+    public let scope: EventNativeSubagentScope?
+    public let id: String
+    public let groupID: String?
+    public let label: String?
+    public let prompt: String?
+    public let status: EventNativeSubagentStatus
+    public let result: String?
 }
 
 /// EventLog is a provisioning/startup log line from the runtime backend.
@@ -1352,6 +1420,7 @@ public struct EventMessage: Codable {
     public let thinkingDelta: EventThinkingDelta?
     public let subagentStart: EventSubagentStart?
     public let subagentEnd: EventSubagentEnd?
+    public let nativeSubagent: EventNativeSubagent?
     public let log: EventLog?
     public let toolOutputDelta: EventToolOutputDelta?
     public let widget: EventWidget?

@@ -348,6 +348,10 @@ sealed interface EventKind {
         override val value = "subagentEnd"
     }
     @Serializable
+    data object NativeSubagent : EventKind {
+        override val value = "nativeSubagent"
+    }
+    @Serializable
     data object Log : EventKind {
         override val value = "log"
     }
@@ -402,6 +406,7 @@ object EventKindSerializer : KSerializer<EventKind> {
             "thinkingDelta" -> EventKind.ThinkingDelta
             "subagentStart" -> EventKind.SubagentStart
             "subagentEnd" -> EventKind.SubagentEnd
+            "nativeSubagent" -> EventKind.NativeSubagent
             "log" -> EventKind.Log
             "toolOutputDelta" -> EventKind.ToolOutputDelta
             "widget" -> EventKind.Widget
@@ -410,6 +415,82 @@ object EventKindSerializer : KSerializer<EventKind> {
             "stats" -> EventKind.Stats
             "commitSnapshot" -> EventKind.CommitSnapshot
             else -> EventKind.Other(v)
+        }
+    }
+}
+
+@Serializable(with = EventNativeSubagentScopeSerializer::class)
+sealed interface EventNativeSubagentScope {
+    val value: String
+    @Serializable
+    data object Agent : EventNativeSubagentScope {
+        override val value = "agent"
+    }
+    @Serializable
+    data object Batch : EventNativeSubagentScope {
+        override val value = "batch"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventNativeSubagentScope
+}
+
+object EventNativeSubagentScopeSerializer : KSerializer<EventNativeSubagentScope> {
+    override val descriptor = PrimitiveSerialDescriptor("EventNativeSubagentScope", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventNativeSubagentScope) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventNativeSubagentScope {
+        val v = decoder.decodeString()
+        return when (v) {
+            "agent" -> EventNativeSubagentScope.Agent
+            "batch" -> EventNativeSubagentScope.Batch
+            else -> EventNativeSubagentScope.Other(v)
+        }
+    }
+}
+
+@Serializable(with = EventNativeSubagentStatusSerializer::class)
+sealed interface EventNativeSubagentStatus {
+    val value: String
+    @Serializable
+    data object Completed : EventNativeSubagentStatus {
+        override val value = "completed"
+    }
+    @Serializable
+    data object Failed : EventNativeSubagentStatus {
+        override val value = "failed"
+    }
+    @Serializable
+    data object Interrupted : EventNativeSubagentStatus {
+        override val value = "interrupted"
+    }
+    @Serializable
+    data object Paused : EventNativeSubagentStatus {
+        override val value = "paused"
+    }
+    @Serializable
+    data object Running : EventNativeSubagentStatus {
+        override val value = "running"
+    }
+    @Serializable
+    data object Unknown : EventNativeSubagentStatus {
+        override val value = "unknown"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventNativeSubagentStatus
+}
+
+object EventNativeSubagentStatusSerializer : KSerializer<EventNativeSubagentStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("EventNativeSubagentStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventNativeSubagentStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventNativeSubagentStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "completed" -> EventNativeSubagentStatus.Completed
+            "failed" -> EventNativeSubagentStatus.Failed
+            "interrupted" -> EventNativeSubagentStatus.Interrupted
+            "paused" -> EventNativeSubagentStatus.Paused
+            "running" -> EventNativeSubagentStatus.Running
+            "unknown" -> EventNativeSubagentStatus.Unknown
+            else -> EventNativeSubagentStatus.Other(v)
         }
     }
 }
@@ -1706,19 +1787,47 @@ data class EventThinking(val text: String)
 @Serializable
 data class EventThinkingDelta(val text: String)
 
-/** EventSubagentStart is emitted when a subagent task begins. */
+/**
+ * EventSubagentStart is emitted when a subagent task begins. It is the legacy
+ * harness-agnostic shape: no current parser produces it, and clients should
+ * render EventNativeSubagent instead. It stays in the v1 event union and the
+ * generated SDKs so existing clients that switch on these kinds keep compiling.
+ */
 @Serializable
 data class EventSubagentStart(
     @SerialName("taskID") val taskID: String,
     val description: String,
 )
 
-/** EventSubagentEnd is emitted when a subagent task completes, fails, or stops. */
+/**
+ * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+ * It is the legacy harness-agnostic shape: no current parser produces it, and
+ * clients should render EventNativeSubagent instead. It stays in the v1 event
+ * union and the generated SDKs so existing clients that switch on these kinds
+ * keep compiling.
+ */
 @Serializable
 data class EventSubagentEnd(
     @SerialName("taskID") val taskID: String,
     /** "completed", "failed", "stopped" */
     val status: String,
+)
+
+/**
+ * EventNativeSubagent is one task-local lifecycle update for a harness native
+ * subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
+ * Optional fields remain absent when the harness did not expose them.
+ */
+@Serializable
+data class EventNativeSubagent(
+    @SerialName("toolUseID") val toolUseID: String? = null,
+    val scope: EventNativeSubagentScope? = null,
+    val id: String,
+    @SerialName("groupID") val groupID: String? = null,
+    val label: String? = null,
+    val prompt: String? = null,
+    val status: EventNativeSubagentStatus,
+    val result: String? = null,
 )
 
 /** EventLog is a provisioning/startup log line from the runtime backend. */
@@ -1846,6 +1955,7 @@ data class EventMessage(
     val thinkingDelta: EventThinkingDelta? = null,
     val subagentStart: EventSubagentStart? = null,
     val subagentEnd: EventSubagentEnd? = null,
+    val nativeSubagent: EventNativeSubagent? = null,
     val log: EventLog? = null,
     val toolOutputDelta: EventToolOutputDelta? = null,
     val widget: EventWidget? = null,

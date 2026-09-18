@@ -26,6 +26,7 @@ export type EventKind =
   | "thinkingDelta"
   | "subagentStart"
   | "subagentEnd"
+  | "nativeSubagent"
   | "log"
   | "toolOutputDelta"
   | "widget"
@@ -53,6 +54,7 @@ export const EventKindThinking: EventKind = "thinking";
 export const EventKindThinkingDelta: EventKind = "thinkingDelta";
 export const EventKindSubagentStart: EventKind = "subagentStart";
 export const EventKindSubagentEnd: EventKind = "subagentEnd";
+export const EventKindNativeSubagent: EventKind = "nativeSubagent";
 export const EventKindLog: EventKind = "log";
 export const EventKindToolOutputDelta: EventKind = "toolOutputDelta";
 export const EventKindWidget: EventKind = "widget";
@@ -60,6 +62,32 @@ export const EventKindWidgetDelta: EventKind = "widgetDelta";
 export const EventKindRateLimit: EventKind = "rateLimit";
 export const EventKindStats: EventKind = "stats";
 export const EventKindCommitSnapshot: EventKind = "commitSnapshot";
+
+export type EventNativeSubagentScope =
+  | "agent"
+  | "batch";
+/**
+ * Supported values.
+ */
+export const EventNativeSubagentScopeAgent: EventNativeSubagentScope = "agent";
+export const EventNativeSubagentScopeBatch: EventNativeSubagentScope = "batch";
+
+export type EventNativeSubagentStatus =
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "paused"
+  | "running"
+  | "unknown";
+/**
+ * Supported values.
+ */
+export const EventNativeSubagentStatusCompleted: EventNativeSubagentStatus = "completed";
+export const EventNativeSubagentStatusFailed: EventNativeSubagentStatus = "failed";
+export const EventNativeSubagentStatusInterrupted: EventNativeSubagentStatus = "interrupted";
+export const EventNativeSubagentStatusPaused: EventNativeSubagentStatus = "paused";
+export const EventNativeSubagentStatusRunning: EventNativeSubagentStatus = "running";
+export const EventNativeSubagentStatusUnknown: EventNativeSubagentStatus = "unknown";
 
 export type EventRateLimitStatus =
   | "allowed"
@@ -263,17 +291,44 @@ export interface EventThinkingDelta {
   text: string;
 }
 
-/** EventSubagentStart is emitted when a subagent task begins. */
+/**
+ * EventSubagentStart is emitted when a subagent task begins. It is the legacy
+ * harness-agnostic shape: no current parser produces it, and clients should
+ * render EventNativeSubagent instead. It stays in the v1 event union and the
+ * generated SDKs so existing clients that switch on these kinds keep compiling.
+ */
 export interface EventSubagentStart {
   taskID: string;
   description: string;
 }
 
-/** EventSubagentEnd is emitted when a subagent task completes, fails, or stops. */
+/**
+ * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+ * It is the legacy harness-agnostic shape: no current parser produces it, and
+ * clients should render EventNativeSubagent instead. It stays in the v1 event
+ * union and the generated SDKs so existing clients that switch on these kinds
+ * keep compiling.
+ */
 export interface EventSubagentEnd {
   taskID: string;
   /** "completed", "failed", "stopped" */
   status: string;
+}
+
+/**
+ * EventNativeSubagent is one task-local lifecycle update for a harness native
+ * subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
+ * Optional fields remain absent when the harness did not expose them.
+ */
+export interface EventNativeSubagent {
+  toolUseID?: string;
+  scope?: EventNativeSubagentScope;
+  id: string;
+  groupID?: string;
+  label?: string;
+  prompt?: string;
+  status: EventNativeSubagentStatus;
+  result?: string;
 }
 
 /** EventLog is a provisioning/startup log line from the runtime backend. */
@@ -391,6 +446,7 @@ export interface EventMessage {
   thinkingDelta?: EventThinkingDelta;
   subagentStart?: EventSubagentStart;
   subagentEnd?: EventSubagentEnd;
+  nativeSubagent?: EventNativeSubagent;
   log?: EventLog;
   toolOutputDelta?: EventToolOutputDelta;
   widget?: EventWidget;

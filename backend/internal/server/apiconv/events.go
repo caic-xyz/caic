@@ -271,6 +271,21 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				Status: m.Status,
 			},
 		}}
+	case *agent.NativeSubagentMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindNativeSubagent,
+			Ts:   ts,
+			NativeSubagent: &v1.EventNativeSubagent{
+				ID:        m.Subagent.ID,
+				ToolUseID: m.Subagent.ToolUseID,
+				Scope:     v1.EventNativeSubagentScope(m.Subagent.Scope),
+				GroupID:   m.Subagent.GroupID,
+				Label:     m.Subagent.Label,
+				Prompt:    m.Subagent.Prompt,
+				Status:    v1.EventNativeSubagentStatus(m.Subagent.Status),
+				Result:    m.Subagent.Result,
+			},
+		}}
 	case *agent.DiffStatMessage:
 		return []v1.EventMessage{{
 			Kind:     v1.EventKindDiffStat,
