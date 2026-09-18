@@ -184,6 +184,22 @@ func renderMsg(b *strings.Builder, msg Message) {
 	case *SubagentEndMessage:
 		fmt.Fprintf(b, "### Subagent %s\n\n", m.Status)
 
+	case *NativeSubagentMessage:
+		// Canonical native activity carries the harness-reported facts; render
+		// the observed status, not an inferred outcome.
+		kind := "agent"
+		if m.Subagent.Scope == NativeSubagentScopeBatch {
+			kind = "batch"
+		}
+		label := m.Subagent.Label
+		if label == "" {
+			label = m.Subagent.ID
+		}
+		fmt.Fprintf(b, "### 🤖 Native %s: %s — %s\n\n", kind, label, m.Subagent.Status)
+		if m.Subagent.Result != "" {
+			fmt.Fprintf(b, "%s\n\n", m.Subagent.Result)
+		}
+
 	case *SystemMessage:
 		if m.Subtype == "compact_boundary" {
 			b.WriteString("---\n*Context compaction boundary*\n\n---\n\n")

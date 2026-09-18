@@ -87,6 +87,12 @@ func v1ExportParseFn(line []byte) ([]Message, error) {
 			return nil, err
 		}
 		return []Message{&m}, nil
+	case "native_subagent":
+		var m NativeSubagentMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []Message{&m}, nil
 	default:
 		return nil, nil
 	}
@@ -317,6 +323,23 @@ func TestRenderDiscussion(t *testing.T) {
 			}
 			assertContains(t, md, "### 🤖 Subagent: analyze logs")
 			assertContains(t, md, "### Subagent completed")
+		})
+
+		t.Run("native_subagent_activity", func(t *testing.T) {
+			t.Parallel()
+			lines := v1ExportFixture([]string{
+				v1MetaLine("task", "pi"),
+				`{"type":"native_subagent","subagent":{"id":"child-1","label":"analyze logs","status":"running"}}`,
+				`{"type":"native_subagent","subagent":{"id":"child-1","scope":"batch","status":"paused","result":"awaiting input"}}`,
+			})
+
+			md, err := renderDiscussionV1Fixture(lines)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertContains(t, md, "### 🤖 Native agent: analyze logs — running")
+			assertContains(t, md, "### 🤖 Native batch: child-1 — paused")
+			assertContains(t, md, "awaiting input")
 		})
 
 		t.Run("compaction_boundary", func(t *testing.T) {

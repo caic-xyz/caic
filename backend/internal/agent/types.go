@@ -562,6 +562,72 @@ type SubagentEndMessage struct {
 // Type implements Message.
 func (m *SubagentEndMessage) Type() string { return "subagent_end" }
 
+// NativeSubagentStatus describes the lifecycle state a harness actually
+// reported for a native subagent. Unknown means the harness proved the spawn
+// but did not expose a lifecycle state; it is not an inferred running state.
+type NativeSubagentStatus string
+
+// Terminal reports whether the status ends a native-subagent lifecycle.
+func (s NativeSubagentStatus) Terminal() bool {
+	switch s {
+	case NativeSubagentStatusCompleted, NativeSubagentStatusFailed, NativeSubagentStatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	// NativeSubagentStatusUnknown means the harness proved a spawn but not its lifecycle state.
+	NativeSubagentStatusUnknown NativeSubagentStatus = "unknown"
+	// NativeSubagentStatusRunning means the harness reported an active lifecycle.
+	NativeSubagentStatusRunning NativeSubagentStatus = "running"
+	// NativeSubagentStatusPaused means the harness reported work that is not
+	// running but also not finished, such as a resumable detached run. It is not
+	// terminal: a later running observation may resume the lifecycle.
+	NativeSubagentStatusPaused NativeSubagentStatus = "paused"
+	// NativeSubagentStatusCompleted means the harness reported successful completion.
+	NativeSubagentStatusCompleted NativeSubagentStatus = "completed"
+	// NativeSubagentStatusFailed means the harness reported a failed lifecycle.
+	NativeSubagentStatusFailed NativeSubagentStatus = "failed"
+	// NativeSubagentStatusInterrupted means the harness reported an interrupted lifecycle.
+	NativeSubagentStatusInterrupted NativeSubagentStatus = "interrupted"
+)
+
+// NativeSubagentScope distinguishes an individual agent from aggregate orchestration.
+type NativeSubagentScope string
+
+const (
+	// NativeSubagentScopeAgent represents one delegated agent.
+	NativeSubagentScopeAgent NativeSubagentScope = "agent"
+	// NativeSubagentScopeBatch represents a batch or chain without per-agent lifecycle evidence.
+	NativeSubagentScopeBatch NativeSubagentScope = "batch"
+)
+
+// NativeSubagent is one harness-owned native subagent lifecycle. ID and
+// GroupID are opaque harness identities, never CAIC task IDs. Optional fields
+// are omitted when the harness does not expose them.
+type NativeSubagent struct {
+	ToolUseID string               `json:"tool_use_id,omitempty"`
+	Scope     NativeSubagentScope  `json:"scope,omitempty"`
+	ID        string               `json:"id"`
+	GroupID   string               `json:"group_id,omitempty"`
+	Label     string               `json:"label,omitempty"`
+	Prompt    string               `json:"prompt,omitempty"`
+	Status    NativeSubagentStatus `json:"status"`
+	Result    string               `json:"result,omitempty"`
+}
+
+// NativeSubagentMessage records an observed native-subagent lifecycle update.
+// It is task-local activity, not a CAIC child task or independently runnable
+// session.
+type NativeSubagentMessage struct {
+	Subagent NativeSubagent `json:"subagent"`
+}
+
+// Type implements Message.
+func (m *NativeSubagentMessage) Type() string { return "native_subagent" }
+
 // MaxWidgetHTMLBytes is the maximum size of widget HTML the backend will
 // forward to clients. Widgets exceeding this limit are replaced with an
 // error message.
