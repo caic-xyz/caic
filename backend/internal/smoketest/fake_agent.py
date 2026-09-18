@@ -566,6 +566,71 @@ def emit_quota_recovery_turn(turns: int) -> None:
     emit_result(turns, "Quota exhausted")
 
 
+def emit_native_subagents_turn(turns: int) -> None:
+    """Emit canonical concurrent activity; this is UI coverage, not harness evidence."""
+    for identity in ("joker", "reviewer"):
+        emit(
+            {
+                "type": "native_subagent",
+                "subagent": {
+                    "id": identity,
+                    "group_id": "parallel",
+                    "label": identity,
+                    "prompt": "Tell a README joke",
+                    "status": "running",
+                },
+            }
+        )
+    time.sleep(0.2)
+    for identity, status, result in (
+        ("joker", "completed", "Read me before you judge me."),
+        ("reviewer", "failed", "Permission denied"),
+    ):
+        emit(
+            {
+                "type": "native_subagent",
+                "subagent": {
+                    "id": identity,
+                    "status": status,
+                    "result": result,
+                },
+            }
+        )
+    emit(
+        {
+            "type": "native_subagent",
+            "subagent": {
+                "id": "batch",
+                "scope": "batch",
+                "label": "Chained work",
+                "status": "unknown",
+            },
+        }
+    )
+    # A paused resumable run is neither active nor an interruption.
+    emit(
+        {
+            "type": "native_subagent",
+            "subagent": {
+                "id": "paused-batch",
+                "scope": "batch",
+                "label": "Detached workflow",
+                "status": "running",
+            },
+        }
+    )
+    emit(
+        {
+            "type": "native_subagent",
+            "subagent": {
+                "id": "paused-batch",
+                "status": "paused",
+            },
+        }
+    )
+    emit_result(turns, "Native activity finished")
+
+
 def main() -> None:
     # Model the agent handshake so setup timing is visible and non-zero in e2e.
     time.sleep(0.12)
@@ -592,6 +657,9 @@ def main() -> None:
         turns += 1
 
         # Exact keyword triggers (for e2e tests).
+        if line.startswith("FAKE_NATIVE_SUBAGENTS"):
+            emit_native_subagents_turn(turns)
+            continue
         if line == "FAKE_LIFECYCLE" or line.startswith("FAKE_LIFECYCLE "):
             emit_lifecycle_turn(turns)
             continue

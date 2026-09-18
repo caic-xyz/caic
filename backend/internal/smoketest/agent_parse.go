@@ -104,6 +104,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			TotalCostUSD: m.TotalCostUSD,
 			DurationMs:   m.DurationMs,
 		}}, nil
+	case "native_subagent":
+		var m agent.NativeSubagentMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	case "rate_limit":
 		var m agent.RateLimitMessage
 		if err := json.Unmarshal(line, &m); err != nil {
