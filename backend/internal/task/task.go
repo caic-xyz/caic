@@ -35,6 +35,11 @@ type CreateRequest struct {
 
 const statsRingSize = 60
 
+// stateTransitionHistory bounds each task's journal of recent state
+// transitions. It only needs to cover the states a task-list connection can
+// miss between two snapshots, so a short window is sufficient.
+const stateTransitionHistory = 16
+
 type statsSub struct {
 	ch   chan runtime.Stats
 	once sync.Once
@@ -144,18 +149,20 @@ type Task struct {
 	diskUsed              int64
 	diskKnown             bool
 	state                 taskslog.State
-	stateUpdatedAt        time.Time // UTC timestamp of the last state transition.
-	sessionID             string    // Agent session ID, captured from InitMessage.
-	reportedModel         string    // Model reported by InitMessage (may differ from RequestedModel).
-	reportedEffort        string    // Thinking effort reported by InitMessage (may differ from RequestedEffort).
-	agentVersion          string    // Agent version, captured from InitMessage.
-	reportedContextWindow int       // Context window size reported by the agent (0 = unknown).
-	planFile              string    // Path to plan file inside instance, captured from Write tool_use.
-	planContent           string    // Content of the plan file, captured from Write tool_use input.
-	planExitID            string    // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
-	planDismissed         bool      // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
-	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
-	title                 string    // LLM-generated short title; set via SetTitle.
+	stateUpdatedAt        time.Time         // UTC timestamp of the last state transition.
+	stateSeq              uint64            // Monotonic sequence of recorded state transitions.
+	stateTransitions      []StateTransition // Bounded journal of recent state transitions.
+	sessionID             string            // Agent session ID, captured from InitMessage.
+	reportedModel         string            // Model reported by InitMessage (may differ from RequestedModel).
+	reportedEffort        string            // Thinking effort reported by InitMessage (may differ from RequestedEffort).
+	agentVersion          string            // Agent version, captured from InitMessage.
+	reportedContextWindow int               // Context window size reported by the agent (0 = unknown).
+	planFile              string            // Path to plan file inside instance, captured from Write tool_use.
+	planContent           string            // Content of the plan file, captured from Write tool_use input.
+	planExitID            string            // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
+	planDismissed         bool              // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
+	inPlanMode            bool              // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
+	title                 string            // LLM-generated short title; set via SetTitle.
 	timeline              []agent.TimedMessage
 
 	subs           []*sub          // active sequenced message subscribers
@@ -700,6 +707,7 @@ func (t *Task) SetStateAt(s taskslog.State, at time.Time) {
 	if s != taskslog.StateRunning {
 		t.turnStartedAt = time.Time{}
 	}
+	t.recordStateTransition(s, at)
 	t.state = s
 	t.stateUpdatedAt = at
 	t.mu.Unlock()
@@ -939,6 +947,15 @@ func (t *Task) Title() string {
 	return t.title
 }
 
+// StateTransition records one task state change in the bounded journal used to
+// replay short-lived states to snapshot-diffing clients. Seq increases
+// monotonically per task and is never reused.
+type StateTransition struct {
+	Seq   uint64
+	State taskslog.State
+	At    time.Time
+}
+
 // Snapshot holds volatile task fields read under the mutex. Used by the
 // server to build API responses without data races on fields that
 // addMessage/SeedTimeline modify concurrently.
@@ -1015,53 +1032,23 @@ type quotaWindowKey struct {
 func (t *Task) Snapshot() Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return Snapshot{
-		State:              t.state,
-		StateUpdatedAt:     t.stateUpdatedAt,
-		TurnStartedAt:      t.turnStartedAt,
-		Repos:              append([]taskslog.RepoMount(nil), t.Repos...),
-		RuntimeName:        t.RuntimeName,
-		RuntimeInstanceID:  t.runtimeInstanceID,
-		Tailscale:          t.Tailscale,
-		TailscaleFQDN:      t.TailscaleFQDN,
-		TailscaleAuthURL:   t.TailscaleAuthURL,
-		USB:                t.USB,
-		Display:            t.Display,
-		Sudo:               t.Sudo,
-		SudoPassword:       t.SudoPassword,
-		VNCPort:            t.VNCPort,
-		GitHubToken:        t.GitHubToken,
-		RelayOffset:        t.RelayOffset,
-		Title:              t.title,
-		SessionID:          t.sessionID,
-		RequestedModel:     t.RequestedModel,
-		RequestedEffort:    t.RequestedEffort,
-		ReportedModel:      t.reportedModel,
-		ReportedEffort:     t.reportedEffort,
-		AgentVersion:       t.agentVersion,
-		ContextWindowLimit: t.reportedContextWindow,
-		InPlanMode:         t.inPlanMode,
-		PlanFile:           t.planFile,
-		PlanContent:        t.planContent,
-		CostUSD:            t.liveCostUSD,
-		NumTurns:           t.liveNumTurns,
-		Duration:           t.liveDuration,
-		Usage:              t.liveUsage,
-		LastUsage:          t.lastUsage,
-		LastAPIUsage:       t.lastAPIUsage,
-		CacheExpiresAt:     t.cacheExpiresAt,
-		DiffStat:           t.liveDiffStat,
-		DiskUsed:           t.diskUsed,
-		DiskKnown:          t.diskKnown,
-		ForgeOwner:         t.forgeOwner,
-		ForgeRepo:          t.forgeRepo,
-		ForgePR:            t.forgePR,
-		ForgePRState:       t.forgePRState,
-		ForgeIssue:         t.ForgeIssue,
-		CIStatus:           t.ciStatus,
-		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
-		RateLimit:          t.rateLimit,
+	return t.snapshotLocked()
+}
+
+// SnapshotWithStateHistory returns a consistent snapshot plus the task's state
+// transition sequence and the retained transitions newer than after, oldest
+// first. Reading both in one critical section lets a snapshot-diffing client
+// replay a short-lived state that the snapshot's own state already overwrote.
+func (t *Task) SnapshotWithStateHistory(after uint64) (Snapshot, uint64, []StateTransition) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var history []StateTransition
+	for _, tr := range t.stateTransitions {
+		if tr.Seq > after {
+			history = append(history, tr)
+		}
 	}
+	return t.snapshotLocked(), t.stateSeq, history
 }
 
 // Messages returns a copy of all received agent messages.
@@ -1766,6 +1753,57 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
+// snapshotLocked builds a Snapshot. Callers hold t.mu.
+func (t *Task) snapshotLocked() Snapshot {
+	return Snapshot{
+		State:              t.state,
+		StateUpdatedAt:     t.stateUpdatedAt,
+		TurnStartedAt:      t.turnStartedAt,
+		Repos:              append([]taskslog.RepoMount(nil), t.Repos...),
+		RuntimeName:        t.RuntimeName,
+		RuntimeInstanceID:  t.runtimeInstanceID,
+		Tailscale:          t.Tailscale,
+		TailscaleFQDN:      t.TailscaleFQDN,
+		TailscaleAuthURL:   t.TailscaleAuthURL,
+		USB:                t.USB,
+		Display:            t.Display,
+		Sudo:               t.Sudo,
+		SudoPassword:       t.SudoPassword,
+		VNCPort:            t.VNCPort,
+		GitHubToken:        t.GitHubToken,
+		RelayOffset:        t.RelayOffset,
+		Title:              t.title,
+		SessionID:          t.sessionID,
+		RequestedModel:     t.RequestedModel,
+		RequestedEffort:    t.RequestedEffort,
+		ReportedModel:      t.reportedModel,
+		ReportedEffort:     t.reportedEffort,
+		AgentVersion:       t.agentVersion,
+		ContextWindowLimit: t.reportedContextWindow,
+		InPlanMode:         t.inPlanMode,
+		PlanFile:           t.planFile,
+		PlanContent:        t.planContent,
+		CostUSD:            t.liveCostUSD,
+		NumTurns:           t.liveNumTurns,
+		Duration:           t.liveDuration,
+		Usage:              t.liveUsage,
+		LastUsage:          t.lastUsage,
+		LastAPIUsage:       t.lastAPIUsage,
+		CacheExpiresAt:     t.cacheExpiresAt,
+		DiffStat:           t.liveDiffStat,
+		DiskUsed:           t.diskUsed,
+		DiskKnown:          t.diskKnown,
+		ForgeOwner:         t.forgeOwner,
+		ForgeRepo:          t.forgeRepo,
+		ForgePR:            t.forgePR,
+		ForgePRState:       t.forgePRState,
+		ForgeIssue:         t.ForgeIssue,
+		CIStatus:           t.ciStatus,
+		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
+		RateLimit:          t.rateLimit,
+	}
+}
+
 // latestCommitSnapshot returns a copy of the most recently recorded repository
 // tips, whether it is a pre-session baseline or a completed-turn snapshot.
 func (t *Task) latestCommitSnapshot() *agent.TurnCommitSnapshotMessage {
@@ -1797,13 +1835,28 @@ func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
 func (t *Task) setState(s taskslog.State) {
+	at := time.Now().UTC()
 	if s == taskslog.StateRunning && t.state != taskslog.StateRunning {
-		t.turnStartedAt = time.Now().UTC()
+		t.turnStartedAt = at
 	} else if s != taskslog.StateRunning {
 		t.turnStartedAt = time.Time{}
 	}
+	t.recordStateTransition(s, at)
 	t.state = s
-	t.stateUpdatedAt = time.Now().UTC()
+	t.stateUpdatedAt = at
+}
+
+// recordStateTransition appends a state change to the bounded transition
+// journal. Callers hold t.mu.
+func (t *Task) recordStateTransition(s taskslog.State, at time.Time) {
+	if s == t.state {
+		return
+	}
+	t.stateSeq++
+	t.stateTransitions = append(t.stateTransitions, StateTransition{Seq: t.stateSeq, State: s, At: at})
+	if len(t.stateTransitions) > stateTransitionHistory {
+		t.stateTransitions = t.stateTransitions[len(t.stateTransitions)-stateTransitionHistory:]
+	}
 }
 
 func (t *Task) recordStartupFailure(ctx context.Context, err error) {

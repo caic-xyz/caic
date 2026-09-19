@@ -2283,6 +2283,69 @@ func TestTask(t *testing.T) {
 		}
 	})
 
+	t.Run("SnapshotWithStateHistory", func(t *testing.T) {
+		t.Parallel()
+		t.Run("replaysTransitionsAfterCursor", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			_, seq0, hist0 := tk.SnapshotWithStateHistory(0)
+			if len(hist0) != 1 || hist0[0].State != taskslog.StatePending {
+				t.Fatalf("initial history = %+v, want one pending transition", hist0)
+			}
+			tk.SetState(taskslog.StateRunning)
+			tk.SetState(taskslog.StateWaiting)
+			snap, seq, hist := tk.SnapshotWithStateHistory(seq0)
+			if snap.State != taskslog.StateWaiting {
+				t.Errorf("state = %v, want waiting", snap.State)
+			}
+			want := []taskslog.State{taskslog.StateRunning, taskslog.StateWaiting}
+			if seq != seq0+uint64(len(want)) {
+				t.Errorf("seq = %d, want %d", seq, seq0+uint64(len(want)))
+			}
+			if len(hist) != len(want) {
+				t.Fatalf("history = %+v, want %v", hist, want)
+			}
+			for i, state := range want {
+				if hist[i].State != state {
+					t.Errorf("history[%d].State = %v, want %v", i, hist[i].State, state)
+				}
+				if hist[i].Seq != seq0+uint64(i)+1 {
+					t.Errorf("history[%d].Seq = %d, want %d", i, hist[i].Seq, seq0+uint64(i)+1)
+				}
+			}
+		})
+		t.Run("unchangedStateIsNotRecorded", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			_, seq, _ := tk.SnapshotWithStateHistory(0)
+			tk.SetState(taskslog.StatePending)
+			if _, gotSeq, hist := tk.SnapshotWithStateHistory(seq); gotSeq != seq || len(hist) != 0 {
+				t.Errorf("seq = %d history = %+v, want seq %d and no new transition", gotSeq, hist, seq)
+			}
+		})
+		t.Run("boundsJournal", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			for i := range stateTransitionHistory + 5 {
+				if i%2 == 0 {
+					tk.SetState(taskslog.StateRunning)
+				} else {
+					tk.SetState(taskslog.StateWaiting)
+				}
+			}
+			_, seq, hist := tk.SnapshotWithStateHistory(0)
+			if len(hist) != stateTransitionHistory {
+				t.Fatalf("history len = %d, want %d", len(hist), stateTransitionHistory)
+			}
+			if hist[len(hist)-1].Seq != seq {
+				t.Errorf("last history seq = %d, want %d", hist[len(hist)-1].Seq, seq)
+			}
+			if first := seq - uint64(stateTransitionHistory) + 1; hist[0].Seq != first {
+				t.Errorf("first history seq = %d, want %d", hist[0].Seq, first)
+			}
+		})
+	})
+
 	t.Run("SetTurnStartedAt", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Running", func(t *testing.T) {

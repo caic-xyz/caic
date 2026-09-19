@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/repo"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
@@ -45,6 +46,36 @@ func BenchmarkTaskListSnapshot(b *testing.B) {
 	for b.Loop() {
 		if got := len(taskSvc.taskListSnapshot(b.Context())); got != 10 {
 			b.Fatalf("task count = %d, want 10", got)
+		}
+	}
+}
+
+func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
+	s := newTestRouter(b, nil)
+	for i := range 10 {
+		id := ksid.NewID()
+		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
+		if i%2 == 0 {
+			task.SetState(taskslog.StateStopped)
+		}
+		insertTestTask(s, id.String(), task)
+	}
+
+	taskSvc := testTaskHandlers(s).taskSvc
+	// Seed every cursor to the current sequence so the benchmark measures the
+	// steady state where no task has pending transitions to replay.
+	cursors := map[string]uint64{}
+	s.taskMgr.Range(func(id string, e *taskmgr.Entry) bool {
+		_, seq, _ := e.Task().SnapshotWithStateHistory(0)
+		cursors[id] = seq
+		return true
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		out, replays := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors)
+		if len(out) != 10 || len(replays) != 10 {
+			b.Fatalf("task count = %d, replay count = %d, want 10", len(out), len(replays))
 		}
 	}
 }

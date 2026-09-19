@@ -84,34 +84,65 @@ func (s *taskService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Tas
 }
 
 func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
+	out, _ := s.taskListSnapshotWithReplay(ctx, nil)
+	return out
+}
+
+// taskStateReplay is the state transition history a task-list SSE connection
+// has not yet observed for one task.
+type taskStateReplay struct {
+	seq     uint64                 // Task state sequence the DTO state corresponds to.
+	history []task.StateTransition // Retained transitions newer than the connection cursor.
+}
+
+// taskListSnapshotWithReplay returns the task DTOs plus each task's retained
+// state transitions newer than its cursor, so a stream can replay short-lived
+// states a later snapshot would overwrite. It reads the history in the same
+// critical section as the DTO's state, so a replayed state is never newer than
+// the DTO reported alongside it. A nil cursors map skips the history.
+func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64) (tasks []v1.Task, replays map[string]taskStateReplay) {
 	var ownerID string
 	if s.authStore != nil {
 		if u, ok := auth.UserFromContext(ctx); ok {
 			ownerID = u.ID
 		}
 	}
-	var out []v1.Task
+	if cursors != nil {
+		replays = make(map[string]taskStateReplay)
+	}
 	s.taskMgr.Range(func(_ string, e *taskmgr.Entry) bool {
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
-		dto, err := taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
+		var dto v1.Task
+		var replay taskStateReplay
+		var id string
+		var err error
+		if cursors != nil {
+			id = e.Task().ID.String()
+			dto, replay, err = taskDTOWithReplay(ctx, e, cursors[id], s.taskMgr, s.checkouts, s.authStore)
+		} else {
+			dto, err = taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
+		}
 		if err != nil {
 			s.log.ErrorContext(ctx, "convert task", "task", e.Task().ID, "err", err)
 			return true
 		}
-		out = append(out, dto)
+		tasks = append(tasks, dto)
+		if replays != nil {
+			replays[id] = replay
+		}
 		return true
 	})
-	sort.Slice(out, func(i, j int) bool {
-		iActive := taskStateActive(out[i].State)
-		jActive := taskStateActive(out[j].State)
+	sort.Slice(tasks, func(i, j int) bool {
+		iActive := taskStateActive(tasks[i].State)
+		jActive := taskStateActive(tasks[j].State)
 		if iActive != jActive {
 			return iActive
 		}
-		return out[i].ID < out[j].ID
+		return tasks[i].ID < tasks[j].ID
 	})
-	return out
+	return tasks, replays
 }
 
 func taskStateActive(state v1.TaskState) bool {
@@ -130,8 +161,26 @@ func taskStateActive(state v1.TaskState) bool {
 
 // taskDTO resolves server-owned task data before projecting it to the API.
 func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager, checkouts *repo.Registry, authStore *auth.Store) (v1.Task, error) {
+	snap := entry.Task().Snapshot()
+	return taskDTOFromSnapshot(ctx, entry, &snap, taskMgr, checkouts, authStore)
+}
+
+// taskDTOWithReplay is taskDTO plus the task's retained state transitions
+// newer than after. It reads the snapshot and its history in one critical
+// section and keeps the large snapshot out of the snapshot loop's closure.
+func taskDTOWithReplay(ctx context.Context, entry *taskmgr.Entry, after uint64, taskMgr *taskmgr.Manager, checkouts *repo.Registry, authStore *auth.Store) (v1.Task, taskStateReplay, error) {
+	snap, seq, history := entry.Task().SnapshotWithStateHistory(after)
+	dto, err := taskDTOFromSnapshot(ctx, entry, &snap, taskMgr, checkouts, authStore)
+	if err != nil {
+		return v1.Task{}, taskStateReplay{}, err
+	}
+	return dto, taskStateReplay{seq: seq, history: history}, nil
+}
+
+// taskDTOFromSnapshot projects a pre-read snapshot so callers can read the
+// task's state transition history and DTO state in one critical section.
+func taskDTOFromSnapshot(ctx context.Context, entry *taskmgr.Entry, snap *task.Snapshot, taskMgr *taskmgr.Manager, checkouts *repo.Registry, authStore *auth.Store) (v1.Task, error) {
 	t := entry.Task()
-	snap := t.Snapshot()
 
 	repos := make([]v1.TaskRepo, len(snap.Repos))
 	for i, repo := range snap.Repos {
@@ -179,7 +228,7 @@ func taskDTO(ctx context.Context, entry *taskmgr.Entry, taskMgr *taskmgr.Manager
 
 	return apiconv.Task(&apiconv.TaskInput{
 		Task:               t,
-		Snapshot:           snap,
+		Snapshot:           *snap,
 		Result:             entry.Result(),
 		Repos:              repos,
 		SudoPassword:       taskMgr.SudoPassword(ctx, t),

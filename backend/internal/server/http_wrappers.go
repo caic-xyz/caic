@@ -261,6 +261,25 @@ func computeTaskPatch(oldJSON, newJSON []byte) (map[string]json.RawMessage, erro
 	return patch, nil
 }
 
+// taskStatePatch returns a sparse task-list patch carrying one state
+// transition, so a client observes a short-lived state that the next snapshot
+// diff would otherwise overwrite.
+func taskStatePatch(id string, state v1.TaskState, at time.Time) (map[string]json.RawMessage, error) {
+	idJSON, err := json.Marshal(id)
+	if err != nil {
+		return nil, err
+	}
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		return nil, err
+	}
+	atJSON, err := json.Marshal(at)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]json.RawMessage{"id": idJSON, "state": stateJSON, "stateUpdatedAt": atJSON}, nil
+}
+
 // emitTaskListEvent marshals ev and writes it as an SSE message event.
 //
 // A task-list connection owns its change catch-up loop, so each delivery is

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	goruntime "runtime"
 	"runtime/trace"
 	"slices"
 	"sync"
@@ -99,6 +100,11 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 		}()
 		if !purgeStoppedImmediately {
 			if state != taskslog.StateStopping && state != taskslog.StateCrashed {
+				// Yield so the task-list snapshot loop can observe the stopping
+				// state before StopTask advances it. This is best-effort: the
+				// state transition journal is what guarantees the transition is
+				// delivered.
+				goruntime.Gosched()
 				r.agentRuntime.StopTask(purgeCtx, t)
 				r.manager.NotifyTaskChange()
 			}

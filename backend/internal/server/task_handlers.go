@@ -613,6 +613,9 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 
 	// prevByID tracks the last marshalled JSON for each task ID.
 	prevByID := map[string][]byte{}
+	// prevStateSeq tracks the state transition sequence already delivered for
+	// each task, so a replayed transition is never resent.
+	prevStateSeq := map[string]uint64{}
 	var prevReposJSON []byte
 	var lastWarnTime time.Time
 	var prevSettledLoading bool
@@ -625,7 +628,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
 		settledLoading, settledError := h.taskMgr.SettledStatus()
-		out := h.taskSvc.taskListSnapshot(ctx)
+		out, replays := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq)
 		repoList := repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus)
 		newWarnings := h.warnings.Since(lastWarnTime)
 
@@ -658,7 +661,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					h.log.WarnContext(ctx, "marshal task entry", "task", out[i].ID, "err", err)
 					continue
 				}
-				prevByID[out[i].ID.String()] = data
+				id := out[i].ID.String()
+				prevByID[id] = data
+				// The snapshot carries the current state, so start the replay
+				// cursor there instead of resending retained transitions.
+				prevStateSeq[id] = replays[id].seq
 			}
 			prevReposJSON = reposJSON
 			prevSettledLoading = settledLoading
@@ -688,23 +695,55 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 				if !bytes.Equal(data, prevByID[id]) {
 					prev := prevByID[id]
 					prevByID[id] = data
+					replay := replays[id]
 					if prev == nil {
-						// New task: emit full object.
+						// New task: emit the full object. It carries the current
+						// state, so advance the replay cursor past the retained
+						// history instead of resending it.
+						prevStateSeq[id] = replay.seq
 						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
 							h.log.WarnContext(ctx, "marshal task upsert", "task", id, "err", err)
 							return
 						}
-					} else {
-						// Existing task changed: emit only the diff.
-						patch, err := computeTaskPatch(prev, data)
+						continue
+					}
+					// Replay short-lived states the snapshot already overwrote before
+					// applying the current diff, so the client observes every
+					// transition instead of only its net result.
+					for _, tr := range replay.history {
+						state, err := apiconv.TaskState(tr.State)
 						if err != nil {
-							h.log.WarnContext(ctx, "compute task patch", "task", id, "err", err)
+							h.log.WarnContext(ctx, "convert task state", "task", id, "state", tr.State, "err", err)
+							continue
+						}
+						patch, err := taskStatePatch(id, state, tr.At)
+						if err != nil {
+							h.log.WarnContext(ctx, "marshal task state patch", "task", id, "err", err)
 							continue
 						}
 						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
 							h.log.WarnContext(ctx, "marshal task patch", "task", id, "err", err)
 							return
 						}
+					}
+					prevStateSeq[id] = replay.seq
+					// Existing task changed: emit only the diff.
+					patch, err := computeTaskPatch(prev, data)
+					if err != nil {
+						h.log.WarnContext(ctx, "compute task patch", "task", id, "err", err)
+						continue
+					}
+					// The replay already delivered the state and its timestamp.
+					if len(replay.history) > 0 {
+						delete(patch, "state")
+						delete(patch, "stateUpdatedAt")
+						if len(patch) == 1 { // Only "id" remains; the replay carried it all.
+							continue
+						}
+					}
+					if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+						h.log.WarnContext(ctx, "marshal task patch", "task", id, "err", err)
+						return
 					}
 				}
 			}
@@ -716,6 +755,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 						return
 					}
 					delete(prevByID, id)
+					delete(prevStateSeq, id)
 				}
 			}
 			// Emit any new warnings.
