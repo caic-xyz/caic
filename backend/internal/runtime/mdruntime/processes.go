@@ -15,9 +15,15 @@ import (
 
 const (
 	fdCountsMarker = "--caic-open-fds--"
+	// psTimezone must be a POSIX std/offset string, not a zoneinfo name. md
+	// bind-mounts the host /etc/localtime over the symlinked
+	// /usr/share/zoneinfo/Etc/UTC, so libc resolves the "UTC" name to the
+	// host's zone and lstart would carry the host's UTC offset. "UTC0" is
+	// evaluated from the POSIX TZ syntax without consulting zoneinfo.
+	psTimezone     = "UTC0"
 	processCommand = "find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -printf '%h\\n' 2>/dev/null | sort | uniq -c" +
 		" && printf '%s\\n' '" + fdCountsMarker + "'" +
-		" && exec env LC_ALL=C TZ=UTC ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,cputimes,lstart,args --no-headers"
+		" && exec env LC_ALL=C TZ=" + psTimezone + " ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,cputimes,lstart,args --no-headers"
 )
 
 func signalCommand(pid int, sig string) (string, error) {
