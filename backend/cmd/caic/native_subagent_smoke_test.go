@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,11 @@ type recordedObservation struct {
 // It never runs a live harness: the recordings are the evidence, so the test stays
 // deterministic and needs no model credentials.
 func TestSmokeNativeSubagents(t *testing.T) {
+	// nativeSubagent is hand written, so a field added to either side is dropped
+	// without a compile error and quietly weakens the contract below.
+	if got, want := reflect.TypeFor[v1.EventNativeSubagent]().NumField(), reflect.TypeFor[agent.NativeSubagent]().NumField(); got != want {
+		t.Fatalf("v1.EventNativeSubagent has %d fields, agent.NativeSubagent has %d; update nativeSubagent to map the new field", got, want)
+	}
 	cases := make(map[string]smokeReplayCase, len(smokeReplayRecordings))
 	byHarness := map[harness.Name][]smoketest.ReplayRecording{}
 	for _, rec := range smokeReplayRecordings {
@@ -498,17 +504,20 @@ func smokeReplayWire(h harness.Name) agent.WireFormat {
 	}
 }
 
-// nativeSubagent converts the canonical event DTO back to its wire-independent form.
+// nativeSubagent converts the canonical event DTO back to its wire-independent
+// form. It maps every DTO field: a dropped field reads as a zero value and
+// silently weakens the UI contract this test pins.
 func nativeSubagent(e *v1.EventNativeSubagent) agent.NativeSubagent {
 	return agent.NativeSubagent{
-		ID:        e.ID,
-		ToolUseID: e.ToolUseID,
-		Scope:     agent.NativeSubagentScope(e.Scope),
-		GroupID:   e.GroupID,
-		Label:     e.Label,
-		Prompt:    e.Prompt,
-		Status:    agent.NativeSubagentStatus(e.Status),
-		Result:    e.Result,
+		ID:         e.ID,
+		ToolUseID:  e.ToolUseID,
+		Scope:      agent.NativeSubagentScope(e.Scope),
+		GroupID:    e.GroupID,
+		Label:      e.Label,
+		Prompt:     e.Prompt,
+		Status:     agent.NativeSubagentStatus(e.Status),
+		Result:     e.Result,
+		Background: e.Background,
 	}
 }
 
