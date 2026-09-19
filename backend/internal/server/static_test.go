@@ -40,7 +40,7 @@ var (
 	iconContent  = []byte("icon")
 )
 
-// testFS returns a brotli-only FS matching what compress_dist.py produces.
+// testFS returns a brotli-only FS matching what precompress_dist.py produces.
 func testFS(t *testing.T) fstest.MapFS {
 	return fstest.MapFS{
 		"index.html.br":       {Data: brCompress(t, indexContent)},
