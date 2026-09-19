@@ -157,7 +157,6 @@ export class VoiceSession {
       selectedInputId: "",
       selectedOutputId: "",
     });
-    // eslint-disable-next-line solid/reactivity
     this.state = state;
     this._setState = setState as (fn: (s: VoiceState) => VoiceState) => void;
   }

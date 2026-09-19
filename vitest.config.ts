@@ -4,6 +4,7 @@ import { resolve } from "path";
 import { defineConfig } from "vitest/config";
 import solidPlugin from "vite-plugin-solid";
 import solidSVG from "vite-solid-svg";
+import { QuietReporter } from "./scripts/vitest-quiet-reporter.mjs";
 
 export default defineConfig({
   plugins: [solidPlugin(), solidSVG()],
@@ -17,6 +18,9 @@ export default defineConfig({
   test: {
     root: "frontend",
     environment: "jsdom",
+    silent: "passed-only",
+    reporters: [new QuietReporter()],
+    fsModuleCache: true,
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
     coverage: {

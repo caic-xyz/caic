@@ -26,6 +26,7 @@ jobs:
           go-version-file: go.mod
       - uses: pnpm/setup@v2
         with:
+          runtime: node@26
           cache: true
           install: false
       - name: Lint (Go)
@@ -80,6 +81,7 @@ jobs:
           go-version-file: go.mod
       - uses: pnpm/setup@v2
         with:
+          runtime: node@26
           cache: true
           install: false
       - name: Install ffmpeg

@@ -1,6 +1,7 @@
 // Tests for the compact task card summary.
 
 import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { MemoryRouter, Route } from "@solidjs/router";
 import type { JSX } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -9,25 +10,6 @@ import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
 import { getTaskRepoStatus } from "../api";
-
-vi.mock("@solidjs/router", () => ({
-  A: (linkProps: {
-    href: string;
-    class?: string;
-    title?: string;
-    onClick?: (event: MouseEvent) => void;
-    children: JSX.Element;
-  }) => (
-    <a
-      class={linkProps.class}
-      href={linkProps.href}
-      title={linkProps.title}
-      onClick={(event) => linkProps.onClick?.(event)}
-    >
-      {linkProps.children}
-    </a>
-  ),
-}));
 
 vi.mock("../api", () => ({
   compactContext: vi.fn(),
@@ -67,9 +49,23 @@ function props(overrides: Partial<TaskCardProps> = {}): TaskCardProps {
   };
 }
 
+/**
+ * Render a card as a matched route inside a memory router. The card's links are
+ * router links: without a router the click falls through to the browser, which
+ * jsdom refuses to follow across documents, and the router renders its children
+ * as route definitions rather than as arbitrary content.
+ */
+function renderCard(card: () => JSX.Element) {
+  return render(() => (
+    <MemoryRouter>
+      <Route path="*" component={card} />
+    </MemoryRouter>
+  ));
+}
+
 describe("TaskCard", () => {
   it("renders every repository and branch before Git status is available", () => {
-    render(() => (
+    renderCard(() => (
       <TaskCard
         {...props({
           runtime: undefined,
@@ -104,7 +100,7 @@ describe("TaskCard", () => {
         },
       ],
     });
-    render(() => <TaskCard {...props()} />);
+    renderCard(() => <TaskCard {...props()} />);
 
     expect(await screen.findByRole("img")).toHaveAccessibleName(
       "2 changed files, 12 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream",
@@ -118,7 +114,7 @@ describe("TaskCard", () => {
   });
 
   it("does not invent a TTL when only a legacy cache expiry is available", () => {
-    render(() => (
+    renderCard(() => (
       <TaskCard
         {...props({
           state: "waiting",
@@ -136,7 +132,7 @@ describe("TaskCard", () => {
   });
 
   it("shows a quota reset countdown in the summary", () => {
-    const { getByTestId } = render(() => (
+    const { getByTestId } = renderCard(() => (
       <TaskCard
         {...props({
           rateLimit: {
@@ -154,7 +150,7 @@ describe("TaskCard", () => {
   it("opens quota recovery without selecting the task card", () => {
     const onClick = vi.fn();
     const onQuotaRecovery = vi.fn();
-    render(() => (
+    renderCard(() => (
       <TaskCard
         {...props({
           rateLimit: {
@@ -175,19 +171,19 @@ describe("TaskCard", () => {
   });
 
   it("omits the token denominator until the context window is known", () => {
-    const { unmount } = render(() => (
+    const { unmount } = renderCard(() => (
       <TaskCard {...props({ activeInputTokens: 12_000, contextWindowLimit: 200_000 })} />
     ));
     expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("12kt/200kt");
     unmount();
 
-    render(() => <TaskCard {...props({ activeInputTokens: 12_000, contextWindowLimit: 0 })} />);
+    renderCard(() => <TaskCard {...props({ activeInputTokens: 12_000, contextWindowLimit: 0 })} />);
     expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("12kt");
     expect(screen.getByTestId("task-card-tokens")).not.toHaveTextContent("/");
   });
 
   it("hides quota recovery when the task has no repository", () => {
-    render(() => (
+    renderCard(() => (
       <TaskCard
         {...props({
           repos: undefined,
@@ -206,14 +202,14 @@ describe("TaskCard", () => {
 
   it("renders errors as a clamped summary", () => {
     const error = "Error: failed to load extension from a very long runtime path";
-    const { getByText } = render(() => <TaskCard {...props({ error })} />);
+    const { getByText } = renderCard(() => <TaskCard {...props({ error })} />);
 
     expect(getByText(error).className).toContain("errorSummary");
   });
 
   it("renders a clickable origin task without selecting the child", () => {
     const onClick = vi.fn();
-    const { getByRole } = render(() => (
+    const { getByRole } = renderCard(() => (
       <TaskCard {...props({ forkedFromTaskID: "3BL0EKDTO000", onClick })} />
     ));
 
@@ -225,7 +221,7 @@ describe("TaskCard", () => {
 
   it("renders a clickable parent task without selecting the child", () => {
     const onClick = vi.fn();
-    const { getByRole } = render(() => (
+    const { getByRole } = renderCard(() => (
       <TaskCard {...props({ parentTaskID: "3BL0EKDTO001", onClick })} />
     ));
 
@@ -236,7 +232,9 @@ describe("TaskCard", () => {
   });
 
   it("shows a child origin once when it matches the fork source", () => {
-    render(() => <TaskCard {...props({ forkedFromTaskID: "parent", parentTaskID: "parent" })} />);
+    renderCard(() => (
+      <TaskCard {...props({ forkedFromTaskID: "parent", parentTaskID: "parent" })} />
+    ));
 
     expect(screen.getByText("child of")).toBeInTheDocument();
     expect(screen.queryByText("forked from")).not.toBeInTheDocument();
@@ -245,7 +243,7 @@ describe("TaskCard", () => {
   it("selects a stopped task before exposing its inline actions", () => {
     const onClick = vi.fn();
     const onPurge = vi.fn();
-    const { container, unmount } = render(() => (
+    const { container, unmount } = renderCard(() => (
       <TaskCard {...props({ state: "stopped", onClick, onPurge, onRevive: vi.fn() })} />
     ));
     const card = container.querySelector("[data-task-id='1']");
@@ -260,7 +258,7 @@ describe("TaskCard", () => {
     expect(onPurge).not.toHaveBeenCalled();
 
     unmount();
-    render(() => (
+    renderCard(() => (
       <TaskCard {...props({ state: "stopped", selected: true, onPurge, onRevive: vi.fn() })} />
     ));
 
@@ -271,7 +269,7 @@ describe("TaskCard", () => {
   it("opens the task actions menu on right click", () => {
     const onClick = vi.fn();
     const onStop = vi.fn();
-    const { container } = render(() => (
+    const { container } = renderCard(() => (
       <TaskCard
         {...props({
           repos: [
@@ -318,7 +316,7 @@ describe("TaskCard", () => {
     const onStop = vi.fn();
     const onPurge = vi.fn();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { getByTestId } = render(() => (
+    const { getByTestId } = renderCard(() => (
       <TaskCard {...props({ state: "waiting", onStop, onPurge })} />
     ));
     const stopButton = getByTestId("stop-task");
@@ -334,7 +332,7 @@ describe("TaskCard", () => {
   });
 
   it("shows the stop icon normally and the purge icon for the Shift modifier", () => {
-    const { getByRole, getByTestId, queryByTestId, unmount } = render(() => (
+    const { getByRole, getByTestId, queryByTestId, unmount } = renderCard(() => (
       <TaskCard {...props({ state: "waiting", onStop: vi.fn(), onPurge: vi.fn() })} />
     ));
 
@@ -343,7 +341,7 @@ describe("TaskCard", () => {
     expect(queryByTestId("purge-task-icon")).not.toBeInTheDocument();
     unmount();
 
-    render(() => (
+    renderCard(() => (
       <TaskCard
         {...props({
           state: "waiting",

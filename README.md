@@ -20,8 +20,20 @@ go install github.com/caic-xyz/caic/backend/cmd/caic@latest
 
 🔥 Full documentation is at [docs.caic.xyz](https://docs.caic.xyz/caic/) 🔥
 
+## Dependency updates
+
+pnpm refuses package versions published within the last eight days, including
+transitive dependencies. Check and update eligible packages with:
+
+```bash
+pnpm outdated
+make upgrade
+make lint-fix
+make check
+```
+
 ## Contributing
 
-Development requires Node.js 26 and pnpm 12.4.0. See [DEV.md](DEV.md).
+Development requires Node.js 26 and pnpm 12.4.2. See [DEV.md](DEV.md).
 
 Made with ❤️ by [Marc-Antoine Ruel](https://maruel.ca). Contributions are very appreciated! Thanks in advance! 🙏
