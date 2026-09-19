@@ -53,7 +53,13 @@ while IFS= read -r -d '' file; do
         ;;
     esac
   fi
+  # These trees are globally ignored by eslint.config.js; keep this list in sync with that
+  # config, which also covers the generated SDK TypeScript that .prettierignore skips. Handing
+  # an ignored path to eslint only adds a "File ignored because of a matching ignore pattern"
+  # warning, so leave such files out of the list.
   case "$file" in
+    backend/* | sdk/* | frontend/dist/* | frontend/public/* | android/*)
+      ;;
     *.js | *.mjs | *.ts | *.tsx)
       eslint_files+=("$file")
       ;;
@@ -105,7 +111,9 @@ if ((${#format_files[@]} > 0)); then
 fi
 
 if ((${#eslint_files[@]} > 0)); then
-  run_check eslint pnpm exec eslint -- "${eslint_files[@]}"
+  # --no-warn-ignored keeps a future change to the ignore list from turning a staged
+  # ignored file back into a warning without failing the push.
+  run_check eslint pnpm exec eslint --no-warn-ignored -- "${eslint_files[@]}"
 fi
 
 if ((${#go_files[@]} > 0)); then

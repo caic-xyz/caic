@@ -97,5 +97,7 @@ export default tseslint.config(
       'solid/style-prop': 'error',
     },
   },
+  // scripts/check-staged.sh mirrors these roots so its eslint invocation never receives an
+  // ignored path (which would only print an ignore warning). Keep the two lists in sync.
   { ignores: ['backend/**', 'sdk/**', 'frontend/dist/**', 'frontend/public/**', 'android/**'] },
 );
