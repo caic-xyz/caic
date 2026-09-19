@@ -49,6 +49,37 @@
   padding: 0 0.35rem;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.processCount {
+  flex: 1;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.toolbarBtn {
+  border: 1px solid var(--color-border-light);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.toolbarBtn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
 .content {
   flex: 1;
   overflow: auto;

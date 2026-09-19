@@ -1,12 +1,12 @@
-// Tests for the process tree builder used by ProcessDetail.
+// Tests for the ProcessDetail process tree builder, flattening, and collapsing.
 
-import { render, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { describe, it, expect, vi } from "vitest";
 
 import type { ISOTimestamp, ProcessInfo } from "@sdk/types.gen";
 
 import { getTaskProcesses } from "../api";
-import { buildTree, default as ProcessDetail } from "./ProcessDetail";
+import { buildTree, default as ProcessDetail, visibleProcesses } from "./ProcessDetail";
 import type { ProcessNode } from "./ProcessDetail";
 
 vi.mock("@solidjs/router", () => ({
@@ -176,5 +176,113 @@ describe("buildTree", () => {
       { pid: 4, depth: 2 },
       { pid: 5, depth: 0 },
     ]);
+  });
+
+  it("treats a self-parent process as a root", () => {
+    const tree = buildTree([p(7, 7, "loop")]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].pid).toBe(7);
+    expect(tree[0].children).toEqual([]);
+  });
+
+  it("cuts a parent cycle at its lowest PID", () => {
+    const tree = buildTree([p(1, 2, "a"), p(2, 1, "b"), p(3, 2, "c")]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].pid).toBe(1);
+    expect(tree[0].children.map((n) => n.pid)).toEqual([2]);
+    expect(tree[0].children[0].children.map((n) => n.pid)).toEqual([3]);
+  });
+
+  it("labels depths in a 20,000-deep chain without overflowing", () => {
+    const procs: ProcessInfo[] = [];
+    for (let i = 1; i <= 20_000; i++) procs.push(p(i, i - 1, "bash"));
+    const tree = buildTree(procs);
+    expect(tree).toHaveLength(1);
+    let node = tree[0];
+    let depth = 0;
+    while (node.children.length > 0) {
+      node = node.children[0];
+      depth += 1;
+    }
+    expect(depth).toBe(19_999);
+    expect(node.depth).toBe(19_999);
+  });
+});
+
+describe("visibleProcesses", () => {
+  function chain(length: number): ProcessInfo[] {
+    const procs: ProcessInfo[] = [];
+    for (let i = 1; i <= length; i++) procs.push(p(i, i - 1, "bash"));
+    return procs;
+  }
+
+  it("flattens depth-first in order", () => {
+    const procs = [p(1, 0, "init"), p(2, 1, "a"), p(3, 2, "b"), p(4, 0, "other")];
+    const visible = visibleProcesses(buildTree(procs), () => false);
+    expect(visible.map((n) => n.pid)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("omits the descendants of collapsed nodes", () => {
+    const procs = [p(1, 0, "init"), p(2, 1, "a"), p(3, 2, "b"), p(4, 0, "other")];
+    const visible = visibleProcesses(buildTree(procs), (node) => node.pid === 2);
+    expect(visible.map((n) => n.pid)).toEqual([1, 2, 4]);
+  });
+
+  it("flattens a 50,000-deep chain without overflowing the call stack", () => {
+    const visible = visibleProcesses(buildTree(chain(50_000)), () => false);
+    expect(visible).toHaveLength(50_000);
+    expect(visible[0].depth).toBe(0);
+    expect(visible[visible.length - 1].depth).toBe(49_999);
+  });
+});
+
+describe("ProcessDetail tree collapsing", () => {
+  function chain(length: number): ProcessInfo[] {
+    const procs: ProcessInfo[] = [];
+    for (let i = 1; i <= length; i++) procs.push(p(i, i - 1, `cmd${i}`));
+    return procs;
+  }
+
+  function renderProcesses(procs: ProcessInfo[]): void {
+    vi.mocked(getTaskProcesses).mockResolvedValue({ processes: procs });
+    render(() => (
+      <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />
+    ));
+  }
+
+  it("collapses subtrees past the auto-collapse depth", async () => {
+    renderProcesses(chain(200));
+
+    expect(await screen.findByText("cmd26")).toBeInTheDocument();
+    expect(screen.getByText("cmd25")).toBeInTheDocument();
+    expect(screen.queryByText("cmd27")).not.toBeInTheDocument();
+    expect(screen.getAllByTitle("Expand children")).toHaveLength(1);
+    expect(screen.getAllByTitle("Collapse children")).toHaveLength(25);
+
+    fireEvent.click(screen.getByTitle("Expand children"));
+    expect(screen.getByText("cmd27")).toBeInTheDocument();
+    expect(screen.queryByText("cmd28")).not.toBeInTheDocument();
+    expect(screen.getAllByTitle("Collapse children")).toHaveLength(26);
+  });
+
+  it("expands and collapses every subtree from the toolbar", async () => {
+    renderProcesses(chain(200));
+
+    expect(await screen.findByText("cmd26")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(screen.getByText("cmd200")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.getByText("cmd1")).toBeInTheDocument();
+    expect(screen.queryByText("cmd2")).not.toBeInTheDocument();
+  });
+
+  it("renders a 20,000 process chain with a bounded row count", async () => {
+    renderProcesses(chain(20_000));
+
+    expect(await screen.findByText("cmd1")).toBeInTheDocument();
+    expect(screen.getByText("cmd26")).toBeInTheDocument();
+    expect(screen.getByText(/^20\D?000 processes$/)).toBeInTheDocument();
+    expect(screen.getAllByRole("row").length).toBeLessThan(100);
   });
 });
