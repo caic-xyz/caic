@@ -1747,8 +1747,8 @@ func taskMCPSummary(number int, task *v1.Task) mcpTaskSummary {
 	var additions int
 	var deletions int
 	for _, file := range task.DiffStat {
-		additions += file.Added
-		deletions += file.Deleted
+		additions += file.LinesAdded
+		deletions += file.LinesDeleted
 	}
 	message := ""
 	switch task.State {

@@ -1379,13 +1379,20 @@ data class TaskRepo(
     val forge: Forge? = null,
 )
 
-/** DiffFileStat describes changes to a single file. */
+/**
+ * DiffFileStat describes changes to a single file. LinesAdded and LinesDeleted
+ * count text lines. OldSize and NewSize report byte sizes for binary files and
+ * are -1 for text files, with 0 on the side where the path is added or removed.
+ */
 @Serializable
 data class DiffFileStat(
     val path: String,
-    val added: Int,
-    val deleted: Int,
-    val binary: Boolean? = null,
+    val linesAdded: Int,
+    val linesDeleted: Int,
+    /** OldSize is the binary pre-image byte size, or -1 for text files. */
+    val oldSize: Long,
+    /** NewSize is the binary post-image byte size, or -1 for text files. */
+    val newSize: Long,
     val diff: String? = null,
 )
 
@@ -1912,8 +1919,8 @@ data class EventRepositoryCommit(
 @Serializable
 data class EventChangeStat(
     val files: Int,
-    val added: Int,
-    val deleted: Int,
+    val linesAdded: Int,
+    val linesDeleted: Int,
     val binaryFiles: Int,
 )
 
@@ -2063,9 +2070,12 @@ data class GitFileStatus(
     val originalPath: String? = null,
     val indexStatus: String? = null,
     val worktreeStatus: String? = null,
-    val added: Int,
-    val deleted: Int,
-    val binary: Boolean,
+    val linesAdded: Int,
+    val linesDeleted: Int,
+    /** OldSize is the binary pre-image byte size, or -1 for text files. */
+    val oldSize: Long,
+    /** NewSize is the binary post-image byte size, or -1 for text files. */
+    val newSize: Long,
     val diff: String,
 )
 
@@ -2089,9 +2099,12 @@ data class DiffResp(val diff: String, val repositories: List<GitRepositoryStatus
 @Serializable
 data class DiffIndexFileStat(
     val path: String,
-    val added: Int,
-    val deleted: Int,
-    val binary: Boolean? = null,
+    val linesAdded: Int,
+    val linesDeleted: Int,
+    /** OldSize is the binary pre-image byte size, or -1 for text files. */
+    val oldSize: Long,
+    /** NewSize is the binary post-image byte size, or -1 for text files. */
+    val newSize: Long,
 )
 
 /** DiffIndexCommit describes one commit and its changed-file metadata. */
@@ -2111,9 +2124,12 @@ data class DiffIndexFileStatus(
     val originalPath: String? = null,
     val indexStatus: String? = null,
     val worktreeStatus: String? = null,
-    val added: Int,
-    val deleted: Int,
-    val binary: Boolean,
+    val linesAdded: Int,
+    val linesDeleted: Int,
+    /** OldSize is the binary pre-image byte size, or -1 for text files. */
+    val oldSize: Long,
+    /** NewSize is the binary post-image byte size, or -1 for text files. */
+    val newSize: Long,
 )
 
 /** DiffIndexRepository describes one repository in a diff index. */
@@ -2144,8 +2160,8 @@ data class GitRepositoryState(
     val ahead: Int,
     val behind: Int,
     val changedFiles: Int,
-    val added: Int,
-    val deleted: Int,
+    val linesAdded: Int,
+    val linesDeleted: Int,
     val uncommittedFiles: Int,
     val conflicts: Int,
     val operation: GitOperation? = null,

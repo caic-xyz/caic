@@ -713,8 +713,8 @@ func TestRunner(t *testing.T) {
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
 					DiffStat: agent.DiffStat{
-						{Path: "a.go", Added: 10, Deleted: 3},
-						{Path: "b.go", Added: 5, Deleted: 0},
+						{Path: "a.go", LinesAdded: 10, LinesDeleted: 3},
+						{Path: "b.go", LinesAdded: 5, LinesDeleted: 0},
 					},
 				},
 			})
@@ -723,7 +723,7 @@ func TestRunner(t *testing.T) {
 			if len(result.DiffStat) != 2 {
 				t.Fatalf("DiffStat has %d entries, want 2", len(result.DiffStat))
 			}
-			if result.DiffStat[0].Path != "a.go" || result.DiffStat[0].Added != 10 {
+			if result.DiffStat[0].Path != "a.go" || result.DiffStat[0].LinesAdded != 10 {
 				t.Errorf("DiffStat[0] = %+v, want {a.go 10 3}", result.DiffStat[0])
 			}
 		})
@@ -775,7 +775,7 @@ func TestRunner(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			tk.SeedTimeline([]agent.Message{
-				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 1}}},
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 1}}},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
 			})
 
@@ -1536,7 +1536,7 @@ func testRunnerSessions(t *testing.T) {
 				if !reflect.DeepEqual(snapshot.RepositoryCommits, wantCommits) {
 					t.Errorf("commit snapshot = %+v, want commits %+v", snapshot, wantCommits)
 				}
-				wantChange := &agent.ChangeStat{Files: 2, Added: 6, Deleted: 2, BinaryFiles: 1}
+				wantChange := &agent.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 2, BinaryFiles: 1}
 				if !reflect.DeepEqual(snapshot.ChangeStat, wantChange) {
 					t.Errorf("commit snapshot change = %+v, want %+v", snapshot.ChangeStat, wantChange)
 				}

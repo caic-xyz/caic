@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V2-only persistent relay with canonical framing and task-local MCP bridging.
+# Maintained v2 persistent relay with canonical framing and task-local MCP bridging.
 #
 # Modes:
 #   serve-attach --dir <path> -- <cmd...>   Start relay daemon + attach as first client.
@@ -44,6 +44,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import socket
@@ -234,17 +235,26 @@ def _encode_control(token, fields):
     return encoded
 
 
-def _parse_numstat(numstat):
-    """Parse git diff --numstat output into a list of file stat dicts.
+# Binary size column in git diff --stat output, for example "Bin 12 -> 23 bytes".
+_BINARY_STAT_RE = re.compile(r"Bin (\d+) -> (\d+) bytes")
 
-    Each line has the format: <added>\\t<deleted>\\t<path>.
-    Binary files use "-\\t-\\t<path>".
+
+def _parse_numstat(numstat):
+    """Parse git diff --numstat --stat output into a list of file stat dicts.
+
+    The --stat block that follows the numstat rows reports the pre-image and
+    post-image byte size of each binary file; rows are matched by position
+    because git lists files in the same order in both formats.
     Returns an empty list if there are no changed files.
     """
     result = []
+    stat_lines = []
     for line in numstat.strip().splitlines():
         line = line.strip()
         if not line:
+            continue
+        if "\t" not in line and " | " in line:
+            stat_lines.append(line)
             continue
         parts = line.split("\t", 2)
         if len(parts) != 3:
@@ -262,6 +272,13 @@ def _parse_numstat(numstat):
             except ValueError:
                 deleted = 0
             result.append({"path": path, "added": added, "deleted": deleted})
+    for line, entry in zip(stat_lines, result, strict=False):
+        match = _BINARY_STAT_RE.search(line)
+        if match is None:
+            continue
+        entry["binary"] = True
+        entry["oldSize"] = int(match.group(1))
+        entry["newSize"] = int(match.group(2))
     return result
 
 
@@ -555,7 +572,7 @@ class _Daemon:
                     timeout=5,
                 )
                 cp = subprocess.run(
-                    ["git", "diff", "--numstat", diff_ref],
+                    ["git", "diff", "--numstat", "--stat", diff_ref],
                     cwd=self.work_dir,
                     env=diff_env,
                     capture_output=True,

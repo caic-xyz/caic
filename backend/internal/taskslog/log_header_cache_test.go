@@ -98,7 +98,7 @@ var pinnedHeaderCacheKeys = []string{
 // non-empty and every struct field set, so the marshaled form exercises the
 // complete key set pinned above.
 func pinnedHeaderCacheFixture() *LoadedTask {
-	diffStat := agent.DiffStat{{Path: "file", Added: 1, Deleted: 1, Binary: true}}
+	diffStat := agent.DiffStat{{Path: "file", LinesAdded: 1, LinesDeleted: 1, Binary: true}}
 	return &LoadedTask{
 		TaskID: "task",
 		Prompt: "prompt",

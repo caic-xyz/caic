@@ -1169,7 +1169,7 @@ func TestTask(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			ds := agent.DiffStat{
-				{Path: "main.go", Added: 10, Deleted: 3},
+				{Path: "main.go", LinesAdded: 10, LinesDeleted: 3},
 				{Path: "img.png", Binary: true},
 			}
 			tk.addMessage(t.Context(), &agent.DiffStatMessage{
@@ -1180,13 +1180,13 @@ func TestTask(t *testing.T) {
 			if len(got) != 2 {
 				t.Fatalf("LiveDiffStat len = %d, want 2", len(got))
 			}
-			if got[0].Path != "main.go" || got[0].Added != 10 {
+			if got[0].Path != "main.go" || got[0].LinesAdded != 10 {
 				t.Errorf("LiveDiffStat[0] = %+v", got[0])
 			}
 			// Update with new diff stat.
 			tk.addMessage(t.Context(), &agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
-				DiffStat:    agent.DiffStat{{Path: "new.go", Added: 1, Deleted: 0}},
+				DiffStat:    agent.DiffStat{{Path: "new.go", LinesAdded: 1, LinesDeleted: 0}},
 			}, false)
 			got = tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "new.go" {
@@ -1200,10 +1200,10 @@ func TestTask(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ResultMessage{
 				MessageType: "result",
-				DiffStat:    agent.DiffStat{{Path: "a.go", Added: 5, Deleted: 2}},
+				DiffStat:    agent.DiffStat{{Path: "a.go", LinesAdded: 5, LinesDeleted: 2}},
 			}, false)
 			got := tk.LiveDiffStat()
-			if len(got) != 1 || got[0].Path != "a.go" || got[0].Added != 5 {
+			if len(got) != 1 || got[0].Path != "a.go" || got[0].LinesAdded != 5 {
 				t.Errorf("LiveDiffStat = %+v, want [{a.go 5 2}]", got)
 			}
 		})
@@ -1218,12 +1218,12 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "old.go", Added: 1}},
+					DiffStat:    agent.DiffStat{{Path: "old.go", LinesAdded: 1}},
 				},
 				&agent.TextMessage{Text: "hello"},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "latest.go", Added: 5}},
+					DiffStat:    agent.DiffStat{{Path: "latest.go", LinesAdded: 5}},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1239,11 +1239,11 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "stale.go", Added: 1}},
+					DiffStat:    agent.DiffStat{{Path: "stale.go", LinesAdded: 1}},
 				},
 				&agent.ResultMessage{
 					MessageType: "result",
-					DiffStat:    agent.DiffStat{{Path: "authoritative.go", Added: 10}},
+					DiffStat:    agent.DiffStat{{Path: "authoritative.go", LinesAdded: 10}},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1259,11 +1259,11 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.ResultMessage{
 					MessageType: "result",
-					DiffStat:    agent.DiffStat{{Path: "result.go", Added: 5}},
+					DiffStat:    agent.DiffStat{{Path: "result.go", LinesAdded: 5}},
 				},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "relay.go", Added: 3}},
+					DiffStat:    agent.DiffStat{{Path: "relay.go", LinesAdded: 3}},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1289,7 +1289,7 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "main.go", Added: 10, Deleted: 2}},
+					DiffStat:    agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}},
 				},
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.DiffStatMessage{
@@ -1303,7 +1303,7 @@ func TestTask(t *testing.T) {
 			}
 			// After adoption, the caller should compute the host-side
 			// diff stat and set it.
-			tk.SetLiveDiffStat(agent.DiffStat{{Path: "main.go", Added: 10, Deleted: 2}})
+			tk.SetLiveDiffStat(agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}})
 			got = tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "main.go" {
 				t.Errorf("LiveDiffStat after set = %+v, want main.go", got)
@@ -1888,7 +1888,7 @@ func TestTask(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "main.go", Added: 1}},
+					DiffStat:    agent.DiffStat{{Path: "main.go", LinesAdded: 1}},
 				},
 			}
 			tk.SeedTimeline(msgs)

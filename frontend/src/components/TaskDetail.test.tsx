@@ -61,8 +61,8 @@ vi.mock("../api", () => ({
           ahead: 1,
           behind: 0,
           changedFiles: 2,
-          added: 15,
-          deleted: 3,
+          linesAdded: 15,
+          linesDeleted: 3,
           uncommittedFiles: 1,
           conflicts: 0,
         },
@@ -786,7 +786,7 @@ describe("TaskDetail", () => {
           ts: 3_100,
           commitSnapshot: {
             repositoryCommits: [],
-            changeStat: { files: 2, added: 10, deleted: 3, binaryFiles: 0 },
+            changeStat: { files: 2, linesAdded: 10, linesDeleted: 3, binaryFiles: 0 },
           },
         },
         { kind: "userInput", ts: 62_000, userInput: { text: "continue" } },
@@ -797,7 +797,7 @@ describe("TaskDetail", () => {
           ts: 65_100,
           commitSnapshot: {
             repositoryCommits: [],
-            changeStat: { files: 4, added: 20, deleted: 5, binaryFiles: 1 },
+            changeStat: { files: 4, linesAdded: 20, linesDeleted: 5, binaryFiles: 1 },
           },
         },
         { kind: "system", ts: 66_000, system: { subtype: "compact_boundary" } },

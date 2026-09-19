@@ -29,8 +29,8 @@ export function repoStateLabel(state?: GitRepositoryState): string {
   const labels: string[] = [];
   if (state.changedFiles > 0)
     labels.push(countLabel(state.changedFiles, "changed file", "changed files"));
-  if (state.added > 0) labels.push(countLabel(state.added, "addition", "additions"));
-  if (state.deleted > 0) labels.push(countLabel(state.deleted, "deletion", "deletions"));
+  if (state.linesAdded > 0) labels.push(countLabel(state.linesAdded, "addition", "additions"));
+  if (state.linesDeleted > 0) labels.push(countLabel(state.linesDeleted, "deletion", "deletions"));
   if (state.conflicts > 0) labels.push(countLabel(state.conflicts, "conflict", "conflicts"));
   if (state.operation) labels.push(`${state.operation} in progress`);
   if (state.uncommittedFiles > 0)
@@ -51,8 +51,8 @@ export function diffStatState(files?: readonly DiffFileStat[]): GitRepositorySta
     ahead: 0,
     behind: 0,
     changedFiles: files.length,
-    added: files.reduce((total, file) => total + file.added, 0),
-    deleted: files.reduce((total, file) => total + file.deleted, 0),
+    linesAdded: files.reduce((total, file) => total + file.linesAdded, 0),
+    linesDeleted: files.reduce((total, file) => total + file.linesDeleted, 0),
     uncommittedFiles: 0,
     conflicts: 0,
   };
@@ -62,8 +62,8 @@ function DiffStats(props: { state?: GitRepositoryState }) {
   return (
     <Show when={(props.state?.changedFiles ?? 0) > 0}>
       <span class={styles.diffStats} data-testid="repo-state-diff-stats">
-        {props.state?.changedFiles}f <span class={styles.added}>+{props.state?.added}</span>{" "}
-        <span class={styles.deleted}>&minus;{props.state?.deleted}</span>
+        {props.state?.changedFiles}f <span class={styles.added}>+{props.state?.linesAdded}</span>{" "}
+        <span class={styles.deleted}>&minus;{props.state?.linesDeleted}</span>
       </span>
     </Show>
   );

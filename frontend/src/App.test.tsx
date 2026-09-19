@@ -359,7 +359,7 @@ describe("App task-list SSE recovery", () => {
       kind: "patch",
       patch: {
         id: "cache-events",
-        diffStat: [{ path: "file.go", added: 1, deleted: 0 }],
+        diffStat: [{ path: "file.go", linesAdded: 1, linesDeleted: 0, oldSize: -1, newSize: -1 }],
       },
     });
     dispatchSSE({ kind: "upsert", upsert: { ...initial, state: "waiting" } });
@@ -369,7 +369,7 @@ describe("App task-list SSE recovery", () => {
         {
           ...initial,
           state: "waiting",
-          diffStat: [{ path: "file.go", added: 2, deleted: 0 }],
+          diffStat: [{ path: "file.go", linesAdded: 2, linesDeleted: 0, oldSize: -1, newSize: -1 }],
         },
       ],
     });
@@ -418,7 +418,7 @@ describe("App task-list SSE recovery", () => {
     const task = makeTask({
       id: "prefetched",
       state: "running",
-      diffStat: [{ path: "file.go", added: 1, deleted: 0 }],
+      diffStat: [{ path: "file.go", linesAdded: 1, linesDeleted: 0, oldSize: -1, newSize: -1 }],
     });
     const { history } = renderApp("/task/@prefetched+prefetched");
     await waitForTaskEventsSubscription();

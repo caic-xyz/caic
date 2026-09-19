@@ -222,10 +222,10 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
 			CommitHash:     "1111111111111111111111111111111111111111",
-		}}, true, &agent.ChangeStat{Files: 2, Added: 6, Deleted: 1, BinaryFiles: 1}), time.Unix(1, 0))
+		}}, true, &agent.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 1, BinaryFiles: 1}), time.Unix(1, 0))
 		want := &v1.EventCommitSnapshot{
 			Baseline:   true,
-			ChangeStat: &v1.EventChangeStat{Files: 2, Added: 6, Deleted: 1, BinaryFiles: 1},
+			ChangeStat: &v1.EventChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 1, BinaryFiles: 1},
 			RepositoryCommits: []v1.EventRepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-1",

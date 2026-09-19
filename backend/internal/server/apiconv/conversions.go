@@ -258,6 +258,14 @@ func ForgeCheck(c *forge.Check) (v1.ForgeCheck, error) {
 	}, nil
 }
 
+// BinarySize returns the byte size for a binary file and -1 for a text file.
+func BinarySize(binary bool, size int64) int64 {
+	if !binary {
+		return -1
+	}
+	return size
+}
+
 // DiffStat converts an agent diff stat to an API DTO.
 func DiffStat(ds agent.DiffStat) v1.DiffStat {
 	if len(ds) == 0 {
@@ -265,7 +273,13 @@ func DiffStat(ds agent.DiffStat) v1.DiffStat {
 	}
 	out := make(v1.DiffStat, len(ds))
 	for i, f := range ds {
-		out[i] = v1.DiffFileStat{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary}
+		out[i] = v1.DiffFileStat{
+			Path:         f.Path,
+			LinesAdded:   f.LinesAdded,
+			LinesDeleted: f.LinesDeleted,
+			OldSize:      BinarySize(f.Binary, f.OldSize),
+			NewSize:      BinarySize(f.Binary, f.NewSize),
+		}
 	}
 	return out
 }

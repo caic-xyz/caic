@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the v2-only relay's canonical framing, lifecycle, and MCP configuration."""
+"""Tests for the maintained v2 relay: canonical framing, lifecycle, and MCP configuration."""
 
 from __future__ import annotations
 
@@ -846,6 +846,16 @@ def test_parse_numstat() -> None:
     assert result == [
         {"path": "src/main.go", "added": 10, "deleted": 3},
         {"path": "image.png", "added": 0, "deleted": 0, "binary": True},
+    ]
+
+    # Binary sizes come from the appended --stat block and match by position.
+    result = relay._parse_numstat(
+        "10\t3\tsrc/main.go\n-\t-\timage.png\n"
+        " src/main.go | 10 +--\n image.png  | Bin 0 -> 2048 bytes\n 2 files changed\n"
+    )
+    assert result == [
+        {"path": "src/main.go", "added": 10, "deleted": 3},
+        {"path": "image.png", "added": 0, "deleted": 0, "binary": True, "oldSize": 0, "newSize": 2048},
     ]
 
 

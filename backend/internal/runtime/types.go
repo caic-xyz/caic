@@ -137,10 +137,12 @@ type GitCommit struct {
 
 // GitFileStat describes one path's changes in a commit.
 type GitFileStat struct {
-	Path    string
-	Added   int
-	Deleted int
-	Binary  bool
+	Path         string
+	LinesAdded   int
+	LinesDeleted int
+	Binary       bool
+	OldSize      int64 // Byte size of the binary pre-image; zero for added paths.
+	NewSize      int64 // Byte size of the binary post-image; zero for deleted paths.
 }
 
 // GitFileStatus describes one uncommitted path from git status porcelain v2.
@@ -149,9 +151,11 @@ type GitFileStatus struct {
 	OriginalPath   string
 	IndexStatus    string
 	WorktreeStatus string
-	Added          int
-	Deleted        int
+	LinesAdded     int
+	LinesDeleted   int
 	Binary         bool
+	OldSize        int64 // Byte size of the binary pre-image; zero for added paths.
+	NewSize        int64 // Byte size of the binary post-image; zero for deleted paths.
 }
 
 // CacheMount describes a host cache directory made available to a runtime.

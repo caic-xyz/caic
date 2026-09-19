@@ -1276,8 +1276,8 @@ func (r *AgentRuntime) turnChangeStat(ctx context.Context, id runtime.ID, repos 
 		}
 		for _, file := range repo.ParseDiffNumstat(numstat) {
 			stat.Files++
-			stat.Added += file.Added
-			stat.Deleted += file.Deleted
+			stat.LinesAdded += file.LinesAdded
+			stat.LinesDeleted += file.LinesDeleted
 			if file.Binary {
 				stat.BinaryFiles++
 			}

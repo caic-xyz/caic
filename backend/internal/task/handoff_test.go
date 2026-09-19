@@ -37,7 +37,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.TextMessage{Text: "The backend state is complete; the prompt builder remains."},
 			&agent.ResultMessage{IsError: true, Result: "The request stopped when the provider rejected the next turn."},
 			&agent.DiffStatMessage{DiffStat: agent.DiffStat{
-				{Path: "backend/internal/task/task.go", Added: 34, Deleted: 2},
+				{Path: "backend/internal/task/task.go", LinesAdded: 34, LinesDeleted: 2},
 				{Path: "frontend/public/logo.png", Binary: true},
 			}},
 			&agent.RateLimitMessage{
@@ -153,7 +153,7 @@ func TestBuildHandoffPrompt(t *testing.T) {
 			&agent.UserInputMessage{Text: prompt},
 			&agent.TextMessage{Text: "most recent assistant context"},
 			&agent.ResultMessage{Result: "latest result marker"},
-			&agent.DiffStatMessage{DiffStat: agent.DiffStat{{Path: "current-change.go", Added: 2}}},
+			&agent.DiffStatMessage{DiffStat: agent.DiffStat{{Path: "current-change.go", LinesAdded: 2}}},
 		})
 		got := BuildHandoffPrompt(tk, 0)
 		if len(got) > defaultHandoffPromptMaxBytes {

@@ -26,7 +26,7 @@ const turn: TurnTiming = {
       reportedModel: "test-model",
     },
   },
-  changeStat: { files: 3, added: 14, deleted: 2, binaryFiles: 1 },
+  changeStat: { files: 3, linesAdded: 14, linesDeleted: 2, binaryFiles: 1 },
   waitMs: 3_000,
 };
 

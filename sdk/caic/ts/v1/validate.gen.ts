@@ -177,9 +177,10 @@ export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
   const obj = asObject(raw, "DiffFileStat");
   return {
     path: asString(obj["path"], "DiffFileStat.path"),
-    added: asNumber(obj["added"], "DiffFileStat.added"),
-    deleted: asNumber(obj["deleted"], "DiffFileStat.deleted"),
-    binary: (obj["binary"] === undefined || obj["binary"] === null ? undefined : asBoolean(obj["binary"], "DiffFileStat.binary")),
+    linesAdded: asNumber(obj["linesAdded"], "DiffFileStat.linesAdded"),
+    linesDeleted: asNumber(obj["linesDeleted"], "DiffFileStat.linesDeleted"),
+    oldSize: asNumber(obj["oldSize"], "DiffFileStat.oldSize"),
+    newSize: asNumber(obj["newSize"], "DiffFileStat.newSize"),
     diff: (obj["diff"] === undefined || obj["diff"] === null ? undefined : asString(obj["diff"], "DiffFileStat.diff")),
   };
 }
@@ -374,8 +375,8 @@ export function validateEventChangeStat(raw: ValidatorInput): EventChangeStat {
   const obj = asObject(raw, "EventChangeStat");
   return {
     files: asNumber(obj["files"], "EventChangeStat.files"),
-    added: asNumber(obj["added"], "EventChangeStat.added"),
-    deleted: asNumber(obj["deleted"], "EventChangeStat.deleted"),
+    linesAdded: asNumber(obj["linesAdded"], "EventChangeStat.linesAdded"),
+    linesDeleted: asNumber(obj["linesDeleted"], "EventChangeStat.linesDeleted"),
     binaryFiles: asNumber(obj["binaryFiles"], "EventChangeStat.binaryFiles"),
   };
 }

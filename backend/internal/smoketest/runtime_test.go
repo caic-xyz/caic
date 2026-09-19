@@ -40,8 +40,8 @@ func TestRuntimeBackendRepositoryStatus(t *testing.T) {
 			t.Errorf("divergence = ahead %d behind %d, want ahead 1 behind 0", status.Ahead, status.Behind)
 		}
 		if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
-			{Path: "cmd/caic/main.go", Added: 8},
-			{Path: "frontend/src/App.tsx", Added: 4, Deleted: 2},
+			{Path: "cmd/caic/main.go", LinesAdded: 8},
+			{Path: "frontend/src/App.tsx", LinesAdded: 4, LinesDeleted: 2},
 		}) {
 			t.Errorf("DiffStat = %#v", status.DiffStat)
 		}
@@ -51,8 +51,8 @@ func TestRuntimeBackendRepositoryStatus(t *testing.T) {
 		if !slices.Equal(status.Uncommitted, []runtime.GitFileStatus{{
 			Path:           "frontend/src/App.tsx",
 			WorktreeStatus: "M",
-			Added:          4,
-			Deleted:        2,
+			LinesAdded:     4,
+			LinesDeleted:   2,
 		}}) {
 			t.Errorf("Uncommitted = %#v", status.Uncommitted)
 		}
@@ -69,8 +69,8 @@ func TestRuntimeBackendRepositoryStatus(t *testing.T) {
 			t.Errorf("divergence = ahead %d behind %d, want ahead 0 behind 1", status.Ahead, status.Behind)
 		}
 		if !slices.Equal(status.DiffStat, []runtime.GitFileStat{
-			{Path: "internal/service/api.go", Added: 6, Deleted: 1},
-			{Path: "README.md", Added: 3, Deleted: 4},
+			{Path: "internal/service/api.go", LinesAdded: 6, LinesDeleted: 1},
+			{Path: "README.md", LinesAdded: 3, LinesDeleted: 4},
 		}) {
 			t.Errorf("DiffStat = %#v", status.DiffStat)
 		}

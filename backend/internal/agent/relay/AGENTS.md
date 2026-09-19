@@ -4,14 +4,23 @@ Persistent process relay that keeps coding agents alive inside containers
 across SSH disconnections and backend restarts. Python-based, embedded into
 the Go binary.
 
-## Architecture
+## Relay versions
 
-- `embed.go` — Embeds `relay.py` as `Script []byte`
-- `relay.py` — Daemon + client relay (~650 lines Python, stdlib only)
-- `test_relay.py` — Tests for shutdown semantics and diff parsing
+`relay_v2.py` is the maintained relay. It implements canonical v2 framing and is
+deployed for every log version except v1. Fix relay behavior here and cover it in
+`test_relay_v2.py`.
 
-Deployment and management from Go is in the parent `agent.go`
-(`DeployRelay`, `StartRelay`, `AttachRelaySession`, `ReadRelayOutput`, etc.).
+`relay.py` is a frozen historical artifact: the original v1 relay. It stays in
+the tree only so v1 log versions remain deployable and replayable. Do not edit it
+and do not port fixes into it. `test_relay.py` exists solely to keep the frozen
+v1 relay working and must not be extended with new behavior.
+
+## Deployment
+
+Deployment and management from Go is in the parent `agent.go` (`RelayScript`,
+`DeployRelay`, `StartRelay`, `AttachRelaySession`, `ReadRelayOutput`, etc.).
+`RelayScript` selects `Script` for `LogVersionV1` and `ScriptV2` otherwise; both
+are deployed to the same container path.
 
 ## Operational Modes
 
@@ -40,14 +49,16 @@ Deployment and management from Go is in the parent `agent.go`
    detects `\x00\n` sentinel and sets `shutdown_event`
 4. **_shutdown_watchdog** (non-daemon) — waits on `shutdown_event`, closes stdin,
    sends SIGINT, escalates to SIGTERM/SIGKILL
-5. **diff_watcher** — polls `git diff` on activity, emits `caic_diff_stat` events
-   (throttled 10s, debounced 2s, uses temporary git index for untracked files)
+5. **diff_watcher** — polls `git diff --numstat --stat` on activity, emits
+   `caic_diff_stat` events (throttled 10s, debounced 2s, uses temporary git index
+   for untracked files). Only `relay_v2.py` reports binary pre-image and post-image
+   sizes.
 
 ## Container Layout
 
 ```
 /tmp/caic-relay/
-  relay.py          # Deployed script
+  relay.py          # Deployed script (v1 or v2 selected by log version)
   relay.sock        # Unix socket
   output.jsonl      # Append-only conversation log (survives restarts)
   relay.log         # Daemon diagnostics

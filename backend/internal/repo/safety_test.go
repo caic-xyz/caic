@@ -191,7 +191,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "clean.go")
 		runGit(t, clone, "commit", "-m", "add clean")
 
-		ds := agent.DiffStat{{Path: "clean.go", Added: 1}}
+		ds := agent.DiffStat{{Path: "clean.go", LinesAdded: 1}}
 		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)

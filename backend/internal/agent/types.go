@@ -42,11 +42,16 @@ const (
 const SystemSubtypeModelRerouted = "model_rerouted"
 
 // DiffFileStat describes changes to a single file.
+//
+// The added/deleted JSON keys are the relay wire contract, so the Go field names
+// are intentionally different from the JSON tags.
 type DiffFileStat struct {
-	Path    string `json:"path"`
-	Added   int    `json:"added"`
-	Deleted int    `json:"deleted"`
-	Binary  bool   `json:"binary,omitempty"`
+	Path         string `json:"path"`
+	LinesAdded   int    `json:"added"`
+	LinesDeleted int    `json:"deleted"`
+	Binary       bool   `json:"binary,omitempty"`
+	OldSize      int64  `json:"oldSize,omitempty"` // Byte size of the binary pre-image; zero for added paths.
+	NewSize      int64  `json:"newSize,omitempty"` // Byte size of the binary post-image; zero for deleted paths.
 }
 
 // MCPRequestMessage carries one task-local MCP request from the relay.
@@ -438,10 +443,10 @@ type RepositoryCommit struct {
 
 // ChangeStat summarizes the net committed file changes between two repository snapshots.
 type ChangeStat struct {
-	Files       int `json:"files"`
-	Added       int `json:"added"`
-	Deleted     int `json:"deleted"`
-	BinaryFiles int `json:"binary_files"`
+	Files        int `json:"files"`
+	LinesAdded   int `json:"added"`
+	LinesDeleted int `json:"deleted"`
+	BinaryFiles  int `json:"binary_files"`
 }
 
 // TurnCommitSnapshotMessage is a standalone durable record of the committed

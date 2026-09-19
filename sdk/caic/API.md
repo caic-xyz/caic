@@ -755,14 +755,17 @@ TaskRepo describes a repository associated with a task in the API response.
 
 ### DiffFileStat
 
-DiffFileStat describes changes to a single file.
+DiffFileStat describes changes to a single file. LinesAdded and LinesDeleted
+count text lines. OldSize and NewSize report byte sizes for binary files and
+are -1 for text files, with 0 on the side where the path is added or removed.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `path` | `string` |  | yes |
-| `added` | `int` |  | yes |
-| `deleted` | `int` |  | yes |
-| `binary` | `boolean` |  |  |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
+| `oldSize` | `int64` | OldSize is the binary pre-image byte size, or -1 for text files. | yes |
+| `newSize` | `int64` | NewSize is the binary post-image byte size, or -1 for text files. | yes |
 | `diff` | `string` |  |  |
 
 ### RuntimeInstance
@@ -1354,8 +1357,8 @@ EventChangeStat summarizes a completed turn's net committed change.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `files` | `int` |  | yes |
-| `added` | `int` |  | yes |
-| `deleted` | `int` |  | yes |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
 | `binaryFiles` | `int` |  | yes |
 
 ### EventCommitSnapshot
@@ -1525,9 +1528,10 @@ GitFileStatus describes one uncommitted repository path.
 | `originalPath` | `string` |  |  |
 | `indexStatus` | `string` |  |  |
 | `worktreeStatus` | `string` |  |  |
-| `added` | `int` |  | yes |
-| `deleted` | `int` |  | yes |
-| `binary` | `boolean` |  | yes |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
+| `oldSize` | `int64` | OldSize is the binary pre-image byte size, or -1 for text files. | yes |
+| `newSize` | `int64` | NewSize is the binary post-image byte size, or -1 for text files. | yes |
 | `diff` | `string` |  | yes |
 
 ### GitRepositoryStatus
@@ -1560,9 +1564,10 @@ DiffIndexFileStat describes a committed file without its patch body.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `path` | `string` |  | yes |
-| `added` | `int` |  | yes |
-| `deleted` | `int` |  | yes |
-| `binary` | `boolean` |  |  |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
+| `oldSize` | `int64` | OldSize is the binary pre-image byte size, or -1 for text files. | yes |
+| `newSize` | `int64` | NewSize is the binary post-image byte size, or -1 for text files. | yes |
 
 ### DiffIndexCommit
 
@@ -1586,9 +1591,10 @@ DiffIndexFileStatus describes one uncommitted path without its patch body.
 | `originalPath` | `string` |  |  |
 | `indexStatus` | `string` |  |  |
 | `worktreeStatus` | `string` |  |  |
-| `added` | `int` |  | yes |
-| `deleted` | `int` |  | yes |
-| `binary` | `boolean` |  | yes |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
+| `oldSize` | `int64` | OldSize is the binary pre-image byte size, or -1 for text files. | yes |
+| `newSize` | `int64` | NewSize is the binary post-image byte size, or -1 for text files. | yes |
 
 ### DiffIndexRepository
 
@@ -1631,8 +1637,8 @@ GitRepositoryState summarizes the compact Git state of one task repository.
 | `ahead` | `int` |  | yes |
 | `behind` | `int` |  | yes |
 | `changedFiles` | `int` |  | yes |
-| `added` | `int` |  | yes |
-| `deleted` | `int` |  | yes |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
 | `uncommittedFiles` | `int` |  | yes |
 | `conflicts` | `int` |  | yes |
 | `operation` | `GitOperation` |  |  |

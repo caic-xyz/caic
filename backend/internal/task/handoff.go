@@ -84,7 +84,7 @@ func BuildHandoffPrompt(source *Task, maxBytes int) string {
 				fmt.Fprintf(&b, "- %s (binary)\n", oneLine(file.Path))
 				continue
 			}
-			fmt.Fprintf(&b, "- %s (+%d/-%d)\n", oneLine(file.Path), file.Added, file.Deleted)
+			fmt.Fprintf(&b, "- %s (+%d/-%d)\n", oneLine(file.Path), file.LinesAdded, file.LinesDeleted)
 		}
 		if len(input.diffStat) > maxHandoffDiffFiles {
 			fmt.Fprintf(&b, "- ... %d more changed files omitted\n", len(input.diffStat)-maxHandoffDiffFiles)

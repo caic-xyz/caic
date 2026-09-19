@@ -114,31 +114,31 @@ func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repo
 	if repoIdx == 0 {
 		status.Ahead = 1
 		status.DiffStat = []runtime.GitFileStat{
-			{Path: "cmd/caic/main.go", Added: 8},
-			{Path: "frontend/src/App.tsx", Added: 4, Deleted: 2},
+			{Path: "cmd/caic/main.go", LinesAdded: 8},
+			{Path: "frontend/src/App.tsx", LinesAdded: 4, LinesDeleted: 2},
 		}
 		status.Commits = []runtime.GitCommit{{
 			SHA:          "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
 			Subject:      "Add task activity summary",
 			AuthoredDate: "2026-09-01T10:30:00Z",
-			Stat:         []runtime.GitFileStat{{Path: "cmd/caic/main.go", Added: 8}},
+			Stat:         []runtime.GitFileStat{{Path: "cmd/caic/main.go", LinesAdded: 8}},
 		}}
 		status.Uncommitted = []runtime.GitFileStatus{{
 			Path:           "frontend/src/App.tsx",
 			WorktreeStatus: "M",
-			Added:          4,
-			Deleted:        2,
+			LinesAdded:     4,
+			LinesDeleted:   2,
 		}}
 		return status, nil
 	}
 	status.Behind = 1
 	status.DiffStat = []runtime.GitFileStat{
-		{Path: "internal/service/api.go", Added: 6, Deleted: 1},
-		{Path: "README.md", Added: 3, Deleted: 4},
+		{Path: "internal/service/api.go", LinesAdded: 6, LinesDeleted: 1},
+		{Path: "README.md", LinesAdded: 3, LinesDeleted: 4},
 	}
 	status.Uncommitted = []runtime.GitFileStatus{
-		{Path: "internal/service/api.go", WorktreeStatus: "M", Added: 6, Deleted: 1},
-		{Path: "README.md", WorktreeStatus: "M", Added: 3, Deleted: 4},
+		{Path: "internal/service/api.go", WorktreeStatus: "M", LinesAdded: 6, LinesDeleted: 1},
+		{Path: "README.md", WorktreeStatus: "M", LinesAdded: 3, LinesDeleted: 4},
 	}
 	return status, nil
 }

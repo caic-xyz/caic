@@ -32,6 +32,8 @@ func runtimeRemoteRef(id runtime.ID, branch string) string {
 // ParseDiffNumstat parses git diff --numstat output into a DiffStat.
 // Each line has the format: <added>\t<deleted>\t<path>.
 // Binary files use "-\t-\t<path>".
+// When the output also contains an appended git diff --stat block (as produced
+// by --numstat --stat), binary sizes are attached to the matching entries.
 // Returns nil if there are no changed files.
 func ParseDiffNumstat(numstat string) agent.DiffStat {
 	numstat = strings.TrimSpace(numstat)
@@ -39,9 +41,24 @@ func ParseDiffNumstat(numstat string) agent.DiffStat {
 		return nil
 	}
 	var files agent.DiffStat
+	statIndex := 0
 	for line := range strings.SplitSeq(numstat, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		// A git diff --stat row is "<path> | <graph>"; numstat rows are
+		// tab-separated. --stat rows follow all numstat rows, so attach each
+		// binary size to the numstat entry at the same position.
+		if !strings.Contains(line, "\t") && strings.Contains(line, " | ") {
+			if statIndex < len(files) {
+				if oldSize, newSize, ok := parseBinaryStatSizes(line); ok {
+					files[statIndex].Binary = true
+					files[statIndex].OldSize = oldSize
+					files[statIndex].NewSize = newSize
+				}
+			}
+			statIndex++
 			continue
 		}
 		parts := strings.SplitN(line, "\t", 3)
@@ -52,12 +69,33 @@ func ParseDiffNumstat(numstat string) agent.DiffStat {
 		if parts[0] == "-" && parts[1] == "-" {
 			fs.Binary = true
 		} else {
-			fs.Added, _ = strconv.Atoi(parts[0])
-			fs.Deleted, _ = strconv.Atoi(parts[1])
+			fs.LinesAdded, _ = strconv.Atoi(parts[0])
+			fs.LinesDeleted, _ = strconv.Atoi(parts[1])
 		}
 		files = append(files, fs)
 	}
 	return files
+}
+
+// parseBinaryStatSizes extracts the "Bin <old> -> <new> bytes" sizes from one
+// git diff --stat row, reporting whether the row describes a binary file.
+func parseBinaryStatSizes(line string) (oldSize, newSize int64, ok bool) {
+	const marker = "| Bin "
+	_, after, ok := strings.Cut(line, marker)
+	if !ok {
+		return 0, 0, false
+	}
+	rest := strings.TrimSuffix(after, " bytes")
+	oldStr, newStr, found := strings.Cut(rest, " -> ")
+	if !found {
+		return 0, 0, false
+	}
+	oldSize, oldErr := strconv.ParseInt(oldStr, 10, 64)
+	newSize, newErr := strconv.ParseInt(newStr, 10, 64)
+	if oldErr != nil || newErr != nil {
+		return 0, 0, false
+	}
+	return oldSize, newSize, true
 }
 
 // LiveBranchesByRoot groups the branch names of instances by their repo's
@@ -551,7 +589,7 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 	var errs []error
 	for i := range repos {
 		repo := &repos[i]
-		numstat, err := runtimes.Diff(ctx, id, i, "--numstat")
+		numstat, err := runtimes.Diff(ctx, id, i, "--numstat", "--stat")
 		if err != nil {
 			log.Warn("diff numstat failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
 			errs = append(errs, err)

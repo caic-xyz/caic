@@ -100,9 +100,10 @@ describe("DiffDetail", () => {
         {
           path: "second.go",
           worktreeStatus: "M",
-          added: 2,
-          deleted: 0,
-          binary: false,
+          linesAdded: 2,
+          linesDeleted: 0,
+          oldSize: -1,
+          newSize: -1,
         },
       ],
     });
@@ -405,9 +406,10 @@ describe("DiffDetail", () => {
               stat: [
                 {
                   path: "frontend/view.tsx",
-                  added: 10,
-                  deleted: 0,
-                  binary: false,
+                  linesAdded: 10,
+                  linesDeleted: 0,
+                  oldSize: -1,
+                  newSize: -1,
                 },
               ],
             },
@@ -418,9 +420,10 @@ describe("DiffDetail", () => {
               stat: [
                 {
                   path: "frontend/view.test.tsx",
-                  added: 8,
-                  deleted: 0,
-                  binary: false,
+                  linesAdded: 8,
+                  linesDeleted: 0,
+                  oldSize: -1,
+                  newSize: -1,
                 },
               ],
             },
@@ -429,24 +432,27 @@ describe("DiffDetail", () => {
             {
               path: "frontend/working.tsx",
               worktreeStatus: "M",
-              added: 2,
-              deleted: 1,
-              binary: false,
+              linesAdded: 2,
+              linesDeleted: 1,
+              oldSize: -1,
+              newSize: -1,
             },
             {
               path: "frontend/new.tsx",
               indexStatus: "A",
-              added: 1,
-              deleted: 0,
-              binary: false,
+              linesAdded: 1,
+              linesDeleted: 0,
+              oldSize: -1,
+              newSize: -1,
             },
             {
               path: "frontend/untracked.tsx",
               indexStatus: "?",
               worktreeStatus: "?",
-              added: 1,
-              deleted: 0,
-              binary: false,
+              linesAdded: 1,
+              linesDeleted: 0,
+              oldSize: -1,
+              newSize: -1,
             },
           ],
         },
@@ -494,6 +500,44 @@ describe("DiffDetail", () => {
     expect(await screen.findByText("+new working")).toBeInTheDocument();
   });
 
+  it("shows binary size changes instead of line counts", async () => {
+    getTaskDiffIndexMock.mockResolvedValueOnce({
+      repositories: [
+        {
+          name: "caic",
+          branch: "feature",
+          upstream: "origin/main",
+          ahead: 0,
+          behind: 0,
+          commits: [],
+          uncommitted: [
+            {
+              path: "assets/new.bin",
+              indexStatus: "A",
+              linesAdded: 0,
+              linesDeleted: 0,
+              oldSize: 0,
+              newSize: 2048,
+            },
+            {
+              path: "assets/edit.bin",
+              worktreeStatus: "M",
+              linesAdded: 0,
+              linesDeleted: 0,
+              oldSize: 1024,
+              newSize: 4096,
+            },
+          ],
+        },
+      ],
+    });
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+
+    expect(await screen.findByText("2.0 KiB")).toBeInTheDocument();
+    expect(screen.getByText("1.0 KiB → 4.0 KiB")).toBeInTheDocument();
+  });
+
   it("retains complete long repository values", async () => {
     const branch = "feature/surface-complete-container-repository-status";
     const upstream = "origin/feature/with-a-very-long-upstream-branch-name";
@@ -517,9 +561,10 @@ describe("DiffDetail", () => {
               stat: [
                 {
                   path: committedPath,
-                  added: 1,
-                  deleted: 0,
-                  binary: false,
+                  linesAdded: 1,
+                  linesDeleted: 0,
+                  oldSize: -1,
+                  newSize: -1,
                 },
               ],
             },
@@ -529,9 +574,10 @@ describe("DiffDetail", () => {
               path: uncommittedPath,
               originalPath,
               worktreeStatus: "R",
-              added: 0,
-              deleted: 0,
-              binary: false,
+              linesAdded: 0,
+              linesDeleted: 0,
+              oldSize: -1,
+              newSize: -1,
             },
           ],
         },
@@ -571,9 +617,10 @@ function diffIndexFixture(): TaskDiffIndexResp {
             stat: [
               {
                 path: "committed.go",
-                added: 1,
-                deleted: 1,
-                binary: false,
+                linesAdded: 1,
+                linesDeleted: 1,
+                oldSize: -1,
+                newSize: -1,
               },
             ],
           },
@@ -583,9 +630,10 @@ function diffIndexFixture(): TaskDiffIndexResp {
             path: "working.go",
             originalPath: "old.go",
             worktreeStatus: "R",
-            added: 1,
-            deleted: 1,
-            binary: false,
+            linesAdded: 1,
+            linesDeleted: 1,
+            oldSize: -1,
+            newSize: -1,
           },
         ],
       },

@@ -380,10 +380,10 @@ func changeStat(stat *agent.ChangeStat) *v1.EventChangeStat {
 		return nil
 	}
 	return &v1.EventChangeStat{
-		Files:       stat.Files,
-		Added:       stat.Added,
-		Deleted:     stat.Deleted,
-		BinaryFiles: stat.BinaryFiles,
+		Files:        stat.Files,
+		LinesAdded:   stat.LinesAdded,
+		LinesDeleted: stat.LinesDeleted,
+		BinaryFiles:  stat.BinaryFiles,
 	}
 }
 

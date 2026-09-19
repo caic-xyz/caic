@@ -124,8 +124,8 @@ func TestDiffStat(t *testing.T) {
 	if got := DiffStat(nil); got != nil {
 		t.Errorf("DiffStat(nil) = %#v, want nil", got)
 	}
-	diff := agent.DiffStat{{Path: "main.go", Added: 3, Deleted: 1, Binary: true}}
-	want := v1.DiffStat{{Path: "main.go", Added: 3, Deleted: 1, Binary: true}}
+	diff := agent.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1, Binary: true, OldSize: 1024, NewSize: 4096}}
+	want := v1.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1, OldSize: 1024, NewSize: 4096}}
 	if got := DiffStat(diff); !reflect.DeepEqual(got, want) {
 		t.Errorf("DiffStat() = %#v, want %#v", got, want)
 	}

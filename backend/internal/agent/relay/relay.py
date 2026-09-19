@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Persistent relay for coding agent processes inside caic containers.
+# Frozen v1 persistent relay for coding agent processes inside caic containers.
 #
 # Modes:
 #   serve-attach --dir <path> -- <cmd...>   Start relay daemon + attach as first client.

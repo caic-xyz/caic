@@ -27,6 +27,7 @@ func TestParseGitStatus(t *testing.T) {
 			"2 R. N... 100644 100644 100644 abc def R100 src/new name.go",
 			"src/old name.go",
 			"? notes/new.txt",
+			"1 .M N... 100644 100644 100644 abc def assets/photo.jpg",
 			gitComparisonMarker + "origin/main",
 			gitDivergenceMarker + "1\t2",
 			gitOperationMarker,
@@ -35,10 +36,13 @@ func TestParseGitStatus(t *testing.T) {
 			"14\t1\tsrc/status.go",
 			"-\t-\tassets/logo.png",
 			"3\t1\tfrontend/new.tsx",
+			" src/status.go       | 14 +-\n assets/logo.png     | Bin 100 -> 250 bytes\n frontend/new.tsx    |  3 +-\n 3 files changed\n",
 			gitWorktreeStatMarker,
 			"2\t0\tsrc/staged.go",
 			"1\t1\tsrc/working.go",
 			"3\t0\tnotes/new.txt",
+			"-\t-\tassets/photo.jpg",
+			" src/staged.go       | 2 ++\n src/working.go      | 1 +-\n notes/new.txt       | 3 +++\n assets/photo.jpg    | Bin 400 -> 500 bytes\n 4 files changed\n",
 			gitLogMarker,
 			"",
 			gitCommitMarker,
@@ -49,6 +53,7 @@ func TestParseGitStatus(t *testing.T) {
 			"",
 			"\n12\t0\tsrc/status.go",
 			"-\t-\tassets/logo.png",
+			" src/status.go       | 12 +\n assets/logo.png     | Bin 100 -> 250 bytes\n 2 files changed\n",
 			gitCommitMarker,
 			"2222222222222222222222222222222222222222",
 			"2026-09-01",
@@ -59,6 +64,7 @@ func TestParseGitStatus(t *testing.T) {
 			"1\t1\t",
 			"frontend/old.tsx",
 			"frontend/new.tsx",
+			" frontend/view.tsx              | 2 +-\n frontend/old.tsx => new.tsx    | 1 +-\n 2 files changed\n",
 		}, "\x00")
 
 		got, err := parseGitStatus(out)
@@ -72,9 +78,9 @@ func TestParseGitStatus(t *testing.T) {
 			Ahead:     2,
 			Behind:    1,
 			DiffStat: []runtime.GitFileStat{
-				{Path: "src/status.go", Added: 14, Deleted: 1},
-				{Path: "assets/logo.png", Binary: true},
-				{Path: "frontend/new.tsx", Added: 3, Deleted: 1},
+				{Path: "src/status.go", LinesAdded: 14, LinesDeleted: 1},
+				{Path: "assets/logo.png", Binary: true, OldSize: 100, NewSize: 250},
+				{Path: "frontend/new.tsx", LinesAdded: 3, LinesDeleted: 1},
 			},
 			Commits: []runtime.GitCommit{
 				{
@@ -83,8 +89,8 @@ func TestParseGitStatus(t *testing.T) {
 					Decorations:  "tag: v1.2.3",
 					AuthoredDate: "2026-08-30",
 					Stat: []runtime.GitFileStat{
-						{Path: "src/status.go", Added: 12},
-						{Path: "assets/logo.png", Binary: true},
+						{Path: "src/status.go", LinesAdded: 12},
+						{Path: "assets/logo.png", Binary: true, OldSize: 100, NewSize: 250},
 					},
 				},
 				{
@@ -93,16 +99,17 @@ func TestParseGitStatus(t *testing.T) {
 					Decorations:  "HEAD -> caic-42",
 					AuthoredDate: "2026-09-01",
 					Stat: []runtime.GitFileStat{
-						{Path: "frontend/view.tsx", Added: 2, Deleted: 2},
-						{Path: "frontend/new.tsx", Added: 1, Deleted: 1},
+						{Path: "frontend/view.tsx", LinesAdded: 2, LinesDeleted: 2},
+						{Path: "frontend/new.tsx", LinesAdded: 1, LinesDeleted: 1},
 					},
 				},
 			},
 			Uncommitted: []runtime.GitFileStatus{
-				{Path: "src/staged.go", IndexStatus: "M", Added: 2},
-				{Path: "src/working.go", WorktreeStatus: "M", Added: 1, Deleted: 1},
+				{Path: "src/staged.go", IndexStatus: "M", LinesAdded: 2},
+				{Path: "src/working.go", WorktreeStatus: "M", LinesAdded: 1, LinesDeleted: 1},
 				{Path: "src/new name.go", OriginalPath: "src/old name.go", IndexStatus: "R"},
-				{Path: "notes/new.txt", IndexStatus: "?", WorktreeStatus: "?", Added: 3},
+				{Path: "notes/new.txt", IndexStatus: "?", WorktreeStatus: "?", LinesAdded: 3},
+				{Path: "assets/photo.jpg", WorktreeStatus: "M", Binary: true, OldSize: 400, NewSize: 500},
 			},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -145,7 +152,7 @@ func TestGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_INDEX_FILE", "git add -N", `git diff "$comparison" --numstat -z`, "git diff HEAD --numstat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_INDEX_FILE", "git add -N", `git diff "$comparison" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}
@@ -197,20 +204,20 @@ func TestGitStatusCommand(t *testing.T) {
 		if status.Branch != "main" || status.Upstream != "origin/main" || status.Ahead != 1 || status.Behind != 0 {
 			t.Errorf("branch status = %+v", status)
 		}
-		if len(status.Commits) != 1 || status.Commits[0].Subject != "one ahead" || status.Commits[0].AuthoredDate == "" || status.Commits[0].Decorations != "HEAD -> main, host/caic-42" || len(status.Commits[0].Stat) != 1 || status.Commits[0].Stat[0] != (runtime.GitFileStat{Path: "committed.txt", Added: 1}) {
+		if len(status.Commits) != 1 || status.Commits[0].Subject != "one ahead" || status.Commits[0].AuthoredDate == "" || status.Commits[0].Decorations != "HEAD -> main, host/caic-42" || len(status.Commits[0].Stat) != 1 || status.Commits[0].Stat[0] != (runtime.GitFileStat{Path: "committed.txt", LinesAdded: 1}) {
 			t.Errorf("commits = %+v", status.Commits)
 		}
 		if len(status.Uncommitted) != 3 {
 			t.Errorf("uncommitted = %+v", status.Uncommitted)
 		}
-		if status.Uncommitted[0].Added != 1 || status.Uncommitted[0].Deleted != 0 || status.Uncommitted[1].Added != 1 || status.Uncommitted[1].Deleted != 1 || status.Uncommitted[2].Added != 1 {
+		if status.Uncommitted[0].LinesAdded != 1 || status.Uncommitted[0].LinesDeleted != 0 || status.Uncommitted[1].LinesAdded != 1 || status.Uncommitted[1].LinesDeleted != 1 || status.Uncommitted[2].LinesAdded != 1 {
 			t.Errorf("uncommitted stats = %+v", status.Uncommitted)
 		}
 		wantDiffStat := []runtime.GitFileStat{
-			{Path: "committed.txt", Added: 1},
-			{Path: "staged.txt", Added: 1},
-			{Path: "tracked.txt", Added: 1, Deleted: 1},
-			{Path: "untracked.txt", Added: 1},
+			{Path: "committed.txt", LinesAdded: 1},
+			{Path: "staged.txt", LinesAdded: 1},
+			{Path: "tracked.txt", LinesAdded: 1, LinesDeleted: 1},
+			{Path: "untracked.txt", LinesAdded: 1},
 		}
 		if !reflect.DeepEqual(status.DiffStat, wantDiffStat) {
 			t.Errorf("diff stat = %+v, want %+v", status.DiffStat, wantDiffStat)
@@ -244,7 +251,7 @@ func TestGitCommitDiffStatCommand(t *testing.T) {
 	if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 		t.Errorf("gitCommitDiffStatCommand() does not safely quote repo: %q", cmd)
 	}
-	if !strings.Contains(cmd, "git diff --numstat --find-renames=50% '"+from+"' '"+to+"' --") {
+	if !strings.Contains(cmd, "git diff --numstat --stat --find-renames=50% '"+from+"' '"+to+"' --") {
 		t.Errorf("gitCommitDiffStatCommand() = %q, want commit comparison", cmd)
 	}
 	if _, err := gitCommitDiffStatCommand("/repo", "short", to); err == nil {

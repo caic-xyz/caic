@@ -176,7 +176,7 @@ func TestGenericConvertResult(t *testing.T) {
 		MessageType:  "result",
 		Subtype:      "success",
 		Result:       "done",
-		DiffStat:     agent.DiffStat{{Path: "a.go", Added: 10, Deleted: 3}},
+		DiffStat:     agent.DiffStat{{Path: "a.go", LinesAdded: 10, LinesDeleted: 3}},
 		TotalCostUSD: 0.05,
 		NumTurns:     3,
 		Usage:        agent.Usage{InputTokens: 100, OutputTokens: 50},

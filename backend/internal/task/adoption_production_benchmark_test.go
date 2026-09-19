@@ -90,7 +90,7 @@ func BenchmarkSeedTimeline(b *testing.B) {
 		appendMessage(&agent.TextMessage{Text: "Working on the next step."})
 		appendMessage(&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", turn), Name: "Read", Input: json.RawMessage(`{"file_path":"/src/main.go"}`)})
 		appendMessage(&agent.ToolResultMessage{ToolUseID: fmt.Sprintf("tool-%d", turn)})
-		appendMessage(&agent.DiffStatMessage{MessageType: "diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 3, Deleted: 1}}})
+		appendMessage(&agent.DiffStatMessage{MessageType: "diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1}}})
 		appendMessage(&agent.UsageMessage{Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheTTLSeconds: 300}, ContextWindow: 200000})
 		appendMessage(&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, NumTurns: 1, DurationMs: 1200,
 			Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheReadInputTokens: 4000}})

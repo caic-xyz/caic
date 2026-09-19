@@ -884,12 +884,17 @@ public struct TaskRepo: Codable {
     public let forge: Forge?
 }
 
-/// DiffFileStat describes changes to a single file.
+/// DiffFileStat describes changes to a single file. LinesAdded and LinesDeleted
+/// count text lines. OldSize and NewSize report byte sizes for binary files and
+/// are -1 for text files, with 0 on the side where the path is added or removed.
 public struct DiffFileStat: Codable {
     public let path: String
-    public let added: Int
-    public let deleted: Int
-    public let binary: Bool?
+    public let linesAdded: Int
+    public let linesDeleted: Int
+    /// OldSize is the binary pre-image byte size, or -1 for text files.
+    public let oldSize: Int
+    /// NewSize is the binary post-image byte size, or -1 for text files.
+    public let newSize: Int
     public let diff: String?
 }
 
@@ -1383,8 +1388,8 @@ public struct EventRepositoryCommit: Codable {
 /// EventChangeStat summarizes a completed turn's net committed change.
 public struct EventChangeStat: Codable {
     public let files: Int
-    public let added: Int
-    public let deleted: Int
+    public let linesAdded: Int
+    public let linesDeleted: Int
     public let binaryFiles: Int
 }
 
@@ -1528,9 +1533,12 @@ public struct GitFileStatus: Codable {
     public let originalPath: String?
     public let indexStatus: String?
     public let worktreeStatus: String?
-    public let added: Int
-    public let deleted: Int
-    public let binary: Bool
+    public let linesAdded: Int
+    public let linesDeleted: Int
+    /// OldSize is the binary pre-image byte size, or -1 for text files.
+    public let oldSize: Int
+    /// NewSize is the binary post-image byte size, or -1 for text files.
+    public let newSize: Int
     public let diff: String
 }
 
@@ -1554,9 +1562,12 @@ public struct DiffResp: Codable {
 /// DiffIndexFileStat describes a committed file without its patch body.
 public struct DiffIndexFileStat: Codable {
     public let path: String
-    public let added: Int
-    public let deleted: Int
-    public let binary: Bool?
+    public let linesAdded: Int
+    public let linesDeleted: Int
+    /// OldSize is the binary pre-image byte size, or -1 for text files.
+    public let oldSize: Int
+    /// NewSize is the binary post-image byte size, or -1 for text files.
+    public let newSize: Int
 }
 
 /// DiffIndexCommit describes one commit and its changed-file metadata.
@@ -1574,9 +1585,12 @@ public struct DiffIndexFileStatus: Codable {
     public let originalPath: String?
     public let indexStatus: String?
     public let worktreeStatus: String?
-    public let added: Int
-    public let deleted: Int
-    public let binary: Bool
+    public let linesAdded: Int
+    public let linesDeleted: Int
+    /// OldSize is the binary pre-image byte size, or -1 for text files.
+    public let oldSize: Int
+    /// NewSize is the binary post-image byte size, or -1 for text files.
+    public let newSize: Int
 }
 
 /// DiffIndexRepository describes one repository in a diff index.
@@ -1607,8 +1621,8 @@ public struct GitRepositoryState: Codable {
     public let ahead: Int
     public let behind: Int
     public let changedFiles: Int
-    public let added: Int
-    public let deleted: Int
+    public let linesAdded: Int
+    public let linesDeleted: Int
     public let uncommittedFiles: Int
     public let conflicts: Int
     public let operation: GitOperation?

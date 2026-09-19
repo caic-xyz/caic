@@ -654,12 +654,17 @@ type CompactReq struct {
 // Validate is a no-op; instructions are optional.
 func (r *CompactReq) Validate() error { return nil }
 
-// DiffFileStat describes changes to a single file.
+// DiffFileStat describes changes to a single file. LinesAdded and LinesDeleted
+// count text lines. OldSize and NewSize report byte sizes for binary files and
+// are -1 for text files, with 0 on the side where the path is added or removed.
 type DiffFileStat struct {
-	Path    string `json:"path"`
-	Added   int    `json:"added"`
-	Deleted int    `json:"deleted"`
-	Binary  bool   `json:"binary,omitempty"`
+	Path         string `json:"path"`
+	LinesAdded   int    `json:"linesAdded"`
+	LinesDeleted int    `json:"linesDeleted"`
+	// OldSize is the binary pre-image byte size, or -1 for text files.
+	OldSize int64 `json:"oldSize"`
+	// NewSize is the binary post-image byte size, or -1 for text files.
+	NewSize int64  `json:"newSize"`
 	Diff    string `json:"diff,omitempty"`
 }
 
@@ -803,10 +808,13 @@ type GitFileStatus struct {
 	OriginalPath   string `json:"originalPath,omitempty"`
 	IndexStatus    string `json:"indexStatus,omitempty"`
 	WorktreeStatus string `json:"worktreeStatus,omitempty"`
-	Added          int    `json:"added"`
-	Deleted        int    `json:"deleted"`
-	Binary         bool   `json:"binary"`
-	Diff           string `json:"diff"`
+	LinesAdded     int    `json:"linesAdded"`
+	LinesDeleted   int    `json:"linesDeleted"`
+	// OldSize is the binary pre-image byte size, or -1 for text files.
+	OldSize int64 `json:"oldSize"`
+	// NewSize is the binary post-image byte size, or -1 for text files.
+	NewSize int64  `json:"newSize"`
+	Diff    string `json:"diff"`
 }
 
 // GitOperation identifies an in-progress Git operation in a task repository.
@@ -828,8 +836,8 @@ type GitRepositoryState struct {
 	Ahead            int          `json:"ahead"`
 	Behind           int          `json:"behind"`
 	ChangedFiles     int          `json:"changedFiles"`
-	Added            int          `json:"added"`
-	Deleted          int          `json:"deleted"`
+	LinesAdded       int          `json:"linesAdded"`
+	LinesDeleted     int          `json:"linesDeleted"`
 	UncommittedFiles int          `json:"uncommittedFiles"`
 	Conflicts        int          `json:"conflicts"`
 	Operation        GitOperation `json:"operation,omitempty"`
@@ -860,10 +868,13 @@ type DiffResp struct {
 
 // DiffIndexFileStat describes a committed file without its patch body.
 type DiffIndexFileStat struct {
-	Path    string `json:"path"`
-	Added   int    `json:"added"`
-	Deleted int    `json:"deleted"`
-	Binary  bool   `json:"binary,omitempty"`
+	Path         string `json:"path"`
+	LinesAdded   int    `json:"linesAdded"`
+	LinesDeleted int    `json:"linesDeleted"`
+	// OldSize is the binary pre-image byte size, or -1 for text files.
+	OldSize int64 `json:"oldSize"`
+	// NewSize is the binary post-image byte size, or -1 for text files.
+	NewSize int64 `json:"newSize"`
 }
 
 // DiffIndexCommit describes one commit and its changed-file metadata.
@@ -881,9 +892,12 @@ type DiffIndexFileStatus struct {
 	OriginalPath   string `json:"originalPath,omitempty"`
 	IndexStatus    string `json:"indexStatus,omitempty"`
 	WorktreeStatus string `json:"worktreeStatus,omitempty"`
-	Added          int    `json:"added"`
-	Deleted        int    `json:"deleted"`
-	Binary         bool   `json:"binary"`
+	LinesAdded     int    `json:"linesAdded"`
+	LinesDeleted   int    `json:"linesDeleted"`
+	// OldSize is the binary pre-image byte size, or -1 for text files.
+	OldSize int64 `json:"oldSize"`
+	// NewSize is the binary post-image byte size, or -1 for text files.
+	NewSize int64 `json:"newSize"`
 }
 
 // DiffIndexRepository describes one repository in a diff index.

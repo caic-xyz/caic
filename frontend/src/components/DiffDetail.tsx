@@ -13,6 +13,7 @@ import type {
   DiffIndexRepository,
 } from "@sdk/types.gen";
 
+import { formatBytes } from "../formatting";
 import { taskDiffCache } from "../diffCache";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import styles from "./DiffDetail.module.css";
@@ -234,9 +235,10 @@ export default function DiffDetail(props: Props) {
                                       return (
                                         <FileDiffRow
                                           path={file.path}
-                                          added={file.added}
-                                          deleted={file.deleted}
-                                          binary={file.binary ?? false}
+                                          linesAdded={file.linesAdded}
+                                          linesDeleted={file.linesDeleted}
+                                          oldSize={file.oldSize}
+                                          newSize={file.newSize}
                                           loadDiff={() =>
                                             taskDiffCache.loadPatch({
                                               taskId: props.taskId,
@@ -284,9 +286,10 @@ export default function DiffDetail(props: Props) {
                               <FileDiffRow
                                 path={file.path}
                                 originalPath={file.originalPath}
-                                added={file.added}
-                                deleted={file.deleted}
-                                binary={file.binary}
+                                linesAdded={file.linesAdded}
+                                linesDeleted={file.linesDeleted}
+                                oldSize={file.oldSize}
+                                newSize={file.newSize}
                                 loadDiff={() =>
                                   taskDiffCache.loadPatch({
                                     taskId: props.taskId,
@@ -325,9 +328,10 @@ export default function DiffDetail(props: Props) {
 interface FileDiffRowProps {
   path: string;
   originalPath?: string;
-  added: number;
-  deleted: number;
-  binary: boolean;
+  linesAdded: number;
+  linesDeleted: number;
+  oldSize: number;
+  newSize: number;
   loadDiff: () => Promise<string>;
   onLoadError: (err: unknown) => boolean;
   statuses?: { scope: string; label: string }[];
@@ -445,7 +449,12 @@ function FileDiffRow(props: FileDiffRowProps) {
             </For>
           </span>
         </Show>
-        <FileCounts added={props.added} deleted={props.deleted} binary={props.binary} />
+        <FileCounts
+          linesAdded={props.linesAdded}
+          linesDeleted={props.linesDeleted}
+          oldSize={props.oldSize}
+          newSize={props.newSize}
+        />
       </button>
       <Show when={props.expanded}>
         <div class={styles.fileDiff}>
@@ -569,19 +578,35 @@ export function elidePathAtBoundary(
   return measureText(filenameWithEllipsis) <= availableWidth ? filenameWithEllipsis : filename;
 }
 
-function FileCounts(props: { added: number; deleted: number; binary: boolean }) {
+function FileCounts(props: {
+  linesAdded: number;
+  linesDeleted: number;
+  oldSize: number;
+  newSize: number;
+}) {
   return (
-    <Show when={!props.binary} fallback={<span class={styles.binary}>binary</span>}>
-      <span class={styles.fileCounts}>
-        <Show when={props.added > 0}>
-          <span class={styles.added}>+{props.added}</span>
-        </Show>
-        <Show when={props.deleted > 0}>
-          <span class={styles.deleted}>&minus;{props.deleted}</span>
-        </Show>
-      </span>
+    <Show
+      when={props.oldSize >= 0 || props.newSize >= 0}
+      fallback={
+        <span class={styles.fileCounts}>
+          <Show when={props.linesAdded > 0}>
+            <span class={styles.added}>+{props.linesAdded}</span>
+          </Show>
+          <Show when={props.linesDeleted > 0}>
+            <span class={styles.deleted}>&minus;{props.linesDeleted}</span>
+          </Show>
+        </span>
+      }
+    >
+      <span class={styles.sizes}>{sizeLabel(props.oldSize, props.newSize)}</span>
     </Show>
   );
+}
+
+function sizeLabel(oldSize: number, newSize: number): string {
+  if (oldSize === 0) return formatBytes(newSize);
+  if (newSize === 0) return formatBytes(oldSize);
+  return `${formatBytes(oldSize)} → ${formatBytes(newSize)}`;
 }
 
 function gitStatusLabel(code: string): string {

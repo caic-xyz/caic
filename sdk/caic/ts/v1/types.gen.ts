@@ -407,8 +407,8 @@ export interface EventRepositoryCommit {
 /** EventChangeStat summarizes a completed turn's net committed change. */
 export interface EventChangeStat {
   files: number /* int */;
-  added: number /* int */;
-  deleted: number /* int */;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
   binaryFiles: number /* int */;
 }
 
@@ -1022,12 +1022,19 @@ export interface TaskRepo {
   forge?: Forge;
 }
 
-/** DiffFileStat describes changes to a single file. */
+/**
+ * DiffFileStat describes changes to a single file. LinesAdded and LinesDeleted
+ * count text lines. OldSize and NewSize report byte sizes for binary files and
+ * are -1 for text files, with 0 on the side where the path is added or removed.
+ */
 export interface DiffFileStat {
   path: string;
-  added: number /* int */;
-  deleted: number /* int */;
-  binary?: boolean;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
+  /** OldSize is the binary pre-image byte size, or -1 for text files. */
+  oldSize: number /* int64 */;
+  /** NewSize is the binary post-image byte size, or -1 for text files. */
+  newSize: number /* int64 */;
   diff?: string;
 }
 
@@ -1349,9 +1356,12 @@ export interface GitFileStatus {
   originalPath?: string;
   indexStatus?: string;
   worktreeStatus?: string;
-  added: number /* int */;
-  deleted: number /* int */;
-  binary: boolean;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
+  /** OldSize is the binary pre-image byte size, or -1 for text files. */
+  oldSize: number /* int64 */;
+  /** NewSize is the binary post-image byte size, or -1 for text files. */
+  newSize: number /* int64 */;
   diff: string;
 }
 
@@ -1375,9 +1385,12 @@ export interface DiffResp {
 /** DiffIndexFileStat describes a committed file without its patch body. */
 export interface DiffIndexFileStat {
   path: string;
-  added: number /* int */;
-  deleted: number /* int */;
-  binary?: boolean;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
+  /** OldSize is the binary pre-image byte size, or -1 for text files. */
+  oldSize: number /* int64 */;
+  /** NewSize is the binary post-image byte size, or -1 for text files. */
+  newSize: number /* int64 */;
 }
 
 /** DiffIndexCommit describes one commit and its changed-file metadata. */
@@ -1395,9 +1408,12 @@ export interface DiffIndexFileStatus {
   originalPath?: string;
   indexStatus?: string;
   worktreeStatus?: string;
-  added: number /* int */;
-  deleted: number /* int */;
-  binary: boolean;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
+  /** OldSize is the binary pre-image byte size, or -1 for text files. */
+  oldSize: number /* int64 */;
+  /** NewSize is the binary post-image byte size, or -1 for text files. */
+  newSize: number /* int64 */;
 }
 
 /** DiffIndexRepository describes one repository in a diff index. */
@@ -1428,8 +1444,8 @@ export interface GitRepositoryState {
   ahead: number /* int */;
   behind: number /* int */;
   changedFiles: number /* int */;
-  added: number /* int */;
-  deleted: number /* int */;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
   uncommittedFiles: number /* int */;
   conflicts: number /* int */;
   operation?: GitOperation;

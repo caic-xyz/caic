@@ -4205,8 +4205,8 @@ func TestManager(t *testing.T) {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
 			want := agent.DiffStat{
-				{Path: "frontend/src/App.tsx", Added: 10, Deleted: 2},
-				{Path: "frontend/src/App.test.tsx", Added: 5, Deleted: 1},
+				{Path: "frontend/src/App.tsx", LinesAdded: 10, LinesDeleted: 2},
+				{Path: "frontend/src/App.test.tsx", LinesAdded: 5, LinesDeleted: 1},
 			}
 			if got := adopted[0].Task().LiveDiffStat(); !slices.Equal(got, want) {
 				t.Fatalf("LiveDiffStat = %+v, want %+v", got, want)

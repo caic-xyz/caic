@@ -845,7 +845,13 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 		for j, commit := range status.Commits {
 			stat := make([]v1.DiffIndexFileStat, len(commit.Stat))
 			for k, file := range commit.Stat {
-				stat[k] = v1.DiffIndexFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary}
+				stat[k] = v1.DiffIndexFileStat{
+					Path:         file.Path,
+					LinesAdded:   file.LinesAdded,
+					LinesDeleted: file.LinesDeleted,
+					OldSize:      apiconv.BinarySize(file.Binary, file.OldSize),
+					NewSize:      apiconv.BinarySize(file.Binary, file.NewSize),
+				}
 			}
 			commits[j] = v1.DiffIndexCommit{
 				SHA:          commit.SHA,
@@ -862,9 +868,10 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 				OriginalPath:   file.OriginalPath,
 				IndexStatus:    file.IndexStatus,
 				WorktreeStatus: file.WorktreeStatus,
-				Added:          file.Added,
-				Deleted:        file.Deleted,
-				Binary:         file.Binary,
+				LinesAdded:     file.LinesAdded,
+				LinesDeleted:   file.LinesDeleted,
+				OldSize:        apiconv.BinarySize(file.Binary, file.OldSize),
+				NewSize:        apiconv.BinarySize(file.Binary, file.NewSize),
 			}
 		}
 		repositories[i] = v1.DiffIndexRepository{
@@ -948,7 +955,14 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 				if err != nil {
 					return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 				}
-				stat[k] = v1.DiffFileStat{Path: file.Path, Added: file.Added, Deleted: file.Deleted, Binary: file.Binary, Diff: fileDiff}
+				stat[k] = v1.DiffFileStat{
+					Path:         file.Path,
+					LinesAdded:   file.LinesAdded,
+					LinesDeleted: file.LinesDeleted,
+					OldSize:      apiconv.BinarySize(file.Binary, file.OldSize),
+					NewSize:      apiconv.BinarySize(file.Binary, file.NewSize),
+					Diff:         fileDiff,
+				}
 			}
 			commits[j] = v1.GitCommit{
 				SHA:          commit.SHA,
@@ -969,9 +983,10 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 				OriginalPath:   file.OriginalPath,
 				IndexStatus:    file.IndexStatus,
 				WorktreeStatus: file.WorktreeStatus,
-				Added:          file.Added,
-				Deleted:        file.Deleted,
-				Binary:         file.Binary,
+				LinesAdded:     file.LinesAdded,
+				LinesDeleted:   file.LinesDeleted,
+				OldSize:        apiconv.BinarySize(file.Binary, file.OldSize),
+				NewSize:        apiconv.BinarySize(file.Binary, file.NewSize),
 				Diff:           fileDiff,
 			}
 		}
@@ -1021,8 +1036,8 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 		added := 0
 		deleted := 0
 		for _, file := range status.DiffStat {
-			added += file.Added
-			deleted += file.Deleted
+			added += file.LinesAdded
+			deleted += file.LinesDeleted
 		}
 		out[i] = v1.GitRepositoryState{
 			Name:             repos[i].Name,
@@ -1030,8 +1045,8 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 			Ahead:            status.Ahead,
 			Behind:           status.Behind,
 			ChangedFiles:     len(status.DiffStat),
-			Added:            added,
-			Deleted:          deleted,
+			LinesAdded:       added,
+			LinesDeleted:     deleted,
 			UncommittedFiles: len(status.Uncommitted),
 			Conflicts:        conflicts,
 			Operation:        v1.GitOperation(status.Operation),

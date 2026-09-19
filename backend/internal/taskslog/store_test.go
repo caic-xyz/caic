@@ -840,7 +840,7 @@ func TestStore(t *testing.T) {
 				v1Meta,
 				`{"type":"caic_session","session_id":"session-1","model":"model-1","agent_version":"agent-1"}`,
 				mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "owner", ForgeRepo: "repo", ForgePR: 7}),
-				mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 2, Deleted: 1}}, Ts: 2_000_000_000}),
+				mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 2, LinesDeleted: 1}}, Ts: 2_000_000_000}),
 				`{"type":"assistant","text":"conversation"}`,
 				mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Title: "done", CostUSD: 1.25, Duration: 2.5, NumTurns: 3}),
 			}
@@ -1075,7 +1075,7 @@ func TestStore(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
-			withDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "a.go", Added: 3, Deleted: 1}}, Ts: 1})
+			withDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "a.go", LinesAdded: 3, LinesDeleted: 1}}, Ts: 1})
 			// A later empty diff (agent committed, working tree clean) must not clear it.
 			emptyDiff := mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", Ts: 2})
 			writeLogFile(t, dir, "a.jsonl", meta, withDiff, emptyDiff)

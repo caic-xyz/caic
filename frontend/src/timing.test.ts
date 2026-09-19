@@ -114,7 +114,7 @@ describe("deriveTaskTimings", () => {
 
   it("associates a completed snapshot's committed change with its turn", () => {
     const completed = result(2_000, 1);
-    const changeStat = { files: 3, added: 14, deleted: 2, binaryFiles: 1 };
+    const changeStat = { files: 3, linesAdded: 14, linesDeleted: 2, binaryFiles: 1 };
 
     const timings = deriveTaskTimings([
       {

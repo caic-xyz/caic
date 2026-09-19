@@ -53,9 +53,9 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend) {
 				SHA:          diffTestCommit,
 				Subject:      "Add API",
 				AuthoredDate: "2026-09-15",
-				Stat:         []runtime.GitFileStat{{Path: "committed.go", Added: 4, Deleted: 1}},
+				Stat:         []runtime.GitFileStat{{Path: "committed.go", LinesAdded: 4, LinesDeleted: 1}},
 			}},
-			Uncommitted: []runtime.GitFileStatus{{Path: "renamed.go", OriginalPath: "old.go", WorktreeStatus: "R", Added: 2}},
+			Uncommitted: []runtime.GitFileStatus{{Path: "renamed.go", OriginalPath: "old.go", WorktreeStatus: "R", LinesAdded: 2}},
 		},
 	}}
 	s := newTestRouter(t, nil)

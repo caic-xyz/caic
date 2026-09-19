@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for relay.py lifecycle: shutdown semantics, signal escalation, and timing."""
+"""Tests for the frozen v1 relay: shutdown semantics, signal escalation, and timing."""
 
 import json
 import os

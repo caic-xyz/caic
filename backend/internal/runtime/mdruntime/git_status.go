@@ -42,12 +42,12 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`elif [ -f "$git_dir/BISECT_LOG" ]; then operation=bisect; fi && ` +
 		`if [ -n "$operation" ]; then printf '` + gitOperationMarker + `\0%s\0' "$operation"; fi && ` +
 		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then ` + alternateIndexDiffCommand(`git diff "$comparison" --numstat -z -- .`) + `; fi && ` +
-		`printf '` + gitWorktreeStatMarker + `\0' && ` +
-		alternateIndexDiffCommand("git diff HEAD --numstat -z -- .") + ` && ` +
-		`printf '` + gitLogMarker + `\0' && ` +
+		`if [ -n "$comparison" ]; then ` + alternateIndexDiffCommand(`git diff "$comparison" --numstat --stat -z -- .`) + `; fi && ` +
+		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
+		alternateIndexDiffCommand("git diff HEAD --numstat --stat -z -- .") + ` && ` +
+		`printf '\0` + gitLogMarker + `\0' && ` +
 		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
-		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat -z "$comparison..HEAD"; fi`
+		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat --stat -z "$comparison..HEAD"; fi`
 }
 
 func shellQuote(s string) string {
@@ -84,7 +84,7 @@ func gitCommitDiffStatCommand(repo, from, to string) (string, error) {
 	return strings.Join([]string{
 		"cd " + shellQuote(repo),
 		"export GIT_OPTIONAL_LOCKS=0 LC_ALL=C",
-		"git diff --numstat --find-renames=50% " + shellQuote(from) + " " + shellQuote(to) + " --",
+		"git diff --numstat --stat --find-renames=50% " + shellQuote(from) + " " + shellQuote(to) + " --",
 	}, " && "), nil
 }
 
@@ -173,7 +173,13 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 			}
 			file, consumed, err := parseGitNumstatRecord(records[i:])
 			if err != nil {
-				return runtime.RepositoryStatus{}, err
+				// git log --numstat --stat appends a --stat block after each
+				// commit's numstat records; attach its binary sizes by position.
+				if !attachGitStatSizes(commit.Stat, records[i]) {
+					return runtime.RepositoryStatus{}, err
+				}
+				i++
+				continue
 			}
 			commit.Stat = append(commit.Stat, file)
 			i += consumed
@@ -203,12 +209,15 @@ func parseGitWorktreeStats(status *runtime.RepositoryStatus, records []string) (
 	}
 	for _, stat := range stats {
 		for j := range status.Uncommitted {
-			if status.Uncommitted[j].Path == stat.Path {
-				status.Uncommitted[j].Added = stat.Added
-				status.Uncommitted[j].Deleted = stat.Deleted
-				status.Uncommitted[j].Binary = stat.Binary
-				break
+			if status.Uncommitted[j].Path != stat.Path {
+				continue
 			}
+			status.Uncommitted[j].LinesAdded = stat.LinesAdded
+			status.Uncommitted[j].LinesDeleted = stat.LinesDeleted
+			status.Uncommitted[j].Binary = stat.Binary
+			status.Uncommitted[j].OldSize = stat.OldSize
+			status.Uncommitted[j].NewSize = stat.NewSize
+			break
 		}
 	}
 	return consumed, nil
@@ -226,12 +235,65 @@ func parseGitNumstats(records []string, endMarker string) ([]runtime.GitFileStat
 		}
 		stat, consumed, err := parseGitNumstatRecord(records[i:])
 		if err != nil {
-			return nil, 0, err
+			// git diff --numstat --stat appends a --stat block after the numstat
+			// records; consume it and attach binary sizes by position.
+			if !attachGitStatSizes(stats, records[i]) {
+				return nil, 0, err
+			}
+			i++
+			continue
 		}
 		stats = append(stats, stat)
 		i += consumed
 	}
 	return stats, len(records), nil
+}
+
+// attachGitStatSizes parses one git diff --stat block and attaches the binary
+// pre-image and post-image sizes to stats. git lists files in the same order for
+// --stat and --numstat, so sizes are matched by position. It reports whether
+// block was a --stat block rather than a malformed numstat record.
+func attachGitStatSizes(stats []runtime.GitFileStat, block string) bool {
+	if !strings.Contains(block, " | ") {
+		return false
+	}
+	index := 0
+	for line := range strings.SplitSeq(block, "\n") {
+		if !strings.Contains(line, " | ") {
+			continue
+		}
+		if index >= len(stats) {
+			break
+		}
+		if oldSize, newSize, ok := parseGitStatBinarySizes(line); ok {
+			stats[index].Binary = true
+			stats[index].OldSize = oldSize
+			stats[index].NewSize = newSize
+		}
+		index++
+	}
+	return true
+}
+
+// parseGitStatBinarySizes extracts the "Bin <old> -> <new> bytes" sizes from one
+// git diff --stat row, reporting whether the row describes a binary file.
+func parseGitStatBinarySizes(line string) (oldSize, newSize int64, ok bool) {
+	const marker = "| Bin "
+	_, after, ok := strings.Cut(line, marker)
+	if !ok {
+		return 0, 0, false
+	}
+	rest := strings.TrimSuffix(after, " bytes")
+	oldStr, newStr, found := strings.Cut(rest, " -> ")
+	if !found {
+		return 0, 0, false
+	}
+	oldSize, oldErr := strconv.ParseInt(oldStr, 10, 64)
+	newSize, newErr := strconv.ParseInt(newStr, 10, 64)
+	if oldErr != nil || newErr != nil {
+		return 0, 0, false
+	}
+	return oldSize, newSize, true
 }
 
 func parseGitNumstatRecord(records []string) (runtime.GitFileStat, int, error) {
@@ -260,7 +322,7 @@ func parseGitNumstatRecord(records []string) (runtime.GitFileStat, int, error) {
 	if err != nil {
 		return runtime.GitFileStat{}, 0, fmt.Errorf("parse git deletions %q: %w", fields[1], err)
 	}
-	return runtime.GitFileStat{Path: path, Added: added, Deleted: deleted}, consumed, nil
+	return runtime.GitFileStat{Path: path, LinesAdded: added, LinesDeleted: deleted}, consumed, nil
 }
 
 func parseGitStatusRecord(status *runtime.RepositoryStatus, records []string) (int, error) {

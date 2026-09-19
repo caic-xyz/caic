@@ -326,8 +326,8 @@
   color: var(--color-diff-deleted);
 }
 
-.binary {
-  color: var(--color-diff-binary);
+.sizes {
+  color: var(--color-diff-size);
   font-style: italic;
   flex-shrink: 0;
 }

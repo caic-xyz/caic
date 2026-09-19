@@ -32,7 +32,7 @@ function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
     stat.binaryFiles > 0
       ? ` · ${stat.binaryFiles} ${stat.binaryFiles === 1 ? "binary" : "binaries"}`
       : "";
-  return `${files} · +${stat.added} −${stat.deleted}${binary}`;
+  return `${files} · +${stat.linesAdded} −${stat.linesDeleted}${binary}`;
 }
 
 export default function TurnInvocationIcon(props: { turn: TurnTiming; model: string | null }) {
@@ -164,8 +164,8 @@ export function SessionInvocationIcon(props: {
         total.userWaitMs += turn.waitMs ?? 0;
         if (turn.changeStat !== null) {
           total.changeStat.files += turn.changeStat.files;
-          total.changeStat.added += turn.changeStat.added;
-          total.changeStat.deleted += turn.changeStat.deleted;
+          total.changeStat.linesAdded += turn.changeStat.linesAdded;
+          total.changeStat.linesDeleted += turn.changeStat.linesDeleted;
           total.changeStat.binaryFiles += turn.changeStat.binaryFiles;
         }
         return total;
@@ -182,8 +182,8 @@ export function SessionInvocationIcon(props: {
         userWaitMs: 0,
         changeStat: {
           files: 0,
-          added: 0,
-          deleted: 0,
+          linesAdded: 0,
+          linesDeleted: 0,
           binaryFiles: 0,
         },
       },

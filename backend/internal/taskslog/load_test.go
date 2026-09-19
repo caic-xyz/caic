@@ -522,11 +522,11 @@ func TestLoadLogHeader(t *testing.T) {
 				Repos: []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}}}),
 			mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "sess-1", ReportedModel: "claude-sonnet-4-6", AgentVersion: "2.1.0"}),
 			mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "org", ForgeRepo: "repo", ForgePR: 7}),
-			mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", Added: 4, Deleted: 1}}, Ts: 1767225600.5}),
+			mustJSON(t, agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 4, LinesDeleted: 1}}, Ts: 1767225600.5}),
 			claudeAssistant(t, map[string]any{"type": "text", "text": "hello"}),
 			mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", Title: "done", CostUSD: 1.5,
 				Duration: 2.5, NumTurns: 2, InputTokens: 100, OutputTokens: 200,
-				DiffStat: agent.DiffStat{{Path: "main.go", Added: 4, Deleted: 1}}, DiskUsedBytes: new(int64(456))}),
+				DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 4, LinesDeleted: 1}}, DiskUsedBytes: new(int64(456))}),
 		)
 		return path
 	}

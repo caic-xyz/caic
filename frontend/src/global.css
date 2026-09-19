@@ -140,10 +140,10 @@
   --color-widget-border: var(--color-border-medium);
   --color-widget-bg: var(--color-bg-surface);
 
-  /* Added, deleted, and binary file-count text in diff summaries. */
+  /* Added, deleted, and binary size text in diff summaries. */
   --color-diff-added: #22863a;
   --color-diff-deleted: #cb2431;
-  --color-diff-binary: #6a737d;
+  --color-diff-size: #6a737d;
 
   /* Border radii */
   --radius-sm: 4px;

@@ -213,10 +213,10 @@ type EventCommitSnapshot struct {
 
 // EventChangeStat summarizes a completed turn's net committed change.
 type EventChangeStat struct {
-	Files       int `json:"files"`
-	Added       int `json:"added"`
-	Deleted     int `json:"deleted"`
-	BinaryFiles int `json:"binaryFiles"`
+	Files        int `json:"files"`
+	LinesAdded   int `json:"linesAdded"`
+	LinesDeleted int `json:"linesDeleted"`
+	BinaryFiles  int `json:"binaryFiles"`
 }
 
 // EventRepositoryCommit identifies one immutable repository branch tip in a

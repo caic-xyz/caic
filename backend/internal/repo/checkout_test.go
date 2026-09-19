@@ -5,6 +5,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -201,7 +202,7 @@ func TestCheckout(t *testing.T) {
 		if len(sc.fetchIDs) != 0 {
 			t.Errorf("BranchDiffStat called Fetch %d times, want 0", len(sc.fetchIDs))
 		}
-		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
+		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].LinesAdded != 5 || ds[0].LinesDeleted != 1 {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
 		}
 	})
@@ -324,8 +325,8 @@ func TestTaskRuntime(t *testing.T) {
 func TestExtractRepoDS(t *testing.T) {
 	t.Parallel()
 	ds := agent.DiffStat{
-		{Path: "a/b/main.go", Added: 10, Deleted: 3},
-		{Path: "a/b/util.go", Added: 5, Deleted: 0},
+		{Path: "a/b/main.go", LinesAdded: 10, LinesDeleted: 3},
+		{Path: "a/b/util.go", LinesAdded: 5, LinesDeleted: 0},
 	}
 	t.Run("Multi", func(t *testing.T) {
 		t.Parallel()
@@ -489,8 +490,8 @@ func TestParseDiffNumstat(t *testing.T) {
 			t.Fatalf("files = %d, want 2", len(ds))
 		}
 		want := []agent.DiffFileStat{
-			{Path: "src/main.go", Added: 10, Deleted: 3},
-			{Path: "src/util.go", Added: 5, Deleted: 0},
+			{Path: "src/main.go", LinesAdded: 10, LinesDeleted: 3},
+			{Path: "src/util.go", LinesAdded: 5, LinesDeleted: 0},
 		}
 		for i, f := range ds {
 			if f != want[i] {
@@ -501,7 +502,11 @@ func TestParseDiffNumstat(t *testing.T) {
 
 	t.Run("Binary", func(t *testing.T) {
 		t.Parallel()
-		input := "-\t-\timage.png\n"
+		input := strings.Join([]string{
+			"-\t-\timage.png",
+			" image.png | Bin 100 -> 250 bytes",
+			" 1 file changed, 0 insertions(+), 0 deletions(-)",
+		}, "\n") + "\n"
 		ds := ParseDiffNumstat(input)
 		if len(ds) != 1 {
 			t.Fatalf("files = %d, want 1", len(ds))
@@ -512,6 +517,32 @@ func TestParseDiffNumstat(t *testing.T) {
 		}
 		if !f.Binary {
 			t.Error("expected binary = true")
+		}
+		if f.OldSize != 100 || f.NewSize != 250 {
+			t.Errorf("sizes = %d -> %d, want 100 -> 250", f.OldSize, f.NewSize)
+		}
+	})
+
+	t.Run("BinarySizesMatchStatOrder", func(t *testing.T) {
+		t.Parallel()
+		input := strings.Join([]string{
+			"10\t3\tsrc/main.go",
+			"-\t-\tassets/logo.png",
+			"2\t1\tREADME.md",
+			" src/main.go   | 10 +--",
+			" assets/logo.png | Bin 0 -> 4096 bytes",
+			" README.md     |  2 +-",
+			" 3 files changed",
+		}, "\n") + "\n"
+		ds := ParseDiffNumstat(input)
+		if len(ds) != 3 {
+			t.Fatalf("files = %d, want 3", len(ds))
+		}
+		if ds[1].OldSize != 0 || ds[1].NewSize != 4096 {
+			t.Errorf("logo sizes = %d -> %d, want 0 -> 4096", ds[1].OldSize, ds[1].NewSize)
+		}
+		if ds[0].Binary || ds[2].Binary {
+			t.Errorf("text files marked binary: %+v", ds)
 		}
 	})
 
@@ -539,6 +570,27 @@ func TestParseDiffNumstat(t *testing.T) {
 			t.Errorf("files[2].path = %q, want %q", ds[2].Path, "README.md")
 		}
 	})
+}
+
+func BenchmarkParseDiffNumstat(b *testing.B) {
+	var numstat, stat strings.Builder
+	for i := range 100 {
+		path := fmt.Sprintf("src/pkg/file-%03d.go", i)
+		fmt.Fprintf(&numstat, "12\t3\t%s\n", path)
+		fmt.Fprintf(&stat, " %s | 12 +--\n", path)
+	}
+	for i := range 10 {
+		path := fmt.Sprintf("assets/image-%02d.bin", i)
+		fmt.Fprintf(&numstat, "-\t-\t%s\n", path)
+		fmt.Fprintf(&stat, " %s | Bin %d -> %d bytes\n", path, i*1024, (i+1)*1024)
+	}
+	input := numstat.String() + stat.String()
+	b.ReportAllocs()
+	for b.Loop() {
+		if got := ParseDiffNumstat(input); len(got) != 110 {
+			b.Fatalf("files = %d, want 110", len(got))
+		}
+	}
 }
 
 func TestDeleteLocalBranchIfUnmodified(t *testing.T) {
