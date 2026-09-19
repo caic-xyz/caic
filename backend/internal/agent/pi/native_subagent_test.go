@@ -49,10 +49,10 @@ func TestSubagentCompletionStatus(t *testing.T) {
 	}
 }
 
-// TestSubagentPausedRunStopsCountingAsActive pins the recorded detached-run
-// shape: a paused completion settles the card out of the active count, so a
-// workflow that stops to await attention cannot stick an active agent.
-func TestSubagentPausedRunStopsCountingAsActive(t *testing.T) {
+// TestSubagentPausedRunIsNotRunning pins the recorded detached-run shape: a
+// paused completion settles the card out of the running state, so a workflow
+// that stops to await attention cannot leave a running agent behind.
+func TestSubagentPausedRunIsNotRunning(t *testing.T) {
 	t.Parallel()
 	wire := New("", nil).NewWire()
 	feed := func(line string) []agent.NativeSubagent {
@@ -76,13 +76,6 @@ func TestSubagentPausedRunStopsCountingAsActive(t *testing.T) {
 	}
 	if settled[0].ID != "pi:run:test-run" {
 		t.Fatalf("identity = %q, want the run card settled by the wait", settled[0].ID)
-	}
-	var timeline agent.NativeSubagentTimeline
-	for i := range settled {
-		timeline.Apply(&settled[i])
-	}
-	if timeline.ActiveCount() != 0 {
-		t.Fatalf("active = %d, want 0 for a paused run", timeline.ActiveCount())
 	}
 }
 

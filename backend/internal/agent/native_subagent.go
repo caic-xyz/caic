@@ -70,18 +70,6 @@ func (t *NativeSubagentTimeline) Subagents() []NativeSubagent {
 	return out
 }
 
-// ActiveCount returns the number of subagents whose observed lifecycle is
-// running. Unknown status is deliberately not counted as active.
-func (t *NativeSubagentTimeline) ActiveCount() int {
-	var count int
-	for _, id := range t.order {
-		if t.byID[id].Status == NativeSubagentStatusRunning {
-			count++
-		}
-	}
-	return count
-}
-
 func normalizedNativeSubagentStatus(s NativeSubagentStatus) NativeSubagentStatus {
 	switch s {
 	case NativeSubagentStatusRunning, NativeSubagentStatusPaused, NativeSubagentStatusCompleted, NativeSubagentStatusFailed, NativeSubagentStatusInterrupted:

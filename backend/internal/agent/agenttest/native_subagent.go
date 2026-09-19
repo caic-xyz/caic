@@ -216,13 +216,20 @@ func nativeSubagents(messages []agent.Message) []agent.NativeSubagent {
 }
 
 // FoldNativeSubagents folds observations into the canonical card set, exactly
-// like the task-wide native-activity view does.
+// like the task-wide native-activity view does, and counts the cards still
+// running. Unknown, paused, and terminal cards are not active.
 func FoldNativeSubagents(observations []agent.NativeSubagent) (cards []agent.NativeSubagent, active int) {
 	var timeline agent.NativeSubagentTimeline
 	for i := range observations {
 		timeline.Apply(&observations[i])
 	}
-	return timeline.Subagents(), timeline.ActiveCount()
+	cards = timeline.Subagents()
+	for i := range cards {
+		if cards[i].Status == agent.NativeSubagentStatusRunning {
+			active++
+		}
+	}
+	return cards, active
 }
 
 // NativeSubagentContractCard is one card's harness-neutral shape. A boolean

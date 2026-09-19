@@ -27,12 +27,9 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		if len(got) != 1 || got[0].ID != "child-1" || got[0].GroupID != "spawn-1" || got[0].Label != "reviewer" || got[0].Prompt != "Review the change" || got[0].Status != NativeSubagentStatusCompleted || got[0].Result != "No findings." {
 			t.Fatalf("subagents = %#v", got)
 		}
-		if timeline.ActiveCount() != 0 {
-			t.Fatalf("active count = %d, want 0", timeline.ActiveCount())
-		}
 	})
 
-	t.Run("concurrent agents retain grouping and independent active counts", func(t *testing.T) {
+	t.Run("concurrent agents retain grouping and independent lifecycles", func(t *testing.T) {
 		t.Parallel()
 		var timeline NativeSubagentTimeline
 		for _, subagent := range []NativeSubagent{
@@ -48,8 +45,8 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		if len(got) != 3 || got[0].GroupID != "parallel-1" || got[1].Status != NativeSubagentStatusFailed || got[2].GroupID != "parallel-1" {
 			t.Fatalf("subagents = %#v", got)
 		}
-		if timeline.ActiveCount() != 2 {
-			t.Fatalf("active count = %d, want 2", timeline.ActiveCount())
+		if got[0].Status != NativeSubagentStatusRunning || got[2].Status != NativeSubagentStatusRunning {
+			t.Fatalf("subagents = %#v, want child-a and child-c still running", got)
 		}
 	})
 
@@ -85,9 +82,6 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		if len(got) != 1 || got[0].Status != NativeSubagentStatusUnknown || got[0].Prompt != "" || got[0].Result != "" {
 			t.Fatalf("subagents = %#v", got)
 		}
-		if timeline.ActiveCount() != 0 {
-			t.Fatalf("active count = %d, want 0", timeline.ActiveCount())
-		}
 	})
 
 	t.Run("terminal observations are idempotent and cannot reopen", func(t *testing.T) {
@@ -99,8 +93,8 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		timeline.Apply(&NativeSubagent{ID: "child-1", Status: NativeSubagentStatusRunning})
 
 		got := timeline.Subagents()
-		if len(got) != 1 || got[0].Status != NativeSubagentStatusInterrupted || timeline.ActiveCount() != 0 {
-			t.Fatalf("subagents = %#v, active = %d", got, timeline.ActiveCount())
+		if len(got) != 1 || got[0].Status != NativeSubagentStatusInterrupted {
+			t.Fatalf("subagents = %#v, want one interrupted card", got)
 		}
 	})
 
@@ -121,8 +115,8 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		}
 
 		got := timeline.Subagents()
-		if len(got) != 2 || got[0].Status != NativeSubagentStatusCompleted || got[1].Status != NativeSubagentStatusFailed || timeline.ActiveCount() != 0 {
-			t.Fatalf("subagents = %#v, active = %d", got, timeline.ActiveCount())
+		if len(got) != 2 || got[0].Status != NativeSubagentStatusCompleted || got[1].Status != NativeSubagentStatusFailed {
+			t.Fatalf("subagents = %#v, want two terminal cards", got)
 		}
 	})
 }

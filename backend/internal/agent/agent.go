@@ -47,7 +47,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"iter"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -950,19 +949,6 @@ func CleanRelayState(ctx context.Context, container string) error {
 	return cmd.Run()
 }
 
-// HasRelayDir checks whether the caic relay directory exists in the container.
-// Its presence proves caic deployed the relay at some point.
-func HasRelayDir(ctx context.Context, container string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-d", RelayDir) //nolint:gosec // container is not user-controlled
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
-			return false, nil
-		}
-		return false, fmt.Errorf("test relay dir: %w", err)
-	}
-	return true, nil
-}
-
 // RelayStatus checks relay socket + PID liveness and returns diagnostic detail.
 func RelayStatus(ctx context.Context, container string) (alive bool, detail string, err error) {
 	pidPath := RelayDir + "/pid"
@@ -1437,51 +1423,6 @@ func relaySnapshotCommand(ctx context.Context, container string, tailBytes, size
 	return sshCmd(ctx, container, command), 0
 }
 
-// StreamRelay streams NDJSON messages from the relay output.jsonl in the
-// container over SSH, yielding each in order. When tailBytes > 0 and the file
-// is larger, only the last tailBytes are transferred (via tail -c) and the
-// partial first line is skipped; otherwise the whole file is streamed (cat).
-//
-// The SSH stdout is read incrementally, so memory usage is O(1) regardless of
-// file size. If the consumer stops early the ssh process is killed and reaped,
-// so no process leaks per abandoned reader.
-func StreamRelay(ctx context.Context, container string, parser *LogRecordParser, tailBytes, size int64) iter.Seq2[TimedMessage, error] {
-	return func(yield func(TimedMessage, error) bool) {
-		cmd, start := relaySnapshotCommand(ctx, container, tailBytes, size)
-		tailed, boundaryErr := relayTailNeedsLeadingSkip(ctx, container, start)
-		if boundaryErr != nil {
-			yield(TimedMessage{}, boundaryErr)
-			return
-		}
-		pipe, err := cmd.StdoutPipe()
-		if err != nil {
-			yield(TimedMessage{}, fmt.Errorf("relay stdout pipe: %w", err))
-			return
-		}
-		if err := cmd.Start(); err != nil {
-			yield(TimedMessage{}, fmt.Errorf("start relay read: %w", err))
-			return
-		}
-		broke := false
-		for m, e := range yieldMessages(pipe, parser, tailed, container) {
-			if !yield(m, e) {
-				broke = true
-				break
-			}
-		}
-		if broke {
-			// Consumer stopped early: kill the process so Wait returns and the
-			// ssh child is reaped instead of lingering.
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			return
-		}
-		if err := cmd.Wait(); err != nil {
-			yield(TimedMessage{}, fmt.Errorf("relay read: %w", err))
-		}
-	}
-}
-
 const maxNDJSONRecordLen = 32 << 20
 
 // readNDJSONRecord reads one LF-terminated physical record without inventing a
@@ -1506,55 +1447,6 @@ func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
 			return record, io.ErrUnexpectedEOF
 		default:
 			return nil, err
-		}
-	}
-}
-
-// yieldMessages parses NDJSON from r, yielding each parsed message in order.
-//
-// When skipFirst is set the first physical record is dropped — it is a partial
-// record left by tailing or seeking into the middle of a file. Unparseable
-// lines are logged (tagged with src) and skipped. A scanner read error is
-// reported as a terminal (nil, err) pair after the last good message.
-//
-// The reader is consumed lazily one line at a time, so memory usage is O(1)
-// regardless of total size. StreamRelay owns the live SSH relay-output stream;
-// this helper only decodes its NDJSON lines.
-func yieldMessages(r io.Reader, parser *LogRecordParser, skipFirst bool, src string) iter.Seq2[TimedMessage, error] {
-	return func(yield func(TimedMessage, error) bool) {
-		reader := bufio.NewReaderSize(r, 1<<20)
-		first := skipFirst
-		for {
-			encoded, readErr := readNDJSONRecord(reader)
-			if errors.Is(readErr, io.EOF) {
-				return
-			}
-			if readErr != nil {
-				yield(TimedMessage{}, readErr)
-				return
-			}
-			line := encoded[:len(encoded)-1]
-			if first {
-				first = false
-				continue
-			}
-			if len(line) == 0 {
-				continue
-			}
-			record, parseErr := parser.ParseRecord(line)
-			if parseErr != nil {
-				if parser.version != LogVersionV1 || record.Control {
-					yield(TimedMessage{}, fmt.Errorf("parse relay record: %w", parseErr))
-					return
-				}
-				slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
-				continue
-			}
-			for _, m := range record.Messages {
-				if !yield(m, nil) {
-					return
-				}
-			}
 		}
 	}
 }

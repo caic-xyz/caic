@@ -323,18 +323,6 @@ func ClonePendingUserAction(a PendingUserAction) PendingUserAction {
 	return a
 }
 
-// ClonePendingUserActions returns a deep copy of actions.
-func ClonePendingUserActions(actions []PendingUserAction) []PendingUserAction {
-	if len(actions) == 0 {
-		return nil
-	}
-	out := make([]PendingUserAction, len(actions))
-	for i := range actions {
-		out[i] = ClonePendingUserAction(actions[i])
-	}
-	return out
-}
-
 // TodoMessage is emitted when the agent updates its todo list via the
 // TodoWrite tool.
 type TodoMessage struct {
@@ -975,13 +963,6 @@ func (DiscardLogSink) AppendMessage(Message) error { return nil }
 func (DiscardLogSink) Close() error { return nil }
 
 var _ LogSink = DiscardLogSink{}
-
-// AppendRelayNativeRecord appends bytes received from a relay in the exact
-// physical task-log format. Only these records are eligible for relay-offset
-// validation during live task adoption.
-func AppendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
-	return appendNativeRecord(log, version, logRecordAgent, data)
-}
 
 // AppendInputNativeRecord appends bytes caic sent to a harness's stdin in the
 // exact physical task-log format. V3 persists them separately from relay

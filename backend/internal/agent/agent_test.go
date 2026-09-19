@@ -49,6 +49,12 @@ func (s *testLogSink) AppendMessage(m Message) error {
 
 func (*testLogSink) Close() error { return nil }
 
+// appendRelayNativeRecord appends bytes received from a relay in the exact
+// physical task-log format, matching what a live relay writes.
+func appendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
+	return appendNativeRecord(log, version, logRecordAgent, data)
+}
+
 func TestMCPToolResultResponse(t *testing.T) {
 	t.Parallel()
 
@@ -92,7 +98,7 @@ func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return AppendRelayNativeRecord(log, LogVersionV1, data)
+	return appendRelayNativeRecord(log, LogVersionV1, data)
 }
 
 // testParseFn is a minimal Claude-format parser for testing. It avoids
@@ -409,13 +415,13 @@ func TestSession(t *testing.T) {
 	})
 }
 
-func TestAppendRelayNativeRecord(t *testing.T) {
+func TestRelayNativeRecordEncoding(t *testing.T) {
 	t.Parallel()
 
 	t.Run("V2TerminatesWithLF", func(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{Version: LogVersionV2}
-		if err := AppendRelayNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
+		if err := appendRelayNativeRecord(log, LogVersionV2, []byte(`{"type":"response"}`)); err != nil {
 			t.Fatal(err)
 		}
 		got := log.Bytes()
@@ -434,7 +440,7 @@ func TestDirectionalNativeRecords(t *testing.T) {
 	if err := AppendInputNativeRecord(log, LogVersionV3, []byte(`{"method":"set_model"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := AppendRelayNativeRecord(log, LogVersionV3, []byte(`{"type":"message"}`)); err != nil {
+	if err := appendRelayNativeRecord(log, LogVersionV3, []byte(`{"type":"message"}`)); err != nil {
 		t.Fatal(err)
 	}
 	lines := bytes.Split(bytes.TrimSuffix(log.Bytes(), []byte{'\n'}), []byte{'\n'})
@@ -966,67 +972,6 @@ func TestRelayGenerationCommand(t *testing.T) {
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("relay generation command args = %#v, want %#v", cmd.Args, want)
 	}
-}
-
-func TestYieldMessages(t *testing.T) {
-	t.Parallel()
-	lines := []string{
-		`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
-		`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{}},"session_id":"s","uuid":"u"}`,
-		`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hi","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
-	}
-	collect := func(content string, skipFirst bool) ([]Message, error) {
-		var msgs []Message
-		parser, err := NewLogRecordParser(LogVersionV1, testParseFn)
-		if err != nil {
-			return nil, err
-		}
-		for m, e := range yieldMessages(strings.NewReader(content), parser, skipFirst, "ctr") {
-			if e != nil {
-				return msgs, e
-			}
-			msgs = append(msgs, m.Message)
-		}
-		return msgs, nil
-	}
-
-	t.Run("Full", func(t *testing.T) {
-		t.Parallel()
-		msgs, err := collect(strings.Join(lines, "\n")+"\n", false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 3 {
-			t.Errorf("message count = %d, want 3", len(msgs))
-		}
-	})
-
-	t.Run("SkipFirstPartialLine", func(t *testing.T) {
-		t.Parallel()
-		// Simulate a tail that cut the first record mid-line: the partial
-		// fragment must be dropped, the remaining valid records kept.
-		msgs, err := collect(`ssage":{"model"...truncated`+"\n"+strings.Join(lines[1:], "\n")+"\n", true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 2 {
-			t.Errorf("message count = %d, want 2", len(msgs))
-		}
-	})
-
-	t.Run("SkipFirstPriorRecordLF", func(t *testing.T) {
-		t.Parallel()
-		// A tail can start at the LF ending the prior record. Consume that
-		// empty physical record as the partial fragment, retaining every
-		// following complete record.
-		msgs, err := collect("\n"+strings.Join(lines, "\n")+"\n", true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != len(lines) {
-			t.Errorf("message count = %d, want %d", len(msgs), len(lines))
-		}
-	})
 }
 
 func TestLogRecordParser(t *testing.T) {
