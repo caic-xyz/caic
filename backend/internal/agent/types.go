@@ -575,8 +575,8 @@ const (
 )
 
 // NativeSubagent is one harness-owned native subagent lifecycle. ID and
-// GroupID are opaque harness identities, never CAIC task IDs. Optional fields
-// are omitted when the harness does not expose them.
+// GroupID are opaque harness identities. Optional fields are omitted when the
+// harness does not expose them.
 type NativeSubagent struct {
 	ToolUseID string               `json:"tool_use_id,omitempty"`
 	Scope     NativeSubagentScope  `json:"scope,omitempty"`
@@ -589,8 +589,8 @@ type NativeSubagent struct {
 }
 
 // NativeSubagentMessage records an observed native-subagent lifecycle update.
-// It is task-local activity, not a CAIC child task or independently runnable
-// session.
+// It is harness activity within the parent session, not an independently
+// runnable session.
 type NativeSubagentMessage struct {
 	Subagent NativeSubagent `json:"subagent"`
 }

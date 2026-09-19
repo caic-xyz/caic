@@ -1297,9 +1297,9 @@ public struct EventSubagentEnd: Codable {
     public let status: String
 }
 
-/// EventNativeSubagent is one task-local lifecycle update for a harness native
-/// subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
-/// Optional fields remain absent when the harness did not expose them.
+/// EventNativeSubagent is one lifecycle update for a harness native subagent.
+/// ID and GroupID are opaque harness identities. Optional fields remain absent
+/// when the harness did not expose them.
 public struct EventNativeSubagent: Codable {
     public let toolUseID: String?
     public let scope: EventNativeSubagentScope?

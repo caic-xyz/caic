@@ -316,9 +316,9 @@ export interface EventSubagentEnd {
 }
 
 /**
- * EventNativeSubagent is one task-local lifecycle update for a harness native
- * subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
- * Optional fields remain absent when the harness did not expose them.
+ * EventNativeSubagent is one lifecycle update for a harness native subagent.
+ * ID and GroupID are opaque harness identities. Optional fields remain absent
+ * when the harness did not expose them.
  */
 export interface EventNativeSubagent {
   toolUseID?: string;

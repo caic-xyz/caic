@@ -1,4 +1,4 @@
-// Canonical native-agent and batch activity cards, distinct from navigable CAIC child tasks.
+// Canonical native-agent and batch activity cards folded from one task transcript.
 
 import { For, Show } from "solid-js";
 
@@ -35,8 +35,8 @@ export default function NativeSubagents(props: { activities: NativeActivity[]; s
           </span>
         </h3>
         <p class={styles.hint}>
-          Activity inside this task, not separate CAIC tasks. Batch outcomes do not describe
-          individual agents.
+          A batch card covers the entire orchestration of multiple agents. Member agents appear as
+          their own cards only when the harness reports them.
         </p>
         <For each={props.activities}>
           {(s) => (

@@ -236,7 +236,7 @@ EventNativeSubagentScope distinguishes a single agent from aggregate batch evide
 
 ### EventNativeSubagentStatus
 
-EventNativeSubagentStatus is the observed native lifecycle, independent of CAIC task state.
+EventNativeSubagentStatus is the observed native lifecycle reported by a harness.
 
 | Value | Description |
 |-------|-------------|
@@ -1251,9 +1251,9 @@ keep compiling.
 
 ### EventNativeSubagent
 
-EventNativeSubagent is one task-local lifecycle update for a harness native
-subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
-Optional fields remain absent when the harness did not expose them.
+EventNativeSubagent is one lifecycle update for a harness native subagent.
+ID and GroupID are opaque harness identities. Optional fields remain absent
+when the harness did not expose them.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|

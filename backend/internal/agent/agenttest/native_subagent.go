@@ -355,8 +355,7 @@ func NativeSubagentEvidencePrompt(t testing.TB, path string, version agent.LogVe
 }
 
 // nativeIdentityScheme returns the harness-native identity scheme of an ID, for
-// example "claude:task" for "claude:task:agent-1". A CAIC task ID has no such
-// scheme, so the contract also proves the card is not a navigable child task.
+// example "claude:task" for "claude:task:agent-1".
 func nativeIdentityScheme(id string) string {
 	parts := strings.SplitN(id, ":", 3)
 	if len(parts) < 2 {

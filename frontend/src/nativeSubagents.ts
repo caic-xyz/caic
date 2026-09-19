@@ -12,8 +12,8 @@ export function nativeTerminal(status: EventNativeSubagent["status"]): boolean {
   return status === "completed" || status === "failed" || status === "interrupted";
 }
 
-// Missing terminal evidence is not success or interruption. A settled task only
-// makes its last running observation stale; it never invents a child outcome.
+// Missing terminal evidence is not success or interruption. A settled parent only
+// makes its last running observation stale; it never invents a terminal outcome.
 export function nativeActivityStatus(activity: NativeActivity, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   if (activity.status === "unknown") return "Status unknown";

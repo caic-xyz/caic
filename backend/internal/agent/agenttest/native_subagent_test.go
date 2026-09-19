@@ -65,8 +65,7 @@ func TestContract(t *testing.T) {
 			{"codex:thread:0197", "codex:thread"},
 			{"opencode:tool:call_1", "opencode:tool"},
 			{"pi:run:run-1", "pi:run"},
-			// A CAIC task ID carries no harness-native scheme, so it can never
-			// project to a fixture's identity.
+			// An ID without a harness-native scheme projects to itself.
 			{"0123456789ABCDEF", "0123456789ABCDEF"},
 		} {
 			card := Contract([]agent.NativeSubagent{{ID: test.id, Status: agent.NativeSubagentStatusRunning}})

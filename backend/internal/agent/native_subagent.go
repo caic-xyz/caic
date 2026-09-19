@@ -2,9 +2,8 @@
 
 package agent
 
-// NativeSubagentTimeline folds task-local native-subagent observations into
-// one stable card per harness identity. It intentionally has no CAIC task
-// references: native subagents are activity within their parent harness task.
+// NativeSubagentTimeline folds native-subagent observations into one stable
+// card per harness identity.
 type NativeSubagentTimeline struct {
 	byID  map[string]NativeSubagent
 	order []string

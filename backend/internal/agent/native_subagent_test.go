@@ -1,4 +1,4 @@
-// Tests replay of the task-local native-subagent lifecycle contract.
+// Tests replay of the native-subagent lifecycle contract.
 
 package agent
 

@@ -295,7 +295,7 @@ type EventSubagentEnd struct {
 	Status string `json:"status"` // "completed", "failed", "stopped"
 }
 
-// EventNativeSubagentStatus is the observed native lifecycle, independent of CAIC task state.
+// EventNativeSubagentStatus is the observed native lifecycle reported by a harness.
 type EventNativeSubagentStatus string
 
 // Observed lifecycle states; unknown does not imply execution.
@@ -317,9 +317,9 @@ const (
 	EventNativeSubagentScopeBatch EventNativeSubagentScope = "batch"
 )
 
-// EventNativeSubagent is one task-local lifecycle update for a harness native
-// subagent. ID and GroupID are opaque harness identities, never CAIC task IDs.
-// Optional fields remain absent when the harness did not expose them.
+// EventNativeSubagent is one lifecycle update for a harness native subagent.
+// ID and GroupID are opaque harness identities. Optional fields remain absent
+// when the harness did not expose them.
 type EventNativeSubagent struct {
 	ToolUseID string                    `json:"toolUseID,omitempty"`
 	Scope     EventNativeSubagentScope  `json:"scope,omitempty"`
