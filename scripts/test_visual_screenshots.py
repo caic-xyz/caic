@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -86,12 +86,14 @@ class GenerateModeTest(unittest.TestCase):
 
     def test_generate_renders_once_without_the_comparison_precheck(self):
         rendered: list[str] = []
+        stdout = StringIO()
 
         def render(directory):
             directory.mkdir(parents=True)
             rendered.append(str(directory))
 
         with (
+            redirect_stdout(stdout),
             mock.patch.object(visual_screenshots.shutil, "which", return_value=None),
             mock.patch.dict(
                 visual_screenshots.__dict__,
@@ -109,9 +111,13 @@ class GenerateModeTest(unittest.TestCase):
         ):
             self.assertEqual(visual_screenshots.main(), 0)
         self.assertEqual(len(rendered), 1)
+        self.assertIn("frontend screenshots rendered.", stdout.getvalue())
 
     def test_check_still_requires_ffmpeg(self):
+        stderr = StringIO()
+
         with (
+            redirect_stderr(stderr),
             mock.patch.object(visual_screenshots.shutil, "which", return_value=None),
             mock.patch.dict(
                 visual_screenshots.__dict__,
@@ -124,6 +130,7 @@ class GenerateModeTest(unittest.TestCase):
             ),
         ):
             self.assertEqual(visual_screenshots.main(), 1)
+        self.assertIn("ffmpeg is required", stderr.getvalue())
 
 
 class ScreenshotTreeTest(unittest.TestCase):
@@ -254,6 +261,13 @@ class FrontendRenderingTest(unittest.TestCase):
 
 
 class AndroidVisualEnvironmentTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # The fixtures below describe an x86_64 emulator, so pin the host architecture that selects
+        # the expected ABI. Otherwise these tests fail on arm64 hosts such as macOS runners.
+        machine = mock.patch("visual_screenshots.platform.machine", return_value="x86_64")
+        machine.start()
+        self.addCleanup(machine.stop)
+
     def test_parse_properties_ignores_comments_and_whitespace(self) -> None:
         self.assertEqual(
             parse_properties("# comment\n Pkg.Revision = 9 \nPkg.Path=system-images;android-35\n"),
