@@ -113,3 +113,24 @@ Key rules from the official docs:
   framing. The server must read lines from stdin and write JSON lines to stdout.
 - Haiku does not support Tool Search (`tool_reference` blocks). If tool search
   auto-enables (MCP tools >10% context), Haiku cannot discover deferred tools.
+
+## Not Yet Exposed
+
+`control_request` subtypes Claude Code accepts that caic does not send. caic
+compacts with a `/compact` user message and resumes with the `--resume` flag
+instead.
+
+- Interrupt the running turn — `interrupt`
+- Switch model mid-session — `set_model`
+- Switch permission mode — `set_permission_mode`
+- Cap thinking tokens — `set_max_thinking_tokens`
+- Report context-window usage — `get_context_usage` (`raw_max_tokens`)
+- Report session cost — `get_session_cost`
+- Report account usage — `get_usage`
+- List models — `list_models`; this is the only per-model discovery the CLI
+offers, since caic has no Claude `ModelFetcher` and its inventory is the
+hardcoded alias list in `claude.go`
+- Rewind files — `rewind_files`
+- Cancel a queued async message — `cancel_async_message`
+
+caic answers the CLI's own `can_use_tool` requests and sends no other subtype.

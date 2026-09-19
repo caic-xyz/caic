@@ -46,7 +46,6 @@ func New(cacheDir string, envVars []string) *Backend {
 		QuotaProviderID: agent.QuotaProviderCodex,
 		Images:          true,
 		Compact:         true,
-		ContextWindow:   200_000,
 	}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Codex, envVars))
 	return b

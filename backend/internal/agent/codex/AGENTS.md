@@ -22,7 +22,6 @@ Codex CLI runs in **app-server mode** — a JSON-RPC 2.0 NDJSON protocol over st
 
 - `codex.go` — Backend lifecycle, handshake, `wireFormat` state machine
 - `parse.go` — Stateless parser: JSON-RPC notifications → `agent.Message`
-- `docs/MORE.md` — Future enhancement opportunities (interrupt, steer, compact, review, etc.)
 
 Wire types are provided by `github.com/maruel/genai/providers/codex` (imported as `cx`).
 
@@ -119,3 +118,18 @@ explicit applied-policy or duration field.
 - **Widget plugin disabled**: TODO comment — needs fixing for Codex.
 - **Opt-out capabilities**: handshake disables verbose notifications caic doesn't need
   (e.g., `turn/diff/updated`, `turn/plan/updated`).
+
+## Not Yet Exposed
+
+JSON-RPC requests the app-server accepts that caic does not send. caic already
+resumes with `thread/resume` and compacts with `thread/compact/start`.
+
+- Interrupt the running turn — `turn/interrupt`
+- Steer a running turn — `turn/steer`
+- Roll back turns — `thread/rollback`
+- Switch the model for a turn — `model` on `turn/start`; caic selects the model
+  once at `thread/start`
+
+Codex can also fork a thread and run a code review, but the pinned `genai` DTOs
+model neither request — `ThreadStartParams` carries no fork field — so extending
+the provider package comes before caic can send them.

@@ -29,14 +29,17 @@ type Backend struct {
 var _ agent.Backend = (*Backend)(nil)
 
 // wireFormat holds per-session Claude Code parsing state: widget tracking,
-// reasoning-token accounting, and native-subagent correlation. A fresh instance
-// is created for every session so this state can't leak between concurrent
-// Claude Code tasks sharing the registered Backend singleton.
+// reasoning-token accounting, native-subagent correlation, and the active model
+// reported by the assistant so result records can resolve the model's context
+// window. A fresh instance is created for every session so this state can't
+// leak between concurrent Claude Code tasks sharing the registered Backend
+// singleton.
 type wireFormat struct {
 	nativeSubagents              nativeSubagents
 	widgetTracker                *WidgetTracker
 	pendingReasoningOutputTokens int
 	pendingReasoningEstimate     int
+	reportedModel                string
 }
 
 var _ agent.WireFormat = (*wireFormat)(nil)
@@ -67,9 +70,19 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	msgs = append(msgs, native...)
 	for _, msg := range msgs {
 		switch m := msg.(type) {
+		case *agent.InitMessage:
+			if m.ReportedModel != "" {
+				w.reportedModel = m.ReportedModel
+			}
 		case *agent.UsageMessage:
+			if m.ReportedModel != "" {
+				w.reportedModel = m.ReportedModel
+			}
 			w.pendingReasoningOutputTokens += m.Usage.ReasoningOutputTokens
 		case *agent.ResultMessage:
+			// Claude Code reports the active model's context window only in the
+			// turn result, so this is the earliest point caic can learn it.
+			m.ContextWindow = resultContextWindow(line, w.reportedModel)
 			// Claude result records can omit output_tokens_details even when
 			// preceding events reported thinking tokens. Prefer actual
 			// message_delta usage over system/thinking_tokens estimates.
@@ -84,6 +97,27 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 	return msgs, nil
+}
+
+// resultContextWindow returns the context window a Claude result record reports
+// for model, or 0 when the record carries none. A record that names a single
+// model is unambiguous even when the session model is still unknown.
+func resultContextWindow(line []byte, model string) int {
+	var w claudecode.OutputResultMsg
+	if json.Unmarshal(line, &w) != nil {
+		return 0
+	}
+	if e, ok := w.ModelUsage[model]; ok && e.ContextWindow > 0 {
+		return int(e.ContextWindow)
+	}
+	if len(w.ModelUsage) == 1 {
+		for _, e := range w.ModelUsage {
+			if e.ContextWindow > 0 {
+				return int(e.ContextWindow)
+			}
+		}
+	}
+	return 0
 }
 
 // WritePrompt writes a single user message in Claude Code's stdin format.
@@ -143,7 +177,6 @@ func New() *Backend {
 		QuotaProviderID: agent.QuotaProviderClaudeCode,
 		Images:          true,
 		Compact:         true,
-		ContextWindow:   180_000,
 	}
 	b.SetModelInventory(claudeModelInventory())
 	return b

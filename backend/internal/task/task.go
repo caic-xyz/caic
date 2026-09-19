@@ -1227,6 +1227,9 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 		case *agent.ResultMessage:
 			t.planDismissed = false
 			cleanTurnComplete = !m.IsError
+			if m.ContextWindow > 0 {
+				t.reportedContextWindow = m.ContextWindow
+			}
 			if len(m.DiffStat) > 0 {
 				t.diffCreated = true
 			}
@@ -2003,6 +2006,9 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
 		t.liveNumTurns += rm.NumTurns
 		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
+		if rm.ContextWindow > 0 {
+			t.reportedContextWindow = rm.ContextWindow
+		}
 		t.planDismissed = false
 		// Transition Running→Waiting/Asking/HasPlan. Also handle
 		// Running/Waiting because watchSession may have already set

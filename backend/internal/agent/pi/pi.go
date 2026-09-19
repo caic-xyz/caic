@@ -55,10 +55,9 @@ var (
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{}
 	b.Base = agent.Base{
-		HarnessID:     harness.Pi,
-		Images:        true,
-		Compact:       true,
-		ContextWindow: 200_000,
+		HarnessID: harness.Pi,
+		Images:    true,
+		Compact:   true,
 	}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Pi, envVars))
 	return b
@@ -992,6 +991,7 @@ func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 
 func modelsForPiModels(models []pi.Model) []agent.Model {
 	efforts := make(map[string][]string, len(models))
+	windows := make(map[string]int, len(models))
 	ids := make([]string, 0, len(models))
 	for i := range models {
 		id := models[i].GetID()
@@ -1000,12 +1000,15 @@ func modelsForPiModels(models []pi.Model) []agent.Model {
 		}
 		ids = append(ids, id)
 		efforts[id] = effortOptions(&models[i])
+		if cw := models[i].ContextWindow; cw > 0 {
+			windows[id] = int(cw)
+		}
 	}
 
 	ids = agent.SortModels(ids)
 	result := make([]agent.Model, 0, len(ids))
 	for _, id := range ids {
-		result = append(result, agent.Model{ID: id, EffortOptions: efforts[id]})
+		result = append(result, agent.Model{ID: id, EffortOptions: efforts[id], ContextWindow: windows[id]})
 	}
 	return result
 }

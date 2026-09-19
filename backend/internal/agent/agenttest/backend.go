@@ -22,7 +22,6 @@ type FakeBackend struct {
 	Inventory       agent.ModelInventory
 	Images          bool
 	Compact         bool
-	ContextLimit    int
 	// WireFactory, when set, backs NewWire. Set it (e.g. to a harness's real
 	// parser) for tests that replay stored wire output; the default is a no-op
 	// wire, since agenttest cannot import a specific harness without a cycle.
@@ -77,15 +76,6 @@ func (f *FakeBackend) NewWire() agent.WireFormat {
 		return f.WireFactory()
 	}
 	return noopWire{}
-}
-
-// ContextWindowLimit implements agent.Backend, returning ContextLimit or a
-// default of 180000 when unset.
-func (f *FakeBackend) ContextWindowLimit(string) int {
-	if f.ContextLimit == 0 {
-		return 180_000
-	}
-	return f.ContextLimit
 }
 
 // noopWire is an agent.WireFormat that writes nothing and parses to no messages.

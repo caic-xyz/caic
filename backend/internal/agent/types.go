@@ -478,16 +478,20 @@ func (m *TurnCommitSnapshotMessage) Type() string { return messageTypeTurnCommit
 
 // ResultMessage is the terminal message for a query.
 type ResultMessage struct {
-	MessageType   string   `json:"type"`
-	Subtype       string   `json:"subtype"`
-	IsError       bool     `json:"is_error"`
-	DurationMs    int64    `json:"duration_ms"`
-	DurationAPIMs int64    `json:"duration_api_ms"`
-	NumTurns      int      `json:"num_turns"`
-	Result        string   `json:"result"`
-	SessionID     string   `json:"session_id"`
-	TotalCostUSD  float64  `json:"total_cost_usd"`
-	Usage         Usage    `json:"usage"`
+	MessageType   string  `json:"type"`
+	Subtype       string  `json:"subtype"`
+	IsError       bool    `json:"is_error"`
+	DurationMs    int64   `json:"duration_ms"`
+	DurationAPIMs int64   `json:"duration_api_ms"`
+	NumTurns      int     `json:"num_turns"`
+	Result        string  `json:"result"`
+	SessionID     string  `json:"session_id"`
+	TotalCostUSD  float64 `json:"total_cost_usd"`
+	Usage         Usage   `json:"usage"`
+	// ContextWindow is the active model's context window size in tokens. It is
+	// set by harnesses that report the window with the turn result (Claude Code)
+	// and is 0 when they do not.
+	ContextWindow int      `json:"context_window,omitempty"`
 	UUID          string   `json:"uuid"`
 	DiffStat      DiffStat `json:"diff_stat,omitzero"` // Set by caic after running container diff.
 }

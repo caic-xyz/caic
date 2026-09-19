@@ -562,6 +562,7 @@ export default function TaskCard(props: TaskCardProps) {
                   text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
                 >
                   <span
+                    data-testid="task-card-tokens"
                     style={{
                       color: tokenColor(
                         props.activeInputTokens + props.activeCacheReadTokens,
@@ -569,8 +570,10 @@ export default function TaskCard(props: TaskCardProps) {
                       ),
                     }}
                   >
-                    {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}/
-                    {formatTokens(props.contextWindowLimit)}
+                    {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}
+                    <Show when={props.contextWindowLimit > 0}>
+                      /{formatTokens(props.contextWindowLimit)}
+                    </Show>
                   </span>
                 </Tooltip>
               </Show>

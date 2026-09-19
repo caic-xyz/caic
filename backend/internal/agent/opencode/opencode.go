@@ -39,10 +39,9 @@ var (
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{}
 	b.Base = agent.Base{
-		HarnessID:     harness.OpenCode,
-		Images:        true,
-		Compact:       true,
-		ContextWindow: 200_000,
+		HarnessID: harness.OpenCode,
+		Images:    true,
+		Compact:   true,
 	}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.OpenCode, envVars))
 	return b
@@ -736,14 +735,22 @@ func fetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 	return models, nil
 }
 
+// modelMetadata is the metadata "opencode models --verbose" prints beneath a
+// model ID.
+type modelMetadata struct {
+	Variants map[string]json.RawMessage `json:"variants"`
+	Limit    modelLimit                 `json:"limit"`
+}
+
+// modelLimit holds the token limits OpenCode publishes for a model.
+type modelLimit struct {
+	Context int `json:"context"`
+}
+
 // parseModels reads the model ID and pretty-printed metadata pairs
 // emitted by "opencode models --verbose". OpenCode exposes model variants as
 // its ACP effort options.
 func parseModels(out []byte) ([]agent.Model, error) {
-	type modelInfo struct {
-		Variants map[string]json.RawMessage `json:"variants"`
-	}
-
 	lines := strings.Split(string(out), "\n")
 	models := make([]agent.Model, 0)
 	for line := 0; line < len(lines); line++ {
@@ -754,7 +761,7 @@ func parseModels(out []byte) ([]agent.Model, error) {
 		}
 
 		var data []byte
-		var info modelInfo
+		var info modelMetadata
 		for line++; line < len(lines); line++ {
 			data = append(data, lines[line]...)
 			data = append(data, '\n')
@@ -775,7 +782,7 @@ func parseModels(out []byte) ([]agent.Model, error) {
 		for effort := range info.Variants {
 			efforts = append(efforts, effort)
 		}
-		models = append(models, agent.Model{ID: model, EffortOptions: efforts})
+		models = append(models, agent.Model{ID: model, EffortOptions: efforts, ContextWindow: info.Limit.Context})
 	}
 	if len(models) == 0 {
 		return nil, errors.New("no model metadata")

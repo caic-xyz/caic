@@ -102,6 +102,27 @@ func TestTask(t *testing.T) {
 			t.Errorf("CacheExpiresAt = %s, want unknown", got)
 		}
 	})
+	t.Run("ResultContextWindowUpdatesSnapshot", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{Result: "done", ContextWindow: 200_000}}, false)
+		if got := tk.Snapshot().ContextWindowLimit; got != 200_000 {
+			t.Fatalf("ContextWindowLimit = %d, want 200000", got)
+		}
+		// A later result that reports no window must not erase the known one.
+		tk.addParsedMessage(agent.TimedMessage{Message: &agent.ResultMessage{Result: "again"}}, false)
+		if got := tk.Snapshot().ContextWindowLimit; got != 200_000 {
+			t.Fatalf("ContextWindowLimit after unknown result = %d, want 200000", got)
+		}
+	})
+	t.Run("SeededResultContextWindowUpdatesSnapshot", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		tk.SeedTimeline([]agent.Message{&agent.ResultMessage{Result: "done", ContextWindow: 180_000}})
+		if got := tk.Snapshot().ContextWindowLimit; got != 180_000 {
+			t.Fatalf("ContextWindowLimit = %d, want 180000", got)
+		}
+	})
 	t.Run("BackwardMessages", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

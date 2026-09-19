@@ -119,8 +119,8 @@ func NewReplayBackend(newWire func() agent.WireFormat, recordings ...ReplayRecor
 		seen[rec.Prompt] = struct{}{}
 	}
 	b := &ReplayBackend{newWire: newWire, recordings: recordings}
-	b.Base = agent.Base{HarnessID: recordings[0].Harness, ContextWindow: 200_000}
-	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "replay-model"}}})
+	b.Base = agent.Base{HarnessID: recordings[0].Harness}
+	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "replay-model", ContextWindow: 200_000}}})
 	return b, nil
 }
 

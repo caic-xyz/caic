@@ -189,10 +189,27 @@ short writes yield the first expiry of 300 seconds. A cache write without
 - **Thinking support**: reasoning via `thinking_delta` events; configurable via
   `set_thinking_level` command.
 - **Compaction**: `compact` command available for context management.
-- **Steering**: `steer` and `follow_up` commands for mid-run and post-run messages.
+- **Steering**: `steer` and `follow_up` exist in the protocol but caic does not
+  send them (see Not Yet Exposed).
 - **Duration tracking**: `piWireFormat` records `startTime` when `WritePrompt`
   is called; `handleAgentEnd` computes duration from `startTime` and emits it in
   the final `ResultMessage`. Pi does not emit `message_update:done` — the stream
   ends with `message_end → turn_end → agent_end`.
 - **Turn counting**: `handleTurnEnd` increments `numTurns`; `handleAgentEnd`
   reads and resets it for each `ResultMessage`.
+
+## Not Yet Exposed
+
+RPC commands caic does not send. caic already uses `set_model`,
+`set_thinking_level`, `get_available_models`, `compact`, and `get_state`; the
+provider package defines the full command set.
+
+- Abort the running turn — `abort`, plus `abort_retry` and `abort_bash` for a
+  pending retry or shell command
+- Steer a run — `steer`, `follow_up`, with `set_steering_mode` and
+  `set_follow_up_mode`
+- Fork or clone the session — `fork`, `clone`, `get_fork_messages`
+- Cycle the model or thinking level — `cycle_model`, `cycle_thinking_level`
+- Move between sessions — `new_session`, `switch_session`, `get_tree`,
+  `get_entries`
+- Toggle automation — `set_auto_compaction`, `set_auto_retry`

@@ -34,8 +34,8 @@ func NewFakeBackend() *FakeBackend {
 		QuotaProviderID: agent.QuotaProviderClaudeCode,
 		Images:          true,
 		Compact:         true,
-		ContextWindow:   180_000}
-	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "fake-model"}}})
+	}
+	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "fake-model", ContextWindow: 180_000}}})
 	return b
 }
 

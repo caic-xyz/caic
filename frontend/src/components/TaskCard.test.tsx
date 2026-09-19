@@ -174,6 +174,18 @@ describe("TaskCard", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it("omits the token denominator until the context window is known", () => {
+    const { unmount } = render(() => (
+      <TaskCard {...props({ activeInputTokens: 12_000, contextWindowLimit: 200_000 })} />
+    ));
+    expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("12kt/200kt");
+    unmount();
+
+    render(() => <TaskCard {...props({ activeInputTokens: 12_000, contextWindowLimit: 0 })} />);
+    expect(screen.getByTestId("task-card-tokens")).toHaveTextContent("12kt");
+    expect(screen.getByTestId("task-card-tokens")).not.toHaveTextContent("/");
+  });
+
   it("hides quota recovery when the task has no repository", () => {
     render(() => (
       <TaskCard

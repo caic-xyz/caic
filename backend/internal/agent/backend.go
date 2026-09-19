@@ -60,10 +60,6 @@ type Backend interface {
 	// NewWire creates a fresh WireFormat for this backend. Each call returns
 	// independent state; suitable for use outside the normal relay transport.
 	NewWire() WireFormat
-
-	// ContextWindowLimit returns the API prompt token limit for the given model.
-	// The model parameter is the model name reported by the agent at runtime.
-	ContextWindowLimit(model string) int
 }
 
 // Model describes the configuration choices supported by one model.
@@ -72,6 +68,10 @@ type Backend interface {
 type Model struct {
 	ID            string   `json:"id"`
 	EffortOptions []string `json:"effortOptions"`
+	// ContextWindow is the model's context window size in tokens. It is 0 when
+	// the harness does not publish one; the runtime usage the agent reports then
+	// becomes the only source of the limit.
+	ContextWindow int `json:"contextWindow,omitempty"`
 }
 
 // ModelInventory is the immutable model and configuration data discovered for
@@ -87,6 +87,20 @@ func (i ModelInventory) IDs() []string {
 		ids = append(ids, model.ID)
 	}
 	return ids
+}
+
+// ContextWindowLimit returns the context window size in tokens published for
+// model, or 0 when the inventory has no entry for it. Models are keyed by the
+// same identifier the harness reports at runtime, so no normalization is
+// applied. Callers fall back to the requested model while the agent has not
+// reported one yet.
+func (i ModelInventory) ContextWindowLimit(model string) int {
+	for _, m := range i.Models {
+		if m.ID == model {
+			return m.ContextWindow
+		}
+	}
+	return 0
 }
 
 func (i ModelInventory) valid() bool {
@@ -151,7 +165,6 @@ type Base struct {
 	HarnessID       harness.Name
 	QuotaProviderID QuotaProvider
 	Images          bool
-	ContextWindow   int
 	Compact         bool
 
 	mu        sync.Mutex
@@ -187,6 +200,3 @@ func (b *Base) SupportsImages() bool { return b.Images }
 
 // SupportsCompact implements Backend.
 func (b *Base) SupportsCompact() bool { return b.Compact }
-
-// ContextWindowLimit implements Backend.
-func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }

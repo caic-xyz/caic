@@ -102,11 +102,8 @@ var _ agent.Backend = (*SmokeBackend)(nil)
 // NewSmokeBackend creates the deterministic relay-backed smoke agent for h.
 func NewSmokeBackend(h harness.Name) *SmokeBackend {
 	b := &SmokeBackend{}
-	b.Base = agent.Base{
-		HarnessID:     h,
-		ContextWindow: 200_000,
-	}
-	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model"}}})
+	b.Base = agent.Base{HarnessID: h}
+	b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "smoke-model", ContextWindow: 200_000}}})
 	return b
 }
 

@@ -124,3 +124,16 @@ cache-duration bucket, applied retention policy, or TTL. Therefore caic must
 leave `agent.Usage.CacheTTLSeconds` unknown for OpenCode, even when the selected
 adapter normally emits a five-minute marker; a gateway or compatible endpoint
 may alter or reject that request.
+
+## Not Yet Exposed
+
+ACP methods caic does not send. caic loads a session with `session/load` for
+reconnect, and sets the model only during the handshake.
+
+- Cancel the running turn — `session/cancel`
+- Fork a session — `session/fork`
+- Resume a session — `session/resume`
+- Switch mode — `session/set_mode`
+- Switch model mid-session — `session/set_model`, which caic sends only in the
+  handshake
+- List or close sessions — `session/list`, `session/close`

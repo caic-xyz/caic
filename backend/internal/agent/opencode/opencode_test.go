@@ -30,7 +30,7 @@ func TestParseModels(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
 
-		models, err := parseModels([]byte("\x1b[92mModels cache refreshed\x1b[0m\nopencode/alpha\n{\n  \"variants\": {\n    \"high\": {},\n    \"low\": {}\n  }\n}\nanthropic/bravo\n{\"variants\": {}}\n"))
+		models, err := parseModels([]byte("\x1b[92mModels cache refreshed\x1b[0m\nopencode/alpha\n{\n  \"variants\": {\n    \"high\": {},\n    \"low\": {}\n  },\n  \"limit\": {\n    \"context\": 200000,\n    \"output\": 32000\n  }\n}\nanthropic/bravo\n{\"variants\": {}}\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -39,6 +39,12 @@ func TestParseModels(t *testing.T) {
 		}
 		if got, want := models[1].EffortOptions, []string{"high", "low"}; !slices.Equal(got, want) {
 			t.Fatalf("effort options = %v, want %v", got, want)
+		}
+		if got, want := models[1].ContextWindow, 200_000; got != want {
+			t.Fatalf("context window = %d, want %d", got, want)
+		}
+		if got := models[0].ContextWindow; got != 0 {
+			t.Fatalf("unpublished context window = %d, want 0", got)
 		}
 	})
 

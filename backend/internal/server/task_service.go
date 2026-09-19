@@ -213,7 +213,7 @@ func taskDTOFromSnapshot(ctx context.Context, entry *taskmgr.Entry, snap *task.S
 		if primary := t.Primary(); primary != nil {
 			if _, ok := taskMgr.Checkouts.Checkout(primary.Name); ok {
 				if b := taskMgr.Backends[t.Harness]; b != nil {
-					contextWindowLimit = b.ContextWindowLimit(model)
+					contextWindowLimit = b.ModelInventory().ContextWindowLimit(model)
 				}
 			}
 		}

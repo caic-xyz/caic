@@ -2424,7 +2424,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_reconnects_before_answering_restored_ask", func(t *testing.T) {
 			t.Parallel()
-			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
+			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true}}
 			t.Cleanup(backend.stop)
 			cacheDir := t.TempDir()
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -4084,7 +4084,7 @@ func TestManager(t *testing.T) {
 		t.Run("aborts_before_registration_or_reconnect_on_malformed_control", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude, Images: true, ContextLimit: 200_000}}
+			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Claude, Images: true}}
 			t.Cleanup(backend.stop)
 			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"md-agent-semantic-error\x00caic.id":      taskID.String(),
@@ -4453,7 +4453,7 @@ func TestManager(t *testing.T) {
 			logDir := filepath.Join(cacheDir, "tasks")
 			store := taskslog.NewStore(testLogger(), logDir)
 			backend := &reconnectInputBackend{
-				FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000},
+				FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true},
 				attached:    make(chan struct{}, 1),
 			}
 			fake := &runtimetest.FakeInfo{Meta: map[string]string{
@@ -4670,7 +4670,7 @@ func TestManager(t *testing.T) {
 		t.Run("missing_local_log_refuses_live_reconnect", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true, ContextLimit: 200_000}}
+			backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: "reconnect", Images: true}}
 			t.Cleanup(backend.stop)
 			fake := &runtimetest.FakeInfo{Meta: map[string]string{
 				"ask-tail\x00caic.id":      taskID.String(),

@@ -117,9 +117,10 @@ func TestModelsForPiModels(t *testing.T) {
 		{ID: "non-reasoning", Provider: "test"},
 		{ID: "defaults", Provider: "test", Reasoning: true},
 		{
-			ID:        "mapped",
-			Provider:  "test",
-			Reasoning: true,
+			ID:            "mapped",
+			Provider:      "test",
+			Reasoning:     true,
+			ContextWindow: 1_048_576,
 			ThinkingLevelMap: map[genaipi.ThinkingLevel]string{
 				genaipi.ThinkingOff:     "",
 				genaipi.ThinkingMinimal: "minimal",
@@ -141,6 +142,12 @@ func TestModelsForPiModels(t *testing.T) {
 	}
 	if got, want := models[2].EffortOptions, []string{"off"}; !slices.Equal(got, want) {
 		t.Fatalf("non-reasoning effort options = %v, want %v", got, want)
+	}
+	if got, want := models[1].ContextWindow, 1_048_576; got != want {
+		t.Fatalf("mapped context window = %d, want %d", got, want)
+	}
+	if got := models[0].ContextWindow; got != 0 {
+		t.Fatalf("unpublished context window = %d, want 0", got)
 	}
 }
 

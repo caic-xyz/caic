@@ -1,4 +1,4 @@
-// Tests for the Backend interface's default Base implementation.
+// Tests for the Backend interface's Base defaults and model inventory lookups.
 
 package agent
 
@@ -54,4 +54,22 @@ func TestBase(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+func TestModelInventoryContextWindowLimit(t *testing.T) {
+	t.Parallel()
+
+	inv := ModelInventory{Models: []Model{
+		{ID: "known", ContextWindow: 200_000},
+		{ID: "unknown"},
+	}}
+	if got := inv.ContextWindowLimit("known"); got != 200_000 {
+		t.Errorf("ContextWindowLimit(known) = %d, want 200000", got)
+	}
+	if got := inv.ContextWindowLimit("unknown"); got != 0 {
+		t.Errorf("ContextWindowLimit(unknown) = %d, want 0", got)
+	}
+	if got := inv.ContextWindowLimit("absent"); got != 0 {
+		t.Errorf("ContextWindowLimit(absent) = %d, want 0", got)
+	}
 }

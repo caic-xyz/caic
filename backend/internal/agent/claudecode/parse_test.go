@@ -793,6 +793,65 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("ReasoningOutputTokens = %d, want 150", m.Usage.ReasoningOutputTokens)
 		}
 	})
+	t.Run("ResultReportsModelContextWindow", func(t *testing.T) {
+		t.Parallel()
+		const initLine = `{"type":"system","subtype":"init","cwd":"/home/user","session_id":"s1","model":"claude-sonnet-4-6","claude_code_version":"2.1.34","uuid":"u1"}`
+		result := func(modelUsage string) string {
+			if modelUsage != "" {
+				modelUsage = `,"modelUsage":` + modelUsage
+			}
+			return `{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"num_turns":1,"result":"done","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":1}` + modelUsage + `}`
+		}
+		tests := []struct {
+			name string
+			line string
+			want int
+		}{
+			{
+				name: "session model wins over subagent entry",
+				line: result(`{"claude-haiku-4-5-20251001":{"contextWindow":200000},"claude-sonnet-4-6":{"contextWindow":180000}}`),
+				want: 180_000,
+			},
+			{
+				name: "single unmatched entry resolves",
+				line: result(`{"claude-haiku-4-5-20251001":{"contextWindow":200000}}`),
+				want: 200_000,
+			},
+			{
+				name: "ambiguous entries stay unknown",
+				line: result(`{"claude-haiku-4-5-20251001":{"contextWindow":200000},"claude-opus-4-6":{"contextWindow":200000}}`),
+				want: 0,
+			},
+			{
+				name: "absent model usage stays unknown",
+				line: result(""),
+				want: 0,
+			},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				w := newWireFormat()
+				if _, err := w.ParseMessage([]byte(initLine)); err != nil {
+					t.Fatal(err)
+				}
+				msgs, err := w.ParseMessage([]byte(tc.line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					t.Fatalf("got %d messages, want 1", len(msgs))
+				}
+				m, ok := msgs[0].(*agent.ResultMessage)
+				if !ok {
+					t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
+				}
+				if m.ContextWindow != tc.want {
+					t.Errorf("ContextWindow = %d, want %d", m.ContextWindow, tc.want)
+				}
+			})
+		}
+	})
 	t.Run("StreamEventNoiseDropped", func(t *testing.T) {
 		t.Parallel()
 		noiseLines := []string{
