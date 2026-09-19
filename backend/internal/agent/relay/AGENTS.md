@@ -11,9 +11,9 @@ deployed for every log version except v1. Fix relay behavior here and cover it i
 `test_relay_v2.py`.
 
 `relay.py` is a frozen historical artifact: the original v1 relay. It stays in
-the tree only so v1 log versions remain deployable and replayable. Do not edit it
-and do not port fixes into it. `test_relay.py` exists solely to keep the frozen
-v1 relay working and must not be extended with new behavior.
+the tree only so v1 log versions remain deployable and replayable. Do not edit
+it, do not port fixes into it, and do not test it: it no longer changes, and
+`test_relay_v2.py` covers the maintained relay.
 
 ## Deployment
 

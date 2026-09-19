@@ -73,6 +73,10 @@ _DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
 # SIGTERM/SIGKILL. Overridable via --shutdown-grace.
 _DEFAULT_SHUTDOWN_GRACE = 10
 
+# Pending-connection limit for the relay socket. The readiness probe and the
+# first attach connect back to back, so the accept queue must tolerate both.
+_LISTEN_BACKLOG = 8
+
 
 def _write_claude_code_caic_mcp_config() -> None:
     """Write Claude Code's local CAIC MCP configuration atomically."""
@@ -840,10 +844,14 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
     env["EDITOR"] = "true"
 
     # Listen before spawning the subprocess so the first client can queue its
-    # connection even if the subprocess fails during startup.
+    # connection even if the subprocess fails during startup. The queue must
+    # hold more than one connection: _wait_for_socket probes with a connect
+    # that stays queued until accept, and a BSD kernel refuses the following
+    # attach with ECONNREFUSED while that probe is still at the head of a
+    # single-slot queue.
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCK_PATH)
-    srv.listen(1)
+    srv.listen(_LISTEN_BACKLOG)
 
     output_file = open(OUTPUT_PATH, "ab", buffering=0)
     env_event = b""

@@ -14,11 +14,7 @@ class DiscoverTestFilesTest(unittest.TestCase):
         run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=(
-                b"scripts/test_top.py\0"
-                b"backend/internal/agent/relay/test_relay.py\0"
-                b"backend/internal/agent/relay/test_relay_v2.py\0"
-            ),
+            stdout=(b"scripts/test_run_python_tests.py\0backend/internal/agent/relay/test_relay_v2.py\0"),
         )
 
         tests = discover_test_files(Path("/repo"))
@@ -26,9 +22,8 @@ class DiscoverTestFilesTest(unittest.TestCase):
         self.assertEqual(
             tests,
             [
-                Path("/repo/backend/internal/agent/relay/test_relay.py"),
                 Path("/repo/backend/internal/agent/relay/test_relay_v2.py"),
-                Path("/repo/scripts/test_top.py"),
+                Path("/repo/scripts/test_run_python_tests.py"),
             ],
         )
         self.assertIn("--exclude-standard", run.call_args.args[0])
