@@ -13,35 +13,43 @@ and the command's type-dispatch registry.
 
 ## Native Subagent Lifecycle Evidence
 
-The canonical native-subagent card is parent-turn activity: task state keeps a
-task `running` while a card is active even after the parent's trailing
-ResultMessage. Only harness-reported lifecycle evidence may create or settle a
-card, because a wrong or never-settling card pins the task state. An audit of
-the retained task-log cache (`~/.cache/caic/tasks`, 956 logs) found two harnesses
-whose cards do not mean "a child is still working":
+The canonical card is parent-turn activity. Task state keeps a task `running`
+after its trailing ResultMessage only while a card reports `running` **and**
+`background`: a harness can end the parent turn when it delegates detached work,
+but a foreground delegation always settles before the parent result, so a
+foreground card still running then is stale or unread evidence and the task
+falls back to `waiting`. Only harness-reported evidence may create or settle a
+card; `NativeSubagentTimeline` folds it, and a terminal card is never reopened.
 
-- **Codex** reports its own root thread through `subAgentActivity` items whose
-  `agentPath` is `/root` and whose `kind` is `interacted`; the targeted
-  `agentThreadId` is the session's root thread, not a child. `parseActivity`
-  folds every `agentThreadId` into a card and maps `interacted` to running, and
-  Codex never emits a terminal activity for the root, so that card runs for the
-  rest of the session. 16 of the 17 codex logs with native cards ended with the
-  root card still running (755 `interacted /root` items corpus-wide). A root
-  card must not be created: require a real spawn, or skip the `/root` path.
-- **Pi** dispatches an asynchronous `subagent` run with an `asyncId`, and reports
-  its completion only in `details.completions` on a `subagent_wait` or `bg_wait`
-  tool end. When the parent never waits, the only completion record is the
-  pi-subagents async-status widget (`extension_ui_request`/`setWidget`,
-  `widgetKey: "subagent-async"`, payload `PI_SUBAGENT_ASYNC_JSON`), which the
-  parser does not consume. Several logs show a card still running while that
-  widget reports the run `complete` with zero `completions`. Fold the
-  async-status snapshot, or treat a Pi running card as weak evidence.
+An audit of the retained task-log cache (`~/.cache/caic/tasks`, 956 logs) drove
+the harness rules below:
 
-Claude and OpenCode show no such drift in the same corpus: Claude settles a
-synchronous delegation (background `run_in_background` agents were not
-exercised), and OpenCode's ACP task call settles on completion. A `paused`,
-`unknown`, or terminal card is never active, so an unclear status falls back to
-`waiting`.
+- **Claude Code** reports a detached agent through the Agent tool's
+  `run_in_background` input and the task record's `is_backgrounded`
+  (`patch.is_backgrounded` repeats it). Both set `Background`. Cards come from
+  `task_*` records, never the tool use alone, so a resumed session cannot split
+  one agent in two.
+- **Codex** runs collaborative agents concurrently. A `spawnAgent` call or a
+  `started` `subAgentActivity` proves a detached agent; the root thread is not
+  one. Do not create a card for `agentPath == "/root"`, and do not create one
+  from `interacted`/`completed`/`interrupted` alone: children interact with the
+  root, which previously produced a root card that never settled (755
+  `interacted /root` items; 16 of 17 codex logs with cards ended root-active). A
+  child thread answers for itself: `thread/status/changed` maps `active` to
+  running and `idle` to `paused` (resumable), `systemError` to failed, and a
+  `turn/completed` with `failed`/`interrupted` is terminal. The wire knows the
+  root thread, so a child's `turn/completed` must not end the parent turn.
+- **Pi** marks a run detached at the `subagent` tool end (`details.asyncId` or
+  `details.background`). Completion normally arrives in `details.completions` on
+  `subagent_wait`/`bg_wait`; when the parent never waits, the installed
+  pi-subagents extension publishes the full detached-run set in its `setWidget`
+  widget (`widgetKey: "subagent-async"`, payload `PI_SUBAGENT_ASYNC_JSON`). Fold
+  that snapshot too, or a run the extension already reports `complete` would stay
+  running.
+- **OpenCode** ACP task calls are synchronous; they never set `Background`.
+
+`paused`, `unknown`, and terminal cards are never active, so any status the
+harness does not prove falls back to `waiting`.
 
 ## Capability Additions
 

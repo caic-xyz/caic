@@ -329,6 +329,9 @@ type EventNativeSubagent struct {
 	Prompt    string                    `json:"prompt,omitempty"`
 	Status    EventNativeSubagentStatus `json:"status"`
 	Result    string                    `json:"result,omitempty"`
+	// Background reports that the harness launched the delegation detached from
+	// the parent turn, so it can outlive that turn's result.
+	Background bool `json:"background,omitempty"`
 }
 
 // EventLog is a provisioning/startup log line from the runtime backend.

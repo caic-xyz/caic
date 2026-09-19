@@ -74,8 +74,13 @@ shape, never merely a tool name that resembles delegation:
 - `{ agent, task }` is one agent-scope card. The card is created by the tool end
   that reports the run ID (the start record only stores the delegation metadata);
   an async tool end (a reported `asyncId` or `background`) only acknowledges
-  dispatch and marks it running, and the run settles from a
-  `subagent_wait`/`bg_wait` completion.
+  dispatch, marks it running, and marks it `Background`; the run then settles
+  from a `subagent_wait`/`bg_wait` completion. When the parent never waits, the
+  installed extension's async-status widget is the completion record: the
+  `setWidget` request with `widgetKey: subagent-async` and a
+  `PI_SUBAGENT_ASYNC_JSON` payload re-publishes the full detached-run set, which
+  the adapter folds so a run the extension reports `complete` cannot stay
+  running.
 - `{ workflowScript }` is one explicit batch-scope card. The installed 0.56.0
   extension removed the legacy top-level `tasks` and `chain` inputs, which stay
   parseable for historical logs only. A workflow reports no per-agent lifecycle,

@@ -61,6 +61,9 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			if card.Status != agent.NativeSubagentStatusCompleted || !strings.Contains(card.Result, "documentation lead") {
 				t.Fatalf("outcome = %#v, want the subagent's joke as the result", card)
 			}
+			if card.Background {
+				t.Fatalf("card = %#v, want a foreground delegation", card)
+			}
 			if active != 0 {
 				t.Fatalf("active = %d, want 0 after the recorded completion", active)
 			}
@@ -146,6 +149,49 @@ func TestClaudeSubagentStatus(t *testing.T) {
 		if got := claudeSubagentStatus(test.status); got != test.want {
 			t.Fatalf("claudeSubagentStatus(%q) = %q, want %q", test.status, got, test.want)
 		}
+	}
+}
+
+// TestNativeSubagentBackground pins that a run_in_background delegation is
+// detached. The tool input marks it when retained, and the task record's
+// is_backgrounded is authoritative when it is not.
+func TestNativeSubagentBackground(t *testing.T) {
+	t.Parallel()
+	observations := func(t *testing.T, lines ...string) []agent.NativeSubagent {
+		t.Helper()
+		wire := New().NewWire()
+		var out []agent.NativeSubagent
+		for _, line := range lines {
+			msgs, err := wire.ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatalf("ParseMessage(%s): %v", line, err)
+			}
+			for _, message := range msgs {
+				if native, ok := message.(*agent.NativeSubagentMessage); ok {
+					out = append(out, native.Subagent)
+				}
+			}
+		}
+		return out
+	}
+	toolUse := func(id, background string) []string {
+		return []string{
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose","run_in_background":` + background + `}}]}}`,
+			`{"type":"system","subtype":"task_started","task_id":"` + id + `","tool_use_id":"spawn","subagent_type":"general-purpose","task_type":"local_agent"}`,
+		}
+	}
+	if got := observations(t, toolUse("bg-input", "true")...); len(got) != 1 || !got[0].Background {
+		t.Fatalf("tool input = %#v, want one detached card", got)
+	}
+	if got := observations(t, toolUse("fg", "false")...); len(got) != 1 || got[0].Background {
+		t.Fatalf("foreground = %#v, want one attached card", got)
+	}
+	taskRecord := `{"type":"system","subtype":"task_started","task_id":"bg-record","tool_use_id":"spawn","subagent_type":"general-purpose","is_backgrounded":true,"task_type":"local_agent"}`
+	if got := observations(t,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"spawn","name":"Agent","input":{"description":"Joke","prompt":"Tell a joke","subagent_type":"general-purpose"}}]}}`,
+		taskRecord,
+	); len(got) != 1 || !got[0].Background {
+		t.Fatalf("task record = %#v, want one detached card", got)
 	}
 }
 

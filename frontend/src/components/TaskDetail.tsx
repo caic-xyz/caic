@@ -82,8 +82,12 @@ import PromptInput from "./PromptInput";
 import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
-import NativeSubagents, { NativeActivityStatus } from "./NativeSubagents";
-import { NativeActivityTracker, type NativeActivity } from "../nativeSubagents";
+import NativeAgents, { NativeActivityStatus } from "./NativeSubagents";
+import {
+  NativeActivityTracker,
+  assignNativeAnchors,
+  type NativeActivity,
+} from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
 import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
@@ -889,6 +893,16 @@ export default function TaskDetail(props: Props) {
     }
     return byTool;
   });
+  // Anchor each card to the transcript item it settled at, or spawned at while
+  // running, so agents render in the flow instead of a task-wide panel.
+  const nativeByAnchor = createMemo(() => assignNativeAnchors(items(), nativeActivities()));
+  // An activity whose turn produced no anchorable transcript item still needs a
+  // home, so it renders after the transcript instead of disappearing.
+  const nativeUnanchored = createMemo(() => {
+    const anchored = new Set<string>();
+    for (const list of nativeByAnchor().values()) for (const a of list) anchored.add(a.id);
+    return nativeActivities().filter((activity) => !anchored.has(activity.id));
+  });
 
   return (
     <div class={styles.container}>
@@ -1244,150 +1258,175 @@ export default function TaskDetail(props: Props) {
                 : null;
             const grpItem = () =>
               item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null;
+            // Canonical native activity anchored to this item: a settled card
+            // renders where it settled, a running one where it spawned.
+            const anchored = () => nativeByAnchor().get(item().key) ?? [];
+            const anchorIndent = () => {
+              const current = item();
+              if (current.kind === "group") {
+                return current.indent === "turn" ? styles.indentTurn : undefined;
+              }
+              if (current.kind === "elided" || current.kind === "expandedHeader") {
+                return current.indent === "session" ? styles.indentSession : undefined;
+              }
+              return undefined;
+            };
             return (
-              <Switch>
-                {/* Collapsed past session: single clickable row. */}
-                <Match when={sessElided()} keyed>
-                  {(se) => (
-                    <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
-                      <button
-                        type="button"
-                        class={styles.sessionToggle}
-                        onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
+              <>
+                <Switch>
+                  {/* Collapsed past session: single clickable row. */}
+                  <Match when={sessElided()} keyed>
+                    {(se) => (
+                      <div
+                        class={styles.sessionElided}
+                        data-anchor-key={`session:${se.sessionKey}`}
                       >
-                        <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
-                        <span class={styles.sessionDuration}>
-                          {se.session.durationMs > 0
-                            ? formatTimingDuration(se.session.durationMs)
-                            : "0s"}
-                        </span>
-                      </button>
-                      <SessionInvocationIcon
-                        turns={sessionTimings(se.session)}
-                        model={props.model ?? null}
-                      />
-                    </div>
-                  )}
-                </Match>
-                {/* Expanded past session header: click to collapse. */}
-                <Match when={sessHdr()} keyed>
-                  {(sh) => (
-                    <div
-                      class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
-                      data-anchor-key={`session:${sh.sessionKey}`}
-                    >
-                      <button
-                        type="button"
-                        class={styles.sessionToggle}
-                        onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
-                      >
-                        <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
-                        <span class={styles.sessionDuration}>
-                          {sh.session.durationMs > 0
-                            ? formatTimingDuration(sh.session.durationMs)
-                            : "0s"}
-                        </span>
-                      </button>
-                      <SessionInvocationIcon
-                        turns={sessionTimings(sh.session)}
-                        model={props.model ?? null}
-                      />
-                    </div>
-                  )}
-                </Match>
-                {/* Session boundary: init or compact_boundary rendered as a separator. */}
-                <Match when={sessBoundary()} keyed>
-                  {(sb) => <SessionBoundaryItem event={sb.event} />}
-                </Match>
-                {/* Collapsed past turn: single clickable row. */}
-                <Match when={elided()} keyed>
-                  {(e) => (
-                    <div
-                      class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
-                      data-anchor-key={`turn:${e.key}`}
-                    >
-                      <button
-                        type="button"
-                        class={styles.turnToggle}
-                        onClick={(ev) => anchoredToggleTurn(ev, e.key)}
-                      >
-                        <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
-                        <span class={styles.turnDuration}>
-                          {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
-                        </span>
-                      </button>
-                      <Show when={turnTiming(e.turn)} keyed>
-                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
-                      </Show>
-                    </div>
-                  )}
-                </Match>
-                {/* Expanded past turn header: click to collapse. */}
-                <Match when={expHdr()} keyed>
-                  {(h) => (
-                    <div
-                      class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`}
-                      data-anchor-key={`turn:${h.turnKey}`}
-                    >
-                      <button
-                        type="button"
-                        class={styles.turnToggle}
-                        onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
-                      >
-                        <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
-                        <span class={styles.turnDuration}>
-                          {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
-                        </span>
-                      </button>
-                      <Show when={turnTiming(h.turn)} keyed>
-                        {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
-                      </Show>
-                    </div>
-                  )}
-                </Match>
-                {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
-                <Match when={grpItem()}>
-                  {(gi) => (
-                    <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
-                      <div class={styles.timedItemContent}>
-                        <Show
-                          when={
-                            hasGroupTiming(gi().group) &&
-                            !gi().group.events.some((event) => event.kind === "result") &&
-                            (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
-                          }
+                        <button
+                          type="button"
+                          class={styles.sessionToggle}
+                          onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
                         >
-                          <span class={styles.messageTiming}>
-                            <TimingIcon
-                              events={gi().group.events}
-                              segments={gi().group.timingSegments}
-                              userWaitMs={taskTimings().userWaitMs}
-                              previousEventTs={taskTimings().previousEventTs}
-                            />
+                          <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
+                          <span class={styles.sessionDuration}>
+                            {se.session.durationMs > 0
+                              ? formatTimingDuration(se.session.durationMs)
+                              : "0s"}
                           </span>
-                        </Show>
-                        <GroupContent
-                          group={() => gi().group}
-                          taskId={props.taskId}
-                          isWaiting={isWaiting}
-                          lastAskGroup={lastAskGroup}
-                          onAskAnswer={sendAskAnswer}
-                          onClearAndExecutePlan={clearAndExecutePlan}
-                          pendingAction={pendingAction}
+                        </button>
+                        <SessionInvocationIcon
+                          turns={sessionTimings(se.session)}
                           model={props.model ?? null}
-                          turnTiming={(event) => turnTimingsByResultEvent().get(event)}
-                          nativeByToolUseID={nativeByToolUseID}
-                          nativeSettled={nativeSettled}
                         />
                       </div>
-                    </div>
-                  )}
-                </Match>
-              </Switch>
+                    )}
+                  </Match>
+                  {/* Expanded past session header: click to collapse. */}
+                  <Match when={sessHdr()} keyed>
+                    {(sh) => (
+                      <div
+                        class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
+                        data-anchor-key={`session:${sh.sessionKey}`}
+                      >
+                        <button
+                          type="button"
+                          class={styles.sessionToggle}
+                          onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
+                        >
+                          <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
+                          <span class={styles.sessionDuration}>
+                            {sh.session.durationMs > 0
+                              ? formatTimingDuration(sh.session.durationMs)
+                              : "0s"}
+                          </span>
+                        </button>
+                        <SessionInvocationIcon
+                          turns={sessionTimings(sh.session)}
+                          model={props.model ?? null}
+                        />
+                      </div>
+                    )}
+                  </Match>
+                  {/* Session boundary: init or compact_boundary rendered as a separator. */}
+                  <Match when={sessBoundary()} keyed>
+                    {(sb) => <SessionBoundaryItem event={sb.event} />}
+                  </Match>
+                  {/* Collapsed past turn: single clickable row. */}
+                  <Match when={elided()} keyed>
+                    {(e) => (
+                      <div
+                        class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                        data-anchor-key={`turn:${e.key}`}
+                      >
+                        <button
+                          type="button"
+                          class={styles.turnToggle}
+                          onClick={(ev) => anchoredToggleTurn(ev, e.key)}
+                        >
+                          <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
+                          <span class={styles.turnDuration}>
+                            {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
+                          </span>
+                        </button>
+                        <Show when={turnTiming(e.turn)} keyed>
+                          {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                        </Show>
+                      </div>
+                    )}
+                  </Match>
+                  {/* Expanded past turn header: click to collapse. */}
+                  <Match when={expHdr()} keyed>
+                    {(h) => (
+                      <div
+                        class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                        data-anchor-key={`turn:${h.turnKey}`}
+                      >
+                        <button
+                          type="button"
+                          class={styles.turnToggle}
+                          onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
+                        >
+                          <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
+                          <span class={styles.turnDuration}>
+                            {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
+                          </span>
+                        </button>
+                        <Show when={turnTiming(h.turn)} keyed>
+                          {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                        </Show>
+                      </div>
+                    )}
+                  </Match>
+                  {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
+                  <Match when={grpItem()}>
+                    {(gi) => (
+                      <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
+                        <div class={styles.timedItemContent}>
+                          <Show
+                            when={
+                              hasGroupTiming(gi().group) &&
+                              !gi().group.events.some((event) => event.kind === "result") &&
+                              (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
+                            }
+                          >
+                            <span class={styles.messageTiming}>
+                              <TimingIcon
+                                events={gi().group.events}
+                                segments={gi().group.timingSegments}
+                                userWaitMs={taskTimings().userWaitMs}
+                                previousEventTs={taskTimings().previousEventTs}
+                              />
+                            </span>
+                          </Show>
+                          <GroupContent
+                            group={() => gi().group}
+                            taskId={props.taskId}
+                            isWaiting={isWaiting}
+                            lastAskGroup={lastAskGroup}
+                            onAskAnswer={sendAskAnswer}
+                            onClearAndExecutePlan={clearAndExecutePlan}
+                            pendingAction={pendingAction}
+                            model={props.model ?? null}
+                            turnTiming={(event) => turnTimingsByResultEvent().get(event)}
+                            nativeByToolUseID={nativeByToolUseID}
+                            nativeSettled={nativeSettled}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </Match>
+                </Switch>
+                <Show when={anchored().length > 0}>
+                  <div class={anchorIndent()}>
+                    <NativeAgents activities={anchored()} settled={nativeSettled()} />
+                  </div>
+                </Show>
+              </>
             );
           }}
         </Index>
-        <NativeSubagents activities={nativeActivities()} settled={nativeSettled()} />
+        <Show when={nativeUnanchored().length > 0}>
+          <NativeAgents activities={nativeUnanchored()} settled={nativeSettled()} />
+        </Show>
         <Show when={messages().length === 0}>
           <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>

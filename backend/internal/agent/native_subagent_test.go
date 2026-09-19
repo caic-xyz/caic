@@ -91,6 +91,34 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		}
 	})
 
+	t.Run("ActiveBackground counts only running detached cards", func(t *testing.T) {
+		t.Parallel()
+		var timeline NativeSubagentTimeline
+		if got := timeline.ActiveBackground(); got != 0 {
+			t.Fatalf("empty ActiveBackground() = %d, want 0", got)
+		}
+		timeline.Apply(&NativeSubagent{ID: "background", Status: NativeSubagentStatusRunning, Background: true})
+		timeline.Apply(&NativeSubagent{ID: "foreground", Status: NativeSubagentStatusRunning})
+		timeline.Apply(&NativeSubagent{ID: "idle-background", Status: NativeSubagentStatusPaused, Background: true})
+		if got := timeline.Active(); got != 2 {
+			t.Fatalf("Active() = %d, want 2 running cards", got)
+		}
+		if got := timeline.ActiveBackground(); got != 1 {
+			t.Fatalf("ActiveBackground() = %d, want 1 detached running card", got)
+		}
+		// Detachment is monotonic: a later foreground observation cannot clear it,
+		// and an early one is upgraded by a later background observation.
+		timeline.Apply(&NativeSubagent{ID: "background", Status: NativeSubagentStatusRunning})
+		timeline.Apply(&NativeSubagent{ID: "foreground", Status: NativeSubagentStatusRunning, Background: true})
+		got := timeline.Subagents()
+		if !got[0].Background || !got[1].Background {
+			t.Fatalf("cards = %#v, want both detached", got)
+		}
+		if active := timeline.ActiveBackground(); active != 2 {
+			t.Fatalf("ActiveBackground() = %d, want 2 after the upgrade", active)
+		}
+	})
+
 	t.Run("partial observability remains unknown instead of active", func(t *testing.T) {
 		t.Parallel()
 		var timeline NativeSubagentTimeline

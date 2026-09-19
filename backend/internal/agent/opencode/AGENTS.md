@@ -57,7 +57,8 @@ lifecycle. The matching `v1.18.31` source is the authority for ACP: retain only
 the tool-call ID, title/kind, input, lifecycle status, and completion output
 that its `session/update` tool events expose. The child session ID and parent
 session ID from the run trace are useful correlation evidence but are not yet a
-promised ACP contract.
+promised ACP contract. The ACP task call blocks the parent until it completes, so
+its card is never `Background`: it always settles before the parent result.
 
 The authoritative ACP projection is
 https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/acp/event.ts,

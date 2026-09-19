@@ -1,4 +1,4 @@
-// Canonical native-agent and batch activity cards folded from one task transcript.
+// Canonical subagent and batch activity cards, rendered inline in the task transcript.
 
 import { For, Show } from "solid-js";
 
@@ -15,65 +15,62 @@ export function NativeActivityStatus(props: { activity: NativeActivity; settled:
   );
 }
 
-export default function NativeSubagents(props: { activities: NativeActivity[]; settled: boolean }) {
-  const active = (batch: boolean) =>
-    props.settled
-      ? 0
-      : props.activities.filter((s) => s.status === "running" && (s.scope === "batch") === batch)
-          .length;
+// NativeAgentCard renders one folded lifecycle: identity, lifecycle status, and
+// the result the harness reported. It is a details/summary so keyboard users can
+// expand it without a pointer.
+export function NativeAgentCard(props: { activity: NativeActivity; settled: boolean }) {
+  const activity = () => props.activity;
+  return (
+    <details
+      class={styles.card}
+      data-testid="native-subagent-card"
+      data-native-id={activity().id}
+      data-background={activity().background ? "true" : undefined}
+    >
+      <summary>
+        <span>
+          {activity().scope === "batch" ? "Batch" : "Subagent"}: {activity().label || "Unnamed"}
+        </span>
+        <NativeActivityStatus activity={activity()} settled={props.settled} />
+        <Show when={activity().background}>
+          <span class={styles.background}>background</span>
+        </Show>
+        <Show when={activity().startedAt !== null && activity().endedAt !== null}>
+          <span class={styles.duration} data-testid="native-subagent-duration">
+            {formatTimingDuration(
+              Math.max(0, (activity().endedAt ?? 0) - (activity().startedAt ?? 0)),
+            )}
+          </span>
+        </Show>
+      </summary>
+      <dl>
+        <dt>Identity</dt>
+        <dd>{activity().id}</dd>
+        <Show when={activity().groupID}>
+          <dt>Group</dt>
+          <dd>{activity().groupID}</dd>
+        </Show>
+      </dl>
+      <Show when={activity().prompt}>
+        <h4>Prompt</h4>
+        <pre>{activity().prompt}</pre>
+      </Show>
+      <h4>Result</h4>
+      <pre>{activity().result || "No result reported by the harness."}</pre>
+    </details>
+  );
+}
+
+// NativeAgents renders the cards anchored to one transcript item. It renders
+// nothing when the item has no anchored activity.
+export default function NativeAgents(props: { activities: NativeActivity[]; settled: boolean }) {
   return (
     <Show when={props.activities.length > 0}>
-      <section
-        class={styles.panel}
-        aria-label="Native subagent activity"
-        data-testid="native-subagents"
-      >
-        <h3>
-          Native subagents{" "}
-          <span class={styles.counts}>
-            {active(false)} agents active · {active(true)} batches active
-          </span>
-        </h3>
-        <p class={styles.hint}>
-          A batch card covers the entire orchestration of multiple agents. Member agents appear as
-          their own cards only when the harness reports them.
-        </p>
+      <div class={styles.anchored} data-testid="native-subagents">
         <For each={props.activities}>
-          {(s) => (
-            <details class={styles.card} data-testid="native-subagent-card" data-native-id={s.id}>
-              <summary>
-                <span>
-                  {s.scope === "batch" ? "Native batch" : "Native agent"}: {s.label || "Unnamed"}
-                </span>
-                <NativeActivityStatus activity={s} settled={props.settled} />
-                <Show when={s.startedAt !== null && s.endedAt !== null}>
-                  <span class={styles.duration}>
-                    {formatTimingDuration(Math.max(0, (s.endedAt ?? 0) - (s.startedAt ?? 0)))}
-                  </span>
-                </Show>
-              </summary>
-              <dl>
-                <dt>Native identity</dt>
-                <dd>{s.id}</dd>
-                <Show when={s.groupID}>
-                  <dt>Group</dt>
-                  <dd>{s.groupID}</dd>
-                </Show>
-                <Show when={s.toolUseID}>
-                  <dt>Tool call</dt>
-                  <dd>{s.toolUseID}</dd>
-                </Show>
-              </dl>
-              <Show when={s.prompt}>
-                <h4>Prompt</h4>
-                <pre>{s.prompt}</pre>
-              </Show>
-              <h4>Result</h4>
-              <pre>{s.result || "No result reported by the harness."}</pre>
-            </details>
-          )}
+          {(activity) => <NativeAgentCard activity={activity} settled={props.settled} />}
         </For>
-      </section>
+      </div>
     </Show>
   );
 }

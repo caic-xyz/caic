@@ -474,5 +474,28 @@ test("generate documentation screenshots", async ({ page, api }) => {
     .toBe("1");
   await captureScreenshot(page, "mobile", "task-list-scrolled-mobile.png");
 
+  // Screenshot 10: Native subagents — inline lifecycle cards anchored to the
+  // parent narration that preceded each run settling.
+  const nativeId = await createTaskAPI(api, "Delegate the auth review to three parallel subagents");
+  await waitForTaskState(api, nativeId, "waiting", 30_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await expect(
+    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
+  ).toBeVisible();
+  const nativeTaskCard = page.locator(`[data-task-id="${nativeId}"]`);
+  await expect(nativeTaskCard).toBeVisible({ timeout: 10_000 });
+  await nativeTaskCard.click();
+  const nativeCards = page.getByTestId("native-subagent-card");
+  await expect(nativeCards).toHaveCount(4);
+  // Expand the completed run so the showcase includes the card content.
+  await nativeCards.first().locator("summary").click();
+  await expect(nativeCards.first().getByText("Read me before you judge me.")).toBeVisible();
+  const nativeMessageArea = page.getByTestId("task-message-area");
+  await nativeMessageArea.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await captureScreenshot(page, "desktop", "task-native-subagents.png");
+
   await convertPngsToWebp(screenshotRoot);
 });

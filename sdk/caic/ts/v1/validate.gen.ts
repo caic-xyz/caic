@@ -297,6 +297,7 @@ export function validateEventNativeSubagent(raw: ValidatorInput): EventNativeSub
     prompt: (obj["prompt"] === undefined || obj["prompt"] === null ? undefined : asString(obj["prompt"], "EventNativeSubagent.prompt")),
     status: (asString(obj["status"], "EventNativeSubagent.status") as EventNativeSubagentStatus),
     result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "EventNativeSubagent.result")),
+    background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "EventNativeSubagent.background")),
   };
 }
 

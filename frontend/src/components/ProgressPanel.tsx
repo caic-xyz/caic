@@ -1,4 +1,4 @@
-// ProgressPanel renders todos; native activity has its own canonical task-wide panel.
+// ProgressPanel renders todos above the prompt; subagents render inline in the transcript.
 
 import { For, Show, createEffect, createMemo } from "solid-js";
 

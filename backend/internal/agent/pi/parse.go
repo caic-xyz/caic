@@ -228,12 +228,18 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		return msgs, decodedRecord{}, err
 
 	case pi.EventExtensionUI:
-		// Extension UI requests are passed through as RawMessage.
-		// The wireFormat handles auto-responses.
+		// Extension UI requests are passed through as RawMessage, and the
+		// wireFormat handles auto-responses. The decoded request is also handed to
+		// the native-subagent adapter, which reads the pi-subagents async-status
+		// widget the extension publishes here.
+		var ev pi.ExtensionUIRequest
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return nil, decodedRecord{}, fmt.Errorf("unmarshal extension_ui_request: %w", err)
+		}
 		return []agent.Message{&agent.RawMessage{
 			MessageType: string(pi.EventExtensionUI),
 			Raw:         append([]byte(nil), line...),
-		}}, decodedRecord{}, nil
+		}}, decodedRecord{extensionUI: &ev}, nil
 
 	case pi.EventAgentEnd, pi.EventTurnEnd,
 		pi.EventAgentSettled, pi.EventAutoRetryStart, pi.EventAutoRetryEnd,

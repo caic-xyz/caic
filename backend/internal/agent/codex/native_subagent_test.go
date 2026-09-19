@@ -36,6 +36,11 @@ func collabItem(method, tool, itemID string, receivers []string, prompt string, 
 
 // activityItem builds one app-server sub-agent activity notification.
 func activityItem(kind, itemID, agentThreadID string) []byte {
+	return activityItemAt(kind, itemID, agentThreadID, "/root/work")
+}
+
+// activityItemAt builds one sub-agent activity with an explicit agent path.
+func activityItemAt(kind, itemID, agentThreadID, agentPath string) []byte {
 	item := map[string]any{
 		"id":   itemID,
 		"type": "subAgentActivity",
@@ -46,8 +51,34 @@ func activityItem(kind, itemID, agentThreadID string) []byte {
 	if agentThreadID != "" {
 		item["agentThreadId"] = agentThreadID
 	}
-	item["agentPath"] = "/root/work"
+	if agentPath != "" {
+		item["agentPath"] = agentPath
+	}
 	data, err := json.Marshal(map[string]any{"method": "item/started", "params": map[string]any{"item": item, "threadId": "parent"}})
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+// threadStatusItem builds one app-server thread status notification.
+func threadStatusItem(threadID, status string) []byte {
+	data, err := json.Marshal(map[string]any{
+		"method": "thread/status/changed",
+		"params": map[string]any{"threadId": threadID, "status": map[string]any{"type": status}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+// turnCompletedItem builds one app-server turn completion notification.
+func turnCompletedItem(threadID, status string) []byte {
+	data, err := json.Marshal(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": threadID, "turn": map[string]any{"id": "turn_1", "status": status}},
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -181,9 +212,23 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 				t.Fatalf("observation %d label = %q, want the harness agent name", i, observation.Label)
 			}
 		}
-		// An unknown kind creates the agent without inventing a state.
-		if got := collectNative(t, New("", nil).NewWire(), activityItem("", "call_1", "th1")); len(got) != 1 || got[0].Status != agent.NativeSubagentStatusUnknown {
-			t.Fatalf("unknown kind = %#v, want one unknown agent", got)
+		// Only a started activity proves a spawn. An interaction, interruption, or
+		// completion cannot invent an agent the wire has not seen start, and the
+		// root thread must never become a card even though children interact with
+		// it.
+		if got := collectNative(t, New("", nil).NewWire(), activityItem("", "call_1", "th1")); len(got) != 0 {
+			t.Fatalf("unknown kind = %#v, want none without a spawn", got)
+		}
+		if got := collectNative(t, New("", nil).NewWire(), activityItem("interacted", "msg_1", "th1")); len(got) != 0 {
+			t.Fatalf("interaction without spawn = %#v, want none", got)
+		}
+		if got := collectNative(t, New("", nil).NewWire(), activityItemAt("started", "call_1", "root", codexRootAgentPath)); len(got) != 0 {
+			t.Fatalf("root activity = %#v, want none", got)
+		}
+		// A started activity is detached, so an active card can outlive the
+		// parent turn.
+		if got := collectNative(t, New("", nil).NewWire(), activityItem("started", "call_1", "th1")); len(got) != 1 || !got[0].Background {
+			t.Fatalf("started activity = %#v, want one background card", got)
 		}
 		// An activity without an agent thread identity cannot be correlated.
 		if got := collectNative(t, New("", nil).NewWire(), activityItem("started", "call_1", "")); len(got) != 0 {
@@ -247,6 +292,69 @@ func TestCodexNativeSubagentAdapter(t *testing.T) {
 		got := collectNative(t, New("", nil).NewWire(), []byte(`{"method":"item/completed","params":{"item":{"id":"i","type":"collabAgentToolCall","tool":"spawnAgent","agentsStates":{"ghost":{"status":"completed"}}}}}`))
 		if len(got) != 0 {
 			t.Fatalf("unknown thread produced %d cards, want 0", len(got))
+		}
+	})
+	t.Run("child thread lifecycle settles a spawned card", func(t *testing.T) {
+		t.Parallel()
+		// A spawned child's own thread status reports whether it is working.
+		// Idle is resumable, so it stays non-terminal; a failed turn is terminal
+		// and a later idle cannot reopen it. The root thread's status is ignored.
+		got := collectNative(t, New("", nil).NewWire(),
+			activityItem("started", "call_1", "th1"),
+			threadStatusItem("th1", "idle"),
+			threadStatusItem("th1", "active"),
+			threadStatusItem("th1", "idle"),
+			turnCompletedItem("th1", "failed"),
+			threadStatusItem("th1", "idle"),
+		)
+		want := []agent.NativeSubagentStatus{
+			agent.NativeSubagentStatusRunning,
+			agent.NativeSubagentStatusPaused,
+			agent.NativeSubagentStatusRunning,
+			agent.NativeSubagentStatusPaused,
+			agent.NativeSubagentStatusFailed,
+		}
+		if len(got) != len(want) {
+			t.Fatalf("observations = %#v, want %d", got, len(want))
+		}
+		for i, observation := range got {
+			if observation.Status != want[i] || observation.ID != "codex:thread:th1" || !observation.Background {
+				t.Fatalf("observation %d = %#v, want %q with a background card", i, observation, want[i])
+			}
+		}
+		if got := collectNative(t, New("", nil).NewWire(), threadStatusItem("parent", "active")); len(got) != 0 {
+			t.Fatalf("root status = %#v, want no card", got)
+		}
+	})
+	t.Run("child turn result never ends the parent turn", func(t *testing.T) {
+		t.Parallel()
+		wire := New("", nil).NewWire()
+		if _, err := wire.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"parent"}}}`)); err != nil {
+			t.Fatal(err)
+		}
+		// A child thread's completion is not the parent turn.
+		msgs, err := wire.ParseMessage(turnCompletedItem("th1", "completed"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range msgs {
+			if _, ok := message.(*agent.ResultMessage); ok {
+				t.Fatalf("child turn emitted a parent result: %#v", msgs)
+			}
+		}
+		// The root thread's own completion still ends the parent turn.
+		msgs, err = wire.ParseMessage(turnCompletedItem("parent", "completed"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, message := range msgs {
+			if _, ok := message.(*agent.ResultMessage); ok {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("parent turn result = %#v, want a ResultMessage", msgs)
 		}
 	})
 }

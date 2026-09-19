@@ -1865,10 +1865,11 @@ func (t *Task) recordStateTransition(s taskslog.State, at time.Time) {
 
 // settledTurnStateLocked returns the state a parent turn settles into once its
 // trailing ResultMessage has arrived: asking or presenting a plan when the user
-// still owes input, running while a harness-native subagent is still active, and
-// waiting otherwise. A harness can end the parent turn when it delegates in the
-// background, so a running native card keeps the task busy after the parent
-// stops producing output.
+// still owes input, running while a harness-native subagent is still active
+// detached from the turn, and waiting otherwise. A harness can end the parent
+// turn when it delegates in the background, so a running background card keeps
+// the task busy after the parent stops producing output; a foreground card that
+// is still running then is stale evidence and falls back to waiting.
 //
 // The caller must hold t.mu.
 func (t *Task) settledTurnStateLocked() taskslog.State {
@@ -1877,7 +1878,7 @@ func (t *Task) settledTurnStateLocked() taskslog.State {
 		return taskslog.StateAsking
 	case lastTurnHasExitPlan(t.timeline) && t.planContent != "":
 		return taskslog.StateHasPlan
-	case t.nativeSubagents.Active() > 0:
+	case t.nativeSubagents.ActiveBackground() > 0:
 		return taskslog.StateRunning
 	default:
 		return taskslog.StateWaiting
@@ -1992,15 +1993,15 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	// Fold harness-native child activity into the canonical card set and let it
 	// settle the parent state. A harness can end the parent turn when it
 	// delegates in the background, so a trailing ResultMessage is not enough
-	// evidence that the task is idle: an active child keeps it running, and the
-	// last child settling returns it to waiting.
+	// evidence that the task is idle: a detached child keeps it running, and the
+	// last detached child settling returns it to waiting.
 	if ns, ok := m.(*agent.NativeSubagentMessage); ok {
 		t.nativeSubagents.Apply(&ns.Subagent)
 		if lastAgentMessage(t.timeline) != nil {
 			switch {
-			case t.nativeSubagents.Active() > 0 && t.state == taskslog.StateWaiting:
+			case t.nativeSubagents.ActiveBackground() > 0 && t.state == taskslog.StateWaiting:
 				t.setState(taskslog.StateRunning)
-			case t.nativeSubagents.Active() == 0 && t.state == taskslog.StateRunning:
+			case t.nativeSubagents.ActiveBackground() == 0 && t.state == taskslog.StateRunning:
 				t.setState(t.settledTurnStateLocked())
 			}
 		}

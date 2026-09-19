@@ -34,7 +34,11 @@ correlation; a card is created from task records, never from the tool use alone,
 so a resumed session cannot split one agent into two cards. It maps the reported
 task statuses onto the canonical lifecycle: `running`/`in_progress` runs, `paused` is the resumable non-terminal
 state, `completed`/`failed` settle, `killed`/`stopped`/`interrupted` are
-interruptions, and `pending` or anything unrecognized stays unknown.
+interruptions, and `pending` or anything unrecognized stays unknown. The Agent
+tool's `run_in_background` and a task record's `is_backgrounded`
+(`patch.is_backgrounded` repeats it) mark the card `Background`: a background
+card is the only native activity that can keep a task running after the parent
+result.
 
 A sanitized historical v2 task record proves the observable lifecycle:
 `system/task_started` carries `task_id`, `tool_use_id`, `description`,

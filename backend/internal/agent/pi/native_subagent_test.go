@@ -3,6 +3,7 @@
 package pi
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -102,6 +103,62 @@ func TestSubagentCompletionResult(t *testing.T) {
 				t.Fatalf("completionResult = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// TestSubagentAsyncSnapshotSettlesRun pins that the extension's async-status
+// widget is lifecycle evidence: the extension re-publishes the full detached-run
+// set, so a run whose completion never arrived through subagent_wait or bg_wait
+// is still settled, and a run only seen there becomes a detached card.
+func TestSubagentAsyncSnapshotSettlesRun(t *testing.T) {
+	t.Parallel()
+	widget := func(runs ...asyncSnapshotRun) []byte {
+		payload, err := json.Marshal(asyncSnapshot{Kind: asyncSnapshotKind, Runs: runs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, err := json.Marshal(map[string]any{
+			"type":        "extension_ui_request",
+			"id":          "widget-1",
+			"method":      "setWidget",
+			"widgetKey":   asyncWidgetKey,
+			"widgetLines": []string{asyncWidgetPrefix + string(payload)},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return line
+	}
+	wire := New("", nil).NewWire()
+	feed := func(line []byte) []agent.NativeSubagent {
+		msgs, err := wire.ParseMessage(line)
+		if err != nil {
+			t.Fatalf("ParseMessage(%s): %v", line, err)
+		}
+		var out []agent.NativeSubagent
+		for _, message := range msgs {
+			if native, ok := message.(*agent.NativeSubagentMessage); ok {
+				out = append(out, native.Subagent)
+			}
+		}
+		return out
+	}
+	feed([]byte(`{"type":"tool_execution_start","toolCallId":"c1","toolName":"subagent","args":{"workflowScript":"const r = await runs.run('implement', {agent:'worker', task:'do work'});"}}`))
+	started := feed([]byte(`{"type":"tool_execution_end","toolCallId":"c1","toolName":"subagent","result":{"content":[{"type":"text","text":"Async workflow [test-run]"}],"details":{"mode":"workflow","runId":"test-run","asyncId":"test-run","results":[]}},"isError":false}`))
+	if len(started) != 1 || started[0].Status != agent.NativeSubagentStatusRunning || !started[0].Background {
+		t.Fatalf("started = %#v, want one detached running card", started)
+	}
+	settled := feed(widget(asyncSnapshotRun{ID: "test-run", Label: "scout", State: "complete"}))
+	if len(settled) != 1 || settled[0].Status != agent.NativeSubagentStatusCompleted || !settled[0].Background {
+		t.Fatalf("settled = %#v, want the same detached card completed", settled)
+	}
+	if settled[0].ID != started[0].ID {
+		t.Fatalf("identity = %q, want the dispatched %q", settled[0].ID, started[0].ID)
+	}
+	// A run observed only through the snapshot is still detached evidence.
+	fresh := feed(widget(asyncSnapshotRun{ID: "other-run", Label: "worker", State: "running"}))
+	if len(fresh) != 1 || fresh[0].Status != agent.NativeSubagentStatusRunning || !fresh[0].Background {
+		t.Fatalf("fresh = %#v, want one detached running card", fresh)
 	}
 }
 

@@ -595,6 +595,11 @@ type NativeSubagent struct {
 	Prompt    string               `json:"prompt,omitempty"`
 	Status    NativeSubagentStatus `json:"status"`
 	Result    string               `json:"result,omitempty"`
+	// Background reports that the harness launched the delegation independently
+	// of the parent turn, so it can still be running after that turn's result.
+	// Only such a card justifies keeping a task running past its trailing result;
+	// a foreground delegation always settles before the parent result arrives.
+	Background bool `json:"background,omitempty"`
 }
 
 // NativeSubagentMessage records an observed native-subagent lifecycle update.

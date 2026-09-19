@@ -47,6 +47,11 @@ func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
 	if old.Prompt == "" {
 		old.Prompt = observed.Prompt
 	}
+	// Detachment is monotonic: once a harness launched a delegation detached from
+	// the parent turn, a later observation cannot make it foreground again.
+	if observed.Background {
+		old.Background = true
+	}
 	// A terminal observation upgrades an interim result (a paused run's artifact
 	// reference, for example), but terminal results do not overwrite each other:
 	// the first terminal report stays the outcome.
@@ -75,6 +80,21 @@ func (t *NativeSubagentTimeline) Active() int {
 	active := 0
 	for _, id := range t.order {
 		if t.byID[id].Status == NativeSubagentStatusRunning {
+			active++
+		}
+	}
+	return active
+}
+
+// ActiveBackground returns the number of detached cards whose latest observed
+// status is running. Only a delegation the harness launched independently of
+// the parent turn can outlive that turn, so only these justify keeping a task
+// running after its trailing result. A foreground card that is still reported
+// running then is stale or unread lifecycle evidence, not detached work.
+func (t *NativeSubagentTimeline) ActiveBackground() int {
+	active := 0
+	for _, id := range t.order {
+		if s := t.byID[id]; s.Background && s.Status == NativeSubagentStatusRunning {
 			active++
 		}
 	}

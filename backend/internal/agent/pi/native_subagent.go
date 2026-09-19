@@ -64,8 +64,9 @@ type subagentCompletion struct {
 // the adapter is the only reader of the extension details it drops, so the parser
 // hands the record over instead of making the adapter decode the line again.
 type decodedRecord struct {
-	start *pi.ToolExecStartEvent
-	end   *pi.ToolExecEndEvent
+	start       *pi.ToolExecStartEvent
+	end         *pi.ToolExecEndEvent
+	extensionUI *pi.ExtensionUIRequest
 }
 
 type nativeSubagents struct {
@@ -80,14 +81,17 @@ func newNativeSubagents() nativeSubagents {
 	return nativeSubagents{calls: make(map[string]agent.NativeSubagent)}
 }
 
-// parse folds one tool execution record: a subagent start remembers the
-// delegation the end record settles.
+// parse folds one decoded record: a subagent start remembers the delegation the
+// end record settles, and the extension's async-status widget settles or
+// refreshes a detached run.
 func (n *nativeSubagents) parse(record decodedRecord) ([]agent.Message, error) {
 	switch {
 	case record.start != nil:
 		return n.parseStart(record.start)
 	case record.end != nil:
 		return n.parseEnd(record.end)
+	case record.extensionUI != nil:
+		return n.parseExtensionUI(record.extensionUI)
 	default:
 		return nil, nil
 	}
@@ -139,7 +143,9 @@ func (n *nativeSubagents) parseEnd(ev *pi.ToolExecEndEvent) ([]agent.Message, er
 		// run without one keeps the tool call identity.
 		s := spawned
 		s.ID = subagentRunIdentity(d.RunID, ev.ToolCallID)
-		if (d.AsyncID != "" || d.Background) && !ev.IsError {
+		detached := d.AsyncID != "" || d.Background
+		s.Background = s.Background || detached
+		if detached && !ev.IsError {
 			s.Status = agent.NativeSubagentStatusRunning
 		} else {
 			s.Status = resultStatus(d.Results, ev.IsError, d.Stopped)
@@ -154,7 +160,7 @@ func (n *nativeSubagents) parseEnd(ev *pi.ToolExecEndEvent) ([]agent.Message, er
 		if c.RunID == "" || !subagentRunMode(c.Mode) {
 			continue
 		}
-		s := agent.NativeSubagent{ID: subagentRunIdentity(c.RunID, ""), Label: c.Agent}
+		s := agent.NativeSubagent{ID: subagentRunIdentity(c.RunID, ""), Label: c.Agent, Background: true}
 		if spawned, ok := n.calls[c.RunID]; ok {
 			// A completion that repeats the tool call ID can enrich the spawn.
 			s = spawned
@@ -166,6 +172,66 @@ func (n *nativeSubagents) parseEnd(ev *pi.ToolExecEndEvent) ([]agent.Message, er
 		s.Status = completionStatus(c.State, c.Success, c.Results)
 		s.Result = completionResult(c.Results)
 		out = append(out, n.timeline.Observe(&s)...)
+	}
+	return out, nil
+}
+
+// asyncWidgetKey is the installed pi-subagents extension's widget key for its
+// detached-run status snapshot. The extension owns this payload; core Pi RPC
+// has no typed event for it. See AGENTS.md.
+const (
+	asyncWidgetKey    = "subagent-async"
+	asyncWidgetPrefix = "PI_SUBAGENT_ASYNC_JSON:"
+	asyncSnapshotKind = "pi-subagents.async-status-snapshot"
+)
+
+// asyncSnapshot is the subset of the extension's async-status snapshot caic
+// consumes: each detached run's identity, label, and reported state.
+type asyncSnapshot struct {
+	Kind string             `json:"kind"`
+	Runs []asyncSnapshotRun `json:"runs"`
+}
+
+type asyncSnapshotRun struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	State string `json:"state"`
+}
+
+// parseExtensionUI folds the extension's async-status widget. The extension
+// re-publishes the full detached-run set on every change, so this settles a run
+// whose completion never arrived through a subagent_wait or bg_wait call, and
+// restores cards for runs that started before the retained history.
+func (n *nativeSubagents) parseExtensionUI(ev *pi.ExtensionUIRequest) ([]agent.Message, error) {
+	if ev.Method != pi.UIMethodSetWidget || ev.WidgetKey != asyncWidgetKey {
+		return nil, nil
+	}
+	var out []agent.Message
+	for _, line := range ev.WidgetLines {
+		payload, ok := strings.CutPrefix(line, asyncWidgetPrefix)
+		if !ok {
+			continue
+		}
+		var snap asyncSnapshot
+		if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+			return nil, err
+		}
+		if snap.Kind != asyncSnapshotKind {
+			continue
+		}
+		for i := range snap.Runs {
+			run := &snap.Runs[i]
+			if run.ID == "" {
+				continue
+			}
+			s := agent.NativeSubagent{
+				ID:         subagentRunIdentity(run.ID, ""),
+				Label:      run.Label,
+				Status:     asyncSnapshotStatus(run.State),
+				Background: true,
+			}
+			out = append(out, n.timeline.Observe(&s)...)
+		}
 	}
 	return out, nil
 }
@@ -221,19 +287,47 @@ func completionStatus(state string, success *bool, results []subagentResult) age
 	switch state {
 	case "complete", "completed", "succeeded":
 		return resultStatus(results, success != nil && !*success, false)
+	default:
+		if status, ok := runStateStatus(state); ok {
+			return status
+		}
+		return agent.NativeSubagentStatusUnknown
+	}
+}
+
+// runStateStatus maps the extension's non-completion run-state vocabulary onto
+// the canonical lifecycle. It reports ok=false for a state that is not
+// lifecycle evidence.
+func runStateStatus(state string) (agent.NativeSubagentStatus, bool) {
+	switch state {
 	case "failed", "error", "errored":
-		return agent.NativeSubagentStatusFailed
+		return agent.NativeSubagentStatusFailed, true
 	case "interrupted", "stopped", "cancelled", "canceled":
-		return agent.NativeSubagentStatusInterrupted
+		return agent.NativeSubagentStatusInterrupted, true
 	case "paused":
-		return agent.NativeSubagentStatusPaused
+		return agent.NativeSubagentStatusPaused, true
 	case "running":
-		return agent.NativeSubagentStatusRunning
+		return agent.NativeSubagentStatusRunning, true
 	case "queued", "pending":
 		// The extension reported a run that is not executing yet: it proves the
 		// run exists but not that it is active.
-		return agent.NativeSubagentStatusUnknown
+		return agent.NativeSubagentStatusUnknown, true
 	default:
+		return agent.NativeSubagentStatusUnknown, false
+	}
+}
+
+// asyncSnapshotStatus maps the extension's snapshot run state onto the canonical
+// lifecycle. The snapshot carries no failure detail, so a terminal run settles
+// the card without inventing a result; that stays a wait completion's job.
+func asyncSnapshotStatus(state string) agent.NativeSubagentStatus {
+	switch state {
+	case "complete", "completed", "succeeded":
+		return agent.NativeSubagentStatusCompleted
+	default:
+		if status, ok := runStateStatus(state); ok {
+			return status
+		}
 		return agent.NativeSubagentStatusUnknown
 	}
 }

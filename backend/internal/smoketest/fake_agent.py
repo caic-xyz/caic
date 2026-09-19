@@ -25,6 +25,7 @@ JOKES = [
 
 NATURAL_ASK_RE = re.compile(r"\b(?:which|should i|choose|prefer)\b")
 NATURAL_DEMO_RE = re.compile(r"\b(?:fix|bug|refactor|update|add|implement)\b")
+NATURAL_NATIVE_RE = re.compile(r"\bparallel subagents?\b")
 NATURAL_PLAN_RE = re.compile(r"\b(?:plan|design|architect|outline)\b")
 
 TOOL_DURATIONS_MS = {
@@ -568,6 +569,9 @@ def emit_quota_recovery_turn(turns: int) -> None:
 
 def emit_native_subagents_turn(turns: int) -> None:
     """Emit canonical concurrent activity; this is UI coverage, not harness evidence."""
+    # Parent narration before, between, and after the runs gives the transcript
+    # the content boundaries the UI anchors each settled card to.
+    emit_text("Delegating the review to two parallel agents and a chained batch.")
     for identity in ("joker", "reviewer"):
         emit(
             {
@@ -596,6 +600,7 @@ def emit_native_subagents_turn(turns: int) -> None:
                 },
             }
         )
+    emit_text("Both reviews are in; the batch is still running.")
     emit(
         {
             "type": "native_subagent",
@@ -628,6 +633,9 @@ def emit_native_subagents_turn(turns: int) -> None:
             },
         }
     )
+    # Keep the result strictly after the last native observation so the UI
+    # anchors the batch cards above the summary instead of on its timestamp.
+    time.sleep(0.05)
     emit_result(turns, "Native activity finished")
 
 
@@ -681,6 +689,9 @@ def main() -> None:
 
         # Natural prompt detection (for screenshots with clean prompts).
         lower = line.lower()
+        if NATURAL_NATIVE_RE.search(lower):
+            emit_native_subagents_turn(turns)
+            continue
         if NATURAL_PLAN_RE.search(lower):
             emit_plan_turn(turns)
             continue

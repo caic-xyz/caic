@@ -14,24 +14,24 @@ for (const width of [390, 1280]) {
     );
     await page.getByTestId("submit-task").click();
     await expect(page).toHaveURL(/\/task\//);
-    const panel = page.getByRole("region", {
-      name: "Native subagent activity",
-    });
-    await expect(panel.getByTestId("native-subagent-card")).toHaveCount(4);
-    await expect(panel.getByText("0 agents active · 0 batches active")).toBeVisible();
-    const summary = panel.locator("summary").first();
+    // Cards render inline in the transcript, where each lifecycle settled.
+    const cards = page.getByTestId("native-subagent-card");
+    await expect(cards).toHaveCount(4);
+    const summary = cards.locator("summary").first();
     await summary.focus();
     await page.keyboard.press("Enter");
-    await expect(panel.getByText("Read me before you judge me.")).toBeVisible();
-    await expect(panel.getByRole("link")).toHaveCount(0);
-    expect(await panel.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(
-      width,
-    );
+    await expect(cards.first().getByText("Read me before you judge me.")).toBeVisible();
+    for (const card of await cards.all()) {
+      await expect(card.getByRole("link")).toHaveCount(0);
+      expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(
+        width,
+      );
+    }
     await page.reload();
-    await expect(panel.getByTestId("native-subagent-card")).toHaveCount(4);
-    await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
-    await expect(panel.getByText("Failed", { exact: true })).toBeVisible();
-    await expect(panel.getByText("Status unknown", { exact: true })).toBeVisible();
-    await expect(panel.getByText("Paused", { exact: true })).toBeVisible();
+    await expect(cards).toHaveCount(4);
+    await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+    await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+    await expect(page.getByText("Status unknown", { exact: true })).toBeVisible();
+    await expect(page.getByText("Paused", { exact: true })).toBeVisible();
   });
 }

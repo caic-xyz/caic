@@ -124,13 +124,13 @@ func parseMessage(line []byte) ([]agent.Message, decodedItem, error) {
 				IsError:     true,
 				Result:      errMsg,
 				DurationMs:  durationMs,
-			}}, decodedItem{}, nil
+			}}, decodedItem{turnCompleted: &p}, nil
 		default: // completed, inProgress
 			return []agent.Message{&agent.ResultMessage{
 				MessageType: "result",
 				Subtype:     "result",
 				DurationMs:  durationMs,
-			}}, decodedItem{}, nil
+			}}, decodedItem{turnCompleted: &p}, nil
 		}
 
 	case codex.MethodItemStarted, codex.MethodItemCompleted:
@@ -211,7 +211,7 @@ func parseMessage(line []byte) ([]agent.Message, decodedItem, error) {
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
 			Subtype:     string(p.Status.Type),
-		}}, decodedItem{}, nil
+		}}, decodedItem{statusChanged: &p}, nil
 
 	case codex.MethodModelRerouted:
 		var p codex.ModelReroutedNotification

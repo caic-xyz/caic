@@ -329,6 +329,11 @@ export interface EventNativeSubagent {
   prompt?: string;
   status: EventNativeSubagentStatus;
   result?: string;
+  /**
+   * Background reports that the harness launched the delegation detached from
+   * the parent turn, so it can outlive that turn's result.
+   */
+  background?: boolean;
 }
 
 /** EventLog is a provisioning/startup log line from the runtime backend. */

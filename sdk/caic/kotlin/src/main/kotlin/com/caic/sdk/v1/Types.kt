@@ -1835,6 +1835,11 @@ data class EventNativeSubagent(
     val prompt: String? = null,
     val status: EventNativeSubagentStatus,
     val result: String? = null,
+    /**
+     * Background reports that the harness launched the delegation detached from
+     * the parent turn, so it can outlive that turn's result.
+     */
+    val background: Boolean? = null,
 )
 
 /** EventLog is a provisioning/startup log line from the runtime backend. */

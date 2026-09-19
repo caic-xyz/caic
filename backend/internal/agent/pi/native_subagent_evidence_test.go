@@ -58,6 +58,9 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			if card.Status != agent.NativeSubagentStatusCompleted || active != 0 {
 				t.Fatalf("outcome = %#v active = %d, want a settled single agent", card, active)
 			}
+			if !card.Background {
+				t.Fatalf("card = %#v, want a detached single agent", card)
+			}
 			// The extension's completion carries the artifact trail, not the
 			// output text, so the card must reference the artifact rather than
 			// claim a result it never received.
@@ -153,6 +156,9 @@ func TestNativeSubagentWorkflowEvidence(t *testing.T) {
 			}
 			if card.Status != agent.NativeSubagentStatusCompleted || active != 0 {
 				t.Fatalf("outcome = %#v active = %d, want a settled batch", card, active)
+			}
+			if !card.Background {
+				t.Fatalf("card = %#v, want a detached batch", card)
 			}
 			if !strings.Contains(card.Result, "Output file:") {
 				t.Fatalf("result = %q, want the workflow's reported output artifact", card.Result)

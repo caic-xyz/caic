@@ -458,14 +458,35 @@ describe("TaskDetail", () => {
 
     const { getByText, getByTestId } = renderTaskDetail();
 
-    // The canonical task-wide panel renders the lifecycle once.
-    const panel = getByTestId("native-subagents");
-    expect(within(panel).getByText("Completed")).toBeInTheDocument();
-    expect(within(panel).getByText("Read me before you judge me.")).toBeInTheDocument();
+    // The canonical card anchors to the transcript where the lifecycle settled.
+    const anchored = getByTestId("native-subagents");
+    expect(within(anchored).getByText("Completed")).toBeInTheDocument();
+    expect(within(anchored).getByText("Read me before you judge me.")).toBeInTheDocument();
     // The spawning tool call carries the same correlated status.
     const call = getByText("Agent").closest("details");
     if (!call) throw new Error("tool card must have a details element");
     expect(within(call).getByText("Completed")).toBeInTheDocument();
+  });
+
+  it("renders a native card that has no transcript item to anchor to", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "nativeSubagent",
+        ts: 1_000,
+        nativeSubagent: { id: "orphan", label: "Orphan", status: "running" },
+      });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    const { getByTestId } = renderTaskDetail();
+    expect(
+      within(getByTestId("native-subagents")).getByText("Subagent: Orphan"),
+    ).toBeInTheDocument();
   });
 
   it("shows elapsed time on a single-event message block", () => {

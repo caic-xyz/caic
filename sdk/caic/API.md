@@ -1268,6 +1268,8 @@ when the harness did not expose them.
 | `prompt` | `string` |  |  |
 | `status` | `EventNativeSubagentStatus` |  | yes |
 | `result` | `string` |  |  |
+| `background` | `boolean` | Background reports that the harness launched the delegation detached from
+the parent turn, so it can outlive that turn's result. |  |
 
 ### EventLog
 

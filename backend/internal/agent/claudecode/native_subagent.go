@@ -87,7 +87,7 @@ func (n *nativeSubagents) parseToolUses(messages []agent.Message) error {
 		if input.Prompt == "" {
 			continue
 		}
-		s := agent.NativeSubagent{ToolUseID: use.ToolUseID, Label: input.Description, Prompt: input.Prompt, Status: agent.NativeSubagentStatusUnknown}
+		s := agent.NativeSubagent{ToolUseID: use.ToolUseID, Label: input.Description, Prompt: input.Prompt, Status: agent.NativeSubagentStatusUnknown, Background: input.RunInBackground}
 		if s.Label == "" {
 			s.Label = input.SubagentType
 		}
@@ -124,6 +124,7 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg) ([]agent.Mes
 		if s.Prompt == "" {
 			s.Prompt = tool.Prompt
 		}
+		s.Background = s.Background || tool.Background
 	}
 	if s.Label == "" {
 		s.Label = ev.Description
@@ -137,6 +138,12 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg) ([]agent.Mes
 	}
 	if ev.Patch.Status != "" {
 		s.Status = claudeSubagentStatus(string(ev.Patch.Status))
+	}
+	// A background task stays background for its whole lifecycle; the task
+	// record repeats the fact and is authoritative when the tool use was not
+	// retained (for example after resuming from history).
+	if ev.IsBackgrounded || ev.Patch.IsBackgrounded {
+		s.Background = true
 	}
 	s.Result = ev.Summary
 	n.tasks[canonicalID] = s

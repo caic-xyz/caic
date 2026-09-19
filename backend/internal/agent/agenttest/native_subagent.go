@@ -230,14 +230,17 @@ func FoldNativeSubagents(observations []agent.NativeSubagent) (cards []agent.Nat
 // fact is true only when the harness reported it for that card.
 type NativeSubagentContractCard struct {
 	// Identity is the harness-native identity scheme, for example "claude:task".
-	Identity  string
-	Scope     agent.NativeSubagentScope
-	Status    agent.NativeSubagentStatus
-	GroupID   bool
-	ToolUseID bool
-	Label     bool
-	Prompt    bool
-	Result    bool
+	Identity string
+	Scope    agent.NativeSubagentScope
+	Status   agent.NativeSubagentStatus
+	GroupID  bool
+	// Background reports whether the harness launched the delegation detached
+	// from the parent turn.
+	Background bool
+	ToolUseID  bool
+	Label      bool
+	Prompt     bool
+	Result     bool
 }
 
 // NativeSubagentContract is the harness-neutral shape one evidence fixture pins
@@ -267,14 +270,15 @@ func Contract(observations []agent.NativeSubagent) NativeSubagentContract {
 	out := NativeSubagentContract{Active: active}
 	for i := range cards {
 		out.Cards = append(out.Cards, NativeSubagentContractCard{
-			Identity:  nativeIdentityScheme(cards[i].ID),
-			Scope:     cards[i].Scope,
-			Status:    cards[i].Status,
-			GroupID:   cards[i].GroupID != "",
-			ToolUseID: cards[i].ToolUseID != "",
-			Label:     cards[i].Label != "",
-			Prompt:    cards[i].Prompt != "",
-			Result:    cards[i].Result != "",
+			Identity:   nativeIdentityScheme(cards[i].ID),
+			Scope:      cards[i].Scope,
+			Status:     cards[i].Status,
+			GroupID:    cards[i].GroupID != "",
+			Background: cards[i].Background,
+			ToolUseID:  cards[i].ToolUseID != "",
+			Label:      cards[i].Label != "",
+			Prompt:     cards[i].Prompt != "",
+			Result:     cards[i].Result != "",
 		})
 	}
 	for i := range observations {
@@ -302,8 +306,8 @@ func (c NativeSubagentContract) String() string {
 	}
 	parts := make([]string, 0, len(c.Cards))
 	for _, card := range c.Cards {
-		parts = append(parts, fmt.Sprintf("{identity:%s scope:%q status:%q group:%t tool:%t label:%t prompt:%t result:%t}",
-			card.Identity, card.Scope, card.Status, card.GroupID, card.ToolUseID, card.Label, card.Prompt, card.Result))
+		parts = append(parts, fmt.Sprintf("{identity:%s scope:%q status:%q group:%t background:%t tool:%t label:%t prompt:%t result:%t}",
+			card.Identity, card.Scope, card.Status, card.GroupID, card.Background, card.ToolUseID, card.Label, card.Prompt, card.Result))
 	}
 	return fmt.Sprintf("cards:[%s] statuses:[%s] active:%d", strings.Join(parts, " "), strings.Join(statuses, " "), c.Active)
 }

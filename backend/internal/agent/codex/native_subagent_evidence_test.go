@@ -58,6 +58,9 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			if card.Status != agent.NativeSubagentStatusCompleted || active != 0 {
 				t.Fatalf("outcome = %#v active = %d, want a settled agent", card, active)
 			}
+			if !card.Background {
+				t.Fatalf("card = %#v, want a detached agent", card)
+			}
 		})
 	}
 }

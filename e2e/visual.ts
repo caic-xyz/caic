@@ -87,6 +87,11 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
         [data-testid="task-setup"] [data-testid="timing-duration"]::after {
           content: "42ms";
         }
+        /* Native-agent card durations are wall-clock event deltas that vary
+           between renders, and the showcase does not need them. */
+        [data-testid="native-subagent-duration"] {
+          display: none !important;
+        }
       `,
     });
     await style.evaluate((el) => {

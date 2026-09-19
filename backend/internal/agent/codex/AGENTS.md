@@ -50,14 +50,25 @@ delegation through two item types, both of which `native_subagent.go` maps:
 
 - `subAgentActivity` (`started`, `interacted`, `interrupted`, `completed`) is
   how a spawn and its lifecycle are reported. Its identity is the
-  `agentThreadId`, and `agentPath` names the agent (`/root/readme_joke`). The
-  standardized recording shows `started` followed by `completed` for one agent.
+  `agentThreadId`, and `agentPath` names the agent (`/root/readme_joke`). Only
+  `started` creates a card, and `agentPath: "/root"` is the parent thread, never
+  a card: children interact with the root, and folding that interaction once
+  produced a root card that never settled. The standardized recording shows
+  `started` followed by `completed` for one agent.
 - `collabAgentToolCall` covers the collaboration tools: a `spawnAgent` call with
   `receiverThreadIds` maps each receiver thread to a card, and `agentsStates`
   entries settle threads the session has already seen for `wait`, `sendInput`,
   `resumeAgent`, `closeAgent`, and similar calls. A `wait` with empty
   `receiverThreadIds` and empty `agentsStates`, which the recording also
   contains, is not evidence of anything and produces no card.
+
+A collaborative agent runs independently of the parent turn, so a `spawnAgent`
+receiver or `started` activity marks its card `Background`; only such a card can
+keep a task running after the parent result. A child thread answers for itself:
+`thread/status/changed` maps `active` to running and `idle` to paused (resumable
+after a later turn), `systemError` to failed, and a `turn/completed` whose status
+is `failed` or `interrupted` is terminal. The wire knows the root thread ID, so a
+child's `turn/completed` must not emit a parent result or end the parent turn.
 
 Legacy multi-agent v1 traffic from the same CLI may report a spawn through
 either type, and both use the agent thread ID as the canonical identity, so one

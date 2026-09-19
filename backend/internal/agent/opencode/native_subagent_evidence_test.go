@@ -58,6 +58,9 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			if card.Status != agent.NativeSubagentStatusCompleted || !strings.Contains(card.Result, "task_result") {
 				t.Fatalf("outcome = %#v, want the ACP-reported task output", card)
 			}
+			if card.Background {
+				t.Fatalf("card = %#v, want a synchronous delegation", card)
+			}
 			if active != 0 {
 				t.Fatalf("active = %d, want 0 after the recorded completion", active)
 			}

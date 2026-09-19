@@ -1314,6 +1314,9 @@ public struct EventNativeSubagent: Codable {
     public let prompt: String?
     public let status: EventNativeSubagentStatus
     public let result: String?
+    /// Background reports that the harness launched the delegation detached from
+    /// the parent turn, so it can outlive that turn's result.
+    public let background: Bool?
 }
 
 /// EventLog is a provisioning/startup log line from the runtime backend.

@@ -408,6 +408,16 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A child thread's turn completion is not the parent turn. Drop its result so
+	// it cannot end the parent turn or trigger a title/summary refresh; the
+	// native-subagent adapter still settles the child's card from the same record.
+	// The root thread is only known after thread/started, so an unscoped wire keeps
+	// the result rather than dropping every turn.
+	if tc := record.turnCompleted; tc != nil && tc.ThreadID != "" {
+		if root := w.rootThreadID(); root != "" && tc.ThreadID != root {
+			msgs = nil
+		}
+	}
 	native, err := w.nativeSubagents.parse(record)
 	if err != nil {
 		return nil, err
@@ -434,6 +444,15 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		out = append(out, msg)
 	}
 	return out, nil
+}
+
+// rootThreadID returns the session's root thread ID, or "" before the wire has
+// seen thread/started. A child thread's turn completion is compared against it to
+// keep the child's result out of the parent turn.
+func (w *wireFormat) rootThreadID() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.threadID
 }
 
 // handshake performs the JSON-RPC initialize → initialized → model/list →

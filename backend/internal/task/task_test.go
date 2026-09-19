@@ -2190,11 +2190,14 @@ func TestTask(t *testing.T) {
 		t.Run("NativeSubagentState", func(t *testing.T) {
 			t.Parallel()
 			native := func(id string, status agent.NativeSubagentStatus) *agent.NativeSubagentMessage {
+				return &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: id, Status: status, Background: true}}
+			}
+			foreground := func(id string, status agent.NativeSubagentStatus) *agent.NativeSubagentMessage {
 				return &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: id, Status: status}}
 			}
 			result := func() *agent.ResultMessage { return &agent.ResultMessage{MessageType: "result"} }
 
-			t.Run("SeedTimelineInfersRunningForActiveSubagent", func(t *testing.T) {
+			t.Run("SeedTimelineInfersRunningForBackgroundSubagent", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(taskslog.StateRunning)
@@ -2203,7 +2206,21 @@ func TestTask(t *testing.T) {
 					native("child-1", agent.NativeSubagentStatusRunning),
 				})
 				if got := tk.GetState(); got != taskslog.StateRunning {
-					t.Errorf("state = %v, want %v (a native subagent is still active)", got, taskslog.StateRunning)
+					t.Errorf("state = %v, want %v (a background subagent is still active)", got, taskslog.StateRunning)
+				}
+			})
+			t.Run("SeedTimelineInfersWaitingForForegroundSubagent", func(t *testing.T) {
+				t.Parallel()
+				// A foreground card still running at the parent result is stale or
+				// unread evidence, not detached work.
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.SeedTimeline([]agent.Message{
+					result(),
+					foreground("child-1", agent.NativeSubagentStatusRunning),
+				})
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v (a foreground card cannot outlive the turn)", got, taskslog.StateWaiting)
 				}
 			})
 			t.Run("SeedTimelineInfersWaitingForSettledSubagent", func(t *testing.T) {
@@ -2231,21 +2248,31 @@ func TestTask(t *testing.T) {
 					t.Errorf("state = %v, want %v (paused evidence is not active)", got, taskslog.StateWaiting)
 				}
 			})
-			t.Run("ResultKeepsRunningWhileSubagentActive", func(t *testing.T) {
+			t.Run("ResultKeepsRunningWhileBackgroundSubagentActive", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(taskslog.StateRunning)
 				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusRunning), false)
 				tk.addMessage(t.Context(), result(), false)
 				if got := tk.GetState(); got != taskslog.StateRunning {
-					t.Errorf("state = %v, want %v after the parent turn ended with a running subagent", got, taskslog.StateRunning)
+					t.Errorf("state = %v, want %v after the parent turn ended with a background subagent", got, taskslog.StateRunning)
 				}
 				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusCompleted), false)
 				if got := tk.GetState(); got != taskslog.StateWaiting {
 					t.Errorf("state = %v, want %v after the last subagent settled", got, taskslog.StateWaiting)
 				}
 			})
-			t.Run("LateRunningSubagentKeepsTaskRunning", func(t *testing.T) {
+			t.Run("ForegroundRunningCardFallsBackToWaiting", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.addMessage(t.Context(), foreground("child-1", agent.NativeSubagentStatusRunning), false)
+				tk.addMessage(t.Context(), result(), false)
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v (unclear foreground card falls back)", got, taskslog.StateWaiting)
+				}
+			})
+			t.Run("LateBackgroundSubagentKeepsTaskRunning", func(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(taskslog.StateRunning)

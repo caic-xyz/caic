@@ -1,26 +1,9 @@
-/* Native activity cards and state badges with bounded mobile layout. */
+/* Native activity cards and state badges anchored inline in the task transcript. */
 
-.panel {
-  margin: 0.75rem;
+.anchored {
+  margin: 0.25rem 0 0.5rem;
   min-width: 0;
   font-size: 0.85rem;
-}
-
-.panel h3 {
-  margin: 0.5rem 0;
-  font-size: 0.95rem;
-}
-
-.counts,
-.hint,
-.duration {
-  color: var(--color-text-tertiary);
-  font-size: 0.8rem;
-  font-weight: normal;
-}
-
-.counts {
-  display: block;
 }
 
 .card {
@@ -59,6 +42,11 @@
   color: var(--color-text-tertiary);
   margin-inline: 0.5rem;
 }
+
+.duration {
+  color: var(--color-text-tertiary);
+  font-size: 0.8rem;
+}
 .status[data-state="failed"] {
   color: var(--color-danger);
 }
@@ -67,4 +55,13 @@
 }
 .status[data-state="paused"] {
   color: var(--color-text-secondary);
+}
+
+.background {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: 0 0.3rem;
+  margin-inline-end: 0.5rem;
 }
