@@ -567,6 +567,37 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 			t.Fatalf("merged texts = %#v, want %#v", texts, want)
 		}
 	})
+	t.Run("valid_result_context_window_mismatch", func(t *testing.T) {
+		t.Parallel()
+		merged := mergeLogAndRelayMessages(
+			harness.Claude,
+			[]agent.Message{
+				&agent.TextMessage{Text: "before"},
+				&agent.ResultMessage{MessageType: "result", Subtype: "success", ContextWindow: 200_000, Usage: agent.Usage{InputTokens: 1}},
+			},
+			[]agent.Message{
+				// A bounded relay tail can resume after the wire learned the active
+				// model, so re-parsing the same turn can leave the window unknown.
+				&agent.ResultMessage{MessageType: "result", Subtype: "success", Usage: agent.Usage{InputTokens: 1}},
+				&agent.TextMessage{Text: "after"},
+			},
+		)
+		resultCount := 0
+		for _, msg := range merged {
+			if _, ok := msg.(*agent.ResultMessage); ok {
+				resultCount++
+			}
+		}
+		if resultCount != 1 {
+			t.Fatalf("merged result count = %d, want 1; merged = %#v", resultCount, merged)
+		}
+		if rm, ok := merged[1].(*agent.ResultMessage); !ok || rm.ContextWindow != 200_000 {
+			t.Fatalf("merged[1] = %#v, want the durable log result with its context window", merged[1])
+		}
+		if texts := textMessages(merged); !slices.Equal(texts, []string{"before", "after"}) {
+			t.Fatalf("merged texts = %#v, want %#v", texts, []string{"before", "after"})
+		}
+	})
 	t.Run("valid_source_record_overlap_across_harness_state", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {

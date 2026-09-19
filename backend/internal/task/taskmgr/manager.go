@@ -2337,6 +2337,11 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 		bb.DurationAPIMs = 0
 		aa.NumTurns = 0
 		bb.NumTurns = 0
+		// The context window is derived from the model the wire has seen. A bounded
+		// relay tail can resume after that record, so like the usage message above
+		// the window cannot anchor the overlap.
+		aa.ContextWindow = 0
+		bb.ContextWindow = 0
 		return reflect.DeepEqual(&aa, &bb)
 	default:
 		return reflect.DeepEqual(a, b)
