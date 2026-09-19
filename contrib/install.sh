@@ -166,13 +166,22 @@ install_service_launchd() {
     fi
 }
 
+# preflight verifies that a usable container runtime is installed. Docker is
+# preferred, but Podman alone is enough.
 preflight() {
-    if ! command -v docker >/dev/null 2>&1; then
-        die "docker is not installed. Install Docker first: https://docs.docker.com/get-docker/"
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        return 0
     fi
-    if ! docker info >/dev/null 2>&1; then
+    if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v docker >/dev/null 2>&1; then
         die "docker is not accessible. Is the Docker daemon running? Is your user in the docker group?"
     fi
+    if command -v podman >/dev/null 2>&1; then
+        die "podman is not accessible. Is the Podman socket running?"
+    fi
+    die "no container runtime found. Install Docker (https://docs.docker.com/get-docker/) or Podman (https://podman.io/docs/installation)"
 }
 
 main() {
