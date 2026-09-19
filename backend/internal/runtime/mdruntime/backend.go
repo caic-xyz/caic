@@ -472,7 +472,7 @@ func (b *Backend) CommitDiffStat(ctx context.Context, id runtime.ID, repoIdx int
 	}
 	out, err := b.commandOutput(ctx, ct, cmd)
 	if err != nil {
-		return "", fmt.Errorf("git commit diff stat in container %s: %w (output: %q)", ct.Name(), err, out)
+		return "", commandOutputError("git commit diff stat", ct, err, out)
 	}
 	return string(out), nil
 }
@@ -497,7 +497,7 @@ func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, comm
 	}
 	out, err := b.commandOutput(ctx, ct, cmd)
 	if err != nil {
-		return "", fmt.Errorf("git file diff in container %s: %w (output: %q)", ct.Name(), err, out)
+		return "", commandOutputError("git file diff", ct, err, out)
 	}
 	return string(out), nil
 }
@@ -519,7 +519,7 @@ func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx i
 	repo := &repos[repoIdx]
 	out, err := b.commandOutput(ctx, ct, gitStatusCommand(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
 	if err != nil {
-		return runtime.RepositoryStatus{}, fmt.Errorf("git status in container %s: %w (output: %q)", ct.Name(), err, out)
+		return runtime.RepositoryStatus{}, commandOutputError("git status", ct, err, out)
 	}
 	status, err := parseGitStatus(string(out))
 	if err != nil {
@@ -884,6 +884,18 @@ func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command str
 	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
 	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
 	return cmd.CombinedOutput()
+}
+
+// commandOutputError describes a failed container Git command. Git reports
+// machine-readable state that can run to megabytes for a worktree full of
+// generated files, so only the tail -- where Git writes its fatal message -- is
+// kept in the error the API returns to the browser.
+func commandOutputError(action string, ct mdContainer, err error, out []byte) error {
+	const limit = 512
+	if len(out) > limit {
+		out = append([]byte("…"), out[len(out)-limit:]...)
+	}
+	return fmt.Errorf("%s in container %s: %w (output: %q)", action, ct.Name(), err, out)
 }
 
 func (b *Backend) container(ctx context.Context, name string) (mdContainer, error) {

@@ -3,6 +3,7 @@
 package mdruntime
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/md"
@@ -585,6 +587,31 @@ func TestBackend(t *testing.T) {
 		}
 		if got := maxCPUsOrDefault(0); got <= 0 {
 			t.Errorf("maxCPUsOrDefault(0) = %d, want positive default", got)
+		}
+	})
+}
+
+func TestCommandOutputError(t *testing.T) {
+	t.Parallel()
+	ct := &fakeMDContainer{name: "md-caic-1"}
+	exitErr := errors.New("exit status 128")
+	t.Run("valid keeps short output", func(t *testing.T) {
+		t.Parallel()
+		got := commandOutputError("git status", ct, exitErr, []byte("fatal: boom\n")).Error()
+		want := `git status in container md-caic-1: exit status 128 (output: "fatal: boom\n")`
+		if got != want {
+			t.Errorf("commandOutputError() = %q, want %q", got, want)
+		}
+	})
+	t.Run("valid bounds long output to its tail", func(t *testing.T) {
+		t.Parallel()
+		out := append(bytes.Repeat([]byte("a"), 4096), []byte("fatal: boom")...)
+		got := commandOutputError("git status", ct, exitErr, out).Error()
+		if !strings.Contains(got, "fatal: boom") {
+			t.Errorf("commandOutputError() dropped the fatal message: %q", got)
+		}
+		if strings.Contains(got, strings.Repeat("a", 600)) {
+			t.Errorf("commandOutputError() kept the head of a long report: %q", got)
 		}
 	})
 }

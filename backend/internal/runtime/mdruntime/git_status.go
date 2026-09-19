@@ -41,10 +41,11 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`elif git rev-parse --verify --quiet REVERT_HEAD >/dev/null; then operation=revert; ` +
 		`elif [ -f "$git_dir/BISECT_LOG" ]; then operation=bisect; fi && ` +
 		`if [ -n "$operation" ]; then printf '` + gitOperationMarker + `\0%s\0' "$operation"; fi && ` +
+		untrackedDiffSetup() + ` && ` +
 		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then ` + alternateIndexDiffCommand(`git diff "$comparison" --numstat --stat -z -- .`) + `; fi && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$comparison" --numstat --stat -z -- .; fi && ` +
 		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
-		alternateIndexDiffCommand("git diff HEAD --numstat --stat -z -- .") + ` && ` +
+		`untracked_diff git diff HEAD --numstat --stat -z -- . && ` +
 		`printf '\0` + gitLogMarker + `\0' && ` +
 		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
 		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat --stat -z "$comparison..HEAD"; fi`
@@ -70,7 +71,7 @@ func gitFileDiffCommand(repo, commit, path, originalPath string) (string, error)
 		if originalPath != "" && originalPath != path {
 			pathspec = shellQuote(originalPath) + " " + pathspec
 		}
-		commands = append(commands, alternateIndexDiffCommand(gitPatchCommand("diff")+" HEAD -- "+pathspec))
+		commands = append(commands, untrackedDiffSetup(), "untracked_diff "+gitPatchCommand("diff")+" HEAD -- "+pathspec)
 	} else {
 		commands = append(commands, gitPatchCommand("show")+" --format= --diff-merges=first-parent --follow "+shellQuote(commit)+" -- "+shellQuote(path))
 	}
@@ -189,16 +190,59 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 	return status, nil
 }
 
-func alternateIndexDiffCommand(diffCommand string) string {
+// untrackedDiffSetup returns shell code that defines untracked_diff, which runs
+// a git command with untracked files included through a scratch index so the
+// real index is never touched. Each attempt rebuilds the scratch index from the
+// current worktree, and an attempt that fails because a file vanished under it
+// -- a build rewriting generated files while an agent works -- is retried with a
+// fresh view instead of failing the whole report. A path that is already gone
+// when the index is built is skipped: it has no contents to report.
+func untrackedDiffSetup() string {
 	return strings.Join([]string{
 		`index_path=$(git rev-parse --git-path index)`,
 		`tmp_index=$(mktemp)`,
 		`untracked_paths=$(mktemp)`,
-		`cp -p "$index_path" "$tmp_index"`,
-		`trap 'rm -f "$tmp_index" "$untracked_paths"' EXIT`,
-		`git ls-files -z --others --exclude-standard -- . > "$untracked_paths"`,
-		`while IFS= read -r -d '' path; do GIT_INDEX_FILE="$tmp_index" git add -N -- "$path" || exit $?; done < "$untracked_paths"`,
-		`GIT_INDEX_FILE="$tmp_index" ` + diffCommand,
+		`diff_output=$(mktemp)`,
+		`diff_errors=$(mktemp)`,
+		`add_errors=$(mktemp)`,
+		`trap 'rm -f "$tmp_index" "$untracked_paths" "$diff_output" "$diff_errors" "$add_errors"' EXIT`,
+		`prepare_diff_index() {
+	cp -p "$index_path" "$tmp_index" &&
+		git ls-files -z --others --exclude-standard -- . > "$untracked_paths" || return 1
+	while IFS= read -r -d '' path; do
+		# An untracked nested repository is reported as a directory and has no
+		# file contents to diff.
+		if [ -d "$path" ]; then continue; fi
+		if ! GIT_INDEX_FILE="$tmp_index" git add -N -- "$path" 2> "$add_errors"; then
+			if [ ! -e "$path" ] && [ ! -L "$path" ]; then continue; fi
+			cat "$add_errors" >&2
+			return 1
+		fi
+	done < "$untracked_paths"
+}`,
+		`untracked_diff() {
+	diff_attempt=0
+	while :; do
+		prepare_diff_index || exit 2
+		diff_status=0
+		env GIT_INDEX_FILE="$tmp_index" "$@" > "$diff_output" 2> "$diff_errors" || diff_status=$?
+		if [ "$diff_status" -le 1 ]; then
+			cat "$diff_output"
+			cat "$diff_errors" >&2
+			break
+		fi
+		vanished=0
+		while IFS= read -r -d '' path; do
+			if [ ! -e "$path" ] && [ ! -L "$path" ]; then vanished=1; break; fi
+		done < "$untracked_paths"
+		if [ "$diff_attempt" -ge 2 ] || [ "$vanished" -eq 0 ] || ! grep -q "^fatal: stat .*: No such file or directory$" "$diff_errors"; then
+			cat "$diff_errors" >&2
+			cat "$diff_output"
+			exit "$diff_status"
+		fi
+		diff_attempt=$((diff_attempt + 1))
+	done
+}`,
 	}, " && ")
 }
 

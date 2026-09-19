@@ -3,10 +3,12 @@
 package mdruntime
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -238,6 +240,91 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Errorf("fallback branch status = %+v", status)
 		}
 	})
+
+	t.Run("valid recovers when an untracked file vanishes during diff", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		vanished := filepath.Join(dir, "vanished.txt")
+		if err := os.WriteFile(vanished, []byte("vanished\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "retained.txt"), []byte("retained\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		shim := gitShim(t, `if [ "$1" = diff ] && [ ! -e "$MD_TEST_MARKER" ]; then
+	: > "$MD_TEST_MARKER"
+	rm -f "$MD_TEST_VANISH"
+	printf 'fatal: stat %s: No such file or directory\n' "$MD_TEST_VANISH" >&2
+	exit 128
+fi`)
+		env := append(os.Environ(),
+			"PATH="+shim,
+			"MD_TEST_MARKER="+filepath.Join(t.TempDir(), "diff-injected"),
+			"MD_TEST_VANISH="+vanished,
+		)
+		out, stderr := runGitStatusCommand(t, dir, env)
+		status, err := parseGitStatus(out)
+		if err != nil {
+			t.Fatalf("parseGitStatus() error %v\nstdout:\n%s\nstderr:\n%s", err, out, stderr)
+		}
+		if strings.Contains(stderr, "fatal: stat") {
+			t.Errorf("recovered transient error leaked to stderr: %s", stderr)
+		}
+		paths := make([]string, len(status.DiffStat))
+		for i, stat := range status.DiffStat {
+			paths[i] = stat.Path
+		}
+		if slices.Contains(paths, "vanished.txt") || !slices.Contains(paths, "retained.txt") {
+			t.Errorf("diff stat = %v, want retained.txt without vanished.txt", paths)
+		}
+	})
+
+	t.Run("valid skips an untracked file that vanishes before add", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		vanished := filepath.Join(dir, "vanished.txt")
+		if err := os.WriteFile(vanished, []byte("vanished\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		shim := gitShim(t, `if [ "$1" = add ] && [ ! -e "$MD_TEST_MARKER" ]; then
+	: > "$MD_TEST_MARKER"
+	rm -f "$MD_TEST_VANISH"
+fi`)
+		env := append(os.Environ(),
+			"PATH="+shim,
+			"MD_TEST_MARKER="+filepath.Join(t.TempDir(), "add-injected"),
+			"MD_TEST_VANISH="+vanished,
+		)
+		out, stderr := runGitStatusCommand(t, dir, env)
+		if _, err := parseGitStatus(out); err != nil {
+			t.Fatalf("parseGitStatus() error %v\nstdout:\n%s\nstderr:\n%s", err, out, stderr)
+		}
+		if strings.Contains(stderr, "did not match any files") {
+			t.Errorf("skipped add error leaked to stderr: %s", stderr)
+		}
+	})
+
+	t.Run("valid ignores an untracked nested repository", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		nested := filepath.Join(dir, "nested")
+		if err := os.Mkdir(nested, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, nested, "init", "-b", "main")
+		out, stderr := runGitStatusCommand(t, dir, os.Environ())
+		status, err := parseGitStatus(out)
+		if err != nil {
+			t.Fatalf("parseGitStatus() error %v\nstdout:\n%s\nstderr:\n%s", err, out, stderr)
+		}
+		untracked := make([]string, len(status.Uncommitted))
+		for i, file := range status.Uncommitted {
+			untracked[i] = file.Path
+		}
+		if !slices.Contains(untracked, "nested/") {
+			t.Errorf("uncommitted = %v, want nested/", untracked)
+		}
+	})
 }
 
 func TestGitCommitDiffStatCommand(t *testing.T) {
@@ -457,6 +544,51 @@ func runFileDiffCommand(t *testing.T, command string) string {
 
 func runTestGit(t *testing.T, dir string, args ...string) {
 	_ = runTestGitOutput(t, dir, args...)
+}
+
+// initStatusRepo creates a repository that gitStatusCommand can inspect: one
+// commit on main tracking origin/main, matching a container's primary branch.
+func initStatusRepo(t *testing.T) string {
+	dir := t.TempDir()
+	runTestGit(t, dir, "init", "-b", "main")
+	runTestGit(t, dir, "config", "user.email", "caic@example.com")
+	runTestGit(t, dir, "config", "user.name", "caic test")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", "tracked.txt")
+	runTestGit(t, dir, "commit", "-m", "base")
+	runTestGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	runTestGit(t, dir, "remote", "add", "origin", ".")
+	runTestGit(t, dir, "branch", "--set-upstream-to=origin/main", "main")
+	return dir
+}
+
+// gitShim writes a git wrapper that runs inject before delegating to the real
+// git, and returns a PATH value that puts the wrapper first.
+func gitShim(t *testing.T, inject string) string {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" + inject + "\nexec " + shellQuote(gitPath) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o700); err != nil { //nolint:gosec // the wrapper must be executable.
+		t.Fatal(err)
+	}
+	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
+func runGitStatusCommand(t *testing.T, dir string, env []string) (stdout, stderr string) {
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", gitStatusCommand(dir, "origin", "main")) //nolint:gosec // repository is a test temp dir.
+	cmd.Env = env
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("status command: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+	return out.String(), errOut.String()
 }
 
 func runTestGitOutput(t *testing.T, dir string, args ...string) string {
