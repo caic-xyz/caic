@@ -2187,6 +2187,118 @@ func TestTask(t *testing.T) {
 				t.Errorf("PlanContentFor(tu4) differs between folds: %q vs %q", a.PlanContentFor("tu4"), b.PlanContentFor("tu4"))
 			}
 		})
+		t.Run("NativeSubagentState", func(t *testing.T) {
+			t.Parallel()
+			native := func(id string, status agent.NativeSubagentStatus) *agent.NativeSubagentMessage {
+				return &agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{ID: id, Status: status}}
+			}
+			result := func() *agent.ResultMessage { return &agent.ResultMessage{MessageType: "result"} }
+
+			t.Run("SeedTimelineInfersRunningForActiveSubagent", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.SeedTimeline([]agent.Message{
+					result(),
+					native("child-1", agent.NativeSubagentStatusRunning),
+				})
+				if got := tk.GetState(); got != taskslog.StateRunning {
+					t.Errorf("state = %v, want %v (a native subagent is still active)", got, taskslog.StateRunning)
+				}
+			})
+			t.Run("SeedTimelineInfersWaitingForSettledSubagent", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.SeedTimeline([]agent.Message{
+					result(),
+					native("child-1", agent.NativeSubagentStatusRunning),
+					native("child-1", agent.NativeSubagentStatusCompleted),
+				})
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v (the trailing native update settled the child)", got, taskslog.StateWaiting)
+				}
+			})
+			t.Run("SeedTimelineFallsBackToWaitingForPausedSubagent", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.SeedTimeline([]agent.Message{
+					result(),
+					native("child-1", agent.NativeSubagentStatusPaused),
+				})
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v (paused evidence is not active)", got, taskslog.StateWaiting)
+				}
+			})
+			t.Run("ResultKeepsRunningWhileSubagentActive", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusRunning), false)
+				tk.addMessage(t.Context(), result(), false)
+				if got := tk.GetState(); got != taskslog.StateRunning {
+					t.Errorf("state = %v, want %v after the parent turn ended with a running subagent", got, taskslog.StateRunning)
+				}
+				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusCompleted), false)
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v after the last subagent settled", got, taskslog.StateWaiting)
+				}
+			})
+			t.Run("LateRunningSubagentKeepsTaskRunning", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.addMessage(t.Context(), result(), false)
+				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusRunning), false)
+				if got := tk.GetState(); got != taskslog.StateRunning {
+					t.Errorf("state = %v, want %v when the child is reported running after the parent settled", got, taskslog.StateRunning)
+				}
+			})
+			t.Run("UnansweredAskWinsOverRunningSubagent", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.addMessage(t.Context(), &agent.AskMessage{ToolUseID: "ask1", Questions: []agent.AskQuestion{{Question: "which?"}}}, false)
+				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusRunning), false)
+				tk.addMessage(t.Context(), result(), false)
+				if got := tk.GetState(); got != taskslog.StateAsking {
+					t.Errorf("state = %v, want %v (the user still owes an answer)", got, taskslog.StateAsking)
+				}
+			})
+			t.Run("NativeUpdateKeepsTrailingExitSpurious", func(t *testing.T) {
+				t.Parallel()
+				// Live and replay must agree that a child lifecycle update between the
+				// clean result and the exit does not turn the exit into a real error.
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(taskslog.StateRunning)
+				live.addMessage(t.Context(), result(), false)
+				live.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusRunning), false)
+				live.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusCompleted), false)
+				live.addMessage(t.Context(), &agent.ExitMessage{ExitCode: -2}, false)
+				if got := live.LastExitError(); got != "" {
+					t.Errorf("live LastExitError = %q, want the exit dropped after a clean turn", got)
+				}
+				if got := live.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("live state = %v, want %v", got, taskslog.StateWaiting)
+				}
+
+				replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				replayed.SetState(taskslog.StateRunning)
+				replayed.SeedTimeline([]agent.Message{
+					result(),
+					native("child-1", agent.NativeSubagentStatusRunning),
+					native("child-1", agent.NativeSubagentStatusCompleted),
+					&agent.ExitMessage{ExitCode: -2},
+				})
+				if got := replayed.LastExitError(); got != "" {
+					t.Errorf("replayed LastExitError = %q, want the exit dropped after a clean turn", got)
+				}
+				if got := replayed.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("replayed state = %v, want %v", got, taskslog.StateWaiting)
+				}
+			})
+		})
 		t.Run("Subscribe", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

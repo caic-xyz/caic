@@ -72,6 +72,25 @@ func TestNativeSubagentTimeline(t *testing.T) {
 		}
 	})
 
+	t.Run("Active counts only running cards", func(t *testing.T) {
+		t.Parallel()
+		var timeline NativeSubagentTimeline
+		if got := timeline.Active(); got != 0 {
+			t.Fatalf("empty Active() = %d, want 0", got)
+		}
+		timeline.Apply(&NativeSubagent{ID: "running", Status: NativeSubagentStatusRunning})
+		timeline.Apply(&NativeSubagent{ID: "paused", Status: NativeSubagentStatusPaused})
+		timeline.Apply(&NativeSubagent{ID: "unknown", Status: NativeSubagentStatusUnknown})
+		timeline.Apply(&NativeSubagent{ID: "queued"})
+		if got := timeline.Active(); got != 1 {
+			t.Fatalf("Active() = %d, want 1: unknown, paused, and absent statuses are not active", got)
+		}
+		timeline.Apply(&NativeSubagent{ID: "running", Status: NativeSubagentStatusCompleted})
+		if got := timeline.Active(); got != 0 {
+			t.Fatalf("Active() = %d, want 0 after the running card settled", got)
+		}
+	})
+
 	t.Run("partial observability remains unknown instead of active", func(t *testing.T) {
 		t.Parallel()
 		var timeline NativeSubagentTimeline

@@ -69,6 +69,18 @@ func (t *NativeSubagentTimeline) Subagents() []NativeSubagent {
 	return out
 }
 
+// Active returns the number of cards whose latest observed status is running.
+// Unknown, paused, and terminal cards are not active.
+func (t *NativeSubagentTimeline) Active() int {
+	active := 0
+	for _, id := range t.order {
+		if t.byID[id].Status == NativeSubagentStatusRunning {
+			active++
+		}
+	}
+	return active
+}
+
 func normalizedNativeSubagentStatus(s NativeSubagentStatus) NativeSubagentStatus {
 	switch s {
 	case NativeSubagentStatusRunning, NativeSubagentStatusPaused, NativeSubagentStatusCompleted, NativeSubagentStatusFailed, NativeSubagentStatusInterrupted:

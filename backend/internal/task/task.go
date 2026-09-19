@@ -164,6 +164,7 @@ type Task struct {
 	inPlanMode            bool              // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string            // LLM-generated short title; set via SetTitle.
 	timeline              []agent.TimedMessage
+	nativeSubagents       agent.NativeSubagentTimeline // harness-native subagent cards folded from timeline
 
 	subs           []*sub          // active sequenced message subscribers
 	rateLimitSubs  []*rateLimitSub // active lossless quota subscribers
@@ -243,9 +244,9 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
 // messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// TextDeltaMessage, RawMessage), and returns the trailing ResultMessage if the
-// last semantically meaningful message is a result. Returns nil if it is not a
-// ResultMessage (agent still producing output) or msgs is empty.
+// TextDeltaMessage, NativeSubagentMessage, RawMessage), and returns the trailing
+// ResultMessage if the last semantically meaningful message is a result. Returns
+// nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
 func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
 	for _, entry := range slices.Backward(entries) {
 		switch m := entry.Message.(type) {
@@ -259,6 +260,8 @@ func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
 			continue // Reconnect metadata; skip.
 		case *agent.TextDeltaMessage:
 			continue // Streaming delta; skip.
+		case *agent.NativeSubagentMessage:
+			continue // Harness-native child activity; skip.
 		case *agent.RawMessage:
 			continue // tool_progress, etc.; skip.
 		case *agent.UsageMessage:
@@ -348,14 +351,14 @@ func fallbackBoundary(msg agent.Message) bool {
 
 // ClearsExitError reports whether a message clears the last exit error from a
 // prior turn. Messages that accompany a turn without starting a new one (exit,
-// diff stat, raw relay lines, pending user actions, parse errors, log output,
-// stripped env) never clear it; a ResultMessage clears it only when the turn
-// succeeded; every other message starts a new turn. The live fold
-// (addParsedMessage), the seed fold (SeedTimeline), and the server SSE replay
-// filter must all agree on this rule, so it lives in one place.
+// diff stat, native subagent updates, raw relay lines, pending user actions,
+// parse errors, log output, stripped env) never clear it; a ResultMessage clears
+// it only when the turn succeeded; every other message starts a new turn. The
+// live fold (addParsedMessage), the seed fold (SeedTimeline), and the server SSE
+// replay filter must all agree on this rule, so it lives in one place.
 func ClearsExitError(msg agent.Message) bool {
 	switch m := msg.(type) {
-	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.RawMessage,
+	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
 		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
 		*agent.LogMessage, *agent.StrippedEnvMessage:
 		return false
@@ -1102,11 +1105,12 @@ func (t *Task) PendingUserActions() []agent.PendingUserAction {
 //
 // State inference rules (applied only for non-terminal states):
 //   - Current turn has unanswered AskUserQuestion → StateAsking
-//   - Trailing ResultMessage (no ask) → StateWaiting
+//   - Trailing ResultMessage and an active native subagent → StateRunning
+//   - Trailing ResultMessage (no ask, no active subagent) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
 // Metadata-only messages (DiffStatMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// RawMessage) after the ResultMessage are skipped during inference. For
+// NativeSubagentMessage, RawMessage) after the ResultMessage are skipped during inference. For
 // import, the caller must handle the case where state remains StateRunning
 // with no relay alive.
 func (t *Task) SeedTimeline(messages []agent.Message) {
@@ -1206,6 +1210,8 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			}
 		case *agent.RateLimitMessage:
 			t.recordRateLimitLocked(m)
+		case *agent.NativeSubagentMessage:
+			t.nativeSubagents.Apply(&m.Subagent)
 		case *agent.ToolUseMessage:
 			t.trackToolUse(m)
 		case *agent.UsageMessage:
@@ -1261,20 +1267,15 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 	}
 	// Infer state: if the last agent-emitted message is a ResultMessage, the
 	// agent finished its turn and is waiting for user input (or asking a
-	// question). Skip trailing DiffStatMessages — the relay emits periodic
-	// diff stats that can appear after the ResultMessage.
+	// question). A harness-native subagent still running keeps the task Running,
+	// because a background delegation ends the parent turn before the child
+	// settles. Skip trailing metadata — the relay emits periodic diff stats and
+	// native child updates that can appear after the ResultMessage.
 	// Only override non-terminal states — purged/crashed/failed tasks loaded
 	// from logs must keep their recorded state.
 	if len(entries) > 0 && t.state != taskslog.StatePurged && t.state != taskslog.StateCrashed && t.state != taskslog.StateFailed && t.state != taskslog.StatePurging {
 		if lastAgentMessage(entries) != nil {
-			switch {
-			case lastTurnHasUnansweredAsk(entries):
-				t.setState(taskslog.StateAsking)
-			case lastTurnHasExitPlan(entries) && t.planContent != "":
-				t.setState(taskslog.StateHasPlan)
-			default:
-				t.setState(taskslog.StateWaiting)
-			}
+			t.setState(t.settledTurnStateLocked())
 		} else if lastTurnHasUnansweredAsk(entries) {
 			t.setState(taskslog.StateAsking)
 		}
@@ -1862,6 +1863,27 @@ func (t *Task) recordStateTransition(s taskslog.State, at time.Time) {
 	}
 }
 
+// settledTurnStateLocked returns the state a parent turn settles into once its
+// trailing ResultMessage has arrived: asking or presenting a plan when the user
+// still owes input, running while a harness-native subagent is still active, and
+// waiting otherwise. A harness can end the parent turn when it delegates in the
+// background, so a running native card keeps the task busy after the parent
+// stops producing output.
+//
+// The caller must hold t.mu.
+func (t *Task) settledTurnStateLocked() taskslog.State {
+	switch {
+	case lastTurnHasUnansweredAsk(t.timeline):
+		return taskslog.StateAsking
+	case lastTurnHasExitPlan(t.timeline) && t.planContent != "":
+		return taskslog.StateHasPlan
+	case t.nativeSubagents.Active() > 0:
+		return taskslog.StateRunning
+	default:
+		return taskslog.StateWaiting
+	}
+}
+
 func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 	t.SetState(taskslog.StateFailed)
 	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()}, false)
@@ -1967,6 +1989,22 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 			t.setState(taskslog.StateRunning)
 		}
 	}
+	// Fold harness-native child activity into the canonical card set and let it
+	// settle the parent state. A harness can end the parent turn when it
+	// delegates in the background, so a trailing ResultMessage is not enough
+	// evidence that the task is idle: an active child keeps it running, and the
+	// last child settling returns it to waiting.
+	if ns, ok := m.(*agent.NativeSubagentMessage); ok {
+		t.nativeSubagents.Apply(&ns.Subagent)
+		if lastAgentMessage(t.timeline) != nil {
+			switch {
+			case t.nativeSubagents.Active() > 0 && t.state == taskslog.StateWaiting:
+				t.setState(taskslog.StateRunning)
+			case t.nativeSubagents.Active() == 0 && t.state == taskslog.StateRunning:
+				t.setState(t.settledTurnStateLocked())
+			}
+		}
+	}
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
 		t.setLiveDiffStatLocked(ds.DiffStat)
@@ -2010,22 +2048,15 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 			t.reportedContextWindow = rm.ContextWindow
 		}
 		t.planDismissed = false
-		// Transition Running→Waiting/Asking/HasPlan. Also handle
-		// Running/Waiting because watchSession may have already set
-		// Waiting before the dispatch goroutine processed this
-		// ResultMessage (it does a blocking Fetch first). In that case
-		// we still need to distinguish Waiting from Asking/HasPlan.
+		// Settle the parent turn. Also handle Running/Waiting because
+		// watchSession may have already set Waiting before the dispatch
+		// goroutine processed this ResultMessage (it does a blocking Fetch
+		// first). In that case we still need to distinguish Asking/HasPlan and
+		// to keep Running while a native subagent is active.
 		// StateStarting is also handled: the agent subprocess may
 		// produce a result before Checkout.Start calls SetState(Running).
 		if t.state == taskslog.StateRunning || t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking {
-			switch {
-			case lastTurnHasUnansweredAsk(t.timeline):
-				t.setState(taskslog.StateAsking)
-			case lastTurnHasExitPlan(t.timeline) && t.planContent != "":
-				t.setState(taskslog.StateHasPlan)
-			default:
-				t.setState(taskslog.StateWaiting)
-			}
+			t.setState(t.settledTurnStateLocked())
 		}
 		if !skipTitleGen {
 			generateTitle = true

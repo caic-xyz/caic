@@ -223,13 +223,7 @@ func FoldNativeSubagents(observations []agent.NativeSubagent) (cards []agent.Nat
 	for i := range observations {
 		timeline.Apply(&observations[i])
 	}
-	cards = timeline.Subagents()
-	for i := range cards {
-		if cards[i].Status == agent.NativeSubagentStatusRunning {
-			active++
-		}
-	}
-	return cards, active
+	return timeline.Subagents(), timeline.Active()
 }
 
 // NativeSubagentContractCard is one card's harness-neutral shape. A boolean
