@@ -7,7 +7,7 @@ import {
   waitForTaskState,
   convertPngsToWebp,
 } from "../helpers";
-import { captureScreenshot, prepareVisualPage, screenshotDir } from "../visual";
+import { captureScreenshot, prepareVisualPage, screenshotRoot } from "../visual";
 
 test.describe.configure({ mode: "serial" });
 
@@ -26,7 +26,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   // Screenshot 1: main prompt with two words.
   await fillContentEditable(prompt, "hello world");
   await expect(prompt).toContainText("hello world");
-  await captureScreenshot(page, "prompt-short.png");
+  await captureScreenshot(page, "desktop", "prompt-short.png");
 
   // Screenshot 2: main prompt with long text.
   const longText =
@@ -39,7 +39,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
     "client applications that still use the legacy session-based authentication mechanism";
   await fillContentEditable(prompt, longText);
   await expect(prompt).toContainText(longText);
-  await captureScreenshot(page, "prompt-long.png");
+  await captureScreenshot(page, "desktop", "prompt-long.png");
 
   // Clear and create a task for detail view.
   await fillContentEditable(prompt, "");
@@ -57,12 +57,12 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   // Screenshot 3: task detail input with two words.
   await fillContentEditable(detailInput, "looks good");
   await expect(detailInput).toContainText("looks good");
-  await captureScreenshot(page, "prompt-detail-short.png");
+  await captureScreenshot(page, "desktop", "prompt-detail-short.png");
 
   // Screenshot 4: task detail input with long text.
   await fillContentEditable(detailInput, longText);
   await expect(detailInput).toContainText(longText);
-  await captureScreenshot(page, "prompt-detail-long.png");
+  await captureScreenshot(page, "desktop", "prompt-detail-long.png");
 
-  await convertPngsToWebp(screenshotDir);
+  await convertPngsToWebp(screenshotRoot);
 });

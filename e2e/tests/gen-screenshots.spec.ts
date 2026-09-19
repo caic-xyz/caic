@@ -1,9 +1,9 @@
 // Generate screenshots for the documentation site.
 //
 // Run with: make screenshots-check (or make screenshots-update to accept changes)
-// Output: e2e/screenshots/frontend/
+// Output: e2e/screenshots/frontend/{desktop,mobile}/
 import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
-import { captureScreenshot, prepareVisualPage, screenshotDir } from "../visual";
+import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot } from "../visual";
 import type { Locator } from "@playwright/test";
 import path from "path";
 
@@ -85,7 +85,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
-  await captureScreenshot(page, "settings-mounts.png");
+  await captureScreenshot(page, "desktop", "settings-mounts.png");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
   await expect(
@@ -150,14 +150,58 @@ test("generate documentation screenshots", async ({ page, api }) => {
   for (let i = 0; i < 2; i++) {
     await expect(desktopHeaderStats.nth(i)).toBeVisible();
   }
-  await captureScreenshot(page, "task-detail.png");
+  await captureScreenshot(page, "desktop", "task-detail.png");
+
+  // Screenshot 2: Repository changes with an expanded per-file patch.
+  await page
+    .getByTestId("task-detail-header")
+    .getByRole("link", { name: /changed files.*commit ahead of upstream/ })
+    .first()
+    .click();
+  await page.getByTitle("Collapse sidebar").click();
+  await expect(page.getByTitle("Expand sidebar")).toBeVisible();
+  await page.setViewportSize({ width: 800, height: 720 });
+  expect(page.viewportSize()).toEqual({ width: 800, height: 720 });
+  await expect(page.getByText("Repository changes", { exact: true })).toBeVisible();
+  await expect(page.getByText("caic-0", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("origin/main", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("1 commit ahead", { exact: true })).toBeVisible();
+  await expect(page.getByText("Commits ahead (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Uncommitted changes (1)", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 commits ahead · 1 behind", { exact: true })).toBeVisible();
+  await expect(page.getByText("Commits ahead (0)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Uncommitted changes (2)", { exact: true })).toBeVisible();
+  const appDiff = page.getByRole("button", {
+    name: "frontend/src/App.tsx",
+  });
+  await expect(appDiff).toHaveAttribute("aria-expanded", "false");
+  await appDiff.click();
+  await expect(appDiff).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("-  <span>Task status</span>", { exact: true })).toBeVisible();
+  await expect(page.getByText("+  <span>Repository changes</span>", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        documentFits: document.documentElement.scrollWidth <= innerWidth,
+        paneFits: (() => {
+          const pane = document.querySelector<HTMLElement>('[data-testid="detail-pane"]');
+          return pane !== null && pane.scrollWidth <= pane.clientWidth;
+        })(),
+      })),
+    )
+    .toEqual({ documentFits: true, paneFits: true });
+  await page.mouse.move(0, 0);
+  await captureScreenshot(page, "desktop", "task-repository-changes.png");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByTitle("Expand sidebar").click();
+  await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
 
   // Screenshot 3: Plan mode.
   const planCard = page.locator(`[data-task-id="${id2}"]`);
   if ((await planCard.count()) > 0) {
     await planCard.click();
     await expect(page.getByTestId("plan-content")).toBeVisible();
-    await captureScreenshot(page, "task-plan.png");
+    await captureScreenshot(page, "desktop", "task-plan.png");
   }
 
   // Screenshot 4: Ask mode.
@@ -165,7 +209,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   if ((await askCard.count()) > 0) {
     await askCard.click();
     await expect(page.getByTestId("ask-option-In-memory (sync.Map)")).toBeVisible();
-    await captureScreenshot(page, "task-ask.png");
+    await captureScreenshot(page, "desktop", "task-ask.png");
   }
 
   // Screenshot 5: Widget — generative UI with interactive SVG diagram.
@@ -188,12 +232,12 @@ test("generate documentation screenshots", async ({ page, api }) => {
       el.scrollTop = 0;
     });
     await expect.poll(() => messageArea.evaluate((el) => el.scrollTop)).toBe(0);
-    await captureScreenshot(page, "task-widget.png");
+    await captureScreenshot(page, "desktop", "task-widget.png");
 
     // Animate the angle slider and capture frames for AVIF animation.
     if ((await slider.count()) > 0) {
       const fs = await import("fs");
-      const tmpDir = path.join(screenshotDir, ".widget-frames");
+      const tmpDir = path.join(screenshotDir("desktop"), ".widget-frames");
       fs.mkdirSync(tmpDir, { recursive: true });
 
       // Rasterize the animation in a fixed top-level viewport. Capturing the
@@ -265,7 +309,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
           "1x1",
           "-f",
           "avif",
-          path.join(screenshotDir, "task-widget.avif"),
+          path.join(screenshotDir("desktop"), "task-widget.avif"),
         ],
         { stdio: "pipe", timeout: 60_000 },
       );
@@ -316,7 +360,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
       }),
     )
     .toBe(true);
-  await captureScreenshot(page, "task-vnc.png");
+  await captureScreenshot(page, "desktop", "task-vnc.png");
 
   // Screenshot 7: Mobile — task detail at phone viewport.
   await page.goto("/");
@@ -330,7 +374,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Verify the context menu toggle is visible at mobile width.
   const contextToggle = page.locator("[aria-label='Context actions']");
   await expect(contextToggle).toBeVisible({ timeout: 3_000 });
-  await captureScreenshot(page, "task-detail-mobile.png");
+  await captureScreenshot(page, "mobile", "task-detail-mobile.png");
 
   // Screenshot 8: Dense task-detail header at the width where a larger phone
   // or narrow desktop pane needs compact repository state markers.
@@ -367,7 +411,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect
     .poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth))
     .toBe(true);
-  await captureScreenshot(page, "task-detail-header-compact.png");
+  await captureScreenshot(page, "mobile", "task-detail-header-compact.png");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
 
@@ -409,7 +453,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect
     .poll(async () => taskList.evaluate((el) => getComputedStyle(el, "::before").opacity))
     .toBe("1");
-  await captureScreenshot(page, "task-list-scrolled.png");
+  await captureScreenshot(page, "desktop", "task-list-scrolled.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -428,7 +472,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect
     .poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity))
     .toBe("1");
-  await captureScreenshot(page, "task-list-scrolled-mobile.png");
+  await captureScreenshot(page, "mobile", "task-list-scrolled-mobile.png");
 
-  await convertPngsToWebp(screenshotDir);
+  await convertPngsToWebp(screenshotRoot);
 });

@@ -94,8 +94,62 @@ func (*RuntimeBackend) CommitDiffStat(_ context.Context, _ runtime.ID, _ int, _,
 }
 
 // FileDiff implements runtime.Repository.
-func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, _ int, _, _, _ string) (string, error) {
-	return "", nil
+func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repoIdx int, commit, path, _ string) (string, error) {
+	switch {
+	case repoIdx == 0 && commit != "" && path == "cmd/caic/main.go":
+		return `diff --git a/cmd/caic/main.go b/cmd/caic/main.go
+--- a/cmd/caic/main.go
++++ b/cmd/caic/main.go
+@@ -30,0 +31,8 @@ func run() {
++	status := task.RepositoryStatus()
++	if status.ChangedFiles == 0 {
++		return nil
++	}
++	log.Info("repository changed",
++		"files", status.ChangedFiles,
++		"additions", status.Added)
++	return nil` + "\n", nil
+	case repoIdx == 0 && commit == "" && path == "frontend/src/App.tsx":
+		return `diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -88,3 +88,5 @@ function TaskHeader() {
+-  <span>Task status</span>
+-  <span>{branch()}</span>
++  <span>Repository changes</span>
++  <span>{branch()} → {upstream()}</span>
++  <RepoStateIcons state={repoState()} />
++  <DiffLink task={task()} />
+ }` + "\n", nil
+	case repoIdx == 1 && commit == "" && path == "internal/service/api.go":
+		return `diff --git a/internal/service/api.go b/internal/service/api.go
+--- a/internal/service/api.go
++++ b/internal/service/api.go
+@@ -52,2 +52,7 @@ func status() {
+-	writeStatus(w)
++	state := repositoryState()
++	writeJSON(w, state)
++	log.Debug("repository state",
++		"ahead", state.Ahead,
++		"behind", state.Behind,
++	)
+ }` + "\n", nil
+	case repoIdx == 1 && commit == "" && path == "README.md":
+		return `diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -10,5 +10,4 @@
+-Open the task.
+-Check the branch.
+-Review the summary.
+-Then push the branch.
++Open Repository changes.
++Review commits and working-tree files.
++Expand a file to inspect its patch.
+ Keep changes isolated.` + "\n", nil
+	default:
+		return "", nil
+	}
 }
 
 // RepositoryStatus implements runtime.Repository.

@@ -79,7 +79,7 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         waitForTestId("clear-and-execute-plan", GOMODE_LOAD_TIMEOUT_MS)
         waitForTestId("plan-content")
         waitForAttentionText("2 items need attention")
-        takeHostedScreenshot("gomode-task-plan")
+        takeHostedScreenshot("gomode-task-plan", fitPlanMessages = true)
         navigateHostedHome()
 
         val askPrompt = "Which storage backend should we use for session data?"
@@ -119,14 +119,49 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         }
     }
 
-    private fun takeHostedScreenshot(name: String, waitForTaskMetadata: Boolean = true) {
+    private fun fitHostedPlanMessages() {
+        executeDom("fit hosted plan messages") {
+            """
+            (() => {
+              const messages = document.querySelector('[data-testid="task-message-area"]');
+              const setup = messages?.querySelector('[data-testid="task-setup"]');
+              if (!(messages instanceof HTMLElement) || !(setup instanceof HTMLElement)) return false;
+              setup.style.display = "none";
+              messages.scrollTop = 0;
+              return true;
+            })()
+            """.trimIndent()
+        }
+        waitForDom("hosted plan messages fit without clipping") {
+            """
+            (() => {
+              const messages = document.querySelector('[data-testid="task-message-area"]');
+              return messages instanceof HTMLElement && messages.scrollHeight <= messages.clientHeight + 1;
+            })()
+            """.trimIndent()
+        }
+    }
+
+    private fun takeHostedScreenshot(
+        name: String,
+        waitForTaskMetadata: Boolean = true,
+        fitPlanMessages: Boolean = false,
+    ) {
         if (waitForTaskMetadata) {
             waitForText("PR #1", GOMODE_LOAD_TIMEOUT_MS)
             waitForText("CI: passed", GOMODE_LOAD_TIMEOUT_MS)
         }
         dismissHostedToasts()
         stabilizeHostedVisuals()
-        takeScreenshot(name)
+        val beforeCapture = if (fitPlanMessages) {
+            {
+                fitHostedPlanMessages()
+                stabilizeHostedVisuals()
+            }
+        } else {
+            null
+        }
+        takeScreenshot(name, beforeCapture)
     }
 
     private fun prepareHostedVisuals() {
@@ -198,9 +233,10 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         }
     }
 
-    private fun takeScreenshot(name: String) {
+    private fun takeScreenshot(name: String, beforeCapture: (() -> Unit)? = null) {
         composeRule.waitForIdle()
         device.waitForIdle()
+        beforeCapture?.invoke()
         check(device.takeScreenshot(File(screenshotDir, "$name.png"))) { "Could not save screenshot $name" }
     }
 

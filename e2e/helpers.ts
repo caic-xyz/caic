@@ -1,6 +1,9 @@
 // Shared e2e test helpers: typed API client and utilities.
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readdirSync, unlinkSync } from "node:fs";
+import path from "node:path";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import type { Task } from "../sdk/caic/ts/v1/types.gen";
 
@@ -116,18 +119,19 @@ export async function waitForTaskState(
 // ---------------------------------------------------------------------------
 
 export async function convertPngsToWebp(dir: string): Promise<void> {
-  const fs = await import("fs");
-  const { execFileSync } = await import("child_process");
-  const path = await import("path");
-
-  const pngs = fs.readdirSync(dir).filter((f: string) => f.endsWith(".png"));
-  for (const png of pngs) {
-    const src = path.join(dir, png);
-    const dst = path.join(dir, png.replace(/\.png$/, ".webp"));
+  const pngs: string[] = [];
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".png")) {
+      pngs.push(path.join(entry.parentPath, entry.name));
+    }
+  }
+  pngs.sort();
+  for (const src of pngs) {
+    const dst = src.replace(/\.png$/, ".webp");
     execFileSync("ffmpeg", ["-y", "-i", src, "-lossless", "1", dst], {
       stdio: "pipe",
       timeout: 60_000,
     });
-    fs.unlinkSync(src);
+    unlinkSync(src);
   }
 }

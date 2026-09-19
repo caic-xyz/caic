@@ -127,7 +127,7 @@ Android E2E uses the fake backend and passes its base URL to instrumentation. Go
 Mode screenshot tests load the hosted caic frontend in WebView and navigate
 through task states there rather than using deleted native caic Compose screens.
 
-Expected documentation screenshots live under `e2e/screenshots/android/` and use
+Expected phone documentation screenshots live under `e2e/screenshots/android/phone/` and use
 Go Mode names, including:
 
 - `gomode-settings.webp`

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -78,6 +79,86 @@ func TestRuntimeBackendRepositoryStatus(t *testing.T) {
 			t.Errorf("Commits = %#v, want none", status.Commits)
 		}
 	})
+}
+
+func TestRuntimeBackendFileDiff(t *testing.T) {
+	t.Parallel()
+
+	b := NewRuntimeBackend(0)
+	tests := []struct {
+		name    string
+		repoIdx int
+		commit  string
+		path    string
+		want    string
+		numstat string
+	}{
+		{
+			name:    "committed primary file",
+			repoIdx: 0,
+			commit:  "7b14c36e1f5a0d2c9e8f4b6a3c1d0e9f8a7b6c5d",
+			path:    "cmd/caic/main.go",
+			want:    "+\tstatus := task.RepositoryStatus()",
+			numstat: "8\t0\tcmd/caic/main.go\n",
+		},
+		{
+			name:    "uncommitted primary file",
+			repoIdx: 0,
+			path:    "frontend/src/App.tsx",
+			want:    "+  <span>Repository changes</span>",
+			numstat: "4\t2\tfrontend/src/App.tsx\n",
+		},
+		{
+			name:    "uncommitted mapped Go file",
+			repoIdx: 1,
+			path:    "internal/service/api.go",
+			want:    "+\tstate := repositoryState()",
+			numstat: "6\t1\tinternal/service/api.go\n",
+		},
+		{
+			name:    "uncommitted mapped documentation",
+			repoIdx: 1,
+			path:    "README.md",
+			want:    "+Open Repository changes.",
+			numstat: "3\t4\tREADME.md\n",
+		},
+		{
+			name: "unknown file",
+			path: "unknown.txt",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := b.FileDiff(t.Context(), "", test.repoIdx, test.commit, test.path, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.want == "" && got != "" {
+				t.Errorf("FileDiff() = %q, want empty content", got)
+			}
+			if test.want != "" && !strings.Contains(got, test.want) {
+				t.Errorf("FileDiff() = %q, want content containing %q", got, test.want)
+			}
+			if got == "" {
+				return
+			}
+			patch := filepath.Join(t.TempDir(), "fixture.patch")
+			if err := os.WriteFile(patch, []byte(got), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.CommandContext(t.Context(), "git", "apply", "--numstat", patch) //nolint:gosec // patch is an owned test file.
+			cmd.Dir = filepath.Join("..", "..", "..")
+			numstat, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("git apply --numstat: %v: %s", err, numstat)
+			}
+			if string(numstat) != test.numstat {
+				t.Errorf("git apply --numstat = %q, want %q", numstat, test.numstat)
+			}
+		})
+	}
 }
 
 func TestFakeAgentNaturalPromptMatching(t *testing.T) {

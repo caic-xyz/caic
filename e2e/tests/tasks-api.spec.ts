@@ -29,7 +29,14 @@ test("task diff reports repository git status", async ({ api }) => {
         subject: "Add task activity summary",
         authoredDate: "2026-09-01T10:30:00Z",
         stat: [
-          { path: "cmd/caic/main.go", linesAdded: 8, linesDeleted: 0, oldSize: -1, newSize: -1 },
+          {
+            path: "cmd/caic/main.go",
+            linesAdded: 8,
+            linesDeleted: 0,
+            oldSize: -1,
+            newSize: -1,
+            diff: expect.stringContaining("+\tstatus := task.RepositoryStatus()"),
+          },
         ],
       },
     ],
@@ -41,7 +48,7 @@ test("task diff reports repository git status", async ({ api }) => {
         linesDeleted: 2,
         oldSize: -1,
         newSize: -1,
-        diff: "",
+        diff: expect.stringContaining("+  <span>Repository changes</span>"),
       },
     ],
   });

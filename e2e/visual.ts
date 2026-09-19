@@ -1,13 +1,20 @@
 // Deterministic browser setup and capture helpers for documentation screenshots.
 import { expect, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const visualTime = "2026-09-02T12:00:00.000Z";
 
-export const screenshotDir =
+export const screenshotRoot =
   process.env.CAIC_SCREENSHOT_DIR ??
   path.join(path.dirname(fileURLToPath(import.meta.url)), "screenshots", "frontend");
+
+export type FrontendScreenshotLayout = "desktop" | "mobile";
+
+export function screenshotDir(layout: FrontendScreenshotLayout): string {
+  return path.join(screenshotRoot, layout);
+}
 
 export async function prepareVisualPage(page: Page): Promise<void> {
   await page.clock.setFixedTime(visualTime);
@@ -39,6 +46,10 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
           border-radius: 0 !important;
         }
         [data-testid="task-detail-form"] button {
+          border-radius: 0 !important;
+        }
+        div:has(> [data-testid="prompt-input"]),
+        div:has(> [data-testid="task-detail-prompt"]) {
           border-radius: 0 !important;
         }
         [data-task-id] {
@@ -93,10 +104,16 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   });
 }
 
-export async function captureScreenshot(page: Page, filename: string): Promise<void> {
+export async function captureScreenshot(
+  page: Page,
+  layout: FrontendScreenshotLayout,
+  filename: string,
+): Promise<void> {
   await waitForVisualReadiness(page);
+  const outputDir = screenshotDir(layout);
+  mkdirSync(outputDir, { recursive: true });
   await page.screenshot({
     caret: "hide",
-    path: path.join(screenshotDir, filename),
+    path: path.join(outputDir, filename),
   });
 }

@@ -18,6 +18,8 @@ REPOSITORY_XML_URL = "https://dl.google.com/android/repository/repository2-1.xml
 DEFAULT_SDK_ROOT = os.path.expanduser("~/.local/share/android-sdk")
 AVD_NAME = "caic_test"
 DEVICE_PROFILE = "pixel_6"
+EMULATOR_API = "android-35"
+EMULATOR_TAG = "google_apis"
 YES_INPUT = b"y\ny\ny\ny\ny\ny\n"
 
 
@@ -39,7 +41,7 @@ def _common_sdk_roots() -> list[str]:
     return roots
 
 
-def _find_sdkmanager() -> tuple[str, str] | None:
+def find_sdkmanager() -> tuple[str, str] | None:
     """Find sdkmanager and return it with its SDK root."""
     path = shutil.which("sdkmanager")
     if path:
@@ -67,8 +69,8 @@ def _system_image() -> str:
     """Return the emulator system image for the current host architecture."""
     machine = platform.machine()
     if machine in ("aarch64", "arm64"):
-        return "system-images;android-35;google_apis;arm64-v8a"
-    return "system-images;android-35;google_apis;x86_64"
+        return f"system-images;{EMULATOR_API};{EMULATOR_TAG};arm64-v8a"
+    return f"system-images;{EMULATOR_API};{EMULATOR_TAG};x86_64"
 
 
 def _fetch_latest_cmdline_tools_version() -> str:
@@ -322,7 +324,7 @@ def _emulator_packages() -> dict[str, str]:
 
 def _command_check() -> int:
     """Install non-emulator Android SDK packages."""
-    sdk = _find_sdkmanager()
+    sdk = find_sdkmanager()
     if not sdk:
         searched = "\n  ".join(_common_sdk_roots())
         print(
@@ -338,7 +340,7 @@ def _command_setup_emulator() -> int:
     """Install emulator packages and create the caic test AVD."""
     _check_host_supported()
     _ensure_java()
-    sdk = _find_sdkmanager()
+    sdk = find_sdkmanager()
     if sdk:
         sdkmanager, sdk_root = sdk
         print(f"Found sdkmanager at {sdkmanager}", file=sys.stderr)

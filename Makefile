@@ -84,7 +84,7 @@ fake-dev: frontend-build
 test: $(FRONTEND_STAMP)
 	@go test -cover ./...
 	@pnpm test:coverage
-	@find . -name 'test_*.py' -exec python3 {} \;
+	@python3 scripts/run_python_tests.py
 
 smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
