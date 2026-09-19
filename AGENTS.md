@@ -44,7 +44,9 @@ make check     # Refresh generated files, build, lint, and test (non-Android).
 `make git-hooks` also configures the repository merge driver. Pre-commit validates the
 fully staged snapshot. Commit-msg requires a subject, a blank separator before any body,
 and message lines no longer than 120 characters; it also rejects `Co-authored-by:` trailers.
-Pre-push rejects dirty worktrees, WIP commits, and multi-commit pushes.
+Pre-push only allows pushing the checked-out commit (deleting a remote ref is the
+exception); it rejects dirty worktrees, unexpected binary files, WIP commits, and
+multi-commit pushes to `main`.
 
 ### Performance
 
