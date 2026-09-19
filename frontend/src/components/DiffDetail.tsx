@@ -361,10 +361,14 @@ function FileDiffRow(props: FileDiffRowProps) {
     if (!force && diff() !== null && (props.variant === "commit" || version <= loadedVersion))
       return;
     if (version >= pendingVersion) pendingVersion = -1;
-    const restoreToggleFocus = document.activeElement === retryButton;
+    const retryWasFocused = document.activeElement === retryButton;
     setLoading(true);
     try {
       setDiff(await props.loadDiff());
+      // A background index refresh can start this load before the user reaches
+      // the retry control, so re-check focus before removing that control
+      // instead of trusting only the snapshot taken before the await.
+      const restoreToggleFocus = retryWasFocused || document.activeElement === retryButton;
       setLoadError(null);
       if (restoreToggleFocus) {
         if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);

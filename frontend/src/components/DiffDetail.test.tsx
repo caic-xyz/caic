@@ -150,6 +150,46 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
   });
 
+  it("restores row focus when a retry coalesces with a background refresh", async () => {
+    const user = userEvent.setup();
+    let resolveIndex: (response: TaskDiffIndexResp) => void = () => undefined;
+    const refreshedIndex = new Promise<TaskDiffIndexResp>((resolve) => {
+      resolveIndex = resolve;
+    });
+    let resolvePatch: (response: FileDiffResp) => void = () => undefined;
+    const refreshedPatch = new Promise<FileDiffResp>((resolve) => {
+      resolvePatch = resolve;
+    });
+    getTaskDiffIndexMock
+      .mockResolvedValueOnce(diffIndexFixture())
+      .mockReturnValueOnce(refreshedIndex);
+    getTaskFileDiffMock
+      .mockRejectedValueOnce(new Error("patch unavailable"))
+      .mockReturnValueOnce(refreshedPatch);
+
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    expect(await screen.findByRole("alert")).toHaveTextContent("patch unavailable");
+
+    // An index revalidation bumps the version, so the expanded row reloads the
+    // failed patch in the background before the user reaches the retry control.
+    taskDiffCache.invalidate("task-1");
+    resolveIndex(diffIndexFixture());
+    await waitFor(() => expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2));
+
+    const retryButton = screen.getByRole("button", {
+      name: "Retry diff for committed.go",
+    });
+    retryButton.focus();
+    await user.keyboard("{Enter}");
+
+    resolvePatch({ diff: "@@ -1 +1 @@\n-old\n+retried" });
+    expect(await screen.findByText("+retried")).toBeInTheDocument();
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
+  });
+
   it("deduplicates an in-flight request when a row is reopened", async () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
     getTaskFileDiffMock.mockReturnValueOnce(new Promise(() => undefined));
