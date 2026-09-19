@@ -37,6 +37,34 @@ a.providerPill:hover {
   letter-spacing: 0.02em;
 }
 
+.providerIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+}
+
+.pricingPeak {
+  background: var(--color-danger-bg);
+  box-shadow: 0 0 0 2px var(--color-danger);
+}
+
+.pricingPeakSoon {
+  background: var(--color-warning-bg);
+  box-shadow: 0 0 0 2px var(--color-warning-border);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .providerLogo {
   width: 12px;
   height: 12px;

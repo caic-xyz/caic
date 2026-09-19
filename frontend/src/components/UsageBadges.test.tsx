@@ -190,4 +190,62 @@ describe("UsageBadges", () => {
       expect(container.textContent).toContain("DeepSeek");
     });
   });
+
+  describe("DeepSeek peak pricing indicator", () => {
+    function renderAt(ms: number, overrides: Partial<ProviderQuota> = {}) {
+      const u = makeUsage([
+        makeProvider({
+          provider: QuotaProviderDeepSeek,
+          label: "DeepSeek",
+          logoUrl: "/logos/deepseek.svg",
+          balance: makeBalance(110, "CNY"),
+          ...overrides,
+        }),
+      ]);
+      const [usage] = createSignal(u);
+      return render(() => <UsageBadges usage={usage} now={() => ms} />);
+    }
+
+    function pricingIcon(container: HTMLElement): Element | null {
+      return container.querySelector('[data-testid="provider-pricing-icon"]');
+    }
+
+    it("tints the icon during peak pricing", () => {
+      const { container } = renderAt(Date.parse("2026-09-21T02:00:00Z"));
+      const el = pricingIcon(container);
+      expect(el?.getAttribute("data-pricing-phase")).toBe("peak");
+      expect(el?.className).toContain(styles.pricingPeak);
+      expect(el?.className).not.toContain(styles.pricingPeakSoon);
+      expect(container.textContent).toContain("peak pricing");
+    });
+
+    it("tints the icon when peak pricing starts within 30 minutes", () => {
+      const { container } = renderAt(Date.parse("2026-09-21T00:45:00Z"));
+      const el = pricingIcon(container);
+      expect(el?.getAttribute("data-pricing-phase")).toBe("peak-soon");
+      expect(el?.className).toContain(styles.pricingPeakSoon);
+      expect(el?.className).not.toContain(styles.pricingPeak);
+      expect(container.textContent).toContain("peak pricing soon");
+    });
+
+    it("leaves the icon untinted off-peak", () => {
+      const { container } = renderAt(Date.parse("2026-09-19T02:00:00Z"));
+      const el = pricingIcon(container);
+      expect(el?.getAttribute("data-pricing-phase")).toBe("off-peak");
+      expect(el?.className).not.toContain(styles.pricingPeak);
+      expect(el?.className).not.toContain(styles.pricingPeakSoon);
+      expect(container.textContent).toContain("off-peak pricing");
+    });
+
+    it("leaves other providers untinted during DeepSeek peak hours", () => {
+      const { container } = renderAt(Date.parse("2026-09-21T02:00:00Z"), {
+        provider: QuotaProviderAnthropic,
+        label: "Anthropic",
+      });
+      const el = pricingIcon(container);
+      expect(el?.hasAttribute("data-pricing-phase")).toBe(false);
+      expect(el?.className).not.toContain(styles.pricingPeak);
+      expect(el?.className).not.toContain(styles.pricingPeakSoon);
+    });
+  });
 });

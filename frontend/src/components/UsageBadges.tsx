@@ -1,8 +1,9 @@
-// Usage badges: per-provider grouped pills with color-coded thresholds.
+// Usage badges: per-provider grouped pills with color-coded thresholds and a DeepSeek peak-pricing icon tint.
 
 import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 
+import { QuotaProviderDeepSeek } from "@sdk/types.gen";
 import type {
   ProviderQuota,
   QuotaRateLimit,
@@ -13,6 +14,7 @@ import type {
 
 import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
+import { deepseekPricing, type DeepseekPricing } from "../deepseekPricing";
 import styles from "./UsageBadges.module.css";
 
 function pctColor(pct: number) {
@@ -74,15 +76,83 @@ function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; labe
   );
 }
 
-function ProviderIcon(props: { logoUrl?: string; label: string }) {
+function pricingClass(pricing: DeepseekPricing | null): string | undefined {
+  switch (pricing?.phase) {
+    case "peak":
+      return styles.pricingPeak;
+    case "peak-soon":
+      return styles.pricingPeakSoon;
+    case "off-peak":
+    case undefined:
+      return undefined;
+  }
+}
+
+function formatUTCClock(ts: number): string {
+  return `${new Date(ts).toISOString().slice(11, 16)} UTC`;
+}
+
+function pricingTooltip(pricing: DeepseekPricing, now: number): string {
+  switch (pricing.phase) {
+    case "peak":
+      return `DeepSeek peak pricing until ${formatUTCClock(pricing.transitionAt)}`;
+    case "peak-soon": {
+      const minutes = Math.max(1, Math.round((pricing.transitionAt - now) / 60_000));
+      return `DeepSeek peak pricing in ${minutes}m (${formatUTCClock(pricing.transitionAt)})`;
+    }
+    case "off-peak":
+      return "DeepSeek off-peak pricing";
+  }
+}
+
+function pricingAnnouncement(pricing: DeepseekPricing): string {
+  switch (pricing.phase) {
+    case "peak":
+      return "peak pricing";
+    case "peak-soon":
+      return "peak pricing soon";
+    case "off-peak":
+      return "off-peak pricing";
+  }
+}
+
+function ProviderIcon(props: {
+  logoUrl?: string;
+  label: string;
+  pricing: DeepseekPricing | null;
+  now: Accessor<number>;
+}) {
+  const tip = () => (props.pricing ? pricingTooltip(props.pricing, props.now()) : undefined);
+  const iconClass = () => {
+    const phase = pricingClass(props.pricing);
+    return phase ? `${styles.providerIcon} ${phase}` : styles.providerIcon;
+  };
   return (
     <Show when={props.logoUrl} fallback={<span class={styles.providerLabel}>{props.label}</span>}>
-      {(url) => <img class={styles.providerLogo} src={url()} alt={props.label} />}
+      {(url) => (
+        <Tooltip text={tip()}>
+          <span
+            class={iconClass()}
+            data-testid="provider-pricing-icon"
+            data-pricing-phase={props.pricing?.phase}
+          >
+            <img class={styles.providerLogo} src={url()} alt={props.label} />
+            <Show when={props.pricing}>
+              {(pricing) => (
+                <span class={styles.visuallyHidden}>{pricingAnnouncement(pricing())}</span>
+              )}
+            </Show>
+          </span>
+        </Tooltip>
+      )}
     </Show>
   );
 }
 
 function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
+  const pricing = () =>
+    props.pq.provider === QuotaProviderDeepSeek ? deepseekPricing(props.now()) : null;
+
   const badgeSpan = (
     <span class={styles.providerBadges}>
       <For each={props.pq.rateLimits ?? []}>
@@ -113,7 +183,12 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
 
   const content = (
     <>
-      <ProviderIcon logoUrl={props.pq.logoUrl} label={props.pq.label} />
+      <ProviderIcon
+        logoUrl={props.pq.logoUrl}
+        label={props.pq.label}
+        pricing={pricing()}
+        now={props.now}
+      />
       {badgeSpan}
     </>
   );
