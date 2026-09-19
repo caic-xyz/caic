@@ -234,6 +234,12 @@ type EventRepositoryCommit struct {
 type EventSystem struct {
 	Subtype string `json:"subtype"`
 	Detail  string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for model_rerouted).
+	// ContextTokensBefore is the context size the harness reported before a
+	// compact_boundary. Zero means the harness did not report it.
+	ContextTokensBefore int64 `json:"contextTokensBefore,omitempty"`
+	// ContextTokensAfter is the context size the harness reported after a
+	// compact_boundary, measured or estimated. Zero means it did not report it.
+	ContextTokensAfter int64 `json:"contextTokensAfter,omitempty"`
 }
 
 // EventUserInput is emitted when a user sends a text message to the agent.

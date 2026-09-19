@@ -248,6 +248,16 @@ export interface EventSystem {
   subtype: string;
   /** Optional human-readable detail (e.g. model names for model_rerouted). */
   detail?: string;
+  /**
+   * ContextTokensBefore is the context size the harness reported before a
+   * compact_boundary. Zero means the harness did not report it.
+   */
+  contextTokensBefore?: number /* int64 */;
+  /**
+   * ContextTokensAfter is the context size the harness reported after a
+   * compact_boundary, measured or estimated. Zero means it did not report it.
+   */
+  contextTokensAfter?: number /* int64 */;
 }
 
 /** EventUserInput is emitted when a user sends a text message to the agent. */

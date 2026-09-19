@@ -1207,6 +1207,11 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 				t.priorCostUSD = t.liveCostUSD
 				t.priorNumTurns = t.liveNumTurns
 				t.priorDuration = t.liveDuration
+				// Compaction replaces the conversation with a summary, so the
+				// pre-compaction usage no longer describes the live context.
+				if m.ContextTokensAfter > 0 {
+					t.lastAPIUsage = agent.Usage{InputTokens: int(m.ContextTokensAfter)}
+				}
 			}
 		case *agent.RateLimitMessage:
 			t.recordRateLimitLocked(m)
@@ -1901,8 +1906,11 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	m := parsed.Message
 	t.mu.Lock()
 	initialState := t.state
+	// A compaction boundary rewrites the summary's live context fill, so the
+	// task list must refresh even though the task state is unchanged.
+	summaryChanged := false
 	defer func() {
-		stateChanged = t.state != initialState
+		stateChanged = summaryChanged || t.state != initialState
 		t.mu.Unlock()
 	}()
 	if meta, ok := m.(*agent.MetaSessionMessage); ok {
@@ -2028,6 +2036,12 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.priorCostUSD = t.liveCostUSD
 		t.priorNumTurns = t.liveNumTurns
 		t.priorDuration = t.liveDuration
+		// Compaction replaces the conversation with a summary, so the
+		// pre-compaction usage no longer describes the live context.
+		if sm.ContextTokensAfter > 0 {
+			t.lastAPIUsage = agent.Usage{InputTokens: int(sm.ContextTokensAfter)}
+			summaryChanged = true
+		}
 	}
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok {

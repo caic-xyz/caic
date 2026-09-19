@@ -1239,6 +1239,12 @@ public struct EventSystem: Codable {
     public let subtype: String
     /// Optional human-readable detail (e.g. model names for model_rerouted).
     public let detail: String?
+    /// ContextTokensBefore is the context size the harness reported before a
+    /// compact_boundary. Zero means the harness did not report it.
+    public let contextTokensBefore: Int?
+    /// ContextTokensAfter is the context size the harness reported after a
+    /// compact_boundary, measured or estimated. Zero means it did not report it.
+    public let contextTokensAfter: Int?
 }
 
 /// EventUserInput is emitted when a user sends a text message to the agent.

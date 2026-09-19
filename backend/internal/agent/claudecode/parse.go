@@ -345,6 +345,21 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 		return nil, nil
 	case claudecode.SystemStatus, claudecode.SystemTaskProgress, claudecode.SystemCommandsChanged, claudecode.SystemTurnDuration:
 		return nil, nil
+	case claudecode.SystemCompactBoundary:
+		m := &agent.SystemMessage{
+			MessageType: string(w.Type),
+			Subtype:     string(w.Subtype),
+			SessionID:   w.SessionID,
+			UUID:        w.UUID,
+		}
+		if w.CompactError != "" {
+			m.Subtype = agent.SystemSubtypeCompactError
+			m.Detail = w.CompactError
+		} else {
+			m.ContextTokensBefore = int64(w.CompactMetadata.PreTokens)
+			m.ContextTokensAfter = int64(w.CompactMetadata.PostTokens)
+		}
+		return []agent.Message{m}, nil
 	default:
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: string(w.Type),

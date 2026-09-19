@@ -1682,10 +1682,23 @@ function hasGroupTiming(group: MessageGroup): boolean {
   );
 }
 
+// compactTokenSummary describes the harness-reported context transition on a
+// compaction boundary, e.g. "128k → 20k tokens". Empty when unreported.
+function compactTokenSummary(before: number | undefined, after: number | undefined): string {
+  const from = before ?? 0;
+  const to = after ?? 0;
+  if (from > 0 && to > 0) return `${formatTokens(from)} → ${formatTokens(to)} tokens`;
+  if (to > 0) return `${formatTokens(to)} tokens`;
+  if (from > 0) return `from ${formatTokens(from)} tokens`;
+  return "";
+}
+
 // Renders the header for a session boundary (init or compact_boundary).
 // These events are extracted from the message stream and shown as section separators.
 function SessionBoundaryItem(props: { event: EventMessage }) {
   const ev = () => props.event;
+  const compactSummary = () =>
+    compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
   return (
     <Switch>
       <Match when={ev().init} keyed>
@@ -1704,7 +1717,10 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
         )}
       </Match>
       <Match when={ev().system?.subtype === "compact_boundary"}>
-        <div class={styles.contextCleared}>Conversation compacted</div>
+        <div class={styles.contextCleared}>
+          Conversation compacted
+          <Show when={compactSummary()}>{(summary) => ` · ${summary()}`}</Show>
+        </div>
       </Match>
     </Switch>
   );
@@ -1795,6 +1811,17 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
       </Match>
       <Match when={props.ev.system?.subtype === "api_error"}>
         <div class={styles.parseError}>API error</div>
+      </Match>
+      <Match when={props.ev.system?.subtype === "compact_start"}>
+        <div class={styles.systemMsg} data-testid="compact-start">
+          Compacting context…{props.ev.system?.detail ? ` (${props.ev.system.detail})` : ""}
+        </div>
+      </Match>
+      <Match when={props.ev.system?.subtype === "compact_error"}>
+        <div class={styles.parseError} data-testid="compact-error">
+          Context compaction failed
+          {props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
+        </div>
       </Match>
       <Match when={props.ev.system?.subtype === "step_start"}>
         <></>

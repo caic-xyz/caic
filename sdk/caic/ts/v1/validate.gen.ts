@@ -205,6 +205,8 @@ export function validateEventSystem(raw: ValidatorInput): EventSystem {
   return {
     subtype: asString(obj["subtype"], "EventSystem.subtype"),
     detail: (obj["detail"] === undefined || obj["detail"] === null ? undefined : asString(obj["detail"], "EventSystem.detail")),
+    contextTokensBefore: (obj["contextTokensBefore"] === undefined || obj["contextTokensBefore"] === null ? undefined : asNumber(obj["contextTokensBefore"], "EventSystem.contextTokensBefore")),
+    contextTokensAfter: (obj["contextTokensAfter"] === undefined || obj["contextTokensAfter"] === null ? undefined : asNumber(obj["contextTokensAfter"], "EventSystem.contextTokensAfter")),
   };
 }
 

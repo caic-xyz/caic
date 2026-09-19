@@ -1004,6 +1004,74 @@ describe("TaskDetail", () => {
     expect(getByTestId("task-setup")).not.toHaveAttribute("open");
     expect(getByText("0:06")).toBeInTheDocument();
   });
+
+  it("shows in-progress context compaction", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "system",
+        ts: 1_000,
+        system: { subtype: "compact_start", detail: "manual" },
+      });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    renderTaskDetail();
+
+    expect(screen.getByTestId("compact-start")).toHaveTextContent("Compacting context… (manual)");
+  });
+
+  it("reports the harness context size on a compaction boundary", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "system",
+        ts: 1_000,
+        system: {
+          subtype: "compact_boundary",
+          contextTokensBefore: 128_000,
+          contextTokensAfter: 20_000,
+        },
+      });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    renderTaskDetail();
+
+    expect(screen.getByText(/Conversation compacted/)).toHaveTextContent(
+      "Conversation compacted · 128kt → 20kt tokens",
+    );
+  });
+
+  it("surfaces a failed context compaction", () => {
+    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "system",
+        ts: 1_000,
+        system: { subtype: "compact_error", detail: "summarizer unavailable" },
+      });
+      handlers.onReady?.();
+      return {
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+        onerror: null,
+      } as unknown as EventSource;
+    });
+
+    renderTaskDetail();
+
+    expect(screen.getByTestId("compact-error")).toHaveTextContent(
+      "Context compaction failed: summarizer unavailable",
+    );
+  });
 });
 
 // Helper type for a controllable fake EventSource.

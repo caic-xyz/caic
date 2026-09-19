@@ -194,6 +194,10 @@ short writes yield the first expiry of 300 seconds. A cache write without
 - **Thinking support**: reasoning via `thinking_delta` events; configurable via
   `set_thinking_level` command.
 - **Compaction**: `compact` command available for context management.
+  `compaction_start` becomes a `compact_start` system message, and
+  `compaction_end` becomes a `compact_boundary` carrying Pi's
+  `tokensBefore`/`estimatedTokensAfter`; a retried attempt emits nothing until it
+  settles, and an aborted or failed attempt becomes `compact_error`.
 - **Steering**: `steer` and `follow_up` exist in the protocol but caic does not
   send them (see Not Yet Exposed).
 - **Duration tracking**: `piWireFormat` records `startTime` when `WritePrompt`

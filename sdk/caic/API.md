@@ -1165,6 +1165,10 @@ EventSystem is a system event (status, compact_boundary, etc.).
 |-------|------|-------------|----------|
 | `subtype` | `string` |  | yes |
 | `detail` | `string` | Optional human-readable detail (e.g. model names for model_rerouted). |  |
+| `contextTokensBefore` | `int64` | ContextTokensBefore is the context size the harness reported before a
+compact_boundary. Zero means the harness did not report it. |  |
+| `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a
+compact_boundary, measured or estimated. Zero means it did not report it. |  |
 
 ### EventUserInput
 

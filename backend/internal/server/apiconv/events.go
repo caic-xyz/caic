@@ -75,9 +75,14 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		}}
 	case *agent.SystemMessage:
 		return []v1.EventMessage{{
-			Kind:   v1.EventKindSystem,
-			Ts:     ts,
-			System: &v1.EventSystem{Subtype: m.Subtype, Detail: m.Detail},
+			Kind: v1.EventKindSystem,
+			Ts:   ts,
+			System: &v1.EventSystem{
+				Subtype:             m.Subtype,
+				Detail:              m.Detail,
+				ContextTokensBefore: m.ContextTokensBefore,
+				ContextTokensAfter:  m.ContextTokensAfter,
+			},
 		}}
 	case *agent.TextMessage:
 		if m.Text != "" {

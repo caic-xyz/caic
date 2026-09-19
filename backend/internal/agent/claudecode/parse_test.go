@@ -611,6 +611,45 @@ func TestParseMessage(t *testing.T) {
 			}
 		}
 	})
+	t.Run("CompactBoundaryReportsTokens", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"system","subtype":"compact_boundary","session_id":"s1","uuid":"u1","compact_metadata":{"trigger":"auto","pre_tokens":150000,"post_tokens":12000}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.SystemMessage", msgs[0])
+		}
+		if sm.Subtype != "compact_boundary" {
+			t.Errorf("Subtype = %q, want compact_boundary", sm.Subtype)
+		}
+		if sm.ContextTokensBefore != 150000 || sm.ContextTokensAfter != 12000 {
+			t.Errorf("tokens = %d -> %d, want 150000 -> 12000", sm.ContextTokensBefore, sm.ContextTokensAfter)
+		}
+	})
+	t.Run("CompactBoundaryError", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"system","subtype":"compact_boundary","session_id":"s1","uuid":"u1","compact_error":"summarizer unavailable"}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.SystemMessage", msgs[0])
+		}
+		if sm.Subtype != agent.SystemSubtypeCompactError || sm.Detail != "summarizer unavailable" {
+			t.Errorf("got %#v, want compact_error with the harness message", sm)
+		}
+	})
 	t.Run("TaskEventsAreNotTranscriptMessages", func(t *testing.T) {
 		t.Parallel()
 		// Task lifecycle belongs to the stateful adapter, which requires

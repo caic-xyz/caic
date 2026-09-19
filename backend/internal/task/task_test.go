@@ -1645,6 +1645,39 @@ func TestTask(t *testing.T) {
 				t.Errorf("duration = %v, want 8s", duration)
 			}
 		})
+
+		// The boundary carries the harness's post-compaction context size, which
+		// must replace the pre-compaction fill until the next usage message.
+		t.Run("ContextTokensAfterResetsMeter", func(t *testing.T) {
+			t.Parallel()
+			newMsgList := func() []agent.Message {
+				return []agent.Message{
+					&agent.UsageMessage{Usage: agent.Usage{InputTokens: 180_000, CacheReadInputTokens: 5_000}},
+					&agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary", ContextTokensAfter: 12_000},
+				}
+			}
+			t.Run("Live", func(t *testing.T) {
+				t.Parallel()
+				tk := newTask()
+				for _, m := range newMsgList() {
+					tk.addMessage(t.Context(), m, false)
+				}
+				usage := tk.Snapshot().LastAPIUsage
+				if usage.InputTokens != 12_000 || usage.CacheReadInputTokens != 0 {
+					t.Errorf("lastAPIUsage = %+v, want only 12000 input tokens", usage)
+				}
+			})
+			t.Run("Restore", func(t *testing.T) {
+				t.Parallel()
+				tk := newTask()
+				tk.SetState(taskslog.StatePurged)
+				tk.SeedTimeline(newMsgList())
+				usage := tk.Snapshot().LastAPIUsage
+				if usage.InputTokens != 12_000 || usage.CacheReadInputTokens != 0 {
+					t.Errorf("lastAPIUsage = %+v, want only 12000 input tokens", usage)
+				}
+			})
+		})
 	})
 
 	t.Run("ClearMessages", func(t *testing.T) {

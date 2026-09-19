@@ -41,6 +41,18 @@ const (
 // harness changed the active model.
 const SystemSubtypeModelRerouted = "model_rerouted"
 
+// SystemSubtypeCompactStart marks the beginning of a harness-initiated context
+// compaction. It lets the UI show progress while the summary is generated.
+const SystemSubtypeCompactStart = "compact_start"
+
+// SystemSubtypeCompactBoundary marks the point where the harness replaced the
+// conversation with a summary.
+const SystemSubtypeCompactBoundary = "compact_boundary"
+
+// SystemSubtypeCompactError reports a compaction that failed or was cancelled,
+// so the context was left unchanged.
+const SystemSubtypeCompactError = "compact_error"
+
 // DiffFileStat describes changes to a single file.
 //
 // The added/deleted JSON keys are the relay wire contract, so the Go field names
@@ -144,6 +156,13 @@ type SystemMessage struct {
 	UUID          string `json:"uuid"`
 	Detail        string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for SystemSubtypeModelRerouted).
 	ReportedModel string `json:"model,omitempty"`  // Active model after SystemSubtypeModelRerouted; used to update task.reportedModel.
+	// ContextTokensBefore is the harness-reported context size before a
+	// SystemSubtypeCompactBoundary. Zero means the harness did not report it.
+	ContextTokensBefore int64 `json:"context_tokens_before,omitempty"`
+	// ContextTokensAfter is the harness's context size after a
+	// SystemSubtypeCompactBoundary, measured or estimated by the harness. Zero
+	// means the harness did not report it.
+	ContextTokensAfter int64 `json:"context_tokens_after,omitempty"`
 }
 
 // Type implements Message.

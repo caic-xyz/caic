@@ -161,6 +161,7 @@ func validateUnknownEventRemainder(dec *json.Decoder) error {
 //   - ToolOutputDeltaMessage — tool_execution_update
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - UserInputMessage     — prompt command (stdin logged by relay)
+//   - SystemMessage        — compaction start/boundary/error
 //   - RawMessage           — unrecognised event types
 func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedRecord, error) {
 	// caic-injected lines and stdin commands.
@@ -227,6 +228,44 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		msgs, err := parseResponse(line)
 		return msgs, decodedRecord{}, err
 
+	case pi.EventCompactionStart:
+		var ev pi.CompactionStartEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return nil, decodedRecord{}, fmt.Errorf("unmarshal compaction_start: %w", err)
+		}
+		return []agent.Message{&agent.SystemMessage{
+			MessageType: "system",
+			Subtype:     agent.SystemSubtypeCompactStart,
+			Detail:      string(ev.Reason),
+		}}, decodedRecord{}, nil
+
+	case pi.EventCompactionEnd:
+		var ev pi.CompactionEndEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return nil, decodedRecord{}, fmt.Errorf("unmarshal compaction_end: %w", err)
+		}
+		// A retry reschedules summarization, so the retried attempt owns the
+		// final outcome and emits the boundary or error.
+		if ev.WillRetry {
+			return nil, decodedRecord{}, nil
+		}
+		m := &agent.SystemMessage{MessageType: "system"}
+		switch {
+		case ev.ErrorMessage != "":
+			m.Subtype = agent.SystemSubtypeCompactError
+			m.Detail = ev.ErrorMessage
+		case ev.Aborted:
+			m.Subtype = agent.SystemSubtypeCompactError
+			m.Detail = "cancelled"
+		default:
+			m.Subtype = agent.SystemSubtypeCompactBoundary
+			if ev.Result != nil {
+				m.ContextTokensBefore = ev.Result.TokensBefore
+				m.ContextTokensAfter = ev.Result.EstimatedTokensAfter
+			}
+		}
+		return []agent.Message{m}, decodedRecord{}, nil
+
 	case pi.EventExtensionUI:
 		// Extension UI requests are passed through as RawMessage, and the
 		// wireFormat handles auto-responses. The decoded request is also handed to
@@ -243,7 +282,7 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 
 	case pi.EventAgentEnd, pi.EventTurnEnd,
 		pi.EventAgentSettled, pi.EventAutoRetryStart, pi.EventAutoRetryEnd,
-		pi.EventCompactionStart, pi.EventCompactionEnd, pi.EventEntryAppended, pi.EventQueueUpdate,
+		pi.EventEntryAppended, pi.EventQueueUpdate,
 		pi.EventSummarizationRetryScheduled, pi.EventSummarizationRetryAttemptStart, pi.EventSummarizationRetryFinished,
 		pi.EventThinkingLevelChanged:
 		// These events have no normalized agent.Message representation. Preserve

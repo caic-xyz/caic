@@ -929,7 +929,7 @@ func TestParseMessage(t *testing.T) {
 		t.Parallel()
 		for _, typ := range []string{
 			"agent_settled", "auto_retry_start", "auto_retry_end",
-			"compaction_start", "compaction_end", "entry_appended", "queue_update",
+			"entry_appended", "queue_update",
 			"summarization_retry_scheduled", "summarization_retry_attempt_start", "summarization_retry_finished",
 			"thinking_level_changed",
 		} {
@@ -1084,6 +1084,90 @@ func TestParsePromptCmd(t *testing.T) {
 		}
 		if len(msgs) != 0 {
 			t.Fatalf("got %d messages, want 0 (compact skipped)", len(msgs))
+		}
+	})
+}
+
+func TestParseCompactionEvents(t *testing.T) {
+	t.Parallel()
+
+	t.Run("start reports the reason", func(t *testing.T) {
+		t.Parallel()
+		msgs, err := parseMessage([]byte(`{"type":"compaction_start","reason":"manual"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
+		}
+		if sm.Subtype != agent.SystemSubtypeCompactStart || sm.Detail != "manual" {
+			t.Errorf("got %#v, want compact_start with reason manual", sm)
+		}
+	})
+
+	t.Run("success emits a boundary with token counts", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"compaction_end","reason":"threshold","result":{"summary":"s","firstKeptEntryId":"e","tokensBefore":120000,"estimatedTokensAfter":20000},"aborted":false,"willRetry":false}`)
+		msgs, err := parseMessage(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
+		}
+		if sm.Subtype != agent.SystemSubtypeCompactBoundary {
+			t.Errorf("Subtype = %q, want %q", sm.Subtype, agent.SystemSubtypeCompactBoundary)
+		}
+		if sm.ContextTokensBefore != 120000 || sm.ContextTokensAfter != 20000 {
+			t.Errorf("tokens = %d -> %d, want 120000 -> 20000", sm.ContextTokensBefore, sm.ContextTokensAfter)
+		}
+	})
+
+	t.Run("retry defers the boundary", func(t *testing.T) {
+		t.Parallel()
+		msgs, err := parseMessage([]byte(`{"type":"compaction_end","reason":"overflow","aborted":false,"willRetry":true}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("got %d messages, want 0 while a retry is pending", len(msgs))
+		}
+	})
+
+	t.Run("failure and cancellation report an error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			line string
+		}{
+			{name: "failure", line: `{"type":"compaction_end","errorMessage":"summarizer unavailable","aborted":false,"willRetry":false}`},
+			{name: "cancelled", line: `{"type":"compaction_end","aborted":true,"willRetry":false}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				msgs, err := parseMessage([]byte(tc.line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					t.Fatalf("got %d messages, want 1", len(msgs))
+				}
+				sm, ok := msgs[0].(*agent.SystemMessage)
+				if !ok {
+					t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
+				}
+				if sm.Subtype != agent.SystemSubtypeCompactError {
+					t.Errorf("Subtype = %q, want %q", sm.Subtype, agent.SystemSubtypeCompactError)
+				}
+			})
 		}
 	})
 }
