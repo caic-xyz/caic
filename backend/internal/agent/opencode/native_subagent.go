@@ -4,6 +4,7 @@ package opencode
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/maruel/genai/providers/opencode"
 
@@ -73,10 +74,34 @@ func (n *nativeSubagents) parse(toolCall *opencode.ToolCallUpdateUpdate) ([]agen
 		s.Status = agent.NativeSubagentStatusRunning
 	case opencode.StatusCompleted:
 		s.Status = agent.NativeSubagentStatusCompleted
-		s.Result = extractToolOutputDelta(toolCall)
+		s.Result = taskResultText(extractToolOutputDelta(toolCall))
 	case opencode.StatusFailed:
 		s.Status = agent.NativeSubagentStatusFailed
 		s.Result = extractToolError(toolCall)
 	}
 	return n.timeline.Observe(&s), nil
+}
+
+// taskResultText extracts the child's report from the OpenCode task tool output,
+// which wraps it in a session envelope:
+//
+//	<task id="ses_…" state="completed">
+//	<task_result>
+//	…
+//	</task_result>
+//	</task>
+//
+// An unrecognized shape is returned unchanged so the card still shows whatever
+// the harness reported rather than silently dropping it.
+func taskResultText(output string) string {
+	const openTag, closeTag = "<task_result>", "</task_result>"
+	_, after, ok := strings.Cut(output, openTag)
+	if !ok {
+		return output
+	}
+	body, _, ok := strings.Cut(after, closeTag)
+	if !ok {
+		return output
+	}
+	return strings.TrimSpace(body)
 }

@@ -44,7 +44,8 @@ The OpenCode 1.18.31 standardized recording drove caic's own ACP transport and
 used the native `task` tool: a `tool_call` session update with `title: "task"`
 and `kind: "think"` (empty `rawInput`), the in-progress `tool_call_update` that
 carries the structured `description`/`subagent_type`/`prompt` input, and the
-completed update with the child `<task>` output. Those three records are the
+completed update with the child `<task>` output, whose `<task_result>` body
+becomes the card result. Those three records are the
 retained v3 fixture, so the adapter is exercised on the transport production
 actually uses. Earlier evidence came from `opencode run --format json`, whose
 event envelope differs from ACP; do not treat those outer event names as ACP

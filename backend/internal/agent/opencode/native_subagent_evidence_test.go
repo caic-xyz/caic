@@ -55,14 +55,43 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			if card.Scope != "" || card.Label != "README joke" || !strings.Contains(card.Prompt, "joke about README.md") {
 				t.Fatalf("metadata = %#v, want the structured delegation input", card)
 			}
-			if card.Status != agent.NativeSubagentStatusCompleted || !strings.Contains(card.Result, "task_result") {
-				t.Fatalf("outcome = %#v, want the ACP-reported task output", card)
+			if card.Status != agent.NativeSubagentStatusCompleted {
+				t.Fatalf("outcome = %#v, want a completed card", card)
+			}
+			if want := "README.md is the project\u2019s autobiography, revised only after a crisis."; card.Result != want {
+				t.Fatalf("result = %q, want the unwrapped task_result text %q", card.Result, want)
 			}
 			if card.Background {
 				t.Fatalf("card = %#v, want a synchronous delegation", card)
 			}
 			if active != 0 {
 				t.Fatalf("active = %d, want 0 after the recorded completion", active)
+			}
+		})
+	}
+}
+
+// TestTaskResultText unwraps the task tool's session envelope and preserves an
+// unrecognized payload instead of dropping it.
+func TestTaskResultText(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "wrapped",
+			input: "<task id=\"child\" state=\"completed\">\n<task_result>\na joke\n</task_result>\n</task>",
+			want:  "a joke",
+		},
+		{name: "bare output", input: "a joke", want: "a joke"},
+		{name: "opening tag only", input: "<task_result>a joke", want: "<task_result>a joke"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := taskResultText(test.input); got != test.want {
+				t.Fatalf("taskResultText(%q) = %q, want %q", test.input, got, test.want)
 			}
 		})
 	}
