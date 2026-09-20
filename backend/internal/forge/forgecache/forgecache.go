@@ -41,12 +41,6 @@ type Cache struct {
 	notified map[string]time.Time
 }
 
-// fileData is the on-disk format.
-type fileData struct {
-	Results  map[string]Result    `json:"results"`
-	Notified map[string]time.Time `json:"notified,omitempty"`
-}
-
 // Open loads or creates a Cache backed by path. If path is empty, the cache
 // operates in-memory only (no persistence). Returns a functional empty cache
 // if the file does not exist or cannot be parsed.
@@ -145,4 +139,10 @@ func (c *Cache) save() error {
 		return fmt.Errorf("forgecache rename: %w", err)
 	}
 	return nil
+}
+
+// fileData is the on-disk format.
+type fileData struct {
+	Results  map[string]Result    `json:"results"`
+	Notified map[string]time.Time `json:"notified,omitempty"`
 }

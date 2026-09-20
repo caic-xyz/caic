@@ -63,6 +63,54 @@ type finding struct {
 	hint    string
 }
 
+func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[string]opencodedto.Method) *finding {
+	if len(message) != 0 && message[0] == '"' {
+		var reason string
+		if err := json.Unmarshal(message, &reason); err == nil {
+			return &finding{
+				path:    path,
+				line:    line,
+				harness: harness,
+				dto:     "relay diagnostic",
+				err:     errors.New(reason),
+				hint:    "inspect: backend/internal/agent/relay/relay_v2.py",
+			}
+		}
+	}
+	var err error
+	var dto string
+	switch harness {
+	case "claude":
+		if input {
+			dto, err = checkClaudeInput(message)
+		} else {
+			dto, err = checkClaude(message)
+		}
+	case "codex":
+		if input {
+			dto, err = checkCodexInput(message)
+		} else {
+			dto, err = checkCodex(message)
+		}
+	case "pi":
+		dto, err = checkPi(message)
+	case "opencode":
+		dto, err = checkOpenCode(message, openCodeMethods)
+	default:
+		return &finding{
+			path:    path,
+			line:    line,
+			harness: harness,
+			dto:     "harness dispatch",
+			err:     fmt.Errorf("unrecognized harness %q; add its DTO and checker dispatch", harness),
+		}
+	}
+	if err == nil {
+		return nil
+	}
+	return &finding{path: path, line: line, harness: harness, dto: dto, err: err}
+}
+
 func (f finding) String() string {
 	hint := f.hint
 	if hint == "" {
@@ -279,54 +327,6 @@ type zstdLog struct {
 func (z *zstdLog) Close() error {
 	z.Decoder.Close()
 	return z.file.Close()
-}
-
-func checkMessage(path string, line int, harness string, message []byte, input bool, openCodeMethods map[string]opencodedto.Method) *finding {
-	if len(message) != 0 && message[0] == '"' {
-		var reason string
-		if err := json.Unmarshal(message, &reason); err == nil {
-			return &finding{
-				path:    path,
-				line:    line,
-				harness: harness,
-				dto:     "relay diagnostic",
-				err:     errors.New(reason),
-				hint:    "inspect: backend/internal/agent/relay/relay_v2.py",
-			}
-		}
-	}
-	var err error
-	var dto string
-	switch harness {
-	case "claude":
-		if input {
-			dto, err = checkClaudeInput(message)
-		} else {
-			dto, err = checkClaude(message)
-		}
-	case "codex":
-		if input {
-			dto, err = checkCodexInput(message)
-		} else {
-			dto, err = checkCodex(message)
-		}
-	case "pi":
-		dto, err = checkPi(message)
-	case "opencode":
-		dto, err = checkOpenCode(message, openCodeMethods)
-	default:
-		return &finding{
-			path:    path,
-			line:    line,
-			harness: harness,
-			dto:     "harness dispatch",
-			err:     fmt.Errorf("unrecognized harness %q; add its DTO and checker dispatch", harness),
-		}
-	}
-	if err == nil {
-		return nil
-	}
-	return &finding{path: path, line: line, harness: harness, dto: dto, err: err}
 }
 
 func checkClaudeInput(data []byte) (string, error) {

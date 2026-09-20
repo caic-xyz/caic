@@ -683,11 +683,6 @@ type assistantSpeechQueue struct {
 	done  chan struct{}
 }
 
-type assistantSpeechQueueItem struct {
-	text      string
-	processed chan struct{}
-}
-
 func (q *assistantSpeechQueue) send(ctx context.Context, text string) bool {
 	if text == "" {
 		return true
@@ -727,4 +722,9 @@ func (q *assistantSpeechQueue) close(ctx context.Context) {
 	case <-q.done:
 	case <-ctx.Done():
 	}
+}
+
+type assistantSpeechQueueItem struct {
+	text      string
+	processed chan struct{}
 }

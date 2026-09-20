@@ -84,13 +84,6 @@ type clientMetadataResolver struct {
 	fetches map[string]*clientMetadataFetch
 }
 
-type clientMetadataFetch struct {
-	done   chan struct{}
-	body   []byte
-	header http.Header
-	err    error
-}
-
 func newClientMetadataResolver(network ClientMetadataNetwork, rootCAs *x509.CertPool) *clientMetadataResolver {
 	if network == nil {
 		network = systemClientMetadataNetwork{resolver: net.DefaultResolver, dialer: &net.Dialer{Timeout: clientMetadataTimeout}}
@@ -291,6 +284,13 @@ func (r *clientMetadataResolver) dialPublicAddress(ctx context.Context, network,
 		errs = append(errs, dialErr)
 	}
 	return nil, errors.Join(errs...)
+}
+
+type clientMetadataFetch struct {
+	done   chan struct{}
+	body   []byte
+	header http.Header
+	err    error
 }
 
 func validateClientIdentifierURL(raw string) error {

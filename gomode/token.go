@@ -27,47 +27,6 @@ type ScopedTokenClaims struct {
 	Expiry            time.Time `json:"exp"`
 }
 
-// EncodeServiceSigningPublicKey returns the importable form of an Ed25519 public key.
-func EncodeServiceSigningPublicKey(k ed25519.PublicKey) (string, error) {
-	if len(k) != ed25519.PublicKeySize {
-		return "", fmt.Errorf("ed25519 public key must be %d bytes", ed25519.PublicKeySize)
-	}
-	return "ed25519:" + base64.RawURLEncoding.EncodeToString(k), nil
-}
-
-// ParseServiceSigningPublicKey parses an imported Ed25519 public key.
-func ParseServiceSigningPublicKey(s string) (ed25519.PublicKey, error) {
-	encoded := strings.TrimPrefix(s, "ed25519:")
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("decode ed25519 public key: %w", err)
-	}
-	if len(raw) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("ed25519 public key must be %d bytes", ed25519.PublicKeySize)
-	}
-	return ed25519.PublicKey(raw), nil
-}
-
-// IssueServiceScopedToken signs a short-lived service-scoped gateway token.
-func IssueServiceScopedToken(c *ScopedTokenClaims, k ed25519.PrivateKey) (string, error) {
-	if c == nil {
-		return "", errors.New("scoped token claims are required")
-	}
-	if len(k) != ed25519.PrivateKeySize {
-		return "", fmt.Errorf("ed25519 private key must be %d bytes", ed25519.PrivateKeySize)
-	}
-	if err := c.Validate(ScopedTokenAudience); err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(c)
-	if err != nil {
-		return "", fmt.Errorf("marshal scoped token: %w", err)
-	}
-	encoded := base64.RawURLEncoding.EncodeToString(payload)
-	signature := ed25519.Sign(k, []byte(encoded))
-	return encoded + "." + base64.RawURLEncoding.EncodeToString(signature), nil
-}
-
 // VerifyServiceScopedToken validates a service-scoped gateway token.
 func VerifyServiceScopedToken(token string, k ed25519.PublicKey, audience string) (*ScopedTokenClaims, error) {
 	if len(k) != ed25519.PublicKeySize {
@@ -124,6 +83,47 @@ func (c *ScopedTokenClaims) Validate(audience string) error {
 		errs = append(errs, errors.New("scoped token expired"))
 	}
 	return errors.Join(errs...)
+}
+
+// EncodeServiceSigningPublicKey returns the importable form of an Ed25519 public key.
+func EncodeServiceSigningPublicKey(k ed25519.PublicKey) (string, error) {
+	if len(k) != ed25519.PublicKeySize {
+		return "", fmt.Errorf("ed25519 public key must be %d bytes", ed25519.PublicKeySize)
+	}
+	return "ed25519:" + base64.RawURLEncoding.EncodeToString(k), nil
+}
+
+// ParseServiceSigningPublicKey parses an imported Ed25519 public key.
+func ParseServiceSigningPublicKey(s string) (ed25519.PublicKey, error) {
+	encoded := strings.TrimPrefix(s, "ed25519:")
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode ed25519 public key: %w", err)
+	}
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("ed25519 public key must be %d bytes", ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(raw), nil
+}
+
+// IssueServiceScopedToken signs a short-lived service-scoped gateway token.
+func IssueServiceScopedToken(c *ScopedTokenClaims, k ed25519.PrivateKey) (string, error) {
+	if c == nil {
+		return "", errors.New("scoped token claims are required")
+	}
+	if len(k) != ed25519.PrivateKeySize {
+		return "", fmt.Errorf("ed25519 private key must be %d bytes", ed25519.PrivateKeySize)
+	}
+	if err := c.Validate(ScopedTokenAudience); err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("marshal scoped token: %w", err)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	signature := ed25519.Sign(k, []byte(encoded))
+	return encoded + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
 func validateTokenOrigin(value string) error {

@@ -502,19 +502,6 @@ type clientMetadataTestNetwork struct {
 	lastDial    string
 }
 
-func (n *clientMetadataTestNetwork) LookupNetIP(_ context.Context, _, _ string) ([]netip.Addr, error) {
-	n.lookupCount.Add(1)
-	return slices.Clone(n.addresses), nil
-}
-
-func (n *clientMetadataTestNetwork) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	n.dialCount.Add(1)
-	n.mu.Lock()
-	n.lastDial = address
-	n.mu.Unlock()
-	return (&net.Dialer{}).DialContext(ctx, network, n.dialAddr)
-}
-
 func newClientMetadataTestServer(t *testing.T, handler http.Handler) (*clientMetadataTestNetwork, *x509.CertPool) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -553,6 +540,19 @@ func newClientMetadataTestServer(t *testing.T, handler http.Handler) (*clientMet
 		addresses: []netip.Addr{netip.MustParseAddr("93.184.216.34")},
 	}
 	return network, roots
+}
+
+func (n *clientMetadataTestNetwork) LookupNetIP(_ context.Context, _, _ string) ([]netip.Addr, error) {
+	n.lookupCount.Add(1)
+	return slices.Clone(n.addresses), nil
+}
+
+func (n *clientMetadataTestNetwork) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	n.dialCount.Add(1)
+	n.mu.Lock()
+	n.lastDial = address
+	n.mu.Unlock()
+	return (&net.Dialer{}).DialContext(ctx, network, n.dialAddr)
 }
 
 func seedClientMetadataCache(server *Server, client *Client) {

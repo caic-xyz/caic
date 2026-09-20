@@ -81,6 +81,13 @@ refresh-generated: generate-sdks
 frontend-build: $(FRONTEND_STAMP) generate-sdks
 	@pnpm --silent build
 
+
+# methodfilecheck (see .golangci.yml) is a golangci-lint module plugin, so the
+# Go linting must run through the custom binary built from the published
+# plugin module.
+custom-gcl: .custom-gcl.yml
+	@golangci-lint custom --version $(GOLANGCI_LINT_VERSION)
+
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
@@ -133,8 +140,8 @@ lint-docs:
 	@python3 scripts/update_agents_file_index.py --check
 	@python3 scripts/update_backend_architecture.py --check
 
-lint-go: tools
-	@golangci-lint run --show-stats=false ./...
+lint-go: tools custom-gcl
+	@./custom-gcl run --show-stats=false ./...
 	@# Compile-check build-tagged code (e.g. smoke tests) that golangci-lint skips.
 	@python3 scripts/lint_build_tags.py
 
@@ -213,7 +220,7 @@ android-e2e: android-setup-emulator
 	@python3 scripts/android_e2e.py
 
 lint-fix: tools $(FRONTEND_STAMP)
-	@golangci-lint run --show-stats=false ./... --fix
+	@./custom-gcl run --show-stats=false ./... --fix
 	@pnpm --silent lint:fix
 	@ruff check --quiet --fix .
 	@ruff format --quiet .

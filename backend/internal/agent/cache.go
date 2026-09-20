@@ -46,16 +46,6 @@ func OpenHarnessCache(path string) *HarnessCache {
 	return c
 }
 
-// CachedModelInventory loads a harness inventory from cacheDir. An empty
-// cacheDir returns an empty inventory.
-func CachedModelInventory(cacheDir string, h harness.Name, envVars []string) ModelInventory {
-	if cacheDir == "" {
-		return ModelInventory{}
-	}
-	inventory, _ := OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json")).ModelInventory(h, APIKeyHash(envVars))
-	return inventory
-}
-
 // ModelInventory returns the cached inventory for h and whether it is fresh
 // (updated within the last 24 h) and its API-key hash matches envHash. Invalid
 // inventory entries are treated as unavailable.
@@ -125,4 +115,14 @@ func (c *HarnessCache) flush() {
 		return
 	}
 	_ = os.Rename(tmp, c.path)
+}
+
+// CachedModelInventory loads a harness inventory from cacheDir. An empty
+// cacheDir returns an empty inventory.
+func CachedModelInventory(cacheDir string, h harness.Name, envVars []string) ModelInventory {
+	if cacheDir == "" {
+		return ModelInventory{}
+	}
+	inventory, _ := OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json")).ModelInventory(h, APIKeyHash(envVars))
+	return inventory
 }

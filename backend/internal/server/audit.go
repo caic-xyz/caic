@@ -24,18 +24,6 @@ type auditStore struct {
 	events []auditEvent
 }
 
-type auditEvent struct {
-	Time      time.Time `json:"time"`
-	UserID    string    `json:"userID,omitempty"`
-	Subject   string    `json:"subject,omitempty"`
-	Scopes    []string  `json:"scopes,omitempty"`
-	Operation string    `json:"operation"`
-	Name      string    `json:"name"`
-	Args      string    `json:"args,omitempty"`
-	Decision  string    `json:"decision"`
-	Status    string    `json:"status,omitempty"`
-}
-
 // RecordOAuth records an OAuth audit event.
 func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any) {
 	a.record(ctx, &auditEvent{
@@ -134,4 +122,16 @@ func (a *auditStore) persistLocked(e *auditEvent) error {
 		return err
 	}
 	return f.Close()
+}
+
+type auditEvent struct {
+	Time      time.Time `json:"time"`
+	UserID    string    `json:"userID,omitempty"`
+	Subject   string    `json:"subject,omitempty"`
+	Scopes    []string  `json:"scopes,omitempty"`
+	Operation string    `json:"operation"`
+	Name      string    `json:"name"`
+	Args      string    `json:"args,omitempty"`
+	Decision  string    `json:"decision"`
+	Status    string    `json:"status,omitempty"`
 }

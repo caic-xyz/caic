@@ -23,8 +23,6 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-var _ forge.Forge = (*Client)(nil)
-
 // NewClient returns a Client that authenticates with token and throttles/retries
 // via throttle. The transport chain is: Header → Retry → throttle.
 func NewClient(token string, throttle http.RoundTripper) *Client {
@@ -39,44 +37,6 @@ func NewClient(token string, throttle http.RoundTripper) *Client {
 			},
 		},
 	}
-}
-
-const apiBase = "https://gitlab.com/api/v4"
-
-// projectID returns the URL-encoded "namespace/repo" project identifier used in GitLab API paths.
-func projectID(owner, repo string) string {
-	return url.PathEscape(owner + "/" + repo)
-}
-
-// createMRRequest is the JSON body for POST /projects/{id}/merge_requests.
-type createMRRequest struct {
-	SourceBranch string `json:"source_branch"`
-	TargetBranch string `json:"target_branch"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-}
-
-// createMRResponse is the relevant subset of the GitLab MR creation response.
-type createMRResponse struct {
-	IID int    `json:"iid"` // Internal project MR number (shown in UI).
-	SHA string `json:"sha"` // HEAD commit SHA of the source branch.
-}
-
-// branchResponse is the relevant subset of the GitLab branch response.
-type branchResponse struct {
-	Commit struct {
-		ID string `json:"id"` // Commit SHA.
-	} `json:"commit"`
-}
-
-// commitStatus is one entry from the GitLab commit statuses API.
-type commitStatus struct {
-	ID           int64      `json:"id"`
-	Name         string     `json:"name"`
-	Status       string     `json:"status"` // "pending", "running", "success", "failed", "canceled"
-	AllowFailure bool       `json:"allow_failure"`
-	TargetURL    string     `json:"target_url"` // e.g. https://gitlab.com/owner/repo/-/jobs/{jobID}
-	CreatedAt    *time.Time `json:"created_at"`
 }
 
 // CreatePR creates a merge request on GitLab and returns its metadata.
@@ -347,4 +307,44 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 		return "", fmt.Errorf("gitlab get job log: status %d: %s", resp.StatusCode, data)
 	}
 	return forge.ReadLog(resp.Body)
+}
+
+var _ forge.Forge = (*Client)(nil)
+
+const apiBase = "https://gitlab.com/api/v4"
+
+// projectID returns the URL-encoded "namespace/repo" project identifier used in GitLab API paths.
+func projectID(owner, repo string) string {
+	return url.PathEscape(owner + "/" + repo)
+}
+
+// createMRRequest is the JSON body for POST /projects/{id}/merge_requests.
+type createMRRequest struct {
+	SourceBranch string `json:"source_branch"`
+	TargetBranch string `json:"target_branch"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+}
+
+// createMRResponse is the relevant subset of the GitLab MR creation response.
+type createMRResponse struct {
+	IID int    `json:"iid"` // Internal project MR number (shown in UI).
+	SHA string `json:"sha"` // HEAD commit SHA of the source branch.
+}
+
+// branchResponse is the relevant subset of the GitLab branch response.
+type branchResponse struct {
+	Commit struct {
+		ID string `json:"id"` // Commit SHA.
+	} `json:"commit"`
+}
+
+// commitStatus is one entry from the GitLab commit statuses API.
+type commitStatus struct {
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Status       string     `json:"status"` // "pending", "running", "success", "failed", "canceled"
+	AllowFailure bool       `json:"allow_failure"`
+	TargetURL    string     `json:"target_url"` // e.g. https://gitlab.com/owner/repo/-/jobs/{jobID}
+	CreatedAt    *time.Time `json:"created_at"`
 }

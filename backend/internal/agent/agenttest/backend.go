@@ -28,9 +28,6 @@ type FakeBackend struct {
 	WireFactory func() agent.WireFormat
 }
 
-// Ensure the fake satisfies the interface at compile time.
-var _ agent.Backend = (*FakeBackend)(nil)
-
 // Harness implements agent.Backend, reporting HarnessName or "fake" if unset.
 func (f *FakeBackend) Harness() harness.Name {
 	if f.HarnessName == "" {
@@ -77,6 +74,9 @@ func (f *FakeBackend) NewWire() agent.WireFormat {
 	}
 	return noopWire{}
 }
+
+// Ensure the fake satisfies the interface at compile time.
+var _ agent.Backend = (*FakeBackend)(nil)
 
 // noopWire is an agent.WireFormat that writes nothing and parses to no messages.
 type noopWire struct{}

@@ -13,18 +13,6 @@ import (
 // InstanceStatus is the lifecycle state FakeBackend tracks per instance.
 type InstanceStatus int
 
-const (
-	// StatusAbsent is the zero value: never launched, or referenced only by a
-	// read. It is also what Status reports for an unknown instance.
-	StatusAbsent InstanceStatus = iota
-	// StatusRunning is set by Launch, Fork, and Revive.
-	StatusRunning
-	// StatusStopped is set by Stop.
-	StatusStopped
-	// StatusPurged is set by Purge.
-	StatusPurged
-)
-
 // String returns the lowercase status name for readable test diagnostics.
 func (s InstanceStatus) String() string {
 	switch s {
@@ -38,6 +26,18 @@ func (s InstanceStatus) String() string {
 		return "absent"
 	}
 }
+
+const (
+	// StatusAbsent is the zero value: never launched, or referenced only by a
+	// read. It is also what Status reports for an unknown instance.
+	StatusAbsent InstanceStatus = iota
+	// StatusRunning is set by Launch, Fork, and Revive.
+	StatusRunning
+	// StatusStopped is set by Stop.
+	StatusStopped
+	// StatusPurged is set by Purge.
+	StatusPurged
+)
 
 // SignalDelivery is the most recent signal a FakeBackend delivered to an instance.
 type SignalDelivery struct {
@@ -82,10 +82,6 @@ type FakeBackend struct {
 	signals map[runtime.ID]SignalDelivery
 	fetches []runtime.FetchOpts
 }
-
-// Ensure the fake satisfies the interface at compile time.
-var _ runtime.Lifecycle = (*FakeBackend)(nil)
-var _ runtime.Repository = (*FakeBackend)(nil)
 
 // Name returns the runtime backend name.
 func (f *FakeBackend) Name() runtime.Name {
@@ -219,3 +215,7 @@ func (f *FakeBackend) normalizeID(id runtime.ID) runtime.ID {
 	}
 	return id
 }
+
+// Ensure the fake satisfies the interface at compile time.
+var _ runtime.Lifecycle = (*FakeBackend)(nil)
+var _ runtime.Repository = (*FakeBackend)(nil)

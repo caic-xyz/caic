@@ -53,39 +53,6 @@ type App struct {
 	taskMgr         *taskmgr.Manager
 }
 
-type backgroundTask func(context.Context) error
-
-type mdRuntime struct {
-	client  *md.Client
-	backend *mdruntime.Backend
-}
-
-type repoDiscoveryResult struct {
-	paths []string
-	err   error
-}
-
-type instanceDiscoveryResult struct {
-	instances []runtime.Instance
-	err       error
-}
-
-// Serve starts the HTTP server and closes app-owned resources when serving ends.
-func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
-	defer func() { err = errors.Join(err, a.taskMgr.Close()) }()
-
-	group, groupCtx := errgroup.WithContext(ctx)
-	for _, task := range a.backgroundTasks {
-		group.Go(func() error { return task(groupCtx) })
-	}
-	group.Go(func() error { return a.Server.Serve(groupCtx, ln) })
-	err = group.Wait()
-	if a.voiceBridge != nil {
-		a.voiceBridge.CloseAll(context.WithoutCancel(ctx))
-	}
-	return err
-}
-
 // New creates the caic backend server application.
 func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Config) (*App, error) {
 	if log == nil {
@@ -502,6 +469,39 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	)
 	keepTaskMgr = true
 	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
+}
+
+// Serve starts the HTTP server and closes app-owned resources when serving ends.
+func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
+	defer func() { err = errors.Join(err, a.taskMgr.Close()) }()
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	for _, task := range a.backgroundTasks {
+		group.Go(func() error { return task(groupCtx) })
+	}
+	group.Go(func() error { return a.Server.Serve(groupCtx, ln) })
+	err = group.Wait()
+	if a.voiceBridge != nil {
+		a.voiceBridge.CloseAll(context.WithoutCancel(ctx))
+	}
+	return err
+}
+
+type backgroundTask func(context.Context) error
+
+type mdRuntime struct {
+	client  *md.Client
+	backend *mdruntime.Backend
+}
+
+type repoDiscoveryResult struct {
+	paths []string
+	err   error
+}
+
+type instanceDiscoveryResult struct {
+	instances []runtime.Instance
+	err       error
 }
 
 func checkoutRelPath(root, dir string) string {

@@ -36,8 +36,6 @@ type Lifecycle struct {
 	purgeScheduled  bool
 }
 
-var _ io.Closer = (*Lifecycle)(nil)
-
 // Close waits for lifecycle-owned background work to finish.
 func (r *Lifecycle) Close() error {
 	r.cancelScheduledPurge()
@@ -660,3 +658,5 @@ func (r *Lifecycle) generateTitle() {
 	t := r.entry.Task()
 	r.wg.Go(func() { t.GenerateTitle(r.ctx, r.manager.log.With("task", t.ID)) })
 }
+
+var _ io.Closer = (*Lifecycle)(nil)

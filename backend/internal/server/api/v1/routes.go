@@ -21,13 +21,6 @@ type Route struct {
 	QueryParams []string     // Query parameter names (GET endpoints only).
 }
 
-// SSEEvent describes a named SSE event. A nil Resp is a payloadless notification.
-type SSEEvent struct {
-	Name    string
-	Handler string
-	Resp    reflect.Type
-}
-
 // ReqName returns the request type name, or "" if Req is nil.
 func (r *Route) ReqName() string {
 	if r.Req == nil {
@@ -54,6 +47,13 @@ func (r *Route) CategoryName() string {
 		return "Other"
 	}
 	return strings.ToUpper(p[:1]) + p[1:]
+}
+
+// SSEEvent describes a named SSE event. A nil Resp is a payloadless notification.
+type SSEEvent struct {
+	Name    string
+	Handler string
+	Resp    reflect.Type
 }
 
 // Routes is the authoritative list of API endpoints. The gen-api-sdk

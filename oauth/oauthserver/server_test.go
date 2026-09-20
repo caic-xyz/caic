@@ -3769,11 +3769,6 @@ type recordingAuditRecorder struct {
 	records []auditRecord
 }
 
-type auditRecord struct {
-	decision string
-	status   string
-}
-
 func (a *recordingAuditRecorder) RecordOAuth(_ context.Context, _, _, _, decision, status string, _ any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -3795,6 +3790,11 @@ func (a *recordingAuditRecorder) events() []auditRecord {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return slices.Clone(a.records)
+}
+
+type auditRecord struct {
+	decision string
+	status   string
 }
 
 func applyTestServerDefaults(t *testing.T, cfg *ServerConfig) {

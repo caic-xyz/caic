@@ -126,6 +126,18 @@ type hijackResponseWriter struct {
 	conn   net.Conn
 }
 
+func newHijackResponseWriter(t *testing.T) *hijackResponseWriter {
+	server, client := net.Pipe()
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = client.Close()
+	})
+	return &hijackResponseWriter{
+		header: http.Header{},
+		conn:   server,
+	}
+}
+
 func (w *hijackResponseWriter) Header() http.Header {
 	return w.header
 }
@@ -139,16 +151,4 @@ func (w *hijackResponseWriter) WriteHeader(int) {}
 func (w *hijackResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	brw := bufio.NewReadWriter(bufio.NewReader(w.conn), bufio.NewWriter(w.conn))
 	return w.conn, brw, nil
-}
-
-func newHijackResponseWriter(t *testing.T) *hijackResponseWriter {
-	server, client := net.Pipe()
-	t.Cleanup(func() {
-		_ = server.Close()
-		_ = client.Close()
-	})
-	return &hijackResponseWriter{
-		header: http.Header{},
-		conn:   server,
-	}
 }

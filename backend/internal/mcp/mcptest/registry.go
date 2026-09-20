@@ -21,9 +21,6 @@ type FakeRegistry struct {
 	ReadErr    error
 }
 
-// Ensure the fake satisfies the interface at compile time.
-var _ mcp.Registry = FakeRegistry{}
-
 // Instructions implements mcp.Registry.
 func (FakeRegistry) Instructions(context.Context) (string, error) { return "be helpful", nil }
 
@@ -80,3 +77,6 @@ func (f FakeRegistry) ReadResource(_ context.Context, uri string) (mcp.Resources
 func (FakeRegistry) SubscribeResourceUpdates(context.Context, mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
 	return func(func(mcp.ResourceUpdate, error) bool) {}, nil
 }
+
+// Ensure the fake satisfies the interface at compile time.
+var _ mcp.Registry = FakeRegistry{}

@@ -41,6 +41,96 @@ type adoptionBenchmarkFixture struct {
 	id   ksid.ID
 }
 
+func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
+	target := adoptionBenchmarkBytes(b)
+	dir := b.TempDir()
+	id := ksid.NewID()
+	name := id.String() + "-org-repo-caic-0.jsonl"
+	path := filepath.Join(dir, name)
+	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		b.Fatal(err)
+	}
+	bw := bufio.NewWriterSize(f, 1<<20)
+	header := benchmarkJSONLine(b, agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     int(agent.LogVersionV1),
+		Prompt:      "benchmark adoption",
+		Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+		Harness:     harness.Claude,
+		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+	})
+	session := benchmarkJSONLine(b, agent.MetaSessionMessage{
+		MessageType:   "caic_session",
+		SessionID:     "benchmark-session",
+		ReportedModel: "claude-sonnet-4-6",
+		AgentVersion:  "2.1.0",
+	})
+	records := benchmarkAdoptionRecords(header)
+	written, err := writeBenchmarkRecord(bw, header)
+	if err == nil {
+		var n int64
+		n, err = writeBenchmarkRecord(bw, session)
+		written += n
+	}
+	const paddingReserve = int64(1 << 20)
+	for i := 0; err == nil; i++ {
+		record := records[i%len(records)]
+		if written+int64(len(record)+1) > target-paddingReserve {
+			break
+		}
+		var n int64
+		n, err = writeBenchmarkRecord(bw, record)
+		written += n
+	}
+	if err == nil {
+		// End the log with a terminal result trailer so the fixture models a
+		// compressed, terminal task log — the set the header cache targets.
+		// Its size is reserved from the padding so the fixture stays exactly
+		// target bytes.
+		result := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		resultBytes := int64(len(result) + 1)
+		remaining := target - written
+		const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
+		const suffix = `"}]}}`
+		payloadBytes := remaining - int64(len(prefix)+len(suffix)+1) - resultBytes
+		if payloadBytes < 0 {
+			err = fmt.Errorf("fixture remainder %d cannot hold padding and result", remaining)
+		} else {
+			if _, err = bw.WriteString(prefix); err == nil {
+				_, err = bw.Write(bytes.Repeat([]byte{'p'}, int(payloadBytes)))
+			}
+			if err == nil {
+				_, err = bw.WriteString(suffix + "\n")
+			}
+			if err == nil {
+				_, err = writeBenchmarkRecord(bw, result)
+			}
+		}
+	}
+	if err == nil {
+		err = bw.Flush()
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		b.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if info.Size() != target {
+		b.Fatalf("fixture size = %d, want %d", info.Size(), target)
+	}
+	b.Logf("fixture=%s bytes=%d mix=small-deltas,normal-events,large-tool-output,controls,repeated-segment-headers", path, target)
+	return &adoptionBenchmarkFixture{dir: dir, name: name, path: path, size: target, id: id}
+}
+
 func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 	lt := &LoadedTask{
 		TaskID:     f.id.String(),
@@ -273,96 +363,6 @@ func runAdoptionSubbenchmark(b *testing.B, fixture *adoptionBenchmarkFixture, op
 		b.ReportMetric(float64(readBytes)/float64(n), "read_bytes/op")
 		b.ReportMetric(float64(rchar)/float64(n)/float64(fixture.size), "rchar/fixture")
 	}
-}
-
-func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
-	target := adoptionBenchmarkBytes(b)
-	dir := b.TempDir()
-	id := ksid.NewID()
-	name := id.String() + "-org-repo-caic-0.jsonl"
-	path := filepath.Join(dir, name)
-	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		b.Fatal(err)
-	}
-	bw := bufio.NewWriterSize(f, 1<<20)
-	header := benchmarkJSONLine(b, agent.MetaMessage{
-		MessageType: "caic_meta",
-		Version:     int(agent.LogVersionV1),
-		Prompt:      "benchmark adoption",
-		Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
-		Harness:     harness.Claude,
-		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-	})
-	session := benchmarkJSONLine(b, agent.MetaSessionMessage{
-		MessageType:   "caic_session",
-		SessionID:     "benchmark-session",
-		ReportedModel: "claude-sonnet-4-6",
-		AgentVersion:  "2.1.0",
-	})
-	records := benchmarkAdoptionRecords(header)
-	written, err := writeBenchmarkRecord(bw, header)
-	if err == nil {
-		var n int64
-		n, err = writeBenchmarkRecord(bw, session)
-		written += n
-	}
-	const paddingReserve = int64(1 << 20)
-	for i := 0; err == nil; i++ {
-		record := records[i%len(records)]
-		if written+int64(len(record)+1) > target-paddingReserve {
-			break
-		}
-		var n int64
-		n, err = writeBenchmarkRecord(bw, record)
-		written += n
-	}
-	if err == nil {
-		// End the log with a terminal result trailer so the fixture models a
-		// compressed, terminal task log — the set the header cache targets.
-		// Its size is reserved from the padding so the fixture stays exactly
-		// target bytes.
-		result := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
-		resultBytes := int64(len(result) + 1)
-		remaining := target - written
-		const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
-		const suffix = `"}]}}`
-		payloadBytes := remaining - int64(len(prefix)+len(suffix)+1) - resultBytes
-		if payloadBytes < 0 {
-			err = fmt.Errorf("fixture remainder %d cannot hold padding and result", remaining)
-		} else {
-			if _, err = bw.WriteString(prefix); err == nil {
-				_, err = bw.Write(bytes.Repeat([]byte{'p'}, int(payloadBytes)))
-			}
-			if err == nil {
-				_, err = bw.WriteString(suffix + "\n")
-			}
-			if err == nil {
-				_, err = writeBenchmarkRecord(bw, result)
-			}
-		}
-	}
-	if err == nil {
-		err = bw.Flush()
-	}
-	if err == nil {
-		err = f.Sync()
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		b.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		b.Fatal(err)
-	}
-	if info.Size() != target {
-		b.Fatalf("fixture size = %d, want %d", info.Size(), target)
-	}
-	b.Logf("fixture=%s bytes=%d mix=small-deltas,normal-events,large-tool-output,controls,repeated-segment-headers", path, target)
-	return &adoptionBenchmarkFixture{dir: dir, name: name, path: path, size: target, id: id}
 }
 
 // BenchmarkDecodeDiscriminatorProbe measures per-line discriminator cost over

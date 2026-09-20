@@ -41,16 +41,6 @@ type Backend struct {
 	agent.Base
 }
 
-// commandDiscriminator is a Pi command without parameters or a correlation ID.
-type commandDiscriminator struct {
-	Type pi.EventType `json:"type"`
-}
-
-var (
-	_ agent.Backend      = (*Backend)(nil)
-	_ agent.ModelFetcher = (*Backend)(nil)
-)
-
 // New creates a Pi backend.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{}
@@ -257,6 +247,16 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	return sess, nil
 }
 
+// commandDiscriminator is a Pi command without parameters or a correlation ID.
+type commandDiscriminator struct {
+	Type pi.EventType `json:"type"`
+}
+
+var (
+	_ agent.Backend      = (*Backend)(nil)
+	_ agent.ModelFetcher = (*Backend)(nil)
+)
+
 // updatePi updates Pi and its extensions in the target container after a failed startup.
 func updatePi(ctx context.Context, target runtime.ConnectionTarget) (string, error) {
 	if target.SSHHost == "" {
@@ -427,10 +427,6 @@ type piWireFormat struct {
 	// Pi's tool_execution_update events carry the full accumulated output;
 	// we track the previous length to emit only the new portion.
 	toolOutputLen map[string]int
-}
-
-type agentEndEnvelope struct {
-	WillRetry bool `json:"willRetry"`
 }
 
 // WritePrompt sends a prompt command to Pi's stdin and records the start time
@@ -804,6 +800,10 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 		}}, nil
 	}
 	return nil, nil
+}
+
+type agentEndEnvelope struct {
+	WillRetry bool `json:"willRetry"`
 }
 
 var errResponseTimeout = errors.New("pi response wait timed out")

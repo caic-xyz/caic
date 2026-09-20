@@ -23,6 +23,15 @@ type pendingControlAsk struct {
 	questions []agent.AskQuestion
 }
 
+func pendingAskFromUserAction(action agent.PendingUserAction) pendingControlAsk {
+	cp := agent.ClonePendingUserAction(action)
+	return pendingControlAsk{
+		requestID: cp.RequestID,
+		toolUseID: cp.ToolUseID,
+		questions: cp.Ask.Questions,
+	}
+}
+
 func (p *pendingControlAsk) answerResponse(answer string) ([]byte, error) {
 	answers := make(map[string]string, len(p.questions))
 	for _, q := range p.questions {
@@ -282,15 +291,6 @@ func askQuestionsToClaude(in []agent.AskQuestion) []claudecode.AskUserQuestion {
 		}
 	}
 	return out
-}
-
-func pendingAskFromUserAction(action agent.PendingUserAction) pendingControlAsk {
-	cp := agent.ClonePendingUserAction(action)
-	return pendingControlAsk{
-		requestID: cp.RequestID,
-		toolUseID: cp.ToolUseID,
-		questions: cp.Ask.Questions,
-	}
 }
 
 func marshalControlResponse(response *claudecode.ControlResponse) ([]byte, error) {

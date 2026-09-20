@@ -97,8 +97,6 @@ type SmokeBackend struct {
 	agent.Base
 }
 
-var _ agent.Backend = (*SmokeBackend)(nil)
-
 // NewSmokeBackend creates the deterministic relay-backed smoke agent for h.
 func NewSmokeBackend(h harness.Name) *SmokeBackend {
 	b := &SmokeBackend{}
@@ -170,6 +168,8 @@ func (*SmokeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
 		}}, nil
 	}
 }
+
+var _ agent.Backend = (*SmokeBackend)(nil)
 
 const smokeAgentScript = `
 import json

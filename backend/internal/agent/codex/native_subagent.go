@@ -37,15 +37,6 @@ func newNativeSubagents() nativeSubagents {
 	return nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}
 }
 
-// codexThreadIdentity is the canonical card identity for a Codex agent thread.
-// Both the activity items and the collaboration receiver/state maps address the
-// same agent by thread ID, so every writer and reader of spawns must use this key
-// or a completion reported by one path would never settle a card created by the
-// other.
-func codexThreadIdentity(threadID string) string {
-	return "codex:thread:" + threadID
-}
-
 // known returns the card for a thread and whether the session has seen it.
 func (n *nativeSubagents) known(threadID string) (agent.NativeSubagent, bool) {
 	s, ok := n.spawns[codexThreadIdentity(threadID)]
@@ -208,6 +199,15 @@ func (n *nativeSubagents) parseCollabToolCall(raw json.RawMessage) ([]agent.Mess
 		out = append(out, n.timeline.Observe(&s)...)
 	}
 	return out, nil
+}
+
+// codexThreadIdentity is the canonical card identity for a Codex agent thread.
+// Both the activity items and the collaboration receiver/state maps address the
+// same agent by thread ID, so every writer and reader of spawns must use this key
+// or a completion reported by one path would never settle a card created by the
+// other.
+func codexThreadIdentity(threadID string) string {
+	return "codex:thread:" + threadID
 }
 
 // subAgentActivityStatus maps a reported activity kind onto the canonical

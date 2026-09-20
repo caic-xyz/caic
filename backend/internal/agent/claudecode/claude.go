@@ -26,6 +26,96 @@ type Backend struct {
 	agent.Base
 }
 
+// New creates a Claude Code backend descriptor.
+func New() *Backend {
+	b := &Backend{
+		HarnessID:       harness.Claude,
+		QuotaProviderID: agent.QuotaProviderClaudeCode,
+		Images:          true,
+		Compact:         true,
+	}
+	b.SetModelInventory(claudeModelInventory())
+	return b
+}
+
+// Start launches a Claude Code process via the relay daemon. It deploys the
+// widget plugin to the container before starting the relay so Claude Code
+// picks up the show_widget MCP tool and the widget design skill.
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	pluginFS, err := fs.Sub(WidgetPlugin, "widget-plugin")
+	if err != nil {
+		return nil, fmt.Errorf("widget plugin fs: %w", err)
+	}
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if err := agent.DeployEmbeddedDir(ctx, sshHost, pluginFS, agent.WidgetPluginDir); err != nil {
+		return nil, err
+	}
+	// When Claude Code has an OAuth session, strip ANTHROPIC_API_KEY from the
+	// agent subprocess so it authenticates via the subscription instead of
+	// silently billing API credits. The key is deliberately NOT re-injected
+	// afterward: re-injecting it made Claude Code switch authentication to API
+	// billing mid-session (observed in traces). The tradeoff is that
+	// in-container tools and MCP servers do not receive ANTHROPIC_API_KEY.
+	if hasOAuth() {
+		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
+	}
+	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
+	var relayArgs []string
+	if opts.MCP != nil {
+		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath, "--allowedTools", "mcp__caic__task_create")
+		relayArgs = append(relayArgs, "--caic-mcp")
+	}
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, args)
+	if err != nil {
+		return nil, err
+	}
+	c := agent.Conn(&controlConn{Conn: agent.NewMCPConn(ctx, opts.Logger, rp.Stdin, opts.Log, newWireFormat(), opts.MCP)})
+	return agent.StartSession(ctx, rp, c, opts)
+}
+
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
+	args := []string{
+		"claude", "-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--permission-mode", "acceptEdits",
+		"--permission-prompt-tool", "stdio",
+		"--include-partial-messages",
+		"--plugin-dir", agent.WidgetPluginDir,
+	}
+	if a.Model != "" {
+		args = append(args, "--model", a.Model)
+	}
+	if a.Effort != "" {
+		args = append(args, "--effort", a.Effort)
+	}
+	if a.ResumeSessionID != "" {
+		args = append(args, "--resume", a.ResumeSessionID)
+	}
+	return args
+}
+
+// AttachRelay implements agent.Backend.
+func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return agent.AttachRelaySession(ctx, opts, newWireFormat(), func(c agent.Conn) (agent.Conn, error) {
+		cc := &controlConn{Conn: c}
+		if err := cc.restorePendingActions(opts.PendingUserActions); err != nil {
+			return nil, err
+		}
+		return cc, nil
+	})
+}
+
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return newWireFormat()
+}
+
 var _ agent.Backend = (*Backend)(nil)
 
 // wireFormat holds per-session Claude Code parsing state: widget tracking,
@@ -41,9 +131,6 @@ type wireFormat struct {
 	pendingReasoningEstimate     int
 	reportedModel                string
 }
-
-var _ agent.WireFormat = (*wireFormat)(nil)
-var _ agent.CompactCommand = (*wireFormat)(nil)
 
 // newWireFormat builds a live wireFormat with fresh per-session state for use by
 // Start and AttachRelay. Schema drift is checked offline by check-agent-logs.
@@ -162,24 +249,15 @@ func (w *wireFormat) WriteCompact(wr io.Writer, instructions string, log agent.L
 	return w.WritePrompt(wr, agent.Prompt{Text: text}, log)
 }
 
+var _ agent.WireFormat = (*wireFormat)(nil)
+var _ agent.CompactCommand = (*wireFormat)(nil)
+
 var claudeEffortOptions = []string{
 	claudecode.EffortLow,
 	claudecode.EffortMedium,
 	claudecode.EffortHigh,
 	claudecode.EffortXHigh,
 	claudecode.EffortMax,
-}
-
-// New creates a Claude Code backend descriptor.
-func New() *Backend {
-	b := &Backend{
-		HarnessID:       harness.Claude,
-		QuotaProviderID: agent.QuotaProviderClaudeCode,
-		Images:          true,
-		Compact:         true,
-	}
-	b.SetModelInventory(claudeModelInventory())
-	return b
 }
 
 func claudeModelInventory() agent.ModelInventory {
@@ -192,84 +270,6 @@ func claudeModelInventory() agent.ModelInventory {
 		})
 	}
 	return agent.ModelInventory{Models: inventory}
-}
-
-// Start launches a Claude Code process via the relay daemon. It deploys the
-// widget plugin to the container before starting the relay so Claude Code
-// picks up the show_widget MCP tool and the widget design skill.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	pluginFS, err := fs.Sub(WidgetPlugin, "widget-plugin")
-	if err != nil {
-		return nil, fmt.Errorf("widget plugin fs: %w", err)
-	}
-	sshHost := opts.Target.SSHHost
-	if sshHost == "" {
-		return nil, errors.New("agent connection target missing SSH host")
-	}
-	if err := agent.DeployEmbeddedDir(ctx, sshHost, pluginFS, agent.WidgetPluginDir); err != nil {
-		return nil, err
-	}
-	// When Claude Code has an OAuth session, strip ANTHROPIC_API_KEY from the
-	// agent subprocess so it authenticates via the subscription instead of
-	// silently billing API credits. The key is deliberately NOT re-injected
-	// afterward: re-injecting it made Claude Code switch authentication to API
-	// billing mid-session (observed in traces). The tradeoff is that
-	// in-container tools and MCP servers do not receive ANTHROPIC_API_KEY.
-	if hasOAuth() {
-		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
-	}
-	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
-	var relayArgs []string
-	if opts.MCP != nil {
-		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath, "--allowedTools", "mcp__caic__task_create")
-		relayArgs = append(relayArgs, "--caic-mcp")
-	}
-	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, args)
-	if err != nil {
-		return nil, err
-	}
-	c := agent.Conn(&controlConn{Conn: agent.NewMCPConn(ctx, opts.Logger, rp.Stdin, opts.Log, newWireFormat(), opts.MCP)})
-	return agent.StartSession(ctx, rp, c, opts)
-}
-
-// AgentArgs implements agent.Backend.
-func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
-	args := []string{
-		"claude", "-p",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--permission-mode", "acceptEdits",
-		"--permission-prompt-tool", "stdio",
-		"--include-partial-messages",
-		"--plugin-dir", agent.WidgetPluginDir,
-	}
-	if a.Model != "" {
-		args = append(args, "--model", a.Model)
-	}
-	if a.Effort != "" {
-		args = append(args, "--effort", a.Effort)
-	}
-	if a.ResumeSessionID != "" {
-		args = append(args, "--resume", a.ResumeSessionID)
-	}
-	return args
-}
-
-// AttachRelay implements agent.Backend.
-func (*Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts, newWireFormat(), func(c agent.Conn) (agent.Conn, error) {
-		cc := &controlConn{Conn: c}
-		if err := cc.restorePendingActions(opts.PendingUserActions); err != nil {
-			return nil, err
-		}
-		return cc, nil
-	})
-}
-
-// NewWire implements agent.Backend.
-func (*Backend) NewWire() agent.WireFormat {
-	return newWireFormat()
 }
 
 // hasOAuth reports whether Claude Code has an OAuth session configured

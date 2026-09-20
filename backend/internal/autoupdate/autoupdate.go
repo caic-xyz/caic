@@ -76,6 +76,36 @@ func ParseSchedule(expr string) (Schedule, error) {
 	return Schedule{Minute: minute, Hour: hour, DayOfMonth: dom, Month: month, DayOfWeek: dow}, nil
 }
 
+// Next returns the next time after now that matches the schedule.
+func (s *Schedule) Next(now time.Time) time.Time {
+	// Start from the next minute.
+	t := now.Truncate(time.Minute).Add(time.Minute)
+	// Search up to 366 days ahead to handle any valid cron pattern.
+	limit := t.Add(366 * 24 * time.Hour)
+	for t.Before(limit) {
+		if !intMatch(s.Month, int(t.Month())) {
+			// Skip to first day of next month.
+			t = time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, t.Location())
+			continue
+		}
+		if !intMatch(s.DayOfMonth, t.Day()) || !intMatch(s.DayOfWeek, int(t.Weekday())) {
+			t = time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
+			continue
+		}
+		if !intMatch(s.Hour, t.Hour()) {
+			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour()+1, 0, 0, 0, t.Location())
+			continue
+		}
+		if !intMatch(s.Minute, t.Minute()) {
+			t = t.Add(time.Minute)
+			continue
+		}
+		return t
+	}
+	// Should not happen for valid schedules; fall back to 24h from now.
+	return now.Add(24 * time.Hour)
+}
+
 // parseCronField parses a single cron field. Returns nil for "*".
 // Supports comma-separated values, "*/step" (every step units), and
 // "start/step" (from start to hi in steps).
@@ -117,36 +147,6 @@ func parseCronField(field string, lo, hi int) ([]int, error) {
 		}
 	}
 	return vals, nil
-}
-
-// Next returns the next time after now that matches the schedule.
-func (s *Schedule) Next(now time.Time) time.Time {
-	// Start from the next minute.
-	t := now.Truncate(time.Minute).Add(time.Minute)
-	// Search up to 366 days ahead to handle any valid cron pattern.
-	limit := t.Add(366 * 24 * time.Hour)
-	for t.Before(limit) {
-		if !intMatch(s.Month, int(t.Month())) {
-			// Skip to first day of next month.
-			t = time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, t.Location())
-			continue
-		}
-		if !intMatch(s.DayOfMonth, t.Day()) || !intMatch(s.DayOfWeek, int(t.Weekday())) {
-			t = time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
-			continue
-		}
-		if !intMatch(s.Hour, t.Hour()) {
-			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour()+1, 0, 0, 0, t.Location())
-			continue
-		}
-		if !intMatch(s.Minute, t.Minute()) {
-			t = t.Add(time.Minute)
-			continue
-		}
-		return t
-	}
-	// Should not happen for valid schedules; fall back to 24h from now.
-	return now.Add(24 * time.Hour)
 }
 
 // intMatch returns true if vals is nil (wildcard) or v is in vals.

@@ -21,26 +21,6 @@ import (
 // code uses compare-and-swap helpers to keep them race-safe.
 type State string
 
-// Task lifecycle states.
-const (
-	StatePending      State = "pending"
-	StateBranching    State = "branching"
-	StateProvisioning State = "provisioning"
-	StateStarting     State = "starting"
-	StateRunning      State = "running"
-	StateWaiting      State = "waiting"
-	StateAsking       State = "asking"
-	StateHasPlan      State = "has_plan"
-	StatePulling      State = "pulling"
-	StatePushing      State = "pushing"
-	StateStopping     State = "stopping"
-	StateStopped      State = "stopped"
-	StatePurging      State = "purging"
-	StateCrashed      State = "crashed"
-	StateFailed       State = "failed"
-	StatePurged       State = "purged"
-)
-
 // Validate rejects unrecognized task states.
 func (s State) Validate() error {
 	switch s {
@@ -74,6 +54,26 @@ func (s State) String() string {
 // IsTerminal reports whether the task cannot be revived.
 func (s State) IsTerminal() bool { return s == StateFailed || s == StatePurged }
 
+// Task lifecycle states.
+const (
+	StatePending      State = "pending"
+	StateBranching    State = "branching"
+	StateProvisioning State = "provisioning"
+	StateStarting     State = "starting"
+	StateRunning      State = "running"
+	StateWaiting      State = "waiting"
+	StateAsking       State = "asking"
+	StateHasPlan      State = "has_plan"
+	StatePulling      State = "pulling"
+	StatePushing      State = "pushing"
+	StateStopping     State = "stopping"
+	StateStopped      State = "stopped"
+	StatePurging      State = "purging"
+	StateCrashed      State = "crashed"
+	StateFailed       State = "failed"
+	StatePurged       State = "purged"
+)
+
 // Result holds the bounded durable outcome of a completed task. Completed-task
 // restoration should read this summary without decoding message bodies; logs
 // that predate required fields may fall back to a full history fold.
@@ -92,8 +92,6 @@ type Result struct {
 	AgentResult   string        `json:"agent_result"`
 	Err           error         `json:"-"`
 }
-
-type persistedResult Result
 
 // MarshalJSON preserves Result's error text in rebuildable task metadata.
 func (r *Result) MarshalJSON() ([]byte, error) {
@@ -128,6 +126,8 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type persistedResult Result
+
 // RepoMount describes one repository in a task.
 //
 // Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
@@ -139,14 +139,14 @@ type RepoMount struct {
 	ContainerPath string `json:"container_path"` // path inside the runtime instance
 }
 
-// ToRuntimeRepo converts a RepoMount to a runtime Repo.
-func (r *RepoMount) ToRuntimeRepo() runtime.Repo {
-	return runtime.Repo{GitRoot: r.GitRoot, ContainerPath: r.ContainerPath, Branch: r.Branch, BaseBranch: r.BaseBranch}
-}
-
 // RepoMountFromMeta converts a log metadata repository to a RepoMount.
 func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
 	return RepoMount{Name: m.Name, BaseBranch: m.BaseBranch, Branch: m.Branch, ContainerPath: m.ContainerPath, GitRoot: gitRoot}
+}
+
+// ToRuntimeRepo converts a RepoMount to a runtime Repo.
+func (r *RepoMount) ToRuntimeRepo() runtime.Repo {
+	return runtime.Repo{GitRoot: r.GitRoot, ContainerPath: r.ContainerPath, Branch: r.Branch, BaseBranch: r.BaseBranch}
 }
 
 func runtimeCacheMountsFromMeta(in []agent.MetaCacheMount) []runtime.CacheMount {

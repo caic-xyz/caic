@@ -43,6 +43,7 @@ linters:
     - loggercheck
     - makezero
     - mirror
+    - methodfilecheck
     - misspell
     - modernize
     - musttag
@@ -72,6 +73,11 @@ linters:
     - wastedassign
     - whitespace
   settings:
+    custom:
+      methodfilecheck:
+        type: module
+        description: Methods must be declared in the same file as their receiver type, in one contiguous block.
+        settings: {}
     funcorder:
       orders:
         - constructor

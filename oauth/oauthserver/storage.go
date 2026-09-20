@@ -178,44 +178,10 @@ type Store struct {
 	io   storeIO
 }
 
-type storeIO interface {
-	CreateTemp(dir, pattern string) (*os.File, error)
-	Open(name string) (storeSyncCloser, error)
-	Rename(oldPath, newPath string) error
-}
-
-type storeSyncCloser interface {
-	Sync() error
-	Close() error
-}
-
-type osStoreIO struct{}
-
-func (osStoreIO) CreateTemp(dir, pattern string) (*os.File, error) {
-	return os.CreateTemp(dir, pattern)
-}
-
-func (osStoreIO) Open(name string) (storeSyncCloser, error) {
-	return os.Open(name) //nolint:gosec // name is the app-controlled OAuth state directory.
-}
-
-func (osStoreIO) Rename(oldPath, newPath string) error {
-	return os.Rename(oldPath, newPath)
-}
-
-type storeFile struct {
-	Version                int                      `json:"version"`
-	Clients                map[string]Client        `json:"clients,omitempty"`
-	RefreshTokens          map[string]RefreshToken  `json:"refreshTokens,omitempty"`
-	Grants                 map[string]Grant         `json:"grants,omitempty"`
-	Codes                  map[string]Code          `json:"codes,omitempty"`
-	Consents               map[string]ConsentParams `json:"consents,omitempty"`
-	DeviceCodes            map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
-	DPoPProofs             map[string]time.Time     `json:"dpopProofs,omitempty"`
-	DPoPNonces             map[string]time.Time     `json:"dpopNonces,omitempty"`
-	ClientAssertionJTIs    map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
-	AccessTokenSigningKeys []storedSigningKey       `json:"accessTokenSigningKeys,omitempty"`
-	CurrentSigningKID      string                   `json:"currentSigningKID,omitempty"`
+func newEmptyStore(path string) *Store {
+	store := &Store{path: path, io: osStoreIO{}}
+	store.ensureMaps()
+	return store
 }
 
 // LoadStore loads durable OAuth state from path.
@@ -477,12 +443,6 @@ func (s *Store) PruneExpiredRefreshTokens(now time.Time) bool {
 	return s.pruneExpired(now)
 }
 
-func newEmptyStore(path string) *Store {
-	store := &Store{path: path, io: osStoreIO{}}
-	store.ensureMaps()
-	return store
-}
-
 func (s *Store) transact(update func(*storeFile) bool) error {
 	next := s.snapshot()
 	if !update(&next) {
@@ -587,6 +547,46 @@ func (s *Store) ensureMaps() {
 func (s *Store) pruneExpired(now time.Time) bool {
 	file := storeFile{RefreshTokens: s.RefreshTokens, Grants: s.Grants, Codes: s.Codes, Consents: s.Consents, DeviceCodes: s.DeviceCodes, DPoPProofs: s.DPoPProofs, DPoPNonces: s.DPoPNonces, ClientAssertionJTIs: s.ClientAssertionJTIs}
 	return pruneExpiredStore(&file, now)
+}
+
+type storeIO interface {
+	CreateTemp(dir, pattern string) (*os.File, error)
+	Open(name string) (storeSyncCloser, error)
+	Rename(oldPath, newPath string) error
+}
+
+type storeSyncCloser interface {
+	Sync() error
+	Close() error
+}
+
+type osStoreIO struct{}
+
+func (osStoreIO) CreateTemp(dir, pattern string) (*os.File, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
+func (osStoreIO) Open(name string) (storeSyncCloser, error) {
+	return os.Open(name) //nolint:gosec // name is the app-controlled OAuth state directory.
+}
+
+func (osStoreIO) Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+
+type storeFile struct {
+	Version                int                      `json:"version"`
+	Clients                map[string]Client        `json:"clients,omitempty"`
+	RefreshTokens          map[string]RefreshToken  `json:"refreshTokens,omitempty"`
+	Grants                 map[string]Grant         `json:"grants,omitempty"`
+	Codes                  map[string]Code          `json:"codes,omitempty"`
+	Consents               map[string]ConsentParams `json:"consents,omitempty"`
+	DeviceCodes            map[string]*DeviceCode   `json:"deviceCodes,omitempty"`
+	DPoPProofs             map[string]time.Time     `json:"dpopProofs,omitempty"`
+	DPoPNonces             map[string]time.Time     `json:"dpopNonces,omitempty"`
+	ClientAssertionJTIs    map[string]time.Time     `json:"clientAssertionJTIs,omitempty"`
+	AccessTokenSigningKeys []storedSigningKey       `json:"accessTokenSigningKeys,omitempty"`
+	CurrentSigningKID      string                   `json:"currentSigningKID,omitempty"`
 }
 
 func pruneExpiredStore(file *storeFile, now time.Time) bool {

@@ -72,6 +72,10 @@ type Preferences struct {
 	Settings Settings `json:"settings"`
 }
 
+func newPreferences() *Preferences {
+	return &Preferences{Version: currentVersion, Settings: defaultSettings()}
+}
+
 // Validate checks that the preferences are well-formed.
 func (p *Preferences) Validate() error {
 	if p.Version != currentVersion {
@@ -203,6 +207,10 @@ type Settings struct {
 	RuntimeName string `json:"runtimeName,omitempty"`
 }
 
+func defaultSettings() Settings {
+	return Settings{PurgeDelay: 15 * time.Second}
+}
+
 // Validate checks that the settings are well-formed.
 func (s *Settings) Validate() error {
 	for i, m := range s.CacheMappings {
@@ -230,10 +238,6 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	type plainSettings Settings
 	*s = defaultSettings()
 	return json.Unmarshal(data, (*plainSettings)(s))
-}
-
-func defaultSettings() Settings {
-	return Settings{PurgeDelay: 15 * time.Second}
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
@@ -323,25 +327,6 @@ func (s *Store) Update(userID string, fn func(*Preferences)) error {
 	return nil
 }
 
-// currentVersion is the preferences file format version.
-const currentVersion = 1
-
-// recentWindow is how far back we consider a repo "recent".
-const recentWindow = 7 * 24 * time.Hour
-
-// minRecentRepos is the minimum number of repos always shown as recent,
-// regardless of last-used time.
-const minRecentRepos = 10
-
-func newPreferences() *Preferences {
-	return &Preferences{Version: currentVersion, Settings: defaultSettings()}
-}
-
-// usersFile is the on-disk JSON format for the Store.
-type usersFile struct {
-	Users map[string]Preferences `json:"users,omitempty"`
-}
-
 // BaseImages returns all distinct non-empty base images configured across all
 // users' global preferences.
 func (s *Store) BaseImages() []ContainerImage {
@@ -361,6 +346,21 @@ func (s *Store) BaseImages() []ContainerImage {
 		images[i] = ContainerImage{BaseImage: baseImage, Platform: platform}
 	}
 	return images
+}
+
+// currentVersion is the preferences file format version.
+const currentVersion = 1
+
+// recentWindow is how far back we consider a repo "recent".
+const recentWindow = 7 * 24 * time.Hour
+
+// minRecentRepos is the minimum number of repos always shown as recent,
+// regardless of last-used time.
+const minRecentRepos = 10
+
+// usersFile is the on-disk JSON format for the Store.
+type usersFile struct {
+	Users map[string]Preferences `json:"users,omitempty"`
 }
 
 // Validate checks that the on-disk format is well-formed.

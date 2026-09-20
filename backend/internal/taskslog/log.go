@@ -160,24 +160,6 @@ type zstdReadCloser struct {
 	file *os.File
 }
 
-// Read decompresses bytes from the wrapped zstd task log.
-func (r *zstdReadCloser) Read(p []byte) (int, error) {
-	return r.dec.Read(p)
-}
-
-// Close detaches the stream and returns the zstd decoder to the shared pool,
-// then closes the backing file. The detach matters: a read that stops before
-// EOF leaves the decoder's async goroutines parked on the stream; Reset(nil)
-// drains them so a pooled (or later GC-dropped) decoder cannot leak
-// goroutines and their window buffers.
-func (r *zstdReadCloser) Close() error {
-	if err := r.dec.Reset(nil); err != nil {
-		return errors.Join(err, r.file.Close())
-	}
-	zstdDecoderPool.Put(r.dec)
-	return r.file.Close()
-}
-
 // openCompressedLogReader opens path as zstd regardless of its filename.
 func openCompressedLogReader(path string) (*zstdReadCloser, error) {
 	f, err := os.Open(filepath.Clean(path))
@@ -194,4 +176,22 @@ func openCompressedLogReader(path string) (*zstdReadCloser, error) {
 		return nil, errors.Join(err, f.Close())
 	}
 	return &zstdReadCloser{dec: d, file: f}, nil
+}
+
+// Read decompresses bytes from the wrapped zstd task log.
+func (r *zstdReadCloser) Read(p []byte) (int, error) {
+	return r.dec.Read(p)
+}
+
+// Close detaches the stream and returns the zstd decoder to the shared pool,
+// then closes the backing file. The detach matters: a read that stops before
+// EOF leaves the decoder's async goroutines parked on the stream; Reset(nil)
+// drains them so a pooled (or later GC-dropped) decoder cannot leak
+// goroutines and their window buffers.
+func (r *zstdReadCloser) Close() error {
+	if err := r.dec.Reset(nil); err != nil {
+		return errors.Join(err, r.file.Close())
+	}
+	zstdDecoderPool.Put(r.dec)
+	return r.file.Close()
 }

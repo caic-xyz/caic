@@ -60,17 +60,6 @@ func (e *NoSessionError) Is(target error) bool {
 // code without inspecting the message string.
 type ErrorKind int
 
-const (
-	// KindInternal is an unexpected or infrastructure failure (HTTP 500).
-	KindInternal ErrorKind = iota
-	// KindNotFound is a missing task or resource (HTTP 404).
-	KindNotFound
-	// KindConflict is a state/precondition violation (HTTP 409).
-	KindConflict
-	// KindBadRequest is invalid input (HTTP 400).
-	KindBadRequest
-)
-
 // String returns the kind name.
 func (k ErrorKind) String() string {
 	switch k {
@@ -87,6 +76,17 @@ func (k ErrorKind) String() string {
 	}
 }
 
+const (
+	// KindInternal is an unexpected or infrastructure failure (HTTP 500).
+	KindInternal ErrorKind = iota
+	// KindNotFound is a missing task or resource (HTTP 404).
+	KindNotFound
+	// KindConflict is a state/precondition violation (HTTP 409).
+	KindConflict
+	// KindBadRequest is invalid input (HTTP 400).
+	KindBadRequest
+)
+
 // Error is a typed error returned by Manager lifecycle methods. Kind classifies
 // the failure; the HTTP layer maps it to a status code. An optional wrapped
 // error is preserved for errors.Is/errors.As.
@@ -95,19 +95,6 @@ type Error struct {
 	Code Code
 	Msg  string
 	Err  error // wrapped underlying error, if any
-}
-
-// Error implements error.
-func (e *Error) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("%s: %v", e.Msg, e.Err)
-	}
-	return e.Msg
-}
-
-// Unwrap returns the wrapped error so errors.Is/errors.As traverse the chain.
-func (e *Error) Unwrap() error {
-	return e.Err
 }
 
 // notFoundf builds a KindNotFound error with a formatted message.
@@ -137,4 +124,17 @@ func badRequestf(format string, args ...any) *Error {
 // if one is ever needed, rather than passing nil here).
 func internalErr(err error, msg string) *Error {
 	return &Error{Kind: KindInternal, Msg: msg, Err: err}
+}
+
+// Error implements error.
+func (e *Error) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Msg, e.Err)
+	}
+	return e.Msg
+}
+
+// Unwrap returns the wrapped error so errors.Is/errors.As traverse the chain.
+func (e *Error) Unwrap() error {
+	return e.Err
 }

@@ -33,8 +33,6 @@ type failingConn struct {
 	err error
 }
 
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
 func (c *failingConn) SendPrompt(agent.Prompt) error { return c.err }
 
 func (*failingConn) SendRaw([]byte) error { return nil }
@@ -46,6 +44,8 @@ func (*failingConn) ReadMessages(io.Reader, chan<- agent.TimedMessage) error { r
 func (*failingConn) SendStop(context.Context) {}
 
 func (*failingConn) Close() error { return nil }
+
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // recvType reads one message type from a live subscriber channel. The task
 // fanout performs a synchronous non-blocking send into a buffered channel

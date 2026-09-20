@@ -806,6 +806,15 @@ type logTailScan struct {
 	lastResultUsage    agent.Usage
 }
 
+func (s *logTailScan) finish(lt *LoadedTask) {
+	if lt.LastTrailer != nil && lt.LastTrailer.CostUSD == 0 && s.lastResultCostUSD > 0 {
+		lt.LastTrailer.CostUSD = s.lastResultCostUSD
+		lt.LastTrailer.Duration = s.lastResultDuration
+		lt.LastTrailer.NumTurns = s.lastResultNumTurns
+		lt.LastTrailer.Usage = s.lastResultUsage
+	}
+}
+
 func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 	lt.State = parseState(mr.State)
 	if mr.Title != "" {
@@ -884,6 +893,181 @@ type LoadedTask struct {
 	path           string               // Absolute path for lazy message loading via LoadMessages.
 	resolver       NativeParserResolver // Fresh parser factory supplied by the task owner.
 	messagesLoaded bool                 // A completed semantic scan may validly produce no messages.
+}
+
+func loadSemanticTask(path string, resolver NativeParserResolver) (*LoadedTask, error) {
+	log, err := loadSemanticLog(path, resolver)
+	if err != nil {
+		return nil, err
+	}
+	return semanticLoadedTask(log), nil
+}
+
+func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (loaded *LoadedTask, retErr error) {
+	if resolver == nil {
+		return nil, errors.New("native parser resolver is nil")
+	}
+	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		native, err := resolver(scanner.authority.Harness)
+		if err != nil {
+			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+		}
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		if err != nil {
+			return fmt.Errorf("construct log parser: %w", err)
+		}
+		loaded = &LoadedTask{LogVersion: scanner.authority.Version}
+		apply := func(record agent.ParsedRecord, err error) error {
+			if err != nil {
+				if record.Control || scanner.authority.Version != agent.LogVersionV1 {
+					return fmt.Errorf("parse task log %s: %w", path, err)
+				}
+				return nil
+			}
+			applyParsedSessionMetadata(loaded, record.Messages)
+			return nil
+		}
+		record, err := parser.ParseRecord(scanner.headerRaw)
+		if err := apply(record, err); err != nil {
+			return err
+		}
+		for scanner.Scan() {
+			record, err := parser.ParseRecord(scanner.Bytes())
+			if err := apply(record, err); err != nil {
+				return err
+			}
+		}
+		return scanner.Err()
+	})
+	if retErr != nil {
+		return nil, retErr
+	}
+	return loaded, nil
+}
+
+func semanticLoadedTask(log *semanticLog) *LoadedTask {
+	loaded := &LoadedTask{LogVersion: log.authority.Version}
+	start := 0
+	for _, record := range log.records {
+		if record.generationMarker {
+			loaded.RelayRecords = nil
+			loaded.RelayGeneration = record.relayGeneration
+		}
+		semanticLoadedMessages(loaded, record.control, log.messages[start:record.end])
+		if record.relayRecord {
+			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
+				Generation:  record.relayGeneration,
+				RelayEnd:    record.relayEnd,
+				MessageEnd:  len(loaded.Timeline),
+				Fingerprint: record.fingerprint,
+			})
+		}
+		start = record.end
+	}
+	return loaded
+}
+
+func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
+	repos := make([]RepoMount, len(meta.Repos))
+	for i, mr := range meta.Repos {
+		repos[i] = RepoMountFromMeta(mr, "")
+	}
+	return &LoadedTask{
+		path:              path,
+		TaskID:            taskID,
+		Prompt:            meta.Prompt,
+		Title:             meta.Title,
+		Repos:             repos,
+		LogVersion:        agent.LogVersion(meta.Version),
+		Harness:           meta.Harness,
+		RequestedModel:    meta.RequestedModel,
+		RequestedEffort:   meta.RequestedEffort,
+		StartedAt:         meta.StartedAt,
+		LastStateUpdateAt: modified,
+		State:             StateRunning,
+		ForgeIssue:        meta.ForgeIssue,
+		OwnerID:           meta.OwnerID,
+		ForkedFromTaskID:  meta.ForkedFromTaskID,
+		ParentTaskID:      meta.ParentTaskID,
+		CaicMCPEnabled:    meta.CaicMCPEnabled,
+		Tailscale:         meta.Tailscale,
+		USB:               meta.USB,
+		Display:           meta.Display,
+		Sudo:              meta.Sudo,
+		GitHubToken:       meta.GitHubToken,
+		RuntimeName:       runtime.Name(meta.RuntimeName),
+		BaseImage:         meta.BaseImage,
+		ContainerPlatform: meta.ContainerPlatform,
+		MaxCPUs:           meta.MaxCPUs,
+		CacheMounts:       runtimeCacheMountsFromMeta(meta.CacheMounts),
+		Mounts:            runtimeMountsFromMeta(meta.Mounts),
+		LogSize:           size,
+	}
+}
+
+// loadLogMetaHeader parses only the leading metadata header of a task log
+// (plain or compressed) into a LoadedTask. It intentionally does not consume
+// the log past the header or validate EOF; it exists so the per-repo cap can
+// attribute a log to its repo without decoding the body.
+func loadLogMetaHeader(path string) (loaded *LoadedTask, retErr error) {
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return nil
+	})
+	if retErr != nil {
+		return nil, retErr
+	}
+	return loaded, nil
+}
+
+// loadLogHeader reads the metadata header and result trailer from a task log.
+// It does NOT parse individual messages — call LoadMessages for that. The path
+// is stored for lazy loading. A header cache matching the log size and mtime
+// skips the full decode; any mismatch falls back to the scan and refreshes it.
+func loadLogHeader(log *slog.Logger, path string, cacheHeader bool) (loaded *LoadedTask, retErr error) {
+	if cached, ok := readHeaderCache(path); ok {
+		return cached, nil
+	}
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, scanner *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return scanInventoryRecords(path, scanner, loaded)
+	})
+	if retErr != nil {
+		return nil, retErr
+	}
+	// Cache the header so the next load skips the scan. Only terminal (immutable)
+	// logs are worth caching: they are the compressed, CPU-bound set, while live
+	// logs change on every append and would just invalidate the entry.
+	if cacheHeader && loaded.State.IsTerminal() {
+		if err := writeHeaderCache(path, loaded); err != nil {
+			// Non-fatal: the load succeeded and the next load re-scans. Log it so a
+			// persistent failure (e.g. a read-only cache dir) is visible; it slows
+			// startup but never affects correctness.
+			log.Warn("write task log header cache", "path", path, "err", err)
+		}
+	}
+	return loaded, nil
+}
+
+// LoadHistorySource validates and loads only a log header for history
+// streaming. It intentionally does not scan inventory records or validate
+// EOF: the caller's subsequent semantic stream performs that one full scan
+// and validation.
+func LoadHistorySource(path string) (loaded *LoadedTask, retErr error) {
+	if path == "" {
+		return nil, ErrNoLog
+	}
+	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
+		base := trimLogExt(filepath.Base(path))
+		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
+		return nil
+	})
+	if retErr != nil {
+		return nil, retErr
+	}
+	return loaded, nil
 }
 
 // Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
@@ -1192,56 +1376,6 @@ func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticL
 	return out, nil
 }
 
-func loadSemanticTask(path string, resolver NativeParserResolver) (*LoadedTask, error) {
-	log, err := loadSemanticLog(path, resolver)
-	if err != nil {
-		return nil, err
-	}
-	return semanticLoadedTask(log), nil
-}
-
-func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (loaded *LoadedTask, retErr error) {
-	if resolver == nil {
-		return nil, errors.New("native parser resolver is nil")
-	}
-	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		native, err := resolver(scanner.authority.Harness)
-		if err != nil {
-			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
-		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
-		if err != nil {
-			return fmt.Errorf("construct log parser: %w", err)
-		}
-		loaded = &LoadedTask{LogVersion: scanner.authority.Version}
-		apply := func(record agent.ParsedRecord, err error) error {
-			if err != nil {
-				if record.Control || scanner.authority.Version != agent.LogVersionV1 {
-					return fmt.Errorf("parse task log %s: %w", path, err)
-				}
-				return nil
-			}
-			applyParsedSessionMetadata(loaded, record.Messages)
-			return nil
-		}
-		record, err := parser.ParseRecord(scanner.headerRaw)
-		if err := apply(record, err); err != nil {
-			return err
-		}
-		for scanner.Scan() {
-			record, err := parser.ParseRecord(scanner.Bytes())
-			if err := apply(record, err); err != nil {
-				return err
-			}
-		}
-		return scanner.Err()
-	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	return loaded, nil
-}
-
 // ExportDiscussion loads one physical task log with its header-authorized native
 // parser and renders the resulting task data as markdown.
 func ExportDiscussion(path string, resolver NativeParserResolver) (string, error) {
@@ -1269,28 +1403,6 @@ func ExportDiscussion(path string, resolver NativeParserResolver) (string, error
 		return "", fmt.Errorf("%s: no caic_meta header", path)
 	}
 	return agent.RenderDiscussion(meta, result, pr, messages), nil
-}
-
-func semanticLoadedTask(log *semanticLog) *LoadedTask {
-	loaded := &LoadedTask{LogVersion: log.authority.Version}
-	start := 0
-	for _, record := range log.records {
-		if record.generationMarker {
-			loaded.RelayRecords = nil
-			loaded.RelayGeneration = record.relayGeneration
-		}
-		semanticLoadedMessages(loaded, record.control, log.messages[start:record.end])
-		if record.relayRecord {
-			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
-				Generation:  record.relayGeneration,
-				RelayEnd:    record.relayEnd,
-				MessageEnd:  len(loaded.Timeline),
-				Fingerprint: record.fingerprint,
-			})
-		}
-		start = record.end
-	}
-	return loaded
 }
 
 func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.TimedMessage) {
@@ -1407,44 +1519,6 @@ func applySemanticTask(lt, loaded *LoadedTask, messages bool) {
 		lt.RelayRecords = loaded.RelayRecords
 		lt.RelayGeneration = loaded.RelayGeneration
 		lt.messagesLoaded = true
-	}
-}
-
-func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
-	repos := make([]RepoMount, len(meta.Repos))
-	for i, mr := range meta.Repos {
-		repos[i] = RepoMountFromMeta(mr, "")
-	}
-	return &LoadedTask{
-		path:              path,
-		TaskID:            taskID,
-		Prompt:            meta.Prompt,
-		Title:             meta.Title,
-		Repos:             repos,
-		LogVersion:        agent.LogVersion(meta.Version),
-		Harness:           meta.Harness,
-		RequestedModel:    meta.RequestedModel,
-		RequestedEffort:   meta.RequestedEffort,
-		StartedAt:         meta.StartedAt,
-		LastStateUpdateAt: modified,
-		State:             StateRunning,
-		ForgeIssue:        meta.ForgeIssue,
-		OwnerID:           meta.OwnerID,
-		ForkedFromTaskID:  meta.ForkedFromTaskID,
-		ParentTaskID:      meta.ParentTaskID,
-		CaicMCPEnabled:    meta.CaicMCPEnabled,
-		Tailscale:         meta.Tailscale,
-		USB:               meta.USB,
-		Display:           meta.Display,
-		Sudo:              meta.Sudo,
-		GitHubToken:       meta.GitHubToken,
-		RuntimeName:       runtime.Name(meta.RuntimeName),
-		BaseImage:         meta.BaseImage,
-		ContainerPlatform: meta.ContainerPlatform,
-		MaxCPUs:           meta.MaxCPUs,
-		CacheMounts:       runtimeCacheMountsFromMeta(meta.CacheMounts),
-		Mounts:            runtimeMountsFromMeta(meta.Mounts),
-		LogSize:           size,
 	}
 }
 
@@ -1688,61 +1762,6 @@ func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
 	}
 }
 
-func (s *logTailScan) finish(lt *LoadedTask) {
-	if lt.LastTrailer != nil && lt.LastTrailer.CostUSD == 0 && s.lastResultCostUSD > 0 {
-		lt.LastTrailer.CostUSD = s.lastResultCostUSD
-		lt.LastTrailer.Duration = s.lastResultDuration
-		lt.LastTrailer.NumTurns = s.lastResultNumTurns
-		lt.LastTrailer.Usage = s.lastResultUsage
-	}
-}
-
-// loadLogMetaHeader parses only the leading metadata header of a task log
-// (plain or compressed) into a LoadedTask. It intentionally does not consume
-// the log past the header or validate EOF; it exists so the per-repo cap can
-// attribute a log to its repo without decoding the body.
-func loadLogMetaHeader(path string) (loaded *LoadedTask, retErr error) {
-	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
-		base := trimLogExt(filepath.Base(path))
-		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
-		return nil
-	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	return loaded, nil
-}
-
-// loadLogHeader reads the metadata header and result trailer from a task log.
-// It does NOT parse individual messages — call LoadMessages for that. The path
-// is stored for lazy loading. A header cache matching the log size and mtime
-// skips the full decode; any mismatch falls back to the scan and refreshes it.
-func loadLogHeader(log *slog.Logger, path string, cacheHeader bool) (loaded *LoadedTask, retErr error) {
-	if cached, ok := readHeaderCache(path); ok {
-		return cached, nil
-	}
-	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, scanner *physicalLogScanner, meta agent.MetaMessage) error {
-		base := trimLogExt(filepath.Base(path))
-		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
-		return scanInventoryRecords(path, scanner, loaded)
-	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	// Cache the header so the next load skips the scan. Only terminal (immutable)
-	// logs are worth caching: they are the compressed, CPU-bound set, while live
-	// logs change on every append and would just invalidate the entry.
-	if cacheHeader && loaded.State.IsTerminal() {
-		if err := writeHeaderCache(path, loaded); err != nil {
-			// Non-fatal: the load succeeded and the next load re-scans. Log it so a
-			// persistent failure (e.g. a read-only cache dir) is visible; it slows
-			// startup but never affects correctness.
-			log.Warn("write task log header cache", "path", path, "err", err)
-		}
-	}
-	return loaded, nil
-}
-
 // isHistoryStreamControlMessage reports controls delivered alongside native
 // messages while streaming task history.
 func isHistoryStreamControlMessage(msg agent.Message) bool {
@@ -1822,23 +1841,4 @@ func parseState(s string) State {
 		return StateFailed
 	}
 	return state
-}
-
-// LoadHistorySource validates and loads only a log header for history
-// streaming. It intentionally does not scan inventory records or validate
-// EOF: the caller's subsequent semantic stream performs that one full scan
-// and validation.
-func LoadHistorySource(path string) (loaded *LoadedTask, retErr error) {
-	if path == "" {
-		return nil, ErrNoLog
-	}
-	retErr = scanPhysicalLog(path, false, func(info os.FileInfo, _ *physicalLogScanner, meta agent.MetaMessage) error {
-		base := trimLogExt(filepath.Base(path))
-		loaded = loadedTaskFromMeta(path, taskIDFromLogBase(base), &meta, info.ModTime().UTC(), info.Size())
-		return nil
-	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	return loaded, nil
 }

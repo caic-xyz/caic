@@ -53,8 +53,6 @@ type RuntimeBackend struct {
 	repos map[runtime.ID][]runtime.Repo
 }
 
-var _ runtime.System = (*RuntimeBackend)(nil)
-
 // NewRuntimeBackend creates a fake runtime backend for smoke and e2e tests.
 func NewRuntimeBackend(vncPort int) *RuntimeBackend {
 	return &RuntimeBackend{vncPort: vncPort, repos: map[runtime.ID][]runtime.Repo{}}
@@ -274,6 +272,8 @@ func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (
 func (*RuntimeBackend) SudoPassword(context.Context, runtime.ID) (string, error) {
 	return "", nil
 }
+
+var _ runtime.System = (*RuntimeBackend)(nil)
 
 // initOneRepo initialises a bare remote and a clone under tmpDir.
 func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error {

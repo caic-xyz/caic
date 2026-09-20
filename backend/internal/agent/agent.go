@@ -192,23 +192,6 @@ type conn struct {
 	mu      sync.Mutex // serializes stdin writes
 }
 
-// NewConn creates a connection using the task log's physical record version.
-// log and sink must be non-nil; use DiscardLogSink{Version: version} when
-// persistence is unnecessary.
-func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat) Conn {
-	if log == nil {
-		panic("logger is required")
-	}
-	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire}
-}
-
-// NewMCPConn creates a connection that services a task-scoped MCP registry.
-//
-// A nil registry leaves task-local MCP requests unavailable.
-func NewMCPConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat, registry mcp.Registry) Conn {
-	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire, mcp: registry}
-}
-
 func (c *conn) SendPrompt(p Prompt) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -276,6 +259,23 @@ func (c *conn) handleMCP(req MCPRequest) error {
 		return RespondMCP(c, req.ID, response, err)
 	}
 	return RespondMCP(c, req.ID, nil, fmt.Errorf("unsupported MCP method: %s", req.Method))
+}
+
+// NewConn creates a connection using the task log's physical record version.
+// log and sink must be non-nil; use DiscardLogSink{Version: version} when
+// persistence is unnecessary.
+func NewConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat) Conn {
+	if log == nil {
+		panic("logger is required")
+	}
+	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire}
+}
+
+// NewMCPConn creates a connection that services a task-scoped MCP registry.
+//
+// A nil registry leaves task-local MCP requests unavailable.
+func NewMCPConn(ctx context.Context, log *slog.Logger, stdin io.WriteCloser, sink LogSink, wire WireFormat, registry mcp.Registry) Conn {
+	return &conn{ctx: ctx, logger: log, stdin: stdin, log: sink, version: sink.LogVersion(), wire: wire, mcp: registry}
 }
 
 // MCPToolResultResponse translates a registry result to the standard MCP tool
@@ -376,6 +376,92 @@ func NewSession(ctx context.Context, cmd *exec.Cmd, c Conn, stdout io.Reader, ms
 	return s
 }
 
+// StartRelay is a convenience that calls PrepareRelay, creates a default Conn,
+// and sends the initial prompt.
+func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
+	rp, err := PrepareRelay(ctx, opts, nil, agentArgs)
+	if err != nil {
+		return nil, err
+	}
+	return StartSession(ctx, rp, NewConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire), opts)
+}
+
+// StartSession creates a Session from a RelayProcess and Conn, sends the
+// initial prompt if present, and returns the session.
+func StartSession(ctx context.Context, rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
+	log := opts.Logger.With("target", sshHost)
+	s := NewSession(ctx, rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
+	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
+		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
+			_ = s.Close()
+			return nil, fmt.Errorf("write prompt: %w", err)
+		}
+	}
+	return s, nil
+}
+
+// AttachRelaySession connects to an already-running relay in the container
+// and returns a new Session. It waits briefly for the attach process to
+// confirm connectivity; if the process exits immediately (e.g. relay socket
+// is stale), an error is returned so the caller can fall back to --resume.
+// Backends may pass wrap to intercept the default Conn before message reading
+// starts.
+func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wrap func(Conn) (Conn, error)) (*Session, error) {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	sshArgs := []string{
+		sshHost, "python3", RelayScriptPath, "attach",
+		"--offset", strconv.FormatInt(opts.RelayOffset, 10),
+	}
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	if err := opts.Log.LogVersion().Validate(); err != nil {
+		return nil, fmt.Errorf("relay log version: %w", err)
+	}
+	if opts.WarmHistory {
+		// A session that attaches with an empty stateful wire cannot correlate
+		// the completions its restored history implies, which is the defect the
+		// warm-up exists to prevent, so a failure here aborts the attach instead
+		// of continuing in that state. The caller's recovery path retries.
+		if err := WarmRelayHistory(ctx, sshHost, opts.Log.LogVersion(), wire, opts.RelayOffset, maxWarmHistoryBytes); err != nil {
+			return nil, fmt.Errorf("warm relay history: %w", err)
+		}
+	}
+	c := NewConn(ctx, opts.Logger, stdin, opts.Log, wire)
+	if wrap != nil {
+		c, err = wrap(c)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if opts.Logger == nil {
+		return nil, errors.New("opts.Logger is required")
+	}
+	cmd.Stderr = &SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay attach", Container: sshHost}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("attach relay: %w", err)
+	}
+
+	log := opts.Logger.With("target", sshHost)
+	return NewSession(ctx, cmd, c, stdout, opts.MsgCh, log), nil
+}
+
 // Stop sends the null-byte sentinel, closes stdin, and waits for the agent
 // process to exit or the context to expire. Returns nil on clean exit, the
 // process exit error on abnormal exit, or the context error on timeout.
@@ -422,91 +508,6 @@ type LogRecordParser struct {
 	version       LogVersion
 	parseNative   func([]byte) ([]Message, error)
 	contextWindow int
-}
-
-// ParsedRecord is a parser-owned semantic task-log record. Control reports
-// whether the version-specific discriminator identifies a caic-owned control.
-type ParsedRecord struct {
-	Messages        []TimedMessage
-	RelayRecord     bool
-	Control         bool
-	RelayGeneration string
-}
-
-// RelayRecordReader reads one physical relay record at a time. Agent payloads
-// are returned as their unchanged native JSON; caic controls are returned only
-// as parsed controls and never presented as native handshake data. logW is the
-// caller's explicit persistence policy: use io.Discard for unpersisted reads.
-type RelayRecordReader struct {
-	r      *bufio.Reader
-	parser *LogRecordParser
-	log    LogSink
-	native []byte
-}
-
-// NewRelayRecordReader creates a version-aware physical relay reader. version
-// must be the caller-validated task-log version. log must be non-nil; use
-// DiscardLogSink{Version: version} when persistence is unnecessary.
-func NewRelayRecordReader(r io.Reader, version LogVersion, log LogSink) (*RelayRecordReader, error) {
-	br, ok := r.(*bufio.Reader)
-	if !ok {
-		br = bufio.NewReaderSize(r, 1<<20)
-	}
-	reader := &RelayRecordReader{r: br, log: log}
-	parser, err := NewLogRecordParser(version, func(line []byte) ([]Message, error) {
-		reader.native = append(reader.native[:0], line...)
-		return nil, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	reader.parser = parser
-	return reader, nil
-}
-
-// Reader returns the buffered source positioned after records consumed by ReadRecord.
-func (r *RelayRecordReader) Reader() *bufio.Reader {
-	return r.r
-}
-
-// ReadRecord reads the next non-empty physical relay record. It persists the
-// original encoded bytes once according to the reader's policy before strict
-// parsing. Native is non-nil only for an agent payload; controls are separate.
-func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage, err error) {
-	for {
-		encoded, readErr := readNDJSONRecord(r.r)
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				return nil, nil, readErr
-			}
-			return nil, nil, fmt.Errorf("read relay record: %w", readErr)
-		}
-		line := encoded[:len(encoded)-1]
-		if len(line) == 0 {
-			continue
-		}
-		r.native = r.native[:0]
-		if r.parser.version == LogVersionV1 {
-			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
-				return nil, nil, fmt.Errorf("write log: %w", writeErr)
-			}
-		}
-		parsed, parseErr := r.parser.ParseRecord(line)
-		if parseErr != nil {
-			return nil, nil, parseErr
-		}
-		if r.parser.version != LogVersionV1 {
-			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
-				return nil, nil, fmt.Errorf("write log: %w", writeErr)
-			}
-		}
-		if len(r.native) > 0 {
-			return slices.Clone(r.native), nil, nil
-		}
-		if parsed.Control {
-			return nil, parsed.Messages, nil
-		}
-	}
 }
 
 // NewLogRecordParser constructs a parser for an already-validated physical log
@@ -759,6 +760,91 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 		out = append(out, msg)
 	}
 	return out, nil
+}
+
+// ParsedRecord is a parser-owned semantic task-log record. Control reports
+// whether the version-specific discriminator identifies a caic-owned control.
+type ParsedRecord struct {
+	Messages        []TimedMessage
+	RelayRecord     bool
+	Control         bool
+	RelayGeneration string
+}
+
+// RelayRecordReader reads one physical relay record at a time. Agent payloads
+// are returned as their unchanged native JSON; caic controls are returned only
+// as parsed controls and never presented as native handshake data. logW is the
+// caller's explicit persistence policy: use io.Discard for unpersisted reads.
+type RelayRecordReader struct {
+	r      *bufio.Reader
+	parser *LogRecordParser
+	log    LogSink
+	native []byte
+}
+
+// NewRelayRecordReader creates a version-aware physical relay reader. version
+// must be the caller-validated task-log version. log must be non-nil; use
+// DiscardLogSink{Version: version} when persistence is unnecessary.
+func NewRelayRecordReader(r io.Reader, version LogVersion, log LogSink) (*RelayRecordReader, error) {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReaderSize(r, 1<<20)
+	}
+	reader := &RelayRecordReader{r: br, log: log}
+	parser, err := NewLogRecordParser(version, func(line []byte) ([]Message, error) {
+		reader.native = append(reader.native[:0], line...)
+		return nil, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	reader.parser = parser
+	return reader, nil
+}
+
+// Reader returns the buffered source positioned after records consumed by ReadRecord.
+func (r *RelayRecordReader) Reader() *bufio.Reader {
+	return r.r
+}
+
+// ReadRecord reads the next non-empty physical relay record. It persists the
+// original encoded bytes once according to the reader's policy before strict
+// parsing. Native is non-nil only for an agent payload; controls are separate.
+func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage, err error) {
+	for {
+		encoded, readErr := readNDJSONRecord(r.r)
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return nil, nil, readErr
+			}
+			return nil, nil, fmt.Errorf("read relay record: %w", readErr)
+		}
+		line := encoded[:len(encoded)-1]
+		if len(line) == 0 {
+			continue
+		}
+		r.native = r.native[:0]
+		if r.parser.version == LogVersionV1 {
+			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
+				return nil, nil, fmt.Errorf("write log: %w", writeErr)
+			}
+		}
+		parsed, parseErr := r.parser.ParseRecord(line)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		if r.parser.version != LogVersionV1 {
+			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
+				return nil, nil, fmt.Errorf("write log: %w", writeErr)
+			}
+		}
+		if len(r.native) > 0 {
+			return slices.Clone(r.native), nil, nil
+		}
+		if parsed.Control {
+			return nil, parsed.Messages, nil
+		}
+	}
 }
 
 func messageIsNil(msg Message) bool {
@@ -1095,37 +1181,6 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	return &RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}, nil
 }
 
-// StartRelay is a convenience that calls PrepareRelay, creates a default Conn,
-// and sends the initial prompt.
-func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
-	rp, err := PrepareRelay(ctx, opts, nil, agentArgs)
-	if err != nil {
-		return nil, err
-	}
-	return StartSession(ctx, rp, NewConn(ctx, opts.Logger, rp.Stdin, opts.Log, wire), opts)
-}
-
-// StartSession creates a Session from a RelayProcess and Conn, sends the
-// initial prompt if present, and returns the session.
-func StartSession(ctx context.Context, rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
-	sshHost := opts.Target.SSHHost
-	if sshHost == "" {
-		return nil, errors.New("agent connection target missing SSH host")
-	}
-	if opts.Logger == nil {
-		return nil, errors.New("opts.Logger is required")
-	}
-	log := opts.Logger.With("target", sshHost)
-	s := NewSession(ctx, rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
-	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
-		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
-			_ = s.Close()
-			return nil, fmt.Errorf("write prompt: %w", err)
-		}
-	}
-	return s, nil
-}
-
 // sshTimeoutArgs are the default SSH options for relay operations.
 var sshTimeoutArgs = []string{"-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2"}
 
@@ -1449,61 +1504,6 @@ func readNDJSONRecord(r *bufio.Reader) ([]byte, error) {
 			return nil, err
 		}
 	}
-}
-
-// AttachRelaySession connects to an already-running relay in the container
-// and returns a new Session. It waits briefly for the attach process to
-// confirm connectivity; if the process exits immediately (e.g. relay socket
-// is stale), an error is returned so the caller can fall back to --resume.
-// Backends may pass wrap to intercept the default Conn before message reading
-// starts.
-func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wrap func(Conn) (Conn, error)) (*Session, error) {
-	sshHost := opts.Target.SSHHost
-	if sshHost == "" {
-		return nil, errors.New("agent connection target missing SSH host")
-	}
-	sshArgs := []string{
-		sshHost, "python3", RelayScriptPath, "attach",
-		"--offset", strconv.FormatInt(opts.RelayOffset, 10),
-	}
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	if err := opts.Log.LogVersion().Validate(); err != nil {
-		return nil, fmt.Errorf("relay log version: %w", err)
-	}
-	if opts.WarmHistory {
-		// A session that attaches with an empty stateful wire cannot correlate
-		// the completions its restored history implies, which is the defect the
-		// warm-up exists to prevent, so a failure here aborts the attach instead
-		// of continuing in that state. The caller's recovery path retries.
-		if err := WarmRelayHistory(ctx, sshHost, opts.Log.LogVersion(), wire, opts.RelayOffset, maxWarmHistoryBytes); err != nil {
-			return nil, fmt.Errorf("warm relay history: %w", err)
-		}
-	}
-	c := NewConn(ctx, opts.Logger, stdin, opts.Log, wire)
-	if wrap != nil {
-		c, err = wrap(c)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if opts.Logger == nil {
-		return nil, errors.New("opts.Logger is required")
-	}
-	cmd.Stderr = &SlogWriter{Context: ctx, Logger: opts.Logger, Prefix: "relay attach", Container: sshHost}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("attach relay: %w", err)
-	}
-
-	log := opts.Logger.With("target", sshHost)
-	return NewSession(ctx, cmd, c, stdout, opts.MsgCh, log), nil
 }
 
 // maxWarmHistoryBytes bounds the relay history replayed through a wire before

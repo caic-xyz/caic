@@ -50,25 +50,6 @@ type kittenTTSAdapter struct {
 	wait          chan error
 }
 
-type kittenTTSCommandFactory func(context.Context) (*exec.Cmd, error)
-
-type kittenTTSReady struct {
-	Kind   string   `json:"kind"`
-	URL    string   `json:"url"`
-	Voices []string `json:"voices"`
-	Error  string   `json:"error"`
-}
-
-type kittenTTSRequest struct {
-	Text  string  `json:"text"`
-	Voice string  `json:"voice"`
-	Speed float64 `json:"speed"`
-}
-
-type kittenTTSResponse struct {
-	Error string `json:"error"`
-}
-
 func newKittenTTSAdapter(ctx context.Context) (*kittenTTSAdapter, error) {
 	return newKittenTTSAdapterWithCommand(ctx, kittenTTSCommand)
 }
@@ -303,6 +284,25 @@ func (a *kittenTTSAdapter) stopLocked() error {
 	a.stdout = nil
 	a.wait = nil
 	return errors.Join(errs...)
+}
+
+type kittenTTSCommandFactory func(context.Context) (*exec.Cmd, error)
+
+type kittenTTSReady struct {
+	Kind   string   `json:"kind"`
+	URL    string   `json:"url"`
+	Voices []string `json:"voices"`
+	Error  string   `json:"error"`
+}
+
+type kittenTTSRequest struct {
+	Text  string  `json:"text"`
+	Voice string  `json:"voice"`
+	Speed float64 `json:"speed"`
+}
+
+type kittenTTSResponse struct {
+	Error string `json:"error"`
 }
 
 func validateKittenTTSURL(rawURL string) error {

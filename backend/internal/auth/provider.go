@@ -5,13 +5,6 @@ package auth
 // Provider identifies the OAuth identity provider a user authenticated through.
 type Provider string
 
-// Supported login providers.
-const (
-	ProviderGitHub Provider = "github"
-	ProviderGitLab Provider = "gitlab"
-	ProviderGoogle Provider = "google"
-)
-
 // Label returns the human-readable provider name, or the raw value when unknown.
 func (p Provider) Label() string {
 	switch p {
@@ -25,3 +18,10 @@ func (p Provider) Label() string {
 		return string(p)
 	}
 }
+
+// Supported login providers.
+const (
+	ProviderGitHub Provider = "github"
+	ProviderGitLab Provider = "gitlab"
+	ProviderGoogle Provider = "google"
+)

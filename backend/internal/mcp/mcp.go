@@ -112,6 +112,660 @@ type Handler struct {
 	ServerInfo Implementation
 }
 
+// HandleMCP handles one MCP HTTP request, dispatching to caic's native
+// 2026-07-28 protocol or the released Streamable HTTP compatibility handler
+// based on the request shape.
+func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		// The native 2026-07-28 transport is POST-only; a GET is a released
+		// client opening an SSE stream, which the released handler answers
+		// with 405.
+		h.handleCompat(w, r)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if isNativeMCPRequest(r, body) {
+		h.handleNative(w, r)
+		return
+	}
+	h.handleCompat(w, r)
+}
+
+// isNativeMCPRequest reports whether a POST uses caic's native 2026-07-28
+// revision. That transport requires an Mcp-Method header on every request,
+// which every caic-native client (frontend, Android, generated SDKs) always
+// sets. server/discover is exclusive to the 2026-07-28 revision, so it is
+// treated as native even without the header to preserve protocol diagnostics.
+// Released clients send neither the header nor server/discover.
+func isNativeMCPRequest(r *http.Request, body []byte) bool {
+	if r.Header.Get("Mcp-Method") != "" {
+		return true
+	}
+	var probe struct {
+		Method Method `json:"method"`
+	}
+	_ = json.Unmarshal(body, &probe)
+	return probe.Method == MethodServerDiscover
+}
+
+// handleNative handles one MCP HTTP request using caic's native 2026-07-28
+// protocol revision.
+func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		rpcErr := rpcError(InvalidRequestCode, "Method not allowed")
+		logMCPFailure(r, http.StatusMethodNotAllowed, nil, rpcErr, nil)
+		h.writeResponse(w, http.StatusMethodNotAllowed, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
+		return
+	}
+	var req JSONRPCRequest
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&req); err != nil {
+		rpcErr := rpcError(ParseErrorCode, "Parse error")
+		logMCPFailure(r, http.StatusBadRequest, nil, rpcErr, err)
+		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
+		return
+	}
+	if req.JSONRPC != jsonRPCVersion || req.Method == "" || !validJSONRPCRequestID(req.ID) {
+		rpcErr := rpcError(InvalidRequestCode, "Invalid Request")
+		logMCPFailure(r, http.StatusBadRequest, &req, rpcErr, nil)
+		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		return
+	}
+	// Transport-layer rejections (bad HTTP method, unparseable body, failed
+	// _meta/header validation) carry a non-200 status. Once a request is valid
+	// MCP it reaches dispatch, whose protocol errors use the transport status
+	// mandated by the 2026-07-28 Streamable HTTP binding.
+	if status, rpcErr := validateMCPRequest(r, &req); rpcErr != nil {
+		logMCPFailure(r, status, &req, rpcErr, nil)
+		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		return
+	}
+	if req.Method == MethodSubscriptionsListen {
+		if rpcErr := h.handleSubscription(r.Context(), w, req.ID, req.Params); rpcErr != nil {
+			status := rpcHTTPStatus(rpcErr)
+			logMCPFailure(r, status, &req, rpcErr, nil)
+			h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		}
+		return
+	}
+	result, rpcErr := h.dispatch(r.Context(), req.Method, req.Params, r.Header)
+	if rpcErr != nil {
+		status := rpcHTTPStatus(rpcErr)
+		logMCPFailure(r, status, &req, rpcErr, nil)
+		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		return
+	}
+	h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
+}
+
+// dispatch routes a validated MCP request to its handler. Returned rpcErr values
+// are JSON-RPC errors; handleMCP maps them to the transport status required by
+// the 2026-07-28 Streamable HTTP binding.
+func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMessage, header http.Header) (result any, rpcErr *JSONRPCError) {
+	switch method {
+	case MethodServerDiscover:
+		instructions, err := h.Registry.Instructions(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
+		t := ServerDiscoverResult{
+			ResultType:        ResultTypeComplete,
+			SupportedVersions: []string{ProtocolVersion},
+			Capabilities:      Capabilities{Tools: ToolsCapability{}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
+			ServerInfo:        h.serverInfo(),
+			Instructions:      instructions,
+			TTLMS:             DefaultTTLMS,
+			CacheScope:        CacheScopePrivate,
+		}
+		return t, nil
+	case MethodToolsList:
+		var p PaginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		tools, err := h.Registry.Tools(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
+		page, next, err := paginate(tools, p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		t := ToolsListResult{
+			ResultType: ResultTypeComplete,
+			NextCursor: next,
+			Tools:      page,
+			TTLMS:      DefaultTTLMS,
+			CacheScope: CacheScopePrivate,
+		}
+		return t, nil
+	case MethodToolsCall:
+		var p ToolsCallParams
+		if err := decodeParams(params, &p); err != nil || p.Name == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		if err := h.validateToolParamHeaders(ctx, header, p.Name, p.Arguments); err != nil {
+			return nil, rpcError(InvalidRequestCode, err.Error())
+		}
+		res, err := h.Registry.CallTool(ctx, p.Name, p.Arguments)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		t := ToolCallResult{
+			Meta:       res.Meta,
+			ResultType: ResultTypeComplete,
+			Content:    []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
+			IsError:    res.IsError,
+		}
+		if !res.IsError {
+			t.StructuredContent = res.Structured
+		}
+		for i := range t.Content {
+			if err := t.Content[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, fmt.Sprintf("invalid tool content %d: %v", i, err))
+			}
+		}
+		return t, nil
+	case MethodResourcesList:
+		var p PaginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.ListResources(ctx, p.Cursor)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		return res, nil
+	case MethodResourceTemplatesList:
+		var p PaginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		templates := h.resourceTemplates()
+		page, next, err := paginate(templates, p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		return ResourceTemplatesListResult{ResultType: ResultTypeComplete, NextCursor: next, ResourceTemplates: page, TTLMS: DefaultTTLMS, CacheScope: CacheScopePrivate}, nil
+	case MethodResourcesRead:
+		var p ResourcesReadParams
+		if err := decodeParams(params, &p); err != nil || p.URI == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.ReadResource(ctx, p.URI)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		for i := range res.Contents {
+			if err := res.Contents[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, fmt.Sprintf("invalid resource content %d: %v", i, err))
+			}
+		}
+		return res, nil
+	default:
+		return nil, rpcError(MethodNotFoundCode, "Method not found")
+	}
+}
+
+func (h *Handler) writeResponse(w http.ResponseWriter, status int, resp JSONRPCResponse) {
+	// TODO(observability): Measure final encoded MCP response bytes and write
+	// failures here, labeled only by method family, status, and result/error.
+	// This transport boundary sees JSON envelope overhead that registry-level
+	// logical result measurements cannot include.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Warn("write mcp response", "err", err)
+	}
+}
+
+func (h *Handler) serverInfo() Implementation {
+	info := h.ServerInfo
+	if info.Version == "" {
+		info.Version = "unknown"
+	}
+	return info
+}
+
+func (h *Handler) resourceTemplates() []ResourceTemplateDescriptor {
+	return []ResourceTemplateDescriptor{
+		{Name: "repo", Title: "Repository", URITemplate: "caic://repos/{path}", Description: "Managed repository detail by path", MimeType: "application/json"},
+		{Name: "task", Title: "Task", URITemplate: "caic://tasks/{id}", Description: "Coding task detail by task ID", MimeType: "application/json"},
+	}
+}
+
+func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter, id, params json.RawMessage) *JSONRPCError {
+	var p SubscriptionsListenParams
+	if err := decodeParams(params, &p); err != nil {
+		return rpcError(InvalidParamsCode, "Invalid params")
+	}
+	stream, ok := w.(subscriptionStreamWriter)
+	if !ok {
+		return rpcError(InternalErrorCode, "streaming unavailable")
+	}
+	subID := mcpSubscriptionID(id)
+	changes, err := h.Registry.SubscribeResourceUpdates(ctx, p.Notifications)
+	if err != nil {
+		return registryError(err)
+	}
+	// Read every subscribed target before acknowledging. The delivered initial
+	// state doubles as the dedup baseline for the change loop; taking it first
+	// establishes a happens-before edge so a mutation that lands as soon as the
+	// client sees the ack is still detected as a change instead of being
+	// deduplicated against a post-mutation snapshot.
+	initialReads := h.readInitialSubscriptionState(ctx, p.Notifications)
+	lastResources := ""
+	if p.Notifications.ResourcesListChanged {
+		lastResources = h.subscriptionResourcesHash(ctx)
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
+		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
+		return nil
+	}
+	lastResourceContents, ok := h.writeInitialSubscriptionState(ctx, stream, subID, p.Notifications, initialReads)
+	if !ok {
+		return nil
+	}
+	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes, lastResources, lastResourceContents)
+	return nil
+}
+
+// subscriptionInitialRead is the pre-ack read of one subscribed target: the
+// contents to deliver, the dedup baseline for the change loop, and a read
+// failure that delivers no initial-state payload for that target.
+type subscriptionInitialRead struct {
+	contents []ResourceContent
+	baseline string
+	readErr  error
+}
+
+// readInitialSubscriptionState reads every subscribed target through the
+// registered resources/read path before the acknowledgment is written, so
+// the delivered initial state and the dedup baseline for the change loop come
+// from the same authorized read.
+func (h *Handler) readInitialSubscriptionState(ctx context.Context, filter SubscriptionFilter) map[string]subscriptionInitialRead {
+	reads := make(map[string]subscriptionInitialRead, len(filter.ResourceSubscriptions))
+	for _, uri := range filter.ResourceSubscriptions {
+		res, err := h.Registry.ReadResource(ctx, uri)
+		if err != nil {
+			reads[uri] = subscriptionInitialRead{baseline: err.Error(), readErr: err}
+			continue
+		}
+		reads[uri] = subscriptionInitialRead{contents: res.Contents, baseline: stableJSON(res.Contents)}
+	}
+	return reads
+}
+
+// writeInitialSubscriptionState delivers the initial state of each subscribed
+// target right after the acknowledgment from the pre-ack read, closing the
+// read-then-subscribe staleness gap without classifying pre-subscribe
+// mutations as post-subscribe changes.
+//
+// Every target also receives the legacy resources/updated notification after
+// the initial_state (when one was delivered); that re-read burst is
+// intentionally kept so a client that does not consume the native notification
+// keeps today's behavior. Targets whose pre-ack read failed receive only the
+// resources/updated re-read, because they have no contents to deliver. The
+// returned baselines seed the change loop, so a genuine first post-subscribe
+// change still deduplicates correctly and produces exactly one update. Returns
+// false if a write fails so the caller skips the change loop.
+func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, reads map[string]subscriptionInitialRead) (map[string]string, bool) {
+	baselines := make(map[string]string, len(filter.ResourceSubscriptions))
+	if filter.ResourcesListChanged {
+		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+			slog.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
+			return baselines, false
+		}
+	}
+	for _, uri := range filter.ResourceSubscriptions {
+		read := reads[uri]
+		baselines[uri] = read.baseline
+		if read.readErr != nil {
+			slog.WarnContext(ctx, "read mcp subscription initial state", "uri", uri, "err", read.readErr)
+		} else if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsInitialState, Params: SubscriptionsInitialStateParams{Meta: mcpSubscriptionMeta(subID), URI: uri, Contents: read.contents}}); err != nil {
+			slog.WarnContext(ctx, "write mcp initial subscription state notification", "err", err)
+			return baselines, false
+		}
+		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+			slog.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
+			return baselines, false
+		}
+	}
+	return baselines, true
+}
+
+type subscriptionStreamWriter interface {
+	http.ResponseWriter
+	http.Flusher
+}
+
+func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error], lastResources string, lastResourceContents map[string]string) {
+	for update, err := range changes {
+		if err != nil {
+			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
+			return
+		}
+		if update.KeepAlive {
+			if err := writeSSEKeepAlive(w); err != nil {
+				slog.WarnContext(ctx, "write mcp subscription heartbeat", "err", err)
+				return
+			}
+			continue
+		}
+		if update.ResourcesListChanged && filter.ResourcesListChanged {
+			resources := h.subscriptionResourcesHash(ctx)
+			if resources != lastResources {
+				if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+					slog.WarnContext(ctx, "write mcp resources notification", "err", err)
+					return
+				}
+				lastResources = resources
+			}
+		}
+		for _, uri := range update.ResourceURIs {
+			if !slices.Contains(filter.ResourceSubscriptions, uri) {
+				continue
+			}
+			content := h.subscriptionResourceContentHash(ctx, uri)
+			if content == lastResourceContents[uri] {
+				continue
+			}
+			if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
+				return
+			}
+			lastResourceContents[uri] = content
+		}
+	}
+}
+
+func (h *Handler) subscriptionResourcesHash(ctx context.Context) string {
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, "[")
+	first := true
+	for resource, err := range h.Registry.Resources(ctx) {
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		data, err := json.Marshal(resource)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		if !first {
+			_, _ = io.WriteString(hash, ",")
+		}
+		_, _ = hash.Write(data)
+		first = false
+	}
+	_, _ = io.WriteString(hash, "]")
+	return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
+}
+
+func (h *Handler) subscriptionResourceContentHash(ctx context.Context, uri string) string {
+	res, err := h.Registry.ReadResource(ctx, uri)
+	if err != nil {
+		return err.Error()
+	}
+	return stableJSON(res.Contents)
+}
+
+func mcpSubscriptionID(id json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(id, &s); err == nil {
+		return s
+	}
+	return string(id)
+}
+
+func mcpSubscriptionMeta(id string) MetaObject {
+	return MetaObject{"io.modelcontextprotocol/subscriptionId": id}
+}
+
+func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSONRPCError, err any) {
+	attrs := []any{
+		"status", status,
+		"http_method", r.Method,
+		"path", r.URL.Path,
+	}
+	if req != nil {
+		if req.Method != "" {
+			attrs = append(attrs, "mcp_method", req.Method)
+		}
+		if len(req.ID) != 0 {
+			attrs = append(attrs, "id", string(req.ID))
+		}
+	}
+	if rpcErr != nil {
+		attrs = append(attrs, "rpc_code", rpcErr.Code)
+		if err == nil {
+			err = rpcErr.Message
+		}
+	}
+	if err != nil {
+		attrs = append(attrs, "err", err)
+	}
+	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
+}
+
+func writeSSEKeepAlive(w subscriptionStreamWriter) error {
+	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+		return err
+	}
+	w.Flush()
+	return nil
+}
+
+func writeMCPNotification(w subscriptionStreamWriter, msg JSONRPCNotification) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	w.Flush()
+	return nil
+}
+
+func stableJSON(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err.Error()
+	}
+	return string(data)
+}
+
+func (h *Handler) validateToolParamHeaders(ctx context.Context, header http.Header, name string, args json.RawMessage) error {
+	tools, err := h.Registry.Tools(ctx)
+	if err != nil {
+		return err
+	}
+	var schema *jsonschema.Schema
+	for _, tool := range tools {
+		if tool.Name == name {
+			schema = tool.InputSchema
+			break
+		}
+	}
+	if schema == nil {
+		return nil
+	}
+	headers, err := mcpHeaderParams(schema)
+	if err != nil {
+		return err
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	arguments, err := decodeJSONObject(args)
+	if err != nil {
+		return fmt.Errorf("invalid arguments for header validation: %w", err)
+	}
+	for _, hp := range headers {
+		bodyValue, ok := jsonValueAtPath(arguments, hp.Path)
+		gotRaw := header.Get("Mcp-Param-" + hp.Header)
+		if !ok || bodyValue == nil {
+			if gotRaw != "" {
+				return fmt.Errorf("header mismatch: Mcp-Param-%s header is present but parameter is absent", hp.Header)
+			}
+			continue
+		}
+		if gotRaw == "" {
+			return fmt.Errorf("header mismatch: Mcp-Param-%s header is required", hp.Header)
+		}
+		got, err := decodeMCPHeaderValue(gotRaw)
+		if err != nil {
+			return fmt.Errorf("header mismatch: Mcp-Param-%s header is malformed", hp.Header)
+		}
+		want, err := mcpPrimitiveHeaderValue(bodyValue)
+		if err != nil {
+			return fmt.Errorf("header mismatch: parameter for Mcp-Param-%s is not header-compatible: %w", hp.Header, err)
+		}
+		if got != want {
+			return fmt.Errorf("header mismatch: Mcp-Param-%s header does not match request params", hp.Header)
+		}
+	}
+	return nil
+}
+
+// handleCompat serves one released Streamable HTTP request. caic runs as a
+// stateless server: it does not issue an Mcp-Session-Id and offers no
+// server-initiated SSE stream, so a GET returns 405 (permitted by the released
+// transport spec) and clients fall back to plain POST request/response.
+func (h *Handler) handleCompat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "no server-initiated SSE stream", http.StatusMethodNotAllowed)
+		return
+	}
+	var req JSONRPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
+		return
+	}
+	// Requests without a valid id are notifications (e.g.
+	// notifications/initialized); they take no response body.
+	if !validJSONRPCRequestID(req.ID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	result, rpcErr := h.dispatchCompat(r.Context(), req.Method, req.Params)
+	if rpcErr != nil {
+		logMCPFailure(r, http.StatusOK, &req, rpcErr, nil)
+		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		return
+	}
+	h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
+}
+
+// dispatchCompat routes a released request to its handler and builds the
+// released result envelope.
+func (h *Handler) dispatchCompat(ctx context.Context, method Method, params json.RawMessage) (any, *JSONRPCError) {
+	switch method {
+	case "initialize":
+		var p compatInitializeParams
+		_ = decodeCompatParams(params, &p)
+		instructions, err := h.Registry.Instructions(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
+		return compatInitializeResult{
+			ProtocolVersion: negotiateCompatVersion(p.ProtocolVersion),
+			Capabilities:    compatServerCapabilities{},
+			ServerInfo:      h.serverInfo(),
+			Instructions:    instructions,
+		}, nil
+	case "ping":
+		return struct{}{}, nil
+	case MethodToolsList:
+		var p PaginatedRequestParams
+		if err := decodeCompatParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		tools, err := h.Registry.Tools(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
+		page, next, err := paginate(tools, p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		return compatListToolsResult{Tools: page, NextCursor: next}, nil
+	case MethodToolsCall:
+		var p ToolsCallParams
+		if err := decodeCompatParams(params, &p); err != nil || p.Name == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.CallTool(ctx, p.Name, p.Arguments)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		out := compatCallToolResult{
+			Meta:    res.Meta,
+			Content: []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
+			IsError: res.IsError,
+		}
+		if !res.IsError {
+			out.StructuredContent = res.Structured
+		}
+		for i := range out.Content {
+			if err := out.Content[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, "invalid tool content")
+			}
+		}
+		return out, nil
+	case MethodResourcesList:
+		var p PaginatedRequestParams
+		if err := decodeCompatParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.ListResources(ctx, p.Cursor)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		return compatListResourcesResult{Resources: res.Resources, NextCursor: res.NextCursor}, nil
+	case MethodResourceTemplatesList:
+		var p PaginatedRequestParams
+		if err := decodeCompatParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		page, next, err := paginate(h.resourceTemplates(), p.Cursor)
+		if err != nil {
+			return nil, rpcError(InvalidParamsCode, err.Error())
+		}
+		return compatListResourceTemplatesResult{ResourceTemplates: page, NextCursor: next}, nil
+	case MethodResourcesRead:
+		var p ResourcesReadParams
+		if err := decodeCompatParams(params, &p); err != nil || p.URI == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		res, err := h.Registry.ReadResource(ctx, p.URI)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		for i := range res.Contents {
+			if err := res.Contents[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, "invalid resource content")
+			}
+		}
+		return compatReadResourceResult{Contents: res.Contents}, nil
+	default:
+		return nil, rpcError(MethodNotFoundCode, "Method not found")
+	}
+}
+
 // Registry supplies MCP tools, resources, instructions, and subscription invalidations to Handler.
 type Registry interface {
 	Instructions(ctx context.Context) (string, error)
@@ -769,660 +1423,6 @@ type SubscriptionsInitialStateParams struct {
 	Contents []ResourceContent `json:"contents"`
 }
 
-// HandleMCP handles one MCP HTTP request, dispatching to caic's native
-// 2026-07-28 protocol or the released Streamable HTTP compatibility handler
-// based on the request shape.
-func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		// The native 2026-07-28 transport is POST-only; a GET is a released
-		// client opening an SSE stream, which the released handler answers
-		// with 405.
-		h.handleCompat(w, r)
-		return
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
-		return
-	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	if isNativeMCPRequest(r, body) {
-		h.handleNative(w, r)
-		return
-	}
-	h.handleCompat(w, r)
-}
-
-// isNativeMCPRequest reports whether a POST uses caic's native 2026-07-28
-// revision. That transport requires an Mcp-Method header on every request,
-// which every caic-native client (frontend, Android, generated SDKs) always
-// sets. server/discover is exclusive to the 2026-07-28 revision, so it is
-// treated as native even without the header to preserve protocol diagnostics.
-// Released clients send neither the header nor server/discover.
-func isNativeMCPRequest(r *http.Request, body []byte) bool {
-	if r.Header.Get("Mcp-Method") != "" {
-		return true
-	}
-	var probe struct {
-		Method Method `json:"method"`
-	}
-	_ = json.Unmarshal(body, &probe)
-	return probe.Method == MethodServerDiscover
-}
-
-// handleNative handles one MCP HTTP request using caic's native 2026-07-28
-// protocol revision.
-func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		rpcErr := rpcError(InvalidRequestCode, "Method not allowed")
-		logMCPFailure(r, http.StatusMethodNotAllowed, nil, rpcErr, nil)
-		h.writeResponse(w, http.StatusMethodNotAllowed, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
-		return
-	}
-	var req JSONRPCRequest
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	if err := d.Decode(&req); err != nil {
-		rpcErr := rpcError(ParseErrorCode, "Parse error")
-		logMCPFailure(r, http.StatusBadRequest, nil, rpcErr, err)
-		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
-		return
-	}
-	if req.JSONRPC != jsonRPCVersion || req.Method == "" || !validJSONRPCRequestID(req.ID) {
-		rpcErr := rpcError(InvalidRequestCode, "Invalid Request")
-		logMCPFailure(r, http.StatusBadRequest, &req, rpcErr, nil)
-		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
-		return
-	}
-	// Transport-layer rejections (bad HTTP method, unparseable body, failed
-	// _meta/header validation) carry a non-200 status. Once a request is valid
-	// MCP it reaches dispatch, whose protocol errors use the transport status
-	// mandated by the 2026-07-28 Streamable HTTP binding.
-	if status, rpcErr := validateMCPRequest(r, &req); rpcErr != nil {
-		logMCPFailure(r, status, &req, rpcErr, nil)
-		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
-		return
-	}
-	if req.Method == MethodSubscriptionsListen {
-		if rpcErr := h.handleSubscription(r.Context(), w, req.ID, req.Params); rpcErr != nil {
-			status := rpcHTTPStatus(rpcErr)
-			logMCPFailure(r, status, &req, rpcErr, nil)
-			h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
-		}
-		return
-	}
-	result, rpcErr := h.dispatch(r.Context(), req.Method, req.Params, r.Header)
-	if rpcErr != nil {
-		status := rpcHTTPStatus(rpcErr)
-		logMCPFailure(r, status, &req, rpcErr, nil)
-		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
-		return
-	}
-	h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
-}
-
-// dispatch routes a validated MCP request to its handler. Returned rpcErr values
-// are JSON-RPC errors; handleMCP maps them to the transport status required by
-// the 2026-07-28 Streamable HTTP binding.
-func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMessage, header http.Header) (result any, rpcErr *JSONRPCError) {
-	switch method {
-	case MethodServerDiscover:
-		instructions, err := h.Registry.Instructions(ctx)
-		if err != nil {
-			return nil, rpcError(InternalErrorCode, err.Error())
-		}
-		t := ServerDiscoverResult{
-			ResultType:        ResultTypeComplete,
-			SupportedVersions: []string{ProtocolVersion},
-			Capabilities:      Capabilities{Tools: ToolsCapability{}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
-			ServerInfo:        h.serverInfo(),
-			Instructions:      instructions,
-			TTLMS:             DefaultTTLMS,
-			CacheScope:        CacheScopePrivate,
-		}
-		return t, nil
-	case MethodToolsList:
-		var p PaginatedRequestParams
-		if err := decodeParams(params, &p); err != nil {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		tools, err := h.Registry.Tools(ctx)
-		if err != nil {
-			return nil, rpcError(InternalErrorCode, err.Error())
-		}
-		page, next, err := paginate(tools, p.Cursor)
-		if err != nil {
-			return nil, rpcError(InvalidParamsCode, err.Error())
-		}
-		t := ToolsListResult{
-			ResultType: ResultTypeComplete,
-			NextCursor: next,
-			Tools:      page,
-			TTLMS:      DefaultTTLMS,
-			CacheScope: CacheScopePrivate,
-		}
-		return t, nil
-	case MethodToolsCall:
-		var p ToolsCallParams
-		if err := decodeParams(params, &p); err != nil || p.Name == "" {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		if err := h.validateToolParamHeaders(ctx, header, p.Name, p.Arguments); err != nil {
-			return nil, rpcError(InvalidRequestCode, err.Error())
-		}
-		res, err := h.Registry.CallTool(ctx, p.Name, p.Arguments)
-		if err != nil {
-			return nil, registryError(err)
-		}
-		t := ToolCallResult{
-			Meta:       res.Meta,
-			ResultType: ResultTypeComplete,
-			Content:    []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
-			IsError:    res.IsError,
-		}
-		if !res.IsError {
-			t.StructuredContent = res.Structured
-		}
-		for i := range t.Content {
-			if err := t.Content[i].Validate(); err != nil {
-				return nil, rpcError(InternalErrorCode, fmt.Sprintf("invalid tool content %d: %v", i, err))
-			}
-		}
-		return t, nil
-	case MethodResourcesList:
-		var p PaginatedRequestParams
-		if err := decodeParams(params, &p); err != nil {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		res, err := h.Registry.ListResources(ctx, p.Cursor)
-		if err != nil {
-			return nil, registryError(err)
-		}
-		return res, nil
-	case MethodResourceTemplatesList:
-		var p PaginatedRequestParams
-		if err := decodeParams(params, &p); err != nil {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		templates := h.resourceTemplates()
-		page, next, err := paginate(templates, p.Cursor)
-		if err != nil {
-			return nil, rpcError(InvalidParamsCode, err.Error())
-		}
-		return ResourceTemplatesListResult{ResultType: ResultTypeComplete, NextCursor: next, ResourceTemplates: page, TTLMS: DefaultTTLMS, CacheScope: CacheScopePrivate}, nil
-	case MethodResourcesRead:
-		var p ResourcesReadParams
-		if err := decodeParams(params, &p); err != nil || p.URI == "" {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		res, err := h.Registry.ReadResource(ctx, p.URI)
-		if err != nil {
-			return nil, registryError(err)
-		}
-		for i := range res.Contents {
-			if err := res.Contents[i].Validate(); err != nil {
-				return nil, rpcError(InternalErrorCode, fmt.Sprintf("invalid resource content %d: %v", i, err))
-			}
-		}
-		return res, nil
-	default:
-		return nil, rpcError(MethodNotFoundCode, "Method not found")
-	}
-}
-
-func (h *Handler) writeResponse(w http.ResponseWriter, status int, resp JSONRPCResponse) {
-	// TODO(observability): Measure final encoded MCP response bytes and write
-	// failures here, labeled only by method family, status, and result/error.
-	// This transport boundary sees JSON envelope overhead that registry-level
-	// logical result measurements cannot include.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Warn("write mcp response", "err", err)
-	}
-}
-
-func (h *Handler) serverInfo() Implementation {
-	info := h.ServerInfo
-	if info.Version == "" {
-		info.Version = "unknown"
-	}
-	return info
-}
-
-func (h *Handler) resourceTemplates() []ResourceTemplateDescriptor {
-	return []ResourceTemplateDescriptor{
-		{Name: "repo", Title: "Repository", URITemplate: "caic://repos/{path}", Description: "Managed repository detail by path", MimeType: "application/json"},
-		{Name: "task", Title: "Task", URITemplate: "caic://tasks/{id}", Description: "Coding task detail by task ID", MimeType: "application/json"},
-	}
-}
-
-func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter, id, params json.RawMessage) *JSONRPCError {
-	var p SubscriptionsListenParams
-	if err := decodeParams(params, &p); err != nil {
-		return rpcError(InvalidParamsCode, "Invalid params")
-	}
-	stream, ok := w.(subscriptionStreamWriter)
-	if !ok {
-		return rpcError(InternalErrorCode, "streaming unavailable")
-	}
-	subID := mcpSubscriptionID(id)
-	changes, err := h.Registry.SubscribeResourceUpdates(ctx, p.Notifications)
-	if err != nil {
-		return registryError(err)
-	}
-	// Read every subscribed target before acknowledging. The delivered initial
-	// state doubles as the dedup baseline for the change loop; taking it first
-	// establishes a happens-before edge so a mutation that lands as soon as the
-	// client sees the ack is still detected as a change instead of being
-	// deduplicated against a post-mutation snapshot.
-	initialReads := h.readInitialSubscriptionState(ctx, p.Notifications)
-	lastResources := ""
-	if p.Notifications.ResourcesListChanged {
-		lastResources = h.subscriptionResourcesHash(ctx)
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
-		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
-		return nil
-	}
-	lastResourceContents, ok := h.writeInitialSubscriptionState(ctx, stream, subID, p.Notifications, initialReads)
-	if !ok {
-		return nil
-	}
-	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes, lastResources, lastResourceContents)
-	return nil
-}
-
-// subscriptionInitialRead is the pre-ack read of one subscribed target: the
-// contents to deliver, the dedup baseline for the change loop, and a read
-// failure that delivers no initial-state payload for that target.
-type subscriptionInitialRead struct {
-	contents []ResourceContent
-	baseline string
-	readErr  error
-}
-
-// readInitialSubscriptionState reads every subscribed target through the
-// registered resources/read path before the acknowledgment is written, so
-// the delivered initial state and the dedup baseline for the change loop come
-// from the same authorized read.
-func (h *Handler) readInitialSubscriptionState(ctx context.Context, filter SubscriptionFilter) map[string]subscriptionInitialRead {
-	reads := make(map[string]subscriptionInitialRead, len(filter.ResourceSubscriptions))
-	for _, uri := range filter.ResourceSubscriptions {
-		res, err := h.Registry.ReadResource(ctx, uri)
-		if err != nil {
-			reads[uri] = subscriptionInitialRead{baseline: err.Error(), readErr: err}
-			continue
-		}
-		reads[uri] = subscriptionInitialRead{contents: res.Contents, baseline: stableJSON(res.Contents)}
-	}
-	return reads
-}
-
-// writeInitialSubscriptionState delivers the initial state of each subscribed
-// target right after the acknowledgment from the pre-ack read, closing the
-// read-then-subscribe staleness gap without classifying pre-subscribe
-// mutations as post-subscribe changes.
-//
-// Every target also receives the legacy resources/updated notification after
-// the initial_state (when one was delivered); that re-read burst is
-// intentionally kept so a client that does not consume the native notification
-// keeps today's behavior. Targets whose pre-ack read failed receive only the
-// resources/updated re-read, because they have no contents to deliver. The
-// returned baselines seed the change loop, so a genuine first post-subscribe
-// change still deduplicates correctly and produces exactly one update. Returns
-// false if a write fails so the caller skips the change loop.
-func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, reads map[string]subscriptionInitialRead) (map[string]string, bool) {
-	baselines := make(map[string]string, len(filter.ResourceSubscriptions))
-	if filter.ResourcesListChanged {
-		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
-			slog.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
-			return baselines, false
-		}
-	}
-	for _, uri := range filter.ResourceSubscriptions {
-		read := reads[uri]
-		baselines[uri] = read.baseline
-		if read.readErr != nil {
-			slog.WarnContext(ctx, "read mcp subscription initial state", "uri", uri, "err", read.readErr)
-		} else if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsInitialState, Params: SubscriptionsInitialStateParams{Meta: mcpSubscriptionMeta(subID), URI: uri, Contents: read.contents}}); err != nil {
-			slog.WarnContext(ctx, "write mcp initial subscription state notification", "err", err)
-			return baselines, false
-		}
-		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
-			slog.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
-			return baselines, false
-		}
-	}
-	return baselines, true
-}
-
-type subscriptionStreamWriter interface {
-	http.ResponseWriter
-	http.Flusher
-}
-
-func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error], lastResources string, lastResourceContents map[string]string) {
-	for update, err := range changes {
-		if err != nil {
-			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
-			return
-		}
-		if update.KeepAlive {
-			if err := writeSSEKeepAlive(w); err != nil {
-				slog.WarnContext(ctx, "write mcp subscription heartbeat", "err", err)
-				return
-			}
-			continue
-		}
-		if update.ResourcesListChanged && filter.ResourcesListChanged {
-			resources := h.subscriptionResourcesHash(ctx)
-			if resources != lastResources {
-				if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
-					slog.WarnContext(ctx, "write mcp resources notification", "err", err)
-					return
-				}
-				lastResources = resources
-			}
-		}
-		for _, uri := range update.ResourceURIs {
-			if !slices.Contains(filter.ResourceSubscriptions, uri) {
-				continue
-			}
-			content := h.subscriptionResourceContentHash(ctx, uri)
-			if content == lastResourceContents[uri] {
-				continue
-			}
-			if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
-				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
-				return
-			}
-			lastResourceContents[uri] = content
-		}
-	}
-}
-
-func (h *Handler) subscriptionResourcesHash(ctx context.Context) string {
-	hash := sha256.New()
-	_, _ = io.WriteString(hash, "[")
-	first := true
-	for resource, err := range h.Registry.Resources(ctx) {
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		data, err := json.Marshal(resource)
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		if !first {
-			_, _ = io.WriteString(hash, ",")
-		}
-		_, _ = hash.Write(data)
-		first = false
-	}
-	_, _ = io.WriteString(hash, "]")
-	return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
-}
-
-func (h *Handler) subscriptionResourceContentHash(ctx context.Context, uri string) string {
-	res, err := h.Registry.ReadResource(ctx, uri)
-	if err != nil {
-		return err.Error()
-	}
-	return stableJSON(res.Contents)
-}
-
-func mcpSubscriptionID(id json.RawMessage) string {
-	var s string
-	if err := json.Unmarshal(id, &s); err == nil {
-		return s
-	}
-	return string(id)
-}
-
-func mcpSubscriptionMeta(id string) MetaObject {
-	return MetaObject{"io.modelcontextprotocol/subscriptionId": id}
-}
-
-func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSONRPCError, err any) {
-	attrs := []any{
-		"status", status,
-		"http_method", r.Method,
-		"path", r.URL.Path,
-	}
-	if req != nil {
-		if req.Method != "" {
-			attrs = append(attrs, "mcp_method", req.Method)
-		}
-		if len(req.ID) != 0 {
-			attrs = append(attrs, "id", string(req.ID))
-		}
-	}
-	if rpcErr != nil {
-		attrs = append(attrs, "rpc_code", rpcErr.Code)
-		if err == nil {
-			err = rpcErr.Message
-		}
-	}
-	if err != nil {
-		attrs = append(attrs, "err", err)
-	}
-	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
-}
-
-func writeSSEKeepAlive(w subscriptionStreamWriter) error {
-	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
-		return err
-	}
-	w.Flush()
-	return nil
-}
-
-func writeMCPNotification(w subscriptionStreamWriter, msg JSONRPCNotification) error {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-		return err
-	}
-	w.Flush()
-	return nil
-}
-
-func stableJSON(v any) string {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err.Error()
-	}
-	return string(data)
-}
-
-func (h *Handler) validateToolParamHeaders(ctx context.Context, header http.Header, name string, args json.RawMessage) error {
-	tools, err := h.Registry.Tools(ctx)
-	if err != nil {
-		return err
-	}
-	var schema *jsonschema.Schema
-	for _, tool := range tools {
-		if tool.Name == name {
-			schema = tool.InputSchema
-			break
-		}
-	}
-	if schema == nil {
-		return nil
-	}
-	headers, err := mcpHeaderParams(schema)
-	if err != nil {
-		return err
-	}
-	if len(headers) == 0 {
-		return nil
-	}
-	arguments, err := decodeJSONObject(args)
-	if err != nil {
-		return fmt.Errorf("invalid arguments for header validation: %w", err)
-	}
-	for _, hp := range headers {
-		bodyValue, ok := jsonValueAtPath(arguments, hp.Path)
-		gotRaw := header.Get("Mcp-Param-" + hp.Header)
-		if !ok || bodyValue == nil {
-			if gotRaw != "" {
-				return fmt.Errorf("header mismatch: Mcp-Param-%s header is present but parameter is absent", hp.Header)
-			}
-			continue
-		}
-		if gotRaw == "" {
-			return fmt.Errorf("header mismatch: Mcp-Param-%s header is required", hp.Header)
-		}
-		got, err := decodeMCPHeaderValue(gotRaw)
-		if err != nil {
-			return fmt.Errorf("header mismatch: Mcp-Param-%s header is malformed", hp.Header)
-		}
-		want, err := mcpPrimitiveHeaderValue(bodyValue)
-		if err != nil {
-			return fmt.Errorf("header mismatch: parameter for Mcp-Param-%s is not header-compatible: %w", hp.Header, err)
-		}
-		if got != want {
-			return fmt.Errorf("header mismatch: Mcp-Param-%s header does not match request params", hp.Header)
-		}
-	}
-	return nil
-}
-
-// handleCompat serves one released Streamable HTTP request. caic runs as a
-// stateless server: it does not issue an Mcp-Session-Id and offers no
-// server-initiated SSE stream, so a GET returns 405 (permitted by the released
-// transport spec) and clients fall back to plain POST request/response.
-func (h *Handler) handleCompat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "no server-initiated SSE stream", http.StatusMethodNotAllowed)
-		return
-	}
-	var req JSONRPCRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
-		return
-	}
-	// Requests without a valid id are notifications (e.g.
-	// notifications/initialized); they take no response body.
-	if !validJSONRPCRequestID(req.ID) {
-		w.WriteHeader(http.StatusAccepted)
-		return
-	}
-	result, rpcErr := h.dispatchCompat(r.Context(), req.Method, req.Params)
-	if rpcErr != nil {
-		logMCPFailure(r, http.StatusOK, &req, rpcErr, nil)
-		h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
-		return
-	}
-	h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
-}
-
-// dispatchCompat routes a released request to its handler and builds the
-// released result envelope.
-func (h *Handler) dispatchCompat(ctx context.Context, method Method, params json.RawMessage) (any, *JSONRPCError) {
-	switch method {
-	case "initialize":
-		var p compatInitializeParams
-		_ = decodeCompatParams(params, &p)
-		instructions, err := h.Registry.Instructions(ctx)
-		if err != nil {
-			return nil, rpcError(InternalErrorCode, err.Error())
-		}
-		return compatInitializeResult{
-			ProtocolVersion: negotiateCompatVersion(p.ProtocolVersion),
-			Capabilities:    compatServerCapabilities{},
-			ServerInfo:      h.serverInfo(),
-			Instructions:    instructions,
-		}, nil
-	case "ping":
-		return struct{}{}, nil
-	case MethodToolsList:
-		var p PaginatedRequestParams
-		if err := decodeCompatParams(params, &p); err != nil {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		tools, err := h.Registry.Tools(ctx)
-		if err != nil {
-			return nil, rpcError(InternalErrorCode, err.Error())
-		}
-		page, next, err := paginate(tools, p.Cursor)
-		if err != nil {
-			return nil, rpcError(InvalidParamsCode, err.Error())
-		}
-		return compatListToolsResult{Tools: page, NextCursor: next}, nil
-	case MethodToolsCall:
-		var p ToolsCallParams
-		if err := decodeCompatParams(params, &p); err != nil || p.Name == "" {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		res, err := h.Registry.CallTool(ctx, p.Name, p.Arguments)
-		if err != nil {
-			return nil, registryError(err)
-		}
-		out := compatCallToolResult{
-			Meta:    res.Meta,
-			Content: []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
-			IsError: res.IsError,
-		}
-		if !res.IsError {
-			out.StructuredContent = res.Structured
-		}
-		for i := range out.Content {
-			if err := out.Content[i].Validate(); err != nil {
-				return nil, rpcError(InternalErrorCode, "invalid tool content")
-			}
-		}
-		return out, nil
-	case MethodResourcesList:
-		var p PaginatedRequestParams
-		if err := decodeCompatParams(params, &p); err != nil {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		res, err := h.Registry.ListResources(ctx, p.Cursor)
-		if err != nil {
-			return nil, registryError(err)
-		}
-		return compatListResourcesResult{Resources: res.Resources, NextCursor: res.NextCursor}, nil
-	case MethodResourceTemplatesList:
-		var p PaginatedRequestParams
-		if err := decodeCompatParams(params, &p); err != nil {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		page, next, err := paginate(h.resourceTemplates(), p.Cursor)
-		if err != nil {
-			return nil, rpcError(InvalidParamsCode, err.Error())
-		}
-		return compatListResourceTemplatesResult{ResourceTemplates: page, NextCursor: next}, nil
-	case MethodResourcesRead:
-		var p ResourcesReadParams
-		if err := decodeCompatParams(params, &p); err != nil || p.URI == "" {
-			return nil, rpcError(InvalidParamsCode, "Invalid params")
-		}
-		res, err := h.Registry.ReadResource(ctx, p.URI)
-		if err != nil {
-			return nil, registryError(err)
-		}
-		for i := range res.Contents {
-			if err := res.Contents[i].Validate(); err != nil {
-				return nil, rpcError(InternalErrorCode, "invalid resource content")
-			}
-		}
-		return compatReadResourceResult{Contents: res.Contents}, nil
-	default:
-		return nil, rpcError(MethodNotFoundCode, "Method not found")
-	}
-}
-
 // HeaderParam maps an MCP input-schema property to a required HTTP header.
 type HeaderParam struct {
 	Header string
@@ -1759,6 +1759,26 @@ type ToolResult[T any] struct {
 	_          [0]T
 }
 
+// TypedToolResult returns a successful structured tool result.
+func TypedToolResult[T any](structured T) ToolResult[T] {
+	return ToolResult[T]{Structured: structured}
+}
+
+// TextToolResult returns a successful text output result.
+func TextToolResult(message string) ToolResult[TextOutput] {
+	return TypedToolResult(TextOutput{Result: message})
+}
+
+// ToolError returns an MCP tool error result.
+func ToolError[T any](message string) ToolResult[T] {
+	return ToolResult[T]{Structured: ErrorOutput{Error: message}, IsError: true}
+}
+
+// ToolErrorWithMeta returns an MCP tool error result with metadata.
+func ToolErrorWithMeta[T any](message string, meta MetaObject) ToolResult[T] {
+	return ToolResult[T]{Meta: meta, Structured: ErrorOutput{Error: message}, IsError: true}
+}
+
 func (r ToolResult[T]) toRawToolResult() RawToolResult {
 	return RawToolResult{Meta: r.Meta, Structured: r.Structured, IsError: r.IsError}
 }
@@ -1848,26 +1868,6 @@ func ResourceJSON(uri string, value any) (ResourcesReadResult, error) {
 func SchemaFor[T any]() *jsonschema.Schema {
 	r := jsonschema.Reflector{Anonymous: true, DoNotReference: true}
 	return r.ReflectFromType(reflect.TypeFor[T]())
-}
-
-// TypedToolResult returns a successful structured tool result.
-func TypedToolResult[T any](structured T) ToolResult[T] {
-	return ToolResult[T]{Structured: structured}
-}
-
-// TextToolResult returns a successful text output result.
-func TextToolResult(message string) ToolResult[TextOutput] {
-	return TypedToolResult(TextOutput{Result: message})
-}
-
-// ToolError returns an MCP tool error result.
-func ToolError[T any](message string) ToolResult[T] {
-	return ToolResult[T]{Structured: ErrorOutput{Error: message}, IsError: true}
-}
-
-// ToolErrorWithMeta returns an MCP tool error result with metadata.
-func ToolErrorWithMeta[T any](message string, meta MetaObject) ToolResult[T] {
-	return ToolResult[T]{Meta: meta, Structured: ErrorOutput{Error: message}, IsError: true}
 }
 
 // TextOutput is the standard human-readable successful tool payload.

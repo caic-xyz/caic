@@ -22,21 +22,6 @@ type Router struct {
 	log *slog.Logger
 }
 
-type statsStream struct {
-	runtimeName Name
-	seq         iter.Seq2[StatsSample, error]
-}
-
-type statsItem struct {
-	sample StatsSample
-	err    error
-}
-
-type eventWatch struct {
-	runtimeName Name
-	ch          <-chan Event
-}
-
 // NewRouter creates a runtime router.
 func NewRouter(log *slog.Logger, runtimes []System) (*Router, error) {
 	if log == nil {
@@ -422,6 +407,21 @@ func (r *Router) runtimeForInstance(id ID) (System, error) {
 		return nil, fmt.Errorf("unknown runtime %q", runtimeName)
 	}
 	return rt, nil
+}
+
+type statsStream struct {
+	runtimeName Name
+	seq         iter.Seq2[StatsSample, error]
+}
+
+type statsItem struct {
+	sample StatsSample
+	err    error
+}
+
+type eventWatch struct {
+	runtimeName Name
+	ch          <-chan Event
 }
 
 func qualifyID(name Name, id ID) ID {

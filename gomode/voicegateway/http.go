@@ -70,36 +70,6 @@ type handler struct {
 	requireServiceAuth bool
 }
 
-// HealthResp is returned by GET /api/voicegateway/v1/voice/health.
-type HealthResp struct {
-	Status string `json:"status"`
-}
-
-// OfferReq starts a voice gateway WebRTC signaling session.
-type OfferReq struct {
-	SDP     string               `json:"sdp"`
-	Service ServiceAuthorization `json:"service"`
-}
-
-// OfferResp returns the WebRTC SDP answer and gateway session ID.
-type OfferResp struct {
-	SDP       string `json:"sdp"`
-	SessionID string `json:"sessionID"`
-}
-
-// CloseSessionResp is returned after closing a voice gateway session.
-type CloseSessionResp struct {
-	Status string `json:"status"`
-}
-
-// ServiceAuthorization authorizes one service-bound voice session.
-type ServiceAuthorization struct {
-	Kind       string `json:"kind"`
-	InstanceID string `json:"instanceID"`
-	BaseURL    string `json:"baseURL"`
-	Token      string `json:"token"`
-}
-
 func (h *handler) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, HealthResp{Status: "ok"})
 }
@@ -195,6 +165,36 @@ func (h *handler) mediaBridge() MediaBridge {
 		return nil
 	}
 	return bridge
+}
+
+// HealthResp is returned by GET /api/voicegateway/v1/voice/health.
+type HealthResp struct {
+	Status string `json:"status"`
+}
+
+// OfferReq starts a voice gateway WebRTC signaling session.
+type OfferReq struct {
+	SDP     string               `json:"sdp"`
+	Service ServiceAuthorization `json:"service"`
+}
+
+// OfferResp returns the WebRTC SDP answer and gateway session ID.
+type OfferResp struct {
+	SDP       string `json:"sdp"`
+	SessionID string `json:"sessionID"`
+}
+
+// CloseSessionResp is returned after closing a voice gateway session.
+type CloseSessionResp struct {
+	Status string `json:"status"`
+}
+
+// ServiceAuthorization authorizes one service-bound voice session.
+type ServiceAuthorization struct {
+	Kind       string `json:"kind"`
+	InstanceID string `json:"instanceID"`
+	BaseURL    string `json:"baseURL"`
+	Token      string `json:"token"`
 }
 
 func isNilMediaBridge(bridge MediaBridge) bool {

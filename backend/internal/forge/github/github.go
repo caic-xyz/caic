@@ -30,8 +30,6 @@ type Client struct {
 	baseURL string
 }
 
-var _ forge.Forge = (*Client)(nil)
-
 // NewClient returns a Client that authenticates with token and throttles/retries
 // via throttle. The transport chain is: Header → Retry → throttle.
 // When token is empty, requests are unauthenticated (lower rate limits).
@@ -53,62 +51,6 @@ func NewClient(token string, throttle http.RoundTripper) *Client {
 		},
 	}
 }
-
-// createPRRequest is the JSON body for POST /repos/{owner}/{repo}/pulls.
-type createPRRequest struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Head  string `json:"head"`
-	Base  string `json:"base"`
-}
-
-// createPRResponse is the relevant subset of the GitHub PR creation response.
-type createPRResponse struct {
-	Number int `json:"number"`
-	Head   struct {
-		SHA string `json:"sha"`
-	} `json:"head"`
-}
-
-// refResponse is the relevant subset of the GitHub git ref response.
-type refResponse struct {
-	Object struct {
-		SHA string `json:"sha"`
-	} `json:"object"`
-}
-
-// checkRunsResponse is the relevant subset of the GitHub check-runs list response.
-type checkRunsResponse struct {
-	CheckRuns []struct {
-		ID          int64                    `json:"id"`
-		Name        string                   `json:"name"`
-		Status      forge.CheckRunStatus     `json:"status"`
-		Conclusion  forge.CheckRunConclusion `json:"conclusion"`
-		HTMLURL     string                   `json:"html_url"` // e.g. https://github.com/owner/repo/actions/runs/{runID}/job/{jobID}
-		CreatedAt   *time.Time               `json:"created_at"`
-		StartedAt   *time.Time               `json:"started_at"`
-		CompletedAt *time.Time               `json:"completed_at"`
-	} `json:"check_runs"`
-}
-
-// jobResponse is the relevant subset of the GitHub Actions job detail response.
-type jobResponse struct {
-	Labels []string `json:"labels"`
-}
-
-// searchPRsResponse is the relevant subset of the GitHub search PRs response.
-type searchPRsResponse struct {
-	TotalCount int `json:"total_count"`
-	Items      []struct {
-		Number int `json:"number"`
-		Head   struct {
-			SHA string `json:"sha"`
-		} `json:"head"`
-	} `json:"items"`
-}
-
-// actionsRunRe extracts the workflow run ID from a GitHub Actions job URL.
-var actionsRunRe = regexp.MustCompile(`/actions/runs/(\d+)/job/\d+`)
 
 // CreatePR creates a pull request on GitHub and returns its metadata.
 func (c *Client) CreatePR(ctx context.Context, owner, repo, head, base, title, body string) (forge.PR, error) {
@@ -478,6 +420,64 @@ func (c *Client) apiBase() string {
 	}
 	return "https://api.github.com"
 }
+
+var _ forge.Forge = (*Client)(nil)
+
+// createPRRequest is the JSON body for POST /repos/{owner}/{repo}/pulls.
+type createPRRequest struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Head  string `json:"head"`
+	Base  string `json:"base"`
+}
+
+// createPRResponse is the relevant subset of the GitHub PR creation response.
+type createPRResponse struct {
+	Number int `json:"number"`
+	Head   struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+// refResponse is the relevant subset of the GitHub git ref response.
+type refResponse struct {
+	Object struct {
+		SHA string `json:"sha"`
+	} `json:"object"`
+}
+
+// checkRunsResponse is the relevant subset of the GitHub check-runs list response.
+type checkRunsResponse struct {
+	CheckRuns []struct {
+		ID          int64                    `json:"id"`
+		Name        string                   `json:"name"`
+		Status      forge.CheckRunStatus     `json:"status"`
+		Conclusion  forge.CheckRunConclusion `json:"conclusion"`
+		HTMLURL     string                   `json:"html_url"` // e.g. https://github.com/owner/repo/actions/runs/{runID}/job/{jobID}
+		CreatedAt   *time.Time               `json:"created_at"`
+		StartedAt   *time.Time               `json:"started_at"`
+		CompletedAt *time.Time               `json:"completed_at"`
+	} `json:"check_runs"`
+}
+
+// jobResponse is the relevant subset of the GitHub Actions job detail response.
+type jobResponse struct {
+	Labels []string `json:"labels"`
+}
+
+// searchPRsResponse is the relevant subset of the GitHub search PRs response.
+type searchPRsResponse struct {
+	TotalCount int `json:"total_count"`
+	Items      []struct {
+		Number int `json:"number"`
+		Head   struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	} `json:"items"`
+}
+
+// actionsRunRe extracts the workflow run ID from a GitHub Actions job URL.
+var actionsRunRe = regexp.MustCompile(`/actions/runs/(\d+)/job/\d+`)
 
 const maxGitHubErrorHTMLLength = 512
 

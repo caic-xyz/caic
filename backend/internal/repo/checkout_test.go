@@ -33,22 +33,22 @@ type fakeTaskView struct {
 	baseBranch string
 }
 
+func (f *fakeTaskView) RuntimeInstanceID() runtime.ID      { return f.instanceID }
+func (f *fakeTaskView) RuntimeRepos() []runtime.Repo       { return f.repo }
+func (f *fakeTaskView) SetRepoBranch(i int, branch string) { f.repo[i].Branch = branch }
+func (f *fakeTaskView) PrimaryBaseBranch() string          { return f.baseBranch }
+
 type testRuntimeSystem struct {
 	testRuntimeBackend
 	runtimetest.FakeInfo
 }
 
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
 type testRuntimeBackend interface {
 	runtime.Lifecycle
 	runtime.Repository
 }
-
-func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
-
-func (f *fakeTaskView) RuntimeInstanceID() runtime.ID      { return f.instanceID }
-func (f *fakeTaskView) RuntimeRepos() []runtime.Repo       { return f.repo }
-func (f *fakeTaskView) SetRepoBranch(i int, branch string) { f.repo[i].Branch = branch }
-func (f *fakeTaskView) PrimaryBaseBranch() string          { return f.baseBranch }
 
 func TestLiveBranchesByRoot(t *testing.T) {
 	t.Parallel()
@@ -429,6 +429,11 @@ type recordingContainer struct {
 	diffIdxs []int
 }
 
+// newRecordingContainer builds a recordingContainer with the fixed diff output.
+func newRecordingContainer() *recordingContainer {
+	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
+}
+
 func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	c.fetchIDs = append(c.fetchIDs, id)
 	return c.FakeBackend.Fetch(ctx, id, opts)
@@ -438,11 +443,6 @@ func (c *recordingContainer) Diff(ctx context.Context, id runtime.ID, repoIdx in
 	c.diffIDs = append(c.diffIDs, id)
 	c.diffIdxs = append(c.diffIdxs, repoIdx)
 	return c.FakeBackend.Diff(ctx, id, repoIdx, args...)
-}
-
-// newRecordingContainer builds a recordingContainer with the fixed diff output.
-func newRecordingContainer() *recordingContainer {
-	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
 }
 
 // initTestRepo creates a bare "remote" and a local clone with one commit on

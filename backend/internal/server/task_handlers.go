@@ -51,206 +51,6 @@ type taskHandlers struct {
 	warnings *WarningStore
 }
 
-// historyLoadError marks a failure before any task history is available for SSE
-// publication. It is the sole condition that can produce the history-unavailable
-// frame; later stats, ready, flush, and live-stream errors remain their own errors.
-type historyLoadError struct{ err error }
-
-func (e *historyLoadError) Error() string { return e.err.Error() }
-
-func (e *historyLoadError) Unwrap() error { return e.err }
-
-// taskEventStream writes one task's ordered SSE event stream.
-type taskEventStream struct {
-	ctx          context.Context
-	w            http.ResponseWriter
-	flusher      http.Flusher
-	controller   *http.ResponseController
-	tracker      *apiconv.ToolTimingTracker
-	resume       taskEventResume
-	nextMessage  uint64
-	writtenBytes int
-	idBuffer     []byte
-}
-
-type taskEventSource string
-
-const (
-	taskEventSourceDisk   taskEventSource = "disk"
-	taskEventSourceMemory taskEventSource = "memory"
-)
-
-type taskEventID struct {
-	timeline string
-	source   taskEventSource
-	message  uint64
-	event    uint64
-}
-
-func (id taskEventID) String() string {
-	return string(id.appendTo(nil))
-}
-
-func (id taskEventID) appendTo(dst []byte) []byte {
-	dst = append(dst, "v1/"...)
-	dst = append(dst, id.timeline...)
-	dst = append(dst, '/')
-	dst = append(dst, id.source...)
-	dst = append(dst, '/')
-	dst = strconv.AppendUint(dst, id.message, 10)
-	dst = append(dst, '/')
-	return strconv.AppendUint(dst, id.event, 10)
-}
-
-var errInvalidTaskEventID = errors.New("invalid task SSE event ID")
-
-func parseTaskEventID(value string) (taskEventID, bool) {
-	parts := strings.Split(value, "/")
-	if len(parts) != 5 || parts[0] != "v1" || parts[1] == "" {
-		return taskEventID{}, false
-	}
-	source := taskEventSource(parts[2])
-	if source != taskEventSourceDisk && source != taskEventSourceMemory {
-		return taskEventID{}, false
-	}
-	messageID, err := strconv.ParseUint(parts[3], 10, 64)
-	if err != nil || messageID == 0 {
-		return taskEventID{}, false
-	}
-	eventID, err := strconv.ParseUint(parts[4], 10, 64)
-	if err != nil {
-		return taskEventID{}, false
-	}
-	return taskEventID{timeline: parts[1], source: source, message: messageID, event: eventID}, true
-}
-
-type taskEventResume struct {
-	lastEventID string
-	timelineID  string
-	source      taskEventSource
-	after       taskEventID
-	cursorSeen  bool
-}
-
-func (r *taskEventResume) prepare(w io.Writer, timelineID string, source taskEventSource) error {
-	r.timelineID = timelineID
-	r.source = source
-	if r.lastEventID == "" {
-		return nil
-	}
-	id, ok := parseTaskEventID(r.lastEventID)
-	if !ok || id.timeline != timelineID || id.source != source {
-		return r.reset(w)
-	}
-	r.after = id
-	return nil
-}
-
-func (r *taskEventResume) reset(w io.Writer) error {
-	if _, err := fmt.Fprint(w, "id:\nevent: reset\ndata: {}\n\n"); err != nil {
-		return fmt.Errorf("write SSE reset event: %w", err)
-	}
-	r.lastEventID = ""
-	r.after = taskEventID{}
-	r.cursorSeen = false
-	return nil
-}
-
-func (r *taskEventResume) observe(sequence uint64, events []v1.EventMessage) error {
-	if sequence != r.after.message {
-		return nil
-	}
-	if r.after.event >= uint64(len(events)) {
-		return errInvalidTaskEventID
-	}
-	r.cursorSeen = true
-	return nil
-}
-
-func (r *taskEventResume) eventID(message, event uint64) taskEventID {
-	return taskEventID{timeline: r.timelineID, source: r.source, message: message, event: event}
-}
-
-func (r *taskEventResume) acknowledged(id taskEventID) bool {
-	return id.message == r.after.message && id.event <= r.after.event
-}
-
-func (r *taskEventResume) precedes(sequence uint64) bool {
-	return sequence < r.after.message
-}
-
-func (r *taskEventResume) beyond(lastSequence uint64) bool {
-	return r.after.message > lastSequence
-}
-
-func (r *taskEventResume) active() bool {
-	return r.after.message != 0
-}
-
-func (r *taskEventResume) complete() error {
-	if r.active() && !r.cursorSeen {
-		return errInvalidTaskEventID
-	}
-	return nil
-}
-
-func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at time.Time, suppress bool) error {
-	s.nextMessage = sequence
-	events := s.tracker.ConvertMessage(msg, at)
-	if err := s.resume.observe(sequence, events); err != nil {
-		return err
-	}
-	if suppress || s.resume.precedes(sequence) {
-		return nil
-	}
-	for i := range events {
-		id := s.resume.eventID(sequence, uint64(i))
-		if s.resume.acknowledged(id) {
-			continue
-		}
-		if err := s.writeEvent(&events[i], id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
-	for i := range stats {
-		ev := apiconv.StatsEvent(&stats[i])
-		if err := s.writeEvent(&ev, taskEventID{}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error {
-	data, err := apiconv.MarshalEvent(ev)
-	if err != nil {
-		return fmt.Errorf("marshal SSE event: %w", err)
-	}
-	var n int
-	if id.message == 0 {
-		n, err = fmt.Fprintf(s.w, "event: message\ndata: %s\n\n", data)
-	} else {
-		s.idBuffer = id.appendTo(s.idBuffer[:0])
-		n, err = fmt.Fprintf(s.w, "id: %s\nevent: message\ndata: %s\n\n", s.idBuffer, data)
-	}
-	if err != nil {
-		return fmt.Errorf("write SSE event: %w", err)
-	}
-	s.writtenBytes += n
-	return nil
-}
-
-func (s *taskEventStream) writeReady() error {
-	if _, err := fmt.Fprint(s.w, "event: ready\ndata: {}\n\n"); err != nil {
-		return fmt.Errorf("write SSE ready event: %w", err)
-	}
-	return nil
-}
-
 func (h *taskHandlers) notifyTaskChange() {
 	h.taskMgr.NotifyTaskChange()
 }
@@ -966,6 +766,206 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
+}
+
+// historyLoadError marks a failure before any task history is available for SSE
+// publication. It is the sole condition that can produce the history-unavailable
+// frame; later stats, ready, flush, and live-stream errors remain their own errors.
+type historyLoadError struct{ err error }
+
+func (e *historyLoadError) Error() string { return e.err.Error() }
+
+func (e *historyLoadError) Unwrap() error { return e.err }
+
+// taskEventStream writes one task's ordered SSE event stream.
+type taskEventStream struct {
+	ctx          context.Context
+	w            http.ResponseWriter
+	flusher      http.Flusher
+	controller   *http.ResponseController
+	tracker      *apiconv.ToolTimingTracker
+	resume       taskEventResume
+	nextMessage  uint64
+	writtenBytes int
+	idBuffer     []byte
+}
+
+func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at time.Time, suppress bool) error {
+	s.nextMessage = sequence
+	events := s.tracker.ConvertMessage(msg, at)
+	if err := s.resume.observe(sequence, events); err != nil {
+		return err
+	}
+	if suppress || s.resume.precedes(sequence) {
+		return nil
+	}
+	for i := range events {
+		id := s.resume.eventID(sequence, uint64(i))
+		if s.resume.acknowledged(id) {
+			continue
+		}
+		if err := s.writeEvent(&events[i], id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
+	for i := range stats {
+		ev := apiconv.StatsEvent(&stats[i])
+		if err := s.writeEvent(&ev, taskEventID{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error {
+	data, err := apiconv.MarshalEvent(ev)
+	if err != nil {
+		return fmt.Errorf("marshal SSE event: %w", err)
+	}
+	var n int
+	if id.message == 0 {
+		n, err = fmt.Fprintf(s.w, "event: message\ndata: %s\n\n", data)
+	} else {
+		s.idBuffer = id.appendTo(s.idBuffer[:0])
+		n, err = fmt.Fprintf(s.w, "id: %s\nevent: message\ndata: %s\n\n", s.idBuffer, data)
+	}
+	if err != nil {
+		return fmt.Errorf("write SSE event: %w", err)
+	}
+	s.writtenBytes += n
+	return nil
+}
+
+func (s *taskEventStream) writeReady() error {
+	if _, err := fmt.Fprint(s.w, "event: ready\ndata: {}\n\n"); err != nil {
+		return fmt.Errorf("write SSE ready event: %w", err)
+	}
+	return nil
+}
+
+type taskEventSource string
+
+const (
+	taskEventSourceDisk   taskEventSource = "disk"
+	taskEventSourceMemory taskEventSource = "memory"
+)
+
+type taskEventID struct {
+	timeline string
+	source   taskEventSource
+	message  uint64
+	event    uint64
+}
+
+func parseTaskEventID(value string) (taskEventID, bool) {
+	parts := strings.Split(value, "/")
+	if len(parts) != 5 || parts[0] != "v1" || parts[1] == "" {
+		return taskEventID{}, false
+	}
+	source := taskEventSource(parts[2])
+	if source != taskEventSourceDisk && source != taskEventSourceMemory {
+		return taskEventID{}, false
+	}
+	messageID, err := strconv.ParseUint(parts[3], 10, 64)
+	if err != nil || messageID == 0 {
+		return taskEventID{}, false
+	}
+	eventID, err := strconv.ParseUint(parts[4], 10, 64)
+	if err != nil {
+		return taskEventID{}, false
+	}
+	return taskEventID{timeline: parts[1], source: source, message: messageID, event: eventID}, true
+}
+
+func (id taskEventID) String() string {
+	return string(id.appendTo(nil))
+}
+
+func (id taskEventID) appendTo(dst []byte) []byte {
+	dst = append(dst, "v1/"...)
+	dst = append(dst, id.timeline...)
+	dst = append(dst, '/')
+	dst = append(dst, id.source...)
+	dst = append(dst, '/')
+	dst = strconv.AppendUint(dst, id.message, 10)
+	dst = append(dst, '/')
+	return strconv.AppendUint(dst, id.event, 10)
+}
+
+var errInvalidTaskEventID = errors.New("invalid task SSE event ID")
+
+type taskEventResume struct {
+	lastEventID string
+	timelineID  string
+	source      taskEventSource
+	after       taskEventID
+	cursorSeen  bool
+}
+
+func (r *taskEventResume) prepare(w io.Writer, timelineID string, source taskEventSource) error {
+	r.timelineID = timelineID
+	r.source = source
+	if r.lastEventID == "" {
+		return nil
+	}
+	id, ok := parseTaskEventID(r.lastEventID)
+	if !ok || id.timeline != timelineID || id.source != source {
+		return r.reset(w)
+	}
+	r.after = id
+	return nil
+}
+
+func (r *taskEventResume) reset(w io.Writer) error {
+	if _, err := fmt.Fprint(w, "id:\nevent: reset\ndata: {}\n\n"); err != nil {
+		return fmt.Errorf("write SSE reset event: %w", err)
+	}
+	r.lastEventID = ""
+	r.after = taskEventID{}
+	r.cursorSeen = false
+	return nil
+}
+
+func (r *taskEventResume) observe(sequence uint64, events []v1.EventMessage) error {
+	if sequence != r.after.message {
+		return nil
+	}
+	if r.after.event >= uint64(len(events)) {
+		return errInvalidTaskEventID
+	}
+	r.cursorSeen = true
+	return nil
+}
+
+func (r *taskEventResume) eventID(message, event uint64) taskEventID {
+	return taskEventID{timeline: r.timelineID, source: r.source, message: message, event: event}
+}
+
+func (r *taskEventResume) acknowledged(id taskEventID) bool {
+	return id.message == r.after.message && id.event <= r.after.event
+}
+
+func (r *taskEventResume) precedes(sequence uint64) bool {
+	return sequence < r.after.message
+}
+
+func (r *taskEventResume) beyond(lastSequence uint64) bool {
+	return r.after.message > lastSequence
+}
+
+func (r *taskEventResume) active() bool {
+	return r.after.message != 0
+}
+
+func (r *taskEventResume) complete() error {
+	if r.active() && !r.cursorSeen {
+		return errInvalidTaskEventID
+	}
+	return nil
 }
 
 // wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.

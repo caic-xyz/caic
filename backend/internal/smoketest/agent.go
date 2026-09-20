@@ -25,8 +25,6 @@ type FakeBackend struct {
 	agent.Base
 }
 
-var _ agent.Backend = (*FakeBackend)(nil)
-
 // NewFakeBackend creates a Claude-compatible fake backend for smoke and e2e testing.
 func NewFakeBackend() *FakeBackend {
 	b := &FakeBackend{
@@ -92,3 +90,5 @@ func (*FakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session
 func (b *FakeBackend) NewWire() agent.WireFormat {
 	return b
 }
+
+var _ agent.Backend = (*FakeBackend)(nil)

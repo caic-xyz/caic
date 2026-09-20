@@ -44,46 +44,6 @@ type Config struct {
 	TrustedIssuers []TrustedIssuerConfig `toml:"trusted_issuers"`
 }
 
-// ServerConfig configures gateway HTTP and WebRTC listeners.
-type ServerConfig struct {
-	HTTP          string `toml:"http"`
-	WebRTCUDPPort int    `toml:"webrtc_udp_port"`
-}
-
-// LocalStackConfig configures local model adapters.
-type LocalStackConfig struct {
-	ASR LocalStackASRConfig `toml:"asr"`
-	LLM LocalStackLLMConfig `toml:"llm"`
-}
-
-// LocalStackASRConfig configures the local ASR (speech-to-text) adapter.
-type LocalStackASRConfig struct {
-	Provider string `toml:"provider"`
-	Remote   string `toml:"remote"`
-	Model    string `toml:"model"`
-}
-
-// LocalStackLLMConfig configures the local LLM adapter.
-type LocalStackLLMConfig struct {
-	Provider string `toml:"provider"`
-	Remote   string `toml:"remote"`
-	Model    string `toml:"model"`
-}
-
-// TrustedIssuerConfig configures a service backend trusted to issue scoped tokens.
-type TrustedIssuerConfig struct {
-	// Service is the service kind allowed to issue tokens, for example "caic" or "mddb".
-	Service string `toml:"service"`
-	// Issuer is the backend origin that owns the signing key.
-	//
-	// It must match the service authorization base URL and the token backend origin.
-	Issuer string `toml:"issuer"`
-	// PublicKey is the imported Ed25519 public key used to verify tokens from issuer.
-	//
-	// The expected format is the value returned by gomode.EncodeServiceSigningPublicKey.
-	PublicKey string `toml:"public_key"`
-}
-
 // DefaultConfig returns the standalone voice gateway defaults.
 func DefaultConfig() Config {
 	return Config{
@@ -158,9 +118,16 @@ func (c *Config) validate(requireHTTP bool) error {
 	return errors.Join(errs...)
 }
 
-func isKnownBackend(backendID string) bool {
-	_, ok := knownBackends[backendID]
-	return ok
+// ServerConfig configures gateway HTTP and WebRTC listeners.
+type ServerConfig struct {
+	HTTP          string `toml:"http"`
+	WebRTCUDPPort int    `toml:"webrtc_udp_port"`
+}
+
+// LocalStackConfig configures local model adapters.
+type LocalStackConfig struct {
+	ASR LocalStackASRConfig `toml:"asr"`
+	LLM LocalStackLLMConfig `toml:"llm"`
 }
 
 func (c *LocalStackConfig) validate() error {
@@ -170,6 +137,39 @@ func (c *LocalStackConfig) validate() error {
 		validateLocalStackProvider("local_stack.llm", c.LLM.Provider, c.LLM.Remote),
 		validateBaseURL("local_stack.llm.remote", c.LLM.Remote),
 	)
+}
+
+// LocalStackASRConfig configures the local ASR (speech-to-text) adapter.
+type LocalStackASRConfig struct {
+	Provider string `toml:"provider"`
+	Remote   string `toml:"remote"`
+	Model    string `toml:"model"`
+}
+
+// LocalStackLLMConfig configures the local LLM adapter.
+type LocalStackLLMConfig struct {
+	Provider string `toml:"provider"`
+	Remote   string `toml:"remote"`
+	Model    string `toml:"model"`
+}
+
+// TrustedIssuerConfig configures a service backend trusted to issue scoped tokens.
+type TrustedIssuerConfig struct {
+	// Service is the service kind allowed to issue tokens, for example "caic" or "mddb".
+	Service string `toml:"service"`
+	// Issuer is the backend origin that owns the signing key.
+	//
+	// It must match the service authorization base URL and the token backend origin.
+	Issuer string `toml:"issuer"`
+	// PublicKey is the imported Ed25519 public key used to verify tokens from issuer.
+	//
+	// The expected format is the value returned by gomode.EncodeServiceSigningPublicKey.
+	PublicKey string `toml:"public_key"`
+}
+
+func isKnownBackend(backendID string) bool {
+	_, ok := knownBackends[backendID]
+	return ok
 }
 
 // validateLocalStackProvider checks that provider (defaulting to "llamacpp"

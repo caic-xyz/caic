@@ -17,26 +17,57 @@ import (
 // logRecordType is the compact top-level "t" discriminator in v2 task-log records.
 type logRecordType string
 
-const (
-	logRecordAgent              logRecordType = "agent"
-	logRecordInput              logRecordType = "input"
-	logRecordMeta               logRecordType = "caic_meta"
-	logRecordDiffStat           logRecordType = "diff_stat"
-	logRecordExit               logRecordType = "exit"
-	logRecordStrippedEnv        logRecordType = "stripped_env"
-	logRecordSession            logRecordType = "session"
-	logRecordModelInfo          logRecordType = "model_info"
-	logRecordPR                 logRecordType = "pr"
-	logRecordResult             logRecordType = "result"
-	logRecordTurnCommitSnapshot logRecordType = "turn_commit_snapshot"
-	logRecordPendingUserAction  logRecordType = "pending_user_action"
-	logRecordProvisioningLog    logRecordType = "log"
-	logRecordContextCleared     logRecordType = "context_cleared"
-	logRecordText               logRecordType = "text"
-	logRecordUserInput          logRecordType = "user_input"
-	logRecordMCPRequest         logRecordType = "mcp_request"
-	logRecordRelayGeneration    logRecordType = "relay_generation"
-)
+func decodeV2ControlFields(line []byte) (token logRecordType, fields []string, err error) {
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	opening, err := decoder.Token()
+	if err != nil {
+		return "", nil, err
+	}
+	if opening != json.Delim('{') {
+		return "", nil, errors.New("record must be a JSON object")
+	}
+
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return "", nil, err
+		}
+		field, ok := keyToken.(string)
+		if !ok {
+			return "", nil, errors.New("record field name is not a string")
+		}
+		if _, duplicate := seen[field]; duplicate {
+			return "", nil, fmt.Errorf("duplicate top-level field %q", field)
+		}
+		seen[field] = struct{}{}
+		fields = append(fields, field)
+
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return "", nil, err
+		}
+		if field == "t" {
+			if err := json.Unmarshal(value, &token); err != nil {
+				return "", nil, fmt.Errorf("top-level t must be a string: %w", err)
+			}
+		}
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return "", nil, err
+	}
+	if closing != json.Delim('}') {
+		return "", nil, errors.New("record has an invalid closing delimiter")
+	}
+	if trailing, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid trailing data: %w", err)
+		}
+		return "", nil, fmt.Errorf("unexpected trailing token %v", trailing)
+	}
+	return token, fields, nil
+}
 
 func (t logRecordType) controlKind() (logControlKind, bool) {
 	switch t {
@@ -81,6 +112,27 @@ func (t logRecordType) relayOwned() bool {
 	return t == logRecordAgent || t == logRecordDiffStat || t == logRecordExit ||
 		t == logRecordStrippedEnv || t == logRecordMCPRequest || t == logRecordRelayGeneration
 }
+
+const (
+	logRecordAgent              logRecordType = "agent"
+	logRecordInput              logRecordType = "input"
+	logRecordMeta               logRecordType = "caic_meta"
+	logRecordDiffStat           logRecordType = "diff_stat"
+	logRecordExit               logRecordType = "exit"
+	logRecordStrippedEnv        logRecordType = "stripped_env"
+	logRecordSession            logRecordType = "session"
+	logRecordModelInfo          logRecordType = "model_info"
+	logRecordPR                 logRecordType = "pr"
+	logRecordResult             logRecordType = "result"
+	logRecordTurnCommitSnapshot logRecordType = "turn_commit_snapshot"
+	logRecordPendingUserAction  logRecordType = "pending_user_action"
+	logRecordProvisioningLog    logRecordType = "log"
+	logRecordContextCleared     logRecordType = "context_cleared"
+	logRecordText               logRecordType = "text"
+	logRecordUserInput          logRecordType = "user_input"
+	logRecordMCPRequest         logRecordType = "mcp_request"
+	logRecordRelayGeneration    logRecordType = "relay_generation"
+)
 
 const (
 	v2AgentRecordPrefix   = `{"t":"` + string(logRecordAgent) + `","ts":`
@@ -158,58 +210,6 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 		record.Messages = nil
 	}
 	return record, err
-}
-
-func decodeV2ControlFields(line []byte) (token logRecordType, fields []string, err error) {
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	opening, err := decoder.Token()
-	if err != nil {
-		return "", nil, err
-	}
-	if opening != json.Delim('{') {
-		return "", nil, errors.New("record must be a JSON object")
-	}
-
-	seen := make(map[string]struct{})
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return "", nil, err
-		}
-		field, ok := keyToken.(string)
-		if !ok {
-			return "", nil, errors.New("record field name is not a string")
-		}
-		if _, duplicate := seen[field]; duplicate {
-			return "", nil, fmt.Errorf("duplicate top-level field %q", field)
-		}
-		seen[field] = struct{}{}
-		fields = append(fields, field)
-
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return "", nil, err
-		}
-		if field == "t" {
-			if err := json.Unmarshal(value, &token); err != nil {
-				return "", nil, fmt.Errorf("top-level t must be a string: %w", err)
-			}
-		}
-	}
-	closing, err := decoder.Token()
-	if err != nil {
-		return "", nil, err
-	}
-	if closing != json.Delim('}') {
-		return "", nil, errors.New("record has an invalid closing delimiter")
-	}
-	if trailing, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid trailing data: %w", err)
-		}
-		return "", nil, fmt.Errorf("unexpected trailing token %v", trailing)
-	}
-	return token, fields, nil
 }
 
 func containsV2ControlField(fields []string, want string) bool {

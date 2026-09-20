@@ -116,6 +116,20 @@ type RetrieveError struct {
 	Body             []byte // raw response body for programmatic inspection
 }
 
+// buildRetrieveError constructs a RetrieveError from a token endpoint response.
+func buildRetrieveError(statusCode int, data []byte, jsonOK bool, tr *codeTokenResponse) *RetrieveError {
+	errResp := &RetrieveError{
+		StatusCode: statusCode,
+		Body:       data,
+	}
+	if jsonOK && tr.Error != "" {
+		errResp.ErrorCode = tr.Error
+		errResp.ErrorDescription = tr.ErrorDescription
+		errResp.ErrorURI = tr.ErrorURI
+	}
+	return errResp
+}
+
 // Error formats the error for logging. It includes StatusCode, ErrorCode,
 // and ErrorDescription but not the raw body.
 func (e *RetrieveError) Error() string {
@@ -172,20 +186,6 @@ func doTokenExchange(ctx context.Context, c oauth.ClientConfig, body url.Values)
 	// JSON unmarshal failed: fall back to form-urlencoded parsing.
 	slog.DebugContext(ctx, "oauth token json parse failed, trying form-encoded fallback", "err", jsonErr)
 	return parseFormEncodedToken(data)
-}
-
-// buildRetrieveError constructs a RetrieveError from a token endpoint response.
-func buildRetrieveError(statusCode int, data []byte, jsonOK bool, tr *codeTokenResponse) *RetrieveError {
-	errResp := &RetrieveError{
-		StatusCode: statusCode,
-		Body:       data,
-	}
-	if jsonOK && tr.Error != "" {
-		errResp.ErrorCode = tr.Error
-		errResp.ErrorDescription = tr.ErrorDescription
-		errResp.ErrorURI = tr.ErrorURI
-	}
-	return errResp
 }
 
 // parseFormEncodedToken attempts to parse a form-encoded token response

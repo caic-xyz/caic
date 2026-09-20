@@ -119,12 +119,12 @@ type testRuntimeSystem struct {
 	runtimetest.FakeInfo
 }
 
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
 type testRuntimeBackend interface {
 	runtime.Lifecycle
 	runtime.Repository
 }
-
-func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 
 // newTestRouter creates a Router for tests. Tests commonly mutate auth/host
 // fields (authStore, sessionSecret, hostState) on the returned Router and then

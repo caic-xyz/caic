@@ -451,15 +451,6 @@ type TaskListEvent struct {
 	Status   *TaskListSettledStatus     `json:"status,omitzero"`
 }
 
-// TaskListSettledStatus carries the background task-history load pass state
-// on kind=="status" events. Loading is true while the pass scans and
-// compresses logs; Error is non-empty when the pass could not register its
-// history.
-type TaskListSettledStatus struct {
-	Loading bool   `json:"loading"`
-	Error   string `json:"error"`
-}
-
 // MarshalJSON preserves the discriminated-union contract for empty snapshot
 // and repos events. omitzero keeps nil slices out of unrelated event kinds, but
 // clients expect arrays for kind=="snapshot" and kind=="repos".
@@ -472,6 +463,15 @@ func (e TaskListEvent) MarshalJSON() ([]byte, error) { //nolint:gocritic // json
 		e.Repos = []Repo{}
 	}
 	return json.Marshal(taskListEvent(e))
+}
+
+// TaskListSettledStatus carries the background task-history load pass state
+// on kind=="status" events. Loading is true while the pass scans and
+// compresses logs; Error is non-empty when the pass could not register its
+// history.
+type TaskListSettledStatus struct {
+	Loading bool   `json:"loading"`
+	Error   string `json:"error"`
 }
 
 // TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.

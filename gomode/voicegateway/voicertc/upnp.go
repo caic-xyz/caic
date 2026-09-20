@@ -65,16 +65,6 @@ type upnpMapping struct {
 	refreshErr error
 }
 
-func (m *upnpMapping) close(ctx context.Context) error {
-	m.stopRefresh()
-	ctx, cancel := context.WithTimeout(ctx, upnpTimeout)
-	defer cancel()
-	if err := m.client.DeletePortMappingCtx(ctx, "", m.externalPort, upnpProtocolUDP); err != nil {
-		return fmt.Errorf("delete UPnP UDP mapping %d: %w", m.externalPort, err)
-	}
-	return nil
-}
-
 func mapUPnPUDP(ctx context.Context, internalIP net.IP, port int) (*upnpMapping, error) {
 	v4 := internalIP.To4()
 	if v4 == nil {
@@ -101,6 +91,46 @@ func mapUPnPUDP(ctx context.Context, internalIP net.IP, port int) (*upnpMapping,
 		attempts = append(attempts, err)
 	}
 	return nil, fmt.Errorf("add UPnP UDP mapping %d: %w", port, errors.Join(attempts...))
+}
+
+func tryMapUPnPUDP(ctx context.Context, client upnpWANConnection, internalIP string, internalPort uint16) (*upnpMapping, error) {
+	logUPnPService(ctx, client)
+	externalPort, err := addInitialUPnPPortMapping(ctx, client, internalIP, internalPort)
+	if err != nil {
+		return nil, err
+	}
+	logUPnPPortMappings(ctx, client)
+	logUPnPSpecificPortMapping(ctx, client, externalPort)
+	external, err := client.GetExternalIPAddressCtx(ctx)
+	if err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("get UPnP external IP: %w", err),
+			deleteUPnPPortMapping(ctx, client, externalPort),
+		)
+	}
+	ip := net.ParseIP(external).To4()
+	if ip == nil {
+		return nil, errors.Join(
+			fmt.Errorf("UPnP gateway returned invalid external IPv4 address %q", external),
+			deleteUPnPPortMapping(ctx, client, externalPort),
+		)
+	}
+	if ip.IsPrivate() {
+		slog.WarnContext(ctx, "UPnP gateway external address is private; voice may still fail behind double NAT", "ip", ip.String())
+	}
+	mapping := &upnpMapping{client: client, ip: append(net.IP(nil), ip...), externalPort: externalPort, internalPort: internalPort}
+	mapping.startRefresh(ctx, internalIP)
+	return mapping, nil
+}
+
+func (m *upnpMapping) close(ctx context.Context) error {
+	m.stopRefresh()
+	ctx, cancel := context.WithTimeout(ctx, upnpTimeout)
+	defer cancel()
+	if err := m.client.DeletePortMappingCtx(ctx, "", m.externalPort, upnpProtocolUDP); err != nil {
+		return fmt.Errorf("delete UPnP UDP mapping %d: %w", m.externalPort, err)
+	}
+	return nil
 }
 
 func discoverUPnPConnections(ctx context.Context, hostIP net.IP) ([]upnpWANConnection, error) {
@@ -378,36 +408,6 @@ func upnpDiscoveryError(err error) error {
 		return errors.New("discover UPnP internet gateway: no WANIPConnection or WANPPPConnection services found")
 	}
 	return fmt.Errorf("discover UPnP internet gateway: %w", err)
-}
-
-func tryMapUPnPUDP(ctx context.Context, client upnpWANConnection, internalIP string, internalPort uint16) (*upnpMapping, error) {
-	logUPnPService(ctx, client)
-	externalPort, err := addInitialUPnPPortMapping(ctx, client, internalIP, internalPort)
-	if err != nil {
-		return nil, err
-	}
-	logUPnPPortMappings(ctx, client)
-	logUPnPSpecificPortMapping(ctx, client, externalPort)
-	external, err := client.GetExternalIPAddressCtx(ctx)
-	if err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("get UPnP external IP: %w", err),
-			deleteUPnPPortMapping(ctx, client, externalPort),
-		)
-	}
-	ip := net.ParseIP(external).To4()
-	if ip == nil {
-		return nil, errors.Join(
-			fmt.Errorf("UPnP gateway returned invalid external IPv4 address %q", external),
-			deleteUPnPPortMapping(ctx, client, externalPort),
-		)
-	}
-	if ip.IsPrivate() {
-		slog.WarnContext(ctx, "UPnP gateway external address is private; voice may still fail behind double NAT", "ip", ip.String())
-	}
-	mapping := &upnpMapping{client: client, ip: append(net.IP(nil), ip...), externalPort: externalPort, internalPort: internalPort}
-	mapping.startRefresh(ctx, internalIP)
-	return mapping, nil
 }
 
 func logUPnPService(ctx context.Context, client upnpWANConnection) {

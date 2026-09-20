@@ -193,14 +193,6 @@ type Task struct {
 	rateLimits     map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
-// TimelineMessage is an immutable task message and its stable, one-based
-// position in the task timeline.
-type TimelineMessage struct {
-	Message    agent.Message
-	Sequence   uint64
-	ObservedAt time.Time
-}
-
 // NewTask creates a task with a valid ID, a pending state, and prompt.
 func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*Task, error) {
 	if id == 0 {
@@ -227,292 +219,6 @@ func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, bas
 	t.SetTitle(title)
 	return t, nil
 }
-
-// syntheticUserInput builds the UserInputMessage recorded in the task log for
-// a prompt that wasn't itself parsed from agent output.
-func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
-	var images []agent.ImageData
-	if len(p.Images) > 0 {
-		images = make([]agent.ImageData, len(p.Images))
-		copy(images, p.Images)
-	}
-	return &agent.UserInputMessage{
-		Text:   p.Text,
-		Images: images,
-	}
-}
-
-// lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// TextDeltaMessage, NativeSubagentMessage, RawMessage), and returns the trailing
-// ResultMessage if the last semantically meaningful message is a result. Returns
-// nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
-func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
-	for _, entry := range slices.Backward(entries) {
-		switch m := entry.Message.(type) {
-		case *agent.DiffStatMessage:
-			continue // Relay metadata; skip.
-		case *agent.ExitMessage:
-			continue // Relay metadata; skip.
-		case *agent.TurnCommitSnapshotMessage:
-			continue // Caic turn-boundary metadata; skip.
-		case *agent.PendingUserActionMessage:
-			continue // Reconnect metadata; skip.
-		case *agent.TextDeltaMessage:
-			continue // Streaming delta; skip.
-		case *agent.NativeSubagentMessage:
-			continue // Harness-native child activity; skip.
-		case *agent.RawMessage:
-			continue // tool_progress, etc.; skip.
-		case *agent.UsageMessage:
-			continue // Token usage metadata; skip.
-		case *agent.ResultMessage:
-			return m
-		default:
-			return nil
-		}
-	}
-	return nil
-}
-
-// ResultTextWindow accumulates the visible assistant text of the current
-// turn so a streaming consumer can produce the fallback result text at the
-// point a ResultMessage arrives. Any other message type (a boundary, see
-// fallbackBoundary) resets the window; finalized TextMessages accumulate
-// with consecutive duplicates collapsed, and TextDeltaMessages count only
-// until the first finalized text.
-type ResultTextWindow struct {
-	texts []string
-	delta strings.Builder
-}
-
-// Update folds one message into the window.
-func (w *ResultTextWindow) Update(msg agent.Message) {
-	if fallbackBoundary(msg) {
-		w.reset()
-		return
-	}
-	switch m := msg.(type) {
-	case *agent.TextMessage:
-		text := strings.TrimSpace(m.Text)
-		if text == "" {
-			return
-		}
-		if len(w.texts) == 0 || w.texts[len(w.texts)-1] != text {
-			w.texts = append(w.texts, text)
-		}
-	case *agent.TextDeltaMessage:
-		if len(w.texts) == 0 {
-			w.delta.WriteString(m.Text)
-		}
-	}
-}
-
-// Value returns the accumulated fallback text: finalized messages joined by
-// blank lines, or the trimmed delta stream when none arrived.
-func (w *ResultTextWindow) Value() string {
-	if len(w.texts) > 0 {
-		return strings.Join(w.texts, "\n\n")
-	}
-	return strings.TrimSpace(w.delta.String())
-}
-
-func (w *ResultTextWindow) reset() {
-	w.texts = nil
-	w.delta.Reset()
-}
-
-// fallbackResultText returns the visible assistant text of the turn preceding
-// the trailing ResultMessage in msgs, using the same window rules as
-// ResultTextWindow. The input may include the trailing ResultMessage.
-func fallbackResultText(entries []agent.TimedMessage) string {
-	end := len(entries)
-	if end > 0 {
-		if _, ok := entries[end-1].Message.(*agent.ResultMessage); ok {
-			end--
-		}
-	}
-	var w ResultTextWindow
-	for _, entry := range entries[:end] {
-		w.Update(entry.Message)
-	}
-	return w.Value()
-}
-
-func fallbackBoundary(msg agent.Message) bool {
-	switch msg.(type) {
-	case *agent.ResultMessage, *agent.ToolUseMessage, *agent.ToolResultMessage,
-		*agent.ThinkingMessage, *agent.ThinkingDeltaMessage:
-		return true
-	default:
-		return false
-	}
-}
-
-// ClearsExitError reports whether a message clears the last exit error from a
-// prior turn. Messages that accompany a turn without starting a new one (exit,
-// diff stat, native subagent updates, raw relay lines, pending user actions,
-// parse errors, log output, stripped env) never clear it; a ResultMessage clears
-// it only when the turn succeeded; every other message starts a new turn. The
-// live fold (addParsedMessage), the seed fold (SeedTimeline), and the server SSE
-// replay filter must all agree on this rule, so it lives in one place.
-func ClearsExitError(msg agent.Message) bool {
-	switch m := msg.(type) {
-	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
-		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
-		*agent.LogMessage, *agent.StrippedEnvMessage:
-		return false
-	case *agent.ResultMessage:
-		return !m.IsError
-	default:
-		return true
-	}
-}
-
-// lastTurnHasUnansweredAsk reports whether the current turn contains an
-// AskMessage that has not been followed by a successful ToolResultMessage.
-// It scans backwards from the end until it hits the previous turn's
-// ResultMessage boundary. If the current turn's ResultMessage is present, it is
-// skipped as a boundary first.
-func lastTurnHasUnansweredAsk(entries []agent.TimedMessage) bool {
-	skipTrailingResult := lastAgentMessage(entries) != nil
-	answered := map[string]struct{}{}
-	for _, entry := range slices.Backward(entries) {
-		switch m := entry.Message.(type) {
-		case *agent.AskMessage:
-			if m.ToolUseID == "" {
-				return true
-			}
-			if _, ok := answered[m.ToolUseID]; !ok {
-				return true
-			}
-		case *agent.ToolResultMessage:
-			if m.ToolUseID != "" && m.Error == "" {
-				answered[m.ToolUseID] = struct{}{}
-			}
-		case *agent.ResultMessage:
-			if skipTrailingResult {
-				skipTrailingResult = false
-			} else {
-				return false
-			}
-		}
-	}
-	return false
-}
-
-// pendingUserActionsFromMessages derives reconnect state from the current turn.
-// Today AskUserQuestion is the only pending action kind; adding a new kind
-// should add its close condition here instead of preserving provider-specific
-// control messages directly.
-func pendingUserActionsFromMessages(entries []agent.TimedMessage) []agent.PendingUserAction {
-	skipTrailingResult := lastAgentMessage(entries) != nil
-	answered := map[string]struct{}{}
-	restored := map[string]struct{}{}
-	pending := map[string]agent.PendingUserAction{}
-	var actions []agent.PendingUserAction
-	for _, entry := range slices.Backward(entries) {
-		switch m := entry.Message.(type) {
-		case *agent.AskMessage:
-			if m.ToolUseID == "" {
-				continue
-			}
-			if _, ok := answered[m.ToolUseID]; ok {
-				continue
-			}
-			if _, ok := restored[m.ToolUseID]; ok {
-				continue
-			}
-			action, ok := pending[m.ToolUseID]
-			if ok {
-				actions = append(actions, agent.ClonePendingUserAction(action))
-				restored[m.ToolUseID] = struct{}{}
-				delete(pending, m.ToolUseID)
-			}
-		case *agent.PendingUserActionMessage:
-			switch m.Action.Kind {
-			case agent.PendingUserActionAskUserQuestion:
-			default:
-				continue
-			}
-			if m.Action.ToolUseID != "" {
-				pending[m.Action.ToolUseID] = m.Action
-			}
-		case *agent.ToolResultMessage:
-			if m.ToolUseID != "" && m.Error == "" {
-				answered[m.ToolUseID] = struct{}{}
-			}
-		case *agent.ResultMessage:
-			if skipTrailingResult {
-				skipTrailingResult = false
-			} else {
-				slices.Reverse(actions)
-				return actions
-			}
-		}
-	}
-	slices.Reverse(actions)
-	return actions
-}
-
-// lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
-// tool call. It scans backwards from the end until it hits a previous turn's
-// ResultMessage boundary.
-func lastTurnHasExitPlan(entries []agent.TimedMessage) bool {
-	skippedResult := false
-	for _, entry := range slices.Backward(entries) {
-		switch m := entry.Message.(type) {
-		case *agent.ToolUseMessage:
-			if m.Name == "ExitPlanMode" {
-				return true
-			}
-		case *agent.ResultMessage:
-			if skippedResult {
-				return false
-			}
-			skippedResult = true
-		}
-	}
-	return false
-}
-
-// sub is a message subscriber with a once-guarded close to prevent double-close
-// panics when both the fan-out (slow subscriber drop) and context cancellation
-// race to close the channel.
-type sub struct {
-	ch   chan TimelineMessage
-	once sync.Once
-}
-
-func (s *sub) close() {
-	s.once.Do(func() { close(s.ch) })
-}
-
-type rateLimitSub struct {
-	ch chan *agent.RateLimitMessage
-}
-
-// computeCost returns the true USD cost for a Claude API result by adding the
-// cache-read surcharge that TotalCostUSD omits.
-//
-// Claude Code's TotalCostUSD correctly prices input, output, and cache-write
-// tokens but excludes cache_read_input_tokens. All Claude models share the same
-// structural price ratios, so we derive the per-token input price from
-// TotalCostUSD and the non-cache-read token counts, then add the missing term.
-//
-// If there are no non-cache-read tokens to derive a unit price from,
-// TotalCostUSD is returned unchanged.
-func computeCost(totalCostUSD float64, u agent.Usage) float64 {
-	// Express all non-cache-read tokens as an equivalent number of input tokens.
-	nonCREquiv := float64(u.InputTokens) + 5*float64(u.OutputTokens) + 1.25*float64(u.CacheCreationInputTokens)
-	if nonCREquiv == 0 {
-		return totalCostUSD
-	}
-	inputPricePerTok := totalCostUSD / nonCREquiv
-	return totalCostUSD + float64(u.CacheReadInputTokens)*0.10*inputPricePerTok
-}
-
-const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
 
 // TimelineID returns this task object's event-stream incarnation.
 func (t *Task) TimelineID() string {
@@ -2251,3 +1957,297 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 		LastTrailer:       res,
 	}
 }
+
+// TimelineMessage is an immutable task message and its stable, one-based
+// position in the task timeline.
+type TimelineMessage struct {
+	Message    agent.Message
+	Sequence   uint64
+	ObservedAt time.Time
+}
+
+// syntheticUserInput builds the UserInputMessage recorded in the task log for
+// a prompt that wasn't itself parsed from agent output.
+func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
+	var images []agent.ImageData
+	if len(p.Images) > 0 {
+		images = make([]agent.ImageData, len(p.Images))
+		copy(images, p.Images)
+	}
+	return &agent.UserInputMessage{
+		Text:   p.Text,
+		Images: images,
+	}
+}
+
+// lastAgentMessage scans backwards through msgs, skipping non-semantic
+// messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
+// TextDeltaMessage, NativeSubagentMessage, RawMessage), and returns the trailing
+// ResultMessage if the last semantically meaningful message is a result. Returns
+// nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
+func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
+		case *agent.DiffStatMessage:
+			continue // Relay metadata; skip.
+		case *agent.ExitMessage:
+			continue // Relay metadata; skip.
+		case *agent.TurnCommitSnapshotMessage:
+			continue // Caic turn-boundary metadata; skip.
+		case *agent.PendingUserActionMessage:
+			continue // Reconnect metadata; skip.
+		case *agent.TextDeltaMessage:
+			continue // Streaming delta; skip.
+		case *agent.NativeSubagentMessage:
+			continue // Harness-native child activity; skip.
+		case *agent.RawMessage:
+			continue // tool_progress, etc.; skip.
+		case *agent.UsageMessage:
+			continue // Token usage metadata; skip.
+		case *agent.ResultMessage:
+			return m
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// ResultTextWindow accumulates the visible assistant text of the current
+// turn so a streaming consumer can produce the fallback result text at the
+// point a ResultMessage arrives. Any other message type (a boundary, see
+// fallbackBoundary) resets the window; finalized TextMessages accumulate
+// with consecutive duplicates collapsed, and TextDeltaMessages count only
+// until the first finalized text.
+type ResultTextWindow struct {
+	texts []string
+	delta strings.Builder
+}
+
+// Update folds one message into the window.
+func (w *ResultTextWindow) Update(msg agent.Message) {
+	if fallbackBoundary(msg) {
+		w.reset()
+		return
+	}
+	switch m := msg.(type) {
+	case *agent.TextMessage:
+		text := strings.TrimSpace(m.Text)
+		if text == "" {
+			return
+		}
+		if len(w.texts) == 0 || w.texts[len(w.texts)-1] != text {
+			w.texts = append(w.texts, text)
+		}
+	case *agent.TextDeltaMessage:
+		if len(w.texts) == 0 {
+			w.delta.WriteString(m.Text)
+		}
+	}
+}
+
+// Value returns the accumulated fallback text: finalized messages joined by
+// blank lines, or the trimmed delta stream when none arrived.
+func (w *ResultTextWindow) Value() string {
+	if len(w.texts) > 0 {
+		return strings.Join(w.texts, "\n\n")
+	}
+	return strings.TrimSpace(w.delta.String())
+}
+
+func (w *ResultTextWindow) reset() {
+	w.texts = nil
+	w.delta.Reset()
+}
+
+// fallbackResultText returns the visible assistant text of the turn preceding
+// the trailing ResultMessage in msgs, using the same window rules as
+// ResultTextWindow. The input may include the trailing ResultMessage.
+func fallbackResultText(entries []agent.TimedMessage) string {
+	end := len(entries)
+	if end > 0 {
+		if _, ok := entries[end-1].Message.(*agent.ResultMessage); ok {
+			end--
+		}
+	}
+	var w ResultTextWindow
+	for _, entry := range entries[:end] {
+		w.Update(entry.Message)
+	}
+	return w.Value()
+}
+
+func fallbackBoundary(msg agent.Message) bool {
+	switch msg.(type) {
+	case *agent.ResultMessage, *agent.ToolUseMessage, *agent.ToolResultMessage,
+		*agent.ThinkingMessage, *agent.ThinkingDeltaMessage:
+		return true
+	default:
+		return false
+	}
+}
+
+// ClearsExitError reports whether a message clears the last exit error from a
+// prior turn. Messages that accompany a turn without starting a new one (exit,
+// diff stat, native subagent updates, raw relay lines, pending user actions,
+// parse errors, log output, stripped env) never clear it; a ResultMessage clears
+// it only when the turn succeeded; every other message starts a new turn. The
+// live fold (addParsedMessage), the seed fold (SeedTimeline), and the server SSE
+// replay filter must all agree on this rule, so it lives in one place.
+func ClearsExitError(msg agent.Message) bool {
+	switch m := msg.(type) {
+	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
+		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
+		*agent.LogMessage, *agent.StrippedEnvMessage:
+		return false
+	case *agent.ResultMessage:
+		return !m.IsError
+	default:
+		return true
+	}
+}
+
+// lastTurnHasUnansweredAsk reports whether the current turn contains an
+// AskMessage that has not been followed by a successful ToolResultMessage.
+// It scans backwards from the end until it hits the previous turn's
+// ResultMessage boundary. If the current turn's ResultMessage is present, it is
+// skipped as a boundary first.
+func lastTurnHasUnansweredAsk(entries []agent.TimedMessage) bool {
+	skipTrailingResult := lastAgentMessage(entries) != nil
+	answered := map[string]struct{}{}
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
+		case *agent.AskMessage:
+			if m.ToolUseID == "" {
+				return true
+			}
+			if _, ok := answered[m.ToolUseID]; !ok {
+				return true
+			}
+		case *agent.ToolResultMessage:
+			if m.ToolUseID != "" && m.Error == "" {
+				answered[m.ToolUseID] = struct{}{}
+			}
+		case *agent.ResultMessage:
+			if skipTrailingResult {
+				skipTrailingResult = false
+			} else {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+// pendingUserActionsFromMessages derives reconnect state from the current turn.
+// Today AskUserQuestion is the only pending action kind; adding a new kind
+// should add its close condition here instead of preserving provider-specific
+// control messages directly.
+func pendingUserActionsFromMessages(entries []agent.TimedMessage) []agent.PendingUserAction {
+	skipTrailingResult := lastAgentMessage(entries) != nil
+	answered := map[string]struct{}{}
+	restored := map[string]struct{}{}
+	pending := map[string]agent.PendingUserAction{}
+	var actions []agent.PendingUserAction
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
+		case *agent.AskMessage:
+			if m.ToolUseID == "" {
+				continue
+			}
+			if _, ok := answered[m.ToolUseID]; ok {
+				continue
+			}
+			if _, ok := restored[m.ToolUseID]; ok {
+				continue
+			}
+			action, ok := pending[m.ToolUseID]
+			if ok {
+				actions = append(actions, agent.ClonePendingUserAction(action))
+				restored[m.ToolUseID] = struct{}{}
+				delete(pending, m.ToolUseID)
+			}
+		case *agent.PendingUserActionMessage:
+			switch m.Action.Kind {
+			case agent.PendingUserActionAskUserQuestion:
+			default:
+				continue
+			}
+			if m.Action.ToolUseID != "" {
+				pending[m.Action.ToolUseID] = m.Action
+			}
+		case *agent.ToolResultMessage:
+			if m.ToolUseID != "" && m.Error == "" {
+				answered[m.ToolUseID] = struct{}{}
+			}
+		case *agent.ResultMessage:
+			if skipTrailingResult {
+				skipTrailingResult = false
+			} else {
+				slices.Reverse(actions)
+				return actions
+			}
+		}
+	}
+	slices.Reverse(actions)
+	return actions
+}
+
+// lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
+// tool call. It scans backwards from the end until it hits a previous turn's
+// ResultMessage boundary.
+func lastTurnHasExitPlan(entries []agent.TimedMessage) bool {
+	skippedResult := false
+	for _, entry := range slices.Backward(entries) {
+		switch m := entry.Message.(type) {
+		case *agent.ToolUseMessage:
+			if m.Name == "ExitPlanMode" {
+				return true
+			}
+		case *agent.ResultMessage:
+			if skippedResult {
+				return false
+			}
+			skippedResult = true
+		}
+	}
+	return false
+}
+
+// sub is a message subscriber with a once-guarded close to prevent double-close
+// panics when both the fan-out (slow subscriber drop) and context cancellation
+// race to close the channel.
+type sub struct {
+	ch   chan TimelineMessage
+	once sync.Once
+}
+
+func (s *sub) close() {
+	s.once.Do(func() { close(s.ch) })
+}
+
+type rateLimitSub struct {
+	ch chan *agent.RateLimitMessage
+}
+
+// computeCost returns the true USD cost for a Claude API result by adding the
+// cache-read surcharge that TotalCostUSD omits.
+//
+// Claude Code's TotalCostUSD correctly prices input, output, and cache-write
+// tokens but excludes cache_read_input_tokens. All Claude models share the same
+// structural price ratios, so we derive the per-token input price from
+// TotalCostUSD and the non-cache-read token counts, then add the missing term.
+//
+// If there are no non-cache-read tokens to derive a unit price from,
+// TotalCostUSD is returned unchanged.
+func computeCost(totalCostUSD float64, u agent.Usage) float64 {
+	// Express all non-cache-read tokens as an equivalent number of input tokens.
+	nonCREquiv := float64(u.InputTokens) + 5*float64(u.OutputTokens) + 1.25*float64(u.CacheCreationInputTokens)
+	if nonCREquiv == 0 {
+		return totalCostUSD
+	}
+	inputPricePerTok := totalCostUSD / nonCREquiv
+	return totalCostUSD + float64(u.CacheReadInputTokens)*0.10*inputPricePerTok
+}
+
+const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."

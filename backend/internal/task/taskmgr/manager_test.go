@@ -57,12 +57,12 @@ type testRuntimeSystem struct {
 	runtimetest.FakeInfo
 }
 
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
 type testRuntimeBackend interface {
 	runtime.Lifecycle
 	runtime.Repository
 }
-
-func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 
 type testRuntimeInfoSystem struct {
 	testRuntimeBackend
@@ -153,14 +153,6 @@ type fakeRelayReader struct {
 	readLogFn  func(context.Context, runtime.ConnectionTarget, int) string
 }
 
-func relayParsed(msgs ...agent.Message) []agent.TimedMessage {
-	parsed := make([]agent.TimedMessage, len(msgs))
-	for i, msg := range msgs {
-		parsed[i] = agent.TimedMessage{Message: msg}
-	}
-	return parsed
-}
-
 func (f fakeRelayReader) Status(ctx context.Context, target runtime.ConnectionTarget) (alive bool, diag string, err error) {
 	return f.statusFn(ctx, target)
 }
@@ -173,6 +165,14 @@ func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionT
 	return f.readLogFn(ctx, target, maxBytes)
 }
 
+func relayParsed(msgs ...agent.Message) []agent.TimedMessage {
+	parsed := make([]agent.TimedMessage, len(msgs))
+	for i, msg := range msgs {
+		parsed[i] = agent.TimedMessage{Message: msg}
+	}
+	return parsed
+}
+
 // blockingStopBackend blocks in Stop until release is closed (or the context is
 // cancelled), widening the Stop/Purge race window. started and returned signal
 // the call's entry and exit.
@@ -182,6 +182,17 @@ type blockingStopBackend struct {
 	started  chan struct{}
 	returned chan struct{}
 	release  chan struct{}
+}
+
+func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
+	close(b.started)
+	defer close(b.returned)
+	select {
+	case <-b.release:
+		return b.FakeBackend.Stop(ctx, id) // advances to StatusStopped
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // blockedStopBackend ignores cancellation until the test releases it.
@@ -196,17 +207,6 @@ func (b *blockedStopBackend) Stop(context.Context, runtime.ID) error {
 	close(b.started)
 	<-b.release
 	return nil
-}
-
-func (b *blockingStopBackend) Stop(ctx context.Context, id runtime.ID) error {
-	close(b.started)
-	defer close(b.returned)
-	select {
-	case <-b.release:
-		return b.FakeBackend.Stop(ctx, id) // advances to StatusStopped
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // blockingPurgeBackend reports when Purge starts and blocks until release is

@@ -186,14 +186,6 @@ type Server struct {
 	releaseStore func()
 }
 
-type dpopBinding struct {
-	jkt            string
-	jti            string
-	iat            int64
-	nonce          string
-	nonceExpiresAt time.Time
-}
-
 // NewServer returns an OAuth authorization server.
 func NewServer(c ServerConfig) (*Server, error) { //nolint:gocritic // ServerConfig is a startup value bag and the public constructor shape is intentional.
 	issuer, err := validateIssuer(c.Issuer)
@@ -2680,6 +2672,14 @@ func (s *Server) reserveClientAssertion(clientID, jti string, expiresAt time.Tim
 		return errors.New("client assertion jti was replayed or capacity is exhausted")
 	}
 	return nil
+}
+
+type dpopBinding struct {
+	jkt            string
+	jti            string
+	iat            int64
+	nonce          string
+	nonceExpiresAt time.Time
 }
 
 func generateUserCode() string {

@@ -24,62 +24,6 @@ import (
 // testWire implements WireFormat for testing.
 type testWire struct{}
 
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
-type testLogSink struct {
-	bytes.Buffer
-
-	Version LogVersion
-}
-
-func (s *testLogSink) LogVersion() LogVersion { return s.Version }
-
-func (s *testLogSink) AppendNative(data []byte) error {
-	_, err := s.Write(data)
-	return err
-}
-
-func (s *testLogSink) AppendMessage(m Message) error {
-	data, err := MarshalLogMessage(s.LogVersion(), m)
-	if err != nil {
-		return err
-	}
-	return s.AppendNative(append(data, '\n'))
-}
-
-func (*testLogSink) Close() error { return nil }
-
-// appendRelayNativeRecord appends bytes received from a relay in the exact
-// physical task-log format, matching what a live relay writes.
-func appendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
-	return appendNativeRecord(log, version, logRecordAgent, data)
-}
-
-func TestMCPToolResultResponse(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		response, err := MCPToolResultResponse(mcp.RawToolResult{Structured: mcp.TextOutput{Result: "created"}})
-		if err != nil {
-			t.Fatalf("MCPToolResultResponse() error: %v", err)
-		}
-		if got, want := string(response.StructuredContent), `{"result":"created"}`; got != want {
-			t.Errorf("StructuredContent = %s, want %s", got, want)
-		}
-		if got, want := response.Content[0].Text, string(response.StructuredContent); got != want {
-			t.Errorf("content text = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("error", func(t *testing.T) {
-		t.Parallel()
-		if _, err := MCPToolResultResponse(mcp.RawToolResult{Structured: math.Inf(1)}); err == nil {
-			t.Fatal("MCPToolResultResponse() accepted a non-JSON result")
-		}
-	})
-}
-
 func (testWire) WritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	msg := struct {
 		Type    string `json:"type"`
@@ -186,6 +130,62 @@ func testParseFn(line []byte) ([]Message, error) {
 
 func (testWire) ParseMessage(line []byte) ([]Message, error) {
 	return testParseFn(line)
+}
+
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
+type testLogSink struct {
+	bytes.Buffer
+
+	Version LogVersion
+}
+
+func (s *testLogSink) LogVersion() LogVersion { return s.Version }
+
+func (s *testLogSink) AppendNative(data []byte) error {
+	_, err := s.Write(data)
+	return err
+}
+
+func (s *testLogSink) AppendMessage(m Message) error {
+	data, err := MarshalLogMessage(s.LogVersion(), m)
+	if err != nil {
+		return err
+	}
+	return s.AppendNative(append(data, '\n'))
+}
+
+func (*testLogSink) Close() error { return nil }
+
+// appendRelayNativeRecord appends bytes received from a relay in the exact
+// physical task-log format, matching what a live relay writes.
+func appendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
+	return appendNativeRecord(log, version, logRecordAgent, data)
+}
+
+func TestMCPToolResultResponse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		response, err := MCPToolResultResponse(mcp.RawToolResult{Structured: mcp.TextOutput{Result: "created"}})
+		if err != nil {
+			t.Fatalf("MCPToolResultResponse() error: %v", err)
+		}
+		if got, want := string(response.StructuredContent), `{"result":"created"}`; got != want {
+			t.Errorf("StructuredContent = %s, want %s", got, want)
+		}
+		if got, want := response.Content[0].Text, string(response.StructuredContent); got != want {
+			t.Errorf("content text = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		if _, err := MCPToolResultResponse(mcp.RawToolResult{Structured: math.Inf(1)}); err == nil {
+			t.Fatal("MCPToolResultResponse() accepted a non-JSON result")
+		}
+	})
 }
 
 func TestExitMessage(t *testing.T) {

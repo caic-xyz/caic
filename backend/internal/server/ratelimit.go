@@ -17,11 +17,6 @@ type rateLimiter struct {
 	nextPrune time.Time
 }
 
-type rateBucket struct {
-	Start time.Time
-	Count int
-}
-
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{limit: limit, window: window, buckets: map[string]rateBucket{}}
 }
@@ -59,4 +54,9 @@ func (r *rateLimiter) Allow(key string) bool {
 	bucket.Count++
 	r.buckets[key] = bucket
 	return true
+}
+
+type rateBucket struct {
+	Start time.Time
+	Count int
 }

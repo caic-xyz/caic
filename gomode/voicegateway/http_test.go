@@ -28,12 +28,6 @@ func (f *fakeMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessi
 
 func (f *fakeMediaBridge) Close(string) {}
 
-type failingMediaBridge struct{ fakeMediaBridge }
-
-func (f *failingMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessionID string, err error) {
-	return "", "", errors.New("offer failed")
-}
-
 func (f *fakeMediaBridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, client *voicev1.VoiceRTCClientDiagnostics) voicev1.VoiceRTCDiagnosticsResp {
 	return voicev1.VoiceRTCDiagnosticsResp{
 		SessionID: sessionID,
@@ -46,6 +40,12 @@ func (f *fakeMediaBridge) DiagnoseVoiceRTC(_ context.Context, sessionID string, 
 		},
 		Client: *client,
 	}
+}
+
+type failingMediaBridge struct{ fakeMediaBridge }
+
+func (f *failingMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessionID string, err error) {
+	return "", "", errors.New("offer failed")
 }
 
 func TestNewHandler(t *testing.T) {

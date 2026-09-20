@@ -46,6 +46,14 @@ const (
 // Empty when not yet completed.
 type CheckRunConclusion string
 
+// IsFailed reports whether the conclusion counts as a CI failure
+// (anything other than success, neutral, or skipped).
+func (c CheckRunConclusion) IsFailed() bool {
+	return c != CheckRunConclusionSuccess &&
+		c != CheckRunConclusionNeutral &&
+		c != CheckRunConclusionSkipped
+}
+
 // Check run conclusion values.
 const (
 	CheckRunConclusionSuccess        CheckRunConclusion = "success"
@@ -57,14 +65,6 @@ const (
 	CheckRunConclusionActionRequired CheckRunConclusion = "action_required"
 	CheckRunConclusionStale          CheckRunConclusion = "stale"
 )
-
-// IsFailed reports whether the conclusion counts as a CI failure
-// (anything other than success, neutral, or skipped).
-func (c CheckRunConclusion) IsFailed() bool {
-	return c != CheckRunConclusionSuccess &&
-		c != CheckRunConclusionNeutral &&
-		c != CheckRunConclusionSkipped
-}
 
 // CheckRun describes a single CI check run.
 type CheckRun struct {

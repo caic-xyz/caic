@@ -40,6 +40,18 @@ type instantExitBackend struct {
 	testBackend
 }
 
+func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	b.capturedCtx = ctx
+	b.capturedOpts = *opts
+	cmd := exec.CommandContext(ctx, "true")
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
+}
+
 // reviveEnsureFailureBackend lets the resumed session exit, then rejects the
 // idle replacement started by EnsureSession.
 type reviveEnsureFailureBackend struct {
@@ -69,6 +81,8 @@ type testRuntimeSystem struct {
 	runtimetest.FakeInfo
 }
 
+func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
+
 type testRuntimeBackend interface {
 	runtime.Lifecycle
 	runtime.Repository
@@ -76,12 +90,15 @@ type testRuntimeBackend interface {
 
 var testCheckoutRuntimes sync.Map
 
-func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
-
 type metadataRuntime struct {
 	*runtimetest.FakeBackend
 
 	metadata runtime.Metadata
+}
+
+func (r *metadataRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
+	r.metadata = maps.Clone(opts.Metadata)
+	return r.FakeBackend.Launch(ctx, repos, opts)
 }
 
 type branchCheckingRuntime struct {
@@ -101,11 +118,6 @@ func (r *branchCheckingRuntime) Launch(ctx context.Context, repos []runtime.Repo
 		return "", fmt.Errorf("mapped branch %q did not exist at launch: %w: %s", branch, err, out)
 	}
 	r.checked = true
-	return r.FakeBackend.Launch(ctx, repos, opts)
-}
-
-func (r *metadataRuntime) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.ID, error) {
-	r.metadata = maps.Clone(opts.Metadata)
 	return r.FakeBackend.Launch(ctx, repos, opts)
 }
 
@@ -234,18 +246,6 @@ func logLines(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
-}
-
-func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	b.capturedCtx = ctx
-	b.capturedOpts = *opts
-	cmd := exec.CommandContext(ctx, "true")
-	stdin, _ := cmd.StdinPipe()
-	stdout, _ := cmd.StdoutPipe()
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
 func caic0BranchExists(t *testing.T, dir string) bool {

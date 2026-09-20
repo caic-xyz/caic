@@ -82,6 +82,201 @@ type Router struct {
 	pprof bool
 }
 
+// New creates a new HTTP router from already-assembled dependencies. It wires
+// the injected services into HTTP handler concerns and the webhook endpoint; it
+// does not construct or own application services.
+func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
+	if log == nil {
+		return nil, errors.New("logger is required")
+	}
+	if d.Runtimes == nil {
+		return nil, errors.New("runtime is required")
+	}
+	if d.TaskMgr == nil {
+		return nil, errors.New("task manager is required")
+	}
+	if d.Checkouts == nil {
+		return nil, errors.New("checkout registry is required")
+	}
+	if d.Preferences == nil {
+		return nil, errors.New("preferences store is required")
+	}
+	if d.RepoStatus == nil {
+		return nil, errors.New("repo status store is required")
+	}
+	if d.ForgeMgr == nil {
+		return nil, errors.New("forge manager is required")
+	}
+	if d.Warnings == nil {
+		return nil, errors.New("warning store is required")
+	}
+	if d.CacheSizes == nil {
+		return nil, errors.New("cache size store is required")
+	}
+	log = log.With("cmp", "server")
+	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
+	voiceMetadata := voice.metadata()
+	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
+	goModeHandler, err := gomode.NewHandler(&goModeSettings)
+	if err != nil {
+		return nil, err
+	}
+	webFetch := &webFetchHandlers{}
+	svc := &taskService{
+		ctx:       ctx,
+		taskMgr:   d.TaskMgr,
+		prefs:     d.Preferences,
+		checkouts: d.Checkouts,
+		forgeMgr:  d.ForgeMgr,
+		ciSvc:     d.CIService,
+		authStore: d.AuthStore,
+		fakeCI:    d.FakeCI,
+		runtimes:  d.Runtimes,
+	}
+	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
+	rateLimiter := newRateLimiter(120, time.Minute)
+
+	s := &Router{
+		log: log,
+		ctx: ctx,
+		authHandlers: &authHandlers{
+			log:                log.With("handler", "auth"),
+			store:              d.AuthStore,
+			sessionSecret:      d.SessionSecret,
+			hostState:          d.HostState,
+			githubOAuth:        d.GitHubOAuth,
+			gitlabOAuth:        d.GitLabOAuth,
+			googleOAuth:        d.GoogleOAuth,
+			githubAllowedUsers: d.GitHubAllowedUsers,
+			gitlabAllowedUsers: d.GitLabAllowedUsers,
+			googleAllowedUsers: d.GoogleAllowedUsers,
+		},
+		ciHandlers: &ciHandlers{
+			log:        log.With("handler", "ci"),
+			taskMgr:    d.TaskMgr,
+			checkouts:  d.Checkouts,
+			repoStatus: d.RepoStatus,
+			forgeMgr:   d.ForgeMgr,
+			provider:   d.Provider,
+			taskClient: d.TaskClient,
+			authStore:  d.AuthStore,
+		},
+		goModeHandler: goModeHandler,
+		runtimeProcesses: &runtimeProcessHandlers{
+			log:         log.With("handler", "runtime-processes"),
+			taskMgr:     d.TaskMgr,
+			runtimes:    d.Runtimes,
+			authEnabled: d.AuthStore != nil,
+		},
+		serverHandlers: &serverHandlers{
+			log:                log.With("handler", "server"),
+			serverCtx:          ctx,
+			runtimes:           d.Runtimes,
+			tailscaleAvailable: d.Tailscale,
+			forgeMgr:           d.ForgeMgr,
+			prefs:              d.Preferences,
+			checkouts:          d.Checkouts,
+			checkoutRoot:       d.CheckoutRoot,
+			repoStatus:         d.RepoStatus,
+			taskMgr:            d.TaskMgr,
+			cacheSizes:         d.CacheSizes,
+			harnessModels:      d.HarnessModels,
+			authStore:          d.AuthStore,
+			githubOAuth:        d.GitHubOAuth,
+			gitlabOAuth:        d.GitLabOAuth,
+			googleOAuth:        d.GoogleOAuth,
+			voiceGateway:       voiceMetadata,
+		},
+		taskHandlers: &taskHandlers{
+			log:        log.With("handler", "tasks"),
+			taskMgr:    d.TaskMgr,
+			checkouts:  d.Checkouts,
+			repoStatus: d.RepoStatus,
+			forgeMgr:   d.ForgeMgr,
+			ciSvc:      d.CIService,
+			authStore:  d.AuthStore,
+			warnings:   d.Warnings,
+			taskSvc:    svc,
+		},
+		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
+		voiceHandlers:    voice,
+		webFetchHandlers: webFetch,
+		authStore:        d.AuthStore,
+		sessionSecret:    d.SessionSecret,
+		hostState:        d.HostState,
+		pprof:            d.Pprof,
+		ipgeoChecker:     d.IPGeoChecker,
+		trustedProxies:   slices.Clone(d.TrustedProxies),
+	}
+	svc.log = s.log.With("handler", "tasks")
+
+	// OAuth server — only when auth and an immutable issuer are configured.
+	if d.AuthStore != nil && d.OAuthIssuer != "" {
+		var err error
+		s.oauthServer, err = oauthserver.NewServer(oauthserver.ServerConfig{
+			KeyPEM:                  d.OAuthPrivateKeyPEM,
+			KeyID:                   d.OAuthKeyID,
+			Issuer:                  d.OAuthIssuer,
+			AccessTokenTTL:          time.Hour,
+			AuthCodeTTL:             10 * time.Minute,
+			RefreshTokenTTL:         30 * 24 * time.Hour,
+			RefreshTokenStorePath:   d.OAuthRefreshTokenStorePath,
+			ResourceURLPath:         "/api/caic/v1/mcp",
+			ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/api/caic/v1/mcp",
+			ClientIDPrefix:          "caic_",
+			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksCreate, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
+			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
+			ScopeLabels:             mcpScopeLabels,
+			Session:                 &caicSessionManager{store: d.AuthStore},
+			UI:                      &caicAuthorizationUI{login: s.authHandlers},
+			Audit:                   audit,
+			RateLimiter:             rateLimiter,
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else if d.AuthStore != nil {
+		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions")
+	}
+	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
+
+	s.mcpHandlers = &mcpHandlers{
+		rateLimiter: rateLimiter,
+		hostState:   d.HostState,
+	}
+	registry := &mcpRegistry{
+		serverConfig:  s.serverHandlers,
+		taskSvc:       svc,
+		ci:            s.ciHandlers,
+		usage:         s.usageHandlers,
+		notifications: newNotificationFeed(),
+		audit:         audit,
+	}
+	s.TaskMCPScoper = registry
+	s.mcpHandlers.protocol = &mcp.Handler{
+		Registry:   registry,
+		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
+	}
+	// The webhook concern owns the forge webhook secrets and the GitHub App
+	// owner allowlist, and dispatches to the app-owned bot and CI service.
+	s.webhooks = &WebhookHandlers{
+		log:              log.With("handler", "webhook"),
+		serverCtx:        ctx,
+		githubSecret:     d.GitHubWebhookSecret,
+		gitlabSecret:     d.GitLabWebhookSecret,
+		appAllowedOwners: d.GitHubAppAllowedOwners,
+		bot:              d.Bot,
+		ciService:        d.CIService,
+		ciCache:          d.CICache,
+		forgeMgr:         d.ForgeMgr,
+		taskMgr:          d.TaskMgr,
+		checkouts:        d.Checkouts,
+		repoStatus:       d.RepoStatus,
+		prefs:            d.Preferences,
+	}
+	return s, nil
+}
+
 // Serve starts the HTTP server on an already-open listener and blocks until
 // ctx is cancelled. Opening the listener early (before calling New) lets the
 // caller detect port conflicts at startup instead of after lengthy
@@ -401,199 +596,4 @@ type Dependencies struct {
 	GitLabWebhookSecret    []byte
 	GitHubAppAllowedOwners []string
 	Pprof                  bool
-}
-
-// New creates a new HTTP router from already-assembled dependencies. It wires
-// the injected services into HTTP handler concerns and the webhook endpoint; it
-// does not construct or own application services.
-func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
-	if log == nil {
-		return nil, errors.New("logger is required")
-	}
-	if d.Runtimes == nil {
-		return nil, errors.New("runtime is required")
-	}
-	if d.TaskMgr == nil {
-		return nil, errors.New("task manager is required")
-	}
-	if d.Checkouts == nil {
-		return nil, errors.New("checkout registry is required")
-	}
-	if d.Preferences == nil {
-		return nil, errors.New("preferences store is required")
-	}
-	if d.RepoStatus == nil {
-		return nil, errors.New("repo status store is required")
-	}
-	if d.ForgeMgr == nil {
-		return nil, errors.New("forge manager is required")
-	}
-	if d.Warnings == nil {
-		return nil, errors.New("warning store is required")
-	}
-	if d.CacheSizes == nil {
-		return nil, errors.New("cache size store is required")
-	}
-	log = log.With("cmp", "server")
-	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
-	voiceMetadata := voice.metadata()
-	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
-	goModeHandler, err := gomode.NewHandler(&goModeSettings)
-	if err != nil {
-		return nil, err
-	}
-	webFetch := &webFetchHandlers{}
-	svc := &taskService{
-		ctx:       ctx,
-		taskMgr:   d.TaskMgr,
-		prefs:     d.Preferences,
-		checkouts: d.Checkouts,
-		forgeMgr:  d.ForgeMgr,
-		ciSvc:     d.CIService,
-		authStore: d.AuthStore,
-		fakeCI:    d.FakeCI,
-		runtimes:  d.Runtimes,
-	}
-	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
-	rateLimiter := newRateLimiter(120, time.Minute)
-
-	s := &Router{
-		log: log,
-		ctx: ctx,
-		authHandlers: &authHandlers{
-			log:                log.With("handler", "auth"),
-			store:              d.AuthStore,
-			sessionSecret:      d.SessionSecret,
-			hostState:          d.HostState,
-			githubOAuth:        d.GitHubOAuth,
-			gitlabOAuth:        d.GitLabOAuth,
-			googleOAuth:        d.GoogleOAuth,
-			githubAllowedUsers: d.GitHubAllowedUsers,
-			gitlabAllowedUsers: d.GitLabAllowedUsers,
-			googleAllowedUsers: d.GoogleAllowedUsers,
-		},
-		ciHandlers: &ciHandlers{
-			log:        log.With("handler", "ci"),
-			taskMgr:    d.TaskMgr,
-			checkouts:  d.Checkouts,
-			repoStatus: d.RepoStatus,
-			forgeMgr:   d.ForgeMgr,
-			provider:   d.Provider,
-			taskClient: d.TaskClient,
-			authStore:  d.AuthStore,
-		},
-		goModeHandler: goModeHandler,
-		runtimeProcesses: &runtimeProcessHandlers{
-			log:         log.With("handler", "runtime-processes"),
-			taskMgr:     d.TaskMgr,
-			runtimes:    d.Runtimes,
-			authEnabled: d.AuthStore != nil,
-		},
-		serverHandlers: &serverHandlers{
-			log:                log.With("handler", "server"),
-			serverCtx:          ctx,
-			runtimes:           d.Runtimes,
-			tailscaleAvailable: d.Tailscale,
-			forgeMgr:           d.ForgeMgr,
-			prefs:              d.Preferences,
-			checkouts:          d.Checkouts,
-			checkoutRoot:       d.CheckoutRoot,
-			repoStatus:         d.RepoStatus,
-			taskMgr:            d.TaskMgr,
-			cacheSizes:         d.CacheSizes,
-			harnessModels:      d.HarnessModels,
-			authStore:          d.AuthStore,
-			githubOAuth:        d.GitHubOAuth,
-			gitlabOAuth:        d.GitLabOAuth,
-			googleOAuth:        d.GoogleOAuth,
-			voiceGateway:       voiceMetadata,
-		},
-		taskHandlers: &taskHandlers{
-			log:        log.With("handler", "tasks"),
-			taskMgr:    d.TaskMgr,
-			checkouts:  d.Checkouts,
-			repoStatus: d.RepoStatus,
-			forgeMgr:   d.ForgeMgr,
-			ciSvc:      d.CIService,
-			authStore:  d.AuthStore,
-			warnings:   d.Warnings,
-			taskSvc:    svc,
-		},
-		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
-		voiceHandlers:    voice,
-		webFetchHandlers: webFetch,
-		authStore:        d.AuthStore,
-		sessionSecret:    d.SessionSecret,
-		hostState:        d.HostState,
-		pprof:            d.Pprof,
-		ipgeoChecker:     d.IPGeoChecker,
-		trustedProxies:   slices.Clone(d.TrustedProxies),
-	}
-	svc.log = s.log.With("handler", "tasks")
-
-	// OAuth server — only when auth and an immutable issuer are configured.
-	if d.AuthStore != nil && d.OAuthIssuer != "" {
-		var err error
-		s.oauthServer, err = oauthserver.NewServer(oauthserver.ServerConfig{
-			KeyPEM:                  d.OAuthPrivateKeyPEM,
-			KeyID:                   d.OAuthKeyID,
-			Issuer:                  d.OAuthIssuer,
-			AccessTokenTTL:          time.Hour,
-			AuthCodeTTL:             10 * time.Minute,
-			RefreshTokenTTL:         30 * 24 * time.Hour,
-			RefreshTokenStorePath:   d.OAuthRefreshTokenStorePath,
-			ResourceURLPath:         "/api/caic/v1/mcp",
-			ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/api/caic/v1/mcp",
-			ClientIDPrefix:          "caic_",
-			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksCreate, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
-			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
-			ScopeLabels:             mcpScopeLabels,
-			Session:                 &caicSessionManager{store: d.AuthStore},
-			UI:                      &caicAuthorizationUI{login: s.authHandlers},
-			Audit:                   audit,
-			RateLimiter:             rateLimiter,
-		})
-		if err != nil {
-			return nil, err
-		}
-	} else if d.AuthStore != nil {
-		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions")
-	}
-	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
-
-	s.mcpHandlers = &mcpHandlers{
-		rateLimiter: rateLimiter,
-		hostState:   d.HostState,
-	}
-	registry := &mcpRegistry{
-		serverConfig:  s.serverHandlers,
-		taskSvc:       svc,
-		ci:            s.ciHandlers,
-		usage:         s.usageHandlers,
-		notifications: newNotificationFeed(),
-		audit:         audit,
-	}
-	s.TaskMCPScoper = registry
-	s.mcpHandlers.protocol = &mcp.Handler{
-		Registry:   registry,
-		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
-	}
-	// The webhook concern owns the forge webhook secrets and the GitHub App
-	// owner allowlist, and dispatches to the app-owned bot and CI service.
-	s.webhooks = &WebhookHandlers{
-		log:              log.With("handler", "webhook"),
-		serverCtx:        ctx,
-		githubSecret:     d.GitHubWebhookSecret,
-		gitlabSecret:     d.GitLabWebhookSecret,
-		appAllowedOwners: d.GitHubAppAllowedOwners,
-		bot:              d.Bot,
-		ciService:        d.CIService,
-		ciCache:          d.CICache,
-		forgeMgr:         d.ForgeMgr,
-		taskMgr:          d.TaskMgr,
-		checkouts:        d.Checkouts,
-		repoStatus:       d.RepoStatus,
-		prefs:            d.Preferences,
-	}
-	return s, nil
 }

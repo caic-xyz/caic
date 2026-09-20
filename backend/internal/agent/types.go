@@ -165,13 +165,13 @@ type SystemMessage struct {
 	ContextTokensAfter int64 `json:"context_tokens_after,omitempty"`
 }
 
-// Type implements Message.
-func (m *SystemMessage) Type() string { return messageTypeSystem }
-
 // ContextCleared creates the persisted context-clear system marker.
 func ContextCleared() *SystemMessage {
 	return &SystemMessage{MessageType: messageTypeSystem, Subtype: messageSubtypeContextCleared}
 }
+
+// Type implements Message.
+func (m *SystemMessage) Type() string { return messageTypeSystem }
 
 // TextMessage is emitted when the agent produces text output.
 type TextMessage struct {
@@ -191,6 +191,9 @@ type ToolUseMessage struct {
 	Detail    string          `json:"detail,omitempty"` // Backend-normalized short display detail for tool headers.
 	InputView ToolInputView   `json:"input_view,omitzero"`
 }
+
+// Type implements Message.
+func (m *ToolUseMessage) Type() string { return "tool_use" }
 
 // ToolInputViewKind identifies a normalized tool input view.
 type ToolInputViewKind string
@@ -280,9 +283,6 @@ func writePatchLines(b *strings.Builder, prefix byte, text string) {
 		b.WriteByte('\n')
 	}
 }
-
-// Type implements Message.
-func (m *ToolUseMessage) Type() string { return "tool_use" }
 
 // AskMessage is emitted when the agent asks the user a question via the
 // AskUserQuestion tool.
@@ -654,12 +654,6 @@ type WidgetMessage struct {
 	HTML      string `json:"html"`
 }
 
-// widgetInput is the expected JSON schema for the show_widget tool's input.
-type widgetInput struct {
-	Title      string `json:"title"`
-	WidgetCode string `json:"widget_code"`
-}
-
 // NewWidgetMessage creates a WidgetMessage from raw tool input JSON. It
 // extracts the title and widget_code fields and enforces MaxWidgetHTMLBytes.
 // Shared by all backend parsers.
@@ -682,6 +676,12 @@ func NewWidgetMessage(toolUseID string, input json.RawMessage) *WidgetMessage {
 // Type implements Message.
 func (m *WidgetMessage) Type() string { return "widget" }
 
+// widgetInput is the expected JSON schema for the show_widget tool's input.
+type widgetInput struct {
+	Title      string `json:"title"`
+	WidgetCode string `json:"widget_code"`
+}
+
 // WidgetDeltaMessage is a streaming fragment of widget HTML, emitted as the
 // agent generates the widget code. Clients accumulate deltas for progressive
 // rendering; the final WidgetMessage replaces them.
@@ -698,6 +698,17 @@ func (m *WidgetDeltaMessage) Type() string { return "widget_delta" }
 // coupled at compile time.
 type QuotaProvider string
 
+// Valid reports whether p is a supported quota provider.
+func (p QuotaProvider) Valid() bool {
+	switch p {
+	case QuotaProviderAnthropic, QuotaProviderClaudeCode, QuotaProviderCodex,
+		QuotaProviderDeepSeek, QuotaProviderOpenRouter, QuotaProviderXiaomi:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	// QuotaProviderAnthropic identifies direct Anthropic API usage.
 	QuotaProviderAnthropic QuotaProvider = "anthropic"
@@ -713,29 +724,9 @@ const (
 	QuotaProviderXiaomi QuotaProvider = "xiaomi"
 )
 
-// Valid reports whether p is a supported quota provider.
-func (p QuotaProvider) Valid() bool {
-	switch p {
-	case QuotaProviderAnthropic, QuotaProviderClaudeCode, QuotaProviderCodex,
-		QuotaProviderDeepSeek, QuotaProviderOpenRouter, QuotaProviderXiaomi:
-		return true
-	default:
-		return false
-	}
-}
-
 // RateLimitStatus describes whether a provider accepted or rejected a request
 // for a quota window.
 type RateLimitStatus string
-
-const (
-	// RateLimitStatusAllowed means the provider accepted the request.
-	RateLimitStatusAllowed RateLimitStatus = "allowed"
-	// RateLimitStatusAllowedWarning means the provider accepted the request and warned of high usage.
-	RateLimitStatusAllowedWarning RateLimitStatus = "allowed_warning"
-	// RateLimitStatusRejected means the provider rejected the request for quota exhaustion.
-	RateLimitStatusRejected RateLimitStatus = "rejected"
-)
 
 // Valid reports whether s is a supported rate-limit status.
 func (s RateLimitStatus) Valid() bool {
@@ -746,6 +737,15 @@ func (s RateLimitStatus) Valid() bool {
 		return false
 	}
 }
+
+const (
+	// RateLimitStatusAllowed means the provider accepted the request.
+	RateLimitStatusAllowed RateLimitStatus = "allowed"
+	// RateLimitStatusAllowedWarning means the provider accepted the request and warned of high usage.
+	RateLimitStatusAllowedWarning RateLimitStatus = "allowed_warning"
+	// RateLimitStatusRejected means the provider rejected the request for quota exhaustion.
+	RateLimitStatusRejected RateLimitStatus = "rejected"
+)
 
 // RateLimitMessage is emitted when the CLI reports a rate limit status change.
 type RateLimitMessage struct {
@@ -869,15 +869,6 @@ type MetaMount struct {
 // LogVersion identifies a physical task-log format.
 type LogVersion int
 
-const (
-	// LogVersionV1 is the legacy bare-harness task-log format.
-	LogVersionV1 LogVersion = 1
-	// LogVersionV2 is the caic-enveloped task-log format.
-	LogVersionV2 LogVersion = 2
-	// LogVersionV3 distinguishes relay output from caic-to-harness input.
-	LogVersionV3 LogVersion = 3
-)
-
 // Validate rejects unsupported task-log versions.
 func (v LogVersion) Validate() error {
 	switch v {
@@ -887,6 +878,15 @@ func (v LogVersion) Validate() error {
 		return fmt.Errorf("unsupported log version %d", v)
 	}
 }
+
+const (
+	// LogVersionV1 is the legacy bare-harness task-log format.
+	LogVersionV1 LogVersion = 1
+	// LogVersionV2 is the caic-enveloped task-log format.
+	LogVersionV2 LogVersion = 2
+	// LogVersionV3 distinguishes relay output from caic-to-harness input.
+	LogVersionV3 LogVersion = 3
+)
 
 // MetaMessage is written as the first line of a JSONL log file. It captures
 // task-level metadata so logs can be reloaded on restart.

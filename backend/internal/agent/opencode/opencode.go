@@ -29,12 +29,6 @@ type Backend struct {
 	agent.Base
 }
 
-var (
-	_ agent.Backend          = (*Backend)(nil)
-	_ agent.ModelFetcher     = (*Backend)(nil)
-	_ agent.RecordHandshaker = (*Backend)(nil)
-)
-
 // New creates an OpenCode backend with parser configured.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{}
@@ -156,6 +150,12 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 	}
 	return agent.ModelInventory{Models: models}, nil
 }
+
+var (
+	_ agent.Backend          = (*Backend)(nil)
+	_ agent.ModelFetcher     = (*Backend)(nil)
+	_ agent.RecordHandshaker = (*Backend)(nil)
+)
 
 // CaicInit is the legacy pre-caic_session metadata record.
 //

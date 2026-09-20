@@ -36,28 +36,6 @@ type AppClient struct {
 	tokenCache    map[int64]cachedToken // keyed by installation ID
 }
 
-type cachedToken struct {
-	token     string
-	expiresAt time.Time
-}
-
-// jwtTransport injects a freshly-generated RS256 JWT into every request's
-// Authorization header. Placed inside Retry so each attempt gets a fresh token.
-type jwtTransport struct {
-	app  *AppClient
-	next http.RoundTripper
-}
-
-func (t *jwtTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	jwt, err := t.app.generateJWT()
-	if err != nil {
-		return nil, err
-	}
-	req2 := req.Clone(req.Context())
-	req2.Header.Set("Authorization", "Bearer "+jwt)
-	return t.next.RoundTrip(req2)
-}
-
 // NewAppClient parses a PEM-encoded RSA private key and returns an AppClient.
 // Both PKCS8 and PKCS1 key formats are supported.
 func NewAppClient(appID int64, privateKeyPEM []byte, transport http.RoundTripper) (*AppClient, error) {
@@ -242,4 +220,26 @@ func (a *AppClient) generateJWT() (string, error) {
 	}
 	encodedSig := base64.RawURLEncoding.EncodeToString(sig)
 	return signingInput + "." + encodedSig, nil
+}
+
+type cachedToken struct {
+	token     string
+	expiresAt time.Time
+}
+
+// jwtTransport injects a freshly-generated RS256 JWT into every request's
+// Authorization header. Placed inside Retry so each attempt gets a fresh token.
+type jwtTransport struct {
+	app  *AppClient
+	next http.RoundTripper
+}
+
+func (t *jwtTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	jwt, err := t.app.generateJWT()
+	if err != nil {
+		return nil, err
+	}
+	req2 := req.Clone(req.Context())
+	req2.Header.Set("Authorization", "Bearer "+jwt)
+	return t.next.RoundTrip(req2)
 }

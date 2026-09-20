@@ -1321,11 +1321,6 @@ func (r *AgentRuntime) runtimeDir(t *Task) string {
 
 type replaceSessionMode int
 
-const (
-	replaceSessionRestart replaceSessionMode = iota
-	replaceSessionClearContext
-)
-
 func (m replaceSessionMode) String() string {
 	switch m {
 	case replaceSessionRestart:
@@ -1343,6 +1338,11 @@ func (m replaceSessionMode) logMessage() string {
 	}
 	return "clearing context"
 }
+
+const (
+	replaceSessionRestart replaceSessionMode = iota
+	replaceSessionClearContext
+)
 
 // setupResult holds the outputs of setup: the instance name and optional Tailscale FQDN.
 // The primary branch is written into the task repo metadata during setup.

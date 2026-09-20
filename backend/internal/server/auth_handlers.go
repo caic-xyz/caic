@@ -40,10 +40,6 @@ type authHandlers struct {
 	googleAllowedUsers []string
 }
 
-// loginProviders is the fixed dispatch order for login providers: the default
-// provider is the first one configured.
-var loginProviders = []string{"github", "gitlab", "google"}
-
 // LoginStartURL returns the login-start path for the first configured forge
 // provider, with next set to resume r after login. Empty when no provider is
 // configured.
@@ -413,3 +409,7 @@ func (h *authHandlers) routes() http.Handler {
 	m.HandleFunc("POST /auth/logout", h.handleLogout)
 	return m
 }
+
+// loginProviders is the fixed dispatch order for login providers: the default
+// provider is the first one configured.
+var loginProviders = []string{"github", "gitlab", "google"}

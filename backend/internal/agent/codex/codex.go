@@ -32,12 +32,6 @@ type Backend struct {
 	agent.Base
 }
 
-var (
-	_ agent.Backend          = (*Backend)(nil)
-	_ agent.ModelFetcher     = (*Backend)(nil)
-	_ agent.RecordHandshaker = (*Backend)(nil)
-)
-
 // New creates a Codex CLI backend with parser configured.
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{}
@@ -224,6 +218,12 @@ func (*Backend) NewWire() agent.WireFormat {
 	return &wireFormat{nativeSubagents: newNativeSubagents()}
 }
 
+var (
+	_ agent.Backend          = (*Backend)(nil)
+	_ agent.ModelFetcher     = (*Backend)(nil)
+	_ agent.RecordHandshaker = (*Backend)(nil)
+)
+
 func codexAppServerArgs() []string {
 	return []string{
 		"codex", "app-server",
@@ -288,6 +288,76 @@ type wireFormat struct {
 	reportedModel     string      // Resolved by thread/start.
 	reportedEffort    string      // Resolved by thread/start.
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
+}
+
+// handshake performs the JSON-RPC initialize → initialized → model/list →
+// thread/start (or thread/resume) sequence and returns a wireFormat with the
+// thread ID set, plus model metadata from model/list.
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []codex.ModelInfo, *bufio.Reader, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: newNativeSubagents()}
+	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
+	}
+
+	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID, opts.Log)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// 4. Send thread/start or thread/resume.
+	var threadReq codex.JSONRPCRequest
+	if opts.ResumeSessionID != "" {
+		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
+		}
+		threadReq = codex.JSONRPCRequest{
+			JSONRPC: "2.0",
+			ID:      w.nextID.Add(1),
+			Method:  "thread/resume",
+			Params:  params,
+		}
+	} else {
+		params, err := marshalParams(codex.ThreadStartParams{Model: opts.Model})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
+		}
+		threadReq = codex.JSONRPCRequest{
+			JSONRPC: "2.0",
+			ID:      w.nextID.Add(1),
+			Method:  "thread/start",
+			Params:  params,
+		}
+	}
+	if err := writeJSONInput(stdin, threadReq, opts.Log); err != nil {
+		return nil, nil, nil, fmt.Errorf("write thread/start: %w", err)
+	}
+
+	// Read thread/start response — contains the thread info.
+	resp, err := readJSONRPCResponse(ctx, records)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("read thread/start response: %w", err)
+	}
+
+	// Extract thread ID from the response result.
+	var result codex.ThreadStartResponse
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, nil, nil, fmt.Errorf("parse thread/start result: %w", err)
+	}
+	if result.Thread.ID == "" {
+		return nil, nil, nil, errors.New("thread/start response missing thread.id")
+	}
+	w.threadID = result.Thread.ID
+	w.agentVersion = result.Thread.CLIVersion
+	w.reportedModel = result.Model
+	if result.ReasoningEffort != nil {
+		w.reportedEffort = string(*result.ReasoningEffort)
+	}
+	return w, models, records.Reader(), nil
 }
 
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
@@ -453,76 +523,6 @@ func (w *wireFormat) rootThreadID() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.threadID
-}
-
-// handshake performs the JSON-RPC initialize → initialized → model/list →
-// thread/start (or thread/resume) sequence and returns a wireFormat with the
-// thread ID set, plus model metadata from model/list.
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []codex.ModelInfo, *bufio.Reader, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: newNativeSubagents()}
-	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)
-	}
-
-	models, err := fetchModelsFromAppServer(ctx, stdin, records, &w.nextID, opts.Log)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// 4. Send thread/start or thread/resume.
-	var threadReq codex.JSONRPCRequest
-	if opts.ResumeSessionID != "" {
-		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID})
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
-		}
-		threadReq = codex.JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      w.nextID.Add(1),
-			Method:  "thread/resume",
-			Params:  params,
-		}
-	} else {
-		params, err := marshalParams(codex.ThreadStartParams{Model: opts.Model})
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
-		}
-		threadReq = codex.JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      w.nextID.Add(1),
-			Method:  "thread/start",
-			Params:  params,
-		}
-	}
-	if err := writeJSONInput(stdin, threadReq, opts.Log); err != nil {
-		return nil, nil, nil, fmt.Errorf("write thread/start: %w", err)
-	}
-
-	// Read thread/start response — contains the thread info.
-	resp, err := readJSONRPCResponse(ctx, records)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read thread/start response: %w", err)
-	}
-
-	// Extract thread ID from the response result.
-	var result codex.ThreadStartResponse
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, nil, nil, fmt.Errorf("parse thread/start result: %w", err)
-	}
-	if result.Thread.ID == "" {
-		return nil, nil, nil, errors.New("thread/start response missing thread.id")
-	}
-	w.threadID = result.Thread.ID
-	w.agentVersion = result.Thread.CLIVersion
-	w.reportedModel = result.Model
-	if result.ReasoningEffort != nil {
-		w.reportedEffort = string(*result.ReasoningEffort)
-	}
-	return w, models, records.Reader(), nil
 }
 
 func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, nextID *atomic.Int64, log agent.LogSink) ([]codex.ModelInfo, error) {

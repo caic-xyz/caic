@@ -67,11 +67,6 @@ type Bridge struct {
 	sessions   map[string]*session
 }
 
-type udpCandidate struct {
-	host net.IP
-	port int
-}
-
 // NewBridge creates a Bridge that multiplexes WebRTC traffic through a single
 // UDP port and eagerly verifies its UPnP publication.
 //
@@ -94,21 +89,6 @@ func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey strin
 		return nil, fmt.Errorf("initialize WebRTC API: %w", err)
 	}
 	return b, nil
-}
-
-// backendForConfig constructs the single backend a gateway instance serves.
-func backendForConfig(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string) (backendConnector, error) {
-	switch cfg.Backend {
-	case voicegateway.BackendGeminiLive:
-		if geminiAPIKey == "" {
-			return nil, errors.New("GEMINI_API_KEY not configured")
-		}
-		return &geminiBridgeBackend{apiKey: geminiAPIKey}, nil
-	case voicegateway.BackendLocalStack:
-		return localStackBackendForConfig(ctx, &cfg.LocalStack)
-	default:
-		return nil, fmt.Errorf("unknown voice backend %q", cfg.Backend)
-	}
 }
 
 func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int) (*Bridge, error) {
@@ -499,6 +479,26 @@ func (b *Bridge) rewriteMappedCandidatePort(sdp string) string {
 		return sdp
 	}
 	return rewriteSDPMappedCandidates(sdp, mapping.ip.String(), int(mapping.externalPort))
+}
+
+type udpCandidate struct {
+	host net.IP
+	port int
+}
+
+// backendForConfig constructs the single backend a gateway instance serves.
+func backendForConfig(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string) (backendConnector, error) {
+	switch cfg.Backend {
+	case voicegateway.BackendGeminiLive:
+		if geminiAPIKey == "" {
+			return nil, errors.New("GEMINI_API_KEY not configured")
+		}
+		return &geminiBridgeBackend{apiKey: geminiAPIKey}, nil
+	case voicegateway.BackendLocalStack:
+		return localStackBackendForConfig(ctx, &cfg.LocalStack)
+	default:
+		return nil, fmt.Errorf("unknown voice backend %q", cfg.Backend)
+	}
 }
 
 // session holds all state for one bridge session.

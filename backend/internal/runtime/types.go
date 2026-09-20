@@ -47,12 +47,6 @@ type Name string
 // different runtimes can own colliding backend-local instance IDs.
 type ID string
 
-// InstanceID identifies a backend-local runtime allocation.
-//
-// It is used only inside concrete runtime adapters when calling their backing
-// runtime APIs. Application-facing runtime interfaces use qualified ID values.
-type InstanceID string
-
 // NewID returns a qualified ID from a runtime name and backend-local instance ID.
 func NewID(runtimeName Name, instanceID InstanceID) ID {
 	if instanceID == "" || runtimeName == "" {
@@ -81,6 +75,12 @@ func (id ID) InstanceID() InstanceID {
 	}
 	return InstanceID(instanceID)
 }
+
+// InstanceID identifies a backend-local runtime allocation.
+//
+// It is used only inside concrete runtime adapters when calling their backing
+// runtime APIs. Application-facing runtime interfaces use qualified ID values.
+type InstanceID string
 
 // ConnectionTarget describes how agent relay operations reach a runtime.
 //

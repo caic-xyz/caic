@@ -35,47 +35,6 @@ type FakeInfo struct {
 	SudoErr    error
 }
 
-// FakeMonitor is an in-memory runtime.Monitor test double.
-type FakeMonitor struct {
-	// DiskSizes is returned by DiskUsage.
-	DiskSizes map[runtime.ID]int64
-	// DiskUsageStarted, when set, receives the instance ids passed to DiskUsage.
-	DiskUsageStarted chan []runtime.ID
-	// Events is returned by WatchEvents (unless WatchErr is set).
-	Events <-chan runtime.Event
-	// WatchErr, when set, is returned by WatchEvents.
-	WatchErr error
-	// Stats is streamed by WatchStats before it blocks on the context.
-	Stats []runtime.StatsSample
-	// WatchStarted, when set, receives the instance ids passed to WatchStats.
-	WatchStarted chan []runtime.ID
-}
-
-// FakeInventory is an in-memory runtime.Inventory test double.
-type FakeInventory struct {
-	// Instances is returned by List.
-	Instances []runtime.Instance
-	// Meta answers Metadata, keyed by string(id)+"\x00"+string(key).
-	Meta map[string]string
-}
-
-// FakePrivilegeInfo is an in-memory runtime.PrivilegeInfo test double.
-type FakePrivilegeInfo struct {
-	// SudoResult and SudoErr are returned by SudoPassword.
-	SudoResult string
-	SudoErr    error
-}
-
-// Ensure the fakes satisfy the interfaces at compile time.
-var (
-	_ runtime.Monitor       = (*FakeInfo)(nil)
-	_ runtime.Inventory     = (*FakeInfo)(nil)
-	_ runtime.PrivilegeInfo = (*FakeInfo)(nil)
-	_ runtime.Monitor       = (*FakeMonitor)(nil)
-	_ runtime.Inventory     = (*FakeInventory)(nil)
-	_ runtime.PrivilegeInfo = (*FakePrivilegeInfo)(nil)
-)
-
 // WatchStats implements runtime.Monitor.
 func (f *FakeInfo) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return watchStats(ctx, ids, f.WatchStarted, f.Stats)
@@ -115,6 +74,22 @@ func (f *FakeInfo) SudoPassword(context.Context, runtime.ID) (string, error) {
 	return f.SudoResult, f.SudoErr
 }
 
+// FakeMonitor is an in-memory runtime.Monitor test double.
+type FakeMonitor struct {
+	// DiskSizes is returned by DiskUsage.
+	DiskSizes map[runtime.ID]int64
+	// DiskUsageStarted, when set, receives the instance ids passed to DiskUsage.
+	DiskUsageStarted chan []runtime.ID
+	// Events is returned by WatchEvents (unless WatchErr is set).
+	Events <-chan runtime.Event
+	// WatchErr, when set, is returned by WatchEvents.
+	WatchErr error
+	// Stats is streamed by WatchStats before it blocks on the context.
+	Stats []runtime.StatsSample
+	// WatchStarted, when set, receives the instance ids passed to WatchStats.
+	WatchStarted chan []runtime.ID
+}
+
 // WatchStats implements runtime.Monitor.
 func (f *FakeMonitor) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return watchStats(ctx, ids, f.WatchStarted, f.Stats)
@@ -136,6 +111,14 @@ func (f *FakeMonitor) WatchEvents(context.Context, runtime.EventFilter) (<-chan 
 	return f.Events, nil
 }
 
+// FakeInventory is an in-memory runtime.Inventory test double.
+type FakeInventory struct {
+	// Instances is returned by List.
+	Instances []runtime.Instance
+	// Meta answers Metadata, keyed by string(id)+"\x00"+string(key).
+	Meta map[string]string
+}
+
 // List implements runtime.Inventory.
 func (f *FakeInventory) List(context.Context) ([]runtime.Instance, error) {
 	return slices.Clone(f.Instances), nil
@@ -151,10 +134,27 @@ func (*FakeInventory) Inspect(context.Context, runtime.ID) (*runtime.InstanceIns
 	return &runtime.InstanceInspect{}, nil
 }
 
+// FakePrivilegeInfo is an in-memory runtime.PrivilegeInfo test double.
+type FakePrivilegeInfo struct {
+	// SudoResult and SudoErr are returned by SudoPassword.
+	SudoResult string
+	SudoErr    error
+}
+
 // SudoPassword implements runtime.PrivilegeInfo.
 func (f *FakePrivilegeInfo) SudoPassword(context.Context, runtime.ID) (string, error) {
 	return f.SudoResult, f.SudoErr
 }
+
+// Ensure the fakes satisfy the interfaces at compile time.
+var (
+	_ runtime.Monitor       = (*FakeInfo)(nil)
+	_ runtime.Inventory     = (*FakeInfo)(nil)
+	_ runtime.PrivilegeInfo = (*FakeInfo)(nil)
+	_ runtime.Monitor       = (*FakeMonitor)(nil)
+	_ runtime.Inventory     = (*FakeInventory)(nil)
+	_ runtime.PrivilegeInfo = (*FakePrivilegeInfo)(nil)
+)
 
 func watchStats(ctx context.Context, ids []runtime.ID, started chan []runtime.ID, stats []runtime.StatsSample) (iter.Seq2[runtime.StatsSample, error], error) {
 	if started != nil {
