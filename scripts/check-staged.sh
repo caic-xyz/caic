@@ -18,7 +18,7 @@ frontend_source_changed=false
 while IFS= read -r -d '' file; do
   staged_changes+=("$file")
   case "$file" in
-  frontend/src/*.css | frontend/src/*.html | frontend/src/*.ts | frontend/src/*.tsx)
+  frontend/src/*.css | frontend/src/*.html | frontend/src/*.json | frontend/src/*.svg | frontend/src/*.ts | frontend/src/*.tsx)
     frontend_source_changed=true
     ;;
   esac
@@ -42,6 +42,7 @@ format_files=()
 eslint_files=()
 go_files=()
 python_files=()
+style_files=()
 
 while IFS= read -r -d '' file; do
   if [[ ! -L "$file" ]]; then
@@ -68,6 +69,9 @@ while IFS= read -r -d '' file; do
     ;;
   *.py)
     python_files+=("$file")
+    ;;
+  frontend/src/*.css)
+    style_files+=("$file")
     ;;
   esac
 done < <(git diff --cached --name-only --diff-filter=ACMR -z)
@@ -129,8 +133,12 @@ if ((${#python_files[@]} > 0)); then
   run_check python-format ruff format --check --quiet -- "${python_files[@]}"
 fi
 
+if ((${#style_files[@]} > 0)); then
+  run_check style pnpm --silent lint:style:files -- "${style_files[@]}"
+fi
+
 if "$frontend_source_changed"; then
-  run_check css-vars python3 scripts/lint_css_vars.py
+  run_check frontend-styles node scripts/lint_frontend_styles.mjs
 fi
 
 run_check binaries python3 scripts/lint_binaries.py

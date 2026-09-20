@@ -2,28 +2,28 @@
 
 .layout {
   display: flex;
-  gap: 0.25rem;
   flex: 1;
+  gap: 0.25rem;
   min-height: 0;
 }
 
 .detailPane {
-  flex: 1;
-  min-width: 0;
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 
 /* Mobile: <=768px */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .layout {
     flex-direction: column;
     gap: 0;
   }
 
   .detailPane {
-    width: 100%;
     flex: 1;
+    width: 100%;
   }
 }

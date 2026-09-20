@@ -1,0 +1,6 @@
+/* Styles for the VNC page's lazy-viewer loading fallback. */
+
+.loading {
+  padding: 1rem;
+  color: var(--color-text-muted);
+}

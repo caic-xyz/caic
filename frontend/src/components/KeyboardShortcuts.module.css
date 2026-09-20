@@ -1,11 +1,11 @@
 /* Styles for the keyboard-shortcuts reference dialog. */
 
 .dialog {
+  box-sizing: border-box;
   width: min(28rem, calc(100vw - 2rem));
   padding: 1.25rem;
-  box-sizing: border-box;
-  background: var(--color-bg-elevated);
   color: inherit;
+  background: var(--color-bg-elevated);
 }
 
 .title {
@@ -15,9 +15,9 @@
 
 .intro {
   margin: 0 0 1rem;
-  color: var(--color-text-secondary);
   font-size: 0.9rem;
   line-height: 1.4;
+  color: var(--color-text-secondary);
 }
 
 .section + .section {
@@ -26,8 +26,8 @@
 
 .sectionTitle {
   margin: 0 0 0.4rem;
-  color: var(--color-text-secondary);
   font-size: 0.8rem;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -39,46 +39,46 @@
 .shortcutRow {
   display: grid;
   grid-template-columns: minmax(7.5rem, auto) 1fr;
-  align-items: center;
   gap: 1rem;
+  align-items: center;
   padding: 0.35rem 0;
 }
 
 .keys {
   display: flex;
-  justify-content: flex-end;
   gap: 0.3rem;
+  justify-content: flex-end;
 }
 
 .keys kbd {
+  box-sizing: border-box;
   min-width: 1.5rem;
   padding: 0.15rem 0.35rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-variant);
-  box-shadow: 0 1px 0 var(--color-border);
-  box-sizing: border-box;
   font-family: inherit;
   font-size: 0.8rem;
   text-align: center;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 0 var(--color-border);
 }
 
 .action {
   margin: 0;
-  color: var(--color-text-secondary);
   font-size: 0.9rem;
+  color: var(--color-text-secondary);
 }
 
 .closeButton {
   display: block;
-  margin: 1.25rem 0 0 auto;
   padding: 0.45rem 0.8rem;
+  margin: 1.25rem 0 0 auto;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: var(--color-bg-hover);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-bg-hover);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 .closeButton:hover {

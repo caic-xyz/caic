@@ -5,12 +5,12 @@
   --color-primary: #4a90d9;
   --color-primary-hover: #357abd;
   --color-on-primary: #fff;
-  --color-on-primary-spinner-track: rgba(255, 255, 255, 0.4);
+  --color-on-primary-spinner-track: rgb(255 255 255 / 40%);
 
   /* Primary tints for drag targets and focus indicators over existing surfaces. */
   --color-primary-drop-bg: color-mix(in srgb, var(--color-primary) 5%, transparent);
   --color-primary-focus-ring: color-mix(in srgb, var(--color-primary) 20%, transparent);
-  --color-primary-ring: rgba(74, 144, 217, 0.3);
+  --color-primary-ring: rgb(74 144 217 / 30%);
   --color-focus-border: var(--color-primary);
 
   /* Low-emphasis primary containers and their readable foreground. */
@@ -52,7 +52,6 @@
   /* Gray button variant */
   --color-gray: #6c757d;
   --color-gray-hover: #5a6268;
-
   --color-secondary-container: #f8f9fa;
 
   /* Plan mode and thinking (purple) */
@@ -84,13 +83,14 @@
   --color-bg-inverse: #2a2a2a;
   --color-bg-media: #000;
   --color-bg-media-panel: #1a1a1a;
+
   /* Opaque stop for the task-list edge-fade mask; its hue is irrelevant. */
   --color-mask-opaque: #000;
   --color-on-inverse: #fff;
   --color-on-inverse-muted: #ccc;
   --color-on-inverse-disabled: #666;
-  --color-on-inverse-hover: rgba(255, 255, 255, 0.1);
-  --color-on-inverse-hover-strong: rgba(255, 255, 255, 0.15);
+  --color-on-inverse-hover: rgb(255 255 255 / 10%);
+  --color-on-inverse-hover-strong: rgb(255 255 255 / 15%);
 
   /* Text scale (dark → light) */
   --color-text-secondary: #555;
@@ -107,6 +107,7 @@
   --color-bg-hover: #eee;
   --color-bg-code: #e8e8e8;
   --color-bg-surface: #fafafa;
+
   /* Toast and tooltip aliases currently share one inverse popup palette. */
   --color-toast-bg: #333;
   --color-on-toast: #fff;
@@ -120,13 +121,13 @@
   --color-border-strong: #444;
 
   /* Modal and media scrims, from lighter to stronger. */
-  --color-overlay: rgba(0, 0, 0, 0.5);
-  --color-overlay-strong: rgba(0, 0, 0, 0.6);
+  --color-overlay: rgb(0 0 0 / 50%);
+  --color-overlay-strong: rgb(0 0 0 / 60%);
 
   /* Popup, menu/toast, and modal shadow colors, ordered by elevation. */
-  --color-shadow-sm: rgba(0, 0, 0, 0.12);
-  --color-shadow-md: rgba(0, 0, 0, 0.18);
-  --color-shadow-lg: rgba(0, 0, 0, 0.24);
+  --color-shadow-sm: rgb(0 0 0 / 12%);
+  --color-shadow-md: rgb(0 0 0 / 18%);
+  --color-shadow-lg: rgb(0 0 0 / 24%);
 
   /* Selection */
   --color-selected: #007bff;
@@ -140,10 +141,41 @@
   --color-widget-border: var(--color-border-medium);
   --color-widget-bg: var(--color-bg-surface);
 
+  /* The sandboxed widget document cannot inherit tokens, so WidgetCard copies these into its srcdoc. */
+  --color-widget-shell-bg: #fff;
+  --color-widget-shell-fg: #1a1a1a;
+
   /* Added, deleted, and binary size text in diff summaries. */
   --color-diff-added: #22863a;
   --color-diff-deleted: #cb2431;
   --color-diff-size: #6a737d;
+
+  /* Dark code surfaces: markdown code blocks and the repository diff view. */
+  --color-code-block-bg: #1e1e1e;
+  --color-code-block-fg: #d4d4d4;
+  --color-diff-block-bg: #1e1e1e;
+  --color-diff-block-fg: #d4d4d4;
+
+  /* Diff line, whitespace, and moved-block markers on the dark diff surface. */
+  --color-diff-block-line-added: #4ec94e;
+  --color-diff-block-line-deleted: #f44;
+  --color-diff-block-line-added-whitespace: #6daa6d;
+  --color-diff-block-line-deleted-whitespace: #d07373;
+  --color-diff-block-move-added: #7dd3fc;
+  --color-diff-block-move-added-alt: #a7f3d0;
+  --color-diff-block-move-deleted: #f0abfc;
+  --color-diff-block-move-deleted-alt: #fcd34d;
+  --color-diff-block-move-added-bg: #102f3d;
+  --color-diff-block-move-added-alt-bg: #123226;
+  --color-diff-block-move-deleted-bg: #351836;
+  --color-diff-block-move-deleted-alt-bg: #3b2b0b;
+  --color-diff-block-hunk: #b48ead;
+
+  /* Git commit graph, SHA, decoration, and date markers in the diff header. */
+  --color-commit-graph: #1a7f37;
+  --color-commit-sha: #1a7f37;
+  --color-commit-decoration: #6639ba;
+  --color-commit-date: #a40e26;
 
   /* Border radii */
   --radius-sm: 4px;
@@ -182,12 +214,12 @@ body {
 .login-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 1rem;
+  align-items: center;
   padding: 2.5rem 3rem;
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
-  background: var(--color-bg-surface);
 }
 
 .login-title {
@@ -198,8 +230,8 @@ body {
 
 .login-subtitle {
   margin: 0;
-  color: var(--color-text-muted);
   font-size: 0.9rem;
+  color: var(--color-text-muted);
 }
 
 .login-buttons {
@@ -211,16 +243,16 @@ body {
 
 .login-button {
   display: flex;
-  align-items: center;
   gap: 0.6em;
+  align-items: center;
   justify-content: center;
   padding: 0.6rem 1.25rem;
-  border-radius: var(--radius-md);
-  background: var(--color-primary);
-  color: var(--color-on-primary);
   font-size: 0.95rem;
   font-weight: 500;
+  color: var(--color-on-primary);
   text-decoration: none;
+  background: var(--color-primary);
+  border-radius: var(--radius-md);
   transition: background 0.15s;
 }
 

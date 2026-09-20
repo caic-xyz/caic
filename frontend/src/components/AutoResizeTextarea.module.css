@@ -2,14 +2,14 @@
 
 .editable {
   min-height: 2em;
-  border-radius: inherit;
-  white-space: pre-wrap;
   overflow-wrap: break-word;
+  white-space: pre-wrap;
+  border-radius: inherit;
 }
 
 .editable.empty::before {
-  content: attr(data-placeholder);
   float: none;
   color: var(--color-text-muted);
   pointer-events: none;
+  content: attr(data-placeholder);
 }

@@ -168,7 +168,7 @@ function ProcessRow(props: RowProps) {
     <tr>
       <td class={`${styles.td} ${styles.actions}`}>
         <div class={styles.actionsRow}>
-          <span class={styles.treeToggle} style={{ width: `${indent()}px`, "min-width": `${indent()}px` }}>
+          <span class={styles.treeToggle} style={{ "--tree-indent": `${indent()}px` }}>
             <Show when={hasChildren()}>
               <button
                 class={styles.toggleBtn}
@@ -202,7 +202,7 @@ function ProcessRow(props: RowProps) {
       <td class={styles.td}>{props.node.pgrp}</td>
       <td class={styles.td}>{props.node.user}</td>
       <td class={styles.td}>
-        <span class={styles.state} style={{ color: stateColor(props.node.state) }}>
+        <span class={styles.state} style={{ "--state-color": stateColor(props.node.state) }}>
           {props.node.state}
         </span>
       </td>

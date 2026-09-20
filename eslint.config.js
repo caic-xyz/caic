@@ -92,6 +92,12 @@ export default tseslint.config(
       "solid/style-prop": "error",
     },
   },
+  // The Node scripts under scripts/ run outside the browser and reach for process, argv, and the
+  // filesystem, so they need the Node globals that the frontend sources must not see.
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node } },
+  },
   // scripts/check-staged.sh mirrors these roots so its eslint invocation never receives an
   // ignored path (which would only print an ignore warning). Keep the two lists in sync.
   { ignores: ["backend/**", "sdk/**", "frontend/dist/**", "frontend/public/**", "android/**"] },

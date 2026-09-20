@@ -17,22 +17,22 @@ function totalTokens(usage: TaskUsageSummary): number {
   return usage.inputTokens + usage.cacheWriteInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
 }
 
-function barColor(ratio: number): string {
-  if (ratio >= 0.85) return "var(--color-danger)";
-  if (ratio >= 0.5) return "var(--color-warning-text)";
-  return "var(--color-success)";
+function barClass(ratio: number): string {
+  if (ratio >= 0.85) return styles.barDanger;
+  if (ratio >= 0.5) return styles.barWarning;
+  return styles.barSuccess;
 }
 
-function netColor(bytes: number): string {
-  if (bytes >= 1e9) return "var(--color-danger)";
-  if (bytes >= 100e6) return "var(--color-warning-text)";
-  return "var(--color-success)";
+function netClass(bytes: number): string {
+  if (bytes >= 1e9) return styles.barDanger;
+  if (bytes >= 100e6) return styles.barWarning;
+  return styles.barSuccess;
 }
 
-function diskColor(bytes: number): string {
-  if (bytes >= 10e9) return "var(--color-danger)";
-  if (bytes >= 5e9) return "var(--color-warning-text)";
-  return "var(--color-success)";
+function diskClass(bytes: number): string {
+  if (bytes >= 10e9) return styles.barDanger;
+  if (bytes >= 5e9) return styles.barWarning;
+  return styles.barSuccess;
 }
 
 export default function StatsIcon(props: { href: string; stats: EventStats[]; usage: TaskUsageSummary }) {
@@ -67,14 +67,14 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
       title="Task usage and performance statistics"
       aria-label="Task statistics"
     >
-      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" data-generated-svg="">
         <rect
           x="0"
           y={8 - Math.round(cpuRatio() * 8)}
           width="6"
           height={Math.round(cpuRatio() * 8)}
           rx="1"
-          fill={hasStats() ? barColor(cpuRatio()) : "var(--color-border)"}
+          class={hasStats() ? barClass(cpuRatio()) : styles.barIdle}
         />
         <rect
           x="10"
@@ -82,7 +82,7 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
           width="6"
           height={Math.round(memRatio() * 8)}
           rx="1"
-          fill={hasStats() ? barColor(memRatio()) : "var(--color-border)"}
+          class={hasStats() ? barClass(memRatio()) : styles.barIdle}
         />
         <rect
           x="0"
@@ -90,7 +90,7 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
           width="6"
           height={Math.round(netRatio() * 8)}
           rx="1"
-          fill={hasStats() ? netColor((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0)) : "var(--color-border)"}
+          class={hasStats() ? netClass((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0)) : styles.barIdle}
         />
         <rect
           x="10"
@@ -98,7 +98,7 @@ export default function StatsIcon(props: { href: string; stats: EventStats[]; us
           width="6"
           height={Math.round(diskRatio() * 8)}
           rx="1"
-          fill={hasStats() ? diskColor(latest()?.diskUsed ?? 0) : "var(--color-border)"}
+          class={hasStats() ? diskClass(latest()?.diskUsed ?? 0) : styles.barIdle}
         />
       </svg>
       <Show when={tokens() > 0}>

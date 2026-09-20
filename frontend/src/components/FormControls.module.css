@@ -11,23 +11,17 @@
 }
 
 .select {
+  min-width: 0;
   padding: 0.35rem 1.8rem 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.4;
+  color: inherit;
+  appearance: none;
+  cursor: pointer;
+  background: var(--color-bg-input);
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-bg-input);
-  color: inherit;
-  cursor: pointer;
-  min-width: 0;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-}
-
-.select:hover:not(:disabled) {
-  background: var(--color-bg-input-hover);
 }
 
 .select:focus {
@@ -35,29 +29,27 @@
 }
 
 .select:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.select:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
 }
 
 /* Trigger variant for SearchableSelect so it matches the native selects. */
 .selectTrigger {
+  min-width: 0;
   padding: 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.4;
+  color: inherit;
+  appearance: none;
+  cursor: pointer;
+  background: var(--color-bg-input);
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-bg-input);
-  color: inherit;
-  cursor: pointer;
-  min-width: 0;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-}
-
-.selectTrigger:hover:not(:disabled) {
-  background: var(--color-bg-input-hover);
 }
 
 .selectTrigger:focus {
@@ -65,8 +57,12 @@
 }
 
 .selectTrigger:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.selectTrigger:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
 }
 
 .selectCaret {
@@ -82,19 +78,28 @@
   display: flex;
   align-items: center;
   padding: 0.4rem 0.55rem;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-input);
   color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
+  background: var(--color-bg-input);
+  border-radius: var(--radius-md);
   transition:
     background 0.15s,
     color 0.15s;
 }
 
 .toggleChip:has(input:checked) {
-  background: var(--color-primary);
   color: var(--color-on-primary);
+  background: var(--color-primary);
+}
+
+.toggleChip:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px var(--color-focus-border);
+}
+
+.toggleChip:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .toggleChip:hover:not(:has(input:disabled)) {
@@ -105,24 +110,15 @@
   background: var(--color-primary-hover);
 }
 
-.toggleChip:has(input:focus-visible) {
-  box-shadow: 0 0 0 3px var(--color-focus-border);
-}
-
-.toggleChip:has(input:disabled) {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .toggleChip input {
   position: absolute;
-  opacity: 0;
   width: 0;
   height: 0;
+  opacity: 0;
 }
 
 /* Mobile: <=768px */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .selectWrap {
     box-sizing: border-box;
     flex: 1 1 auto;

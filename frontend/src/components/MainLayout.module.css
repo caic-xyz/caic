@@ -4,11 +4,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 1rem;
   align-items: flex-start;
   max-height: 15rem;
-  opacity: 1;
+  margin-bottom: 1rem;
   overflow: visible;
+  opacity: 1;
   transition:
     max-height 150ms ease-out,
     opacity 150ms ease-out,
@@ -17,27 +17,27 @@
 
 .promptInput {
   flex: 1;
+  max-height: 10rem;
   padding: 0.35rem 0.5rem;
-  resize: none;
+  overflow-y: auto;
   font: inherit;
   line-height: 1.4;
-  max-height: 10rem;
-  overflow-y: auto;
+  resize: none;
 }
 
 .hidden {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  margin-bottom: 0;
-  pointer-events: none;
   /* Keep the collapsed controls out of the tab order and the a11y tree. */
   visibility: hidden;
+  max-height: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
   transition: none;
 }
 
 /* Mobile: <=768px */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .submitForm {
     max-height: none;
     overflow: visible;

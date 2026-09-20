@@ -1,24 +1,24 @@
 /* Styles for the PromptInput component: container, drag-over, and image previews. */
 
 .container {
+  box-sizing: border-box;
   flex-basis: 100%;
   min-width: 0;
-  box-sizing: border-box;
 }
 
 .container.dragOver {
   outline: 2px dashed var(--color-primary);
   outline-offset: -2px;
-  border-radius: var(--radius-lg);
   background: var(--color-primary-drop-bg);
+  border-radius: var(--radius-lg);
 }
 
 .row {
   position: relative;
   min-width: 0;
+  background: var(--color-bg-input);
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-lg);
-  background: var(--color-bg-input);
 }
 
 /* When .spacer is applied to the contenteditable, ::before generates an
@@ -26,11 +26,12 @@
    positioned trailing buttons.  A pseudo-element is always the first child
    in the formatting context, so the float reliably affects all text. */
 .spacer::before {
-  content: "";
   float: right;
+
   /* Match trailing buttons size + gap. */
   width: 5rem;
   height: 2rem;
+  content: "";
 }
 
 .row:focus-within {
@@ -47,10 +48,10 @@
   position: absolute;
   top: 0.25rem;
   right: 0.25rem;
+  z-index: 1;
   display: flex;
   gap: 0.25rem;
   align-items: center;
-  z-index: 1;
 }
 
 .actionRow {
@@ -63,12 +64,12 @@
 /* Use opacity+position instead of display:none so mobile browsers
    allow programmatic click() to open the file picker. */
 .hiddenFileInput {
-  opacity: 0;
   position: absolute;
   width: 0;
   height: 0;
   overflow: hidden;
   pointer-events: none;
+  opacity: 0;
 }
 
 .imagePreviewRow {
@@ -82,9 +83,9 @@
   position: relative;
   width: 48px;
   height: 48px;
-  border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
 }
 
 .imageThumb img {
@@ -97,13 +98,13 @@
   position: absolute;
   top: 0;
   right: 0;
-  background: var(--color-overlay);
-  color: var(--color-on-inverse);
-  border: none;
-  cursor: pointer;
+  padding: 1px 3px;
   font-size: 0.75rem;
   line-height: 1;
-  padding: 1px 3px;
+  color: var(--color-on-inverse);
+  cursor: pointer;
+  background: var(--color-overlay);
+  border: none;
   border-radius: 0 0 0 3px;
 }
 
@@ -113,34 +114,34 @@
 
 .attachMenu {
   position: absolute;
-  bottom: calc(100% + 4px);
   right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 10;
+  min-width: 150px;
+  padding: 4px 0;
   background: var(--color-bg-inverse);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-xl);
-  padding: 4px 0;
-  min-width: 150px;
   box-shadow: 0 4px 12px var(--color-shadow-lg);
-  z-index: 10;
 }
 
 .attachMenuFlipped {
-  bottom: auto;
   top: calc(100% + 4px);
+  bottom: auto;
 }
 
 .menuItem {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   width: 100%;
   padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--color-on-inverse-muted);
+  white-space: nowrap;
+  cursor: pointer;
   background: none;
   border: none;
-  color: var(--color-on-inverse-muted);
-  cursor: pointer;
-  font-size: 0.85rem;
-  white-space: nowrap;
 }
 
 .menuItem:hover {

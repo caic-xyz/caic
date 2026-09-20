@@ -1,33 +1,28 @@
 /* Styles for the full-page repository status and unified diff view. */
 
 .container {
-  --color-commit-date: #a40e26;
-  --color-commit-decoration: #6639ba;
-  --color-commit-graph: #1a7f37;
-  --color-commit-sha: #1a7f37;
-
   display: flex;
-  flex-direction: column;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
 }
 
 .header {
   display: flex;
-  align-items: center;
   gap: 0.75rem;
+  align-items: center;
   margin-bottom: 0.5rem;
 }
 
 .backBtn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  padding: 4px;
   display: flex;
   align-items: center;
+  padding: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
 }
 
 .backBtn:hover {
@@ -36,11 +31,11 @@
 
 .headerMeta {
   flex: 1;
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -50,15 +45,15 @@
 
 .wrapToggle {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
   padding: 0.25rem;
-  background: var(--color-bg-surface);
   color: var(--color-text-secondary);
   cursor: pointer;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 .wrapToggle:hover {
@@ -66,19 +61,19 @@
 }
 
 .wrapToggleActive {
-  border-color: var(--color-link);
   color: var(--color-link);
+  border-color: var(--color-link);
 }
 
 .fileList {
   flex: 1;
+  min-height: 0;
+  padding: 0.75rem;
   overflow: auto;
+  font-size: 0.85rem;
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: 0.75rem;
-  background: var(--color-bg-surface);
-  font-size: 0.85rem;
-  min-height: 0;
 }
 
 .statusList {
@@ -87,17 +82,17 @@
 }
 
 .repoStatus {
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
   padding: 0.75rem;
   background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
 }
 
 .repoHeading {
   display: flex;
-  align-items: baseline;
   flex-wrap: wrap;
   gap: 0.45rem;
+  align-items: baseline;
   min-width: 0;
   font-weight: 600;
 }
@@ -105,9 +100,9 @@
 .branchName,
 .upstreamName {
   min-width: 0;
-  overflow-wrap: anywhere;
   font-family: monospace;
   font-size: 0.8rem;
+  overflow-wrap: anywhere;
 }
 
 .branchArrow {
@@ -120,8 +115,8 @@
 
 .divergence {
   margin-top: 0.2rem;
-  color: var(--color-text-tertiary);
   font-size: 0.75rem;
+  color: var(--color-text-tertiary);
 }
 
 .statusGroup {
@@ -130,9 +125,9 @@
 
 .statusGroup h2 {
   margin: 0 0 0.4rem;
-  color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -159,8 +154,8 @@
   top: 0;
   bottom: 0;
   left: 50%;
-  border-left: 2px solid var(--color-commit-graph);
   content: "";
+  border-left: 2px solid var(--color-commit-graph);
 }
 
 .commit:first-child .commitGraph::before {
@@ -176,16 +171,16 @@
   width: 0.55rem;
   height: 0.55rem;
   margin-top: 0.39rem;
+  background: var(--color-bg-elevated);
   border: 2px solid var(--color-commit-graph);
   border-radius: 50%;
-  background: var(--color-bg-elevated);
 }
 
 .commitHeading {
   display: flex;
-  align-items: baseline;
   flex-wrap: wrap;
   gap: 0.55rem;
+  align-items: baseline;
   min-width: 0;
   padding: 0.15rem 0 0.25rem;
   font-family: monospace;
@@ -198,11 +193,11 @@
 
 .commitDecorations {
   max-width: 100%;
-  border-radius: var(--radius-sm);
   padding: 0 0.3rem;
-  background: var(--color-bg-surface);
   color: var(--color-commit-decoration);
   overflow-wrap: anywhere;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-sm);
 }
 
 .commitDate {
@@ -218,10 +213,10 @@
 .commitStat {
   grid-column: 2;
   margin: 0 0 0.55rem;
-  color: var(--color-text-tertiary);
   font-family: monospace;
   font-size: 0.72rem;
   line-height: 1.45;
+  color: var(--color-text-tertiary);
 }
 
 .fileChange {
@@ -230,18 +225,18 @@
 
 .fileChangeButton {
   display: flex;
-  align-items: baseline;
   gap: 0.5rem;
+  align-items: baseline;
   width: 100%;
   min-width: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
   padding: 0.15rem 0.2rem;
-  background: transparent;
-  color: inherit;
   font: inherit;
+  color: inherit;
   text-align: left;
   cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
 }
 
 .fileChangeButton:hover {
@@ -285,37 +280,37 @@
 
 .statusBadges {
   display: flex;
-  gap: 0.25rem;
   flex-shrink: 0;
+  gap: 0.25rem;
 }
 
 .statusBadge {
-  border-radius: var(--radius-sm);
   padding: 0.1rem 0.35rem;
-  background: var(--color-bg-surface);
-  color: var(--color-text-secondary);
   font-size: 0.68rem;
+  color: var(--color-text-secondary);
   white-space: nowrap;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-sm);
 }
 
 .cleanState {
   margin: 0;
-  color: var(--color-text-muted);
   font-size: 0.75rem;
+  color: var(--color-text-muted);
 }
 
 .collapseIndicator {
-  font-size: 0.6rem;
-  color: var(--color-text-muted);
   flex-shrink: 0;
   width: 0.8em;
+  font-size: 0.6rem;
+  color: var(--color-text-muted);
 }
 
 .fileCounts {
   display: inline-flex;
+  flex-shrink: 0;
   gap: 0.3em;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .added {
@@ -327,38 +322,38 @@
 }
 
 .sizes {
-  color: var(--color-diff-size);
-  font-style: italic;
   flex-shrink: 0;
+  font-style: italic;
+  color: var(--color-diff-size);
 }
 
 .diffLoading {
+  padding: 0.25rem 0;
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  padding: 0.25rem 0;
 }
 
 .diffError {
+  padding: 0.25rem 0;
   font-size: 0.75rem;
   color: var(--color-error);
-  padding: 0.25rem 0;
 }
 
 .fileDiffError {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   color: var(--color-error);
 }
 
 .fileDiffError button {
+  padding: 0.15rem 0.4rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 0.15rem 0.4rem;
-  background: var(--color-bg-surface);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 .fileDiffError button:hover {
@@ -366,7 +361,7 @@
 }
 
 /* Mobile: <=768px */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .container {
     margin: 0 -0.5rem;
   }
@@ -376,9 +371,9 @@
   }
 
   .fileList {
-    border-radius: 0;
-    border-left: none;
     border-right: none;
+    border-left: none;
+    border-radius: 0;
   }
 
   .repoHeading {

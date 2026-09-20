@@ -1,27 +1,35 @@
 /* Shared task actions menu styles. */
 
 .menu {
+  z-index: 10;
+  min-width: 10rem;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-md);
   box-shadow: 0 2px 8px var(--color-shadow-md);
-  z-index: 10;
-  min-width: 10rem;
+}
+
+.menuPositioned {
+  --menu-left: auto;
+  --menu-top: auto;
+
+  top: var(--menu-top);
+  left: var(--menu-left);
 }
 
 .item {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   width: 100%;
   padding: 0.4rem 0.75rem;
-  border: none;
-  background: none;
-  color: inherit;
-  cursor: pointer;
   font-size: 0.8rem;
+  color: inherit;
   text-align: left;
   white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: none;
 }
 
 .item:hover {
@@ -37,8 +45,8 @@
 }
 
 .disabled {
-  opacity: 0.4;
   cursor: default;
+  opacity: 0.4;
 }
 
 .disabled:hover {

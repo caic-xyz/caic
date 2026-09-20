@@ -2,16 +2,16 @@
 
 .container {
   display: flex;
-  flex-direction: column;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
 }
 
 .header {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
+  align-items: center;
   margin-bottom: 0.5rem;
 }
 
@@ -37,14 +37,14 @@
 }
 
 .closeBtn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  padding: 4px;
   display: flex;
   align-items: center;
+  padding: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
 }
 
 .closeBtn:hover {
@@ -53,21 +53,21 @@
 
 .headerTitle {
   display: none;
-  font-size: 0.85rem;
-  font-weight: 500;
   flex: 0 1 8rem;
   min-width: 8rem;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.85rem;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .headerMeta {
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -85,8 +85,8 @@ a.headerRepo:hover {
 }
 
 .headerBranch::before {
-  content: "·";
   margin-right: 0.4em;
+  content: "·";
 }
 
 .headerPR {
@@ -100,13 +100,13 @@ a.headerPR:hover {
 }
 
 .headerPR::before {
-  content: "·";
   margin-right: 0.4em;
+  content: "·";
 }
 
 .taskError {
-  margin-bottom: 0.5rem;
   padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
   color: var(--color-danger-text);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
@@ -124,13 +124,13 @@ a.headerPR:hover {
   overflow: auto;
   font-family: monospace;
   font-size: 0.8rem;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .taskPrompt {
-  margin-bottom: 0.5rem;
   padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
@@ -138,8 +138,17 @@ a.headerPR:hover {
 
 .taskPromptTitle {
   margin: 0 0 0.25rem;
-  color: var(--color-text-secondary);
   font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.userInputMsg {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  overflow-wrap: break-word;
+  background: var(--color-user-msg-bg);
+  border-radius: var(--radius-lg);
 }
 
 .taskPrompt .userInputMsg {
@@ -151,19 +160,19 @@ a.headerPR:hover {
 }
 
 .taskSetupTitle {
-  display: flex;
   box-sizing: border-box;
-  width: 100%;
-  align-items: baseline;
+  display: flex;
   gap: 0.5rem;
+  align-items: baseline;
+  width: 100%;
   padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
   color: var(--color-on-primary-container);
+  cursor: pointer;
+  list-style: none;
   background: var(--color-primary-container);
   border: none;
   border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.8rem;
-  list-style: none;
 }
 
 .taskSetupTitle::-webkit-details-marker {
@@ -171,9 +180,9 @@ a.headerPR:hover {
 }
 
 .taskSetupTitle::before {
-  content: "▶";
   margin-right: 0.4em;
   font-size: 0.7em;
+  content: "▶";
 }
 
 .taskSetup:hover .taskSetupTitle,
@@ -187,23 +196,22 @@ a.headerPR:hover {
 
 .taskSetupLogs {
   margin: 0.35rem 0 0;
-  color: var(--color-text-secondary);
   font-family: monospace;
   font-size: 0.8rem;
-  white-space: pre-wrap;
+  color: var(--color-text-secondary);
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .messageArea {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  min-height: 0;
+  padding: 0.75rem;
+  overflow: hidden auto;
+  font-size: 0.85rem;
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: 0.75rem;
-  background: var(--color-bg-surface);
-  font-size: 0.85rem;
-  min-height: 0;
 }
 
 .placeholder {
@@ -217,112 +225,112 @@ a.headerPR:hover {
 
 .messageTiming {
   position: relative;
-  float: right;
   z-index: 2;
-  margin: 0.15rem 0.5rem 0 0.5rem;
+  float: right;
+  margin: 0.15rem 0.5rem 0;
   transition: opacity 0.15s;
 }
 
 .timedItemContent:has(.markdownWrap:hover) > .messageTiming {
-  opacity: 0;
   pointer-events: none;
+  opacity: 0;
 }
 
 .inputForm {
   display: flex;
-  align-items: flex-end;
   gap: 0.25rem;
+  align-items: flex-end;
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
 }
 
 .textInput {
   flex: 1;
+  max-height: 10rem;
   padding: 0.4rem;
-  resize: none;
+  overflow-y: auto;
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.2;
-  max-height: 10rem;
-  overflow-y: auto;
+  resize: none;
 }
 
 .actionError {
+  margin-top: 0.25rem;
   font-size: 0.8rem;
   color: var(--color-danger);
-  margin-top: 0.25rem;
 }
 
 .systemInit {
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
   margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
   overflow-wrap: break-word;
 }
 
 .systemMsg {
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
   margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
 }
 
 .contextCleared {
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
-  text-align: center;
-  margin: 1rem 0;
-  border-top: 1px solid var(--color-border-strong);
   padding-top: 0.5rem;
+  margin: 1rem 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  border-top: 1px solid var(--color-border-strong);
 }
 
 .logLine {
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
-  font-family: monospace;
   margin-bottom: 0.1rem;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
 }
 
 .parseError {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
   color: var(--color-danger-text);
+  word-break: break-all;
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-md);
-  padding: 0.4rem 0.6rem;
-  font-size: 0.8rem;
-  margin-bottom: 0.25rem;
-  word-break: break-all;
 }
 
 .rateLimitWarning {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
   color: var(--color-warning-text);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-md);
-  padding: 0.4rem 0.6rem;
-  font-size: 0.8rem;
-  margin-bottom: 0.25rem;
 }
 
 .rateLimitRejected {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
   color: var(--color-danger-text);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-md);
-  padding: 0.4rem 0.6rem;
-  font-size: 0.8rem;
-  margin-bottom: 0.25rem;
 }
 
 .quotaRecovery {
   display: flex;
+  gap: 1rem;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  padding: 0.75rem;
   color: var(--color-danger-text);
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-md);
-  padding: 0.75rem;
 }
 
 .quotaRecoveryTitle {
@@ -336,20 +344,11 @@ a.headerPR:hover {
   line-height: 1.4;
 }
 
-@media (max-width: 600px) {
+@media (width <= 600px) {
   .quotaRecovery {
-    align-items: stretch;
     flex-direction: column;
+    align-items: stretch;
   }
-}
-
-.userInputMsg {
-  margin-bottom: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  background: var(--color-user-msg-bg);
-  border-radius: var(--radius-lg);
-  font-size: 0.85rem;
-  word-break: break-word;
 }
 
 .assistantMsg {
@@ -362,13 +361,13 @@ a.headerPR:hover {
 
 .rawToolbar {
   position: relative;
+  z-index: 1;
   float: right;
   display: flex;
   gap: 0.2em;
   margin-left: 0.4em;
   opacity: 0;
   transition: opacity 0.15s;
-  z-index: 1;
 }
 
 .markdownWrap:hover .rawToolbar {
@@ -377,15 +376,15 @@ a.headerPR:hover {
 
 .rawToolbarBtn {
   display: inline-flex;
-  align-items: center;
   gap: 0.2em;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  align-items: center;
   padding: 0.1em 0.4em;
   font-size: 0.7rem;
   color: var(--color-text-secondary);
   cursor: pointer;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .rawToolbarBtn svg {
@@ -395,15 +394,15 @@ a.headerPR:hover {
 .rawCopyBtn,
 .codeCopyBtn {
   display: inline-flex;
-  align-items: center;
   gap: 0.2em;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  align-items: center;
   padding: 0.1em 0.4em;
   font-size: 0.7rem;
   color: var(--color-text-secondary);
   cursor: pointer;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .rawCopyBtn .copyIcon,
@@ -413,6 +412,32 @@ a.headerPR:hover {
 
 .rawCopyBtn .checkIcon,
 .codeCopyBtn .checkIcon {
+  display: none;
+}
+
+.codeCopyBtn .copyIcon,
+.codeCopyBtn .checkIcon {
+  width: 14px;
+  height: 14px;
+  background-color: currentcolor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+}
+
+.codeCopyBtn .copyIcon {
+  mask-image: url("@material-symbols/svg-400/outlined/content_copy.svg");
+}
+
+.codeCopyBtn .checkIcon {
+  mask-image: url("@material-symbols/svg-400/outlined/check.svg");
+}
+
+.sudoCopyBtn .copyIcon {
+  display: block;
+}
+
+.sudoCopyBtn .checkIcon {
   display: none;
 }
 
@@ -428,24 +453,21 @@ a.headerPR:hover {
 }
 
 .rawText {
-  white-space: pre-wrap;
-  word-break: break-word;
+  padding: 0.5em;
+  margin: 0;
+  overflow-x: auto;
   font-size: 0.82rem;
   line-height: 1.5;
-  margin: 0;
-  padding: 0.5em;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
   background: var(--color-bg-code);
   border-radius: var(--radius-md);
-  overflow-x: auto;
 }
 
 .markdown {
-  --markdown-code-block-bg: #1e1e1e;
-  --markdown-code-block-fg: #d4d4d4;
-
   margin-bottom: 0.25rem;
   line-height: 1.5;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .markdown p {
@@ -467,17 +489,19 @@ a.headerPR:hover {
 .markdown h1 {
   font-size: 1.3em;
 }
+
 .markdown h2 {
   font-size: 1.15em;
 }
+
 .markdown h3 {
   font-size: 1.05em;
 }
 
 .markdown ul,
 .markdown ol {
-  margin: 0.25em 0;
   padding-left: 1.5em;
+  margin: 0.25em 0;
 }
 
 .markdown li {
@@ -485,21 +509,21 @@ a.headerPR:hover {
 }
 
 .markdown code {
-  background: var(--color-bg-code);
   padding: 0.15em 0.35em;
-  border-radius: var(--radius-sm);
   font-size: 0.9em;
+  background: var(--color-bg-code);
+  border-radius: var(--radius-sm);
 }
 
 .markdown pre {
-  background: var(--markdown-code-block-bg);
-  color: var(--markdown-code-block-fg);
   padding: 0.75em;
-  border-radius: var(--radius-md);
-  overflow-x: auto;
   margin: 0.5em 0;
+  overflow-x: auto;
   font-size: 0.8em;
   line-height: 1.4;
+  color: var(--color-code-block-fg);
+  background: var(--color-code-block-bg);
+  border-radius: var(--radius-md);
 }
 
 .codeBlock {
@@ -522,44 +546,34 @@ a.headerPR:hover {
   transform: translateY(-50%);
 }
 
-.codeCopyBtn svg {
-  width: 14px;
-  height: 14px;
-  fill: var(--color-text-secondary);
-}
-
-.codeCopyBtn.copied svg {
-  fill: var(--color-success);
-}
-
 .markdown pre code {
-  background: none;
   padding: 0;
-  border-radius: 0;
-  color: inherit;
   font-size: inherit;
+  color: inherit;
+  background: none;
+  border-radius: 0;
 }
 
 .markdown blockquote {
-  border-left: 3px solid var(--color-border-medium);
-  margin: 0.5em 0;
   padding: 0.25em 0.75em;
+  margin: 0.5em 0;
   color: var(--color-text-secondary);
+  border-left: 3px solid var(--color-border-medium);
 }
 
 .markdown table {
   display: block;
   max-width: 100%;
-  overflow-x: auto;
-  border-collapse: collapse;
   margin: 0.5em 0;
+  overflow-x: auto;
   font-size: 0.9em;
+  border-collapse: collapse;
 }
 
 .markdown th,
 .markdown td {
-  border: 1px solid var(--color-border);
   padding: 0.3em 0.6em;
+  border: 1px solid var(--color-border);
 }
 
 .markdown th {
@@ -567,9 +581,9 @@ a.headerPR:hover {
 }
 
 .markdown hr {
+  margin: 0.75em 0;
   border: none;
   border-top: 1px solid var(--color-border);
-  margin: 0.75em 0;
 }
 
 .markdown a {
@@ -588,11 +602,11 @@ a.headerPR:hover {
 }
 
 .result {
+  padding: 0.5rem;
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
-  padding: 0.5rem;
-  border-radius: var(--radius-md);
   font-size: 0.85rem;
+  border-radius: var(--radius-md);
 }
 
 .resultSuccess {
@@ -610,8 +624,8 @@ a.headerPR:hover {
 }
 
 .resultHeader {
-  justify-content: space-between;
   gap: 0.5rem;
+  justify-content: space-between;
 }
 
 .resultTiming {
@@ -620,16 +634,16 @@ a.headerPR:hover {
 }
 
 .resultDuration {
-  color: var(--color-text-tertiary);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
 }
 
 .resultMeta {
+  margin-top: 0.25rem;
   font-size: 0.8rem;
   color: var(--color-text-secondary);
-  margin-top: 0.25rem;
 }
 
 .resultText {
@@ -637,11 +651,11 @@ a.headerPR:hover {
 }
 
 .diffLink {
+  flex-shrink: 0;
   font-size: 0.75rem;
   color: var(--color-link);
-  text-decoration: none;
   white-space: nowrap;
-  flex-shrink: 0;
+  text-decoration: none;
 }
 
 .diffLink:hover {
@@ -650,26 +664,26 @@ a.headerPR:hover {
 
 .repoStateLinks {
   display: inline-flex;
-  align-items: center;
   flex: 0 1 auto;
   flex-wrap: wrap;
+  align-items: center;
   max-width: 100%;
 }
 
 .sudoPassword {
   display: inline-flex;
-  align-items: center;
+  flex-shrink: 0;
   gap: 4px;
-  font-size: 0.75rem;
+  align-items: center;
+  padding: 1px 1px 1px 5px;
   font-family: monospace;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
+  white-space: nowrap;
+  user-select: all;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: 3px;
-  padding: 1px 1px 1px 5px;
-  user-select: all;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .sudoPasswordText {
@@ -678,62 +692,56 @@ a.headerPR:hover {
 
 .sudoCopyBtn {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: none;
-  background: transparent;
+  padding: 0;
   color: var(--color-text-muted);
   cursor: pointer;
+  background: transparent;
+  border: none;
   border-radius: 2px;
-  padding: 0;
-  flex-shrink: 0;
 }
 
 .sudoCopyBtn:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
-}
-
-.sudoCopyBtn .copyIcon {
-  display: block;
-}
-.sudoCopyBtn .checkIcon {
-  display: none;
+  background: var(--color-bg-hover);
 }
 
 .sudoCopyBtn.copied .copyIcon {
   display: none;
 }
+
 .sudoCopyBtn.copied .checkIcon {
   display: block;
   color: var(--color-success);
 }
 
 .ciStatus {
+  flex-shrink: 0;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.4em;
   font-size: 0.75rem;
   font-weight: 600;
-  margin-left: 0.4em;
-  padding: 0.1rem 0.45rem;
-  border-radius: var(--radius-sm);
   white-space: nowrap;
-  flex-shrink: 0;
+  border-radius: var(--radius-sm);
 }
 
 .ciStatus_pending {
-  background: var(--color-warning-bg);
   color: var(--color-warning-text);
+  background: var(--color-warning-bg);
 }
 
 .ciStatus_success {
-  background: var(--color-success-bg);
   color: var(--color-success-text);
+  background: var(--color-success-bg);
 }
 
 .ciStatus_failure {
-  background: var(--color-danger-bg);
   color: var(--color-danger-text);
+  background: var(--color-danger-bg);
 }
 
 .ciDetails {
@@ -744,8 +752,8 @@ a.headerPR:hover {
 
 .ciDetails > summary {
   cursor: pointer;
-  list-style: none;
   user-select: none;
+  list-style: none;
 }
 
 .ciDetails > summary::-webkit-details-marker {
@@ -757,27 +765,27 @@ a.headerPR:hover {
   top: 100%;
   left: 0;
   z-index: 20;
-  margin-top: 0.25rem;
   min-width: 16rem;
+  padding: 0.35rem 0;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 12px var(--color-shadow-md);
-  padding: 0.35rem 0;
-  font-size: 0.75rem;
 }
 
 .ciCheckRow {
   display: flex;
-  align-items: center;
   gap: 0.5em;
+  align-items: center;
   padding: 0.25rem 0.6rem;
   white-space: nowrap;
 }
 
 a.ciCheckLink {
-  text-decoration: none;
   color: inherit;
+  text-decoration: none;
 }
 
 a.ciCheckLink:hover {
@@ -785,8 +793,8 @@ a.ciCheckLink:hover {
 }
 
 a.ciStatus {
-  text-decoration: none;
   color: inherit;
+  text-decoration: none;
 }
 
 a.ciStatus:hover {
@@ -826,47 +834,47 @@ a.ciStatus:hover {
 }
 
 .fixCIBtn {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-danger);
   color: var(--color-on-primary);
-  border: none;
-  cursor: pointer;
-  flex-shrink: 0;
   white-space: nowrap;
+  cursor: pointer;
+  background: var(--color-danger);
+  border: none;
+  border-radius: var(--radius-sm);
+}
+
+.fixCIBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .fixCIBtn:hover:not(:disabled) {
   opacity: 0.85;
 }
 
-.fixCIBtn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .planIndicator {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-plan-bg);
   color: var(--color-plan);
   white-space: nowrap;
-  flex-shrink: 0;
+  background: var(--color-plan-bg);
+  border-radius: var(--radius-sm);
 }
 
 .stoppedDiskUsage {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
   white-space: nowrap;
-  flex-shrink: 0;
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
 }
 
 .planAction {
@@ -874,25 +882,25 @@ a.ciStatus:hover {
 }
 
 .planContent {
-  margin-bottom: 0.75rem;
   padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
   background: var(--color-plan-surface);
   border: 1px solid var(--color-plan-border);
   border-radius: var(--radius-lg);
-  overflow-x: auto;
 }
 
 .toolGroup {
+  padding: 0.25rem 0.5rem;
   margin-bottom: 0.25rem;
   background: var(--color-bg-code);
   border-radius: var(--radius-md);
-  padding: 0.25rem 0.5rem;
 }
 
 .toolGroup > summary {
-  cursor: pointer;
   font-size: 0.8rem;
   color: var(--color-text-secondary);
+  cursor: pointer;
 }
 
 .toolGroupInner {
@@ -900,61 +908,61 @@ a.ciStatus:hover {
 }
 
 .thinkingBlock {
+  padding: 0.25rem 0.5rem;
   margin-bottom: 0.25rem;
   background: var(--color-bg-code);
-  border-radius: var(--radius-md);
-  padding: 0.25rem 0.5rem;
   border-left: 2px solid var(--color-thinking-border);
+  border-radius: var(--radius-md);
 }
 
 .thinkingBlock summary {
   display: flex;
   align-items: baseline;
   min-width: 0;
-  color: var(--color-text-secondary);
-  cursor: pointer;
   font-size: 0.8rem;
   font-style: italic;
+  color: var(--color-text-secondary);
+  cursor: pointer;
 }
 
 .thinkingExcerpt {
   margin-left: 0.5em;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  font-style: normal;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.75rem;
+  font-style: normal;
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 
 .thinkingText {
-  font-size: 0.75rem;
-  white-space: pre-wrap;
-  color: var(--color-text-secondary);
   margin: 0.15rem 0;
+  font-size: 0.75rem;
   line-height: 1.4;
-  word-break: break-word;
+  color: var(--color-text-secondary);
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .toolBlock {
+  padding: 0.25rem 0.5rem;
   margin-bottom: 0.25rem;
   background: var(--color-bg-input);
   border-radius: var(--radius-md);
-  padding: 0.25rem 0.5rem;
 }
 
 .toolBlock summary {
-  cursor: pointer;
   font-size: 0.85rem;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .toolSummaryContent {
   display: inline-flex;
+  gap: 0.5rem;
+  align-items: baseline;
   width: calc(100% - 1rem);
   min-width: 0;
-  align-items: baseline;
-  gap: 0.5rem;
   vertical-align: top;
 }
 
@@ -965,52 +973,52 @@ a.ciStatus:hover {
 }
 
 .toolBlockPre {
-  font-size: 0.75rem;
-  white-space: pre-wrap;
   max-height: 200px;
   overflow: auto;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
 }
 
 .toolInputList {
-  font-size: 0.75rem;
   margin: 0.15rem 0;
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 
 .toolInputRow {
+  overflow-wrap: break-word;
   white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .toolInputKey {
-  color: var(--color-text-tertiary);
   font-weight: 500;
+  color: var(--color-text-tertiary);
 }
 
 .toolInputBlock {
-  margin: 0;
   padding-left: 1em;
+  margin: 0;
+  overflow-wrap: break-word;
   white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .fileChangesInput {
-  font-size: 0.75rem;
   margin: 0.15rem 0;
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 
 .toolPatchFile {
-  margin-top: 0.35rem;
   padding-left: 0.5rem;
+  margin-top: 0.35rem;
   border-left: 2px solid var(--color-border);
 }
 
 .toolPatchPath {
-  color: var(--color-text-secondary);
-  font-weight: 600;
   margin-bottom: 0.15rem;
-  word-break: break-word;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  overflow-wrap: break-word;
 }
 
 .subagentList {
@@ -1031,9 +1039,9 @@ a.ciStatus:hover {
 
 .subagentHead {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
 }
 
 .subagentAgent {
@@ -1047,42 +1055,42 @@ a.ciStatus:hover {
 
 .subagentTask {
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
   color: var(--color-text-secondary);
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .elidedTurn {
   display: flex;
-  width: 100%;
   align-items: baseline;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
   margin-top: 0.35rem;
   margin-bottom: 0.35rem;
-  background: var(--color-primary-container);
-  border-radius: var(--radius-md);
-  padding: 0.25rem 0.5rem;
   font-size: 0.8rem;
   color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
+  border-radius: var(--radius-md);
 }
 
 .turnToggle {
   display: flex;
-  min-width: 0;
   flex: 1;
   align-items: baseline;
+  min-width: 0;
   padding: 0;
-  border: none;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
   font: inherit;
+  color: inherit;
   text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
 }
 
 .turnToggle::before {
-  content: "▶";
   margin-right: 0.4em;
   font-size: 0.7em;
+  content: "▶";
 }
 
 .turnToggle:focus-visible {
@@ -1098,10 +1106,10 @@ a.ciStatus:hover {
 }
 
 .turnDuration {
-  margin-left: auto;
   padding-left: 0.75rem;
-  color: var(--color-text-tertiary);
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
 }
 
@@ -1110,8 +1118,8 @@ a.ciStatus:hover {
 }
 
 .elidedTurnExpanded {
-  background: var(--color-primary-container-hover);
   margin-bottom: 0.1rem;
+  background: var(--color-primary-container-hover);
 }
 
 .elidedTurnExpanded .turnToggle::before {
@@ -1122,60 +1130,60 @@ a.ciStatus:hover {
    padding-bottom: 1px prevents margin-collapse of the last child's bottom-margin so the border
    extends flush to the next sibling item, making the line appear continuous. */
 .indentSession {
-  border-left: 3px solid var(--color-border);
-  padding-left: 6px;
   padding-bottom: 1px;
+  padding-left: 6px;
   margin-left: 2px;
+  border-left: 3px solid var(--color-border);
 }
 
 .indentTurn {
-  border-left: 2px solid var(--color-border-light);
-  padding-left: 6px;
   padding-bottom: 1px;
+  padding-left: 6px;
   margin-left: 2px;
+  border-left: 2px solid var(--color-border-light);
 }
 
 /* Session-level eliding: visually heavier than turn eliding to reflect the hierarchy. */
 .sessionElided {
   display: flex;
-  width: 100%;
   align-items: baseline;
-  margin-bottom: 0.4rem;
-  background: var(--color-session-bg);
-  border-radius: var(--radius-md);
+  width: 100%;
   padding: 0.3rem 0.6rem;
+  margin-bottom: 0.4rem;
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--color-on-primary-container);
+  background: var(--color-session-bg);
+  border-radius: var(--radius-md);
 }
 
 .sessionToggle {
   display: flex;
-  min-width: 0;
   flex: 1;
   align-items: baseline;
+  min-width: 0;
   padding: 0;
-  border: none;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
   font: inherit;
   font-weight: inherit;
+  color: inherit;
   text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
 }
 
 .sessionDuration {
-  margin-left: auto;
   padding-left: 0.75rem;
-  color: var(--color-text-tertiary);
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
 }
 
 .sessionToggle::before {
-  content: "▶";
   margin-right: 0.4em;
   font-size: 0.7em;
+  content: "▶";
 }
 
 .sessionToggle:focus-visible {
@@ -1188,15 +1196,15 @@ a.ciStatus:hover {
 }
 
 .sessionElidedExpanded {
-  background: var(--color-session-bg-hover);
   margin-bottom: 0.1rem;
+  background: var(--color-session-bg-hover);
 }
 
 .sessionElidedExpanded .sessionToggle::before {
   content: "▼";
 }
 
-@keyframes toolSpin {
+@keyframes tool-spin {
   to {
     transform: rotate(360deg);
   }
@@ -1207,111 +1215,111 @@ a.ciStatus:hover {
   width: 0.7em;
   height: 0.7em;
   margin-right: 0.4em;
+  vertical-align: middle;
   border: 2px solid var(--color-border-medium);
   border-top-color: var(--color-text-tertiary);
   border-radius: 50%;
-  animation: toolSpin 0.8s linear infinite;
-  vertical-align: middle;
+  animation: tool-spin 0.8s linear infinite;
 }
 
 .toolDone {
   margin-right: 0.3em;
-  color: var(--color-success);
-  font-weight: bold;
   font-size: 0.85em;
+  font-weight: bold;
+  color: var(--color-success);
 }
 
 .toolBackground {
   margin-right: 0.3em;
-  color: var(--color-text-muted);
-  font-weight: bold;
   font-size: 0.85em;
+  font-weight: bold;
+  color: var(--color-text-muted);
 }
 
 .toolDetail {
   margin-left: 0.5em;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 
 .toolDuration {
-  margin-left: auto;
   flex-shrink: 0;
+  margin-left: auto;
   font-size: 0.75rem;
-  color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
 }
 
 .toolError {
   margin-left: 0.5em;
   font-size: 0.75rem;
-  color: var(--color-error);
   font-weight: bold;
+  color: var(--color-error);
 }
 
 .toolErrorPre {
-  font-size: 0.75rem;
-  white-space: pre-wrap;
   max-height: 150px;
-  overflow: auto;
-  color: var(--color-error);
-  background: var(--color-danger-surface);
   padding: 0.25rem 0.5rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  color: var(--color-error);
+  white-space: pre-wrap;
+  background: var(--color-danger-surface);
   border-radius: var(--radius-sm);
 }
 
 .toolOutputDelta {
-  font-size: 0.75rem;
-  white-space: pre-wrap;
   max-height: 200px;
-  overflow: auto;
-  color: var(--color-text-muted);
   padding: 0.25rem 0.5rem;
-  border-radius: var(--radius-sm);
+  overflow: auto;
   font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  border-radius: var(--radius-sm);
 }
 
 .loadInputBtn {
-  font-size: 0.75rem;
   padding: 0.25rem 0.75rem;
   margin: 0.25rem 0.5rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-input);
+  font-size: 0.75rem;
   color: var(--color-text-muted);
   cursor: pointer;
-}
-
-.loadInputBtn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .loadInputBtn:disabled {
-  opacity: 0.6;
   cursor: default;
+  opacity: 0.6;
+}
+
+.loadInputBtn:hover:not(:disabled) {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
 }
 
 .usageMeta {
+  padding: 0.1rem 0.5rem;
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  padding: 0.1rem 0.5rem;
 }
 
 .askGroup {
-  margin-bottom: 0.5rem;
   padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--color-secondary-container);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-secondary-container);
 }
 
 .askGroupActive {
-  border-color: var(--color-primary);
   background: var(--color-primary-container);
+  border-color: var(--color-primary);
 }
 
 .askQuestion {
@@ -1323,16 +1331,16 @@ a.ciStatus:hover {
 }
 
 .askHeader {
+  margin-bottom: 0.15rem;
   font-size: 0.75rem;
   font-weight: 600;
-  text-transform: uppercase;
   color: var(--color-text-tertiary);
-  margin-bottom: 0.15rem;
+  text-transform: uppercase;
 }
 
 .askText {
-  font-size: 0.85rem;
   margin-bottom: 0.4rem;
+  font-size: 0.85rem;
 }
 
 .askOptions {
@@ -1345,13 +1353,13 @@ a.ciStatus:hover {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  border: 1px solid var(--color-border-medium);
-  border-radius: var(--radius-lg);
   padding: 0.35rem 0.6rem;
-  background: var(--color-bg-elevated);
-  cursor: pointer;
   font-size: 0.8rem;
   text-align: left;
+  cursor: pointer;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-lg);
 }
 
 .askChip:disabled {
@@ -1360,8 +1368,8 @@ a.ciStatus:hover {
 }
 
 .askChipSelected {
-  border-color: var(--color-primary);
   background: var(--color-user-msg-bg);
+  border-color: var(--color-primary);
 }
 
 .askChipLabel {
@@ -1369,36 +1377,36 @@ a.ciStatus:hover {
 }
 
 .askChipDesc {
+  margin-top: 0.1rem;
   font-size: 0.7rem;
   color: var(--color-text-secondary);
-  margin-top: 0.1rem;
 }
 
 .askOtherInput {
+  box-sizing: border-box;
   display: block;
   width: 100%;
-  box-sizing: border-box;
-  margin-top: 0.35rem;
+  max-height: 10rem;
   padding: 0.35rem;
+  margin-top: 0.35rem;
+  overflow-y: auto;
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  resize: none;
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-md);
-  font-size: 0.8rem;
-  resize: none;
-  font-family: inherit;
-  line-height: 1.4;
-  max-height: 10rem;
-  overflow-y: auto;
 }
 
 .askSubmit {
-  margin-top: 0.5rem;
   padding: 0.4rem 1rem;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-primary);
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
   color: var(--color-on-primary);
   cursor: pointer;
-  font-size: 0.85rem;
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-md);
 }
 
 .askSubmit:hover {
@@ -1421,17 +1429,17 @@ a.ciStatus:hover {
 .userInputImage {
   max-width: min(100%, 720px);
   height: auto;
-  border-radius: var(--radius-md);
   border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-md);
 }
 
 .safetyWarning {
-  margin-top: 0.5rem;
   padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-lg);
-  font-size: 0.8rem;
 }
 
 .safetyWarning strong {
@@ -1439,8 +1447,8 @@ a.ciStatus:hover {
 }
 
 .safetyWarning ul {
-  margin: 0.25rem 0 0.5rem;
   padding-left: 1.25rem;
+  margin: 0.25rem 0 0.5rem;
 }
 
 .safetyWarning li {
@@ -1455,24 +1463,20 @@ a.ciStatus:hover {
 
 .syncDropdown {
   position: absolute;
-  bottom: 100%;
   right: 0;
+  bottom: 100%;
   margin-bottom: 2px;
 }
 
 .contextMenuToggle {
-  border: 1px solid var(--color-border-medium);
-  background: var(--color-bg-input);
-  cursor: pointer;
-  font-size: 0.9rem;
   padding: 0.4rem 0.5rem;
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
+  font-size: 0.9rem;
   line-height: 1;
-}
-
-.contextMenuToggle:hover:not(:disabled) {
-  background: var(--color-border-light);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
 }
 
 .contextMenuToggle:disabled {
@@ -1480,8 +1484,12 @@ a.ciStatus:hover {
   opacity: 0.5;
 }
 
+.contextMenuToggle:hover:not(:disabled) {
+  background: var(--color-border-light);
+}
+
 /* Mobile: <=768px */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .container {
     margin: 0 -0.5rem;
   }
@@ -1500,9 +1508,9 @@ a.ciStatus:hover {
 
   .messageArea {
     min-height: 0;
-    border-radius: 0;
-    border-left: none;
     border-right: none;
+    border-left: none;
+    border-radius: 0;
   }
 
   .toolBlockPre {

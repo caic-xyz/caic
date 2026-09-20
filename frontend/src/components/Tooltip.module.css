@@ -6,13 +6,13 @@
 
 .popup {
   position: fixed;
-  background: var(--color-tooltip-bg);
-  color: var(--color-on-tooltip);
+  z-index: 1000;
+  padding: 0.3rem 0.5rem;
   font-size: 0.75rem;
   line-height: 1.3;
-  padding: 0.3rem 0.5rem;
-  border-radius: var(--radius-md);
+  color: var(--color-on-tooltip);
   white-space: pre-line;
   pointer-events: none;
-  z-index: 1000;
+  background: var(--color-tooltip-bg);
+  border-radius: var(--radius-md);
 }

@@ -1,6 +1,6 @@
 // Shared task actions menu used by task details and task-card context menus.
 
-import { Match, Show, Switch, type JSX } from "solid-js";
+import { Match, Show, Switch } from "solid-js";
 import BlockIcon from "@material-symbols/svg-400/outlined/block.svg?solid";
 import CompressIcon from "@material-symbols/svg-400/outlined/compress.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
@@ -15,7 +15,7 @@ import styles from "./TaskActionsMenu.module.css";
 
 interface TaskActionsMenuProps {
   class?: string;
-  style?: JSX.CSSProperties;
+  position?: { x: number; y: number };
   menuRef?: (element: HTMLDivElement) => void;
   forge?: string;
   forgePR?: number;
@@ -39,8 +39,11 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
   return (
     <div
       ref={(element) => props.menuRef?.(element)}
-      class={`${styles.menu} ${props.class ?? ""}`}
-      style={props.style}
+      class={`${styles.menu} ${props.position ? styles.menuPositioned : ""} ${props.class ?? ""}`}
+      style={{
+        "--menu-left": props.position ? `${props.position.x}px` : "auto",
+        "--menu-top": props.position ? `${props.position.y}px` : "auto",
+      }}
       role="menu"
     >
       <button

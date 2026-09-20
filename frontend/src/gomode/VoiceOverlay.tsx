@@ -143,7 +143,7 @@ export default function VoiceOverlay(props: Props) {
 
   return (
     <>
-      <div style={{ height: `${spacerHeight()}px`, "flex-shrink": "0" }} aria-hidden="true" />
+      <div class={styles.spacer} style={{ "--spacer-height": `${spacerHeight()}px` }} aria-hidden="true" />
       <div class={styles.panel} ref={panelRef} role="region" aria-label="Voice assistant">
         <div class={styles.panelInner}>
           {/* Idle state: mic button right-aligned */}
@@ -219,7 +219,7 @@ function ConnectingPanel(props: { status: string; onDisconnect: () => void }) {
 function ErrorPanel(props: { error: string; onRetry: () => void }) {
   return (
     <div class={styles.row}>
-      <MicIcon width="1.1em" height="1.1em" style={{ color: "var(--color-danger)" }} />
+      <MicIcon width="1.1em" height="1.1em" class={styles.micIconError} />
       <span class={styles.statusError}>{props.error}</span>
       <button
         type="button"
@@ -338,10 +338,7 @@ function MicLevelBars(barProps: { micLevel: number }) {
           return (
             <div
               class={styles.micBar}
-              style={{
-                height: `${height()}px`,
-                "transition-duration": `${duration}ms`,
-              }}
+              style={{ "--mic-bar-height": `${height()}px`, "--mic-bar-duration": `${duration}ms` }}
             />
           );
         }}

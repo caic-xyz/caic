@@ -8,7 +8,21 @@ import styles from "./WidgetCard.module.css";
 
 import widgetShellHTML from "./WidgetShell.html?raw";
 
+// The shell document is sandboxed and cannot inherit tokens from this document, so copy the resolved
+// shell colors into its srcdoc.
+const SHELL_TOKENS = ["--color-widget-shell-bg", "--color-widget-shell-fg"] as const;
+
+function widgetShellDocument(): string {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const declarations = SHELL_TOKENS.map((token) => `${token}: ${rootStyle.getPropertyValue(token).trim()}`).filter(
+    (declaration) => !declaration.endsWith(":"),
+  );
+  if (declarations.length === 0) return widgetShellHTML;
+  return widgetShellHTML.replace("</head>", `<style>:root { ${declarations.join("; ")} }</style></head>`);
+}
+
 export default function WidgetCard(props: { group: MessageGroup }) {
+  const shellDocument = widgetShellDocument();
   const [iframeHeight, setIframeHeight] = createSignal(400);
   const [iframeReady, setIframeReady] = createSignal(false);
   const [fullscreen, setFullscreen] = createSignal(false);
@@ -134,8 +148,8 @@ export default function WidgetCard(props: { group: MessageGroup }) {
           title={props.group.widgetTitle || "Widget"}
           class={styles.widgetIframe}
           sandbox="allow-scripts"
-          srcdoc={widgetShellHTML}
-          style={{ height: `${iframeHeight()}px` }}
+          srcdoc={shellDocument}
+          style={{ "--iframe-height": `${iframeHeight()}px` }}
         />
       </div>
       <Show when={fullscreen()}>
@@ -164,7 +178,7 @@ export default function WidgetCard(props: { group: MessageGroup }) {
               title={props.group.widgetTitle || "Widget"}
               class={styles.fullscreenIframe}
               sandbox="allow-scripts"
-              srcdoc={widgetShellHTML}
+              srcdoc={shellDocument}
             />
           </div>
         </Portal>

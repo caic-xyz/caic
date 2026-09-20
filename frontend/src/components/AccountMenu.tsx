@@ -27,7 +27,7 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
             <span class={styles.dropdownUser}>{user().username}</span>
           </Show>
           <A class={styles.dropdownItem} href="/settings" role="menuitem" onClick={() => setMenuOpen(false)}>
-            <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
+            <SettingsIcon width="1em" height="1em" class={styles.dropdownItemIcon} />
             Settings
           </A>
           <button

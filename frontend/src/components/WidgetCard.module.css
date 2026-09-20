@@ -1,16 +1,16 @@
 /* WidgetCard: sandboxed iframe for agent-generated HTML widgets. */
 
 .widgetCard {
-  border: 1px solid var(--color-widget-border, var(--color-border-medium));
-  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--color-widget-bg, var(--color-bg-surface));
+  border: 1px solid var(--color-widget-border, var(--color-border-medium));
+  border-radius: var(--radius-lg);
 }
 
 .widgetHeader {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
   color: var(--color-text-secondary);
@@ -27,67 +27,70 @@
 }
 
 .widgetIframe {
-  border: none;
-  width: 100%;
-  min-height: 100px;
+  --iframe-height: 400px;
+
   display: block;
+  width: 100%;
+  height: var(--iframe-height);
+  min-height: 100px;
+  border: none;
 }
 
 .fullscreenBtn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  cursor: pointer;
   padding: 0.2rem 0.4rem;
+  margin-left: auto;
   font-size: 0.85rem;
   color: var(--color-text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
   border-radius: var(--radius-sm);
 }
 
 .fullscreenBtn:hover {
-  background: var(--color-bg-input);
   color: var(--color-text-secondary);
+  background: var(--color-bg-input);
 }
 
 .fullscreenOverlay {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay-strong);
+  z-index: 1000;
   display: flex;
   flex-direction: column;
-  z-index: 1000;
+  background: var(--color-overlay-strong);
 }
 
 .fullscreenHeader {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   padding: 0.5rem 0.75rem;
-  background: var(--color-bg-surface);
-  border-bottom: 1px solid var(--color-border-light);
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .fullscreenCloseBtn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  cursor: pointer;
   padding: 0.2rem 0.5rem;
+  margin-left: auto;
   font-size: 1rem;
   color: var(--color-text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
   border-radius: var(--radius-sm);
 }
 
 .fullscreenCloseBtn:hover {
-  background: var(--color-bg-input);
   color: var(--color-text-secondary);
+  background: var(--color-bg-input);
 }
 
 .fullscreenIframe {
-  border: none;
   flex: 1;
   width: 100%;
   background: var(--color-bg-elevated);
+  border: none;
 }

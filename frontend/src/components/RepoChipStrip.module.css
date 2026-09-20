@@ -3,16 +3,16 @@
 .repoChips {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 0.35rem;
+  align-items: center;
 }
 
 .repoChip {
   display: inline-flex;
   align-items: center;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-input);
   overflow: visible;
+  background: var(--color-bg-input);
+  border-radius: var(--radius-md);
 }
 
 .chipLabel {
@@ -20,12 +20,12 @@
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.4;
+  color: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
   border: none;
   border-radius: var(--radius-md) 0 0 var(--radius-md);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  white-space: nowrap;
 }
 
 .chipLabel:hover {
@@ -38,9 +38,9 @@
 
 .branchOption {
   display: inline-flex;
+  gap: 1rem;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
   width: 100%;
 }
 
@@ -65,11 +65,11 @@
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.4;
-  border: none;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
 .chipRemove:hover {
@@ -85,13 +85,13 @@
   padding: 0.35rem 0.6rem;
   font: inherit;
   font-size: 0.9rem;
+  font-weight: bold;
   line-height: 1.4;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-input);
   color: inherit;
   cursor: pointer;
-  font-weight: bold;
+  background: var(--color-bg-input);
+  border: none;
+  border-radius: var(--radius-md);
 }
 
 .addRepoBtn:hover {
@@ -106,20 +106,20 @@
   padding: 0.35rem 0.6rem;
   font: inherit;
   font-size: 0.9rem;
+  font-weight: bold;
   line-height: 1.4;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-input);
   color: inherit;
   cursor: pointer;
-  font-weight: bold;
+  background: var(--color-bg-input);
+  border: none;
+  border-radius: var(--radius-md);
+}
+
+.cloneButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .cloneButton:hover:not(:disabled) {
   background: var(--color-bg-input-hover);
-}
-
-.cloneButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }

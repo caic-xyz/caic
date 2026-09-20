@@ -141,17 +141,21 @@ lint-go: tools
 lint-frontend: $(FRONTEND_STAMP)
 	@pnpm --silent typecheck
 	@pnpm --silent lint
-	@python3 scripts/lint_css_vars.py
+	@pnpm --silent lint:style
+	@node scripts/lint_frontend_styles.mjs
 
 # Apply and verify the shared formatters: prettier for the web and prose sources,
 # gofmt and goimports through golangci-lint for Go, ruff format for the Python
 # scripts, and shfmt for the shell scripts.
 # Prettier skips whatever .prettierignore excludes (locks, generated code, testdata).
+# The stylelint fixer runs last: its cascade-sensitive rewrites must not be undone by
+# another formatter.
 format: tools format-kotlin $(FRONTEND_STAMP)
 	@pnpm --silent format
 	@golangci-lint fmt
 	@ruff format --quiet .
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || shfmt -w $$files
+	@pnpm --silent lint:style:fix
 
 format-check: tools $(FRONTEND_STAMP)
 	@pnpm --silent format:check

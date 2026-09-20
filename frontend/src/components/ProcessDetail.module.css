@@ -2,27 +2,27 @@
 
 .container {
   display: flex;
-  flex-direction: column;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
 }
 
 .header {
   display: flex;
-  align-items: center;
   gap: 0.75rem;
+  align-items: center;
   margin-bottom: 0.75rem;
 }
 
 .backBtn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  padding: 4px;
   display: flex;
   align-items: center;
+  padding: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
 }
 
 .backBtn:hover {
@@ -31,8 +31,8 @@
 
 .headerMeta {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   font-size: 0.8rem;
   color: var(--color-text-muted);
 }
@@ -43,16 +43,16 @@
 }
 
 .headerBranch {
+  padding: 0 0.35rem;
   font-family: monospace;
   background: var(--color-bg-hover);
   border-radius: var(--radius-sm);
-  padding: 0 0.35rem;
 }
 
 .toolbar {
   display: flex;
-  align-items: center;
   gap: 0.4rem;
+  align-items: center;
   margin-bottom: 0.5rem;
 }
 
@@ -63,21 +63,21 @@
 }
 
 .toolbarBtn {
-  border: 1px solid var(--color-border-light);
-  background: transparent;
-  cursor: pointer;
-  font-size: 0.7rem;
   padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
   color: var(--color-text-tertiary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
   transition:
     background 0.15s,
     color 0.15s;
 }
 
 .toolbarBtn:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
 }
 
 .content {
@@ -88,9 +88,9 @@
 .loading,
 .error,
 .empty {
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
   padding: 1rem 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }
 
 .error {
@@ -99,38 +99,38 @@
 
 .table {
   width: 100%;
-  border-collapse: collapse;
   font-size: 0.8rem;
+  border-collapse: collapse;
 }
 
 .th {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--color-text-tertiary);
-  text-align: left;
-  padding: 0.3rem 0.4rem;
-  border-bottom: 1px solid var(--color-border-light);
   position: sticky;
   top: 0;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .td {
   padding: 0.2rem 0.4rem;
   font-variant-numeric: tabular-nums;
+  vertical-align: baseline;
   color: var(--color-text-secondary);
   white-space: nowrap;
-  vertical-align: baseline;
   border-bottom: 1px solid var(--color-border-light);
 }
 
 .cmd {
-  white-space: normal;
-  word-break: break-all;
   min-width: 300px;
   max-width: 700px;
+  word-break: break-all;
+  white-space: normal;
 }
 
 .actionsHdr {
@@ -138,31 +138,38 @@
 }
 
 .state {
-  font-weight: 700;
+  --state-color: inherit;
+
   font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--state-color);
 }
 
 .actionsRow {
   display: flex;
-  align-items: center;
   gap: 0.25rem;
+  align-items: center;
 }
 
 .treeToggle {
+  --tree-indent: 0;
+
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: flex-end;
-  flex-shrink: 0;
+  width: var(--tree-indent);
+  min-width: var(--tree-indent);
 }
 
 .toggleBtn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  padding: 0;
   display: flex;
   align-items: center;
+  padding: 0;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  background: none;
+  border: none;
   border-radius: var(--radius-sm);
   transition: color 0.15s;
 }
@@ -172,29 +179,29 @@
 }
 
 .signalBtn {
-  border: 1px solid var(--color-border-light);
-  background: transparent;
-  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+  font-family: monospace;
   font-size: 0.65rem;
   font-weight: 600;
-  font-family: monospace;
-  padding: 0.1rem 0.35rem;
-  border-radius: var(--radius-sm);
   color: var(--color-warning-text);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
   transition:
     background 0.15s,
     color 0.15s,
     border-color 0.15s;
 }
 
+.signalBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 .signalBtn:hover:not(:disabled) {
   background: var(--color-warning-bg);
   border-color: var(--color-warning-text);
-}
-
-.signalBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .signalKill {

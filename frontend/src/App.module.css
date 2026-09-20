@@ -3,38 +3,38 @@
 .app {
   position: fixed;
   inset: 0;
-  width: min(100%, 1200px);
-  margin: 0 auto;
-  padding: 0.5rem 1rem 0;
-  font-family: system-ui;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
+  width: min(100%, 1200px);
+  padding: 0.5rem 1rem 0;
+  margin: 0 auto;
   overflow: hidden;
+  font-family: system-ui;
 }
 
 .navbar {
   display: flex;
-  align-items: center;
   gap: 0.75rem;
+  align-items: center;
   margin-bottom: 0.75rem;
 }
 
 .title {
+  align-self: baseline;
   margin: 0;
   font-size: 1.5rem;
   line-height: 1;
-  align-self: baseline;
 }
 
 .titleButton {
   padding: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
   font: inherit;
   line-height: inherit;
+  color: inherit;
   cursor: pointer;
+  background: transparent;
+  border: none;
 }
 
 .titleButton:hover {
@@ -42,9 +42,9 @@
 }
 
 .subtitle {
+  align-self: baseline;
   font-size: 0.85rem;
   color: var(--color-text-muted);
-  align-self: baseline;
 }
 
 .dotConnected,
@@ -52,11 +52,11 @@
 .dotSettledError,
 .dotSettledLoading {
   display: inline-block;
+  flex-shrink: 0;
   width: 0.5rem;
   height: 0.5rem;
-  border-radius: 50%;
-  flex-shrink: 0;
   vertical-align: middle;
+  border-radius: 50%;
 }
 
 .dotConnected {
@@ -78,11 +78,11 @@
 .errorFallback {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 0.75rem;
+  align-items: flex-start;
+  max-width: 600px;
   padding: 1.5rem;
   margin: auto;
-  max-width: 600px;
 }
 
 .errorTitle {
@@ -92,17 +92,17 @@
 }
 
 .errorMessage {
-  margin: 0;
-  padding: 0.75rem;
-  width: 100%;
   box-sizing: border-box;
+  width: 100%;
+  padding: 0.75rem;
+  margin: 0;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
   background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  white-space: pre-wrap;
-  overflow-x: auto;
-  font-size: 0.85rem;
 }
 
 .errorActions {
@@ -121,18 +121,18 @@
 }
 
 .errorReport {
-  margin: 0.5rem 0 0;
   padding: 0.75rem;
+  margin: 0.5rem 0 0;
   overflow-x: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
   background: var(--color-surface-variant);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  white-space: pre-wrap;
-  font-size: 0.8rem;
 }
 
 /* Mobile: <=768px */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .app {
     padding: 0.5rem 0.5rem 0;
     overflow-y: auto;
@@ -151,7 +151,7 @@
   }
 }
 
-@media (max-width: 480px) {
+@media (width <= 480px) {
   .navbar {
     flex-wrap: wrap;
     row-gap: 0.5rem;

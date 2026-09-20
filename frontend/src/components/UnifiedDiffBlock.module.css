@@ -1,38 +1,22 @@
 /* Styles for the shared UnifiedDiffBlock component. */
 
 .block {
-  --diff-code-bg: #1e1e1e;
-  --diff-code-fg: #d4d4d4;
-  --diff-added-line: #4ec94e;
-  --diff-deleted-line: #f44;
-  --diff-added-whitespace-line: #6daa6d;
-  --diff-deleted-whitespace-line: #d07373;
-  --diff-moved-added-line: #7dd3fc;
-  --diff-moved-added-alt-line: #a7f3d0;
-  --diff-moved-deleted-line: #f0abfc;
-  --diff-moved-deleted-alt-line: #fcd34d;
-  --diff-moved-added-bg: #102f3d;
-  --diff-moved-added-alt-bg: #123226;
-  --diff-moved-deleted-bg: #351836;
-  --diff-moved-deleted-alt-bg: #3b2b0b;
-  --diff-hunk: #b48ead;
-
-  margin: 0.25rem 0;
   padding: 0.5rem;
-  background: var(--diff-code-bg);
-  color: var(--diff-code-fg);
+  margin: 0.25rem 0;
+  overflow-x: auto;
   font-size: 0.75rem;
   line-height: 1.4;
+  color: var(--color-diff-block-fg);
+  background: var(--color-diff-block-bg);
   border-radius: var(--radius-md);
-  overflow-x: auto;
 }
 
 .compact {
-  margin: 0.1rem 0 0;
-  padding: 0.35rem 0.5rem;
-  border-radius: var(--radius-sm);
   max-height: 14rem;
+  padding: 0.35rem 0.5rem;
+  margin: 0.1rem 0 0;
   overflow: auto;
+  border-radius: var(--radius-sm);
 }
 
 .line {
@@ -44,48 +28,48 @@
 }
 
 .lineWrap .line {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .lineAdded {
-  color: var(--diff-added-line);
+  color: var(--color-diff-block-line-added);
 }
 
 .lineDeleted {
-  color: var(--diff-deleted-line);
+  color: var(--color-diff-block-line-deleted);
 }
 
 .lineAddedWhitespace {
-  color: var(--diff-added-whitespace-line);
+  color: var(--color-diff-block-line-added-whitespace);
 }
 
 .lineDeletedWhitespace {
-  color: var(--diff-deleted-whitespace-line);
+  color: var(--color-diff-block-line-deleted-whitespace);
 }
 
 .lineMovedAdded {
-  color: var(--diff-moved-added-line);
-  background: var(--diff-moved-added-bg);
+  color: var(--color-diff-block-move-added);
+  background: var(--color-diff-block-move-added-bg);
 }
 
 .lineMovedAddedAlt {
-  color: var(--diff-moved-added-alt-line);
-  background: var(--diff-moved-added-alt-bg);
+  color: var(--color-diff-block-move-added-alt);
+  background: var(--color-diff-block-move-added-alt-bg);
 }
 
 .lineMovedDeleted {
-  color: var(--diff-moved-deleted-line);
-  background: var(--diff-moved-deleted-bg);
+  color: var(--color-diff-block-move-deleted);
+  background: var(--color-diff-block-move-deleted-bg);
 }
 
 .lineMovedDeletedAlt {
-  color: var(--diff-moved-deleted-alt-line);
-  background: var(--diff-moved-deleted-alt-bg);
+  color: var(--color-diff-block-move-deleted-alt);
+  background: var(--color-diff-block-move-deleted-alt-bg);
 }
 
 .lineHunk {
-  color: var(--diff-hunk);
+  color: var(--color-diff-block-hunk);
 }
 
 .lineHeader {

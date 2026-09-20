@@ -2,26 +2,33 @@
 
 /* ---- Full-width bottom panel ---- */
 
+.spacer {
+  --spacer-height: 0;
+
+  flex-shrink: 0;
+  height: var(--spacer-height);
+}
+
 .panel {
   position: fixed;
+  right: 0;
   bottom: 0;
   left: 0;
-  right: 0;
   z-index: 50;
-  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-bg-surface));
-  border-top: 1px solid var(--color-border);
   font-family: system-ui;
   font-size: 0.9rem;
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-bg-surface));
+  border-top: 1px solid var(--color-border);
 }
 
 .panelInner {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 1rem 0.5rem;
   box-sizing: border-box;
+  max-width: 1200px;
+  padding: 0 1rem 0.5rem;
+  margin: 0 auto;
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .panelInner {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
   }
@@ -31,8 +38,8 @@
 
 .row {
   display: flex;
-  align-items: center;
   gap: 0.75rem;
+  align-items: center;
 }
 
 .rowEnd {
@@ -42,15 +49,15 @@
 
 .rowSpaced {
   display: flex;
-  align-items: center;
   gap: 0.75rem;
+  align-items: center;
   margin-bottom: 0.5rem;
 }
 
 .rowLabel {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   margin-top: 0.4rem;
 }
 
@@ -58,17 +65,17 @@
 
 .micButton {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
   padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  background: var(--color-bg-surface);
   color: var(--color-text-muted);
   cursor: pointer;
-  flex-shrink: 0;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
   transition:
     color 0.15s,
     background 0.15s,
@@ -76,8 +83,8 @@
 }
 
 .micButton:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
   border-color: var(--color-text-muted);
 }
 
@@ -85,10 +92,10 @@
 
 .statusText {
   flex: 1;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 .statusConnecting {
@@ -104,10 +111,15 @@
   color: var(--color-danger);
 }
 
+.micIconError {
+  color: var(--color-danger);
+}
+
 @keyframes pulse {
   from {
     opacity: 0.5;
   }
+
   to {
     opacity: 1;
   }
@@ -117,25 +129,25 @@
 
 .iconButton {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   width: 2rem;
   height: 2rem;
   padding: 0;
-  border: none;
-  border-radius: var(--radius-md);
-  background: none;
   color: var(--color-text-secondary);
   cursor: pointer;
-  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
   transition:
     background 0.15s,
     color 0.15s;
 }
 
 .iconButton:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
 }
 
 .iconButtonMuted {
@@ -147,22 +159,22 @@
 }
 
 .iconButtonEnd:hover {
-  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
   color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
 }
 
 /* ---- Panel action buttons ---- */
 
 .actionButton {
+  flex-shrink: 0;
   padding: 0.3rem 0.75rem;
   font: inherit;
   font-size: 0.85rem;
-  border: 1px solid var(--color-border-medium);
-  border-radius: var(--radius-md);
-  background: none;
   color: inherit;
   cursor: pointer;
-  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
   transition: background 0.15s;
 }
 
@@ -171,8 +183,8 @@
 }
 
 .actionButtonPrimary {
-  background: var(--color-primary);
   color: var(--color-on-primary);
+  background: var(--color-primary);
   border-color: var(--color-primary);
 }
 
@@ -185,8 +197,8 @@
 
 .deviceRow {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   margin-bottom: 0.25rem;
 }
 
@@ -196,39 +208,44 @@
   padding: 0.25rem 0.4rem;
   font: inherit;
   font-size: 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-surface);
   color: var(--color-text-secondary);
   cursor: pointer;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 /* ---- Mic level bars ---- */
 
 .micBars {
   display: flex;
-  align-items: center;
+  flex-shrink: 0;
   gap: 2px;
+  align-items: center;
   width: 1.5rem;
   height: 1.5rem;
-  flex-shrink: 0;
 }
 
 .micBar {
+  --mic-bar-height: 3px;
+  --mic-bar-duration: 0ms;
+
   width: 3px;
+  height: var(--mic-bar-height);
+  min-height: 3px;
   background: var(--color-primary);
   border-radius: 1px;
-  transition-property: height;
   transition-timing-function: ease-out;
-  min-height: 3px;
+  transition-duration: var(--mic-bar-duration);
+  transition-property: height;
 }
 
 /* ---- Transcript ---- */
 
 .transcriptLabel {
+  flex: 1;
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  flex: 1;
 }
 
 .clearButton {
@@ -238,13 +255,13 @@
   width: 1.5rem;
   height: 1.5rem;
   padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
   font-size: 1rem;
   line-height: 1;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
   transition: background 0.15s;
 }
 
@@ -253,34 +270,34 @@
 }
 
 .transcriptList {
-  max-height: 8rem;
-  overflow-y: auto;
-  margin-top: 0.35rem;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  max-height: 8rem;
+  margin-top: 0.35rem;
+  overflow-y: auto;
 }
 
 .transcriptEntry {
   font-size: 0.8rem;
-  color: var(--color-text-secondary);
   line-height: 1.4;
+  color: var(--color-text-secondary);
 }
 
 .transcriptLabelUser {
-  color: var(--color-primary);
-  font-weight: 600;
   margin-right: 0.2rem;
+  font-weight: 600;
+  color: var(--color-primary);
 }
 
 .transcriptLabelAssistant {
-  color: var(--color-success);
-  font-weight: 600;
   margin-right: 0.2rem;
+  font-weight: 600;
+  color: var(--color-success);
 }
 
 .transcriptPlaceholder {
+  margin-top: 0.35rem;
   font-size: 0.8rem;
   color: var(--color-text-faint);
-  margin-top: 0.35rem;
 }

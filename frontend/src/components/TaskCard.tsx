@@ -476,9 +476,7 @@ export default function TaskCard(props: TaskCardProps) {
                 <span
                   class={styles.badge}
                   data-testid="state-badge"
-                  style={{
-                    background: stale() ? staleStateColor(props.state) : stateColor(props.state),
-                  }}
+                  style={{ "--badge-bg": stale() ? staleStateColor(props.state) : stateColor(props.state) }}
                 >
                   {props.state}
                 </span>
@@ -522,9 +520,10 @@ export default function TaskCard(props: TaskCardProps) {
                   text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
                 >
                   <span
+                    class={styles.tokens}
                     data-testid="task-card-tokens"
                     style={{
-                      color: tokenColor(
+                      "--tokens-color": tokenColor(
                         props.activeInputTokens + props.activeCacheReadTokens,
                         props.contextWindowLimit,
                       ),
@@ -586,7 +585,7 @@ export default function TaskCard(props: TaskCardProps) {
           {(position) => (
             <TaskActionsMenu
               class={styles.contextMenu}
-              style={{ left: `${position.x}px`, top: `${position.y}px` }}
+              position={position}
               menuRef={(element) => {
                 contextMenuRef = element;
                 const bounds = element.getBoundingClientRect();

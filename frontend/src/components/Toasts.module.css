@@ -4,31 +4,31 @@
   position: fixed;
   bottom: 1rem;
   left: 50%;
-  transform: translateX(-50%);
+  z-index: 300;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  z-index: 300;
-  pointer-events: none;
-  max-width: min(32rem, 90vw);
   width: 90vw;
+  max-width: min(32rem, 90vw);
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
 .toast {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  max-height: min(12rem, calc(100vh - 3rem));
   box-sizing: border-box;
-  overflow-y: auto;
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  max-height: min(12rem, calc(100vh - 3rem));
   padding: 0.6rem 0.75rem;
-  border-radius: var(--radius-md);
-  background: var(--color-toast-bg);
-  color: var(--color-on-toast);
+  overflow-y: auto;
   font-size: 0.85rem;
-  box-shadow: 0 4px 12px var(--color-shadow-md);
+  color: var(--color-on-toast);
   pointer-events: auto;
-  animation: toastIn 200ms ease-out;
+  background: var(--color-toast-bg);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px var(--color-shadow-md);
+  animation: toast-in 200ms ease-out;
 }
 
 .toastMessage {
@@ -38,26 +38,27 @@
 }
 
 .toastDismiss {
-  margin-left: auto;
-  padding: 0 0.25rem;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 1.1rem;
-  cursor: pointer;
-  opacity: 0.7;
   flex-shrink: 0;
+  padding: 0 0.25rem;
+  margin-left: auto;
+  font-size: 1.1rem;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  opacity: 0.7;
 }
 
 .toastDismiss:hover {
   opacity: 1;
 }
 
-@keyframes toastIn {
+@keyframes toast-in {
   from {
     opacity: 0;
     transform: translateY(0.5rem);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);

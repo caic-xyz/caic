@@ -9,15 +9,15 @@
 
 .providerPill {
   display: inline-flex;
-  align-items: center;
   gap: 0.3rem;
+  align-items: center;
   padding: 0.15rem 0.45rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border-light);
+  color: inherit;
   white-space: nowrap;
   text-decoration: none;
-  color: inherit;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
 }
 
 a.providerPill {
@@ -31,9 +31,9 @@ a.providerPill:hover {
 .providerLabel {
   font-size: 0.7rem;
   font-weight: 600;
+  font-variant: small-caps;
   color: var(--color-text-muted);
   text-transform: lowercase;
-  font-variant: small-caps;
   letter-spacing: 0.02em;
 }
 
@@ -60,16 +60,16 @@ a.providerPill:hover {
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
 
 .providerLogo {
+  display: block;
+  flex-shrink: 0;
   width: 12px;
   height: 12px;
-  flex-shrink: 0;
-  display: block;
 }
 
 .providerBadges {
@@ -78,53 +78,58 @@ a.providerPill:hover {
 }
 
 .badge {
-  font-size: 0.7rem;
   padding: 0.1rem 0.35rem;
-  border-radius: 3px;
+  font-size: 0.7rem;
   font-weight: 500;
   white-space: nowrap;
+  border-radius: 3px;
 }
 
 .green {
-  background: var(--color-success-bg);
   color: var(--color-success-text);
+  background: var(--color-success-bg);
 }
+
 .yellow {
-  background: var(--color-warning-bg);
   color: var(--color-warning-text);
+  background: var(--color-warning-bg);
 }
+
 .red {
-  background: var(--color-danger-bg);
   color: var(--color-danger-text);
+  background: var(--color-danger-bg);
 }
 
 .disabled {
-  background: var(--color-surface-variant);
   color: var(--color-gray);
   text-decoration: line-through;
+  background: var(--color-surface-variant);
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .usageRow {
     gap: 0.25rem;
   }
+
   .providerPill {
     gap: 0.15rem;
     padding: 0.1rem 0.25rem;
   }
+
   .providerLabel {
     display: none;
   }
+
   .badge {
-    font-size: 0.6rem;
     padding: 0.06rem 0.22rem;
+    font-size: 0.6rem;
   }
 }
 
-@media (max-width: 480px) {
+@media (width <= 480px) {
   .usageRow {
-    order: 1;
     flex-basis: 100%;
+    order: 1;
     margin-left: 0;
   }
 }

@@ -11,11 +11,11 @@
   width: 2rem;
   height: 2rem;
   padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  background: transparent;
   border: none;
   border-radius: 50%;
-  background: transparent;
-  cursor: pointer;
-  overflow: hidden;
 }
 
 .avatarButton:hover {
@@ -25,8 +25,8 @@
 .avatarImg {
   width: 100%;
   height: 100%;
-  border-radius: 50%;
   object-fit: cover;
+  border-radius: 50%;
 }
 
 .avatarInitials {
@@ -35,57 +35,62 @@
   justify-content: center;
   width: 100%;
   height: 100%;
-  border-radius: 50%;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1;
+  color: var(--color-on-primary);
+  background: var(--color-primary);
+  border-radius: 50%;
 }
 
 .userDropdown {
   position: absolute;
   top: calc(100% + 0.25rem);
   right: 0;
+  z-index: 100;
   min-width: 10rem;
   padding: 0.35rem 0;
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-bg-elevated);
   box-shadow: 0 4px 12px var(--color-shadow-sm);
-  z-index: 100;
 }
 
 .dropdownUser {
   display: block;
   padding: 0.4rem 0.75rem;
+  margin-bottom: 0.2rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--color-text-secondary);
   border-bottom: 1px solid var(--color-border-light);
-  margin-bottom: 0.2rem;
 }
 
 .dropdownItem {
+  box-sizing: border-box;
   display: block;
   width: 100%;
-  box-sizing: border-box;
   padding: 0.4rem 0.75rem;
   font: inherit;
   font-size: 0.85rem;
+  color: inherit;
   text-align: left;
   text-decoration: none;
-  border: none;
-  background: transparent;
   cursor: pointer;
-  color: inherit;
+  background: transparent;
+  border: none;
+}
+
+.dropdownItemIcon {
+  margin-right: 0.4em;
+  vertical-align: middle;
 }
 
 .dropdownItem:hover {
   background: var(--color-bg-hover);
 }
 
-@media (max-width: 480px) {
+@media (width <= 480px) {
   .userMenu {
     margin-left: auto;
   }

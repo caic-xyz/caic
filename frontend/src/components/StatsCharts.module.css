@@ -12,18 +12,18 @@
 
 .resourceHeader {
   display: flex;
+  gap: 0.4rem;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.4rem;
   margin-bottom: 0.1rem;
-  color: var(--color-text-secondary);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
 }
 
 .resourceHeader strong {
-  color: var(--color-text-tertiary);
   font-size: 0.7rem;
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
 }
 
@@ -55,9 +55,9 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  color: var(--color-text-muted);
   font-size: 0.64rem;
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
 }
 
 .networkSeriesHeaderTx {
@@ -78,14 +78,14 @@
 
 .resourceRange {
   grid-column: 1 / -1;
-  color: var(--color-text-muted);
   font-size: 0.64rem;
+  color: var(--color-text-muted);
 }
 
 .sampleDetails {
   grid-column: 1 / -1;
-  color: var(--color-text-secondary);
   font-size: 0.68rem;
+  color: var(--color-text-secondary);
 }
 
 .sampleDetails summary {
@@ -107,16 +107,24 @@
 
 .sampleTable {
   width: 100%;
-  border-collapse: collapse;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  border-collapse: collapse;
 }
 
 .sampleTable th,
 .sampleTable td {
   padding: 0.2rem 0.45rem 0.2rem 0;
-  border-bottom: 1px solid var(--color-border-light);
   text-align: right;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.sampleTable th {
+  position: sticky;
+  top: 0;
+  font-size: 0.64rem;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-elevated);
 }
 
 .sampleTable th:first-child,
@@ -124,21 +132,13 @@
   text-align: left;
 }
 
-.sampleTable th {
-  position: sticky;
-  top: 0;
-  background: var(--color-bg-elevated);
-  color: var(--color-text-tertiary);
-  font-size: 0.64rem;
-}
-
 .resourceUnavailable {
   display: flex;
-  height: 58px;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-muted);
+  height: 58px;
   font-size: 0.66rem;
+  color: var(--color-text-muted);
 }
 
 .figure + .figure {
@@ -147,9 +147,9 @@
 
 .title {
   margin-bottom: 0.15rem;
-  color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .chart {
@@ -164,17 +164,17 @@
 .chart :global(.caic-plot-swatches) {
   gap: 0.2rem 0.65rem;
   margin-bottom: 0.15rem;
-  color: var(--color-text-muted);
   font-size: 0.66rem;
+  color: var(--color-text-muted);
 }
 
 .note {
   margin-top: 0.1rem;
-  color: var(--color-text-muted);
   font-size: 0.66rem;
+  color: var(--color-text-muted);
 }
 
-@media (max-width: 480px) {
+@media (width <= 480px) {
   .resourceGrid {
     grid-template-columns: 1fr;
   }

@@ -6,6 +6,7 @@ import { useParams } from "@solidjs/router";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPathForTask } from "../taskPath";
 import { DetailPane } from "../components/Layout";
+import styles from "./VncPage.module.css";
 
 const VncViewer = lazy(() => import("../components/VncViewer"));
 
@@ -24,9 +25,7 @@ export default function VncPage() {
         };
         return (
           <DetailPane>
-            <Suspense
-              fallback={<div style={{ padding: "1rem", color: "var(--color-text-muted)" }}>Loading VNC viewer…</div>}
-            >
+            <Suspense fallback={<div class={styles.loading}>Loading VNC viewer…</div>}>
               <VncViewer
                 taskId={taskId}
                 repo={t()?.repos?.[0]?.name ?? ""}

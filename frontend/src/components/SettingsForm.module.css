@@ -4,8 +4,8 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
   padding: 0.25rem 0 2rem;
+  overflow: auto;
 }
 
 .settingsPanel {
@@ -27,17 +27,21 @@
 
 .settingsLabel {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.25rem;
   font-size: 0.95rem;
   cursor: pointer;
-  margin-bottom: 0.25rem;
 }
 
 .settingsDescription {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
   color: var(--color-text-secondary);
+}
+
+.settingsDescriptionError {
+  color: var(--color-error);
 }
 
 .settingsSection {
@@ -61,10 +65,10 @@
 .settingsInput {
   width: 100%;
   padding: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.9rem;
-  margin-bottom: 0.25rem;
 }
 
 .settingsInput::placeholder {
@@ -84,14 +88,14 @@
 
 .cacheCheckbox {
   display: inline-flex;
-  align-items: center;
   gap: 0.35rem;
+  align-items: center;
   padding: 0.35rem 0.6rem;
-  border-radius: var(--radius-sm);
   font-size: 0.85rem;
   cursor: pointer;
-  border: 1px solid var(--color-border);
   background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   transition:
     background-color 0.15s,
     border-color 0.15s;
@@ -102,8 +106,8 @@
 }
 
 .cacheSize {
-  color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
 }
 
 .cacheCheckbox:hover {
@@ -111,19 +115,18 @@
 }
 
 .cacheCheckbox[data-state="disabled"] {
-  opacity: 0.5;
   text-decoration: line-through;
+  opacity: 0.5;
 }
 
 .cacheMappingRow {
   display: grid;
-  grid-template-columns: 1.5rem minmax(0, 1fr) auto minmax(0, 1fr) auto auto;
   grid-template-areas:
     "toggle host-label . container-label . ."
     "toggle host-input arrow container-input read-only remove"
     ". . . container-hint . .";
-  column-gap: 0.5rem;
-  row-gap: 0.25rem;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto minmax(0, 1fr) auto auto;
+  gap: 0.25rem 0.5rem;
   align-items: center;
   margin-bottom: 0.5rem;
 }
@@ -147,23 +150,28 @@
 .mappingPathLabel {
   display: block;
   margin-bottom: 0.25rem;
-  color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 500;
+  color: var(--color-text-secondary);
 }
 
 .mappingHostInput,
 .mappingContainerInput {
   box-sizing: border-box;
-  margin-bottom: 0;
   min-width: 0;
+  margin-bottom: 0;
 }
 
 .mappingPathHint {
-  grid-area: container-hint;
   display: block;
-  color: var(--color-text-secondary);
+  grid-area: container-hint;
   font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.cacheMappingArrow {
+  grid-area: arrow;
+  color: var(--color-text-secondary);
 }
 
 .cacheMappingRow[data-state="disabled"] .settingsInput,
@@ -172,21 +180,21 @@
 }
 
 .cacheMappingToggle {
-  grid-area: toggle;
   display: inline-flex;
+  grid-area: toggle;
   align-items: center;
   cursor: pointer;
 }
 
 .mountOptionToggle {
-  grid-area: read-only;
   display: inline-flex;
-  align-items: center;
+  grid-area: read-only;
   gap: 0.25rem;
-  color: var(--color-text-secondary);
-  cursor: pointer;
+  align-items: center;
   font-size: 0.85rem;
+  color: var(--color-text-secondary);
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .visuallyHidden {
@@ -196,24 +204,19 @@
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.cacheMappingArrow {
-  grid-area: arrow;
-  color: var(--color-text-secondary);
+  clip-path: inset(50%);
 }
 
 .cacheMappingRemove {
   grid-area: remove;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.25rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
   background: none;
   border: none;
-  font-size: 1.25rem;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  padding: 0.25rem 0.5rem;
 }
 
 .cacheMappingRemove:hover {
@@ -221,19 +224,19 @@
 }
 
 .settingsButton {
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
   background: none;
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 0.5rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  width: 100%;
 }
 
 .settingsButton:hover {
-  border-color: var(--color-primary);
   color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .settingsButton:disabled {
@@ -255,9 +258,9 @@
 
 .oauthGrantCard {
   padding: 0.75rem;
+  background: var(--color-bg-input);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-input);
 }
 
 .oauthGrantCard[data-status="revoked"],
@@ -267,8 +270,8 @@
 
 .oauthGrantHeader {
   display: flex;
-  justify-content: space-between;
   gap: 1rem;
+  justify-content: space-between;
   margin-bottom: 0.5rem;
 }
 
@@ -278,8 +281,8 @@
 
 .oauthGrantMeta,
 .oauthGrantDetails {
-  color: var(--color-text-secondary);
   font-size: 0.82rem;
+  color: var(--color-text-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -290,7 +293,7 @@
 }
 
 .oauthGrantStatus {
-  color: var(--color-text-secondary);
   font-size: 0.8rem;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
 }

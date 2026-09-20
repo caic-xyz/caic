@@ -445,7 +445,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             <Show
               when={!props.oauthGrantError()}
               fallback={
-                <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>
+                <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
                   {props.oauthGrantError()}
                 </p>
               }
@@ -594,7 +594,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                 when={props.checkingUpdate()}
                 fallback={
                   <Show when={props.versionCheckError()}>
-                    <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>
+                    <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
                       Check failed: {props.versionCheckError()}
                     </p>
                   </Show>
@@ -616,7 +616,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   </Show>
                 </p>
                 <Show when={v().checkError}>
-                  <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>
+                  <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
                     Check failed: {v().checkError}
                   </p>
                 </Show>

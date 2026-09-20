@@ -17,9 +17,7 @@ import {
 import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
-import copyIconSVG from "@material-symbols/svg-400/outlined/content_copy.svg?raw";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
-import checkIconSVG from "@material-symbols/svg-400/outlined/check.svg?raw";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
 import type {
@@ -2208,7 +2206,7 @@ const markdownRenderer = {
     const blockClass = token.text.includes("\n")
       ? styles.codeBlock
       : `${styles.codeBlock} ${styles.singleLineCodeBlock}`;
-    return `<div class="${blockClass}"><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true">${copyIconSVG}</span><span class="${styles.checkIcon}" aria-hidden="true">${checkIconSVG}</span></button>${code}</div>\n`;
+    return `<div class="${blockClass}"><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true"></span><span class="${styles.checkIcon}" aria-hidden="true"></span></button>${code}</div>\n`;
   },
 };
 

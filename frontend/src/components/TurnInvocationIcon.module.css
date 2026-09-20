@@ -7,16 +7,30 @@
   width: 1.25rem;
   height: 1.25rem;
   padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
 }
 
 .trigger:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
 }
 
 .trigger:focus-visible,
@@ -34,9 +48,9 @@
 
 .heading {
   display: flex;
+  gap: 1rem;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
   margin-bottom: 1rem;
 }
 
@@ -47,20 +61,6 @@
 
 .heading h2 {
   font-size: 1rem;
-}
-
-.close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  background: transparent;
-  cursor: pointer;
 }
 
 .close:hover {
@@ -79,24 +79,24 @@
 .tokenMetrics > div {
   min-width: 0;
   padding: 0.45rem 0.5rem;
-  border-radius: var(--radius-sm);
   background: var(--color-bg-surface);
+  border-radius: var(--radius-sm);
 }
 
 .metrics dt,
 .tokenMetrics dt {
-  color: var(--color-text-muted);
   font-size: 0.72rem;
+  color: var(--color-text-muted);
 }
 
 .metrics dd,
 .tokenMetrics dd {
   margin: 0.1rem 0 0;
   overflow: hidden;
-  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -109,7 +109,7 @@
   font-size: 0.8rem;
 }
 
-@media (max-width: 360px) {
+@media (width <= 360px) {
   .metrics,
   .tokenMetrics {
     grid-template-columns: 1fr;
