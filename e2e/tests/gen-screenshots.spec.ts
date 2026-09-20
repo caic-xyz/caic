@@ -371,22 +371,22 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Task statistics is a router link to the task's stats route, not a button.
   const taskStatistics = detailHeader.getByRole("link", { name: "Task statistics" });
   await expect(taskStatistics).toBeVisible();
+  const infoLink = detailHeader.getByRole("link", { name: "Task info" });
+  await expect(infoLink).toBeVisible();
   const titleBox = await detailHeader
     .locator(":scope > span")
     .filter({ hasText: "Fix OAuth security hardening" })
     .first()
     .boundingBox();
   expect(titleBox?.width).toBeLessThanOrEqual(128);
-  const [repositoryStateBox, taskStatisticsBox] = await Promise.all([
+  const [repositoryStateBox, infoLinkBox] = await Promise.all([
     headerStats.first().locator("xpath=../..").boundingBox(),
-    taskStatistics.boundingBox(),
+    infoLink.boundingBox(),
   ]);
   expect(repositoryStateBox).not.toBeNull();
-  expect(taskStatisticsBox).not.toBeNull();
+  expect(infoLinkBox).not.toBeNull();
   expect(
-    Math.abs(
-      repositoryStateBox!.y + repositoryStateBox!.height / 2 - taskStatisticsBox!.y - taskStatisticsBox!.height / 2,
-    ),
+    Math.abs(repositoryStateBox!.y + repositoryStateBox!.height / 2 - infoLinkBox!.y - infoLinkBox!.height / 2),
   ).toBeLessThanOrEqual(1);
   await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await captureScreenshot(page, "mobile", "task-detail-header-compact.png");

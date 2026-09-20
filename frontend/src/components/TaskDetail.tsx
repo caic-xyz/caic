@@ -18,6 +18,8 @@ import { A, useLocation } from "@solidjs/router";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
+import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
+import ProcessesIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
 import type {
@@ -1000,8 +1002,8 @@ export default function TaskDetail(props: Props) {
             })()}
           </Show>
         </span>
-        <A class={styles.diffLink} href={`${location.pathname}/info`}>
-          Info
+        <A class={styles.diffLink} href={`${location.pathname}/info`} aria-label="Task info" title="Task info">
+          <InfoIcon width="13" height="13" aria-hidden="true" />
         </A>
         <Show
           when={repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))}
@@ -1039,8 +1041,13 @@ export default function TaskDetail(props: Props) {
             props.taskState !== "failed"
           }
         >
-          <A class={styles.diffLink} href={`${location.pathname}/processes`}>
-            Processes
+          <A
+            class={styles.diffLink}
+            href={`${location.pathname}/processes`}
+            aria-label="Task processes"
+            title="Task processes"
+          >
+            <ProcessesIcon width="13" height="13" aria-hidden="true" />
           </A>
         </Show>
         <Show when={(props.vncPort ?? 0) > 0}>
