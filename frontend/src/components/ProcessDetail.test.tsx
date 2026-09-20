@@ -228,6 +228,11 @@ describe("visibleProcesses", () => {
   });
 });
 
+// Rendering a few hundred jsdom rows under coverage instrumentation can exceed
+// the 5s default test timeout on a loaded CI runner, so these heavy tests set
+// their own generous ceiling.
+const HEAVY_TREE_TIMEOUT = 20_000;
+
 describe("ProcessDetail tree collapsing", () => {
   function chain(length: number): ProcessInfo[] {
     const procs: ProcessInfo[] = [];
@@ -240,7 +245,7 @@ describe("ProcessDetail tree collapsing", () => {
     render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
   }
 
-  it("collapses subtrees past the auto-collapse depth", async () => {
+  it("collapses subtrees past the auto-collapse depth", { timeout: HEAVY_TREE_TIMEOUT }, async () => {
     renderProcesses(chain(200));
 
     expect(await screen.findByText("cmd26")).toBeInTheDocument();
@@ -255,7 +260,7 @@ describe("ProcessDetail tree collapsing", () => {
     expect(screen.getAllByTitle("Collapse children")).toHaveLength(26);
   });
 
-  it("expands and collapses every subtree from the toolbar", async () => {
+  it("expands and collapses every subtree from the toolbar", { timeout: HEAVY_TREE_TIMEOUT }, async () => {
     renderProcesses(chain(200));
 
     expect(await screen.findByText("cmd26")).toBeInTheDocument();
@@ -267,7 +272,7 @@ describe("ProcessDetail tree collapsing", () => {
     expect(screen.queryByText("cmd2")).not.toBeInTheDocument();
   });
 
-  it("renders a 20,000 process chain with a bounded row count", async () => {
+  it("renders a 20,000 process chain with a bounded row count", { timeout: HEAVY_TREE_TIMEOUT }, async () => {
     renderProcesses(chain(20_000));
 
     expect(await screen.findByText("cmd1")).toBeInTheDocument();
