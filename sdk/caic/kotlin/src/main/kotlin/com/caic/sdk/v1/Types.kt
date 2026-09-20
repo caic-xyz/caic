@@ -858,6 +858,18 @@ sealed interface QuotaProvider {
         override val value = "deepseek"
     }
     @Serializable
+    data object Gemini : QuotaProvider {
+        override val value = "gemini"
+    }
+    @Serializable
+    data object Grok : QuotaProvider {
+        override val value = "grok"
+    }
+    @Serializable
+    data object Groq : QuotaProvider {
+        override val value = "groq"
+    }
+    @Serializable
     data object OpenRouter : QuotaProvider {
         override val value = "openrouter"
     }
@@ -893,6 +905,9 @@ object QuotaProviderSerializer : KSerializer<QuotaProvider> {
             "claudecode" -> QuotaProvider.ClaudeCode
             "codex" -> QuotaProvider.Codex
             "deepseek" -> QuotaProvider.DeepSeek
+            "gemini" -> QuotaProvider.Gemini
+            "grok" -> QuotaProvider.Grok
+            "groq" -> QuotaProvider.Groq
             "openrouter" -> QuotaProvider.OpenRouter
             "runinfra" -> QuotaProvider.RunInfra
             "typesafe" -> QuotaProvider.TypeSafe

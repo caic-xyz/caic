@@ -671,6 +671,9 @@ export type QuotaProvider =
   | "claudecode"
   | "codex"
   | "deepseek"
+  | "gemini"
+  | "grok"
+  | "groq"
   | "openrouter"
   | "runinfra"
   | "typesafe"
@@ -685,6 +688,9 @@ export const QuotaProviderCerebras: QuotaProvider = "cerebras";
 export const QuotaProviderClaudeCode: QuotaProvider = "claudecode";
 export const QuotaProviderCodex: QuotaProvider = "codex";
 export const QuotaProviderDeepSeek: QuotaProvider = "deepseek";
+export const QuotaProviderGemini: QuotaProvider = "gemini";
+export const QuotaProviderGrok: QuotaProvider = "grok";
+export const QuotaProviderGroq: QuotaProvider = "groq";
 export const QuotaProviderOpenRouter: QuotaProvider = "openrouter";
 export const QuotaProviderRunInfra: QuotaProvider = "runinfra";
 export const QuotaProviderTypeSafe: QuotaProvider = "typesafe";

@@ -301,6 +301,12 @@ func QuotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 		return v1.QuotaProviderCodex, nil
 	case agent.QuotaProviderDeepSeek:
 		return v1.QuotaProviderDeepSeek, nil
+	case agent.QuotaProviderGemini:
+		return v1.QuotaProviderGemini, nil
+	case agent.QuotaProviderGrok:
+		return v1.QuotaProviderGrok, nil
+	case agent.QuotaProviderGroq:
+		return v1.QuotaProviderGroq, nil
 	case agent.QuotaProviderOpenRouter:
 		return v1.QuotaProviderOpenRouter, nil
 	case agent.QuotaProviderRunInfra:

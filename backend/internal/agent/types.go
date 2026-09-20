@@ -703,6 +703,7 @@ func (p QuotaProvider) Valid() bool {
 	switch p {
 	case QuotaProviderAlibaba, QuotaProviderAnthropic, QuotaProviderCerebras,
 		QuotaProviderClaudeCode, QuotaProviderCodex, QuotaProviderDeepSeek,
+		QuotaProviderGemini, QuotaProviderGrok, QuotaProviderGroq,
 		QuotaProviderOpenRouter, QuotaProviderRunInfra, QuotaProviderTypeSafe,
 		QuotaProviderXiaomi, QuotaProviderZai:
 		return true
@@ -724,6 +725,12 @@ const (
 	QuotaProviderCerebras QuotaProvider = "cerebras"
 	// QuotaProviderDeepSeek identifies DeepSeek API usage.
 	QuotaProviderDeepSeek QuotaProvider = "deepseek"
+	// QuotaProviderGemini identifies Google Gemini API (AI Studio) usage.
+	QuotaProviderGemini QuotaProvider = "gemini"
+	// QuotaProviderGrok identifies xAI Grok API usage.
+	QuotaProviderGrok QuotaProvider = "grok"
+	// QuotaProviderGroq identifies Groq API usage.
+	QuotaProviderGroq QuotaProvider = "groq"
 	// QuotaProviderOpenRouter identifies OpenRouter API usage.
 	QuotaProviderOpenRouter QuotaProvider = "openrouter"
 	// QuotaProviderRunInfra identifies RunInfra Model APIs usage.

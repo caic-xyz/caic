@@ -164,6 +164,9 @@ var apiKeyUsageFetchers = []struct {
 	{provider: "alibaba", envVars: []string{"DASHSCOPE_API_KEY_US", "DASHSCOPE_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewAlibabaFetcher(key) }},
 	{provider: "runinfra", envVars: []string{"RUNINFRA_GATEWAY_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewRunInfraFetcher(key) }},
 	{provider: "typesafe", factory: func(key string) usage.ProviderFetcher { return usage.NewTypeSafeFetcher(key) }},
+	{provider: "groq", factory: func(key string) usage.ProviderFetcher { return usage.NewGroqFetcher(key) }},
+	{provider: "grok", envVars: []string{"GROK_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewGrokFetcher(key) }},
+	{provider: "gemini", factory: func(key string) usage.ProviderFetcher { return usage.NewGeminiFetcher(key) }},
 }
 
 // usageFetcherKey resolves the API key for one usage fetcher entry: explicit

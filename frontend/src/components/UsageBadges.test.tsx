@@ -185,6 +185,21 @@ describe("UsageBadges", () => {
     });
   });
 
+  describe("provider icon tooltip", () => {
+    it("names the provider on hover even without money data", () => {
+      const u = makeUsage([
+        makeProvider({ provider: QuotaProviderAnthropic, label: "Anthropic", logoUrl: "/logos/anthropic.svg" }),
+      ]);
+      const [usage] = createSignal(u);
+      const { container } = render(() => <UsageBadges usage={usage} now={now} />);
+      const wrapper = container.querySelector('[data-testid="provider-pricing-icon"]')?.parentElement;
+      expect(wrapper?.hasAttribute("role")).toBe(true);
+      wrapper?.dispatchEvent(new MouseEvent("mouseenter"));
+      expect(document.body.textContent).toContain("Anthropic");
+      wrapper?.dispatchEvent(new MouseEvent("mouseleave"));
+    });
+  });
+
   describe("DeepSeek peak pricing indicator", () => {
     function renderAt(ms: number, overrides: Partial<ProviderQuota> = {}) {
       const u = makeUsage([

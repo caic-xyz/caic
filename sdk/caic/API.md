@@ -364,6 +364,9 @@ QuotaProvider identifies a monitored quota source.
 | `claudecode` |  |
 | `codex` |  |
 | `deepseek` |  |
+| `gemini` |  |
+| `grok` |  |
+| `groq` |  |
 | `openrouter` |  |
 | `runinfra` |  |
 | `typesafe` |  |

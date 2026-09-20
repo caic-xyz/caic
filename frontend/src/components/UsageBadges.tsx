@@ -1,4 +1,5 @@
-// Usage badges: per-provider grouped pills with color-coded thresholds and a DeepSeek peak-pricing icon tint.
+// Usage badges: per-provider grouped pills with color-coded thresholds, an icon
+// tooltip that always names the provider, and a DeepSeek peak-pricing icon tint.
 
 import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -114,7 +115,9 @@ function ProviderIcon(props: {
   pricing: DeepseekPricing | null;
   now: Accessor<number>;
 }) {
-  const tip = () => (props.pricing ? pricingTooltip(props.pricing, props.now()) : undefined);
+  // Name the provider even when there is no money or rate-limit data to show;
+  // the pricing tooltip supersedes it for DeepSeek.
+  const tip = () => (props.pricing ? pricingTooltip(props.pricing, props.now()) : props.label);
   const iconClass = () => {
     const phase = pricingClass(props.pricing);
     return phase ? `${styles.providerIcon} ${phase}` : styles.providerIcon;
