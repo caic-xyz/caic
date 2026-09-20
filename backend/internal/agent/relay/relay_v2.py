@@ -105,7 +105,7 @@ import net from "node:net";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const socketPath = %r;
+const socketPath = __CAIC_MCP_SOCKET_PATH__;
 type MCPResult = {result?: {content: unknown[]; structuredContent?: unknown}; error?: string};
 function createChild(prompt: string): Promise<MCPResult> {
   return new Promise((resolve, reject) => {
@@ -138,8 +138,7 @@ export default function (pi: ExtensionAPI) {
   });
 }
 """
-        % CAIC_MCP_SOCK_PATH
-    )
+    ).replace("__CAIC_MCP_SOCKET_PATH__", repr(CAIC_MCP_SOCK_PATH))
     temp_path = PI_CAIC_MCP_EXTENSION_PATH + ".tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
         os.fchmod(f.fileno(), 0o600)

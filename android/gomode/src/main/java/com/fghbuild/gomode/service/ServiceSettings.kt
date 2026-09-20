@@ -18,7 +18,10 @@ class ServiceSettingsClient {
     }
 }
 
-class ServiceSettingsException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class ServiceSettingsException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
 
 fun serviceOrigin(url: String): String {
     val uri = URI(url.trim())
@@ -27,29 +30,37 @@ fun serviceOrigin(url: String): String {
     return "${uri.scheme}://${uri.rawAuthority}"
 }
 
-fun resolveServiceURL(baseURL: String, advertisedURL: String): String {
+fun resolveServiceURL(
+    baseURL: String,
+    advertisedURL: String,
+): String {
     val baseOrigin = URI(serviceOrigin(baseURL).trimEnd('/') + "/")
     return baseOrigin.resolve(advertisedURL).toString().trimEnd('/')
 }
 
 data class ShellCompatibility(
-    val bridgeVersion: Int = GoModeShellContract.BridgeVersion,
+    val bridgeVersion: Int = GoModeShellContract.BRIDGE_VERSION,
 )
 
 object GoModeShellContract {
     const val API_VERSION = 1
-    const val BridgeVersion = 1
+    const val BRIDGE_VERSION = 1
 }
 
-fun Settings.compatibilityError(
-    compatibility: ShellCompatibility = ShellCompatibility(),
-): String? = validationError() ?: when {
-    apiVersion != GoModeShellContract.API_VERSION ->
-        "Unsupported Go Mode service API version $apiVersion. This app supports ${GoModeShellContract.API_VERSION}."
-    compatibility.bridgeVersion != webShell.bridgeVersion ->
-        "Service requires bridge version ${webShell.bridgeVersion}. This app provides ${compatibility.bridgeVersion}."
-    else -> null
-}
+fun Settings.compatibilityError(compatibility: ShellCompatibility = ShellCompatibility()): String? =
+    validationError() ?: when {
+        apiVersion != GoModeShellContract.API_VERSION -> {
+            "Unsupported Go Mode service API version $apiVersion. This app supports ${GoModeShellContract.API_VERSION}."
+        }
+
+        compatibility.bridgeVersion != webShell.bridgeVersion -> {
+            "Service requires bridge version ${webShell.bridgeVersion}. This app provides ${compatibility.bridgeVersion}."
+        }
+
+        else -> {
+            null
+        }
+    }
 
 private fun Settings.validationError(): String? {
     if (service.isBlank()) return "Service settings field service is required."
@@ -65,14 +76,29 @@ private fun ToolGroup.validationError(index: Int): String? {
     val prefix = "webShell.toolGroups[$index]"
     val skillURL = skillUrl
     return when {
-        name.isBlank() -> "Service settings field $prefix.name is required."
-        endpoint.isBlank() -> "Service settings field $prefix.endpoint is required."
-        !isValidURLReference(endpoint) ->
+        name.isBlank() -> {
+            "Service settings field $prefix.name is required."
+        }
+
+        endpoint.isBlank() -> {
+            "Service settings field $prefix.endpoint is required."
+        }
+
+        !isValidURLReference(endpoint) -> {
             "Service settings field $prefix.endpoint must be an absolute URL or absolute path."
-        protocolVersion.isBlank() -> "Service settings field $prefix.protocolVersion is required."
-        !skillURL.isNullOrBlank() && !isValidURLReference(skillURL) ->
+        }
+
+        protocolVersion.isBlank() -> {
+            "Service settings field $prefix.protocolVersion is required."
+        }
+
+        !skillURL.isNullOrBlank() && !isValidURLReference(skillURL) -> {
             "Service settings field $prefix.skillUrl must be an absolute URL or absolute path."
-        else -> null
+        }
+
+        else -> {
+            null
+        }
     }
 }
 
@@ -80,15 +106,25 @@ private fun VoiceGatewaySettings.validationError(): String? {
     val gatewayURL = url
     val tokenURL = tokenEndpoint
     return when {
-        required && gatewayURL.isNullOrBlank() ->
+        required && gatewayURL.isNullOrBlank() -> {
             "Service settings field webShell.voiceGateway.url is required when voice is required."
-        authRequired == true && gatewayURL.isNullOrBlank() ->
+        }
+
+        authRequired == true && gatewayURL.isNullOrBlank() -> {
             "Service settings field webShell.voiceGateway.url is required when voice authentication is required."
-        !gatewayURL.isNullOrBlank() && !isValidURLReference(gatewayURL) ->
+        }
+
+        !gatewayURL.isNullOrBlank() && !isValidURLReference(gatewayURL) -> {
             "Service settings field webShell.voiceGateway.url must be an absolute URL or absolute path."
-        !tokenURL.isNullOrBlank() && !isValidURLReference(tokenURL) ->
+        }
+
+        !tokenURL.isNullOrBlank() && !isValidURLReference(tokenURL) -> {
             "Service settings field webShell.voiceGateway.tokenEndpoint must be an absolute URL or absolute path."
-        else -> null
+        }
+
+        else -> {
+            null
+        }
     }
 }
 

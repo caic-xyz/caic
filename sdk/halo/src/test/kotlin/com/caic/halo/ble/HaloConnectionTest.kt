@@ -29,7 +29,6 @@ import java.util.UUID
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class HaloConnectionTest {
-
     private lateinit var btDevice: BluetoothDevice
 
     // Pre-built characteristics for HALO (has AUDIO TX) and FRAME (no AUDIO TX).
@@ -44,8 +43,11 @@ class HaloConnectionTest {
 
     @Before
     fun setUp() {
-        val adapter = RuntimeEnvironment.getApplication()
-            .getSystemService(BluetoothManager::class.java).adapter
+        val adapter =
+            RuntimeEnvironment
+                .getApplication()
+                .getSystemService(BluetoothManager::class.java)
+                .adapter
         btDevice = adapter.getRemoteDevice("00:11:22:33:44:55")
         Shadows.shadowOf(btDevice).setName("Halo AB")
 

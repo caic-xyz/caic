@@ -45,7 +45,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.halo.HaloController
-import com.fghbuild.gomode.sdk.v1.Settings as ServiceSettings
 import com.fghbuild.gomode.service.ServiceMonitor
 import com.fghbuild.gomode.service.ServiceNotification
 import com.fghbuild.gomode.service.ServiceNotificationPublisher
@@ -64,6 +63,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 import java.io.IOException
+import com.fghbuild.gomode.sdk.v1.Settings as ServiceSettings
 
 private enum class NativeScreen {
     Settings,
@@ -71,17 +71,26 @@ private enum class NativeScreen {
 }
 
 internal sealed interface ServiceBootstrapState {
-    data class Unvalidated(val reason: String? = null) : ServiceBootstrapState
-    data class Ready(val settings: ServiceSettings) : ServiceBootstrapState
-    data class Error(val message: String) : ServiceBootstrapState
+    data class Unvalidated(
+        val reason: String? = null,
+    ) : ServiceBootstrapState
+
+    data class Ready(
+        val settings: ServiceSettings,
+    ) : ServiceBootstrapState
+
+    data class Error(
+        val message: String,
+    ) : ServiceBootstrapState
 }
 
 @Composable
 fun GoModeApp(settingsRepository: SettingsRepository) {
     val context = LocalContext.current
-    val haloController = remember(settingsRepository) {
-        HaloController(context.applicationContext, settingsRepository)
-    }
+    val haloController =
+        remember(settingsRepository) {
+            HaloController(context.applicationContext, settingsRepository)
+        }
     DisposableEffect(haloController) {
         onDispose { haloController.close() }
     }
@@ -105,16 +114,18 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     val snackbarHostState = remember { SnackbarHostState() }
     val notificationPublisher = remember(context) { ServiceNotificationPublisher(context.applicationContext) }
     var pendingNotifications by remember { mutableStateOf(emptyList<ServiceNotification>()) }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) pendingNotifications.forEach(notificationPublisher::publish)
-        pendingNotifications = emptyList()
-    }
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            if (granted) pendingNotifications.forEach(notificationPublisher::publish)
+            pendingNotifications = emptyList()
+        }
     val scope = rememberCoroutineScope()
-    val voiceSession = remember(settingsRepository) {
-        VoiceSession(context.applicationContext, settingsRepository, settingsClient)
-    }
+    val voiceSession =
+        remember(settingsRepository) {
+            VoiceSession(context.applicationContext, settingsRepository, settingsClient)
+        }
     DisposableEffect(voiceSession) {
         onDispose { voiceSession.disconnect() }
     }
@@ -123,44 +134,49 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         voiceSession.disconnect()
     }
     val voiceState by voiceSession.state.collectAsStateWithLifecycle()
-    val serviceMonitor = remember(scope) {
-        ServiceMonitor(scope = scope) { endpointURL, protocolVersion ->
-            McpClient(
-                endpointURL = endpointURL,
-                protocolVersion = protocolVersion,
-                cookieProvider = { CookieManager.getInstance().getCookie(endpointURL) },
-            )
+    val serviceMonitor =
+        remember(scope) {
+            ServiceMonitor(scope = scope) { endpointURL, protocolVersion ->
+                McpClient(
+                    endpointURL = endpointURL,
+                    protocolVersion = protocolVersion,
+                    cookieProvider = { CookieManager.getInstance().getCookie(endpointURL) },
+                )
+            }
         }
-    }
     DisposableEffect(serviceMonitor) {
         onDispose { serviceMonitor.stop() }
     }
     val serviceMonitorState by serviceMonitor.state.collectAsStateWithLifecycle()
     var onMicGranted by remember { mutableStateOf<(() -> Unit)?>(null) }
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            onMicGranted?.invoke()
-        } else {
-            scope.launch {
-                snackbarHostState.showSnackbar("Microphone permission is required for voice mode")
+    val micPermissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            if (granted) {
+                onMicGranted?.invoke()
+            } else {
+                scope.launch {
+                    snackbarHostState.showSnackbar("Microphone permission is required for voice mode")
+                }
             }
+            onMicGranted = null
         }
-        onMicGranted = null
-    }
-    val shellRecovery = shellRecoveryState(
-        bootstrapError = (bootstrapState as? ServiceBootstrapState.Error)?.message,
-        webLoadState = webLoadState,
-    ).takeIf { activeNativeScreen == null && activeURL.isNotBlank() }
-    val voiceSessionActive = voiceState.connected || voiceState.connectStatus != null ||
-        voiceState.listening || voiceState.speaking
-    val configuredVoiceAvailable = (bootstrapState as? ServiceBootstrapState.Ready)
-        ?.settings
-        ?.webShell
-        ?.voiceGateway
-        ?.url
-        ?.isNotBlank() == true
+    val shellRecovery =
+        shellRecoveryState(
+            bootstrapError = (bootstrapState as? ServiceBootstrapState.Error)?.message,
+            webLoadState = webLoadState,
+        ).takeIf { activeNativeScreen == null && activeURL.isNotBlank() }
+    val voiceSessionActive =
+        voiceState.connected || voiceState.connectStatus != null ||
+            voiceState.listening || voiceState.speaking
+    val configuredVoiceAvailable =
+        (bootstrapState as? ServiceBootstrapState.Ready)
+            ?.settings
+            ?.webShell
+            ?.voiceGateway
+            ?.url
+            ?.isNotBlank() == true
     val voiceAvailable = voiceSessionActive || (configuredVoiceAvailable && shellRecovery == null)
     val density = LocalDensity.current
     val keyboardOpen = WindowInsets.ime.getBottom(density) > 0
@@ -181,7 +197,9 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     LaunchedEffect(serviceMonitorState.notifications) {
         val notifications = serviceMonitorState.notifications
         if (notifications.isEmpty()) return@LaunchedEffect
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
             notifications.forEach(notificationPublisher::publish)
         } else {
             pendingNotifications = notifications
@@ -204,16 +222,18 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding),
         ) {
             // Resize hosted WebViews above the IME. Without native IME insets, Android WebView
             // keeps reporting a full-height viewport and fixed bottom web inputs sit under the keyboard.
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .imePadding(),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .imePadding(),
             ) {
                 GoModeContent(
                     settings = settings,
@@ -269,8 +289,9 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                     onSelectDevice = { voiceSession.selectAudioDevice(it) },
                     onClearTranscript = { voiceSession.clearTranscript() },
                     onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
-                    serviceAttentionText = serviceMonitorState.notificationText
-                        ?: serviceMonitorState.error?.let { "Service updates are reconnecting." },
+                    serviceAttentionText =
+                        serviceMonitorState.notificationText
+                            ?: serviceMonitorState.error?.let { "Service updates are reconnecting." },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -281,25 +302,26 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
 internal suspend fun fetchBootstrapState(
     activeURL: String,
     settingsClient: ServiceSettingsClient,
-): ServiceBootstrapState = try {
-    val serviceSettings = settingsClient.fetch(activeURL)
-    val compatibilityError = serviceSettings.compatibilityError()
-    if (compatibilityError == null) {
-        ServiceBootstrapState.Ready(serviceSettings)
-    } else {
-        ServiceBootstrapState.Error(compatibilityError)
+): ServiceBootstrapState =
+    try {
+        val serviceSettings = settingsClient.fetch(activeURL)
+        val compatibilityError = serviceSettings.compatibilityError()
+        if (compatibilityError == null) {
+            ServiceBootstrapState.Ready(serviceSettings)
+        } else {
+            ServiceBootstrapState.Error(compatibilityError)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: SerializationException) {
+        ServiceBootstrapState.Unvalidated(e.message ?: "Could not parse service settings.")
+    } catch (e: IllegalArgumentException) {
+        ServiceBootstrapState.Error("Invalid service URL: ${e.message.orEmpty()}")
+    } catch (e: ServiceSettingsException) {
+        ServiceBootstrapState.Unvalidated(e.message ?: "Could not fetch service settings.")
+    } catch (e: IOException) {
+        ServiceBootstrapState.Unvalidated(e.message ?: "Could not fetch service settings.")
     }
-} catch (e: CancellationException) {
-    throw e
-} catch (e: SerializationException) {
-    ServiceBootstrapState.Unvalidated(e.message ?: "Could not parse service settings.")
-} catch (e: IllegalArgumentException) {
-    ServiceBootstrapState.Error("Invalid service URL: ${e.message.orEmpty()}")
-} catch (e: ServiceSettingsException) {
-    ServiceBootstrapState.Unvalidated(e.message ?: "Could not fetch service settings.")
-} catch (e: IOException) {
-    ServiceBootstrapState.Unvalidated(e.message ?: "Could not fetch service settings.")
-}
 
 @Composable
 private fun GoModeContent(
@@ -322,6 +344,7 @@ private fun GoModeContent(
                 onNavigateBack = { onSetNativeScreen(NativeScreen.Settings) },
             )
         }
+
         activeURL.isBlank() || activeNativeScreen == NativeScreen.Settings -> {
             SettingsScreen(
                 settings = settings,
@@ -330,13 +353,16 @@ private fun GoModeContent(
                 onOpenHalo = { onSetNativeScreen(NativeScreen.Halo) },
             )
         }
+
         else -> {
             when (val state = bootstrapState) {
                 is ServiceBootstrapState.Error -> {
                     Box(Modifier.fillMaxSize().testTag("gomode-service-bootstrap"))
                 }
+
                 is ServiceBootstrapState.Unvalidated,
-                is ServiceBootstrapState.Ready -> {
+                is ServiceBootstrapState.Ready,
+                -> {
                     // Keep non-error states in one Compose branch. Otherwise the WebView is disposed
                     // when bootstrap validation completes, which can strand in-flight JavaScript callbacks.
                     WebShellScreen(
@@ -366,24 +392,36 @@ internal data class ShellRecoveryState(
 internal fun shellRecoveryState(
     bootstrapError: String?,
     webLoadState: WebShellLoadState,
-): ShellRecoveryState? = when {
-    bootstrapError != null -> ShellRecoveryState(
-        title = "Could not use service",
-        message = bootstrapError,
-        retryTarget = ShellRecoveryRetryTarget.BOOTSTRAP,
-    )
-    webLoadState is WebShellLoadState.Reconnecting -> ShellRecoveryState(
-        title = "Reconnecting to service",
-        message = "Voice will be available when the service reconnects.",
-        retryTarget = null,
-    )
-    webLoadState is WebShellLoadState.Failed -> ShellRecoveryState(
-        title = "Could not load service",
-        message = webLoadState.message,
-        retryTarget = ShellRecoveryRetryTarget.WEB,
-    )
-    else -> null
-}
+): ShellRecoveryState? =
+    when {
+        bootstrapError != null -> {
+            ShellRecoveryState(
+                title = "Could not use service",
+                message = bootstrapError,
+                retryTarget = ShellRecoveryRetryTarget.BOOTSTRAP,
+            )
+        }
+
+        webLoadState is WebShellLoadState.Reconnecting -> {
+            ShellRecoveryState(
+                title = "Reconnecting to service",
+                message = "Voice will be available when the service reconnects.",
+                retryTarget = null,
+            )
+        }
+
+        webLoadState is WebShellLoadState.Failed -> {
+            ShellRecoveryState(
+                title = "Could not load service",
+                message = webLoadState.message,
+                retryTarget = ShellRecoveryRetryTarget.WEB,
+            )
+        }
+
+        else -> {
+            null
+        }
+    }
 
 @Composable
 private fun ShellRecoveryStrip(
@@ -401,7 +439,11 @@ private fun ShellRecoveryStrip(
             Text(recovery.title, style = MaterialTheme.typography.titleMedium)
             Text(recovery.message, style = MaterialTheme.typography.bodyMedium)
             Text(
-                if (voiceSessionActive) "Voice remains connected." else "Voice is unavailable until the service reconnects.",
+                if (voiceSessionActive) {
+                    "Voice remains connected."
+                } else {
+                    "Voice is unavailable until the service reconnects."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

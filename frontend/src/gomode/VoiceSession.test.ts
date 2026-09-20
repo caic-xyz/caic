@@ -100,8 +100,7 @@ class FakePeerConnection extends EventTarget {
           const reflexiveCandidateEvent = new Event("icecandidate");
           Object.defineProperty(reflexiveCandidateEvent, "candidate", {
             value: {
-              candidate:
-                "candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000",
+              candidate: "candidate:2 1 udp 1694498815 203.0.113.2 50000 typ srflx raddr 192.0.2.2 rport 50000",
             },
           });
           this.dispatchEvent(reflexiveCandidateEvent);
@@ -314,22 +313,15 @@ function triggerIceState(state: RTCIceConnectionState): void {
   const pc = FakePeerConnection.last;
   if (!pc) throw new Error("Expected a peer connection");
   pc.iceConnectionState = state;
-  pc.oniceconnectionstatechange?.call(
-    pc as unknown as RTCPeerConnection,
-    new Event("iceconnectionstatechange"),
-  );
+  pc.oniceconnectionstatechange?.call(pc as unknown as RTCPeerConnection, new Event("iceconnectionstatechange"));
 }
 
 describe("voice network recovery", () => {
   it("fetches a fresh service-item snapshot for reconnect setup", async () => {
     vi.useFakeTimers();
     mcpMocks.mcpReadAdvertisedTextResource
-      .mockResolvedValueOnce(
-        '{"items":[{"id":"1","title":"Old state","state":"running","needsAttention":false}]}',
-      )
-      .mockResolvedValueOnce(
-        '{"items":[{"id":"1","title":"Fresh state","state":"waiting","needsAttention":true}]}',
-      );
+      .mockResolvedValueOnce('{"items":[{"id":"1","title":"Old state","state":"running","needsAttention":false}]}')
+      .mockResolvedValueOnce('{"items":[{"id":"1","title":"Fresh state","state":"waiting","needsAttention":true}]}');
     const session = new VoiceSession();
     try {
       await session.connect();

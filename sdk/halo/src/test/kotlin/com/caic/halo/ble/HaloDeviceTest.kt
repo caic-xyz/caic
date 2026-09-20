@@ -37,7 +37,6 @@ import java.util.concurrent.atomic.AtomicReference
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class HaloDeviceTest {
-
     companion object {
         private const val TX_UUID_STR = "7A230002-5475-A6A4-654C-8431F6AD49C4"
     }
@@ -50,51 +49,60 @@ class HaloDeviceTest {
 
     @Before
     fun setUp() {
-        val adapter = RuntimeEnvironment.getApplication()
-            .getSystemService(BluetoothManager::class.java).adapter
+        val adapter =
+            RuntimeEnvironment
+                .getApplication()
+                .getSystemService(BluetoothManager::class.java)
+                .adapter
         btDevice = adapter.getRemoteDevice("00:11:22:33:44:55")
         shadowOf(btDevice).setName("Halo AB")
 
-        txChar = BluetoothGattCharacteristic(
-            UUID.fromString(TX_UUID_STR),
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE,
-        )
+        txChar =
+            BluetoothGattCharacteristic(
+                UUID.fromString(TX_UUID_STR),
+                BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE,
+            )
 
         notificationChannel = Channel(Channel.UNLIMITED)
         lastWrite = AtomicReference()
 
-        device = HaloDevice(
-            platformDevice = btDevice,
-            type = HaloDeviceType.HALO,
-            txChar = txChar,
-            rxChar = null,
-            audioTxChar = null,
-            maxStringLen = 500,
-            maxDataLen = 500,
-            rawNotifications = notificationChannel.receiveAsFlow(),
-        )
+        device =
+            HaloDevice(
+                platformDevice = btDevice,
+                type = HaloDeviceType.HALO,
+                txChar = txChar,
+                rxChar = null,
+                audioTxChar = null,
+                maxStringLen = 500,
+                maxDataLen = 500,
+                rawNotifications = notificationChannel.receiveAsFlow(),
+            )
         device.writeSink = { lastWrite.set(it) }
     }
 
     // ---- helpers ----
 
     private fun stringPacket(text: String) = text.toByteArray(Charsets.UTF_8)
+
     private fun dataPacket(vararg bytes: Byte) = byteArrayOf(0x01.toByte()) + bytes
+
     private val dataAck = dataPacket(0x00, 0x00)
     private val dataFailureAck = dataPacket(0x00, 0x01)
 
     // ---- writeSink variants that also send a response into the channel ----
 
-    private fun sinkWithString(text: String): suspend (HaloDevice.RawWrite) -> Unit = { w ->
-        lastWrite.set(w)
-        notificationChannel.send(stringPacket(text))
-    }
+    private fun sinkWithString(text: String): suspend (HaloDevice.RawWrite) -> Unit =
+        { w ->
+            lastWrite.set(w)
+            notificationChannel.send(stringPacket(text))
+        }
 
-    private fun sinkWithData(bytes: ByteArray): suspend (HaloDevice.RawWrite) -> Unit = { w ->
-        lastWrite.set(w)
-        notificationChannel.send(byteArrayOf(0x01.toByte()) + bytes)
-    }
+    private fun sinkWithData(bytes: ByteArray): suspend (HaloDevice.RawWrite) -> Unit =
+        { w ->
+            lastWrite.set(w)
+            notificationChannel.send(byteArrayOf(0x01.toByte()) + bytes)
+        }
 
     private fun sinkWithDataAck(): suspend (HaloDevice.RawWrite) -> Unit = sinkWithData(byteArrayOf(0x00, 0x00))
 
@@ -103,238 +111,303 @@ class HaloDeviceTest {
     // =========================================================================
 
     @Test
-    fun `sendBreakSignal writes 0x03`() = runTest {
-        device.sendBreakSignal()
-        assertEquals(0x03.toByte(), lastWrite.get().data[0])
-    }
+    fun `sendBreakSignal writes 0x03`() =
+        runTest {
+            device.sendBreakSignal()
+            assertEquals(0x03.toByte(), lastWrite.get().data[0])
+        }
 
     @Test
-    fun `sendResetSignal writes 0x04`() = runTest {
-        device.sendResetSignal()
-        assertEquals(0x04.toByte(), lastWrite.get().data[0])
-    }
+    fun `sendResetSignal writes 0x04`() =
+        runTest {
+            device.sendResetSignal()
+            assertEquals(0x04.toByte(), lastWrite.get().data[0])
+        }
 
     @Test
-    fun `sendRemoveSignal writes 0x05`() = runTest {
-        device.sendRemoveSignal()
-        assertEquals(0x05.toByte(), lastWrite.get().data[0])
-    }
+    fun `sendRemoveSignal writes 0x05`() =
+        runTest {
+            device.sendRemoveSignal()
+            assertEquals(0x05.toByte(), lastWrite.get().data[0])
+        }
 
     @Test
-    fun `all control signals are available`() = runTest {
-        device.sendRebootSignal(settleDelayMs = 0)
-        assertEquals(0x02.toByte(), lastWrite.get().data[0])
-        device.sendExitLuaSignal(settleDelayMs = 0)
-        assertEquals(0x06.toByte(), lastWrite.get().data[0])
-        device.sendRemoveAllFilesSignal(settleDelayMs = 0)
-        assertEquals(0x07.toByte(), lastWrite.get().data[0])
-    }
+    fun `all control signals are available`() =
+        runTest {
+            device.sendRebootSignal(settleDelayMs = 0)
+            assertEquals(0x02.toByte(), lastWrite.get().data[0])
+            device.sendExitLuaSignal(settleDelayMs = 0)
+            assertEquals(0x06.toByte(), lastWrite.get().data[0])
+            device.sendRemoveAllFilesSignal(settleDelayMs = 0)
+            assertEquals(0x07.toByte(), lastWrite.get().data[0])
+        }
 
     // =========================================================================
     // Lua REPL
     // =========================================================================
 
     @Test
-    fun `sendString without awaiting response`() = runTest {
-        assertEquals(null, device.sendString("print(1)", awaitResponse = false))
-        assertEquals("print(1)", String(lastWrite.get().data))
-    }
-
-    @Test
-    fun `sendString with awaitResponse`() = runTest {
-        device.writeSink = sinkWithString("hello")
-        assertEquals("hello", device.sendString("print(1)", awaitResponse = true))
-        assertEquals("print(1)", String(lastWrite.get().data))
-    }
-
-    @Test
-    fun `sendString rejects oversized payload`() = runTest {
-        device = HaloDevice(platformDevice = btDevice, txChar = txChar, maxStringLen = 5)
-        device.writeSink = { lastWrite.set(it) }
-        try {
-            device.sendString("too long string")
-            fail("Expected HaloException")
-        } catch (e: HaloException) {
-            assertTrue(e.message!!.contains("exceeds max length"))
+    fun `sendString without awaiting response`() =
+        runTest {
+            assertEquals(null, device.sendString("print(1)", awaitResponse = false))
+            assertEquals("print(1)", String(lastWrite.get().data))
         }
-    }
 
     @Test
-    fun `isLuaInReplState true`() = runTest {
-        device.writeSink = sinkWithString("1")
-        assertTrue(device.isLuaInReplState(timeoutMs = 1000))
-    }
+    fun `sendString with awaitResponse`() =
+        runTest {
+            device.writeSink = sinkWithString("hello")
+            assertEquals("hello", device.sendString("print(1)", awaitResponse = true))
+            assertEquals("print(1)", String(lastWrite.get().data))
+        }
 
     @Test
-    fun `isLuaInReplState false on timeout`() = runTest {
-        assertFalse(device.isLuaInReplState(timeoutMs = 1))
-    }
+    fun `sendString rejects oversized payload`() =
+        runTest {
+            device = HaloDevice(platformDevice = btDevice, txChar = txChar, maxStringLen = 5)
+            device.writeSink = { lastWrite.set(it) }
+            try {
+                device.sendString("too long string")
+                fail("Expected HaloException")
+            } catch (e: HaloException) {
+                assertTrue(e.message!!.contains("exceeds max length"))
+            }
+        }
+
+    @Test
+    fun `isLuaInReplState true`() =
+        runTest {
+            device.writeSink = sinkWithString("1")
+            assertTrue(device.isLuaInReplState(timeoutMs = 1000))
+        }
+
+    @Test
+    fun `isLuaInReplState false on timeout`() =
+        runTest {
+            assertFalse(device.isLuaInReplState(timeoutMs = 1))
+        }
 
     // =========================================================================
     // Raw data
     // =========================================================================
 
     @Test
-    fun `sendData prepends 0x01 header`() = runTest {
-        device.writeSink = sinkWithDataAck()
-        device.sendData(byteArrayOf(0x10, 0x20, 0x30))
-        val sent = lastWrite.get().data
-        assertEquals(0x01.toByte(), sent[0])
-        assertArrayEquals(byteArrayOf(0x10, 0x20, 0x30), sent.copyOfRange(1, sent.size))
-    }
+    fun `sendData prepends 0x01 header`() =
+        runTest {
+            device.writeSink = sinkWithDataAck()
+            device.sendData(byteArrayOf(0x10, 0x20, 0x30))
+            val sent = lastWrite.get().data
+            assertEquals(0x01.toByte(), sent[0])
+            assertArrayEquals(byteArrayOf(0x10, 0x20, 0x30), sent.copyOfRange(1, sent.size))
+        }
 
     @Test
-    fun `sendData rejects oversized payload`() = runTest {
-        device = HaloDevice(platformDevice = btDevice, txChar = txChar, maxDataLen = 3)
-        device.writeSink = { lastWrite.set(it) }
-        try {
-            device.sendData(ByteArray(5))
-            fail("Expected HaloException")
-        } catch (e: HaloException) {
-            assertTrue(e.message!!.contains("exceeds max length"))
+    fun `sendData rejects oversized payload`() =
+        runTest {
+            device = HaloDevice(platformDevice = btDevice, txChar = txChar, maxDataLen = 3)
+            device.writeSink = { lastWrite.set(it) }
+            try {
+                device.sendData(ByteArray(5))
+                fail("Expected HaloException")
+            } catch (e: HaloException) {
+                assertTrue(e.message!!.contains("exceeds max length"))
+            }
         }
-    }
 
     // =========================================================================
     // Typed messages
     // =========================================================================
 
     @Test
-    fun `sendMessage splits payload across chunks`() = runTest {
-        val writes = mutableListOf<HaloDevice.RawWrite>()
-        device = HaloDevice(platformDevice = btDevice, txChar = txChar, maxDataLen = 20, rawNotifications = notificationChannel.receiveAsFlow())
-        device.writeSink = { w -> writes.add(w); notificationChannel.send(dataAck) }
+    fun `sendMessage splits payload across chunks`() =
+        runTest {
+            val writes = mutableListOf<HaloDevice.RawWrite>()
+            device =
+                HaloDevice(
+                    platformDevice = btDevice,
+                    txChar = txChar,
+                    maxDataLen = 20,
+                    rawNotifications = notificationChannel.receiveAsFlow(),
+                )
+            device.writeSink = { w ->
+                writes.add(w)
+                notificationChannel.send(dataAck)
+            }
 
-        val payload = ByteArray(30) { (it + 1).toByte() }
-        device.sendMessage(msgCode = 0x42, payload = payload)
+            val payload = ByteArray(30) { (it + 1).toByte() }
+            device.sendMessage(msgCode = 0x42, payload = payload)
 
-        assertEquals(2, writes.size)
-        val f = writes[0].data
-        assertEquals(0x01.toByte(), f[0]); assertEquals(0x42.toByte(), f[1])
-        assertEquals(0x00.toByte(), f[2]); assertEquals(0x1E.toByte(), f[3])
-        assertArrayEquals(payload.copyOf(16), f.copyOfRange(4, f.size))
+            assertEquals(2, writes.size)
+            val f = writes[0].data
+            assertEquals(0x01.toByte(), f[0])
+            assertEquals(0x42.toByte(), f[1])
+            assertEquals(0x00.toByte(), f[2])
+            assertEquals(0x1E.toByte(), f[3])
+            assertArrayEquals(payload.copyOf(16), f.copyOfRange(4, f.size))
 
-        val s = writes[1].data
-        assertEquals(0x01.toByte(), s[0]); assertEquals(0x42.toByte(), s[1])
-        assertArrayEquals(payload.copyOfRange(16, 30), s.copyOfRange(2, s.size))
-    }
-
-    @Test
-    fun `sendMessage single chunk`() = runTest {
-        device.writeSink = sinkWithDataAck()
-        val p = byteArrayOf(1, 2, 3, 4, 5)
-        device.sendMessage(msgCode = 0x10, payload = p)
-        val s = lastWrite.get().data
-        assertArrayEquals(p, s.copyOfRange(4, s.size))
-    }
-
-    @Test
-    fun `sendMessage sends zero-length payload header`() = runTest {
-        device.writeSink = sinkWithDataAck()
-        device.sendMessage(msgCode = 0x10, payload = ByteArray(0))
-        assertArrayEquals(byteArrayOf(0x01, 0x10, 0x00, 0x00), lastWrite.get().data)
-    }
-
-    @Test
-    fun `sendMessage rejects failed ack`() = runTest {
-        device.writeSink = { w -> lastWrite.set(w); notificationChannel.send(dataFailureAck) }
-        try {
-            device.sendMessage(msgCode = 0x10, payload = byteArrayOf(1))
-            fail("Expected HaloException")
-        } catch (e: HaloException) {
-            assertTrue(e.message!!.contains("rejected"))
+            val s = writes[1].data
+            assertEquals(0x01.toByte(), s[0])
+            assertEquals(0x42.toByte(), s[1])
+            assertArrayEquals(payload.copyOfRange(16, 30), s.copyOfRange(2, s.size))
         }
-    }
 
     @Test
-    fun `sendMessage rejects bad msgCode`() = runTest {
-        try { device.sendMessage(256, byteArrayOf()); fail() }
-        catch (e: IllegalArgumentException) { assertTrue(e.message!!.contains("0–255")) }
-    }
+    fun `sendMessage single chunk`() =
+        runTest {
+            device.writeSink = sinkWithDataAck()
+            val p = byteArrayOf(1, 2, 3, 4, 5)
+            device.sendMessage(msgCode = 0x10, payload = p)
+            val s = lastWrite.get().data
+            assertArrayEquals(p, s.copyOfRange(4, s.size))
+        }
 
     @Test
-    fun `sendMessage rejects oversized payload`() = runTest {
-        try { device.sendMessage(1, ByteArray(65536)); fail() }
-        catch (e: IllegalArgumentException) { assertTrue(e.message!!.contains("65535")) }
-    }
+    fun `sendMessage sends zero-length payload header`() =
+        runTest {
+            device.writeSink = sinkWithDataAck()
+            device.sendMessage(msgCode = 0x10, payload = ByteArray(0))
+            assertArrayEquals(byteArrayOf(0x01, 0x10, 0x00, 0x00), lastWrite.get().data)
+        }
+
+    @Test
+    fun `sendMessage rejects failed ack`() =
+        runTest {
+            device.writeSink = { w ->
+                lastWrite.set(w)
+                notificationChannel.send(dataFailureAck)
+            }
+            try {
+                device.sendMessage(msgCode = 0x10, payload = byteArrayOf(1))
+                fail("Expected HaloException")
+            } catch (e: HaloException) {
+                assertTrue(e.message!!.contains("rejected"))
+            }
+        }
+
+    @Test
+    fun `sendMessage rejects bad msgCode`() =
+        runTest {
+            try {
+                device.sendMessage(256, byteArrayOf())
+                fail()
+            } catch (
+                e: IllegalArgumentException,
+            ) {
+                assertTrue(e.message!!.contains("0–255"))
+            }
+        }
+
+    @Test
+    fun `sendMessage rejects oversized payload`() =
+        runTest {
+            try {
+                device.sendMessage(1, ByteArray(65536))
+                fail()
+            } catch (
+                e: IllegalArgumentException,
+            ) {
+                assertTrue(e.message!!.contains("65535"))
+            }
+        }
 
     // =========================================================================
     // clearDisplay
     // =========================================================================
 
     @Test
-    fun `clearDisplay HALO`() = runTest {
-        device.writeSink = sinkWithString("1")
-        device.clearDisplay()
-        assertEquals("frame.display.clear()print(1)", String(lastWrite.get().data))
-    }
+    fun `clearDisplay HALO`() =
+        runTest {
+            device.writeSink = sinkWithString("1")
+            device.clearDisplay()
+            assertEquals("frame.display.clear()print(1)", String(lastWrite.get().data))
+        }
 
     @Test
-    fun `clearDisplay FRAME`() = runTest {
-        device = HaloDevice(platformDevice = btDevice, type = HaloDeviceType.FRAME, txChar = txChar, maxStringLen = 500, rawNotifications = notificationChannel.receiveAsFlow())
-        device.writeSink = sinkWithString("1")
-        device.clearDisplay()
-        assertTrue(String(lastWrite.get().data).contains("frame.display.bitmap"))
-    }
+    fun `clearDisplay FRAME`() =
+        runTest {
+            device =
+                HaloDevice(
+                    platformDevice = btDevice,
+                    type = HaloDeviceType.FRAME,
+                    txChar = txChar,
+                    maxStringLen = 500,
+                    rawNotifications = notificationChannel.receiveAsFlow(),
+                )
+            device.writeSink = sinkWithString("1")
+            device.clearDisplay()
+            assertTrue(String(lastWrite.get().data).contains("frame.display.bitmap"))
+        }
 
     // =========================================================================
     // File upload
     // =========================================================================
 
     @Test
-    fun `uploadFile open write close`() = runTest {
-        val w = mutableListOf<String>()
-        device.writeSink = { r -> w.add(String(r.data)); notificationChannel.send(stringPacket("2")) }
-        device.uploadFile("test.lua", "Hello\nWorld")
-        assertTrue("Need >= 3 writes, got ${w.size}", w.size >= 3)
-        assertEquals("f=frame.file.open(\"test.lua\",\"w\");print(2)", w[0])
-        assertTrue(w[1].startsWith("f:write(\""))
-        assertEquals("f:close();print(2)", w[w.size - 1])
-    }
+    fun `uploadFile open write close`() =
+        runTest {
+            val w = mutableListOf<String>()
+            device.writeSink = { r ->
+                w.add(String(r.data))
+                notificationChannel.send(stringPacket("2"))
+            }
+            device.uploadFile("test.lua", "Hello\nWorld")
+            assertTrue("Need >= 3 writes, got ${w.size}", w.size >= 3)
+            assertEquals("f=frame.file.open(\"test.lua\",\"w\");print(2)", w[0])
+            assertTrue(w[1].startsWith("f:write(\""))
+            assertEquals("f:close();print(2)", w[w.size - 1])
+        }
 
     @Test
-    fun `uploadFile escapes special chars`() = runTest {
-        val w = mutableListOf<String>()
-        device.writeSink = { r -> w.add(String(r.data)); notificationChannel.send(stringPacket("2")) }
-        device.uploadFile("t.lua", "a\\b\r\nc'd\"e")
-        assertEquals("f=frame.file.open(\"t.lua\",\"w\");print(2)", w[0])
-        val cmd = w[1]
-        assertTrue(cmd.contains("\\\\"))
-        assertTrue(cmd.contains("\\n"))
-        assertTrue(cmd.contains("\\'"))
-        assertTrue(cmd.contains("\\\""))
-    }
+    fun `uploadFile escapes special chars`() =
+        runTest {
+            val w = mutableListOf<String>()
+            device.writeSink = { r ->
+                w.add(String(r.data))
+                notificationChannel.send(stringPacket("2"))
+            }
+            device.uploadFile("t.lua", "a\\b\r\nc'd\"e")
+            assertEquals("f=frame.file.open(\"t.lua\",\"w\");print(2)", w[0])
+            val cmd = w[1]
+            assertTrue(cmd.contains("\\\\"))
+            assertTrue(cmd.contains("\\n"))
+            assertTrue(cmd.contains("\\'"))
+            assertTrue(cmd.contains("\\\""))
+        }
 
     // =========================================================================
     // Flow streams
     // =========================================================================
 
     @Test
-    fun `stringResponse filters data`() = runTest {
-        // Collect a fixed number of items then stop, to avoid timing issues.
-        val r = mutableListOf<String>()
-        val job = backgroundScope.launch {
-            device.stringResponse.take(2).collect { r.add(it) }
+    fun `stringResponse filters data`() =
+        runTest {
+            // Collect a fixed number of items then stop, to avoid timing issues.
+            val r = mutableListOf<String>()
+            val job =
+                backgroundScope.launch {
+                    device.stringResponse.take(2).collect { r.add(it) }
+                }
+            notificationChannel.send(stringPacket("hello"))
+            notificationChannel.send(dataPacket(0x42)) // filtered out
+            notificationChannel.send(stringPacket("world"))
+            job.join() // waits until take(2) completes (2 strings collected)
+            assertEquals(listOf("hello", "world"), r)
         }
-        notificationChannel.send(stringPacket("hello"))
-        notificationChannel.send(dataPacket(0x42)) // filtered out
-        notificationChannel.send(stringPacket("world"))
-        job.join() // waits until take(2) completes (2 strings collected)
-        assertEquals(listOf("hello", "world"), r)
-    }
 
     @Test
-    fun `dataResponse strips prefix`() = runTest {
-        val r = mutableListOf<ByteArray>()
-        val job = backgroundScope.launch {
-            device.dataResponse.take(1).collect { r.add(it) }
+    fun `dataResponse strips prefix`() =
+        runTest {
+            val r = mutableListOf<ByteArray>()
+            val job =
+                backgroundScope.launch {
+                    device.dataResponse.take(1).collect { r.add(it) }
+                }
+            notificationChannel.send(stringPacket("ignored")) // filtered out
+            notificationChannel.send(dataPacket(0x42, 0x55))
+            job.join()
+            assertEquals(1, r.size)
+            assertArrayEquals(byteArrayOf(0x42, 0x55), r[0])
         }
-        notificationChannel.send(stringPacket("ignored")) // filtered out
-        notificationChannel.send(dataPacket(0x42, 0x55))
-        job.join()
-        assertEquals(1, r.size)
-        assertArrayEquals(byteArrayOf(0x42, 0x55), r[0])
-    }
 
     // =========================================================================
     // Misc

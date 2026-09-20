@@ -5,9 +5,7 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page, uniquePromp
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   const prompt = uniquePrompt("FAKE_WIDGET");
 

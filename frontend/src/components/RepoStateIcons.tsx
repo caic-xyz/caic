@@ -27,18 +27,15 @@ function countLabel(count: number, singular: string, plural: string): string {
 export function repoStateLabel(state?: GitRepositoryState): string {
   if (!state) return "";
   const labels: string[] = [];
-  if (state.changedFiles > 0)
-    labels.push(countLabel(state.changedFiles, "changed file", "changed files"));
+  if (state.changedFiles > 0) labels.push(countLabel(state.changedFiles, "changed file", "changed files"));
   if (state.linesAdded > 0) labels.push(countLabel(state.linesAdded, "addition", "additions"));
   if (state.linesDeleted > 0) labels.push(countLabel(state.linesDeleted, "deletion", "deletions"));
   if (state.conflicts > 0) labels.push(countLabel(state.conflicts, "conflict", "conflicts"));
   if (state.operation) labels.push(`${state.operation} in progress`);
   if (state.uncommittedFiles > 0)
     labels.push(countLabel(state.uncommittedFiles, "uncommitted file", "uncommitted files"));
-  if (state.ahead > 0)
-    labels.push(countLabel(state.ahead, "commit ahead of upstream", "commits ahead of upstream"));
-  if (state.behind > 0)
-    labels.push(countLabel(state.behind, "commit behind upstream", "commits behind upstream"));
+  if (state.ahead > 0) labels.push(countLabel(state.ahead, "commit ahead of upstream", "commits ahead of upstream"));
+  if (state.behind > 0) labels.push(countLabel(state.behind, "commit behind upstream", "commits behind upstream"));
   return labels.join(", ");
 }
 

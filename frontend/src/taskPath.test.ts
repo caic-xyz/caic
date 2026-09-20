@@ -6,9 +6,7 @@ import { taskIdFromPath, taskPath, taskPathForTask } from "./taskPath";
 
 describe("taskPath", () => {
   it("builds a task URL with ID and slug", () => {
-    expect(taskPath("abc123", "owner/repo", "caic-1", "Fix bug")).toBe(
-      "/task/@abc123+repo-caic-1-fix-bug",
-    );
+    expect(taskPath("abc123", "owner/repo", "caic-1", "Fix bug")).toBe("/task/@abc123+repo-caic-1-fix-bug");
   });
 
   it("builds a task URL from task data", () => {

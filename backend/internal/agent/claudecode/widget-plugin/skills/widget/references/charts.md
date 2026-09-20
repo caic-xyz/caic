@@ -160,9 +160,7 @@ For multi-chart dashboards, use a grid:
 ```html
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px">
   <div style="border:1px solid var(--border); border-radius:8px; padding:16px">
-    <div style="font-size:14px; font-weight:600; margin-bottom:12px; color:var(--text-primary)">
-      Chart Title
-    </div>
+    <div style="font-size:14px; font-weight:600; margin-bottom:12px; color:var(--text-primary)">Chart Title</div>
     <canvas id="chart1" style="width:100%; max-height:300px"></canvas>
   </div>
   <!-- more chart cards -->

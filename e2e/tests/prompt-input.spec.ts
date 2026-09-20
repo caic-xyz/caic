@@ -1,12 +1,5 @@
 // Screenshots of the prompt input with short and long text to verify button layout.
-import {
-  test,
-  expect,
-  fillContentEditable,
-  createTaskAPI,
-  waitForTaskState,
-  convertPngsToWebp,
-} from "../helpers";
+import { test, expect, fillContentEditable, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotRoot } from "../visual";
 
 test.describe.configure({ mode: "serial" });
@@ -17,9 +10,7 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
 
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   const prompt = page.getByTestId("prompt-input");
 

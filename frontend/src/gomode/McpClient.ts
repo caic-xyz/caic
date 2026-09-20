@@ -132,28 +132,19 @@ export async function mcpCallTool(name: string, args: JsonObject): Promise<McpTo
   };
 }
 
-function textContentAsStructuredError(
-  content: Array<{ type?: string; text?: string }> | undefined,
-): JsonObject {
+function textContentAsStructuredError(content: Array<{ type?: string; text?: string }> | undefined): JsonObject {
   const text = content?.find((block) => block.type === "text")?.text;
   return text === undefined ? {} : { error: text };
 }
 
-function mcpParamHeaders(
-  tool: McpToolDescriptor | undefined,
-  args: JsonObject,
-): Record<string, string> {
+function mcpParamHeaders(tool: McpToolDescriptor | undefined, args: JsonObject): Record<string, string> {
   if (tool === undefined) return {};
   const headers: Record<string, string> = {};
   collectMcpParamHeaders(tool.inputSchema, args, headers);
   return headers;
 }
 
-function collectMcpParamHeaders(
-  schema: JsonObject,
-  args: unknown,
-  headers: Record<string, string>,
-): void {
+function collectMcpParamHeaders(schema: JsonObject, args: unknown, headers: Record<string, string>): void {
   const headerName = schema["x-mcp-header"];
   if (typeof headerName === "string" && args !== null && args !== undefined) {
     headers[`Mcp-Param-${headerName}`] = encodeMcpHeaderValue(String(args));

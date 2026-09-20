@@ -3,11 +3,7 @@
 import type { EventMessage } from "@sdk/types.gen";
 import { describe, expect, it } from "vitest";
 
-import {
-  deriveNetworkRates,
-  deriveToolTimingSummaries,
-  IncrementalToolTimingTracker,
-} from "./taskStats";
+import { deriveNetworkRates, deriveToolTimingSummaries, IncrementalToolTimingTracker } from "./taskStats";
 
 function toolUse(id: string, name: string, ts: number): EventMessage {
   return { kind: "toolUse", ts, toolUse: { toolUseID: id, name, input: {} } };
@@ -46,12 +42,10 @@ describe("task stats", () => {
       { name: "Bash", calls: 1, durationMs: 500 },
     ]);
     const unchanged = tracker.derive(extended);
-    expect(tracker.derive([...extended, { kind: "text", ts: 5_000, text: { text: "done" } }])).toBe(
-      unchanged,
-    );
-    expect(
-      tracker.derive([toolUse("write", "Write", 5_000), toolResult("write", 5_250, 0)]),
-    ).toEqual([{ name: "Write", calls: 1, durationMs: 250 }]);
+    expect(tracker.derive([...extended, { kind: "text", ts: 5_000, text: { text: "done" } }])).toBe(unchanged);
+    expect(tracker.derive([toolUse("write", "Write", 5_000), toolResult("write", 5_250, 0)])).toEqual([
+      { name: "Write", calls: 1, durationMs: 250 },
+    ]);
   });
 
   it("derives network throughput without spanning counter resets", () => {

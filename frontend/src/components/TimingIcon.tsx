@@ -25,12 +25,8 @@ export default function TimingIcon(props: Props) {
     const range = props.range === undefined ? timing.range : props.range;
     if (!range || range.end > range.start || props.range !== undefined) return range;
 
-    const previousTs = timing.firstTimedEvent
-      ? props.previousEventTs?.get(timing.firstTimedEvent)
-      : undefined;
-    return previousTs !== undefined && previousTs < range.start
-      ? { start: previousTs, end: range.end }
-      : range;
+    const previousTs = timing.firstTimedEvent ? props.previousEventTs?.get(timing.firstTimedEvent) : undefined;
+    return previousTs !== undefined && previousTs < range.start ? { start: previousTs, end: range.end } : range;
   });
   const combinedDurationMs = createMemo(() => {
     if (props.segments === undefined) return null;
@@ -79,8 +75,7 @@ export default function TimingIcon(props: Props) {
       lines.push(`Combined elements: ${formatTimingDuration(combinedMs)}`);
     } else if (result && result.duration > 0) {
       lines.push(`Turn: ${formatTimingDuration(result.duration * 1000)}`);
-      if (result.durationAPI > 0)
-        lines.push(`API: ${formatTimingDuration(result.durationAPI * 1000)}`);
+      if (result.durationAPI > 0) lines.push(`API: ${formatTimingDuration(result.durationAPI * 1000)}`);
     } else if (hasRange && !hasWait) {
       lines.push(`Element: ${formatTimingDuration(end - start)}`);
     }

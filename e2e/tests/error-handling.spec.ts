@@ -40,18 +40,14 @@ test("purge nonexistent task returns 404", async ({ api }) => {
 });
 
 test("send input to nonexistent task returns 404", async ({ api }) => {
-  const err = await api
-    .sendInput("nonexistent-id", { prompt: { text: "hello" } })
-    .catch((e: unknown) => e);
+  const err = await api.sendInput("nonexistent-id", { prompt: { text: "hello" } }).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(404);
 });
 
 test("navigating to a nonexistent task redirects home", async ({ page }) => {
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // The detail route resolves the task as a REST resource; a 404 is
   // authoritative and sends us home (no dependence on the list snapshot).
@@ -62,9 +58,7 @@ test("navigating to a nonexistent task redirects home", async ({ page }) => {
 
 test("network failure shows reconnect banner", async ({ page }) => {
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Intercept all API requests to simulate network failure. This must close
   // the existing SSE connection too, so we abort any in-flight requests and

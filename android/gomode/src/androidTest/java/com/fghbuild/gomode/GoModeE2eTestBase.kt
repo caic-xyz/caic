@@ -22,16 +22,17 @@ internal const val GOMODE_LOAD_TIMEOUT_MS = 60_000L
 @Suppress("UnnecessaryAbstractClass")
 abstract class GoModeE2eTestBase {
     @get:Rule(order = 0)
-    val clearSettingsRule = TestRule { base, _ ->
-        object : Statement() {
-            override fun evaluate() {
-                enableSoftKeyboardWithHardwareKeyboard()
-                val context = InstrumentationRegistry.getInstrumentation().targetContext
-                context.filesDir.resolve("datastore/gomode_settings.preferences_pb").delete()
-                base.evaluate()
+    val clearSettingsRule =
+        TestRule { base, _ ->
+            object : Statement() {
+                override fun evaluate() {
+                    enableSoftKeyboardWithHardwareKeyboard()
+                    val context = InstrumentationRegistry.getInstrumentation().targetContext
+                    context.filesDir.resolve("datastore/gomode_settings.preferences_pb").delete()
+                    base.evaluate()
+                }
             }
         }
-    }
 
     @get:Rule(order = 1)
     val composeRule = createAndroidComposeRule<MainActivity>()
@@ -106,7 +107,10 @@ abstract class GoModeE2eTestBase {
         fillContentEditable("[data-testid=\"task-detail-form\"] [role=\"textbox\"]", text)
     }
 
-    protected fun fillContentEditableByTestId(testId: String, text: String) {
+    protected fun fillContentEditableByTestId(
+        testId: String,
+        text: String,
+    ) {
         fillContentEditable(testIdSelector(testId), text)
     }
 
@@ -124,20 +128,27 @@ abstract class GoModeE2eTestBase {
         }
     }
 
-    protected fun waitForTestId(testId: String, timeoutMs: Long = GOMODE_DEFAULT_TIMEOUT_MS) {
+    protected fun waitForTestId(
+        testId: String,
+        timeoutMs: Long = GOMODE_DEFAULT_TIMEOUT_MS,
+    ) {
         val selector = testIdSelector(testId)
         waitForDom("test id $testId", timeoutMs) { "isVisible(${selector.jsString()})" }
     }
 
-    protected fun waitForText(text: String, timeoutMs: Long = GOMODE_DEFAULT_TIMEOUT_MS) {
+    protected fun waitForText(
+        text: String,
+        timeoutMs: Long = GOMODE_DEFAULT_TIMEOUT_MS,
+    ) {
         waitForDom("text '$text'", timeoutMs) {
             "document.body?.innerText.includes(${text.jsString()}) === true"
         }
     }
 
-    protected fun textOccurrenceCount(text: String): Int = js(
-        "((document.body?.innerText ?? '').split(${text.jsString()}).length - 1)"
-    ).toInt()
+    protected fun textOccurrenceCount(text: String): Int =
+        js(
+            "((document.body?.innerText ?? '').split(${text.jsString()}).length - 1)",
+        ).toInt()
 
     protected fun waitForTextOccurrenceAtLeast(
         text: String,
@@ -164,7 +175,10 @@ abstract class GoModeE2eTestBase {
         error("Timed out waiting for DOM condition '$description': $condition\nBody: $bodyText")
     }
 
-    protected fun executeDom(description: String, script: () -> String) {
+    protected fun executeDom(
+        description: String,
+        script: () -> String,
+    ) {
         val result = js(wrapDomHelpers(script()))
         check(result == "true") { "DOM action failed '$description': $result" }
     }
@@ -191,22 +205,24 @@ abstract class GoModeE2eTestBase {
         val view = waitForWebView()
         val widthScale = view.width / js("window.innerWidth").toFloat()
         val heightScale = view.height / js("window.innerHeight").toFloat()
-        val xCss = js(
-            """
-            (() => {
-              const r = document.querySelector(${selector.jsString()}).getBoundingClientRect();
-              return r.left + r.width / 2;
-            })()
-            """.trimIndent(),
-        ).toFloat()
-        val yCss = js(
-            """
-            (() => {
-              const r = document.querySelector(${selector.jsString()}).getBoundingClientRect();
-              return r.top + r.height / 2;
-            })()
-            """.trimIndent(),
-        ).toFloat()
+        val xCss =
+            js(
+                """
+                (() => {
+                  const r = document.querySelector(${selector.jsString()}).getBoundingClientRect();
+                  return r.left + r.width / 2;
+                })()
+                """.trimIndent(),
+            ).toFloat()
+        val yCss =
+            js(
+                """
+                (() => {
+                  const r = document.querySelector(${selector.jsString()}).getBoundingClientRect();
+                  return r.top + r.height / 2;
+                })()
+                """.trimIndent(),
+            ).toFloat()
         val location = webViewScreenLocation()
         UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(
             location[0] + (xCss * widthScale).roundToInt(),
@@ -232,8 +248,10 @@ abstract class GoModeE2eTestBase {
         composeRule.activity.runOnUiThread {
             val root = composeRule.activity.window.decorView.rootView
             visible = root.rootWindowInsets
-                ?.getInsets(android.view.WindowInsets.Type.ime())
-                ?.bottom
+                ?.getInsets(
+                    android.view.WindowInsets.Type
+                        .ime(),
+                )?.bottom
                 ?.let { it > 0 }
                 ?: false
             latch.countDown()
@@ -257,7 +275,8 @@ abstract class GoModeE2eTestBase {
     }
 
     private fun enableSoftKeyboardWithHardwareKeyboard() {
-        InstrumentationRegistry.getInstrumentation()
+        InstrumentationRegistry
+            .getInstrumentation()
             .uiAutomation
             .executeShellCommand("settings put secure show_ime_with_hard_keyboard 1")
             .close()
@@ -277,7 +296,10 @@ abstract class GoModeE2eTestBase {
         return view
     }
 
-    private fun fillContentEditable(selector: String, text: String) {
+    private fun fillContentEditable(
+        selector: String,
+        text: String,
+    ) {
         waitForDom("editable $selector") { "isVisible(${selector.jsString()})" }
         executeDom("fill $selector") {
             """

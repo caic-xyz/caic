@@ -121,11 +121,9 @@ describe("NativeActivityTracker", () => {
   it("resets on history replacement and ignores uncorrelatable observations", () => {
     const tracker = new NativeActivityTracker();
     tracker.derive([event("a", "running", 1, {})]);
-    expect(
-      tracker
-        .derive([event("b", "completed", 2, {}), event("", "running", 3, {})])
-        .map((s) => s.id),
-    ).toEqual(["b"]);
+    expect(tracker.derive([event("b", "completed", 2, {}), event("", "running", 3, {})]).map((s) => s.id)).toEqual([
+      "b",
+    ]);
     expect(tracker.derive([])).toEqual([]);
   });
 });
@@ -144,9 +142,7 @@ function elidedTurn(key: string, ts: number): MsgItem {
     kind: "elided",
     key,
     turn: {
-      groups: [
-        { kind: "text", events: [{ kind: "text", ts, text: { text: "content" } }], toolCalls: [] },
-      ],
+      groups: [{ kind: "text", events: [{ kind: "text", ts, text: { text: "content" } }], toolCalls: [] }],
       toolCount: 0,
       textCount: 0,
       durationMs: 0,

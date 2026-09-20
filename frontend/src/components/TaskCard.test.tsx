@@ -125,9 +125,7 @@ describe("TaskCard", () => {
 
     fireEvent.focus(screen.getByRole("button", { name: "waiting" }));
 
-    expect(
-      screen.getByText("Prompt cache likely expired — continuing may use more tokens"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Prompt cache likely expired — continuing may use more tokens")).toBeInTheDocument();
     expect(screen.queryByText(/TTL/)).not.toBeInTheDocument();
   });
 
@@ -209,9 +207,7 @@ describe("TaskCard", () => {
 
   it("renders a clickable origin task without selecting the child", () => {
     const onClick = vi.fn();
-    const { getByRole } = renderCard(() => (
-      <TaskCard {...props({ forkedFromTaskID: "3BL0EKDTO000", onClick })} />
-    ));
+    const { getByRole } = renderCard(() => <TaskCard {...props({ forkedFromTaskID: "3BL0EKDTO000", onClick })} />);
 
     const link = getByRole("link", { name: "3BL0EKDTO000" });
     expect(link).toHaveAttribute("href", "/task/@3BL0EKDTO000");
@@ -221,9 +217,7 @@ describe("TaskCard", () => {
 
   it("renders a clickable parent task without selecting the child", () => {
     const onClick = vi.fn();
-    const { getByRole } = renderCard(() => (
-      <TaskCard {...props({ parentTaskID: "3BL0EKDTO001", onClick })} />
-    ));
+    const { getByRole } = renderCard(() => <TaskCard {...props({ parentTaskID: "3BL0EKDTO001", onClick })} />);
 
     const link = getByRole("link", { name: "3BL0EKDTO001" });
     expect(link).toHaveAttribute("href", "/task/@3BL0EKDTO001");
@@ -232,9 +226,7 @@ describe("TaskCard", () => {
   });
 
   it("shows a child origin once when it matches the fork source", () => {
-    renderCard(() => (
-      <TaskCard {...props({ forkedFromTaskID: "parent", parentTaskID: "parent" })} />
-    ));
+    renderCard(() => <TaskCard {...props({ forkedFromTaskID: "parent", parentTaskID: "parent" })} />);
 
     expect(screen.getByText("child of")).toBeInTheDocument();
     expect(screen.queryByText("forked from")).not.toBeInTheDocument();
@@ -258,9 +250,7 @@ describe("TaskCard", () => {
     expect(onPurge).not.toHaveBeenCalled();
 
     unmount();
-    renderCard(() => (
-      <TaskCard {...props({ state: "stopped", selected: true, onPurge, onRevive: vi.fn() })} />
-    ));
+    renderCard(() => <TaskCard {...props({ state: "stopped", selected: true, onPurge, onRevive: vi.fn() })} />);
 
     expect(screen.getByTestId("purge-task")).toBeInTheDocument();
     expect(screen.getByTestId("revive-task")).toBeInTheDocument();
@@ -316,9 +306,7 @@ describe("TaskCard", () => {
     const onStop = vi.fn();
     const onPurge = vi.fn();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { getByTestId } = renderCard(() => (
-      <TaskCard {...props({ state: "waiting", onStop, onPurge })} />
-    ));
+    const { getByTestId } = renderCard(() => <TaskCard {...props({ state: "waiting", onStop, onPurge })} />);
     const stopButton = getByTestId("stop-task");
 
     fireEvent.click(stopButton, { detail: 1 });

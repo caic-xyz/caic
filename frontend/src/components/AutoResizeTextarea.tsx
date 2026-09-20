@@ -42,9 +42,7 @@ export default function AutoResizeTextarea(props: Props) {
     if (pointerFocus) return;
     const generation = ++focusGeneration;
     const previousRange =
-      savedRange && editable.contains(savedRange.commonAncestorContainer)
-        ? savedRange.cloneRange()
-        : undefined;
+      savedRange && editable.contains(savedRange.commonAncestorContainer) ? savedRange.cloneRange() : undefined;
     queueMicrotask(() => {
       if (generation !== focusGeneration || document.activeElement !== editable) return;
       const selection = window.getSelection();

@@ -112,12 +112,7 @@ describe("SearchableSelect", () => {
       search: `option ${i}`,
     }));
     render(() => (
-      <SearchableSelect
-        ariaLabel="Deep picker"
-        value="option-25"
-        options={() => deepOptions}
-        onChange={vi.fn()}
-      />
+      <SearchableSelect ariaLabel="Deep picker" value="option-25" options={() => deepOptions} onChange={vi.fn()} />
     ));
 
     const trigger = screen.getByRole("button", { name: "Deep picker" });
@@ -126,9 +121,7 @@ describe("SearchableSelect", () => {
 
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
-    expect(scrollIntoView.mock.contexts).toContain(
-      screen.getByRole("option", { name: "Option 29" }),
-    );
+    expect(scrollIntoView.mock.contexts).toContain(screen.getByRole("option", { name: "Option 29" }));
     expect(screen.getByRole("combobox", { name: "Deep picker" })).toHaveAttribute(
       "aria-activedescendant",
       expect.stringContaining("-opt-29"),
@@ -140,9 +133,7 @@ describe("SearchableSelect", () => {
     await user.keyboard("{ArrowDown}");
 
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(scrollIntoView.mock.contexts).toContain(
-      screen.getByRole("option", { name: "Option 25" }),
-    );
+    expect(scrollIntoView.mock.contexts).toContain(screen.getByRole("option", { name: "Option 25" }));
   });
 
   it("filters options as the user types", async () => {
@@ -173,10 +164,7 @@ describe("SearchableSelect", () => {
     await user.click(screen.getByRole("button", { name: "Repository" }));
     await user.type(screen.getByRole("combobox", { name: "Repository" }), "foo");
 
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "foo/foobar",
-      "foo/bar",
-    ]);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["foo/foobar", "foo/bar"]);
   });
 
   it("selects the first match on Enter after filtering", async () => {

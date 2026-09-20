@@ -1,17 +1,11 @@
 // End-to-end tests for the task lifecycle using a fake backend.
 import { test, expect, waitForTaskState, fillContentEditable, createTaskAPI } from "../helpers";
 
-test("create task, verify streaming text and result, then purge", async ({
-  page,
-  api,
-  uniquePrompt,
-}) => {
+test("create task, verify streaming text and result, then purge", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load (a chip appears in the strip).
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Use a unique prompt to avoid collisions with parallel tests.
   const prompt = uniquePrompt("FAKE_LIFECYCLE e2e lifecycle");
@@ -93,10 +87,7 @@ test("setup logs remain visible after task-detail replay", async ({ page, api },
   await page.screenshot({ path: testInfo.outputPath("task-setup-logs.png") });
 });
 
-test("task detail desktop layout wraps timed controls and avoids pane overflow", async ({
-  page,
-  api,
-}) => {
+test("task detail desktop layout wraps timed controls and avoids pane overflow", async ({ page, api }) => {
   await page.setViewportSize({ width: 950, height: 800 });
   const id = await createTaskAPI(api, "Fix a desktop overflow regression");
   await waitForTaskState(api, id, "waiting", 30_000);
@@ -124,8 +115,8 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
         rawButton.evaluate((button) => {
           const toolbar = button.parentElement;
           const content = toolbar?.parentElement?.parentElement?.parentElement;
-          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")
-            ?.parentElement?.parentElement;
+          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement
+            ?.parentElement;
           return timing ? getComputedStyle(timing).float : null;
         }),
       )
@@ -137,8 +128,8 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
         rawButton.evaluate((button) => {
           const toolbar = button.parentElement;
           const content = toolbar?.parentElement?.parentElement?.parentElement;
-          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")
-            ?.parentElement?.parentElement;
+          const timing = content?.querySelector<HTMLElement>("[data-testid='timing-duration']")?.parentElement
+            ?.parentElement;
           return timing ? getComputedStyle(timing).opacity : null;
         }),
       )
@@ -146,9 +137,7 @@ test("task detail desktop layout wraps timed controls and avoids pane overflow",
   });
 
   await test.step("detail pane has no extra gutters or horizontal overflow", async () => {
-    await expect
-      .poll(async () => messageArea.evaluate((el) => getComputedStyle(el).overflowX))
-      .toBe("hidden");
+    await expect.poll(async () => messageArea.evaluate((el) => getComputedStyle(el).overflowX)).toBe("hidden");
     await expect
       .poll(async () =>
         taskList.evaluate((list) => {
@@ -179,9 +168,7 @@ test("add-repo dropdown is visible and not clipped by overflow", async ({ page }
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // The add-repo button should be present (at least one repo is not yet selected).
   const addBtn = page.getByTestId("add-repo-button");

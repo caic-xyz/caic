@@ -7,29 +7,27 @@ import { createSignal } from "solid-js";
 
 import type { Task } from "@sdk/types.gen";
 
-const { connectMock, disconnectMock, injectTextMock, taskNumberForIDMock, voiceState } = vi.hoisted(
-  () => ({
-    connectMock: vi.fn(),
-    disconnectMock: vi.fn(),
-    injectTextMock: vi.fn(),
-    taskNumberForIDMock: vi.fn((id: string) => (id === "new-task" ? 2 : 1)),
-    voiceState: {
-      connectStatus: null,
-      connected: false,
-      listening: false,
-      speaking: false,
-      muted: false,
-      activeTool: null,
-      transcript: [],
-      micLevel: 0,
-      error: null,
-      audioInputs: [],
-      audioOutputs: [],
-      selectedInputId: "",
-      selectedOutputId: "",
-    },
-  }),
-);
+const { connectMock, disconnectMock, injectTextMock, taskNumberForIDMock, voiceState } = vi.hoisted(() => ({
+  connectMock: vi.fn(),
+  disconnectMock: vi.fn(),
+  injectTextMock: vi.fn(),
+  taskNumberForIDMock: vi.fn((id: string) => (id === "new-task" ? 2 : 1)),
+  voiceState: {
+    connectStatus: null,
+    connected: false,
+    listening: false,
+    speaking: false,
+    muted: false,
+    activeTool: null,
+    transcript: [],
+    micLevel: 0,
+    error: null,
+    audioInputs: [],
+    audioOutputs: [],
+    selectedInputId: "",
+    selectedOutputId: "",
+  },
+}));
 
 vi.mock("./VoiceSession", () => ({
   voiceSession: {

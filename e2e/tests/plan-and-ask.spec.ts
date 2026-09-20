@@ -2,11 +2,7 @@
 import { test, expect, waitForTaskState, fillContentEditable, type APIClient } from "../helpers";
 
 // Submit a task via the UI and poll until the task ID is available via the API.
-async function submitAndGetId(
-  page: import("@playwright/test").Page,
-  api: APIClient,
-  prompt: string,
-): Promise<string> {
+async function submitAndGetId(page: import("@playwright/test").Page, api: APIClient, prompt: string): Promise<string> {
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await page.getByTestId("submit-task").click();
   let taskId = "";
@@ -19,17 +15,11 @@ async function submitAndGetId(
   return taskId;
 }
 
-test("FAKE_PLAN: clear-plan button appears and restarts task", async ({
-  page,
-  api,
-  uniquePrompt,
-}) => {
+test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   const prompt = uniquePrompt("FAKE_PLAN e2e");
   const taskId = await submitAndGetId(page, api, prompt);
@@ -58,17 +48,11 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({
   await waitForTaskState(api, taskId, "waiting", 20_000);
 });
 
-test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
-  page,
-  api,
-  uniquePrompt,
-}) => {
+test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   const prompt = uniquePrompt("FAKE_ASK e2e");
   const taskId = await submitAndGetId(page, api, prompt);

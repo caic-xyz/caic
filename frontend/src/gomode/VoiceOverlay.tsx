@@ -7,11 +7,7 @@ import CallEndIcon from "@material-symbols/svg-400/outlined/call_end.svg?solid";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 
 import type { Task } from "@sdk/types.gen";
-import {
-  buildTaskCIContext,
-  buildTaskCreatedContext,
-  buildTaskStateContext,
-} from "../voiceTaskContext";
+import { buildTaskCIContext, buildTaskCreatedContext, buildTaskStateContext } from "../voiceTaskContext";
 
 import { voiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
@@ -85,12 +81,7 @@ export default function VoiceOverlay(props: Props) {
           if (notification !== null) session.injectText(notification);
         }
         const prevCI = prevCIStatuses.get(task.id);
-        if (
-          prevCI !== undefined &&
-          prevCI !== "failure" &&
-          task.ciStatus === "failure" &&
-          taskNumber !== undefined
-        ) {
+        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
           session.injectText(buildTaskCIContext(task, taskNumber));
         }
       }
@@ -174,16 +165,10 @@ export default function VoiceOverlay(props: Props) {
             {(err) => <ErrorPanel error={err} onRetry={() => handleMicClick()} />}
           </Show>
           <Show
-            when={
-              session.state.error === null &&
-              session.state.connectStatus !== null &&
-              session.state.connectStatus
-            }
+            when={session.state.error === null && session.state.connectStatus !== null && session.state.connectStatus}
             keyed
           >
-            {(status) => (
-              <ConnectingPanel status={status} onDisconnect={() => session.disconnect()} />
-            )}
+            {(status) => <ConnectingPanel status={status} onDisconnect={() => session.disconnect()} />}
           </Show>
           <Show
             when={
@@ -263,9 +248,7 @@ function ActivePanel(props: {
   };
 
   const statusClass = () =>
-    props.state.activeTool !== null
-      ? `${styles.statusText} ${styles.statusTool}`
-      : styles.statusText;
+    props.state.activeTool !== null ? `${styles.statusText} ${styles.statusTool}` : styles.statusText;
 
   return (
     <>
@@ -303,10 +286,7 @@ function ActivePanel(props: {
           onSelectOutput={props.onSelectOutput}
         />
       )}
-      <TranscriptLog
-        transcript={props.state.transcript}
-        onClear={() => props.onClearTranscript()}
-      />
+      <TranscriptLog transcript={props.state.transcript} onClear={() => props.onClearTranscript()} />
     </>
   );
 }
@@ -410,13 +390,7 @@ function TranscriptLog(props: { transcript: TranscriptEntry[]; onClear: () => vo
           <For each={props.transcript}>
             {(entry) => (
               <div class={styles.transcriptEntry}>
-                <span
-                  class={
-                    entry.speaker === "user"
-                      ? styles.transcriptLabelUser
-                      : styles.transcriptLabelAssistant
-                  }
-                >
+                <span class={entry.speaker === "user" ? styles.transcriptLabelUser : styles.transcriptLabelAssistant}>
                   {entry.speaker === "user" ? "You:" : "Assistant:"}
                 </span>
                 {entry.text}

@@ -79,29 +79,31 @@ class HaloController(
                 selectedDeviceId = null,
             )
         }
-        scanJob = scope.launch {
-            haloConnection.scan()
-                .catch { error ->
-                    stopScan()
-                    _state.update {
-                        it.copy(
-                            connectionState = HaloConnectionState.Error,
-                            error = error.message ?: "BLE scan failed",
-                        )
+        scanJob =
+            scope.launch {
+                haloConnection
+                    .scan()
+                    .catch { error ->
+                        stopScan()
+                        _state.update {
+                            it.copy(
+                                connectionState = HaloConnectionState.Error,
+                                error = error.message ?: "BLE scan failed",
+                            )
+                        }
+                    }.collect { scanned ->
+                        val item = scanned.toItem()
+                        scannedDevices[item.id] = scanned
+                        _state.update { current ->
+                            val devices =
+                                current.devices
+                                    .filterNot { it.id == item.id }
+                                    .plus(item)
+                                    .sortedBy { it.name }
+                            current.copy(devices = devices)
+                        }
                     }
-                }
-                .collect { scanned ->
-                    val item = scanned.toItem()
-                    scannedDevices[item.id] = scanned
-                    _state.update { current ->
-                        val devices = current.devices
-                            .filterNot { it.id == item.id }
-                            .plus(item)
-                            .sortedBy { it.name }
-                        current.copy(devices = devices)
-                    }
-                }
-        }
+            }
     }
 
     fun stopScan() {
@@ -132,8 +134,7 @@ class HaloController(
                             error = null,
                         )
                     }
-                }
-                .onFailure { error ->
+                }.onFailure { error ->
                     _state.update {
                         it.copy(
                             connectionState = HaloConnectionState.Error,

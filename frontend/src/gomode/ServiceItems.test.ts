@@ -49,8 +49,6 @@ describe("initialServiceContext", () => {
   });
 
   it("uses an empty baseline when advertised data is malformed", () => {
-    expect(initialServiceContext('{"items":[{"id":"new","title":""}]}')).toBe(
-      "No visible service items.",
-    );
+    expect(initialServiceContext('{"items":[{"id":"new","title":""}]}')).toBe("No visible service items.");
   });
 });

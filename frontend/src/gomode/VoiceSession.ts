@@ -189,12 +189,8 @@ export class VoiceSession {
       // Auto-select: first available, or keep current selection if still valid.
       const curSel = this.state.selectedInputId;
       const curOut = this.state.selectedOutputId;
-      const newInId =
-        curSel && inputs.some((d) => d.deviceId === curSel) ? curSel : (inputs[0]?.deviceId ?? "");
-      const newOutId =
-        curOut && outputs.some((d) => d.deviceId === curOut)
-          ? curOut
-          : (outputs[0]?.deviceId ?? "");
+      const newInId = curSel && inputs.some((d) => d.deviceId === curSel) ? curSel : (inputs[0]?.deviceId ?? "");
+      const newOutId = curOut && outputs.some((d) => d.deviceId === curOut) ? curOut : (outputs[0]?.deviceId ?? "");
       this._update((s) => {
         s.audioInputs = inputs;
         s.audioOutputs = outputs;
@@ -615,16 +611,8 @@ export class VoiceSession {
   // Gateway setup message
   // -----------------------------------------------------------------------
 
-  private _sendSetup(
-    tools: McpToolDescriptor[],
-    systemInstruction: string,
-    serviceContext: string,
-  ): void {
-    const setup = gatewaySessionSetup(
-      voiceToolDeclarations(tools),
-      systemInstruction,
-      serviceContext,
-    );
+  private _sendSetup(tools: McpToolDescriptor[], systemInstruction: string, serviceContext: string): void {
+    const setup = gatewaySessionSetup(voiceToolDeclarations(tools), systemInstruction, serviceContext);
     this._send(JSON.stringify(setup));
   }
 
@@ -735,9 +723,7 @@ export class VoiceSession {
       // Surface tool errors in the transcript.
       if (result.isError) {
         const errMsg =
-          typeof result.structuredContent["error"] === "string"
-            ? result.structuredContent["error"]
-            : "Tool error";
+          typeof result.structuredContent["error"] === "string" ? result.structuredContent["error"] : "Tool error";
         this._update((s) => {
           s.transcript = [
             ...s.transcript,
@@ -796,10 +782,7 @@ export class VoiceSession {
   }
 }
 
-function completeLocalOffer(
-  pc: RTCPeerConnection,
-  offer: RTCSessionDescriptionInit,
-): Promise<string> {
+function completeLocalOffer(pc: RTCPeerConnection, offer: RTCSessionDescriptionInit): Promise<string> {
   return pc.setLocalDescription(offer).then(async () => {
     await waitForUsableICECandidate(pc);
     const sdp = pc.localDescription?.sdp;
@@ -851,11 +834,7 @@ function waitForUsableICECandidate(pc: RTCPeerConnection): Promise<void> {
     const onConnectionStateChange = () => {
       if (pc.connectionState !== "closed" && pc.connectionState !== "failed") return;
       cleanup();
-      reject(
-        new Error(
-          `WebRTC connection ${pc.connectionState} before ICE candidate gathering completed`,
-        ),
-      );
+      reject(new Error(`WebRTC connection ${pc.connectionState} before ICE candidate gathering completed`));
     };
     pc.addEventListener("icecandidate", onICECandidate);
     pc.addEventListener("icegatheringstatechange", onGatheringStateChange);
@@ -892,16 +871,10 @@ function iceCandidateType(candidate: string): string | undefined {
 function isUsableIPv4(address: string | undefined): boolean {
   if (address === undefined || address.startsWith("169.254.")) return false;
   const octets = address.split(".");
-  return (
-    octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
-  );
+  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255);
 }
 
-function logVoiceRTCDiagnostics(
-  diagnostics: VoiceRTCDiagnosticsResp,
-  offerSDP: string,
-  answerSDP: string,
-): void {
+function logVoiceRTCDiagnostics(diagnostics: VoiceRTCDiagnosticsResp, offerSDP: string, answerSDP: string): void {
   console.warn("Voice RTC diagnostics", {
     issue: diagnostics.issue,
     side: diagnostics.side,
@@ -927,16 +900,13 @@ export function summarizeSDPCandidates(sdp: string): string {
 
 export function formatVoiceRTCDiagnostics(diagnostics: VoiceRTCDiagnosticsResp): string {
   const side = diagnostics.side === "none" ? "unknown" : diagnostics.side;
-  const mappingError = diagnostics.server.udpMappingError
-    ? ` UDP mapping: ${diagnostics.server.udpMappingError}`
-    : "";
+  const mappingError = diagnostics.server.udpMappingError ? ` UDP mapping: ${diagnostics.server.udpMappingError}` : "";
   return `Voice connection failed (${side}: ${diagnostics.issue}) — ${diagnostics.message}${mappingError}`;
 }
 
 /** Build a bounded recovery-only context without replaying unfinished transcript deltas. */
 export function buildRecoveryContext(transcript: TranscriptEntry[]): string {
-  const prefix =
-    "Network recovery context. Continue the existing conversation; do not treat this as a new user turn.";
+  const prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn.";
   const availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - 24;
   const lines: string[] = [];
   let lineChars = 0;
@@ -947,8 +917,7 @@ export function buildRecoveryContext(transcript: TranscriptEntry[]): string {
     lines.unshift(line);
     lineChars += line.length + (lines.length === 1 ? 0 : 1);
   }
-  const transcriptSection =
-    lines.length === 0 ? "" : `\nFinalized transcript:\n${lines.join("\n")}`;
+  const transcriptSection = lines.length === 0 ? "" : `\nFinalized transcript:\n${lines.join("\n")}`;
   return `${prefix}${transcriptSection}`;
 }
 
@@ -996,11 +965,7 @@ function gatewayToolResult(id: string, name: string, result: Record<string, unkn
 
 // Transcript helpers
 
-function appendChunk(
-  transcript: TranscriptEntry[],
-  speaker: TranscriptSpeaker,
-  text: string,
-): TranscriptEntry[] {
+function appendChunk(transcript: TranscriptEntry[], speaker: TranscriptSpeaker, text: string): TranscriptEntry[] {
   const last = transcript[transcript.length - 1];
   if (last && last.speaker === speaker && !last.final) {
     return [...transcript.slice(0, -1), { speaker, text: last.text + text, final: false }];

@@ -14,9 +14,7 @@ const wire = (json: string): unknown => JSON.parse(json);
 
 describe("validateTaskListEvent settled status", () => {
   it("preserves loading=true on a kind=status event", () => {
-    const ev = validateTaskListEvent(
-      wire('{"kind":"status","status":{"loading":true,"error":""}}'),
-    );
+    const ev = validateTaskListEvent(wire('{"kind":"status","status":{"loading":true,"error":""}}'));
     expect(ev.kind).toBe("status");
     expect(ev.status).toEqual({ loading: true, error: "" });
   });

@@ -164,10 +164,7 @@ describe("TaskDetail", () => {
   it("links task statistics to the full detail route", () => {
     renderTaskDetail();
 
-    expect(screen.getByRole("link", { name: "Task statistics" })).toHaveAttribute(
-      "href",
-      "/task/@abc+test-task/stats",
-    );
+    expect(screen.getByRole("link", { name: "Task statistics" })).toHaveAttribute("href", "/task/@abc+test-task/stats");
   });
 
   it("keeps header Git line totals when its capped title ellipsizes", async () => {
@@ -284,14 +281,8 @@ describe("TaskDetail", () => {
     });
 
     expect(screen.getByRole("navigation", { name: "Task hierarchy" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Parent task" })).toHaveAttribute(
-      "href",
-      "/task/@parent",
-    );
-    expect(screen.getByRole("link", { name: "Child: Review tests" })).toHaveAttribute(
-      "href",
-      "/task/@child",
-    );
+    expect(screen.getByRole("link", { name: "Parent task" })).toHaveAttribute("href", "/task/@parent");
+    expect(screen.getByRole("link", { name: "Child: Review tests" })).toHaveAttribute("href", "/task/@child");
   });
 
   it("uses a child ID when its title is empty", () => {
@@ -404,12 +395,8 @@ describe("TaskDetail", () => {
 
     expect(getAllByText("100ms")).toHaveLength(1);
     expect(getByText("/workspace/main.go")).toBeInTheDocument();
-    const added = getByText(
-      (_, element) => element?.textContent === '+\tfmt.Println("Hi, World!")',
-    );
-    const deleted = getByText(
-      (_, element) => element?.textContent === '-\tfmt.Println("Hello, World!")',
-    );
+    const added = getByText((_, element) => element?.textContent === '+\tfmt.Println("Hi, World!")');
+    const deleted = getByText((_, element) => element?.textContent === '-\tfmt.Println("Hello, World!")');
     expect(added.className).toMatch(/lineAdded/);
     expect(deleted.className).toMatch(/lineDeleted/);
   });
@@ -484,9 +471,7 @@ describe("TaskDetail", () => {
     });
 
     const { getByTestId } = renderTaskDetail();
-    expect(
-      within(getByTestId("native-subagents")).getByText("Subagent: Orphan"),
-    ).toBeInTheDocument();
+    expect(within(getByTestId("native-subagents")).getByText("Subagent: Orphan")).toBeInTheDocument();
   });
 
   it("shows elapsed time on a single-event message block", () => {
@@ -685,8 +670,7 @@ describe("TaskDetail", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(2_000);
       const latestResult = resultEvent(4_000);
-      if (!firstResult.result || !latestResult.result)
-        throw new Error("result fixture is missing payload");
+      if (!firstResult.result || !latestResult.result) throw new Error("result fixture is missing payload");
       firstResult.result.usage.reportedModel = "collapsed-model";
       latestResult.result.usage.reportedModel = "latest-model";
       const events: EventMessage[] = [
@@ -744,8 +728,7 @@ describe("TaskDetail", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(0);
       const secondResult = resultEvent(0);
-      if (!firstResult.result || !secondResult.result)
-        throw new Error("result fixture is missing payload");
+      if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
       firstResult.result.duration = 0;
       secondResult.result.duration = 0;
       const events: EventMessage[] = [
@@ -766,9 +749,7 @@ describe("TaskDetail", () => {
 
     const { getAllByText } = renderTaskDetail();
 
-    expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(
-      true,
-    );
+    expect(getAllByText("0s").some((duration) => duration.className.includes("turnDuration"))).toBe(true);
   });
 
   it("summarizes every turn in the collapsed session details", async () => {
@@ -776,8 +757,7 @@ describe("TaskDetail", () => {
     vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
-      if (!firstResult.result || !secondResult.result)
-        throw new Error("result fixture is missing payload");
+      if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
       firstResult.result.duration = 2;
       secondResult.result.duration = 3;
       firstResult.result.usage.inputTokens = 100;
@@ -1068,9 +1048,7 @@ describe("TaskDetail", () => {
 
     renderTaskDetail();
 
-    expect(screen.getByTestId("compact-error")).toHaveTextContent(
-      "Context compaction failed: summarizer unavailable",
-    );
+    expect(screen.getByTestId("compact-error")).toHaveTextContent("Context compaction failed: summarizer unavailable");
   });
 });
 
@@ -1083,10 +1061,7 @@ type FakeES = {
 
 // Build a mock that fires the "ready" event synchronously so tests don't need
 // to advance timers just to get the component into live mode.
-function makeSyncReadyMock(
-  created: FakeES[],
-  capturedCb?: { value: ((ev: EventMessage) => void) | null },
-) {
+function makeSyncReadyMock(created: FakeES[], capturedCb?: { value: ((ev: EventMessage) => void) | null }) {
   vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
     if (capturedCb) capturedCb.value = handlers.onMessage;
     const fakeES: FakeES = {
@@ -1230,9 +1205,7 @@ describe("SSE connection", () => {
     onReady();
 
     expect(document.body).not.toHaveTextContent("replacement live a");
-    expect(document.body).toHaveTextContent(
-      "lower-split-1 lower-split-2 lower-split-3 lower-split-4 lower-split-5",
-    );
+    expect(document.body).toHaveTextContent("lower-split-1 lower-split-2 lower-split-3 lower-split-4 lower-split-5");
   });
 
   it("reports terminal history errors and does not retry after the native error", () => {
@@ -1377,9 +1350,7 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2024-03-21T04:26:40Z").toLocaleTimeString();
-    expect(document.body.textContent).toContain(
-      `5-hour quota reached; using extra usage · resets at ${resetTime}`,
-    );
+    expect(document.body.textContent).toContain(`5-hour quota reached; using extra usage · resets at ${resetTime}`);
     expect(document.body.textContent).not.toContain("monthly");
   });
 
@@ -1492,9 +1463,7 @@ describe("SSE connection", () => {
     expect(document.body.textContent).not.toContain("0t in + 0t out");
     expect(document.body.textContent).toContain("50t thinking");
     expect(document.body.textContent).not.toContain("claude");
-    expect(document.body.textContent).toContain(
-      "codex · 100t new · 200t cache write · 700t cache read · 40t out",
-    );
+    expect(document.body.textContent).toContain("codex · 100t new · 200t cache write · 700t cache read · 40t out");
     expect(document.querySelectorAll('[aria-label="Timing details"]')).toHaveLength(0);
   });
 

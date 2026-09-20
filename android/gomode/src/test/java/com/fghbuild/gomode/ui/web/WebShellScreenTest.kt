@@ -67,30 +67,33 @@ class WebShellScreenTest {
 
     @Test
     fun newWindowRequestUriAcceptsAnchorHitTestUrls() {
-        val uri = newWindowRequestUriOrNull(
-            WebView.HitTestResult.SRC_ANCHOR_TYPE,
-            "https://example.com/docs",
-        )
+        val uri =
+            newWindowRequestUriOrNull(
+                WebView.HitTestResult.SRC_ANCHOR_TYPE,
+                "https://example.com/docs",
+            )
 
         assertEquals("https://example.com/docs", uri.toString())
     }
 
     @Test
     fun newWindowRequestUriAcceptsImageAnchorHitTestUrls() {
-        val uri = newWindowRequestUriOrNull(
-            WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE,
-            "mailto:support@example.com",
-        )
+        val uri =
+            newWindowRequestUriOrNull(
+                WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE,
+                "mailto:support@example.com",
+            )
 
         assertEquals("mailto:support@example.com", uri.toString())
     }
 
     @Test
     fun newWindowRequestUriIgnoresUnknownHitTestUrls() {
-        val uri = newWindowRequestUriOrNull(
-            WebView.HitTestResult.UNKNOWN_TYPE,
-            "https://example.com/docs",
-        )
+        val uri =
+            newWindowRequestUriOrNull(
+                WebView.HitTestResult.UNKNOWN_TYPE,
+                "https://example.com/docs",
+            )
 
         assertNull(uri)
     }

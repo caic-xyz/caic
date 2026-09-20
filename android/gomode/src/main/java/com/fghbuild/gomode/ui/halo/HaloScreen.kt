@@ -43,10 +43,11 @@ import com.fghbuild.gomode.halo.HaloConnectionState
 import com.fghbuild.gomode.halo.HaloController
 import com.fghbuild.gomode.halo.HaloDeviceItem
 
-private val BluetoothPermissions = arrayOf(
-    Manifest.permission.BLUETOOTH_SCAN,
-    Manifest.permission.BLUETOOTH_CONNECT,
-)
+private val BluetoothPermissions =
+    arrayOf(
+        Manifest.permission.BLUETOOTH_SCAN,
+        Manifest.permission.BLUETOOTH_CONNECT,
+    )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,16 +57,18 @@ fun HaloScreen(
 ) {
     val state by haloController.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
-        if (BluetoothPermissions.all { grants[it] == true }) {
-            haloController.startScan()
+    val permissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions(),
+        ) { grants ->
+            if (BluetoothPermissions.all { grants[it] == true }) {
+                haloController.startScan()
+            }
         }
-    }
-    val hasBluetoothPermissions = BluetoothPermissions.all {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-    }
+    val hasBluetoothPermissions =
+        BluetoothPermissions.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
 
     Scaffold(
         topBar = {
@@ -80,12 +83,13 @@ fun HaloScreen(
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState())
-                .testTag("gomode-halo-screen"),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState())
+                    .testTag("gomode-halo-screen"),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ListItem(
@@ -239,16 +243,18 @@ private fun HaloDeviceRow(
 }
 
 @Composable
-private fun HaloConnectionState.tint() = when (this) {
-    HaloConnectionState.Connected -> MaterialTheme.colorScheme.primary
-    HaloConnectionState.Error -> MaterialTheme.colorScheme.error
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
-}
+private fun HaloConnectionState.tint() =
+    when (this) {
+        HaloConnectionState.Connected -> MaterialTheme.colorScheme.primary
+        HaloConnectionState.Error -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
-private fun HaloConnectionState.label(): String = when (this) {
-    HaloConnectionState.Disconnected -> "Disconnected"
-    HaloConnectionState.Scanning -> "Scanning"
-    HaloConnectionState.Connecting -> "Waiting for pairing or connection"
-    HaloConnectionState.Connected -> "Connected"
-    HaloConnectionState.Error -> "Connection error"
-}
+private fun HaloConnectionState.label(): String =
+    when (this) {
+        HaloConnectionState.Disconnected -> "Disconnected"
+        HaloConnectionState.Scanning -> "Scanning"
+        HaloConnectionState.Connecting -> "Waiting for pairing or connection"
+        HaloConnectionState.Connected -> "Connected"
+        HaloConnectionState.Error -> "Connection error"
+    }

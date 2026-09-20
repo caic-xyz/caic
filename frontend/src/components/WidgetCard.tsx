@@ -73,8 +73,7 @@ export default function WidgetCard(props: { group: MessageGroup }) {
   // Mirror content to fullscreen iframe when it's open and ready.
   createEffect(
     on(
-      () =>
-        [props.group.widgetHTML, props.group.widgetDone, fullscreenReady(), fullscreen()] as const,
+      () => [props.group.widgetHTML, props.group.widgetDone, fullscreenReady(), fullscreen()] as const,
       ([html, done, ready, fs]) => {
         if (!html || !ready || !fs) return;
         const final = !!done;
@@ -120,9 +119,7 @@ export default function WidgetCard(props: { group: MessageGroup }) {
       <div class={styles.widgetCard}>
         <div class={styles.widgetHeader}>
           <span class={styles.widgetTitle}>{props.group.widgetTitle || "Widget"}</span>
-          <span class={styles.widgetBadge}>
-            {props.group.widgetDone ? "\u2713" : "\u25CF streaming"}
-          </span>
+          <span class={styles.widgetBadge}>{props.group.widgetDone ? "\u2713" : "\u25CF streaming"}</span>
           <button
             class={styles.fullscreenBtn}
             onClick={() => setFullscreen(true)}
@@ -152,9 +149,7 @@ export default function WidgetCard(props: { group: MessageGroup }) {
           >
             <div class={styles.fullscreenHeader}>
               <span class={styles.widgetTitle}>{props.group.widgetTitle || "Widget"}</span>
-              <span class={styles.widgetBadge}>
-                {props.group.widgetDone ? "\u2713" : "\u25CF streaming"}
-              </span>
+              <span class={styles.widgetBadge}>{props.group.widgetDone ? "\u2713" : "\u25CF streaming"}</span>
               <button
                 class={styles.fullscreenCloseBtn}
                 onClick={() => setFullscreen(false)}

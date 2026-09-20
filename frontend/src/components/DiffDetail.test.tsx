@@ -10,13 +10,7 @@ const { getTaskDiffIndexMock, getTaskFileDiffMock } = vi.hoisted(() => ({
   getTaskDiffIndexMock: vi.fn<(id: string) => Promise<TaskDiffIndexResp>>(),
   getTaskFileDiffMock:
     vi.fn<
-      (
-        id: string,
-        repository: string,
-        commit: string,
-        path: string,
-        originalPath: string,
-      ) => Promise<FileDiffResp>
+      (id: string, repository: string, commit: string, path: string, originalPath: string) => Promise<FileDiffResp>
     >(),
 }));
 
@@ -126,9 +120,7 @@ describe("DiffDetail", () => {
       resolveRetry = resolve;
     });
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
-    getTaskFileDiffMock
-      .mockRejectedValueOnce(new Error("patch unavailable"))
-      .mockReturnValueOnce(retry);
+    getTaskFileDiffMock.mockRejectedValueOnce(new Error("patch unavailable")).mockReturnValueOnce(retry);
 
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
@@ -161,12 +153,8 @@ describe("DiffDetail", () => {
     const refreshedPatch = new Promise<FileDiffResp>((resolve) => {
       resolvePatch = resolve;
     });
-    getTaskDiffIndexMock
-      .mockResolvedValueOnce(diffIndexFixture())
-      .mockReturnValueOnce(refreshedIndex);
-    getTaskFileDiffMock
-      .mockRejectedValueOnce(new Error("patch unavailable"))
-      .mockReturnValueOnce(refreshedPatch);
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockReturnValueOnce(refreshedIndex);
+    getTaskFileDiffMock.mockRejectedValueOnce(new Error("patch unavailable")).mockReturnValueOnce(refreshedPatch);
 
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
@@ -248,26 +236,19 @@ describe("DiffDetail", () => {
     resolveRefresh(refreshed);
 
     expect(await screen.findByText(/1 commit ahead · 2 behind/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "committed.go" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "committed.go" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("+loaded")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "committed.go" })).toHaveFocus();
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps stale metadata without claiming a failed refresh is active", async () => {
-    getTaskDiffIndexMock
-      .mockResolvedValueOnce(diffIndexFixture())
-      .mockRejectedValueOnce(new Error("refresh failed"));
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockRejectedValueOnce(new Error("refresh failed"));
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     expect(await screen.findByText("Commits ahead (1)")).toBeInTheDocument();
 
     taskDiffCache.invalidate("task-1");
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Diff may be out of date: refresh failed",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Diff may be out of date: refresh failed");
     expect(screen.queryByText("Updating diff...")).not.toBeInTheDocument();
     expect(screen.getByText("Commit subject")).toBeInTheDocument();
   });
@@ -291,13 +272,11 @@ describe("DiffDetail", () => {
         resolveIndex = resolve;
       }),
     );
-    getTaskFileDiffMock
-      .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+first" })
-      .mockReturnValueOnce(
-        new Promise((resolve) => {
-          resolvePatch = resolve;
-        }),
-      );
+    getTaskFileDiffMock.mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+first" }).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePatch = resolve;
+      }),
+    );
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", {
       name: "old.go → working.go",
@@ -346,9 +325,7 @@ describe("DiffDetail", () => {
       resolveFirstPatch = resolve;
     });
     getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
-    getTaskFileDiffMock
-      .mockReturnValueOnce(firstPatch)
-      .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
+    getTaskFileDiffMock.mockReturnValueOnce(firstPatch).mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
     render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", {
       name: "old.go → working.go",
@@ -376,9 +353,7 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
     getTaskFileDiffMock.mockRejectedValueOnce(err);
 
-    render(() => (
-      <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />
-    ));
+    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />);
     fireEvent.click(await screen.findByRole("button", { name: "committed.go" }));
 
     await vi.waitFor(() => {
@@ -472,9 +447,7 @@ describe("DiffDetail", () => {
     expect(screen.getByText("Commits ahead (2)")).toBeInTheDocument();
     expect(screen.getByText("12345678")).toHaveClass(styles.commitSha);
     expect(screen.getByText("2026-09-03")).toHaveAttribute("datetime", "2026-09-03");
-    expect(screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3")).toHaveClass(
-      styles.commitDecorations,
-    );
+    expect(screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3")).toHaveClass(styles.commitDecorations);
     expect(screen.getByText("Surface git status")).toBeInTheDocument();
     expect(screen.getByText("+10")).toHaveClass(styles.added);
     expect(screen.getAllByText("1 file changed")).toHaveLength(2);
@@ -645,25 +618,19 @@ describe("elidePathAtBoundary", () => {
   const measureCharacters = (text: string) => text.length;
 
   it("removes complete directory segments before touching the filename", () => {
-    expect(
-      elidePathAtBoundary(
-        "backend/internal/server/apiconv/oauth_handlers_test.go",
-        33,
-        measureCharacters,
-      ),
-    ).toBe("backend/…/oauth_handlers_test.go");
-  });
-
-  it("keeps the complete path when it fits", () => {
-    expect(elidePathAtBoundary("backend/internal/types.go", 40, measureCharacters)).toBe(
-      "backend/internal/types.go",
+    expect(elidePathAtBoundary("backend/internal/server/apiconv/oauth_handlers_test.go", 33, measureCharacters)).toBe(
+      "backend/…/oauth_handlers_test.go",
     );
   });
 
+  it("keeps the complete path when it fits", () => {
+    expect(elidePathAtBoundary("backend/internal/types.go", 40, measureCharacters)).toBe("backend/internal/types.go");
+  });
+
   it("keeps the complete basename when only the basename fits", () => {
-    expect(
-      elidePathAtBoundary("backend/internal/server/oauth_handlers_test.go", 22, measureCharacters),
-    ).toBe("oauth_handlers_test.go");
+    expect(elidePathAtBoundary("backend/internal/server/oauth_handlers_test.go", 22, measureCharacters)).toBe(
+      "oauth_handlers_test.go",
+    );
   });
 });
 
@@ -766,9 +733,7 @@ describe("annotateDiffLines", () => {
 
     const lines = annotateDiffLines(diff);
 
-    expect(lines.some((line) => line.kind === "movedDeleted" || line.kind === "movedAdded")).toBe(
-      false,
-    );
+    expect(lines.some((line) => line.kind === "movedDeleted" || line.kind === "movedAdded")).toBe(false);
   });
 
   it("marks paired added and deleted lines that only change whitespace", () => {
@@ -786,18 +751,10 @@ describe("annotateDiffLines", () => {
 
     const lines = annotateDiffLines(diff);
 
-    expect(lines.find((line) => line.text === "-const value = alpha + beta;")?.whitespaceOnly).toBe(
-      true,
-    );
-    expect(
-      lines.find((line) => line.text === "+const value = alpha  + beta;")?.whitespaceOnly,
-    ).toBe(true);
-    expect(
-      lines.find((line) => line.text === "-const changedText = alpha;")?.whitespaceOnly,
-    ).toBeUndefined();
-    expect(
-      lines.find((line) => line.text === "+const changedText = beta;")?.whitespaceOnly,
-    ).toBeUndefined();
+    expect(lines.find((line) => line.text === "-const value = alpha + beta;")?.whitespaceOnly).toBe(true);
+    expect(lines.find((line) => line.text === "+const value = alpha  + beta;")?.whitespaceOnly).toBe(true);
+    expect(lines.find((line) => line.text === "-const changedText = alpha;")?.whitespaceOnly).toBeUndefined();
+    expect(lines.find((line) => line.text === "+const changedText = beta;")?.whitespaceOnly).toBeUndefined();
   });
 
   it("alternates moved block variants", () => {

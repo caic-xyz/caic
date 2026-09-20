@@ -28,10 +28,7 @@ function formatChangeStat(stat: EventChangeStat, aggregate: boolean): string {
   const files = aggregate
     ? `${stat.files} ${stat.files === 1 ? "file change" : "file changes"}`
     : `${stat.files} ${stat.files === 1 ? "file" : "files"}`;
-  const binary =
-    stat.binaryFiles > 0
-      ? ` · ${stat.binaryFiles} ${stat.binaryFiles === 1 ? "binary" : "binaries"}`
-      : "";
+  const binary = stat.binaryFiles > 0 ? ` · ${stat.binaryFiles} ${stat.binaryFiles === 1 ? "binary" : "binaries"}` : "";
   return `${files} · +${stat.linesAdded} −${stat.linesDeleted}${binary}`;
 }
 
@@ -54,11 +51,7 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
         <InfoIcon width="13" height="13" aria-hidden="true" />
       </button>
       <Show when={open()}>
-        <ModalDialog
-          class={styles.dialog}
-          onClose={() => setOpen(false)}
-          data-testid="turn-invocation-dialog"
-        >
+        <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="turn-invocation-dialog">
           <div class={styles.heading}>
             <h2>Turn details</h2>
             <button
@@ -144,10 +137,7 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
   );
 }
 
-export function SessionInvocationIcon(props: {
-  turns: readonly TurnTiming[];
-  model: string | null;
-}) {
+export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; model: string | null }) {
   const [open, setOpen] = createSignal(false);
   const totals = () =>
     props.turns.reduce(
@@ -197,8 +187,7 @@ export function SessionInvocationIcon(props: {
         }),
       ),
     );
-  const hasCompleteChangeStats = () =>
-    props.turns.length > 0 && props.turns.every((turn) => turn.changeStat !== null);
+  const hasCompleteChangeStats = () => props.turns.length > 0 && props.turns.every((turn) => turn.changeStat !== null);
 
   return (
     <>
@@ -213,11 +202,7 @@ export function SessionInvocationIcon(props: {
         <InfoIcon width="13" height="13" aria-hidden="true" />
       </button>
       <Show when={open()}>
-        <ModalDialog
-          class={styles.dialog}
-          onClose={() => setOpen(false)}
-          data-testid="session-invocation-dialog"
-        >
+        <ModalDialog class={styles.dialog} onClose={() => setOpen(false)} data-testid="session-invocation-dialog">
           <div class={styles.heading}>
             <h2>Session details</h2>
             <button

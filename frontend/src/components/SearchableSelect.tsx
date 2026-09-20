@@ -73,11 +73,7 @@ export default function SearchableSelect(props: Props) {
             search: (option.search ?? String(option.label)).toLowerCase(),
           }))
           .filter(({ search }) => search.includes(initialFilter))
-          .sort(
-            (a, b) =>
-              matchRank(a.search, initialFilter) - matchRank(b.search, initialFilter) ||
-              a.index - b.index,
-          )
+          .sort((a, b) => matchRank(a.search, initialFilter) - matchRank(b.search, initialFilter) || a.index - b.index)
           .map(({ option }) => option)
       : props.options();
     const base = !initialFilter && props.emptyOption ? [props.emptyOption] : [];
@@ -99,9 +95,7 @@ export default function SearchableSelect(props: Props) {
     if (props.disabled) return;
     openerRef = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFilter("");
-    setActive(
-      initialOption === "last" ? Math.max(0, visibleOptions().length - 1) : selectedOptionIndex(),
-    );
+    setActive(initialOption === "last" ? Math.max(0, visibleOptions().length - 1) : selectedOptionIndex());
     setOpen(true);
     props.onOpen?.();
     requestAnimationFrame(() => inputRef?.focus());
@@ -247,9 +241,7 @@ export default function SearchableSelect(props: Props) {
               role="combobox"
               aria-expanded={open()}
               aria-controls={listboxId}
-              aria-activedescendant={
-                visibleOptions()[active()] ? `${listboxId}-opt-${active()}` : undefined
-              }
+              aria-activedescendant={visibleOptions()[active()] ? `${listboxId}-opt-${active()}` : undefined}
               onInput={(e) => {
                 setFilter(e.currentTarget.value);
                 setActive(0);

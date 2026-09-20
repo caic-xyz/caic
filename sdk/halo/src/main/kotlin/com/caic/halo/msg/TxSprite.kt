@@ -12,30 +12,62 @@ data class TxSprite(
     val height: Int,
     val bpp: Int,
     val numColors: Int,
-    val palette: ByteArray,   // RGB triplets, numColors × 3
-    val pixels: ByteArray,    // packed pixel data
+    val palette: ByteArray, // RGB triplets, numColors × 3
+    val pixels: ByteArray, // packed pixel data
 ) : TxMessage {
-
     companion object {
         /** 16-color Halo palette (indices 0–15), RGB. */
-        val HALO_PALETTE = byteArrayOf(
-            0, 0, 0,          //  0 VOID
-            -1, -1, -1,        //  1 WHITE
-            -99, -99, -99,     //  2 GREY
-            -66, 38, 51,       //  3 RED
-            -32, 111, -117,    //  4 PINK
-            73, 60, 43,        //  5 DARKBROWN
-            -92, 100, 34,      //  6 BROWN
-            -21, -119, 49,    //  7 ORANGE
-            -9, -30, 107,     //  8 YELLOW
-            47, 72, 78,        //  9 DARKGREEN
-            68, -119, 26,      // 10 GREEN
-            -93, -50, 39,     // 11 LIGHTGREEN
-            27, 38, 50,        // 12 NIGHTBLUE
-            0, 87, -124,       // 13 SEABLUE
-            49, -94, -14,      // 14 SKYBLUE
-            -78, -36, -17,    // 15 CLOUDBLUE
-        )
+        val HALO_PALETTE =
+            byteArrayOf(
+                0,
+                0,
+                0, //  0 VOID
+                -1,
+                -1,
+                -1, //  1 WHITE
+                -99,
+                -99,
+                -99, //  2 GREY
+                -66,
+                38,
+                51, //  3 RED
+                -32,
+                111,
+                -117, //  4 PINK
+                73,
+                60,
+                43, //  5 DARKBROWN
+                -92,
+                100,
+                34, //  6 BROWN
+                -21,
+                -119,
+                49, //  7 ORANGE
+                -9,
+                -30,
+                107, //  8 YELLOW
+                47,
+                72,
+                78, //  9 DARKGREEN
+                68,
+                -119,
+                26, // 10 GREEN
+                -93,
+                -50,
+                39, // 11 LIGHTGREEN
+                27,
+                38,
+                50, // 12 NIGHTBLUE
+                0,
+                87,
+                -124, // 13 SEABLUE
+                49,
+                -94,
+                -14, // 14 SKYBLUE
+                -78,
+                -36,
+                -17, // 15 CLOUDBLUE
+            )
 
         /**
          * Create a TxSprite from a PNG byte array. The PNG must be indexed-color
@@ -43,16 +75,18 @@ data class TxSprite(
          */
         fun fromPng(pngBytes: ByteArray): TxSprite {
             val opts = BitmapFactory.Options().apply { inMutable = false }
-            val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, opts)
-                ?: throw IllegalArgumentException("Failed to decode PNG")
+            val bitmap =
+                BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, opts)
+                    ?: throw IllegalArgumentException("Failed to decode PNG")
 
             // Quantize to ≤16 colors if needed.
             val (quantized, palette, pixels) = quantize(bitmap)
-            val bpp = when {
-                palette.size / 3 <= 2 -> 1
-                palette.size / 3 <= 4 -> 2
-                else -> 4
-            }
+            val bpp =
+                when {
+                    palette.size / 3 <= 2 -> 1
+                    palette.size / 3 <= 4 -> 2
+                    else -> 4
+                }
 
             return TxSprite(
                 width = quantized.width,
@@ -69,10 +103,13 @@ data class TxSprite(
             val width = bitmap.width
             val height = bitmap.height
             val maxDim = 640.coerceAtMost(if (width > height) width else height)
-            val scaled = if (width > maxDim || height > maxDim) {
-                val scale = maxDim.toFloat() / maxOf(width, height)
-                Bitmap.createScaledBitmap(bitmap, (width * scale).toInt(), (height * scale).toInt(), true)
-            } else bitmap
+            val scaled =
+                if (width > maxDim || height > maxDim) {
+                    val scale = maxDim.toFloat() / maxOf(width, height)
+                    Bitmap.createScaledBitmap(bitmap, (width * scale).toInt(), (height * scale).toInt(), true)
+                } else {
+                    bitmap
+                }
 
             // Collect all unique colors.
             val colorMap = LinkedHashMap<Int, Int>() // ARGB → index
@@ -105,7 +142,11 @@ data class TxSprite(
             return Triple(scaled, paletteBytes, pixelIndices)
         }
 
-        private fun packPixels(bitmap: Bitmap, palette: ByteArray, bpp: Int): ByteArray {
+        private fun packPixels(
+            bitmap: Bitmap,
+            palette: ByteArray,
+            bpp: Int,
+        ): ByteArray {
             val pixels = IntArray(bitmap.width * bitmap.height)
             bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 
@@ -123,7 +164,10 @@ data class TxSprite(
                     val dg = ((rgb shr 8) and 0xFF) - pg
                     val db = (rgb and 0xFF) - pb
                     val dist = dr * dr + dg * dg + db * db
-                    if (dist < bestDist) { bestDist = dist; bestIdx = j }
+                    if (dist < bestDist) {
+                        bestDist = dist
+                        bestIdx = j
+                    }
                 }
                 pixels[i] = bestIdx
             }
@@ -131,8 +175,11 @@ data class TxSprite(
             return packBits(pixels, bpp)
         }
 
-        internal fun packBits(indices: IntArray, bpp: Int): ByteArray {
-            return when (bpp) {
+        internal fun packBits(
+            indices: IntArray,
+            bpp: Int,
+        ): ByteArray =
+            when (bpp) {
                 1 -> {
                     ByteArray((indices.size + 7) / 8).also { out ->
                         for (i in indices.indices) {
@@ -140,6 +187,7 @@ data class TxSprite(
                         }
                     }
                 }
+
                 2 -> {
                     ByteArray((indices.size + 3) / 4).also { out ->
                         for (i in indices.indices) {
@@ -148,6 +196,7 @@ data class TxSprite(
                         }
                     }
                 }
+
                 4 -> {
                     ByteArray((indices.size + 1) / 2).also { out ->
                         for (i in indices.indices) {
@@ -156,9 +205,11 @@ data class TxSprite(
                         }
                     }
                 }
-                else -> throw IllegalArgumentException("Unsupported bpp: $bpp")
+
+                else -> {
+                    throw IllegalArgumentException("Unsupported bpp: $bpp")
+                }
             }
-        }
     }
 
     override fun pack(): ByteArray {

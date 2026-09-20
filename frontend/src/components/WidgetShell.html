@@ -72,8 +72,7 @@
       window.addEventListener("message", function (e) {
         if (e.data && e.data.type === "setContent") window._setContent(e.data.html);
         if (e.data && e.data.type === "runScripts") window._runScripts();
-        if (e.data && e.data.type === "setTheme")
-          document.documentElement.setAttribute("data-theme", e.data.theme);
+        if (e.data && e.data.type === "setTheme") document.documentElement.setAttribute("data-theme", e.data.theme);
       });
       new ResizeObserver(function () {
         parent.postMessage({ type: "resize", height: document.body.scrollHeight }, "*");

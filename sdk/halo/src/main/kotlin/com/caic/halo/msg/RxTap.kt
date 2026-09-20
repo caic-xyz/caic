@@ -14,35 +14,38 @@ class RxTap(
     private val debounceMs: Long = 40,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
-    fun attach(dataResponse: Flow<ByteArray>): Flow<Int> = callbackFlow {
-        var lastTapTimeMs = Long.MIN_VALUE
-        var taps = 0
-        var pendingEmit = launch { }
+    fun attach(dataResponse: Flow<ByteArray>): Flow<Int> =
+        callbackFlow {
+            var lastTapTimeMs = Long.MIN_VALUE
+            var taps = 0
+            var pendingEmit = launch { }
 
-        val collector = launch {
-            dataResponse
-                .filter { it.isNotEmpty() && it[0].toInt() and 0xFF == msgCode }
-                .collect {
-                    val now = nowMs()
-                    if (lastTapTimeMs != Long.MIN_VALUE && now - lastTapTimeMs < debounceMs) {
-                        lastTapTimeMs = now
-                        return@collect
-                    }
+            val collector =
+                launch {
+                    dataResponse
+                        .filter { it.isNotEmpty() && it[0].toInt() and 0xFF == msgCode }
+                        .collect {
+                            val now = nowMs()
+                            if (lastTapTimeMs != Long.MIN_VALUE && now - lastTapTimeMs < debounceMs) {
+                                lastTapTimeMs = now
+                                return@collect
+                            }
 
-                    lastTapTimeMs = now
-                    taps += 1
-                    pendingEmit.cancel()
-                    pendingEmit = launch {
-                        delay(thresholdMs)
-                        trySend(taps)
-                        taps = 0
-                    }
+                            lastTapTimeMs = now
+                            taps += 1
+                            pendingEmit.cancel()
+                            pendingEmit =
+                                launch {
+                                    delay(thresholdMs)
+                                    trySend(taps)
+                                    taps = 0
+                                }
+                        }
                 }
-        }
 
-        awaitClose {
-            collector.cancel()
-            pendingEmit.cancel()
+            awaitClose {
+                collector.cancel()
+                pendingEmit.cancel()
+            }
         }
-    }
 }

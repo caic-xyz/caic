@@ -1094,8 +1094,7 @@ export interface ResourceRequestParams extends RequestParams {
  *
  * @category `resources/read`
  */
-export interface ReadResourceRequestParams
-  extends ResourceRequestParams, InputResponseRequestParams {}
+export interface ReadResourceRequestParams extends ResourceRequestParams, InputResponseRequestParams {}
 
 /**
  * Sent from the client to the server, to read a specific resource URI.
@@ -1897,8 +1896,7 @@ export interface LoggingMessageNotification extends JSONRPCNotification {
  *
  * @category Common Types
  */
-export type LoggingLevel =
-  "debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency";
+export type LoggingLevel = "debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency";
 
 /* Sampling */
 /**
@@ -2116,8 +2114,7 @@ export interface Annotations {
 /**
  * @category Content
  */
-export type ContentBlock =
-  TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource;
+export type ContentBlock = TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource;
 
 /**
  * Text provided to or from an LLM.

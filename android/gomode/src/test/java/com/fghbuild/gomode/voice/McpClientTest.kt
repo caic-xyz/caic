@@ -23,155 +23,183 @@ class McpClientTest {
     }
 
     @Test
-    fun `server instructions request includes json rpc id`() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            server.enqueue(MockResponse().setBody(SERVER_DISCOVER_JSON).setResponseCode(200))
-            val client = McpClient(
-                endpointURL = server.url("/mcp").toString(),
-                protocolVersion = "2026-07-28",
-                cookieProvider = { null },
-            )
+    fun `server instructions request includes json rpc id`() =
+        runBlocking {
+            val server = MockWebServer()
+            server.start()
+            try {
+                server.enqueue(MockResponse().setBody(SERVER_DISCOVER_JSON).setResponseCode(200))
+                val client =
+                    McpClient(
+                        endpointURL = server.url("/mcp").toString(),
+                        protocolVersion = "2026-07-28",
+                        cookieProvider = { null },
+                    )
 
-            assertEquals("Use the tools.", client.serverInstructions())
+                assertEquals("Use the tools.", client.serverInstructions())
 
-            val request = server.takeRequest()
-            val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
-            assertEquals("/mcp", request.path)
-            assertEquals("2026-07-28", request.getHeader("Mcp-Protocol-Version"))
-            assertEquals("server/discover", request.getHeader("Mcp-Method"))
-            assertEquals("2.0", body["jsonrpc"]?.jsonPrimitive?.content)
-            assertNotNull(body["id"])
-            assertEquals("server/discover", body["method"]?.jsonPrimitive?.content)
-        } finally {
-            server.shutdown()
+                val request = server.takeRequest()
+                val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+                assertEquals("/mcp", request.path)
+                assertEquals("2026-07-28", request.getHeader("Mcp-Protocol-Version"))
+                assertEquals("server/discover", request.getHeader("Mcp-Method"))
+                assertEquals("2.0", body["jsonrpc"]?.jsonPrimitive?.content)
+                assertNotNull(body["id"])
+                assertEquals("server/discover", body["method"]?.jsonPrimitive?.content)
+            } finally {
+                server.shutdown()
+            }
         }
-    }
 
     @Test
-    fun `resources list request paginates`() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            server.enqueue(MockResponse().setBody(RESOURCES_LIST_PAGE_1_JSON).setResponseCode(200))
-            server.enqueue(MockResponse().setBody(RESOURCES_LIST_PAGE_2_JSON).setResponseCode(200))
-            val client = McpClient(
-                endpointURL = server.url("/mcp").toString(),
-                protocolVersion = "2026-07-28",
-                cookieProvider = { "session=abc" },
-            )
+    fun `resources list request paginates`() =
+        runBlocking {
+            val server = MockWebServer()
+            server.start()
+            try {
+                server.enqueue(MockResponse().setBody(RESOURCES_LIST_PAGE_1_JSON).setResponseCode(200))
+                server.enqueue(MockResponse().setBody(RESOURCES_LIST_PAGE_2_JSON).setResponseCode(200))
+                val client =
+                    McpClient(
+                        endpointURL = server.url("/mcp").toString(),
+                        protocolVersion = "2026-07-28",
+                        cookieProvider = { "session=abc" },
+                    )
 
-            val resources = client.listResources()
+                val resources = client.listResources()
 
-            assertEquals(listOf("service://items", "service://usage"), resources.map { it.uri })
-            val firstRequest = server.takeRequest()
-            val firstBody = Json.parseToJsonElement(firstRequest.body.readUtf8()).jsonObject
-            assertEquals("/mcp", firstRequest.path)
-            assertEquals("session=abc", firstRequest.getHeader("Cookie"))
-            assertEquals("resources/list", firstRequest.getHeader("Mcp-Method"))
-            assertEquals("resources/list", firstBody["method"]?.jsonPrimitive?.content)
+                assertEquals(listOf("service://items", "service://usage"), resources.map { it.uri })
+                val firstRequest = server.takeRequest()
+                val firstBody = Json.parseToJsonElement(firstRequest.body.readUtf8()).jsonObject
+                assertEquals("/mcp", firstRequest.path)
+                assertEquals("session=abc", firstRequest.getHeader("Cookie"))
+                assertEquals("resources/list", firstRequest.getHeader("Mcp-Method"))
+                assertEquals("resources/list", firstBody["method"]?.jsonPrimitive?.content)
 
-            val secondRequest = server.takeRequest()
-            val secondBody = Json.parseToJsonElement(secondRequest.body.readUtf8()).jsonObject
-            assertEquals("resources/list", secondRequest.getHeader("Mcp-Method"))
-            assertEquals("next", secondBody["params"]?.jsonObject?.get("cursor")?.jsonPrimitive?.content)
-        } finally {
-            server.shutdown()
+                val secondRequest = server.takeRequest()
+                val secondBody = Json.parseToJsonElement(secondRequest.body.readUtf8()).jsonObject
+                assertEquals("resources/list", secondRequest.getHeader("Mcp-Method"))
+                assertEquals(
+                    "next",
+                    secondBody["params"]
+                        ?.jsonObject
+                        ?.get("cursor")
+                        ?.jsonPrimitive
+                        ?.content,
+                )
+            } finally {
+                server.shutdown()
+            }
         }
-    }
 
     @Test
-    fun `resource templates list request uses resource template method`() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            server.enqueue(MockResponse().setBody(RESOURCE_TEMPLATES_LIST_JSON).setResponseCode(200))
-            val client = McpClient(
-                endpointURL = server.url("/mcp").toString(),
-                protocolVersion = "2026-07-28",
-                cookieProvider = { null },
-            )
+    fun `resource templates list request uses resource template method`() =
+        runBlocking {
+            val server = MockWebServer()
+            server.start()
+            try {
+                server.enqueue(MockResponse().setBody(RESOURCE_TEMPLATES_LIST_JSON).setResponseCode(200))
+                val client =
+                    McpClient(
+                        endpointURL = server.url("/mcp").toString(),
+                        protocolVersion = "2026-07-28",
+                        cookieProvider = { null },
+                    )
 
-            val templates = client.listResourceTemplates()
+                val templates = client.listResourceTemplates()
 
-            assertEquals(listOf("item"), templates.map { it.name })
-            val request = server.takeRequest()
-            val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
-            assertEquals("resources/templates/list", request.getHeader("Mcp-Method"))
-            assertEquals("resources/templates/list", body["method"]?.jsonPrimitive?.content)
-        } finally {
-            server.shutdown()
+                assertEquals(listOf("item"), templates.map { it.name })
+                val request = server.takeRequest()
+                val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+                assertEquals("resources/templates/list", request.getHeader("Mcp-Method"))
+                assertEquals("resources/templates/list", body["method"]?.jsonPrimitive?.content)
+            } finally {
+                server.shutdown()
+            }
         }
-    }
 
     @Test
-    fun `resource read request sends resource uri`() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            server.enqueue(MockResponse().setBody(RESOURCE_READ_JSON).setResponseCode(200))
-            val client = McpClient(
-                endpointURL = server.url("/mcp").toString(),
-                protocolVersion = "2026-07-28",
-                cookieProvider = { null },
-            )
+    fun `resource read request sends resource uri`() =
+        runBlocking {
+            val server = MockWebServer()
+            server.start()
+            try {
+                server.enqueue(MockResponse().setBody(RESOURCE_READ_JSON).setResponseCode(200))
+                val client =
+                    McpClient(
+                        endpointURL = server.url("/mcp").toString(),
+                        protocolVersion = "2026-07-28",
+                        cookieProvider = { null },
+                    )
 
-            val result = client.readResource("service://items")
+                val result = client.readResource("service://items")
 
-            assertEquals("[]", result.contents.single().text)
-            val request = server.takeRequest()
-            val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
-            assertEquals("resources/read", request.getHeader("Mcp-Method"))
-            assertEquals("service://items", request.getHeader("Mcp-Name"))
-            assertEquals("resources/read", body["method"]?.jsonPrimitive?.content)
-            assertEquals("service://items", body["params"]?.jsonObject?.get("uri")?.jsonPrimitive?.content)
-        } finally {
-            server.shutdown()
+                assertEquals("[]", result.contents.single().text)
+                val request = server.takeRequest()
+                val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+                assertEquals("resources/read", request.getHeader("Mcp-Method"))
+                assertEquals("service://items", request.getHeader("Mcp-Name"))
+                assertEquals("resources/read", body["method"]?.jsonPrimitive?.content)
+                assertEquals(
+                    "service://items",
+                    body["params"]
+                        ?.jsonObject
+                        ?.get("uri")
+                        ?.jsonPrimitive
+                        ?.content,
+                )
+            } finally {
+                server.shutdown()
+            }
         }
-    }
 
     @Test
-    fun `subscriptions listen posts sse request and parses notifications`() = runBlocking {
-        val server = MockWebServer()
-        server.start()
-        try {
-            server.enqueue(
-                MockResponse()
-                    .setHeader("Content-Type", "text/event-stream")
-                    .setBody(SUBSCRIPTION_SSE)
-                    .setResponseCode(200),
-            )
-            val client = McpClient(
-                endpointURL = server.url("/mcp").toString(),
-                protocolVersion = "2026-07-28",
-                cookieProvider = { null },
-            )
+    fun `subscriptions listen posts sse request and parses notifications`() =
+        runBlocking {
+            val server = MockWebServer()
+            server.start()
+            try {
+                server.enqueue(
+                    MockResponse()
+                        .setHeader("Content-Type", "text/event-stream")
+                        .setBody(SUBSCRIPTION_SSE)
+                        .setResponseCode(200),
+                )
+                val client =
+                    McpClient(
+                        endpointURL = server.url("/mcp").toString(),
+                        protocolVersion = "2026-07-28",
+                        cookieProvider = { null },
+                    )
 
-            val events = client.listenSubscriptions(
-                SubscriptionFilter(resourceSubscriptions = listOf("service://items")),
-            ).take(2).toList()
+                val events =
+                    client
+                        .listenSubscriptions(
+                            SubscriptionFilter(resourceSubscriptions = listOf("service://items")),
+                        ).take(2)
+                        .toList()
 
-            assertEquals(NotificationMethod.SubscriptionsAcknowledged, events[0].method)
-            assertEquals(NotificationMethod.ResourcesUpdated, events[1].method)
-            val request = server.takeRequest()
-            val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
-            val params = body["params"]?.jsonObject
-            val resourceSubscriptions = params
-                ?.get("notifications")
-                ?.jsonObject
-                ?.get("resourceSubscriptions")
-                ?.jsonArray
-                ?.map { it.jsonPrimitive.content }
-            assertEquals("POST", request.method)
-            assertEquals("text/event-stream", request.getHeader("Accept"))
-            assertEquals("subscriptions/listen", request.getHeader("Mcp-Method"))
-            assertEquals("subscriptions/listen", body["method"]?.jsonPrimitive?.content)
-            assertEquals(listOf("service://items"), resourceSubscriptions)
-        } finally {
-            server.shutdown()
+                assertEquals(NotificationMethod.SubscriptionsAcknowledged, events[0].method)
+                assertEquals(NotificationMethod.ResourcesUpdated, events[1].method)
+                val request = server.takeRequest()
+                val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+                val params = body["params"]?.jsonObject
+                val resourceSubscriptions =
+                    params
+                        ?.get("notifications")
+                        ?.jsonObject
+                        ?.get("resourceSubscriptions")
+                        ?.jsonArray
+                        ?.map { it.jsonPrimitive.content }
+                assertEquals("POST", request.method)
+                assertEquals("text/event-stream", request.getHeader("Accept"))
+                assertEquals("subscriptions/listen", request.getHeader("Mcp-Method"))
+                assertEquals("subscriptions/listen", body["method"]?.jsonPrimitive?.content)
+                assertEquals(listOf("service://items"), resourceSubscriptions)
+            } finally {
+                server.shutdown()
+            }
         }
-    }
 
     private companion object {
         const val SERVER_DISCOVER_JSON = """

@@ -20,13 +20,11 @@ export default function ForkDialog() {
   return (
     <Show when={s.forkTaskId()}>
       <ModalDialog class={styles.forkDialog} data-testid="fork-dialog" onClose={s.closeFork}>
-        <h2 class={styles.forkTitle}>
-          {s.forkQuotaRecovery() ? "Continue after quota limit" : "Fork task"}
-        </h2>
+        <h2 class={styles.forkTitle}>{s.forkQuotaRecovery() ? "Continue after quota limit" : "Fork task"}</h2>
         <Show when={s.forkQuotaRecovery()}>
           <p class={styles.recoveryIntro}>
-            Start a new agent from the source task's current workspace. Choose a harness and review
-            the handoff before continuing.
+            Start a new agent from the source task's current workspace. Choose a harness and review the handoff before
+            continuing.
           </p>
         </Show>
         <AutoResizeTextarea
@@ -61,11 +59,7 @@ export default function ForkDialog() {
           </p>
         </Show>
         <Show
-          when={
-            s.forkAvailableRecent().length > 0 ||
-            s.forkAvailableRest().length > 0 ||
-            s.forkExtraRepos().length > 0
-          }
+          when={s.forkAvailableRecent().length > 0 || s.forkAvailableRest().length > 0 || s.forkExtraRepos().length > 0}
         >
           <RepoChipStrip
             repos={s.repos}
@@ -73,9 +67,7 @@ export default function ForkDialog() {
             onAdd={(path) => s.setForkExtraRepos((prev) => [...prev, { path, branch: "" }])}
             onRemove={(path) => s.setForkExtraRepos((prev) => prev.filter((r) => r.path !== path))}
             onSetBranch={(path, branch) =>
-              s.setForkExtraRepos((prev) =>
-                prev.map((r) => (r.path === path ? { ...r, branch } : r)),
-              )
+              s.setForkExtraRepos((prev) => prev.map((r) => (r.path === path ? { ...r, branch } : r)))
             }
             availableRecent={s.forkAvailableRecent}
             availableRest={s.forkAvailableRest}
@@ -102,29 +94,17 @@ export default function ForkDialog() {
         </Show>
         <div class={styles.forkRow}>
           <Show when={s.tailscaleAvailable()}>
-            <ToggleChip
-              checked={s.forkTailscale()}
-              title="Enable Tailscale networking"
-              onChange={s.setForkTailscale}
-            >
+            <ToggleChip checked={s.forkTailscale()} title="Enable Tailscale networking" onChange={s.setForkTailscale}>
               <TailscaleIcon width="1.2em" height="1.2em" />
             </ToggleChip>
           </Show>
           <Show when={s.usbAvailable()}>
-            <ToggleChip
-              checked={s.forkUSB()}
-              title="Enable USB passthrough"
-              onChange={s.setForkUSB}
-            >
+            <ToggleChip checked={s.forkUSB()} title="Enable USB passthrough" onChange={s.setForkUSB}>
               <USBIcon width="1.2em" height="1.2em" />
             </ToggleChip>
           </Show>
           <Show when={s.displayAvailable()}>
-            <ToggleChip
-              checked={s.forkDisplay()}
-              title="Enable virtual display"
-              onChange={s.setForkDisplay}
-            >
+            <ToggleChip checked={s.forkDisplay()} title="Enable virtual display" onChange={s.setForkDisplay}>
               <DisplayIcon width="1.2em" height="1.2em" />
             </ToggleChip>
           </Show>
@@ -134,11 +114,7 @@ export default function ForkDialog() {
             </ToggleChip>
           </Show>
           <Show when={s.gitHubTokenAvailable()}>
-            <ToggleChip
-              checked={s.forkGitHubToken()}
-              title="Enable GitHub token"
-              onChange={s.setForkGitHubToken}
-            >
+            <ToggleChip checked={s.forkGitHubToken()} title="Enable GitHub token" onChange={s.setForkGitHubToken}>
               <TokenIcon width="1.2em" height="1.2em" />
             </ToggleChip>
           </Show>
@@ -147,12 +123,7 @@ export default function ForkDialog() {
           <button type="button" class={styles.forkCancel} onClick={s.closeFork}>
             Cancel
           </button>
-          <Button
-            type="button"
-            onClick={s.submitFork}
-            disabled={!s.forkPrompt().trim()}
-            data-testid="fork-submit"
-          >
+          <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()} data-testid="fork-submit">
             {s.forkQuotaRecovery() ? "Continue in new agent" : "Fork"}
           </Button>
         </div>

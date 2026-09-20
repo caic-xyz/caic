@@ -75,9 +75,7 @@ export const AuthProvider: ParentComponent = (props) => {
   const clearUser = () => setUser(null);
 
   return (
-    <AuthContext.Provider value={{ ready, providers, user, logout, clearUser }}>
-      {props.children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={{ ready, providers, user, logout, clearUser }}>{props.children}</AuthContext.Provider>
   );
 };
 

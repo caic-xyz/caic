@@ -26,10 +26,16 @@ abstract class TextLayout(
 
     open val startY: Float = 0f
 
-    abstract fun lineLayout(lineY: Float, lineHeight: Float): LineLayout?
+    abstract fun lineLayout(
+        lineY: Float,
+        lineHeight: Float,
+    ): LineLayout?
 }
 
-data class LineLayout(val width: Int, val xOffset: Int)
+data class LineLayout(
+    val width: Int,
+    val xOffset: Int,
+)
 
 class RectangularTextLayout(
     width: Int,
@@ -38,7 +44,10 @@ class RectangularTextLayout(
     typeface: Typeface = Typeface.DEFAULT,
     textAlign: Paint.Align = Paint.Align.LEFT,
 ) : TextLayout(width, height, fontSizePx, typeface, textAlign) {
-    override fun lineLayout(lineY: Float, lineHeight: Float): LineLayout? {
+    override fun lineLayout(
+        lineY: Float,
+        lineHeight: Float,
+    ): LineLayout? {
         if (lineY < 0f || lineY + lineHeight > height) return null
         return LineLayout(width = width, xOffset = 0)
     }
@@ -62,7 +71,10 @@ class CircularTextLayout(
 
     override val startY: Float = centerY - radius
 
-    override fun lineLayout(lineY: Float, lineHeight: Float): LineLayout? {
+    override fun lineLayout(
+        lineY: Float,
+        lineHeight: Float,
+    ): LineLayout? {
         val distanceFromCenter = lineY + lineHeight / 2f - centerY
         if (kotlin.math.abs(distanceFromCenter) > radius) return null
         val halfWidth = sqrt(radius * radius - distanceFromCenter * distanceFromCenter)
@@ -98,13 +110,14 @@ class TxTextPage(
 
             val lineText = pageRemainder.substring(0, breakIndex).trim()
             if (lineText.isNotEmpty()) {
-                lines += TextLineData(
-                    text = lineText,
-                    width = lineLayout.width,
-                    xOffset = lineLayout.xOffset,
-                    yOffset = y.toInt(),
-                    lineHeight = lineHeight.toInt(),
-                )
+                lines +=
+                    TextLineData(
+                        text = lineText,
+                        width = lineLayout.width,
+                        xOffset = lineLayout.xOffset,
+                        yOffset = y.toInt(),
+                        lineHeight = lineHeight.toInt(),
+                    )
             }
             pageRemainder = pageRemainder.substring(breakIndex).trimStart()
             y += lineHeight
@@ -117,7 +130,11 @@ class TxTextPage(
 
     fun rasterizeNextPage(): TextPageData? = measureNextPage()?.also { it.rasterize() }
 
-    private fun breakText(text: String, paint: Paint, maxWidth: Float): Int {
+    private fun breakText(
+        text: String,
+        paint: Paint,
+        maxWidth: Float,
+    ): Int {
         val measured = paint.breakText(text, true, maxWidth, null)
         if (measured >= text.length) return text.length
         val lastWhitespace = text.substring(0, measured).indexOfLast { it.isWhitespace() }
@@ -143,11 +160,12 @@ class TextPageData internal constructor(
             val bitmap = Bitmap.createBitmap(textWidth, line.lineHeight, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.BLACK)
-            val x = when (layout.textAlign) {
-                Paint.Align.CENTER -> textWidth / 2f
-                Paint.Align.RIGHT -> textWidth.toFloat()
-                else -> 0f
-            }
+            val x =
+                when (layout.textAlign) {
+                    Paint.Align.CENTER -> textWidth / 2f
+                    Paint.Align.RIGHT -> textWidth.toFloat()
+                    else -> 0f
+                }
             canvas.drawText(line.text, x, -paint.fontMetrics.ascent, paint)
             sprites += bitmap.toMonochromeSprite()
             line.width = textWidth
@@ -182,12 +200,13 @@ internal data class TextLineData(
     val lineHeight: Int,
 )
 
-private fun textPaint(layout: TextLayout): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.WHITE
-    textSize = layout.fontSizePx.toFloat()
-    typeface = layout.typeface
-    textAlign = layout.textAlign
-}
+private fun textPaint(layout: TextLayout): Paint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = layout.fontSizePx.toFloat()
+        typeface = layout.typeface
+        textAlign = layout.textAlign
+    }
 
 private fun Bitmap.toMonochromeSprite(): TxSprite {
     val indices = IntArray(width * height)

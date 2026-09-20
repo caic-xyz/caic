@@ -24,11 +24,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
-    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json",
+    "lint": "eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .",
     "lint:fix": "eslint . --fix",
+    "format": "prettier --write --log-level warn .",
+    "format:check": "prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content .",
     "hooks:install": "scripts/install-git-hooks.sh",
-    "prepare": "pnpm hooks:install"
+    "prepare": "pnpm --silent hooks:install"
   },
   "dependencies": {
     "@material-symbols/svg-400": "0.47.2",
@@ -47,6 +49,7 @@
     "@types/node": "26.5.1",
     "@vitest/coverage-v8": "5.0.0",
     "eslint": "10.10.0",
+    "eslint-config-prettier": "10.1.8",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-solid": "0.18.0",
     "globals": "17.12.0",

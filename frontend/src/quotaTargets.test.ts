@@ -49,12 +49,7 @@ function usage(
 describe("quotaRecoveryTargets", () => {
   it("puts a preferred viable alternative first and the shared exhausted group last", () => {
     const targets = quotaRecoveryTargets(
-      [
-        harness("claude", "claudecode"),
-        harness("codex", "codex"),
-        harness("opencode", "openrouter"),
-        harness("pi"),
-      ],
+      [harness("claude", "claudecode"), harness("codex", "codex"), harness("opencode", "openrouter"), harness("pi")],
       usage([
         { provider: "claudecode", usedPct: 10 },
         { provider: "codex", usedPct: 25 },
@@ -65,12 +60,7 @@ describe("quotaRecoveryTargets", () => {
       now,
     );
 
-    expect(targets.map((target) => target.harness.name)).toEqual([
-      "opencode",
-      "codex",
-      "pi",
-      "claude",
-    ]);
+    expect(targets.map((target) => target.harness.name)).toEqual(["opencode", "codex", "pi", "claude"]);
     expect(targets.map((target) => target.label)).toEqual([
       "Available · Recommended",
       "Available",

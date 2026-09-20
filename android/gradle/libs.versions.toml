@@ -2,6 +2,7 @@
 agp = "9.0.1"
 kotlin = "2.2.10"
 detekt = "1.23.7"
+ktlint = "14.2.0"
 versions = "0.51.0"
 coreKtx = "1.18.0"
 junit = "4.13.2"
@@ -94,6 +95,7 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 versions = { id = "com.github.ben-manes.versions", version.ref = "versions" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

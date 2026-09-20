@@ -20,11 +20,15 @@ class VoicePanelTest {
         composeRule.setContent {
             MaterialTheme {
                 VoicePanel(
-                    voiceState = VoiceState(
-                        connected = true,
-                        listening = true,
-                        transcript = listOf(TranscriptEntry(TranscriptSpeaker.ASSISTANT, "Four tasks are running.")),
-                    ),
+                    voiceState =
+                        VoiceState(
+                            connected = true,
+                            listening = true,
+                            transcript =
+                                listOf(
+                                    TranscriptEntry(TranscriptSpeaker.ASSISTANT, "Four tasks are running."),
+                                ),
+                        ),
                     voiceEnabled = true,
                     onConnect = {},
                     onDisconnect = {},

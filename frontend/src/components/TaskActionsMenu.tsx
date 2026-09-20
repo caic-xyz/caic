@@ -71,12 +71,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
         Push to {props.baseBranch}
       </button>
       <Show when={props.active}>
-        <button
-          type="button"
-          role="menuitem"
-          class={`${styles.item} ${styles.danger}`}
-          onClick={() => props.onStop()}
-        >
+        <button type="button" role="menuitem" class={`${styles.item} ${styles.danger}`} onClick={() => props.onStop()}>
           <StopIcon width="1em" height="1em" />
           Stop
         </button>
@@ -88,12 +83,7 @@ export default function TaskActionsMenu(props: TaskActionsMenuProps) {
         </button>
       </Show>
       <Show when={props.active || props.recoverable}>
-        <button
-          type="button"
-          role="menuitem"
-          class={`${styles.item} ${styles.danger}`}
-          onClick={() => props.onPurge()}
-        >
+        <button type="button" role="menuitem" class={`${styles.item} ${styles.danger}`} onClick={() => props.onPurge()}>
           <DeleteIcon width="1em" height="1em" />
           Purge
         </button>

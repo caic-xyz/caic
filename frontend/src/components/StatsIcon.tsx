@@ -14,12 +14,7 @@ function formatUSD(usd: number): string {
 }
 
 function totalTokens(usage: TaskUsageSummary): number {
-  return (
-    usage.inputTokens +
-    usage.cacheWriteInputTokens +
-    usage.cacheReadInputTokens +
-    usage.outputTokens
-  );
+  return usage.inputTokens + usage.cacheWriteInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
 }
 
 function barColor(ratio: number): string {
@@ -40,11 +35,7 @@ function diskColor(bytes: number): string {
   return "var(--color-success)";
 }
 
-export default function StatsIcon(props: {
-  href: string;
-  stats: EventStats[];
-  usage: TaskUsageSummary;
-}) {
+export default function StatsIcon(props: { href: string; stats: EventStats[]; usage: TaskUsageSummary }) {
   const latest = () => props.stats.at(-1);
   const maxNet = () => {
     let max = 1;
@@ -99,11 +90,7 @@ export default function StatsIcon(props: {
           width="6"
           height={Math.round(netRatio() * 8)}
           rx="1"
-          fill={
-            hasStats()
-              ? netColor((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0))
-              : "var(--color-border)"
-          }
+          fill={hasStats() ? netColor((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0)) : "var(--color-border)"}
         />
         <rect
           x="10"

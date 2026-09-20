@@ -34,7 +34,9 @@ data class SettingsState(
     val activeServiceId: String = "",
 )
 
-class SettingsRepository(private val dataStore: DataStore<Preferences>) {
+class SettingsRepository(
+    private val dataStore: DataStore<Preferences>,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -45,22 +47,25 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
     }
 
-    val settings: StateFlow<SettingsState> = dataStore.data
-        .map { prefs ->
-            val services = decodeServices(prefs)
-            val activeId = prefs[Keys.ACTIVE_SERVICE_ID] ?: services.firstOrNull()?.id ?: ""
-            val active = services.firstOrNull { it.id == activeId } ?: services.firstOrNull()
-            SettingsState(
-                activeServiceURL = active?.url ?: "",
-                haloAddress = prefs[Keys.HALO_ADDRESS],
-                haloAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
-                services = services,
-                activeServiceId = active?.id ?: "",
-            )
-        }
-        .stateIn(scope, SharingStarted.Eagerly, SettingsState())
+    val settings: StateFlow<SettingsState> =
+        dataStore.data
+            .map { prefs ->
+                val services = decodeServices(prefs)
+                val activeId = prefs[Keys.ACTIVE_SERVICE_ID] ?: services.firstOrNull()?.id ?: ""
+                val active = services.firstOrNull { it.id == activeId } ?: services.firstOrNull()
+                SettingsState(
+                    activeServiceURL = active?.url ?: "",
+                    haloAddress = prefs[Keys.HALO_ADDRESS],
+                    haloAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
+                    services = services,
+                    activeServiceId = active?.id ?: "",
+                )
+            }.stateIn(scope, SharingStarted.Eagerly, SettingsState())
 
-    suspend fun saveActiveService(label: String, url: String): String {
+    suspend fun saveActiveService(
+        label: String,
+        url: String,
+    ): String {
         val normalizedURL = normalizeURL(url)
         var savedId = ""
         dataStore.edit { prefs ->
@@ -70,25 +75,27 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
 
             if (activeExists) {
                 savedId = activeId
-                prefs[Keys.SERVICES] = json.encodeToString(
-                    services.map { service ->
-                        if (service.id == activeId) {
-                            service.copy(
-                                label = label.ifBlank { service.label.ifBlank { DEFAULT_SERVICE_LABEL } },
-                                url = normalizedURL,
-                            )
-                        } else {
-                            service
-                        }
-                    }
-                )
+                prefs[Keys.SERVICES] =
+                    json.encodeToString(
+                        services.map { service ->
+                            if (service.id == activeId) {
+                                service.copy(
+                                    label = label.ifBlank { service.label.ifBlank { DEFAULT_SERVICE_LABEL } },
+                                    url = normalizedURL,
+                                )
+                            } else {
+                                service
+                            }
+                        },
+                    )
             } else {
                 savedId = UUID.randomUUID().toString()
-                val service = ServiceInstance(
-                    id = savedId,
-                    label = label.ifBlank { DEFAULT_SERVICE_LABEL },
-                    url = normalizedURL,
-                )
+                val service =
+                    ServiceInstance(
+                        id = savedId,
+                        label = label.ifBlank { DEFAULT_SERVICE_LABEL },
+                        url = normalizedURL,
+                    )
                 prefs[Keys.SERVICES] = json.encodeToString(services + service)
                 prefs[Keys.ACTIVE_SERVICE_ID] = savedId
             }

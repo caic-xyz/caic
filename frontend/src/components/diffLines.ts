@@ -6,8 +6,7 @@ export interface FileDiff {
   lines: DiffLine[];
 }
 
-export type DiffLineKind =
-  "context" | "added" | "deleted" | "hunk" | "header" | "movedAdded" | "movedDeleted";
+export type DiffLineKind = "context" | "added" | "deleted" | "hunk" | "header" | "movedAdded" | "movedDeleted";
 
 export interface DiffLine {
   text: string;
@@ -82,11 +81,7 @@ function stripGitHeaderTab(path: string): string {
   return tab === -1 ? path : path.slice(0, tab);
 }
 
-function diffGitSidePath(
-  section: string,
-  side: "a" | "b",
-  usesSidePrefixes: boolean,
-): string | null {
+function diffGitSidePath(section: string, side: "a" | "b", usesSidePrefixes: boolean): string | null {
   const git = section.match(/^diff --git (.+)$/m);
   const paths = git ? splitDiffGitPaths(git[1]) : null;
   if (!paths) return null;
@@ -169,11 +164,7 @@ export function annotateDiffLines(diff: string): DiffLine[] {
     }
   }
 
-  const movedBlocks = findMovedBlocks(
-    deletedByLineIndex,
-    addedByLineIndex,
-    addedLineIndexesByContent,
-  );
+  const movedBlocks = findMovedBlocks(deletedByLineIndex, addedByLineIndex, addedLineIndexesByContent);
   movedBlocks.forEach((block, blockIndex) => {
     const movedVariant = (blockIndex % 2) as 0 | 1;
     for (const lineIndex of block.addedLineIndexes) {
@@ -191,8 +182,7 @@ export function annotateDiffLines(diff: string): DiffLine[] {
 
 function lineKind(line: string, inHunk: boolean): DiffLineKind {
   if (line.startsWith("@@")) return "hunk";
-  const isFileHeader =
-    !inHunk && (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ "));
+  const isFileHeader = !inHunk && (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ "));
   if (line.startsWith("diff --git ") || isFileHeader) return "header";
   if (line.startsWith("+")) return "added";
   if (line.startsWith("-")) return "deleted";
@@ -224,11 +214,7 @@ function isChangeLine(line: DiffLine): boolean {
   return line.kind === "added" || line.kind === "deleted";
 }
 
-function markWhitespaceOnlyChangeGroup(
-  lines: DiffLine[],
-  deletedLineIndexes: number[],
-  addedLineIndexes: number[],
-) {
+function markWhitespaceOnlyChangeGroup(lines: DiffLine[], deletedLineIndexes: number[], addedLineIndexes: number[]) {
   const usedAddedLineIndexes = new Set<number>();
   for (const deletedLineIndex of deletedLineIndexes) {
     const deletedContent = lines[deletedLineIndex].text.slice(1);
@@ -236,9 +222,7 @@ function markWhitespaceOnlyChangeGroup(
     const addedLineIndex = addedLineIndexes.find((candidate) => {
       if (usedAddedLineIndexes.has(candidate)) return false;
       const addedContent = lines[candidate].text.slice(1);
-      return (
-        addedContent !== deletedContent && removeWhitespace(addedContent) === normalizedDeleted
-      );
+      return addedContent !== deletedContent && removeWhitespace(addedContent) === normalizedDeleted;
     });
     if (addedLineIndex === undefined) continue;
 
@@ -323,10 +307,7 @@ function expandMovedBlock(
   return { addedLineIndexes, deletedLineIndexes };
 }
 
-function countMovedBlockAlnum(
-  block: MovedBlock,
-  deletedByLineIndex: Map<number, ChangeLine>,
-): number {
+function countMovedBlockAlnum(block: MovedBlock, deletedByLineIndex: Map<number, ChangeLine>): number {
   let count = 0;
   for (const lineIndex of block.deletedLineIndexes) {
     const content = deletedByLineIndex.get(lineIndex)?.content ?? "";

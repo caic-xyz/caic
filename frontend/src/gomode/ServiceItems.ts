@@ -91,16 +91,12 @@ function formatServiceItems(source: ServiceItems, count: number): string {
   }
   const lines = source.items.slice(0, count).map((item) => {
     const reference = item.reference === null || item.reference === "" ? "" : `${item.reference}: `;
-    const state =
-      item.state === "" ? "" : ` (${item.state}${item.needsAttention ? ", needs attention" : ""})`;
+    const state = item.state === "" ? "" : ` (${item.state}${item.needsAttention ? ", needs attention" : ""})`;
     return `- ${reference}${item.title}${state}`;
   });
   const omitted = source.omittedCount + source.items.length - count;
   if (omitted > 0) {
-    const hint =
-      source.moreItemsHint === null || source.moreItemsHint === ""
-        ? ""
-        : ` ${source.moreItemsHint}`;
+    const hint = source.moreItemsHint === null || source.moreItemsHint === "" ? "" : ` ${source.moreItemsHint}`;
     lines.push(`- … ${omitted} more items omitted.${hint}`);
   }
   return `Current service items:\n${lines.join("\n")}`;

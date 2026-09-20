@@ -28,11 +28,7 @@ export default function Dropdown(props: DropdownProps) {
   let containerRef: HTMLDivElement | undefined;
 
   const menuItems = (menu: Element) =>
-    Array.from(
-      menu.querySelectorAll<HTMLElement>(
-        "[role='menuitem']:not([disabled]):not([aria-disabled='true'])",
-      ),
-    );
+    Array.from(menu.querySelectorAll<HTMLElement>("[role='menuitem']:not([disabled]):not([aria-disabled='true'])"));
 
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -54,12 +50,7 @@ export default function Dropdown(props: DropdownProps) {
     const items = menuItems(menu);
     const current = items.indexOf(document.activeElement as HTMLElement);
     const delta = event.key === "ArrowDown" ? 1 : -1;
-    const next =
-      current < 0
-        ? delta > 0
-          ? 0
-          : items.length - 1
-        : (current + delta + items.length) % items.length;
+    const next = current < 0 ? (delta > 0 ? 0 : items.length - 1) : (current + delta + items.length) % items.length;
     items[next]?.focus();
   }
 

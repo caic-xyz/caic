@@ -37,9 +37,7 @@ export function NativeAgentCard(props: { activity: NativeActivity; settled: bool
         </Show>
         <Show when={activity().startedAt !== null && activity().endedAt !== null}>
           <span class={styles.duration} data-testid="native-subagent-duration">
-            {formatTimingDuration(
-              Math.max(0, (activity().endedAt ?? 0) - (activity().startedAt ?? 0)),
-            )}
+            {formatTimingDuration(Math.max(0, (activity().endedAt ?? 0) - (activity().startedAt ?? 0)))}
           </span>
         </Show>
       </summary>

@@ -156,10 +156,7 @@ export class DiffCache {
     entry.request = this.options
       .loadPatch(selector)
       .then((response) => {
-        if (
-          response.diff.length > this.options.maxPatchCharacters &&
-          this.patches.get(key) === entry
-        ) {
+        if (response.diff.length > this.options.maxPatchCharacters && this.patches.get(key) === entry) {
           this.patches.delete(key);
         }
         return response.diff;
@@ -252,20 +249,13 @@ export class DiffCache {
 
   private dropWorkingPatches(taskId: string): void {
     for (const [key, patch] of this.patches) {
-      if (patch.selector.taskId === taskId && patch.selector.commit === "")
-        this.patches.delete(key);
+      if (patch.selector.taskId === taskId && patch.selector.commit === "") this.patches.delete(key);
     }
   }
 }
 
 function patchKey(selector: FileDiffSelector): string {
-  return [
-    selector.taskId,
-    selector.repository,
-    selector.commit,
-    selector.path,
-    selector.originalPath,
-  ].join("\0");
+  return [selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath].join("\0");
 }
 
 export const taskDiffCache = new DiffCache({
@@ -275,13 +265,7 @@ export const taskDiffCache = new DiffCache({
   loadIndex: getTaskDiffIndex,
   maxPatchCharacters: 1_000_000,
   loadPatch: (selector) =>
-    getTaskFileDiff(
-      selector.taskId,
-      selector.repository,
-      selector.commit,
-      selector.path,
-      selector.originalPath,
-    ),
+    getTaskFileDiff(selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath),
 });
 
 export const prefetchTaskDiff = (taskId: string) => taskDiffCache.loadIndex(taskId);

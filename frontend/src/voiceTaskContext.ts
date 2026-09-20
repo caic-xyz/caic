@@ -21,9 +21,7 @@ export function buildTaskStateContext(task: Task, taskNumber: number): string | 
     case "has_plan":
       return `[Task #${taskNumber} (${shortName}) — ${task.state}]`;
     case "purged":
-      return task.result
-        ? `[Task #${taskNumber} (${shortName}) — completed: ${task.result}]`
-        : null;
+      return task.result ? `[Task #${taskNumber} (${shortName}) — completed: ${task.result}]` : null;
     case "stopped":
       return `[Task #${taskNumber} (${shortName}) — stopped]`;
     case "crashed":

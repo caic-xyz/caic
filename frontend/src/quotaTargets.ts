@@ -27,8 +27,7 @@ export function quotaRecoveryTargets(
   now: number,
 ): QuotaTarget[] {
   const candidates = harnesses.map((harness, originalIndex): Candidate => {
-    const sameExhaustedGroup =
-      exhaustedGroup !== undefined && harness.quotaGroup === exhaustedGroup;
+    const sameExhaustedGroup = exhaustedGroup !== undefined && harness.quotaGroup === exhaustedGroup;
     return {
       harness,
       status: sameExhaustedGroup ? "exhausted" : quotaGroupStatus(harness.quotaGroup, usage, now),
@@ -40,8 +39,7 @@ export function quotaRecoveryTargets(
     const statusOrder = quotaStatusRank(a.status) - quotaStatusRank(b.status);
     if (statusOrder !== 0) return statusOrder;
     if (a.status === "available") {
-      const preferredOrder =
-        Number(b.harness.name === preferredHarness) - Number(a.harness.name === preferredHarness);
+      const preferredOrder = Number(b.harness.name === preferredHarness) - Number(a.harness.name === preferredHarness);
       if (preferredOrder !== 0) return preferredOrder;
     }
     return a.originalIndex - b.originalIndex;
@@ -59,21 +57,13 @@ export function quotaRecoveryTargets(
   });
 }
 
-function quotaGroupStatus(
-  group: QuotaProvider | undefined,
-  usage: UsageResp | null,
-  now: number,
-): QuotaTargetStatus {
+function quotaGroupStatus(group: QuotaProvider | undefined, usage: UsageResp | null, now: number): QuotaTargetStatus {
   if (group === undefined) return "unknown";
   const provider = usage?.providers?.find((candidate) => candidate.provider === group);
   if (provider?.fetchStatus !== "fresh") return "unknown";
   const limits = provider.rateLimits;
   if (!limits || limits.length === 0) return "unknown";
-  if (
-    limits.some(
-      (limit) => limit.usedPct >= 100 && (!limit.resetsAt || Date.parse(limit.resetsAt) > now),
-    )
-  ) {
+  if (limits.some((limit) => limit.usedPct >= 100 && (!limit.resetsAt || Date.parse(limit.resetsAt) > now))) {
     return "exhausted";
   }
   if (limits.some((limit) => limit.usedPct >= 100)) return "unknown";
@@ -91,11 +81,7 @@ function quotaStatusRank(status: QuotaTargetStatus): number {
   }
 }
 
-function quotaTargetLabel(
-  status: QuotaTargetStatus,
-  sameExhaustedGroup: boolean,
-  recommended: boolean,
-): string {
+function quotaTargetLabel(status: QuotaTargetStatus, sameExhaustedGroup: boolean, recommended: boolean): string {
   if (sameExhaustedGroup) return "Same exhausted quota";
   switch (status) {
     case "available":

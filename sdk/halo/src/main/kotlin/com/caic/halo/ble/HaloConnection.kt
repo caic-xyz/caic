@@ -1,5 +1,5 @@
 // HaloConnection: BLE scanning, connection, bonding, MTU negotiation, service discovery, and GATT writes for Halo/Frame devices.
-@file:Suppress("MissingPermission")  // Library: permissions are the consuming app's responsibility.
+@file:Suppress("MissingPermission") // Library: permissions are the consuming app's responsibility.
 
 package com.caic.halo.ble
 
@@ -24,14 +24,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-open class HaloConnection(private val context: Context) {
-
+open class HaloConnection(
+    private val context: Context,
+) {
     private val bluetoothManager: BluetoothManager =
         context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
 
     private val adapter: BluetoothAdapter
-        get() = bluetoothManager.adapter
-            ?: throw HaloException("Bluetooth not available on this device")
+        get() =
+            bluetoothManager.adapter
+                ?: throw HaloException("Bluetooth not available on this device")
 
     private var activeGatt: BluetoothGatt? = null
 
@@ -43,112 +45,158 @@ open class HaloConnection(private val context: Context) {
 
     // ---- Scanning ----
 
-    open fun scan(): Flow<HaloScannedDevice> = callbackFlow {
-        val scanner = adapter.bluetoothLeScanner
-            ?: throw HaloException("BLE scanner not available")
+    open fun scan(): Flow<HaloScannedDevice> =
+        callbackFlow {
+            val scanner =
+                adapter.bluetoothLeScanner
+                    ?: throw HaloException("BLE scanner not available")
 
-        val filters = listOf(
-            ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.LUA_SERVICE)).build(),
-            ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.OTA_SERVICE)).build(),
-            ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.LEGACY_DFU_SERVICE)).build(),
-        )
+            val filters =
+                listOf(
+                    ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.LUA_SERVICE)).build(),
+                    ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.OTA_SERVICE)).build(),
+                    ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.LEGACY_DFU_SERVICE)).build(),
+                )
 
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
+            val settings =
+                ScanSettings
+                    .Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build()
 
-        val callback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val name = result.device.name ?: return
-                if (name.startsWith("Halo ") || name.startsWith("Frame ")) {
-                    trySend(HaloScannedDevice(result.device, result.rssi))
+            val callback =
+                object : ScanCallback() {
+                    override fun onScanResult(
+                        callbackType: Int,
+                        result: ScanResult,
+                    ) {
+                        val name = result.device.name ?: return
+                        if (name.startsWith("Halo ") || name.startsWith("Frame ")) {
+                            trySend(HaloScannedDevice(result.device, result.rssi))
+                        }
+                    }
+
+                    override fun onScanFailed(errorCode: Int) {
+                        close(HaloException("BLE scan failed with code $errorCode"))
+                    }
+                }
+
+            scanner.startScan(filters, settings, callback)
+            awaitClose {
+                try {
+                    scanner.stopScan(callback)
+                } catch (_: Exception) {
                 }
             }
-
-            override fun onScanFailed(errorCode: Int) {
-                close(HaloException("BLE scan failed with code $errorCode"))
-            }
         }
-
-        scanner.startScan(filters, settings, callback)
-        awaitClose { try { scanner.stopScan(callback) } catch (_: Exception) { } }
-    }
 
     // ---- Connection ----
 
     /** Overridable for testing: create the GATT connection. */
-    protected open suspend fun connectGatt(device: BluetoothDevice, timeoutMs: Long): BluetoothGatt {
-        return withTimeoutOrNull(timeoutMs) {
+    protected open suspend fun connectGatt(
+        device: BluetoothDevice,
+        timeoutMs: Long,
+    ): BluetoothGatt =
+        withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<BluetoothGatt> { cont ->
-                val gatt = device.connectGatt(
-                    context, false,
-                    object : BluetoothGattCallback() {
-                        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                            when (newState) {
-                                BluetoothProfile.STATE_CONNECTED -> {
-                                    if (cont.isActive) { activeGatt = g; cont.resume(g) }
+                val gatt =
+                    device.connectGatt(
+                        context,
+                        false,
+                        object : BluetoothGattCallback() {
+                            override fun onConnectionStateChange(
+                                g: BluetoothGatt,
+                                status: Int,
+                                newState: Int,
+                            ) {
+                                when (newState) {
+                                    BluetoothProfile.STATE_CONNECTED -> {
+                                        if (cont.isActive) {
+                                            activeGatt = g
+                                            cont.resume(g)
+                                        }
+                                    }
+
+                                    BluetoothProfile.STATE_DISCONNECTED -> {
+                                        if (cont.isActive) {
+                                            cont.resumeWithException(
+                                                HaloException("Disconnected during connection (status=$status)"),
+                                            )
+                                        }
+                                    }
                                 }
-                                BluetoothProfile.STATE_DISCONNECTED -> {
-                                    if (cont.isActive) cont.resumeWithException(
-                                        HaloException("Disconnected during connection (status=$status)")
-                                    )
-                                }
+                                currentGattCallback?.onConnectionStateChange(g, status, newState)
                             }
-                            currentGattCallback?.onConnectionStateChange(g, status, newState)
-                        }
 
-                        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-                            currentGattCallback?.onMtuChanged(g, mtu, status)
-                        }
+                            override fun onMtuChanged(
+                                g: BluetoothGatt,
+                                mtu: Int,
+                                status: Int,
+                            ) {
+                                currentGattCallback?.onMtuChanged(g, mtu, status)
+                            }
 
-                        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                            currentGattCallback?.onServicesDiscovered(g, status)
-                        }
+                            override fun onServicesDiscovered(
+                                g: BluetoothGatt,
+                                status: Int,
+                            ) {
+                                currentGattCallback?.onServicesDiscovered(g, status)
+                            }
 
-                        override fun onCharacteristicWrite(
-                            g: BluetoothGatt,
-                            c: BluetoothGattCharacteristic,
-                            status: Int,
-                        ) {
-                            currentGattCallback?.onCharacteristicWrite(g, c, status)
-                        }
+                            override fun onCharacteristicWrite(
+                                g: BluetoothGatt,
+                                c: BluetoothGattCharacteristic,
+                                status: Int,
+                            ) {
+                                currentGattCallback?.onCharacteristicWrite(g, c, status)
+                            }
 
-                        override fun onCharacteristicChanged(
-                            g: BluetoothGatt,
-                            c: BluetoothGattCharacteristic,
-                            value: ByteArray,
-                        ) {
-                            currentGattCallback?.onCharacteristicChanged(g, c, value)
-                        }
+                            override fun onCharacteristicChanged(
+                                g: BluetoothGatt,
+                                c: BluetoothGattCharacteristic,
+                                value: ByteArray,
+                            ) {
+                                currentGattCallback?.onCharacteristicChanged(g, c, value)
+                            }
 
-                        @Suppress("DEPRECATION")
-                        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
-                            currentGattCallback?.onCharacteristicChanged(g, c, c.value)
-                        }
-                    },
-                    BluetoothDevice.TRANSPORT_LE,
-                )
+                            @Suppress("DEPRECATION")
+                            override fun onCharacteristicChanged(
+                                g: BluetoothGatt,
+                                c: BluetoothGattCharacteristic,
+                            ) {
+                                currentGattCallback?.onCharacteristicChanged(g, c, c.value)
+                            }
+                        },
+                        BluetoothDevice.TRANSPORT_LE,
+                    )
                 if (gatt == null) cont.resumeWithException(HaloException("connectGatt returned null"))
             }
         } ?: throw HaloException("Connection timed out after ${timeoutMs}ms")
-    }
 
     /** Overridable for testing: store the negotiated MTU. */
     protected open fun onMtuNegotiated(mtu: Int) {
         negotiatedMtu = mtu
     }
 
-    private suspend fun requestMtu(gatt: BluetoothGatt, timeoutMs: Long) {
+    private suspend fun requestMtu(
+        gatt: BluetoothGatt,
+        timeoutMs: Long,
+    ) {
         withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<Unit> { cont ->
                 val previousCallback = currentGattCallback
-                currentGattCallback = object : BluetoothGattCallback() {
-                    override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-                        currentGattCallback = previousCallback
-                        if (status == BluetoothGatt.GATT_SUCCESS) onMtuNegotiated(mtu)
-                        if (cont.isActive) cont.resume(Unit)
+                currentGattCallback =
+                    object : BluetoothGattCallback() {
+                        override fun onMtuChanged(
+                            g: BluetoothGatt,
+                            mtu: Int,
+                            status: Int,
+                        ) {
+                            currentGattCallback = previousCallback
+                            if (status == BluetoothGatt.GATT_SUCCESS) onMtuNegotiated(mtu)
+                            if (cont.isActive) cont.resume(Unit)
+                        }
                     }
-                }
                 cont.invokeOnCancellation { currentGattCallback = previousCallback }
                 if (!gatt.requestMtu(517)) {
                     currentGattCallback = previousCallback
@@ -159,23 +207,43 @@ open class HaloConnection(private val context: Context) {
     }
 
     @Suppress("TooGenericExceptionCaught")
-    open suspend fun connect(scanned: HaloScannedDevice, timeoutMs: Long = 15_000): HaloDevice {
+    open suspend fun connect(
+        scanned: HaloScannedDevice,
+        timeoutMs: Long = 15_000,
+    ): HaloDevice {
         val device = scanned.device
         val gatt = connectGatt(device, timeoutMs)
 
         return try {
             gatt.device.createBond()
-            try { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) } catch (_: SecurityException) { }
+            try {
+                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+            } catch (
+                _: SecurityException,
+            ) {
+            }
 
             requestMtu(gatt, timeoutMs)
             enableServices(device, gatt, timeoutMs)
         } catch (e: HaloException) {
-            try { gatt.disconnect() } catch (_: Exception) { }
-            try { gatt.close() } catch (_: Exception) { }
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+            }
+            try {
+                gatt.close()
+            } catch (_: Exception) {
+            }
             throw e
         } catch (e: Exception) {
-            try { gatt.disconnect() } catch (_: Exception) { }
-            try { gatt.close() } catch (_: Exception) { }
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+            }
+            try {
+                gatt.close()
+            } catch (_: Exception) {
+            }
             throw HaloException("Connection failed: ${e.message}", e)
         }
     }
@@ -189,8 +257,8 @@ open class HaloConnection(private val context: Context) {
         audioTxChar: BluetoothGattCharacteristic?,
         limits: HaloServiceDiscovery.PayloadLimits,
         notificationsFlow: Flow<ByteArray>,
-    ): HaloDevice {
-        return HaloDevice(
+    ): HaloDevice =
+        HaloDevice(
             platformDevice = platformDevice,
             type = type,
             txChar = txChar,
@@ -200,10 +268,12 @@ open class HaloConnection(private val context: Context) {
             maxDataLen = limits.maxDataLen,
             rawNotifications = notificationsFlow,
         )
-    }
 
     /** Overridable for testing: wire the writeSink to GATT writes. */
-    protected open fun wireWriteSink(device: HaloDevice, gatt: BluetoothGatt) {
+    protected open fun wireWriteSink(
+        device: HaloDevice,
+        gatt: BluetoothGatt,
+    ) {
         @Suppress("DEPRECATION")
         device.writeSink = { write ->
             suspendCancellableCoroutine<Unit> { cont ->
@@ -212,37 +282,50 @@ open class HaloConnection(private val context: Context) {
                 char.setValue(write.data)
 
                 val previousCallback = currentGattCallback
-                currentGattCallback = object : BluetoothGattCallback() {
-                    override fun onCharacteristicWrite(
-                        g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int,
-                    ) {
-                        currentGattCallback = previousCallback
-                        if (status == BluetoothGatt.GATT_SUCCESS) {
-                            if (cont.isActive) cont.resume(Unit)
-                        } else {
-                            if (cont.isActive) cont.resumeWithException(
-                                HaloException("GATT write failed with status=$status")
-                            )
+                currentGattCallback =
+                    object : BluetoothGattCallback() {
+                        override fun onCharacteristicWrite(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            status: Int,
+                        ) {
+                            currentGattCallback = previousCallback
+                            if (status == BluetoothGatt.GATT_SUCCESS) {
+                                if (cont.isActive) cont.resume(Unit)
+                            } else {
+                                if (cont.isActive) {
+                                    cont.resumeWithException(
+                                        HaloException("GATT write failed with status=$status"),
+                                    )
+                                }
+                            }
+                        }
+
+                        override fun onCharacteristicChanged(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            value: ByteArray,
+                        ) {
+                            previousCallback?.onCharacteristicChanged(g, c, value)
+                        }
+
+                        override fun onConnectionStateChange(
+                            g: BluetoothGatt,
+                            status: Int,
+                            newState: Int,
+                        ) {
+                            previousCallback?.onConnectionStateChange(g, status, newState)
                         }
                     }
-
-                    override fun onCharacteristicChanged(
-                        g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray,
-                    ) {
-                        previousCallback?.onCharacteristicChanged(g, c, value)
-                    }
-
-                    override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                        previousCallback?.onConnectionStateChange(g, status, newState)
-                    }
-                }
 
                 val success = gatt.writeCharacteristic(char)
                 if (!success) {
                     currentGattCallback = previousCallback
-                    if (cont.isActive) cont.resumeWithException(
-                        HaloException("writeCharacteristic returned false")
-                    )
+                    if (cont.isActive) {
+                        cont.resumeWithException(
+                            HaloException("writeCharacteristic returned false"),
+                        )
+                    }
                 }
             }
         }
@@ -253,58 +336,87 @@ open class HaloConnection(private val context: Context) {
         gatt: BluetoothGatt,
         timeoutMs: Long,
     ): HaloDevice {
-        val services = withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine<List<android.bluetooth.BluetoothGattService>> { cont ->
-                currentGattCallback = object : BluetoothGattCallback() {
-                    override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                        if (status == BluetoothGatt.GATT_SUCCESS) cont.resume(g.services)
-                        else cont.resumeWithException(
-                            HaloException("Service discovery failed with status=$status")
-                        )
-                    }
-                    override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                        if (newState == BluetoothProfile.STATE_DISCONNECTED) { /* errors surface through Flow */ }
-                    }
-                }
-                if (gatt.services.isEmpty()) {
-                    if (!gatt.discoverServices()) {
-                        cont.resumeWithException(HaloException("Service discovery initiation failed"))
-                    }
-                } else {
-                    cont.resume(gatt.services)
-                }
-            }
-        } ?: throw HaloException("Service discovery timed out after ${timeoutMs}ms")
+        val services =
+            withTimeoutOrNull(timeoutMs) {
+                suspendCancellableCoroutine<List<android.bluetooth.BluetoothGattService>> { cont ->
+                    currentGattCallback =
+                        object : BluetoothGattCallback() {
+                            override fun onServicesDiscovered(
+                                g: BluetoothGatt,
+                                status: Int,
+                            ) {
+                                if (status == BluetoothGatt.GATT_SUCCESS) {
+                                    cont.resume(g.services)
+                                } else {
+                                    cont.resumeWithException(
+                                        HaloException("Service discovery failed with status=$status"),
+                                    )
+                                }
+                            }
 
-        val luaService = HaloServiceDiscovery.findLuaService(services)
-            ?: throw HaloException("Lua service not found on device")
+                            override fun onConnectionStateChange(
+                                g: BluetoothGatt,
+                                status: Int,
+                                newState: Int,
+                            ) {
+                                if (newState ==
+                                    BluetoothProfile.STATE_DISCONNECTED
+                                ) { // errors surface through Flow
+                                }
+                            }
+                        }
+                    if (gatt.services.isEmpty()) {
+                        if (!gatt.discoverServices()) {
+                            cont.resumeWithException(HaloException("Service discovery initiation failed"))
+                        }
+                    } else {
+                        cont.resume(gatt.services)
+                    }
+                }
+            } ?: throw HaloException("Service discovery timed out after ${timeoutMs}ms")
+
+        val luaService =
+            HaloServiceDiscovery.findLuaService(services)
+                ?: throw HaloException("Lua service not found on device")
 
         val deviceType = HaloServiceDiscovery.deviceType(luaService)
         val (txChar, rxChar, audioTxChar) = HaloServiceDiscovery.requiredCharacteristics(luaService)
         val limits = HaloServiceDiscovery.payloadLimits(negotiatedMtu, deviceType)
 
         // Enable RX notifications.
-        val notificationsFlow: Flow<ByteArray> = callbackFlow {
-            currentGattCallback = object : BluetoothGattCallback() {
-                override fun onCharacteristicChanged(
-                    g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray,
-                ) {
-                    if (c.uuid == HaloServiceDiscovery.LUA_RX_CHAR) trySend(value)
+        val notificationsFlow: Flow<ByteArray> =
+            callbackFlow {
+                currentGattCallback =
+                    object : BluetoothGattCallback() {
+                        override fun onCharacteristicChanged(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            value: ByteArray,
+                        ) {
+                            if (c.uuid == HaloServiceDiscovery.LUA_RX_CHAR) trySend(value)
+                        }
+
+                        override fun onConnectionStateChange(
+                            g: BluetoothGatt,
+                            status: Int,
+                            newState: Int,
+                        ) {
+                            if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                                close(HaloException("Device disconnected (status=$status)"))
+                            }
+                        }
+                    }
+
+                if (!gatt.setCharacteristicNotification(rxChar, true)) {
+                    close(HaloException("Failed to enable RX notifications"))
                 }
-                override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                    if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                        close(HaloException("Device disconnected (status=$status)"))
+                awaitClose {
+                    try {
+                        gatt.setCharacteristicNotification(rxChar, false)
+                    } catch (_: Exception) {
                     }
                 }
             }
-
-            if (!gatt.setCharacteristicNotification(rxChar, true)) {
-                close(HaloException("Failed to enable RX notifications"))
-            }
-            awaitClose {
-                try { gatt.setCharacteristicNotification(rxChar, false) } catch (_: Exception) { }
-            }
-        }
 
         val haloDevice = createHaloDevice(device, deviceType, txChar, rxChar, audioTxChar, limits, notificationsFlow)
         wireWriteSink(haloDevice, gatt)
@@ -314,8 +426,14 @@ open class HaloConnection(private val context: Context) {
     // ---- Disconnect ----
 
     open suspend fun disconnect() {
-        try { activeGatt?.disconnect() } catch (_: Exception) { }
-        try { activeGatt?.close() } catch (_: Exception) { }
+        try {
+            activeGatt?.disconnect()
+        } catch (_: Exception) {
+        }
+        try {
+            activeGatt?.close()
+        } catch (_: Exception) {
+        }
         activeGatt = null
         currentGattCallback = null
     }

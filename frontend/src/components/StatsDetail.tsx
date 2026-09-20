@@ -61,10 +61,7 @@ function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
       total.outputTokens += usage.outputTokens;
       total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
       total.totalTokens +=
-        usage.inputTokens +
-        usage.cacheCreationInputTokens +
-        usage.cacheReadInputTokens +
-        usage.outputTokens;
+        usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
       total.costUSD += turn.result.totalCostUSD;
       return total;
     },
@@ -98,8 +95,7 @@ export function StatsContent(props: StatsContentProps) {
   });
   const cacheHitRate = () => {
     const details = usage();
-    const input =
-      details.inputTokens + details.cacheWriteInputTokens + details.cacheReadInputTokens;
+    const input = details.inputTokens + details.cacheWriteInputTokens + details.cacheReadInputTokens;
     return input > 0 ? details.cacheReadInputTokens / input : 0;
   };
   const costPerMillionTokens = () => {
@@ -113,43 +109,26 @@ export function StatsContent(props: StatsContentProps) {
         <section class={styles.section} data-testid="task-usage-summary">
           <h2 class={styles.sectionTitle}>Usage</h2>
           <div class={styles.usageGrid}>
-            <div
-              class={styles.usageMetric}
-              title="Input tokens that were neither written to nor read from cache"
-            >
+            <div class={styles.usageMetric} title="Input tokens that were neither written to nor read from cache">
               <span class={styles.usageLabel}>New input</span>
               <strong>{formatUsageTokens(usage().inputTokens)}</strong>
             </div>
-            <div
-              class={styles.usageMetric}
-              title="Input tokens written to the provider prompt cache"
-            >
+            <div class={styles.usageMetric} title="Input tokens written to the provider prompt cache">
               <span class={styles.usageLabel}>Cache write</span>
               <strong>{formatUsageTokens(usage().cacheWriteInputTokens)}</strong>
             </div>
-            <div
-              class={styles.usageMetric}
-              title="Input tokens served from the provider prompt cache"
-            >
+            <div class={styles.usageMetric} title="Input tokens served from the provider prompt cache">
               <span class={styles.usageLabel}>Cache read</span>
               <strong>{formatUsageTokens(usage().cacheReadInputTokens)}</strong>
             </div>
-            <div
-              class={styles.usageMetric}
-              title="All generated output tokens, including thinking tokens"
-            >
+            <div class={styles.usageMetric} title="All generated output tokens, including thinking tokens">
               <span class={styles.usageLabel}>Output</span>
               <strong>{formatUsageTokens(usage().outputTokens)}</strong>
             </div>
-            <div
-              class={styles.usageMetric}
-              title="Thinking or reasoning tokens; included in output"
-            >
+            <div class={styles.usageMetric} title="Thinking or reasoning tokens; included in output">
               <span class={styles.usageLabel}>Thinking</span>
               <strong>
-                {usage().reasoningOutputTokens > 0
-                  ? formatUsageTokens(usage().reasoningOutputTokens)
-                  : "—"}
+                {usage().reasoningOutputTokens > 0 ? formatUsageTokens(usage().reasoningOutputTokens) : "—"}
               </strong>
             </div>
           </div>
@@ -209,11 +188,7 @@ export default function StatsDetail(props: StatsDetailProps) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button
-          class={styles.backBtn}
-          onClick={() => navigate(props.taskPath)}
-          title="Back to task"
-        >
+        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span>Performance</span>
@@ -222,12 +197,7 @@ export default function StatsDetail(props: StatsDetailProps) {
           <span class={styles.headerBranch}>{props.branch}</span>
         </span>
       </div>
-      <StatsContent
-        events={props.events}
-        stats={props.stats}
-        turns={props.turns}
-        usage={props.usage}
-      />
+      <StatsContent events={props.events} stats={props.stats} turns={props.turns} usage={props.usage} />
     </div>
   );
 }

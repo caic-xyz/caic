@@ -69,113 +69,141 @@ internal fun WebShellScreen(
     val currentHostURL by rememberUpdatedState(hostURL)
     val currentOnLoadStateChanged by rememberUpdatedState(onLoadStateChanged)
     val currentOnHostedPageLoaded by rememberUpdatedState(onHostedPageLoaded)
-    val fileChooserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        fileChooserCallback?.onReceiveValue(uris.toTypedArray())
-        fileChooserCallback = null
-    }
-    val webView = remember(context, hostURL) {
-        WebView(context).apply {
-            id = R.id.web_shell
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.setSupportMultipleWindows(true)
-            enableWebAuthentication()
-            addJavascriptInterface(GoModeHostBridge(), "goModeHost")
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    view.loadUrl(request.url.toString())
-                    return true
-                }
-
-                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                    if (currentHostURL != hostURL) return
-
-                    automaticRetryState = automaticTimeoutRetryStateOnPageStarted(automaticRetryState)
-                    loadFailed = false
-                    loading = true
-                    currentOnLoadStateChanged(
-                        if (recoveryLoadInProgress) WebShellLoadState.Reconnecting else WebShellLoadState.Loading,
-                    )
-                }
-
-                override fun onPageFinished(view: WebView, url: String?) {
-                    if (currentHostURL != hostURL) return
-
-                    if (!loadFailed) {
-                        automaticRetryState = automaticRetryState.copy(attempts = 0)
-                        recoveryLoadInProgress = false
-                        currentOnLoadStateChanged(WebShellLoadState.Ready)
-                    }
-                    loading = automaticRetryState.pending
-                    currentOnHostedPageLoaded()
-                }
-
-                override fun onReceivedError(
-                    view: WebView,
-                    request: WebResourceRequest,
-                    error: WebResourceError,
-                ) {
-                    if (!request.isForMainFrame || currentHostURL != hostURL) return
-
-                    loadFailed = true
-                    if (shouldAutomaticallyRetryWebLoadError(error.errorCode, automaticRetryState.attempts)) {
-                        automaticRetryState = automaticRetryState.copy(
-                            attempts = automaticRetryState.attempts + 1,
-                            pending = true,
-                        )
-                        recoveryLoadInProgress = true
-                        loading = true
-                        currentOnLoadStateChanged(WebShellLoadState.Reconnecting)
-                    } else {
-                        val message = webLoadErrorMessage(error.errorCode)
-                        recoveryLoadInProgress = false
-                        loading = false
-                        currentOnLoadStateChanged(WebShellLoadState.Failed(message))
-                    }
-                }
-            }
-            webChromeClient = object : WebChromeClient() {
-                override fun onPermissionRequest(request: PermissionRequest) {
-                    val grantedResources = request.resources.filter { resource ->
-                        when (resource) {
-                            PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
-                                hasPermission(context, Manifest.permission.RECORD_AUDIO)
-                            PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
-                                hasPermission(context, Manifest.permission.CAMERA)
-                            else -> true
+    val fileChooserLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+            fileChooserCallback?.onReceiveValue(uris.toTypedArray())
+            fileChooserCallback = null
+        }
+    val webView =
+        remember(context, hostURL) {
+            WebView(context).apply {
+                id = R.id.web_shell
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.mediaPlaybackRequiresUserGesture = false
+                settings.setSupportMultipleWindows(true)
+                enableWebAuthentication()
+                addJavascriptInterface(GoModeHostBridge(), "goModeHost")
+                webViewClient =
+                    object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: WebResourceRequest,
+                        ): Boolean {
+                            view.loadUrl(request.url.toString())
+                            return true
                         }
-                    }.toTypedArray()
-                    if (grantedResources.size != request.resources.size) {
-                        request.deny()
-                        return
+
+                        override fun onPageStarted(
+                            view: WebView,
+                            url: String?,
+                            favicon: Bitmap?,
+                        ) {
+                            if (currentHostURL != hostURL) return
+
+                            automaticRetryState = automaticTimeoutRetryStateOnPageStarted(automaticRetryState)
+                            loadFailed = false
+                            loading = true
+                            currentOnLoadStateChanged(
+                                if (recoveryLoadInProgress) {
+                                    WebShellLoadState.Reconnecting
+                                } else {
+                                    WebShellLoadState.Loading
+                                },
+                            )
+                        }
+
+                        override fun onPageFinished(
+                            view: WebView,
+                            url: String?,
+                        ) {
+                            if (currentHostURL != hostURL) return
+
+                            if (!loadFailed) {
+                                automaticRetryState = automaticRetryState.copy(attempts = 0)
+                                recoveryLoadInProgress = false
+                                currentOnLoadStateChanged(WebShellLoadState.Ready)
+                            }
+                            loading = automaticRetryState.pending
+                            currentOnHostedPageLoaded()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: WebResourceError,
+                        ) {
+                            if (!request.isForMainFrame || currentHostURL != hostURL) return
+
+                            loadFailed = true
+                            if (shouldAutomaticallyRetryWebLoadError(error.errorCode, automaticRetryState.attempts)) {
+                                automaticRetryState =
+                                    automaticRetryState.copy(
+                                        attempts = automaticRetryState.attempts + 1,
+                                        pending = true,
+                                    )
+                                recoveryLoadInProgress = true
+                                loading = true
+                                currentOnLoadStateChanged(WebShellLoadState.Reconnecting)
+                            } else {
+                                val message = webLoadErrorMessage(error.errorCode)
+                                recoveryLoadInProgress = false
+                                loading = false
+                                currentOnLoadStateChanged(WebShellLoadState.Failed(message))
+                            }
+                        }
                     }
-                    request.grant(grantedResources)
-                }
+                webChromeClient =
+                    object : WebChromeClient() {
+                        override fun onPermissionRequest(request: PermissionRequest) {
+                            val grantedResources =
+                                request.resources
+                                    .filter { resource ->
+                                        when (resource) {
+                                            PermissionRequest.RESOURCE_AUDIO_CAPTURE -> {
+                                                hasPermission(context, Manifest.permission.RECORD_AUDIO)
+                                            }
 
-                override fun onShowFileChooser(
-                    webView: WebView,
-                    filePathCallback: ValueCallback<Array<Uri>>,
-                    fileChooserParams: FileChooserParams,
-                ): Boolean {
-                    fileChooserCallback?.onReceiveValue(emptyArray())
-                    fileChooserCallback = filePathCallback
-                    val mimeTypes = fileChooserParams.acceptTypes.filter { it.isNotBlank() }
-                    fileChooserLauncher.launch(mimeTypes.firstOrNull() ?: "*/*")
-                    return true
-                }
+                                            PermissionRequest.RESOURCE_VIDEO_CAPTURE -> {
+                                                hasPermission(context, Manifest.permission.CAMERA)
+                                            }
 
-                override fun onCreateWindow(
-                    view: WebView,
-                    isDialog: Boolean,
-                    isUserGesture: Boolean,
-                    resultMsg: Message,
-                ): Boolean = openNewWindowInExternalBrowser(view, resultMsg) { uri ->
-                    openExternalBrowser(context, uri)
-                }
+                                            else -> {
+                                                true
+                                            }
+                                        }
+                                    }.toTypedArray()
+                            if (grantedResources.size != request.resources.size) {
+                                request.deny()
+                                return
+                            }
+                            request.grant(grantedResources)
+                        }
+
+                        override fun onShowFileChooser(
+                            webView: WebView,
+                            filePathCallback: ValueCallback<Array<Uri>>,
+                            fileChooserParams: FileChooserParams,
+                        ): Boolean {
+                            fileChooserCallback?.onReceiveValue(emptyArray())
+                            fileChooserCallback = filePathCallback
+                            val mimeTypes = fileChooserParams.acceptTypes.filter { it.isNotBlank() }
+                            fileChooserLauncher.launch(mimeTypes.firstOrNull() ?: "*/*")
+                            return true
+                        }
+
+                        override fun onCreateWindow(
+                            view: WebView,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: Message,
+                        ): Boolean =
+                            openNewWindowInExternalBrowser(view, resultMsg) { uri ->
+                                openExternalBrowser(context, uri)
+                            }
+                    }
             }
         }
-    }
 
     LaunchedEffect(hostURL, reloadToken) {
         if (reloadToken == appliedReloadToken) return@LaunchedEffect
@@ -278,14 +306,21 @@ private fun WebView.enableWebAuthentication() {
     }
 }
 
-private fun hasPermission(context: Context, permission: String): Boolean =
-    ContextCompat.checkSelfPermission(context, permission) == PermissionChecker.PERMISSION_GRANTED
+private fun hasPermission(
+    context: Context,
+    permission: String,
+): Boolean = ContextCompat.checkSelfPermission(context, permission) == PermissionChecker.PERMISSION_GRANTED
 
 internal sealed interface WebShellLoadState {
     data object Loading : WebShellLoadState
+
     data object Reconnecting : WebShellLoadState
+
     data object Ready : WebShellLoadState
-    data class Failed(val message: String) : WebShellLoadState
+
+    data class Failed(
+        val message: String,
+    ) : WebShellLoadState
 }
 
 internal data class AutomaticTimeoutRetryState(
@@ -294,16 +329,17 @@ internal data class AutomaticTimeoutRetryState(
     val inProgress: Boolean = false,
 )
 
-internal fun automaticTimeoutRetryStateOnPageStarted(
-    state: AutomaticTimeoutRetryState,
-): AutomaticTimeoutRetryState = if (state.inProgress) {
-    state.copy(inProgress = false)
-} else {
-    AutomaticTimeoutRetryState()
-}
+internal fun automaticTimeoutRetryStateOnPageStarted(state: AutomaticTimeoutRetryState): AutomaticTimeoutRetryState =
+    if (state.inProgress) {
+        state.copy(inProgress = false)
+    } else {
+        AutomaticTimeoutRetryState()
+    }
 
-internal fun shouldAutomaticallyRetryWebLoadError(errorCode: Int, retryAttempts: Int): Boolean =
-    errorCode == WebViewClient.ERROR_TIMEOUT && retryAttempts == 0
+internal fun shouldAutomaticallyRetryWebLoadError(
+    errorCode: Int,
+    retryAttempts: Int,
+): Boolean = errorCode == WebViewClient.ERROR_TIMEOUT && retryAttempts == 0
 
 internal fun webLoadErrorMessage(errorCode: Int): String =
     if (errorCode == WebViewClient.ERROR_TIMEOUT) {
@@ -329,34 +365,49 @@ internal fun openNewWindowInExternalBrowser(
         return false
     }
 
-    val popupView = WebView(parentView.context).apply {
-        webViewClient = object : WebViewClient() {
-            private var openedExternalWindow = false
+    val popupView =
+        WebView(parentView.context).apply {
+            webViewClient =
+                object : WebViewClient() {
+                    private var openedExternalWindow = false
 
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                openOnce(view, request.url)
-                return true
-            }
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): Boolean {
+                        openOnce(view, request.url)
+                        return true
+                    }
 
-            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                url?.toUri()?.let { openOnce(view, it) }
-            }
+                    override fun onPageStarted(
+                        view: WebView,
+                        url: String?,
+                        favicon: Bitmap?,
+                    ) {
+                        url?.toUri()?.let { openOnce(view, it) }
+                    }
 
-            private fun openOnce(view: WebView, uri: Uri) {
-                if (openedExternalWindow) return
-                openedExternalWindow = true
-                openExternalUri(uri)
-                view.destroy()
-            }
+                    private fun openOnce(
+                        view: WebView,
+                        uri: Uri,
+                    ) {
+                        if (openedExternalWindow) return
+                        openedExternalWindow = true
+                        openExternalUri(uri)
+                        view.destroy()
+                    }
+                }
         }
-    }
 
     transport.webView = popupView
     resultMsg.sendToTarget()
     return true
 }
 
-internal fun newWindowRequestUriOrNull(hitTestType: Int, extra: String?): Uri? {
+internal fun newWindowRequestUriOrNull(
+    hitTestType: Int,
+    extra: String?,
+): Uri? {
     if (hitTestType != WebView.HitTestResult.SRC_ANCHOR_TYPE &&
         hitTestType != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
     ) {
@@ -367,7 +418,10 @@ internal fun newWindowRequestUriOrNull(hitTestType: Int, extra: String?): Uri? {
     return extra.toUri().takeIf { !it.scheme.isNullOrBlank() }
 }
 
-internal fun openExternalBrowser(context: Context, uri: Uri): Boolean {
+internal fun openExternalBrowser(
+    context: Context,
+    uri: Uri,
+): Boolean {
     val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
     if (context !is Activity) {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -383,7 +437,8 @@ internal fun openExternalBrowser(context: Context, uri: Uri): Boolean {
 }
 
 private fun goModeHostURL(url: String): String =
-    url.toUri()
+    url
+        .toUri()
         .buildUpon()
         .appendQueryParameter("goModeHost", "1")
         .build()

@@ -7,8 +7,7 @@ import { fileURLToPath } from "url";
 const visualTime = "2026-09-02T12:00:00.000Z";
 
 export const screenshotRoot =
-  process.env.CAIC_SCREENSHOT_DIR ??
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "screenshots", "frontend");
+  process.env.CAIC_SCREENSHOT_DIR ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "screenshots", "frontend");
 
 export type FrontendScreenshotLayout = "desktop" | "mobile";
 
@@ -109,11 +108,7 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   });
 }
 
-export async function captureScreenshot(
-  page: Page,
-  layout: FrontendScreenshotLayout,
-  filename: string,
-): Promise<void> {
+export async function captureScreenshot(page: Page, layout: FrontendScreenshotLayout, filename: string): Promise<void> {
   await waitForVisualReadiness(page);
   const outputDir = screenshotDir(layout);
   mkdirSync(outputDir, { recursive: true });

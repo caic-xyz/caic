@@ -1,14 +1,7 @@
 // Application state store: owns task data, settings, SSE wiring, task actions, and task-scoped cache invalidation.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
-import {
-  createContext,
-  createEffect,
-  createSignal,
-  onCleanup,
-  useContext,
-  type JSX,
-} from "solid-js";
+import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 
 import type {
@@ -90,13 +83,10 @@ const otherAliveTaskStates = new Set<TaskState>([
 type AliveFocusTarget = { kind: "task"; task: Task } | { kind: "prompt" };
 
 function confirmImmediatePurge(task: Task): boolean {
-  return window.confirm(
-    `Purge runtime instance?\n\n${task.title}\nbranch: ${task.repos?.[0]?.branch ?? ""}`,
-  );
+  return window.confirm(`Purge runtime instance?\n\n${task.title}\nbranch: ${task.repos?.[0]?.branch ?? ""}`);
 }
 
-type PendingTaskUpdate =
-  { kind: "patch"; patch: Record<string, unknown> } | { kind: "replace" } | { kind: "delete" };
+type PendingTaskUpdate = { kind: "patch"; patch: Record<string, unknown> } | { kind: "replace" } | { kind: "delete" };
 
 type TaskRecovery = {
   updates: PendingTaskUpdate[];
@@ -104,8 +94,7 @@ type TaskRecovery = {
 
 function taskDiffChanged(previous: Task, next: Task): boolean {
   return (
-    previous.state !== next.state ||
-    JSON.stringify(previous.diffStat ?? []) !== JSON.stringify(next.diffStat ?? [])
+    previous.state !== next.state || JSON.stringify(previous.diffStat ?? []) !== JSON.stringify(next.diffStat ?? [])
   );
 }
 
@@ -170,15 +159,9 @@ function createAppStore() {
   const [maxCPUs, setMaxCPUs] = createSignal(0);
   const [purgeDelay, setPurgeDelay] = createSignal(0);
   const [containerPlatform, setContainerPlatform] = createSignal("");
-  const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>(
-    {},
-  );
-  const [wellKnownCachesList, setWellKnownCachesList] = createSignal<
-    WellKnownCachesResp["wellKnown"]
-  >([]);
-  const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<
-    Record<string, CacheSize | undefined>
-  >({});
+  const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
+  const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
+  const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<Record<string, CacheSize | undefined>>({});
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
   const [settingsError, setSettingsError] = createSignal("");
@@ -203,9 +186,7 @@ function createAppStore() {
   });
 
   /** Build the current settings payload for updatePreferences, with optional overrides. */
-  const currentSettings = (
-    overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {},
-  ) => {
+  const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => {
     const settings = {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
@@ -222,9 +203,7 @@ function createAppStore() {
     return {
       settings: {
         ...settings,
-        cacheMappings: settings.cacheMappings.map(
-          ({ resolvedContainerPath: _, ...mapping }) => mapping,
-        ),
+        cacheMappings: settings.cacheMappings.map(({ resolvedContainerPath: _, ...mapping }) => mapping),
         customMounts: settings.customMounts.map(({ resolvedContainerPath: _, ...mount }) => mount),
       },
     };
@@ -242,9 +221,7 @@ function createAppStore() {
   const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
 
   // Per-task image drafts survive task switching.
-  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(
-    new Map(),
-  );
+  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(new Map());
 
   function removeTaskDrafts(id: string) {
     setInputDrafts((prev) => {
@@ -271,8 +248,7 @@ function createAppStore() {
   }
   const dismissWarning = (id: number) => setWarnings((prev) => prev.filter((w) => w.id !== id));
 
-  const harnessSupportsImages = () =>
-    harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
+  const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
   const selectRuntimeName = (runtimeName: string) => {
     setSelectedRuntimeName(runtimeName);
@@ -294,11 +270,7 @@ function createAppStore() {
     setCacheMappings((current) =>
       current.map((mapping, i) => {
         const saved = settings.cacheMappings?.[i];
-        if (
-          !saved ||
-          saved.hostPath !== mapping.hostPath ||
-          saved.containerPath !== mapping.containerPath
-        ) {
+        if (!saved || saved.hostPath !== mapping.hostPath || saved.containerPath !== mapping.containerPath) {
           return { ...mapping, resolvedContainerPath: undefined };
         }
         return {
@@ -310,11 +282,7 @@ function createAppStore() {
     setCustomMounts((current) =>
       current.map((mount, i) => {
         const saved = settings.customMounts?.[i];
-        if (
-          !saved ||
-          saved.hostPath !== mount.hostPath ||
-          saved.containerPath !== mount.containerPath
-        ) {
+        if (!saved || saved.hostPath !== mount.hostPath || saved.containerPath !== mount.containerPath) {
           return { ...mount, resolvedContainerPath: undefined };
         }
         return { ...mount, resolvedContainerPath: saved.resolvedContainerPath };
@@ -325,10 +293,7 @@ function createAppStore() {
   const applyServerConfig = (config: Config) => {
     const availableRuntimes = config.runtimes ?? [];
     setRuntimes(availableRuntimes);
-    if (
-      availableRuntimes.length > 0 &&
-      !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())
-    ) {
+    if (availableRuntimes.length > 0 && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
       setSelectedRuntimeName(availableRuntimes[0].name);
     }
     setTailscaleAvailable(config.tailscaleAvailable);
@@ -369,10 +334,7 @@ function createAppStore() {
   function nextAliveFocusTarget(id: string): AliveFocusTarget {
     const ordered = tasksInSidebarOrder();
     const currentIdx = ordered.findIndex((t) => t.id === id);
-    const rotated =
-      currentIdx === -1
-        ? ordered
-        : ordered.slice(currentIdx + 1).concat(ordered.slice(0, currentIdx));
+    const rotated = currentIdx === -1 ? ordered : ordered.slice(currentIdx + 1).concat(ordered.slice(0, currentIdx));
     const candidates = rotated.filter((t) => t.id !== id);
     const nextTask =
       candidates.find((t) => inputNeededTaskStates.has(t.state)) ??
@@ -460,8 +422,7 @@ function createAppStore() {
   };
   const selectedEffortForModel = (harness: string, model: string) => {
     const harnessInfo = harnesses().find((x) => x.name === harness);
-    const options =
-      harnessInfo?.models.find((candidate) => candidate.id === model)?.effortOptions ?? [];
+    const options = harnessInfo?.models.find((candidate) => candidate.id === model)?.effortOptions ?? [];
     const effort = getPrefEffort(harness, model);
     return effort && options.includes(effort) ? effort : "";
   };
@@ -492,11 +453,9 @@ function createAppStore() {
     }
   };
   const checkAndNotify = (task: Task) => {
-    const needsInput =
-      task.state === "waiting" || task.state === "asking" || task.state === "has_plan";
+    const needsInput = task.state === "waiting" || task.state === "asking" || task.state === "has_plan";
     const prevState = prevStates.get(task.id);
-    const prevNeedsInput =
-      prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
+    const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
     if (needsInput && prevState === "running") {
       notifyWaiting(task.id, task.title, {
         enabled: hostMode.browserNotificationsEnabled(),
@@ -655,8 +614,7 @@ function createAppStore() {
       .slice(recentCount())
       .filter((r) => !selectedRepos().some((s) => s.path === r.path));
 
-  const isAuthenticated = () =>
-    auth.ready() && (auth.providers().length === 0 || auth.user() !== null);
+  const isAuthenticated = () => auth.ready() && (auth.providers().length === 0 || auth.user() !== null);
 
   // Load initial data once authentication is confirmed.
   let dataLoaded = false;
@@ -696,8 +654,7 @@ function createAppStore() {
           prefModels = prefs?.models ?? {};
           prefEfforts = prefs?.efforts ?? {};
           const prefHarness = prefs?.harness ?? "";
-          const harness =
-            prefHarness && h.find((x) => x.name === prefHarness) ? prefHarness : (h[0]?.name ?? "");
+          const harness = prefHarness && h.find((x) => x.name === prefHarness) ? prefHarness : (h[0]?.name ?? "");
           selectHarness(harness);
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
@@ -739,8 +696,7 @@ function createAppStore() {
       }
       return false;
     }
-    const initialScriptSrc =
-      document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
+    const initialScriptSrc = document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
 
     function onOpen() {
       setConnected(true);
@@ -1034,37 +990,23 @@ function createAppStore() {
   const forkAvailableRecent = () =>
     repos()
       .slice(0, recentCount())
-      .filter(
-        (r) =>
-          !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path),
-      );
+      .filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
   const forkAvailableRest = () =>
     repos()
       .slice(recentCount())
-      .filter(
-        (r) =>
-          !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path),
-      );
+      .filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
   const forkTargets = () => {
     const source = tasks().find((task) => task.id === forkTaskId());
-    return quotaRecoveryTargets(
-      harnesses(),
-      usage(),
-      source?.rateLimit?.quotaGroup,
-      selectedHarness(),
-      now(),
-    );
+    return quotaRecoveryTargets(harnesses(), usage(), source?.rateLimit?.quotaGroup, selectedHarness(), now());
   };
-  const forkHarnesses = () =>
-    forkQuotaRecovery() ? forkTargets().map((target) => target.harness) : harnesses();
+  const forkHarnesses = () => (forkQuotaRecovery() ? forkTargets().map((target) => target.harness) : harnesses());
   const forkHarnessLabel = (harness: HarnessInfo) => {
     if (!forkQuotaRecovery()) return harness.name;
     const target = forkTargets().find((candidate) => candidate.harness.name === harness.name);
     return target ? `${harness.name} — ${target.label}` : harness.name;
   };
   const forkSelectedTargetLabel = () =>
-    forkTargets().find((target) => target.harness.name === forkHarness())?.label ??
-    "Quota status unknown";
+    forkTargets().find((target) => target.harness.name === forkHarness())?.label ?? "Quota status unknown";
 
   createEffect(() => {
     if (!forkQuotaRecovery() || forkTargetTouched) return;
@@ -1084,11 +1026,7 @@ function createAppStore() {
     setForkHandoffError("");
     applyForkHarness(harness);
     setForkExtraRepos([]);
-    setForkTailscale(
-      task?.runtime?.tailscale === "true" ||
-        task?.runtime?.tailscale?.startsWith("https://") ||
-        false,
-    );
+    setForkTailscale(task?.runtime?.tailscale === "true" || task?.runtime?.tailscale?.startsWith("https://") || false);
     setForkUSB(task?.runtime?.usb ?? false);
     setForkDisplay(task?.runtime?.display ?? false);
     setForkSudo(task?.runtime?.sudo ?? false);
@@ -1264,9 +1202,7 @@ function createAppStore() {
     }
   }
 
-  function saveSettings(
-    overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {},
-  ): Promise<void> {
+  function saveSettings(overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}): Promise<void> {
     const saveID = ++latestSettingsSave;
     const settings = currentSettings(overrides);
     setSettingsError("");
@@ -1275,8 +1211,7 @@ function createAppStore() {
         const preferences = await updatePreferences(settings);
         if (saveID === latestSettingsSave) applyResolvedContainerPaths(preferences.settings);
       } catch (e: unknown) {
-        if (saveID === latestSettingsSave)
-          setSettingsError(e instanceof Error ? e.message : "Could not save settings");
+        if (saveID === latestSettingsSave) setSettingsError(e instanceof Error ? e.message : "Could not save settings");
       }
     });
     return settingsSaveQueue;

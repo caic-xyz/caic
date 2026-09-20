@@ -104,12 +104,7 @@ export default function KeyboardShortcuts(props: Props) {
     const cards = taskCards();
     if (cards.length === 0) return;
     const current = cards.findIndex((el) => el.dataset.taskId === currentTaskId);
-    const next =
-      current === -1
-        ? delta > 0
-          ? 0
-          : cards.length - 1
-        : (current + delta + cards.length) % cards.length;
+    const next = current === -1 ? (delta > 0 ? 0 : cards.length - 1) : (current + delta + cards.length) % cards.length;
     openTaskFromCard(cards[next], focusPrompt);
   }
 
@@ -125,9 +120,7 @@ export default function KeyboardShortcuts(props: Props) {
       if (document.querySelector("dialog[open]")) return;
 
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const taskPrompt = target?.closest(
-        "[data-testid='task-detail-prompt'], [data-testid='prompt-input']",
-      );
+      const taskPrompt = target?.closest("[data-testid='task-detail-prompt'], [data-testid='prompt-input']");
       const focusedCard = target?.matches("[data-task-id]") ? target : null;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -162,9 +155,7 @@ export default function KeyboardShortcuts(props: Props) {
       }
       if (event.key === "F2") {
         event.preventDefault();
-        focusNewTaskControl(
-          "[data-testid='repo-chips'] [data-testid^='chip-label-'], [data-testid='add-repo-button']",
-        );
+        focusNewTaskControl("[data-testid='repo-chips'] [data-testid^='chip-label-'], [data-testid='add-repo-button']");
         return;
       }
       if (event.key === "F3") {
@@ -205,8 +196,7 @@ export default function KeyboardShortcuts(props: Props) {
       >
         <h2 class={styles.title}>Keyboard shortcuts</h2>
         <p class={styles.intro}>
-          Move between task cards and prompts without leaving the keyboard. Local menus and dialogs
-          handle Escape first.
+          Move between task cards and prompts without leaving the keyboard. Local menus and dialogs handle Escape first.
         </p>
         <ShortcutSection title="Navigation" shortcuts={navigationShortcuts()} />
         <ShortcutSection title="While typing" shortcuts={promptShortcuts} />

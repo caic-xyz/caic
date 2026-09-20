@@ -11,14 +11,17 @@ import androidx.core.content.ContextCompat
 import com.fghbuild.gomode.MainActivity
 import com.fghbuild.gomode.R
 
-class ServiceNotificationPublisher(private val context: Context) {
+class ServiceNotificationPublisher(
+    private val context: Context,
+) {
     fun publish(notification: ServiceNotification) {
         if (!hasNotificationPermission()) return
         val manager = context.getSystemService(NotificationManager::class.java)
         ensureChannel(manager)
         manager.notify(
             notification.id.hashCode(),
-            Notification.Builder(context, ChannelID)
+            Notification
+                .Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(notification.title)
                 .setContentText(notification.text)
@@ -33,24 +36,25 @@ class ServiceNotificationPublisher(private val context: Context) {
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private fun ensureChannel(manager: NotificationManager) {
-        if (manager.getNotificationChannel(ChannelID) != null) return
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
             NotificationChannel(
-                ChannelID,
+                CHANNEL_ID,
                 context.getString(R.string.service_alerts_notification_channel),
                 NotificationManager.IMPORTANCE_DEFAULT,
             ),
         )
     }
 
-    private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
-        context,
-        0,
-        Intent(context, MainActivity::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun openAppIntent(): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     private companion object {
-        const val ChannelID = "gomode_service_alerts"
+        const val CHANNEL_ID = "gomode_service_alerts"
     }
 }

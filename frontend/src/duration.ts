@@ -40,9 +40,7 @@ export function formatDuration(nanoseconds: number): string {
   if (minutes > 0) parts.push(`${minutes}m`);
   if (seconds > 0 || fractionalNanoseconds > 0 || parts.length === 0) {
     const fraction =
-      fractionalNanoseconds > 0
-        ? `.${String(fractionalNanoseconds).padStart(9, "0").replace(/0+$/, "")}`
-        : "";
+      fractionalNanoseconds > 0 ? `.${String(fractionalNanoseconds).padStart(9, "0").replace(/0+$/, "")}` : "";
     parts.push(`${seconds}${fraction}s`);
   }
   return parts.join("");

@@ -5,10 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import workerSource from "../public/sw.js?raw";
 
-type FetchHandler = (event: {
-  request: Request;
-  respondWith: (response: Promise<Response>) => void;
-}) => void;
+type FetchHandler = (event: { request: Request; respondWith: (response: Promise<Response>) => void }) => void;
 
 type CacheMock = {
   match: ReturnType<typeof vi.fn>;
@@ -38,8 +35,7 @@ function loadFetchHandler(
     },
   });
   const handler = listeners.get("fetch");
-  if (typeof handler !== "function")
-    throw new Error("service worker did not register a fetch handler");
+  if (typeof handler !== "function") throw new Error("service worker did not register a fetch handler");
   return { handler: handler as FetchHandler, open };
 }
 

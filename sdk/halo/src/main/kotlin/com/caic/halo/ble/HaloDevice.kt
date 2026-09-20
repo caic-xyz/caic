@@ -14,17 +14,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 class HaloDevice(
     val platformDevice: BluetoothDevice,
     val type: HaloDeviceType = HaloDeviceType.UNKNOWN,
-
     // GATT characteristics discovered by HaloConnection
     internal var txChar: BluetoothGattCharacteristic? = null,
     internal var rxChar: BluetoothGattCharacteristic? = null,
     internal var audioTxChar: BluetoothGattCharacteristic? = null,
-
     // Payload size limits derived from negotiated MTU.
     // Lua strings: MTU − 3; raw data: MTU − 4 (one byte for 0x01 header).
     internal var maxStringLen: Int = 0,
     internal var maxDataLen: Int = 0,
-
     // Shared notification Flow — populated by HaloConnection.enableServices.
     internal var rawNotifications: Flow<ByteArray>? = null,
 ) {
@@ -34,15 +31,17 @@ class HaloDevice(
 
     /** Lua print() output and errors — UTF-8 strings (data[0] != 0x01). */
     val stringResponse: Flow<String>
-        get() = rawNotifications!!
-            .filter { it.isNotEmpty() && it[0] != HaloProtocol.DATA_PREFIX }
-            .map { String(it, Charsets.UTF_8) }
+        get() =
+            rawNotifications!!
+                .filter { it.isNotEmpty() && it[0] != HaloProtocol.DATA_PREFIX }
+                .map { String(it, Charsets.UTF_8) }
 
     /** Raw data sent by the device via frame.bluetooth.send() — first byte 0x01 stripped. */
     val dataResponse: Flow<ByteArray>
-        get() = rawNotifications!!
-            .filter { it.isNotEmpty() && it[0] == HaloProtocol.DATA_PREFIX }
-            .map { it.copyOfRange(1, it.size) }
+        get() =
+            rawNotifications!!
+                .filter { it.isNotEmpty() && it[0] == HaloProtocol.DATA_PREFIX }
+                .map { it.copyOfRange(1, it.size) }
 
     // ---- Control signals (single-byte writes on LUA TX) ----
 
@@ -70,7 +69,10 @@ class HaloDevice(
     suspend fun sendRemoveAllFilesSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
         sendControl(HaloProtocol.CONTROL_REMOVE_ALL_FILES, settleDelayMs)
 
-    private suspend fun sendControl(byte: Byte, settleDelayMs: Long) {
+    private suspend fun sendControl(
+        byte: Byte,
+        settleDelayMs: Long,
+    ) {
         val tx = txChar ?: throw HaloException("TX characteristic not available")
         sendRaw(RawWrite(tx, byteArrayOf(byte), writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
         if (settleDelayMs > 0) delay(settleDelayMs)
@@ -108,7 +110,7 @@ class HaloDevice(
 
     /** Check whether the Lua REPL is active by sending `print(1)` and expecting `"1"`. */
     suspend fun isLuaInReplState(timeoutMs: Long = 200): Boolean {
-        @Suppress("SwallowedException")  // Intentional: probe timeout/error → not in REPL
+        @Suppress("SwallowedException") // Intentional: probe timeout/error → not in REPL
         return try {
             sendString("print(1)", awaitResponse = true, timeoutMs = timeoutMs) == "1"
         } catch (e: HaloException) {
@@ -151,8 +153,9 @@ class HaloDevice(
 
     /** Stream audio (PCM or LC3) to the device speaker via the dedicated AUDIO TX characteristic. */
     suspend fun sendAudio(data: ByteArray) {
-        val audioTx = audioTxChar
-            ?: throw HaloException("AUDIO TX characteristic not available (only on Halo)")
+        val audioTx =
+            audioTxChar
+                ?: throw HaloException("AUDIO TX characteristic not available (only on Halo)")
         val maxAudioPayload = maxDataLen + 1 // AUDIO TX has no 0x01 header overhead
         if (data.size > maxAudioPayload) {
             throw HaloException("Audio payload ${data.size} exceeds MTU ($maxAudioPayload)")
@@ -188,7 +191,10 @@ class HaloDevice(
      * [msgCode] identifies the message type (0–255). [payload] is the serialized body.
      * The device-side data.lua library reassembles by msgCode.
      */
-    suspend fun sendMessage(msgCode: Int, payload: ByteArray) {
+    suspend fun sendMessage(
+        msgCode: Int,
+        payload: ByteArray,
+    ) {
         require(msgCode in 0..255) { "Message code must be 0–255, got $msgCode" }
         require(payload.size <= HaloProtocol.MAX_MESSAGE_PAYLOAD) {
             "Payload size ${payload.size} exceeds maximum ${HaloProtocol.MAX_MESSAGE_PAYLOAD}"
@@ -237,11 +243,12 @@ class HaloDevice(
     }
 
     private suspend fun awaitMessageAck(msgCode: Int) {
-        val ack = withTimeoutOrNull(MESSAGE_ACK_TIMEOUT_MS) {
-            dataResponse.first {
-                it.contentEquals(HaloProtocol.DATA_ACK_SUCCESS) || it.contentEquals(HaloProtocol.DATA_ACK_FAILURE)
-            }
-        } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
+        val ack =
+            withTimeoutOrNull(MESSAGE_ACK_TIMEOUT_MS) {
+                dataResponse.first {
+                    it.contentEquals(HaloProtocol.DATA_ACK_SUCCESS) || it.contentEquals(HaloProtocol.DATA_ACK_FAILURE)
+                }
+            } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
 
         if (ack.contentEquals(HaloProtocol.DATA_ACK_FAILURE)) {
             throw HaloException("Device rejected message chunk (msgCode=0x${msgCode.toString(16)})")
@@ -254,15 +261,19 @@ class HaloDevice(
      * Upload [contents] as a Lua file at [path] (e.g. "main.lua") on the device filesystem.
      * Escapes Lua string literals and writes in MTU-sized chunks.
      */
-    suspend fun uploadFile(path: String, contents: String) {
-        val escaped = contents
-            .replace("\\", "\\\\")
-            .replace("\r\n", "\\n")
-            .replace("\n", "\\n")
-            .replace("\r", "\\n")
-            .replace("\t", "\\t")
-            .replace("'", "\\'")
-            .replace("\"", "\\\"")
+    suspend fun uploadFile(
+        path: String,
+        contents: String,
+    ) {
+        val escaped =
+            contents
+                .replace("\\", "\\\\")
+                .replace("\r\n", "\\n")
+                .replace("\n", "\\n")
+                .replace("\r", "\\n")
+                .replace("\t", "\\t")
+                .replace("'", "\\'")
+                .replace("\"", "\\\"")
 
         // Open file
         val openResp = sendString("f=frame.file.open(\"$path\",\"w\");print(2)", awaitResponse = true)

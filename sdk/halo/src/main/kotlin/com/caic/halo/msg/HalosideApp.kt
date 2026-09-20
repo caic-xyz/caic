@@ -19,21 +19,21 @@ class HalosideApp(
     private val context: Context,
     private val device: HaloDevice,
 ) {
-
     companion object {
         // Lua library filenames (as stored in assets/halo/).
-        val DEFAULT_LIBS = listOf(
-            "data.min.lua",
-            "sprite.min.lua",
-            "plain_text.min.lua",
-            "camera.min.lua",
-            "audio.min.lua",
-            "imu.min.lua",
-            "battery.min.lua",
-            "code.min.lua",
-            "image_sprite_block.min.lua",
-            "text_sprite_block.min.lua",
-        )
+        val DEFAULT_LIBS =
+            listOf(
+                "data.min.lua",
+                "sprite.min.lua",
+                "plain_text.min.lua",
+                "camera.min.lua",
+                "audio.min.lua",
+                "imu.min.lua",
+                "battery.min.lua",
+                "code.min.lua",
+                "image_sprite_block.min.lua",
+                "text_sprite_block.min.lua",
+            )
     }
 
     /**
@@ -43,7 +43,10 @@ class HalosideApp(
      * [appCode] is the Lua source for the main application loop.
      * [libs] are the Lua library filenames to upload from assets/halo/.
      */
-    suspend fun start(appCode: String, libs: List<String> = DEFAULT_LIBS) {
+    suspend fun start(
+        appCode: String,
+        libs: List<String> = DEFAULT_LIBS,
+    ) {
         // 1. Break any running script, reset, break again.
         device.sendBreakSignal()
         device.sendResetSignal()
@@ -69,15 +72,20 @@ class HalosideApp(
      * Send a typed message to the device via [HaloDevice.sendMessage].
      * The device-side data.lua will route it to the msgCode handler.
      */
-    suspend fun send(msgCode: Int, message: TxMessage) {
+    suspend fun send(
+        msgCode: Int,
+        message: TxMessage,
+    ) {
         device.sendMessage(msgCode, message.pack())
     }
 
-    private fun readAsset(path: String): String {
-        return try {
-            context.assets.open(path).bufferedReader().use { it.readText() }
+    private fun readAsset(path: String): String =
+        try {
+            context.assets
+                .open(path)
+                .bufferedReader()
+                .use { it.readText() }
         } catch (e: IOException) {
             throw IOException("Failed to read asset '$path': ${e.message}", e)
         }
-    }
 }

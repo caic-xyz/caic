@@ -110,10 +110,11 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         waitForDom("external link loaded") { "document.getElementById('external-link') !== null" }
 
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val filter = IntentFilter(Intent.ACTION_VIEW).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
-            addDataScheme("https")
-        }
+        val filter =
+            IntentFilter(Intent.ACTION_VIEW).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addDataScheme("https")
+            }
         val monitor = instrumentation.addMonitor(filter, ActivityResult(0, null), true)
         try {
             tapDomElement("#external-link")
@@ -142,12 +143,14 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         return !text.isNullOrBlank() && text != initialText && ATTENTION_COUNT_NUMBER_PATTERN.containsMatchIn(text)
     }
 
-    private fun serviceAttentionText(): String? = composeRule.onAllNodesWithTag("gomode-service-attention")
-        .fetchSemanticsNodes()
-        .firstOrNull()
-        ?.config
-        ?.get(SemanticsProperties.Text)
-        ?.joinToString(separator = "") { it.text }
+    private fun serviceAttentionText(): String? =
+        composeRule
+            .onAllNodesWithTag("gomode-service-attention")
+            .fetchSemanticsNodes()
+            .firstOrNull()
+            ?.config
+            ?.get(SemanticsProperties.Text)
+            ?.joinToString(separator = "") { it.text }
 
     private fun loadHostedExternalLinkTestPage() {
         loadHostedHtml(EXTERNAL_LINK_TEST_PAGE)
@@ -171,13 +174,14 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         private const val JS_TIMEOUT_MS = 5_000L
         private val ATTENTION_COUNT_NUMBER_PATTERN = Regex("""\d+""")
         private const val EXTERNAL_LINK_URL = "https://example.com/gomode-external-link"
-        private val EXTERNAL_LINK_TEST_PAGE = """
+        private val EXTERNAL_LINK_TEST_PAGE =
+            """
             <!doctype html>
             <html>
               <body>
                 <a id="external-link" href="$EXTERNAL_LINK_URL" target="_blank" rel="noopener">External docs</a>
               </body>
             </html>
-        """.trimIndent()
+            """.trimIndent()
     }
 }

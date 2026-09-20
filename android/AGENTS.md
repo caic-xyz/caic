@@ -47,6 +47,9 @@ Run the focused checks for Android changes:
 make android-check
 ```
 
+Format Kotlin with `make format-kotlin`, which `make format` also runs; `make verify` runs `ktlintCheck` for
+both modules through `make lint-kotlin`.
+
 Use `make check` for non-Android repo validation. Use `make android-e2e` for
 instrumented Android flows. Use `make screenshots-check` for deterministic visual
 coverage and `make screenshots-update` to accept intentional baseline changes.

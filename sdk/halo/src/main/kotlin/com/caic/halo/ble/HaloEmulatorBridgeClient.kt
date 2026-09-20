@@ -26,10 +26,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 sealed interface HaloEmulatorEvent {
-    data class Print(val text: String) : HaloEmulatorEvent
+    data class Print(
+        val text: String,
+    ) : HaloEmulatorEvent
 
-    data class BluetoothSent(val data: ByteArray) : HaloEmulatorEvent {
+    data class BluetoothSent(
+        val data: ByteArray,
+    ) : HaloEmulatorEvent {
         override fun equals(other: Any?): Boolean = other is BluetoothSent && data.contentEquals(other.data)
+
         override fun hashCode(): Int = data.contentHashCode()
     }
 }
@@ -50,31 +55,51 @@ class HaloEmulatorBridgeClient(
 
     val events: Flow<HaloEmulatorEvent> = eventChannel.receiveAsFlow()
 
-    suspend fun connect(url: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
+    suspend fun connect(
+        url: String,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ) {
         close()
         val opened = CompletableDeferred<Unit>()
         val request = Request.Builder().url(url).build()
-        webSocket = okHttpClient.newWebSocket(
-            request,
-            object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    opened.complete(Unit)
-                }
+        webSocket =
+            okHttpClient.newWebSocket(
+                request,
+                object : WebSocketListener() {
+                    override fun onOpen(
+                        webSocket: WebSocket,
+                        response: Response,
+                    ) {
+                        opened.complete(Unit)
+                    }
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    handleMessage(text)
-                }
+                    override fun onMessage(
+                        webSocket: WebSocket,
+                        text: String,
+                    ) {
+                        handleMessage(text)
+                    }
 
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    opened.completeExceptionally(HaloException("Emulator bridge connection failed: ${t.message}", t))
-                    failPending(t)
-                }
+                    override fun onFailure(
+                        webSocket: WebSocket,
+                        t: Throwable,
+                        response: Response?,
+                    ) {
+                        opened.completeExceptionally(
+                            HaloException("Emulator bridge connection failed: ${t.message}", t),
+                        )
+                        failPending(t)
+                    }
 
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    failPending(HaloException("Emulator bridge closed: $code $reason"))
-                }
-            },
-        )
+                    override fun onClosed(
+                        webSocket: WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) {
+                        failPending(HaloException("Emulator bridge closed: $code $reason"))
+                    }
+                },
+            )
         withTimeout(timeoutMs) { opened.await() }
     }
 
@@ -90,12 +115,18 @@ class HaloEmulatorBridgeClient(
         request("connect_repl", timeoutMs = timeoutMs)
     }
 
-    suspend fun executeLua(code: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): String? {
+    suspend fun executeLua(
+        code: String,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): String? {
         val response = request("execute_lua", mapOf("code" to JsonPrimitive(code)), timeoutMs)
         return response.string("result")
     }
 
-    suspend fun start(script: String = "main.lua", timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
+    suspend fun start(
+        script: String = "main.lua",
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ) {
         request("start", mapOf("script" to JsonPrimitive(script)), timeoutMs)
     }
 
@@ -115,7 +146,11 @@ class HaloEmulatorBridgeClient(
         request("remove_all_files", timeoutMs = timeoutMs)
     }
 
-    suspend fun uploadFile(path: String, content: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
+    suspend fun uploadFile(
+        path: String,
+        content: String,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ) {
         request(
             "upload_file",
             mapOf("path" to JsonPrimitive(path), "content" to JsonPrimitive(content)),
@@ -127,7 +162,11 @@ class HaloEmulatorBridgeClient(
         request("clear_display", timeoutMs = timeoutMs)
     }
 
-    suspend fun sendMessage(msgCode: Int, payload: ByteArray, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
+    suspend fun sendMessage(
+        msgCode: Int,
+        payload: ByteArray,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ) {
         require(msgCode in 0..255) { "Message code must be 0..255, got $msgCode" }
         request(
             "send_message",
@@ -175,11 +214,12 @@ class HaloEmulatorBridgeClient(
         val requestId = nextRequestId.getAndIncrement()
         val response = CompletableDeferred<JsonObject>()
         pending[requestId] = response
-        val payload = buildJsonObject {
-            put("id", JsonPrimitive(requestId))
-            put("op", JsonPrimitive(op))
-            fields.forEach { (key, value) -> put(key, value) }
-        }
+        val payload =
+            buildJsonObject {
+                put("id", JsonPrimitive(requestId))
+                put("op", JsonPrimitive(op))
+                fields.forEach { (key, value) -> put(key, value) }
+            }
         if (!socket.send(payload.toString())) {
             pending.remove(requestId)
             throw HaloException("Failed to send emulator bridge request")
@@ -204,10 +244,15 @@ class HaloEmulatorBridgeClient(
 
     private fun handleEvent(message: JsonObject) {
         when (message.string("event")) {
-            "bluetooth_sent" -> eventChannel.trySend(
-                HaloEmulatorEvent.BluetoothSent(Base64.getDecoder().decode(message.requiredString("data"))),
-            )
-            "print" -> eventChannel.trySend(HaloEmulatorEvent.Print(message.string("text") ?: ""))
+            "bluetooth_sent" -> {
+                eventChannel.trySend(
+                    HaloEmulatorEvent.BluetoothSent(Base64.getDecoder().decode(message.requiredString("data"))),
+                )
+            }
+
+            "print" -> {
+                eventChannel.trySend(HaloEmulatorEvent.Print(message.string("text") ?: ""))
+            }
         }
     }
 

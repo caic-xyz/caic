@@ -9,10 +9,11 @@ import org.junit.Test
 class GoModeAppTest {
     @Test
     fun bootstrapFailureTakesPriorityOverWebFailure() {
-        val recovery = shellRecoveryState(
-            bootstrapError = "Unsupported service version.",
-            webLoadState = WebShellLoadState.Failed("The service took too long to respond."),
-        )
+        val recovery =
+            shellRecoveryState(
+                bootstrapError = "Unsupported service version.",
+                webLoadState = WebShellLoadState.Failed("The service took too long to respond."),
+            )
 
         assertEquals(
             ShellRecoveryState(
@@ -26,10 +27,11 @@ class GoModeAppTest {
 
     @Test
     fun webFailureOffersServiceRetryAndMarksVoiceUnavailable() {
-        val recovery = shellRecoveryState(
-            bootstrapError = null,
-            webLoadState = WebShellLoadState.Failed("The service took too long to respond."),
-        )
+        val recovery =
+            shellRecoveryState(
+                bootstrapError = null,
+                webLoadState = WebShellLoadState.Failed("The service took too long to respond."),
+            )
 
         assertEquals(
             ShellRecoveryState(
@@ -43,10 +45,11 @@ class GoModeAppTest {
 
     @Test
     fun webReconnectSuppressesCompetingActions() {
-        val recovery = shellRecoveryState(
-            bootstrapError = null,
-            webLoadState = WebShellLoadState.Reconnecting,
-        )
+        val recovery =
+            shellRecoveryState(
+                bootstrapError = null,
+                webLoadState = WebShellLoadState.Reconnecting,
+            )
 
         assertEquals(
             ShellRecoveryState(

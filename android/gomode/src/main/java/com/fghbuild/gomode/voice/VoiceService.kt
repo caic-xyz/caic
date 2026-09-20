@@ -15,13 +15,16 @@ import com.fghbuild.gomode.R
 import java.lang.ref.WeakReference
 
 class VoiceService : Service() {
-
     override fun onCreate() {
         super.onCreate()
         activeService = WeakReference(this)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
         refreshNotification()
         return START_STICKY
     }
@@ -38,11 +41,12 @@ class VoiceService : Service() {
     private fun ensureChannel() {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.voice_channel_name),
-            NotificationManager.IMPORTANCE_LOW,
-        )
+        val channel =
+            NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.voice_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            )
         channel.setShowBadge(false)
         nm.createNotificationChannel(channel)
     }
@@ -54,13 +58,19 @@ class VoiceService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val tapIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, tapIntent, PendingIntent.FLAG_IMMUTABLE,
-        )
-        return Notification.Builder(this, CHANNEL_ID)
+        val tapIntent =
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+        val pendingIntent =
+            PendingIntent.getActivity(
+                this,
+                0,
+                tapIntent,
+                PendingIntent.FLAG_IMMUTABLE,
+            )
+        return Notification
+            .Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mic)
             .setContentTitle(getString(R.string.voice_notification_title))
             .setContentText(serviceNotificationText ?: getString(R.string.voice_notification_text))

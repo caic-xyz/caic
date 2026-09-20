@@ -64,13 +64,17 @@ class ServiceMonitor(
     private var job: Job? = null
     internal val observedNotificationIDs = mutableSetOf<String>()
 
-    fun start(serviceURL: String, settings: Settings) {
+    fun start(
+        serviceURL: String,
+        settings: Settings,
+    ) {
         job?.cancel()
         observedNotificationIDs.clear()
         _state.value = ServiceMonitorState()
-        job = scope.launch {
-            run(serviceURL, settings)
-        }
+        job =
+            scope.launch {
+                run(serviceURL, settings)
+            }
     }
 
     fun stop() {
@@ -82,18 +86,23 @@ class ServiceMonitor(
 
     @Suppress("TooGenericExceptionCaught") // Native monitoring must retry transient service and network failures.
     private suspend fun run(serviceURL: String, settings: Settings) {
-        val group = settings.webShell.toolGroups.firstOrNull() ?: run {
-            _state.value = ServiceMonitorState()
-            return
-        }
+        val group =
+            settings.webShell.toolGroups.firstOrNull() ?: run {
+                _state.value = ServiceMonitorState()
+                return
+            }
         val endpointURL = resolveServiceURL(serviceURL, group.endpoint)
         val client = clientFactory(endpointURL, group.protocolVersion)
-        var retryDelayMs = InitialRetryDelayMs
+        var retryDelayMs = INITIAL_RETRY_DELAY_MS
         while (true) {
             try {
                 when (monitorOnce(client)) {
                     MonitorRunResult.Disabled,
-                    MonitorRunResult.Static -> return
+                    MonitorRunResult.Static,
+                    -> {
+                        return
+                    }
+
                     MonitorRunResult.Retry -> {
                         _state.value = ServiceMonitorState(error = "MCP subscription stream ended")
                         delay(retryDelayMs)
@@ -123,10 +132,12 @@ class ServiceMonitor(
                         applyDeliveredSnapshot(plan, initial.deliveredContents)
                     }
                 }
+
                 notification.invalidatesResource(plan) -> {
                     if (initial.consumeLegacyUpdate(notification.resourceUri())) return@collect
                     refreshSnapshot(client, plan)
                 }
+
                 notification.invalidatesResourceList(plan) -> {
                     if (initial.consumeInitialListChanged()) {
                         plan = refreshPlanAfterLeadingListChanged(client, plan) ?: return@collect
@@ -174,10 +185,11 @@ class ServiceMonitor(
     ) {
         val readResults = plan.resourceURIs.associateWith { uri -> client.readResource(uri) }
         val snapshot = serviceMonitoringSnapshot(readResults, plan)
-        _state.value = ServiceMonitorState(
-            snapshot = snapshot,
-            notifications = serviceNotifications(readResults, plan),
-        )
+        _state.value =
+            ServiceMonitorState(
+                snapshot = snapshot,
+                notifications = serviceNotifications(readResults, plan),
+            )
     }
 
     // Exposes the delivered baseline with the same state construction as
@@ -186,19 +198,21 @@ class ServiceMonitor(
         plan: ServiceMonitoringPlan,
         delivered: Map<String, List<ResourceContent>>,
     ) {
-        val readResults = plan.resourceURIs.associateWith { uri ->
-            ResourcesReadResult(
-                resultType = ResultType.Complete,
-                contents = delivered[uri].orEmpty(),
-                ttlMs = 0,
-                cacheScope = CacheScope.Private,
-            )
-        }
+        val readResults =
+            plan.resourceURIs.associateWith { uri ->
+                ResourcesReadResult(
+                    resultType = ResultType.Complete,
+                    contents = delivered[uri].orEmpty(),
+                    ttlMs = 0,
+                    cacheScope = CacheScope.Private,
+                )
+            }
         val snapshot = serviceMonitoringSnapshot(readResults, plan)
-        _state.value = ServiceMonitorState(
-            snapshot = snapshot,
-            notifications = serviceNotifications(readResults, plan),
-        )
+        _state.value =
+            ServiceMonitorState(
+                snapshot = snapshot,
+                notifications = serviceNotifications(readResults, plan),
+            )
     }
 }
 
@@ -208,14 +222,17 @@ private fun ServiceMonitor.serviceNotifications(
 ): List<ServiceNotification> {
     val uri = plan.notificationResourceURI ?: return emptyList()
     val readResult = readResults[uri] ?: throw IllegalArgumentException("resource read result is missing $uri")
-    val content = readResult.contents.firstOrNull { it.uri == uri }
-        ?: throw IllegalArgumentException("resource read result is missing $uri")
+    val content =
+        readResult.contents.firstOrNull { it.uri == uri }
+            ?: throw IllegalArgumentException("resource read result is missing $uri")
     val text = content.text ?: throw IllegalArgumentException("resource $uri is missing text content")
-    val events = Json.parseToJsonElement(text) as? JsonArray
-        ?: throw IllegalArgumentException("resource $uri must be a JSON array")
+    val events =
+        Json.parseToJsonElement(text) as? JsonArray
+            ?: throw IllegalArgumentException("resource $uri must be a JSON array")
     return events.mapIndexedNotNull { index, element ->
-        val event = element as? JsonObject
-            ?: throw IllegalArgumentException("resource $uri item $index must be an object")
+        val event =
+            element as? JsonObject
+                ?: throw IllegalArgumentException("resource $uri item $index must be an object")
         val id = event.requiredNotificationString("id", uri, index)
         if (!observedNotificationIDs.add(id)) return@mapIndexedNotNull null
         ServiceNotification(
@@ -226,11 +243,15 @@ private fun ServiceMonitor.serviceNotifications(
     }
 }
 
-private fun JsonObject.requiredNotificationString(field: String, uri: String, index: Int): String =
+private fun JsonObject.requiredNotificationString(
+    field: String,
+    uri: String,
+    index: Int,
+): String =
     this[field]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         ?: throw IllegalArgumentException("resource $uri item $index is missing $field")
 
-private fun nextRetryDelay(delayMs: Long): Long = (delayMs * 2).coerceAtMost(MaxRetryDelayMs)
+private fun nextRetryDelay(delayMs: Long): Long = (delayMs * 2).coerceAtMost(MAX_RETRY_DELAY_MS)
 
 private fun subscriptionFilter(plan: ServiceMonitoringPlan): SubscriptionFilter? {
     val resourceSubscriptions = plan.resourceSubscriptions.takeIf { it.isNotEmpty() }
@@ -257,7 +278,10 @@ private class InitialStateWindow {
     val deliveredContents: Map<String, List<ResourceContent>>
         get() = contents
 
-    fun recordInitialState(uri: String, initialContents: List<ResourceContent>) {
+    fun recordInitialState(
+        uri: String,
+        initialContents: List<ResourceContent>,
+    ) {
         contents[uri] = initialContents
     }
 
@@ -302,5 +326,5 @@ private enum class MonitorRunResult {
 
 private val mcpJson = Json { ignoreUnknownKeys = true }
 
-private const val InitialRetryDelayMs = 1_000L
-private const val MaxRetryDelayMs = 30_000L
+private const val INITIAL_RETRY_DELAY_MS = 1_000L
+private const val MAX_RETRY_DELAY_MS = 30_000L

@@ -18,9 +18,9 @@ frontend_source_changed=false
 while IFS= read -r -d '' file; do
   staged_changes+=("$file")
   case "$file" in
-    frontend/src/*.css | frontend/src/*.html | frontend/src/*.ts | frontend/src/*.tsx)
-      frontend_source_changed=true
-      ;;
+  frontend/src/*.css | frontend/src/*.html | frontend/src/*.ts | frontend/src/*.tsx)
+    frontend_source_changed=true
+    ;;
   esac
 done < <(git diff --cached --name-only -z)
 
@@ -46,11 +46,11 @@ python_files=()
 while IFS= read -r -d '' file; do
   if [[ ! -L "$file" ]]; then
     case "$file" in
-      AGENTS.md | */AGENTS.md)
-        ;;
-      *.css | *.html | *.json | *.md | *.mjs | *.ts | *.tsx | *.yaml | *.yml)
-        format_files+=("$file")
-        ;;
+    AGENTS.md | */AGENTS.md)
+      ;;
+    *.css | *.html | *.json | *.md | *.mjs | *.ts | *.tsx | *.yaml | *.yml)
+      format_files+=("$file")
+      ;;
     esac
   fi
   # These trees are globally ignored by eslint.config.js; keep this list in sync with that
@@ -58,17 +58,17 @@ while IFS= read -r -d '' file; do
   # an ignored path to eslint only adds a "File ignored because of a matching ignore pattern"
   # warning, so leave such files out of the list.
   case "$file" in
-    backend/* | sdk/* | frontend/dist/* | frontend/public/* | android/*)
-      ;;
-    *.js | *.mjs | *.ts | *.tsx)
-      eslint_files+=("$file")
-      ;;
-    *.go)
-      go_files+=("$file")
-      ;;
-    *.py)
-      python_files+=("$file")
-      ;;
+  backend/* | sdk/* | frontend/dist/* | frontend/public/* | android/*)
+    ;;
+  *.js | *.mjs | *.ts | *.tsx)
+    eslint_files+=("$file")
+    ;;
+  *.go)
+    go_files+=("$file")
+    ;;
+  *.py)
+    python_files+=("$file")
+    ;;
   esac
 done < <(git diff --cached --name-only --diff-filter=ACMR -z)
 
@@ -107,7 +107,7 @@ check_gofmt() {
 }
 
 if ((${#format_files[@]} > 0)); then
-  run_check format pnpm exec prettier --check -- "${format_files[@]}"
+  run_check format pnpm exec prettier --check --log-level warn -- "${format_files[@]}"
 fi
 
 if ((${#eslint_files[@]} > 0)); then
@@ -121,12 +121,12 @@ if ((${#go_files[@]} > 0)); then
 fi
 
 if ((${#python_files[@]} > 0)); then
-  command -v ruff > /dev/null || {
+  command -v ruff >/dev/null || {
     printf '%s\n' 'ruff is required to validate staged Python files.' >&2
     exit 1
   }
-  run_check python-lint ruff check -- "${python_files[@]}"
-  run_check python-format ruff format --check -- "${python_files[@]}"
+  run_check python-lint ruff check --quiet -- "${python_files[@]}"
+  run_check python-format ruff format --check --quiet -- "${python_files[@]}"
 fi
 
 if "$frontend_source_changed"; then

@@ -68,5 +68,8 @@ object HaloProtocol {
     fun maxStringLength(mtu: Int): Int = mtu - 3
 
     /** Raw data payloads reserve ATT overhead, DATA_PREFIX, and two extra bytes on Halo when audio TX coexists. */
-    fun maxDataLength(mtu: Int, type: HaloDeviceType): Int = if (type == HaloDeviceType.HALO) mtu - 6 else mtu - 4
+    fun maxDataLength(
+        mtu: Int,
+        type: HaloDeviceType,
+    ): Int = if (type == HaloDeviceType.HALO) mtu - 6 else mtu - 4
 }

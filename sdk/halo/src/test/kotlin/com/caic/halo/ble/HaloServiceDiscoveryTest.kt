@@ -15,11 +15,12 @@ import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
 class HaloServiceDiscoveryTest {
+    private fun makeChar(uuid: UUID): BluetoothGattCharacteristic = BluetoothGattCharacteristic(uuid, 0, 0)
 
-    private fun makeChar(uuid: UUID): BluetoothGattCharacteristic =
-        BluetoothGattCharacteristic(uuid, 0, 0)
-
-    private fun makeService(uuid: UUID, vararg chars: BluetoothGattCharacteristic): BluetoothGattService {
+    private fun makeService(
+        uuid: UUID,
+        vararg chars: BluetoothGattCharacteristic,
+    ): BluetoothGattService {
         val svc = BluetoothGattService(uuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         chars.forEach { svc.addCharacteristic(it) }
         return svc
@@ -49,22 +50,24 @@ class HaloServiceDiscoveryTest {
 
     @Test
     fun `deviceType is HALO when AUDIO TX present`() {
-        val svc = makeService(
-            HaloServiceDiscovery.LUA_SERVICE,
-            makeChar(HaloServiceDiscovery.LUA_TX_CHAR),
-            makeChar(HaloServiceDiscovery.LUA_RX_CHAR),
-            makeChar(HaloServiceDiscovery.AUDIO_TX_CHAR),
-        )
+        val svc =
+            makeService(
+                HaloServiceDiscovery.LUA_SERVICE,
+                makeChar(HaloServiceDiscovery.LUA_TX_CHAR),
+                makeChar(HaloServiceDiscovery.LUA_RX_CHAR),
+                makeChar(HaloServiceDiscovery.AUDIO_TX_CHAR),
+            )
         assertEquals(HaloDeviceType.HALO, HaloServiceDiscovery.deviceType(svc))
     }
 
     @Test
     fun `deviceType is FRAME when AUDIO TX absent`() {
-        val svc = makeService(
-            HaloServiceDiscovery.LUA_SERVICE,
-            makeChar(HaloServiceDiscovery.LUA_TX_CHAR),
-            makeChar(HaloServiceDiscovery.LUA_RX_CHAR),
-        )
+        val svc =
+            makeService(
+                HaloServiceDiscovery.LUA_SERVICE,
+                makeChar(HaloServiceDiscovery.LUA_TX_CHAR),
+                makeChar(HaloServiceDiscovery.LUA_RX_CHAR),
+            )
         assertEquals(HaloDeviceType.FRAME, HaloServiceDiscovery.deviceType(svc))
     }
 
@@ -123,21 +126,21 @@ class HaloServiceDiscoveryTest {
     fun `payload limits at MTU 23`() {
         val limits = HaloServiceDiscovery.payloadLimits(23, HaloDeviceType.FRAME)
         assertEquals(20, limits.maxStringLen) // 23 - 3
-        assertEquals(19, limits.maxDataLen)   // 23 - 4
+        assertEquals(19, limits.maxDataLen) // 23 - 4
     }
 
     @Test
     fun `payload limits at MTU 517 for Frame`() {
         val limits = HaloServiceDiscovery.payloadLimits(517, HaloDeviceType.FRAME)
         assertEquals(514, limits.maxStringLen) // 517 - 3
-        assertEquals(513, limits.maxDataLen)   // 517 - 4
+        assertEquals(513, limits.maxDataLen) // 517 - 4
     }
 
     @Test
     fun `payload limits at MTU 517 for Halo`() {
         val limits = HaloServiceDiscovery.payloadLimits(517, HaloDeviceType.HALO)
         assertEquals(514, limits.maxStringLen) // 517 - 3
-        assertEquals(511, limits.maxDataLen)   // 517 - 6
+        assertEquals(511, limits.maxDataLen) // 517 - 6
     }
 
     @Test

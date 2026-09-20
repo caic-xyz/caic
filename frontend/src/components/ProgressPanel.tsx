@@ -40,9 +40,7 @@ export default function ProgressPanel(props: { messages: EventMessage[] }) {
     return [];
   });
 
-  const completedCount = createMemo(
-    () => todos().filter((item) => item.status === "completed").length,
-  );
+  const completedCount = createMemo(() => todos().filter((item) => item.status === "completed").length);
 
   // Auto-collapse when all todos done and no active agents.
   createEffect(() => {

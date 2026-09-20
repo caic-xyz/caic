@@ -83,11 +83,7 @@ import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import NativeAgents, { NativeActivityStatus } from "./NativeSubagents";
-import {
-  NativeActivityTracker,
-  assignNativeAnchors,
-  type NativeActivity,
-} from "../nativeSubagents";
+import { NativeActivityTracker, assignNativeAnchors, type NativeActivity } from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
 import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
@@ -187,11 +183,7 @@ function ciLabel(status: CIStatus, checks?: ForgeCheck[]): string {
 }
 
 function checkDuration(c: ForgeCheck, now: number): string {
-  const start = c.startedAt
-    ? new Date(c.startedAt).getTime()
-    : c.queuedAt
-      ? new Date(c.queuedAt).getTime()
-      : 0;
+  const start = c.startedAt ? new Date(c.startedAt).getTime() : c.queuedAt ? new Date(c.queuedAt).getTime() : 0;
   if (!start) return "";
   const end = c.completedAt ? new Date(c.completedAt).getTime() : now;
   return formatElapsed(end - start);
@@ -199,8 +191,7 @@ function checkDuration(c: ForgeCheck, now: number): string {
 
 function checkStatusLabel(c: ForgeCheck): string {
   if (c.status === "completed") {
-    if (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped")
-      return "passed";
+    if (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped") return "passed";
     return c.conclusion || "failed";
   }
   if (c.status === "in_progress") return "running";
@@ -209,8 +200,7 @@ function checkStatusLabel(c: ForgeCheck): string {
 
 function checkJobURL(c: ForgeCheck, forge?: string): string | undefined {
   if (forge === "gitlab") return `https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}`;
-  if (c.runID && c.jobID)
-    return `https://github.com/${c.owner}/${c.repo}/actions/runs/${c.runID}/job/${c.jobID}`;
+  if (c.runID && c.jobID) return `https://github.com/${c.owner}/${c.repo}/actions/runs/${c.runID}/job/${c.jobID}`;
   return undefined;
 }
 
@@ -229,9 +219,7 @@ export default function TaskDetail(props: Props) {
   });
   const messages = timeline.messages;
   const [sending, setSending] = createSignal(false);
-  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(
-    null,
-  );
+  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
@@ -249,8 +237,7 @@ export default function TaskDetail(props: Props) {
   function headerWraps(): boolean {
     if (!headerRef) return false;
     const headerItems = Array.from(headerRef.children).filter(
-      (child): child is HTMLElement =>
-        child instanceof HTMLElement && getComputedStyle(child).display !== "none",
+      (child): child is HTMLElement => child instanceof HTMLElement && getComputedStyle(child).display !== "none",
     );
     const first = headerItems[0]?.getBoundingClientRect();
     const firstCenter = first && first.top + first.height / 2;
@@ -283,8 +270,7 @@ export default function TaskDetail(props: Props) {
 
   createEffect(() => {
     const hasRepositoryState =
-      repoStates().some((state) => repoStateLabel(state)) ||
-      repoStateLabel(diffStatState(props.diffStat));
+      repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat));
     if (!hasRepositoryState) {
       setElideHeaderGitStats(false);
       return;
@@ -329,8 +315,7 @@ export default function TaskDetail(props: Props) {
   function setPromptRef(element: HTMLElement) {
     if (!initialPromptFocusPending) return;
     initialPromptFocusPending = false;
-    if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches)
-      return;
+    if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
     requestAnimationFrame(() => {
       if (element.isConnected) element.focus();
     });
@@ -430,9 +415,7 @@ export default function TaskDetail(props: Props) {
     const container = messageAreaRef;
     if (!container || beforeTop === undefined) return;
     requestAnimationFrame(() => {
-      const afterEl = container.querySelector<HTMLElement>(
-        `[data-anchor-key="${CSS.escape(anchorKey)}"]`,
-      );
+      const afterEl = container.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
       if (afterEl) {
         container.scrollTop += afterEl.getBoundingClientRect().top - beforeTop;
       }
@@ -499,14 +482,9 @@ export default function TaskDetail(props: Props) {
     timingEpoch = epoch;
     return timingTracker.derive(messages(), reset);
   });
-  const turnTimingsByResultEvent = createMemo(
-    () => new Map(taskTimings().turns.map((turn) => [turn.event, turn])),
-  );
-  const turnTimingsByResult = createMemo(
-    () => new Map(taskTimings().turns.map((turn) => [turn.result, turn])),
-  );
-  const turnTiming = (turn: Turn) =>
-    turn.result ? turnTimingsByResult().get(turn.result) : undefined;
+  const turnTimingsByResultEvent = createMemo(() => new Map(taskTimings().turns.map((turn) => [turn.event, turn])));
+  const turnTimingsByResult = createMemo(() => new Map(taskTimings().turns.map((turn) => [turn.result, turn])));
+  const turnTiming = (turn: Turn) => (turn.result ? turnTimingsByResult().get(turn.result) : undefined);
   const sessionTimings = (session: Session) => {
     const timings: TurnTiming[] = [];
     const timingsByResult = turnTimingsByResult();
@@ -573,10 +551,7 @@ export default function TaskDetail(props: Props) {
     const taskStartTs = props.startedAt ? Date.parse(props.startedAt) : 0;
     const durationMs = firstSetupEndTs - taskStartTs;
     const range =
-      taskStartTs > 0 &&
-      Number.isFinite(durationMs) &&
-      durationMs >= 0 &&
-      durationMs <= maxCredibleSetupDurationMs
+      taskStartTs > 0 && Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= maxCredibleSetupDurationMs
         ? { start: taskStartTs, end: firstSetupEndTs }
         : null;
     return {
@@ -601,9 +576,7 @@ export default function TaskDetail(props: Props) {
   });
   const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
   // Boundary event for the current session from completed messages.
-  const currentSessionBoundaryFromCompleted = createMemo(
-    () => currentSessionEntry()?.boundaryEvent,
-  );
+  const currentSessionBoundaryFromCompleted = createMemo(() => currentSessionEntry()?.boundaryEvent);
 
   // Scan live messages for a session boundary event (e.g., init before the first result).
   // This handles the common case where the first session starts before any turn completes.
@@ -615,9 +588,7 @@ export default function TaskDetail(props: Props) {
     }
     return undefined;
   });
-  const currentSessionBoundaryEvent = createMemo(
-    () => currentSessionBoundaryFromCompleted() ?? liveSessionBoundary(),
-  );
+  const currentSessionBoundaryEvent = createMemo(() => currentSessionBoundaryFromCompleted() ?? liveSessionBoundary());
   const currentSessionKey = createMemo(() => {
     const idx = allCompletedSessions().length - 1;
     const ev = currentSessionBoundaryEvent();
@@ -663,9 +634,7 @@ export default function TaskDetail(props: Props) {
     return completedTurns.slice(0, -1);
   });
   // Completed turn items (elidable): stable during streaming.
-  const completedTurnItems = createMemo(() =>
-    buildTurnItems(elidableTurns(), expandedTurnKeys(), currentSessionKey()),
-  );
+  const completedTurnItems = createMemo(() => buildTurnItems(elidableTurns(), expandedTurnKeys(), currentSessionKey()));
   // Last completed turn is always expanded.
   const lastTurnItems = createMemo((): MsgItem[] => {
     const completedTurns = currentSessionCompletedTurns();
@@ -789,10 +758,7 @@ export default function TaskDetail(props: Props) {
   };
 
   const isWaiting = () =>
-    props.taskState === "waiting" ||
-    props.taskState === "asking" ||
-    props.taskState === "has_plan" ||
-    isPendingAsk();
+    props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan" || isPendingAsk();
   const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
   const canSendInput = () => isActive() && props.taskState !== "purging";
   const prURL = () => {
@@ -800,8 +766,7 @@ export default function TaskDetail(props: Props) {
     const repo = props.forgeRepo;
     const pr = props.forgePR;
     if (!owner || !repo || !pr) return undefined;
-    if (props.forge === "gitlab")
-      return `https://gitlab.com/${owner}/${repo}/-/merge_requests/${pr}`;
+    if (props.forge === "gitlab") return `https://gitlab.com/${owner}/${repo}/-/merge_requests/${pr}`;
     return `https://github.com/${owner}/${repo}/pull/${pr}`;
   };
 
@@ -925,10 +890,7 @@ export default function TaskDetail(props: Props) {
             headerMetaRef = element;
           }}
         >
-          <Show
-            when={props.remoteURL}
-            fallback={<span class={styles.headerRepo}>{props.repo}</span>}
-          >
+          <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
             <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">
               {props.repo}
             </a>
@@ -953,9 +915,7 @@ export default function TaskDetail(props: Props) {
                         when={actionsURL()}
                         keyed
                         fallback={
-                          <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
-                            {ciLabel(s, props.ciChecks)}
-                          </span>
+                          <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</span>
                         }
                       >
                         {(url) => (
@@ -972,17 +932,13 @@ export default function TaskDetail(props: Props) {
                     }
                   >
                     <details class={styles.ciDetails}>
-                      <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
-                        {ciLabel(s, props.ciChecks)}
-                      </summary>
+                      <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</summary>
                       <div class={styles.ciDropdown}>
                         <For each={props.ciChecks}>
                           {(c) => {
                             const statusCls =
                               c.status === "completed"
-                                ? c.conclusion === "success" ||
-                                  c.conclusion === "neutral" ||
-                                  c.conclusion === "skipped"
+                                ? c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped"
                                   ? styles.ciCheckPassed
                                   : styles.ciCheckFailed
                                 : c.status === "in_progress"
@@ -998,9 +954,7 @@ export default function TaskDetail(props: Props) {
                                     <span class={styles.ciCheckName}>{c.name}</span>
                                     <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
                                     <Show when={c.startedAt || c.queuedAt}>
-                                      <span class={styles.ciCheckDuration}>
-                                        {checkDuration(c, Date.now())}
-                                      </span>
+                                      <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
                                     </Show>
                                   </div>
                                 }
@@ -1015,9 +969,7 @@ export default function TaskDetail(props: Props) {
                                     <span class={styles.ciCheckName}>{c.name}</span>
                                     <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
                                     <Show when={c.startedAt || c.queuedAt}>
-                                      <span class={styles.ciCheckDuration}>
-                                        {checkDuration(c, Date.now())}
-                                      </span>
+                                      <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
                                     </Show>
                                   </a>
                                 )}
@@ -1032,10 +984,7 @@ export default function TaskDetail(props: Props) {
                     when={
                       s === "failure" &&
                       props.ciChecks?.some(
-                        (c) =>
-                          c.conclusion !== "success" &&
-                          c.conclusion !== "neutral" &&
-                          c.conclusion !== "skipped",
+                        (c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped",
                       )
                     }
                   >
@@ -1057,10 +1006,7 @@ export default function TaskDetail(props: Props) {
           Info
         </A>
         <Show
-          when={
-            repoStates().some((state) => repoStateLabel(state)) ||
-            repoStateLabel(diffStatState(props.diffStat))
-          }
+          when={repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))}
         >
           <span class={styles.repoStateLinks}>
             <For each={repoStates()}>
@@ -1069,9 +1015,7 @@ export default function TaskDetail(props: Props) {
                   state={state}
                   href={`${location.pathname}/diff`}
                   elideDiffStats={elideHeaderGitStats()}
-                  onNavigateIntent={() =>
-                    void prefetchTaskDiff(props.taskId).catch(() => undefined)
-                  }
+                  onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
                 />
               )}
             </For>
@@ -1132,10 +1076,7 @@ export default function TaskDetail(props: Props) {
           </span>
         </Show>
         <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
-          <span
-            class={styles.stoppedDiskUsage}
-            title="Writable disk space retained by this stopped task"
-          >
+          <span class={styles.stoppedDiskUsage} title="Writable disk space retained by this stopped task">
             Disk {formatBytes(props.stoppedDiskUsedBytes)}
           </span>
         </Show>
@@ -1181,8 +1122,8 @@ export default function TaskDetail(props: Props) {
             </h4>
             <p class={styles.quotaRecoveryText}>
               {props.rateLimit?.window || "Current"} quota resets in{" "}
-              {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this
-              task unchanged and continue its workspace in a new agent.
+              {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this task unchanged and
+              continue its workspace in a new agent.
             </p>
           </div>
           <Show when={props.onQuotaRecovery && props.repo}>
@@ -1218,12 +1159,7 @@ export default function TaskDetail(props: Props) {
           </section>
         )}
       </Show>
-      <div
-        class={styles.messageArea}
-        ref={messageAreaRef}
-        onScroll={handleScroll}
-        data-testid="task-message-area"
-      >
+      <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
         <Show when={setupLogLines().length > 0}>
           <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
             <summary class={styles.taskSetupTitle}>
@@ -1239,25 +1175,15 @@ export default function TaskDetail(props: Props) {
           {(item) => {
             // Type-narrowing accessors for the MsgItem discriminated union.
             const sessElided = () =>
-              item().kind === "sessionElided"
-                ? (item() as Extract<MsgItem, { kind: "sessionElided" }>)
-                : null;
+              item().kind === "sessionElided" ? (item() as Extract<MsgItem, { kind: "sessionElided" }>) : null;
             const sessHdr = () =>
-              item().kind === "sessionHeader"
-                ? (item() as Extract<MsgItem, { kind: "sessionHeader" }>)
-                : null;
+              item().kind === "sessionHeader" ? (item() as Extract<MsgItem, { kind: "sessionHeader" }>) : null;
             const sessBoundary = () =>
-              item().kind === "sessionBoundary"
-                ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>)
-                : null;
-            const elided = () =>
-              item().kind === "elided" ? (item() as Extract<MsgItem, { kind: "elided" }>) : null;
+              item().kind === "sessionBoundary" ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>) : null;
+            const elided = () => (item().kind === "elided" ? (item() as Extract<MsgItem, { kind: "elided" }>) : null);
             const expHdr = () =>
-              item().kind === "expandedHeader"
-                ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>)
-                : null;
-            const grpItem = () =>
-              item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null;
+              item().kind === "expandedHeader" ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>) : null;
+            const grpItem = () => (item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null);
             // Canonical native activity anchored to this item: a settled card
             // renders where it settled, a running one where it spawned.
             const anchored = () => nativeByAnchor().get(item().key) ?? [];
@@ -1277,10 +1203,7 @@ export default function TaskDetail(props: Props) {
                   {/* Collapsed past session: single clickable row. */}
                   <Match when={sessElided()} keyed>
                     {(se) => (
-                      <div
-                        class={styles.sessionElided}
-                        data-anchor-key={`session:${se.sessionKey}`}
-                      >
+                      <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
                         <button
                           type="button"
                           class={styles.sessionToggle}
@@ -1288,15 +1211,10 @@ export default function TaskDetail(props: Props) {
                         >
                           <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
                           <span class={styles.sessionDuration}>
-                            {se.session.durationMs > 0
-                              ? formatTimingDuration(se.session.durationMs)
-                              : "0s"}
+                            {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
                           </span>
                         </button>
-                        <SessionInvocationIcon
-                          turns={sessionTimings(se.session)}
-                          model={props.model ?? null}
-                        />
+                        <SessionInvocationIcon turns={sessionTimings(se.session)} model={props.model ?? null} />
                       </div>
                     )}
                   </Match>
@@ -1314,15 +1232,10 @@ export default function TaskDetail(props: Props) {
                         >
                           <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
                           <span class={styles.sessionDuration}>
-                            {sh.session.durationMs > 0
-                              ? formatTimingDuration(sh.session.durationMs)
-                              : "0s"}
+                            {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
                           </span>
                         </button>
-                        <SessionInvocationIcon
-                          turns={sessionTimings(sh.session)}
-                          model={props.model ?? null}
-                        />
+                        <SessionInvocationIcon turns={sessionTimings(sh.session)} model={props.model ?? null} />
                       </div>
                     )}
                   </Match>
@@ -1337,11 +1250,7 @@ export default function TaskDetail(props: Props) {
                         class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
                         data-anchor-key={`turn:${e.key}`}
                       >
-                        <button
-                          type="button"
-                          class={styles.turnToggle}
-                          onClick={(ev) => anchoredToggleTurn(ev, e.key)}
-                        >
+                        <button type="button" class={styles.turnToggle} onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
                           <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
                           <span class={styles.turnDuration}>
                             {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
@@ -1449,9 +1358,7 @@ export default function TaskDetail(props: Props) {
             onInput={props.onInputDraft}
             onSubmit={sendInput}
             onKeyDown={handlePromptNavigation}
-            placeholder={
-              isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."
-            }
+            placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
             disabled={!canSendInput()}
             class={styles.textInput}
             tabIndex={0}
@@ -1462,11 +1369,7 @@ export default function TaskDetail(props: Props) {
             sendButton={
               <Button
                 type="submit"
-                disabled={
-                  !canSendInput() ||
-                  sending() ||
-                  (!props.inputDraft.trim() && props.inputImages.length === 0)
-                }
+                disabled={!canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)}
                 title="Send"
                 data-testid="send-input"
               >
@@ -1626,10 +1529,7 @@ function GroupContent(props: {
         )}
       </Match>
       <Match when={group().kind === "action"}>
-        <Show
-          when={group().toolCalls.length > 0}
-          fallback={<ThinkingCard events={group().events} />}
-        >
+        <Show when={group().toolCalls.length > 0} fallback={<ThinkingCard events={group().events} />}>
           <ToolMessageGroup
             toolCalls={group().toolCalls}
             taskId={props.taskId}
@@ -1697,8 +1597,7 @@ function compactTokenSummary(before: number | undefined, after: number | undefin
 // These events are extracted from the message stream and shown as section separators.
 function SessionBoundaryItem(props: { event: EventMessage }) {
   const ev = () => props.event;
-  const compactSummary = () =>
-    compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
+  const compactSummary = () => compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
   return (
     <Switch>
       <Match when={ev().init} keyed>
@@ -1750,8 +1649,7 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     const dayMS = 24 * 60 * 60 * 1000;
     const d = new Date(resetMS);
     const now = new Date();
-    const localDay = (date: Date) =>
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMS;
+    const localDay = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMS;
     const days = localDay(d) - localDay(now);
     if (days === 1) {
       return ` · resets tomorrow at ${d.toLocaleTimeString()}`;
@@ -1777,8 +1675,8 @@ function RateLimitBanner(props: { ev: EventMessage }) {
       </Match>
       <Match when={rl()?.status === "allowed_warning"}>
         <div class={styles.rateLimitWarning}>
-          Rate limit warning: {rateLimitPercentage(rl()?.utilization ?? 0)}% of{" "}
-          {rateLimitLabel(rl()?.rateLimitType)} used{resetsLabel()}
+          Rate limit warning: {rateLimitPercentage(rl()?.utilization ?? 0)}% of {rateLimitLabel(rl()?.rateLimitType)}{" "}
+          used{resetsLabel()}
         </div>
       </Match>
     </Switch>
@@ -1788,10 +1686,8 @@ function RateLimitBanner(props: { ev: EventMessage }) {
 function usageMetaParts(u: EventUsage): string[] {
   const tokenParts: string[] = [];
   if (u.inputTokens > 0) tokenParts.push(`${formatTokens(u.inputTokens)} new`);
-  if (u.cacheCreationInputTokens > 0)
-    tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
-  if (u.cacheReadInputTokens > 0)
-    tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
+  if (u.cacheCreationInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
+  if (u.cacheReadInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
   if (u.outputTokens > 0) tokenParts.push(`${formatTokens(u.outputTokens)} out`);
   if ((u.reasoningOutputTokens ?? 0) > 0) {
     tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
@@ -1853,9 +1749,7 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
         }}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => (
-          <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />
-        )}
+        {(result) => <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />}
       </Match>
       <Match when={props.ev.error} keyed>
         {(err) => <div class={styles.parseError}>Parse error: {err.err}</div>}
@@ -1873,8 +1767,7 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
     const current = result();
     const parts: string[] = [];
     if (current.totalCostUSD > 0) parts.push(`$${current.totalCostUSD.toFixed(4)}`);
-    if (current.numTurns > 0)
-      parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
+    if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
     return parts.join(" · ");
   });
   return (
@@ -1885,9 +1778,7 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
             <strong>{result().isError ? "Error" : "Done"}</strong>
             <div class={styles.resultTiming}>
               <span class={styles.resultDuration} data-testid="turn-duration">
-                {turn.result.duration > 0
-                  ? formatTimingDuration(turn.result.duration * 1_000)
-                  : "0s"}
+                {turn.result.duration > 0 ? formatTimingDuration(turn.result.duration * 1_000) : "0s"}
               </span>
               <TurnInvocationIcon turn={turn} model={props.model} />
             </div>
@@ -1921,14 +1812,11 @@ function ToolMessageGroup(props: {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
-  const thinkingEvents = () =>
-    (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
+  const thinkingEvents = () => (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
   // Compute accumulated tool output deltas per toolUseID from the group events.
   const outputDeltaEvents = (toolUseID: string) =>
-    (props.events ?? []).filter(
-      (e) => e.kind === "toolOutputDelta" && e.toolOutputDelta?.toolUseID === toolUseID,
-    );
+    (props.events ?? []).filter((e) => e.kind === "toolOutputDelta" && e.toolOutputDelta?.toolUseID === toolUseID);
   return (
     <Show when={calls().length > 0}>
       <Show
@@ -1956,8 +1844,7 @@ function ToolMessageGroup(props: {
             onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}
           >
             <summary>
-              {calls().filter((c) => c.done).length}/{calls().length} tools:{" "}
-              {toolCountSummary(calls())}
+              {calls().filter((c) => c.done).length}/{calls().length} tools: {toolCountSummary(calls())}
             </summary>
             <div class={styles.toolGroupInner}>
               <Show when={thinkingEvents().length > 0}>
@@ -2080,10 +1967,7 @@ function TextMessageGroup(props: { events: EventMessage[] }) {
     const finalEv = props.events.findLast((e) => e.kind === "text");
     if (finalEv?.text) return finalEv.text.text;
     return props.events
-      .filter(
-        (e): e is EventMessage & { textDelta: EventTextDelta } =>
-          e.kind === "textDelta" && !!e.textDelta,
-      )
+      .filter((e): e is EventMessage & { textDelta: EventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
       .map((e) => e.textDelta.text)
       .join("");
   });
@@ -2124,10 +2008,7 @@ function fmtValue(v: unknown): string {
 function GenericToolCallInput(props: { input: Record<string, unknown> }) {
   const flat = () => isFlat(props.input);
   return (
-    <Show
-      when={flat()}
-      fallback={<pre class={styles.toolBlockPre}>{JSON.stringify(props.input, null, 2)}</pre>}
-    >
+    <Show when={flat()} fallback={<pre class={styles.toolBlockPre}>{JSON.stringify(props.input, null, 2)}</pre>}>
       <div class={styles.toolInputList}>
         <For each={Object.entries(props.input)}>
           {([k, v]) => {
@@ -2135,11 +2016,7 @@ function GenericToolCallInput(props: { input: Record<string, unknown> }) {
             return (
               <div class={styles.toolInputRow}>
                 <span class={styles.toolInputKey}>{k}:</span>
-                {multiline ? (
-                  <pre class={styles.toolInputBlock}>{v as string}</pre>
-                ) : (
-                  <> {fmtValue(v)}</>
-                )}
+                {multiline ? <pre class={styles.toolInputBlock}>{v as string}</pre> : <> {fmtValue(v)}</>}
               </div>
             );
           }}
@@ -2196,9 +2073,7 @@ function SubagentSpawns(props: { spawns: EventSubagentSpawn[] }) {
             <div class={styles.subagentHead}>
               <span class={styles.subagentAgent}>{s.agent}</span>
               <Show when={s.phase || s.label}>
-                <span class={styles.subagentPhase}>
-                  {[s.phase, s.label].filter(Boolean).join(" · ")}
-                </span>
+                <span class={styles.subagentPhase}>{[s.phase, s.label].filter(Boolean).join(" · ")}</span>
               </Show>
             </div>
             <Show when={s.task}>
@@ -2232,8 +2107,7 @@ function ToolCallCard(props: {
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
-  const detail = () =>
-    props.call.use.detail || toolCallDetail(props.call.use.name, effectiveInput());
+  const detail = () => props.call.use.detail || toolCallDetail(props.call.use.name, effectiveInput());
   const showLoadBtn = () => props.call.use.inputTruncated && !loadedInput();
 
   async function loadInput() {
@@ -2248,21 +2122,14 @@ function ToolCallCard(props: {
 
   return (
     <>
-      <details
-        class={styles.toolBlock}
-        open={props.open}
-        onToggle={(e) => props.onToggle(e.currentTarget.open)}
-      >
+      <details class={styles.toolBlock} open={props.open} onToggle={(e) => props.onToggle(e.currentTarget.open)}>
         <summary>
           <span class={styles.toolSummaryContent}>
             <span class={styles.toolSummaryMain}>
               <Show
                 when={!props.call.done}
                 fallback={
-                  <Show
-                    when={props.call.use.background}
-                    fallback={<span class={styles.toolDone}>&#10003;</span>}
-                  >
+                  <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
                     <span class={styles.toolBackground} title="Running in background">
                       &#8943;
                     </span>
@@ -2273,12 +2140,7 @@ function ToolCallCard(props: {
               </Show>
               {props.call.use.name}
               <For each={props.nativeActivity ?? []}>
-                {(activity) => (
-                  <NativeActivityStatus
-                    activity={activity}
-                    settled={props.nativeSettled?.() ?? false}
-                  />
-                )}
+                {(activity) => <NativeActivityStatus activity={activity} settled={props.nativeSettled?.() ?? false} />}
               </For>
               <Show when={detail()}>
                 <span class={styles.toolDetail}>{detail()}</span>
@@ -2537,9 +2399,7 @@ function AskQuestionCard(props: {
                   const selected = (): boolean => selections().get(qIdx())?.has(opt.label) ?? false;
                   return (
                     <button
-                      class={
-                        selected() ? `${styles.askChip} ${styles.askChipSelected}` : styles.askChip
-                      }
+                      class={selected() ? `${styles.askChip} ${styles.askChipSelected}` : styles.askChip}
                       disabled={!canInteract()}
                       onClick={() => toggleOption(qIdx(), opt.label, q.multiSelect ?? false)}
                       data-testid={`ask-option-${opt.label}`}

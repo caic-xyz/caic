@@ -9,7 +9,6 @@ data class TxPlainText(
     val paletteOffset: Int = 1, // 1–15
     val spacing: Int = 4,
 ) : TxMessage {
-
     init {
         require(paletteOffset in 1..15) { "paletteOffset must be 1–15, got $paletteOffset" }
         require(x in 1..256) { "x must be 1–256 (Halo display), got $x" }

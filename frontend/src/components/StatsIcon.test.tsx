@@ -89,10 +89,7 @@ describe("StatsIcon", () => {
   it("surfaces task token volume and cost before opening details", () => {
     const { getByRole } = render(() => (
       <MemoryRouter>
-        <Route
-          path="*"
-          component={() => <StatsIcon href="/task/@task/stats" stats={[]} usage={usage} />}
-        />
+        <Route path="*" component={() => <StatsIcon href="/task/@task/stats" stats={[]} usage={usage} />} />
       </MemoryRouter>
     ));
 
@@ -116,12 +113,7 @@ describe("StatsIcon", () => {
     expect(() =>
       render(() => (
         <MemoryRouter>
-          <Route
-            path="*"
-            component={() => (
-              <StatsIcon href="/task/@task/stats" stats={longHistory} usage={usage} />
-            )}
-          />
+          <Route path="*" component={() => <StatsIcon href="/task/@task/stats" stats={longHistory} usage={usage} />} />
         </MemoryRouter>
       )),
     ).not.toThrow();
@@ -152,20 +144,14 @@ describe("StatsIcon", () => {
     expect(summary).toHaveTextContent("Thinking200t");
     expect(summary).toHaveTextContent("Cache hit 70%");
 
-    expect(
-      await findByTestId("turn-token-chart", undefined, { timeout: 5_000 }),
-    ).toBeInTheDocument();
-    expect(
-      await findByTestId("tool-time-chart", undefined, { timeout: 5_000 }),
-    ).toBeInTheDocument();
+    expect(await findByTestId("turn-token-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(await findByTestId("tool-time-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
   });
 
   it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const manyTurns = Array.from({ length: 12 }, () => turns[0]);
-    const { findByTestId } = render(() => (
-      <StatsContent events={[]} stats={[]} turns={manyTurns} usage={usage} />
-    ));
+    const { findByTestId } = render(() => <StatsContent events={[]} stats={[]} turns={manyTurns} usage={usage} />);
     const chart = await findByTestId("turn-token-chart");
     const labels = Array.from(
       chart.querySelectorAll('[aria-label="x-axis tick label"] text'),
@@ -189,9 +175,7 @@ describe("StatsIcon", () => {
     const cpuChart = await findByLabelText("CPU utilization over time");
     expect(cpuChart).toBeInTheDocument();
     const cpuDots = Array.from(cpuChart.querySelectorAll("circle"));
-    expect(
-      cpuDots.every((dot) => Number(dot.getAttribute("cy")) >= Number(dot.getAttribute("r"))),
-    ).toBe(true);
+    expect(cpuDots.every((dot) => Number(dot.getAttribute("cy")) >= Number(dot.getAttribute("r")))).toBe(true);
     const cpuScaleLabels = Array.from(
       cpuChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
       (label) => label.textContent,
@@ -204,30 +188,15 @@ describe("StatsIcon", () => {
     expect(resources).toHaveTextContent("TX/s0 B/s");
     expect(resources).not.toHaveTextContent("network chart shows throughput");
     expect(
-      Array.from(
-        rxChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
-        (label) => label.textContent,
-      ),
+      Array.from(rxChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
     ).toEqual(["0 B/s", "2.0 KB/s"]);
     expect(
-      Array.from(
-        txChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
-        (label) => label.textContent,
-      ),
+      Array.from(txChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
     ).toEqual(["0 B/s", "1.0 KB/s"]);
-    expect(rxChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute(
-      "text-anchor",
-      "end",
-    );
-    expect(txChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute(
-      "text-anchor",
-      "start",
-    );
+    expect(rxChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "end");
+    expect(txChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "start");
     expect(await findByLabelText("Writable disk usage over time")).toBeInTheDocument();
-    const titles = Array.from(
-      resources.querySelectorAll("title"),
-      (title) => title.textContent ?? "",
-    );
+    const titles = Array.from(resources.querySelectorAll("title"), (title) => title.textContent ?? "");
     expect(titles.some((title) => title.includes("RX 2.0 KB/s"))).toBe(true);
     expect(titles.some((title) => title.includes("TX 1.0 KB/s"))).toBe(true);
     const summary = within(resources).getByText("Exact samples (3)");
@@ -266,9 +235,7 @@ describe("StatsIcon", () => {
         diskUsed: 1_537,
       },
     ];
-    const { findByTestId } = render(() => (
-      <StatsContent events={[]} stats={irregularStats} turns={[]} usage={usage} />
-    ));
+    const { findByTestId } = render(() => <StatsContent events={[]} stats={irregularStats} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
     await user.click(within(resources).getByText("Exact samples (2)"));
     const table = within(resources).getByRole("table");
@@ -282,9 +249,7 @@ describe("StatsIcon", () => {
 
   it("does not infer network throughput from one sample", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { findByTestId } = render(() => (
-      <StatsContent events={[]} stats={[stats[0]]} turns={[]} usage={usage} />
-    ));
+    const { findByTestId } = render(() => <StatsContent events={[]} stats={[stats[0]]} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("Waiting for another sample");
     expect(resources).toHaveTextContent("No disk history available");

@@ -9,7 +9,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +17,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +26,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
@@ -61,13 +61,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 
-private const val PulseMinAlpha = 0.5f
-private const val PulseMaxAlpha = 1.0f
-private const val PulseDurationMs = 1000
-private const val BarCount = 3
-private const val BarMinHeight = 4f
-private const val BarMaxHeight = 20f
-private const val BarContainerSize = 24
+private const val PULSE_MIN_ALPHA = 0.5f
+private const val PULSE_MAX_ALPHA = 1.0f
+private const val PULSE_DURATION_MS = 1000
+private const val BAR_COUNT = 3
+private const val BAR_MIN_HEIGHT = 4f
+private const val BAR_MAX_HEIGHT = 20f
+private const val BAR_CONTAINER_SIZE = 24
 private val TranscriptHeight = 220.dp
 
 @Composable
@@ -90,19 +90,36 @@ fun VoicePanel(
         Column(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             when {
-                !voiceEnabled -> IdlePanel(onConnect, onOpenSettings, voiceEnabled = false)
-                voiceState.error != null -> ErrorPanel(voiceState.error, onConnect, onOpenSettings)
-                voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus, onOpenSettings)
-                voiceState.listening || voiceState.speaking -> ActivePanel(
-                    voiceState = voiceState,
-                    onDisconnect = onDisconnect,
-                    onToggleMute = onToggleMute,
-                    onSelectDevice = onSelectDevice,
-                    onClearTranscript = onClearTranscript,
-                    onOpenSettings = onOpenSettings,
-                )
-                !voiceState.connected -> IdlePanel(onConnect, onOpenSettings)
-                else -> ConnectingPanel("Starting audio…", onOpenSettings)
+                !voiceEnabled -> {
+                    IdlePanel(onConnect, onOpenSettings, voiceEnabled = false)
+                }
+
+                voiceState.error != null -> {
+                    ErrorPanel(voiceState.error, onConnect, onOpenSettings)
+                }
+
+                voiceState.connectStatus != null -> {
+                    ConnectingPanel(voiceState.connectStatus, onOpenSettings)
+                }
+
+                voiceState.listening || voiceState.speaking -> {
+                    ActivePanel(
+                        voiceState = voiceState,
+                        onDisconnect = onDisconnect,
+                        onToggleMute = onToggleMute,
+                        onSelectDevice = onSelectDevice,
+                        onClearTranscript = onClearTranscript,
+                        onOpenSettings = onOpenSettings,
+                    )
+                }
+
+                !voiceState.connected -> {
+                    IdlePanel(onConnect, onOpenSettings)
+                }
+
+                else -> {
+                    ConnectingPanel("Starting audio…", onOpenSettings)
+                }
             }
             ServiceAttentionLabel(serviceAttentionText)
         }
@@ -116,10 +133,11 @@ private fun ServiceAttentionLabel(text: String?) {
         text = text,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.error,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-            .testTag("gomode-service-attention"),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                .testTag("gomode-service-attention"),
     )
 }
 
@@ -144,9 +162,10 @@ private fun IdlePanel(
     voiceEnabled: Boolean = true,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -156,14 +175,14 @@ private fun IdlePanel(
         IconButton(
             onClick = onConnect,
             enabled = voiceEnabled,
-            modifier = Modifier
-                .size(36.dp)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = iconAlpha),
-                    shape = CircleShape,
-                )
-                .testTag(if (voiceEnabled) "gomode-voice-connect" else "gomode-voice-disabled"),
+            modifier =
+                Modifier
+                    .size(36.dp)
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = iconAlpha),
+                        shape = CircleShape,
+                    ).testTag(if (voiceEnabled) "gomode-voice-connect" else "gomode-voice-disabled"),
         ) {
             Icon(
                 Icons.Default.Mic,
@@ -182,19 +201,21 @@ private fun ConnectingPanel(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val alpha by infiniteTransition.animateFloat(
-        initialValue = PulseMinAlpha,
-        targetValue = PulseMaxAlpha,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = PulseDurationMs),
-            repeatMode = RepeatMode.Reverse,
-        ),
+        initialValue = PULSE_MIN_ALPHA,
+        targetValue = PULSE_MAX_ALPHA,
+        animationSpec =
+            infiniteRepeatable(
+                animation = tween(durationMillis = PULSE_DURATION_MS),
+                repeatMode = RepeatMode.Reverse,
+            ),
         label = "pulseAlpha",
     )
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp)
-            .alpha(alpha),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp)
+                .alpha(alpha),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -233,20 +254,22 @@ private fun ActivePanel(
             SettingsButton(onOpenSettings)
             MicLevelIndicator(micLevel = voiceState.micLevel)
 
-            val statusText = when {
-                voiceState.activeTool != null -> voiceState.activeTool!!
-                voiceState.muted && !voiceState.speaking -> "Muted"
-                voiceState.speaking -> "Speaking…"
-                else -> "Listening…"
-            }
+            val statusText =
+                when {
+                    voiceState.activeTool != null -> voiceState.activeTool!!
+                    voiceState.muted && !voiceState.speaking -> "Muted"
+                    voiceState.speaking -> "Speaking…"
+                    else -> "Listening…"
+                }
             Text(
                 text = statusText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (voiceState.activeTool != null) {
-                    MaterialTheme.colorScheme.tertiary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                color =
+                    if (voiceState.activeTool != null) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                 modifier = Modifier.weight(1f),
             )
 
@@ -294,9 +317,10 @@ private fun ActivePanel(
                 }
                 IconButton(
                     onClick = { transcriptExpanded = !transcriptExpanded },
-                    modifier = Modifier
-                        .size(32.dp)
-                        .testTag("gomode-voice-transcript-toggle"),
+                    modifier =
+                        Modifier
+                            .size(32.dp)
+                            .testTag("gomode-voice-transcript-toggle"),
                 ) {
                     Icon(
                         imageVector = if (transcriptExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -309,9 +333,10 @@ private fun ActivePanel(
         if (transcriptExpanded) {
             TranscriptLog(
                 entries = voiceState.transcript,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("gomode-voice-transcript"),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("gomode-voice-transcript"),
             )
         }
     }
@@ -324,9 +349,10 @@ private fun ErrorPanel(
     onOpenSettings: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -395,18 +421,20 @@ private fun TranscriptLog(
             itemsIndexed(entries) { _, entry ->
                 val isUser = entry.speaker == TranscriptSpeaker.USER
                 val label = if (isUser) "You" else "Assistant"
-                val labelColor = if (isUser) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.secondary
-                }
+                val labelColor =
+                    if (isUser) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    }
                 Text(
-                    text = buildAnnotatedString {
-                        withStyle(SpanStyle(color = labelColor, fontWeight = FontWeight.SemiBold)) {
-                            append("$label: ")
-                        }
-                        append(entry.text)
-                    },
+                    text =
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = labelColor, fontWeight = FontWeight.SemiBold)) {
+                                append("$label: ")
+                            }
+                            append(entry.text)
+                        },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth(),
@@ -420,29 +448,29 @@ private fun TranscriptLog(
 private fun MicLevelIndicator(micLevel: Float = 0f) {
     val durations = intArrayOf(80, 40, 120)
     Box(
-        modifier = Modifier.size(BarContainerSize.dp),
+        modifier = Modifier.size(BAR_CONTAINER_SIZE.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            repeat(BarCount) { index ->
-                val target = BarMinHeight + micLevel * (BarMaxHeight - BarMinHeight)
+            repeat(BAR_COUNT) { index ->
+                val target = BAR_MIN_HEIGHT + micLevel * (BAR_MAX_HEIGHT - BAR_MIN_HEIGHT)
                 val height by animateFloatAsState(
                     targetValue = target,
                     animationSpec = tween(durationMillis = durations[index]),
                     label = "bar$index",
                 )
                 Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(height.dp)
-                        .clip(RoundedCornerShape(1.dp))
-                        .background(MaterialTheme.colorScheme.primary),
+                    modifier =
+                        Modifier
+                            .width(3.dp)
+                            .height(height.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(MaterialTheme.colorScheme.primary),
                 )
             }
         }
     }
 }
-

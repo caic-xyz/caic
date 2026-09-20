@@ -61,11 +61,12 @@ class McpClient(
     private var toolsByName: Map<String, ToolDescriptor> = emptyMap()
 
     private val requestMeta: RequestMeta
-        get() = RequestMeta(
-            protocolVersion = protocolVersion,
-            clientInfo = Implementation(name = "gomode-android", version = "1.0.0"),
-            clientCapabilities = ClientCapabilities(),
-        )
+        get() =
+            RequestMeta(
+                protocolVersion = protocolVersion,
+                clientInfo = Implementation(name = "gomode-android", version = "1.0.0"),
+                clientCapabilities = ClientCapabilities(),
+            )
 
     private fun cookieHeaders(): Map<String, String> =
         cookieProvider()?.takeIf { it.isNotBlank() }?.let { mapOf("Cookie" to it) } ?: emptyMap()
@@ -77,25 +78,28 @@ class McpClient(
         paramHeaders: Map<String, String> = emptyMap(),
     ): T {
         val headers = mcpHeaders(method, name, paramHeaders)
-        val response = api.mcp(
-            req = JSONRPCRequest(
-                jsonrpc = "2.0",
-                id = JsonPrimitive(idCounter.incrementAndGet()),
-                method = method,
-                params = params,
-            ),
-            headers = headers,
-        )
+        val response =
+            api.mcp(
+                req =
+                    JSONRPCRequest(
+                        jsonrpc = "2.0",
+                        id = JsonPrimitive(idCounter.incrementAndGet()),
+                        method = method,
+                        params = params,
+                    ),
+                headers = headers,
+            )
         val rpcError = response.error
         if (rpcError != null) error(rpcError.message)
         val result = response.result ?: error("Missing result in MCP response")
         return json.decodeFromJsonElement(result)
     }
 
-    suspend fun serverDiscover(): ServerDiscoverResult = request(
-        method = Method.ServerDiscover,
-        params = buildJsonObject { put("_meta", json.encodeToJsonElement(requestMeta)) },
-    )
+    suspend fun serverDiscover(): ServerDiscoverResult =
+        request(
+            method = Method.ServerDiscover,
+            params = buildJsonObject { put("_meta", json.encodeToJsonElement(requestMeta)) },
+        )
 
     suspend fun serverInstructions(): String = serverDiscover().instructions.orEmpty()
 
@@ -103,15 +107,17 @@ class McpClient(
         val tools = mutableListOf<ToolDescriptor>()
         var cursor: String? = null
         do {
-            val result = request<ToolsListResult>(
-                method = Method.ToolsList,
-                params = json.encodeToJsonElement(
-                    PaginatedRequestParams(
-                        _meta = requestMeta,
-                        cursor = cursor,
-                    )
-                ),
-            )
+            val result =
+                request<ToolsListResult>(
+                    method = Method.ToolsList,
+                    params =
+                        json.encodeToJsonElement(
+                            PaginatedRequestParams(
+                                _meta = requestMeta,
+                                cursor = cursor,
+                            ),
+                        ),
+                )
             tools += result.tools
             cursor = result.nextCursor
         } while (!cursor.isNullOrEmpty())
@@ -119,19 +125,24 @@ class McpClient(
         return tools
     }
 
-    suspend fun callTool(name: String, args: JsonObject): McpToolResult {
-        val result = request<ToolCallResult>(
-            method = Method.ToolsCall,
-            params = json.encodeToJsonElement(
-                ToolsCallParams(
-                    _meta = requestMeta,
-                    name = name,
-                    arguments = args,
-                )
-            ),
-            name = name,
-            paramHeaders = mcpParamHeaders(toolsByName[name], args),
-        )
+    suspend fun callTool(
+        name: String,
+        args: JsonObject,
+    ): McpToolResult {
+        val result =
+            request<ToolCallResult>(
+                method = Method.ToolsCall,
+                params =
+                    json.encodeToJsonElement(
+                        ToolsCallParams(
+                            _meta = requestMeta,
+                            name = name,
+                            arguments = args,
+                        ),
+                    ),
+                name = name,
+                paramHeaders = mcpParamHeaders(toolsByName[name], args),
+            )
         val structuredContent = result.structuredContent?.jsonObject ?: textContentAsStructuredError(result)
         return McpToolResult(
             structuredContent = structuredContent,
@@ -143,15 +154,17 @@ class McpClient(
         val resources = mutableListOf<ResourceDescriptor>()
         var cursor: String? = null
         do {
-            val result = request<ResourcesListResult>(
-                method = Method.ResourcesList,
-                params = json.encodeToJsonElement(
-                    PaginatedRequestParams(
-                        _meta = requestMeta,
-                        cursor = cursor,
-                    )
-                ),
-            )
+            val result =
+                request<ResourcesListResult>(
+                    method = Method.ResourcesList,
+                    params =
+                        json.encodeToJsonElement(
+                            PaginatedRequestParams(
+                                _meta = requestMeta,
+                                cursor = cursor,
+                            ),
+                        ),
+                )
             resources += result.resources
             cursor = result.nextCursor
         } while (!cursor.isNullOrEmpty())
@@ -162,31 +175,35 @@ class McpClient(
         val templates = mutableListOf<ResourceTemplateDescriptor>()
         var cursor: String? = null
         do {
-            val result = request<ResourceTemplatesListResult>(
-                method = Method.ResourceTemplatesList,
-                params = json.encodeToJsonElement(
-                    PaginatedRequestParams(
-                        _meta = requestMeta,
-                        cursor = cursor,
-                    )
-                ),
-            )
+            val result =
+                request<ResourceTemplatesListResult>(
+                    method = Method.ResourceTemplatesList,
+                    params =
+                        json.encodeToJsonElement(
+                            PaginatedRequestParams(
+                                _meta = requestMeta,
+                                cursor = cursor,
+                            ),
+                        ),
+                )
             templates += result.resourceTemplates
             cursor = result.nextCursor
         } while (!cursor.isNullOrEmpty())
         return templates
     }
 
-    override suspend fun readResource(uri: String): ResourcesReadResult = request(
-        method = Method.ResourcesRead,
-        params = json.encodeToJsonElement(
-            ResourcesReadParams(
-                _meta = requestMeta,
-                uri = uri,
-            )
-        ),
-        name = uri,
-    )
+    override suspend fun readResource(uri: String): ResourcesReadResult =
+        request(
+            method = Method.ResourcesRead,
+            params =
+                json.encodeToJsonElement(
+                    ResourcesReadParams(
+                        _meta = requestMeta,
+                        uri = uri,
+                    ),
+                ),
+            name = uri,
+        )
 
     override fun listenSubscriptions(notifications: SubscriptionFilter): Flow<JSONRPCNotification> =
         subscriptionAPI.subscriptionsListen(
@@ -194,12 +211,13 @@ class McpClient(
                 jsonrpc = "2.0",
                 id = JsonPrimitive(idCounter.incrementAndGet()),
                 method = Method.SubscriptionsListen,
-                params = json.encodeToJsonElement(
-                    SubscriptionsListenParams(
-                        _meta = requestMeta,
-                        notifications = notifications,
-                    )
-                ),
+                params =
+                    json.encodeToJsonElement(
+                        SubscriptionsListenParams(
+                            _meta = requestMeta,
+                            notifications = notifications,
+                        ),
+                    ),
             ),
             headers = mcpHeaders(Method.SubscriptionsListen),
         )
@@ -208,34 +226,45 @@ class McpClient(
         method: Method,
         name: String? = null,
         paramHeaders: Map<String, String> = emptyMap(),
-    ): Map<String, String> = buildMap {
-        putAll(cookieHeaders())
-        put("Mcp-Protocol-Version", protocolVersion)
-        put("Mcp-Method", method.value)
-        if (name != null) put("Mcp-Name", name)
-        putAll(paramHeaders)
-    }
+    ): Map<String, String> =
+        buildMap {
+            putAll(cookieHeaders())
+            put("Mcp-Protocol-Version", protocolVersion)
+            put("Mcp-Method", method.value)
+            if (name != null) put("Mcp-Name", name)
+            putAll(paramHeaders)
+        }
 }
 
-internal fun newSubscriptionHTTPClient(): OkHttpClient = OkHttpClient.Builder()
-    .readTimeout(SUBSCRIPTION_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-    .build()
+internal fun newSubscriptionHTTPClient(): OkHttpClient =
+    OkHttpClient
+        .Builder()
+        .readTimeout(SUBSCRIPTION_READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .build()
 
 private fun textContentAsStructuredError(result: ToolCallResult): JsonObject {
-    val text = result.content.firstNotNullOfOrNull { block ->
-        block.takeIf { it.type.value == "text" }?.text
-    } ?: return JsonObject(emptyMap())
+    val text =
+        result.content.firstNotNullOfOrNull { block ->
+            block.takeIf { it.type.value == "text" }?.text
+        } ?: return JsonObject(emptyMap())
     return buildJsonObject { put("error", text) }
 }
 
-private fun mcpParamHeaders(tool: ToolDescriptor?, args: JsonObject): Map<String, String> {
+private fun mcpParamHeaders(
+    tool: ToolDescriptor?,
+    args: JsonObject,
+): Map<String, String> {
     val inputSchema = tool?.inputSchema?.jsonObject ?: return emptyMap()
     val headers = mutableMapOf<String, String>()
     collectMcpParamHeaders(inputSchema, args, headers)
     return headers
 }
 
-private fun collectMcpParamHeaders(schema: JsonObject, args: JsonElement?, headers: MutableMap<String, String>) {
+private fun collectMcpParamHeaders(
+    schema: JsonObject,
+    args: JsonElement?,
+    headers: MutableMap<String, String>,
+) {
     val headerName = schema["x-mcp-header"]?.jsonPrimitive?.content
     if (headerName != null && args != null && args !is JsonNull) {
         headers["Mcp-Param-$headerName"] = encodeMcpHeaderValue(args.jsonPrimitive.content)

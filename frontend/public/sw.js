@@ -7,9 +7,11 @@ const CACHE = `caic-assets-${entryAsset}`;
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k.startsWith("caic-") && k !== CACHE).map((k) => caches.delete(k)))
-    )
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k.startsWith("caic-") && k !== CACHE).map((k) => caches.delete(k))),
+      ),
   );
 });
 
@@ -34,7 +36,7 @@ self.addEventListener("fetch", (e) => {
             },
           );
         });
-      })
-    )
+      }),
+    ),
   );
 });

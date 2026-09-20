@@ -2,11 +2,7 @@
 
 import { test, expect, waitForTaskState } from "../helpers";
 
-test("completes the primary task flow using only the keyboard", async ({
-  page,
-  api,
-  uniquePrompt,
-}) => {
+test("completes the primary task flow using only the keyboard", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
   await expect(page.getByTestId("new-task-form")).toHaveCSS("overflow", "visible");
   const repoChips = page.getByTestId("repo-chips");

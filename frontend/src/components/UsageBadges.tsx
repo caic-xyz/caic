@@ -4,13 +4,7 @@ import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 
 import { QuotaProviderDeepSeek } from "@sdk/types.gen";
-import type {
-  ProviderQuota,
-  QuotaRateLimit,
-  QuotaBalance,
-  QuotaExtraUsage,
-  UsageResp,
-} from "@sdk/types.gen";
+import type { ProviderQuota, QuotaRateLimit, QuotaBalance, QuotaExtraUsage, UsageResp } from "@sdk/types.gen";
 
 import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
@@ -63,9 +57,7 @@ function extraTooltip(extra: QuotaExtraUsage): string {
 function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; label: string }) {
   const tip = () => {
     const reset = formatReset(props.rl.resetsAt, props.now());
-    return reset
-      ? `${props.label} ${props.rl.window}: ${Math.round(props.rl.usedPct)}% — Resets ${reset}`
-      : undefined;
+    return reset ? `${props.label} ${props.rl.window}: ${Math.round(props.rl.usedPct)}% — Resets ${reset}` : undefined;
   };
   return (
     <Tooltip text={tip()}>
@@ -131,16 +123,10 @@ function ProviderIcon(props: {
     <Show when={props.logoUrl} fallback={<span class={styles.providerLabel}>{props.label}</span>}>
       {(url) => (
         <Tooltip text={tip()}>
-          <span
-            class={iconClass()}
-            data-testid="provider-pricing-icon"
-            data-pricing-phase={props.pricing?.phase}
-          >
+          <span class={iconClass()} data-testid="provider-pricing-icon" data-pricing-phase={props.pricing?.phase}>
             <img class={styles.providerLogo} src={url()} alt={props.label} />
             <Show when={props.pricing}>
-              {(pricing) => (
-                <span class={styles.visuallyHidden}>{pricingAnnouncement(pricing())}</span>
-              )}
+              {(pricing) => <span class={styles.visuallyHidden}>{pricingAnnouncement(pricing())}</span>}
             </Show>
           </span>
         </Tooltip>
@@ -150,8 +136,7 @@ function ProviderIcon(props: {
 }
 
 function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
-  const pricing = () =>
-    props.pq.provider === QuotaProviderDeepSeek ? deepseekPricing(props.now()) : null;
+  const pricing = () => (props.pq.provider === QuotaProviderDeepSeek ? deepseekPricing(props.now()) : null);
 
   const badgeSpan = (
     <span class={styles.providerBadges}>
@@ -183,12 +168,7 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
 
   const content = (
     <>
-      <ProviderIcon
-        logoUrl={props.pq.logoUrl}
-        label={props.pq.label}
-        pricing={pricing()}
-        now={props.now}
-      />
+      <ProviderIcon logoUrl={props.pq.logoUrl} label={props.pq.label} pricing={pricing()} now={props.now} />
       {badgeSpan}
     </>
   );
@@ -215,10 +195,7 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
   );
 }
 
-export default function UsageBadges(props: {
-  usage: Accessor<UsageResp | null>;
-  now: Accessor<number>;
-}) {
+export default function UsageBadges(props: { usage: Accessor<UsageResp | null>; now: Accessor<number> }) {
   return (
     <span class={styles.usageRow}>
       <Show when={props.usage()} keyed>

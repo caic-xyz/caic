@@ -25,13 +25,7 @@ function makeBalance(total: number, currency = "USD", granted?: number, toppedUp
   return { currency, total, granted, toppedUp };
 }
 
-function makeExtra(
-  isEnabled: boolean,
-  usedCredits: number,
-  monthlyLimit: number,
-  usedPct: number,
-  currency = "USD",
-) {
+function makeExtra(isEnabled: boolean, usedCredits: number, monthlyLimit: number, usedPct: number, currency = "USD") {
   return { currency, isEnabled, usedCredits, monthlyLimit, usedPct };
 }
 

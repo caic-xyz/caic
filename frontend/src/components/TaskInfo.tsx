@@ -4,12 +4,7 @@ import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } f
 import { A, useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 
-import type {
-  TaskInfo as TaskInfoData,
-  TaskInfoCacheMount,
-  TaskInfoMount,
-  TaskInfoRepo,
-} from "@sdk/types.gen";
+import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
 
 import { getTaskInfo } from "../api";
 import styles from "./TaskInfo.module.css";
@@ -48,41 +43,31 @@ function compareText(a?: string, b?: string): number {
 }
 
 function sortedRepos(repos?: TaskInfoRepo[]): TaskInfoRepo[] | undefined {
-  return repos
-    ?.slice()
-    .sort((a, b) => compareText(a.name, b.name) || compareText(a.containerPath, b.containerPath));
+  return repos?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.containerPath, b.containerPath));
 }
 
 function sortedMounts(mounts?: TaskInfoMount[]): TaskInfoMount[] | undefined {
   return mounts
     ?.slice()
-    .sort(
-      (a, b) =>
-        compareText(a.hostPath, b.hostPath) || compareText(a.containerPath, b.containerPath),
-    );
+    .sort((a, b) => compareText(a.hostPath, b.hostPath) || compareText(a.containerPath, b.containerPath));
 }
 
 function sortedCaches(caches?: TaskInfoCacheMount[]): TaskInfoCacheMount[] | undefined {
-  return caches
-    ?.slice()
-    .sort((a, b) => compareText(a.name, b.name) || compareText(a.containerPath, b.containerPath));
+  return caches?.slice().sort((a, b) => compareText(a.name, b.name) || compareText(a.containerPath, b.containerPath));
 }
 
 function runtimeText(recorded?: string, observed?: string): string {
-  if (recorded && observed && recorded !== observed)
-    return `${recorded} requested, ${observed} running`;
+  if (recorded && observed && recorded !== observed) return `${recorded} requested, ${observed} running`;
   return observed || recorded || "";
 }
 
 function imageText(recorded?: string, observed?: string): string {
-  if (recorded && observed && recorded !== observed)
-    return `${recorded} requested, ${observed} running`;
+  if (recorded && observed && recorded !== observed) return `${recorded} requested, ${observed} running`;
   return observed || recorded || "";
 }
 
 function cpuText(recorded?: number, observed?: number): string {
-  if (recorded && observed && recorded !== observed)
-    return `${recorded} requested, ${observed} running`;
+  if (recorded && observed && recorded !== observed) return `${recorded} requested, ${observed} running`;
   return String(observed || recorded || "");
 }
 
@@ -126,10 +111,7 @@ function LineageRow(props: { label: string; id: string }) {
 
 function MountTable(props: { mounts?: TaskInfoMount[]; empty: string }) {
   return (
-    <Show
-      when={(props.mounts?.length ?? 0) > 0}
-      fallback={<div class={styles.empty}>{props.empty}</div>}
-    >
+    <Show when={(props.mounts?.length ?? 0) > 0} fallback={<div class={styles.empty}>{props.empty}</div>}>
       <div class={styles.tableWrap}>
         <table class={styles.table}>
           <thead>
@@ -158,10 +140,7 @@ function MountTable(props: { mounts?: TaskInfoMount[]; empty: string }) {
 
 function CacheTable(props: { caches?: TaskInfoCacheMount[] }) {
   return (
-    <Show
-      when={(props.caches?.length ?? 0) > 0}
-      fallback={<div class={styles.empty}>No caches</div>}
-    >
+    <Show when={(props.caches?.length ?? 0) > 0} fallback={<div class={styles.empty}>No caches</div>}>
       <div class={styles.tableWrap}>
         <table class={styles.table}>
           <thead>
@@ -200,10 +179,7 @@ function CacheTable(props: { caches?: TaskInfoCacheMount[] }) {
 
 function RepoTable(props: { repos?: TaskInfoRepo[] }) {
   return (
-    <Show
-      when={(props.repos?.length ?? 0) > 0}
-      fallback={<div class={styles.empty}>No repositories</div>}
-    >
+    <Show when={(props.repos?.length ?? 0) > 0} fallback={<div class={styles.empty}>No repositories</div>}>
       <div class={styles.tableWrap}>
         <table class={styles.table}>
           <thead>
@@ -270,11 +246,7 @@ export default function TaskInfo(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button
-          class={styles.backBtn}
-          onClick={() => navigate(props.taskPath)}
-          title="Back to task"
-        >
+        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span>Info</span>
@@ -342,37 +314,20 @@ export default function TaskInfo(props: Props) {
                   />
                   <Field label="Instance" value={data.recorded.runtime.id} code />
                   <Field label="State" value={data.observed?.state || data.recorded.state} />
-                  <Field
-                    label="Image"
-                    value={imageText(data.recorded.baseImage, data.observed?.imageRef)}
-                    code
-                  />
+                  <Field label="Image" value={imageText(data.recorded.baseImage, data.observed?.imageRef)} code />
                   <Field label="Image ID" value={data.observed?.imageID} code />
-                  <Field
-                    label="OS"
-                    value={runtimeText(data.recorded.containerOS, data.observed?.os)}
-                    code
-                  />
+                  <Field label="OS" value={runtimeText(data.recorded.containerOS, data.observed?.os)} code />
                   <Field
                     label="CPU architecture"
-                    value={runtimeText(
-                      data.recorded.containerCPUArchitecture,
-                      data.observed?.cpuArchitecture,
-                    )}
+                    value={runtimeText(data.recorded.containerCPUArchitecture, data.observed?.cpuArchitecture)}
                     code
                   />
-                  <Field
-                    label="CPUs"
-                    value={cpuText(data.recorded.maxCPUs, data.observed?.cpuLimit)}
-                  />
+                  <Field label="CPUs" value={cpuText(data.recorded.maxCPUs, data.observed?.cpuLimit)} />
                   <Field label="Tailscale" value={boolText(data.recorded.capabilities.tailscale)} />
                   <Field label="USB" value={boolText(data.recorded.capabilities.usb)} />
                   <Field label="Display" value={boolText(data.recorded.capabilities.display)} />
                   <Field label="Sudo" value={boolText(data.recorded.capabilities.sudo)} />
-                  <Field
-                    label="GitHub token injected"
-                    value={boolText(data.recorded.capabilities.gitHubToken)}
-                  />
+                  <Field label="GitHub token injected" value={boolText(data.recorded.capabilities.gitHubToken)} />
                 </div>
               </Section>
 

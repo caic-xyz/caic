@@ -21,10 +21,11 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
     }
 
     private val screenshotDir: File by lazy {
-        val dir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-            "gomode-screenshots",
-        )
+        val dir =
+            File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                "gomode-screenshots",
+            )
         dir.mkdirs()
         dir
     }
@@ -153,14 +154,15 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         }
         dismissHostedToasts()
         stabilizeHostedVisuals()
-        val beforeCapture = if (fitPlanMessages) {
-            {
-                fitHostedPlanMessages()
-                stabilizeHostedVisuals()
+        val beforeCapture =
+            if (fitPlanMessages) {
+                {
+                    fitHostedPlanMessages()
+                    stabilizeHostedVisuals()
+                }
+            } else {
+                null
             }
-        } else {
-            null
-        }
         takeScreenshot(name, beforeCapture)
     }
 
@@ -233,7 +235,10 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         }
     }
 
-    private fun takeScreenshot(name: String, beforeCapture: (() -> Unit)? = null) {
+    private fun takeScreenshot(
+        name: String,
+        beforeCapture: (() -> Unit)? = null,
+    ) {
         composeRule.waitForIdle()
         device.waitForIdle()
         beforeCapture?.invoke()
@@ -242,15 +247,16 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
 
     companion object {
         private const val TASK_DETAIL_PROMPT_SELECTOR = "[data-testid=\"task-detail-form\"] [role=\"textbox\"]"
-        private val SCREENSHOT_NAMES = listOf(
-            "gomode-settings",
-            "gomode-web-shell",
-            "gomode-settings-from-web",
-            "gomode-task-list",
-            "gomode-task-detail",
-            "gomode-task-detail-prompt-focused",
-            "gomode-task-plan",
-            "gomode-task-ask",
-        )
+        private val SCREENSHOT_NAMES =
+            listOf(
+                "gomode-settings",
+                "gomode-web-shell",
+                "gomode-settings-from-web",
+                "gomode-task-list",
+                "gomode-task-detail",
+                "gomode-task-detail-prompt-focused",
+                "gomode-task-plan",
+                "gomode-task-ask",
+            )
     }
 }

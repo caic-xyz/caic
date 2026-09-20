@@ -208,11 +208,7 @@ export default function PromptInput(props: Props) {
             {(img, idx) => (
               <div class={styles.imageThumb}>
                 <img src={`data:${img.mediaType};base64,${img.data}`} alt="attached" />
-                <button
-                  class={styles.imageRemove}
-                  onClick={() => removeImage(idx())}
-                  aria-label="Remove"
-                >
+                <button class={styles.imageRemove} onClick={() => removeImage(idx())} aria-label="Remove">
                   &times;
                 </button>
               </div>

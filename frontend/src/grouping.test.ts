@@ -80,10 +80,7 @@ describe("groupMessages", () => {
   });
 
   it("keeps preceding assistant text when the result payload differs", () => {
-    const groups = groupMessages([
-      { kind: "text", ts: 1, text: { text: "A useful explanation." } },
-      resultEvent(),
-    ]);
+    const groups = groupMessages([{ kind: "text", ts: 1, text: { text: "A useful explanation." } }, resultEvent()]);
 
     expect(groups.map((group) => group.kind)).toEqual(["text", "other"]);
   });
@@ -110,11 +107,7 @@ describe("groupMessages", () => {
   });
 
   it("toolResult matches backwards across groups", () => {
-    const groups = groupMessages([
-      toolUseEvent("t1", "Bash"),
-      textDeltaEvent("text"),
-      toolResultEvent("t1"),
-    ]);
+    const groups = groupMessages([toolUseEvent("t1", "Bash"), textDeltaEvent("text"), toolResultEvent("t1")]);
     expect(groups).toHaveLength(2);
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls[0].done).toBe(true);
@@ -291,12 +284,7 @@ describe("groupMessages", () => {
       toolResultEvent(id),
       usageEvent(),
     ];
-    const events: EventMessage[] = [
-      ...turn(1, "t1"),
-      ...turn(10, "t2"),
-      ...turn(20, "t3"),
-      resultEvent(),
-    ];
+    const events: EventMessage[] = [...turn(1, "t1"), ...turn(10, "t2"), ...turn(20, "t3"), resultEvent()];
     const groups = groupMessages(events);
     expect(groups).toHaveLength(3);
     const holder = groups[0];
@@ -336,9 +324,7 @@ describe("groupMessages", () => {
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(0);
     expect(groups[0].timingSegments).toHaveLength(2);
-    expect(groups[0].timingSegments?.flat().filter((event) => event.kind === "usage")).toHaveLength(
-      1,
-    );
+    expect(groups[0].timingSegments?.flat().filter((event) => event.kind === "usage")).toHaveLength(1);
     expect(groups[1].kind).toBe("text");
   });
 
@@ -376,9 +362,7 @@ describe("groupMessages", () => {
     expect(groups[0].events.filter(isThinking)).toHaveLength(4);
     expect(groups[1].toolCalls).toHaveLength(3);
     expect(groups[2].kind).toBe("text");
-    expect(groups[2].events.findLast((e) => e.kind === "text")?.text?.text).toBe(
-      "I read the file.",
-    );
+    expect(groups[2].events.findLast((e) => e.kind === "text")?.text?.text).toBe("I read the file.");
     expect(groups[2].events.some(isThinking)).toBe(false);
     // Turn 3 has no coalescing partner: stays its own thinking+text group.
     expect(groups[3].kind).toBe("text");
@@ -513,11 +497,7 @@ describe("groupMessages", () => {
         questions: [{ question: "Which?", options: [{ label: "A" }, { label: "B" }] }],
       },
     };
-    const groups = groupMessages([
-      askEvent,
-      resultEvent(),
-      { kind: "userInput", ts: 3, userInput: { text: "A" } },
-    ]);
+    const groups = groupMessages([askEvent, resultEvent(), { kind: "userInput", ts: 3, userInput: { text: "A" } }]);
     const askGroup = groups.find((g) => g.kind === "ask");
     expect(askGroup?.answerText).toBe("A");
   });
@@ -554,9 +534,7 @@ describe("groupMessages", () => {
       },
     ]);
 
-    expect(
-      groups.filter((group) => group.events.some((event) => event.kind === "rateLimit")),
-    ).toHaveLength(2);
+    expect(groups.filter((group) => group.events.some((event) => event.kind === "rateLimit"))).toHaveLength(2);
   });
 
   it("keeps matching rateLimit warning percentages for different quota windows", () => {
@@ -934,8 +912,7 @@ describe("groupSessions", () => {
   it("session duration sums turn runtimes instead of elapsed wall time", () => {
     const firstResult = resultEvent();
     const secondResult = resultEvent();
-    if (!firstResult.result || !secondResult.result)
-      throw new Error("result fixture is missing payload");
+    if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
     firstResult.ts = 3_000;
     firstResult.result.duration = 2;
     secondResult.ts = 65_000;
@@ -971,10 +948,7 @@ describe("groupTurns", () => {
     if (!completion.result) throw new Error("result fixture is missing payload");
     completion.result.result = "Finished the requested change.";
     const turns = groupTurns(
-      groupMessages([
-        { kind: "text", ts: 1, text: { text: "Finished the requested change." } },
-        completion,
-      ]),
+      groupMessages([{ kind: "text", ts: 1, text: { text: "Finished the requested change." } }, completion]),
     );
 
     expect(turns).toHaveLength(1);
@@ -1082,9 +1056,7 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Bash", input: {} } },
       { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "t1", duration: 0.125 } },
     ]);
-    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(
-      125,
-    );
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(125);
   });
 
   it("falls back to event timestamps", () => {
@@ -1092,9 +1064,7 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
       { kind: "toolResult", ts: 1_037, toolResult: { toolUseID: "t1", duration: 0 } },
     ]);
-    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(
-      37,
-    );
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(37);
   });
 
   it("returns no duration when timing metadata is unavailable", () => {
@@ -1102,9 +1072,7 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 0, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
       { kind: "toolResult", ts: 0, toolResult: { toolUseID: "t1", duration: 0 } },
     ]);
-    expect(
-      toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events)),
-    ).toBeNull();
+    expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBeNull();
   });
 });
 
@@ -1112,12 +1080,7 @@ describe("buildTurnItems", () => {
   it("all turns are elidable when passed to buildTurnItems", () => {
     // buildTurnItems elidates every turn it receives — the caller is responsible
     // for excluding the last completed turn (which should always be expanded).
-    const events: EventMessage[] = [
-      textDeltaEvent("turn 1"),
-      resultEvent(),
-      textDeltaEvent("turn 2"),
-      resultEvent(),
-    ];
+    const events: EventMessage[] = [textDeltaEvent("turn 1"), resultEvent(), textDeltaEvent("turn 2"), resultEvent()];
     const turns = groupTurns(groupMessages(events));
     const items = buildTurnItems(turns, new Set(), "session:0:");
     expect(items).toHaveLength(2);
@@ -1140,12 +1103,7 @@ describe("buildTurnItems", () => {
     // The fix splits items() into per-concern createMemo calls so stable parts
     // retain object identity. This test validates that keys are deterministic:
     // any caching layer can use them as stable lookup keys.
-    const events: EventMessage[] = [
-      textDeltaEvent("turn 1"),
-      resultEvent(),
-      textDeltaEvent("turn 2"),
-      resultEvent(),
-    ];
+    const events: EventMessage[] = [textDeltaEvent("turn 1"), resultEvent(), textDeltaEvent("turn 2"), resultEvent()];
     const turns = groupTurns(groupMessages(events));
     const sessionKey = "session:0:";
     const expanded = new Set<string>();

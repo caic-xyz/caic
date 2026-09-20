@@ -23,9 +23,7 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
   const [copied, setCopied] = createSignal(false);
   const message = () => (props.error instanceof Error ? props.error.message : String(props.error));
   const report = createMemo(() => currentErrorReport(props.error));
-  createEffect(() =>
-    console.error("caic frontend ErrorBoundary caught a render error.\n" + report()),
-  );
+  createEffect(() => console.error("caic frontend ErrorBoundary caught a render error.\n" + report()));
 
   async function copyDiagnosticDetails() {
     try {
@@ -69,22 +67,14 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
 // (yellow) > pass completed (green).
 type ConnectionStatus = "disconnected" | "settled-error" | "settled-loading" | "connected";
 
-function connectionStatus(
-  connected: boolean,
-  settledError: string,
-  settledLoading: boolean,
-): ConnectionStatus {
+function connectionStatus(connected: boolean, settledError: string, settledLoading: boolean): ConnectionStatus {
   if (!connected) return "disconnected";
   if (settledError !== "") return "settled-error";
   if (settledLoading) return "settled-loading";
   return "connected";
 }
 
-function ConnectionDot(props: {
-  connected: boolean;
-  settledLoading: boolean;
-  settledError: string;
-}) {
+function ConnectionDot(props: { connected: boolean; settledLoading: boolean; settledError: string }) {
   const status = () => connectionStatus(props.connected, props.settledError, props.settledLoading);
   const classFor = (s: ConnectionStatus) => {
     switch (s) {
@@ -111,12 +101,7 @@ function ConnectionDot(props: {
     }
   };
   return (
-    <span
-      class={classFor(status())}
-      title={titleFor(status())}
-      data-status={status()}
-      data-testid="connection-dot"
-    />
+    <span class={classFor(status())} title={titleFor(status())} data-status={status()} data-testid="connection-dot" />
   );
 }
 

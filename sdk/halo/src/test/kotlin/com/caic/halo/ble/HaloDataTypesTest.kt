@@ -6,7 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class HaloDataTypesTest {
-
     @Test
     fun `enum values are distinct`() {
         assertEquals(3, HaloDeviceType.entries.size)

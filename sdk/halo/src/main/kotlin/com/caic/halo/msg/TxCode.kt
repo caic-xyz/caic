@@ -2,6 +2,8 @@
 // Wire format: value(1).
 package com.caic.halo.msg
 
-data class TxCode(val value: Byte) : TxMessage {
+data class TxCode(
+    val value: Byte,
+) : TxMessage {
     override fun pack(): ByteArray = byteArrayOf(value)
 }

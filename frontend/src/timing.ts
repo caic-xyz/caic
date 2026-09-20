@@ -36,10 +36,7 @@ export class IncrementalEventTimingTracker {
   private inputEvent: EventMessage | null = null;
 
   derive(events: readonly EventMessage[]): EventTimingSummary {
-    if (
-      events.length < this.processed ||
-      (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)
-    ) {
+    if (events.length < this.processed || (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)) {
       this.clear();
     }
     for (let i = this.processed; i < events.length; i++) {

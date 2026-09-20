@@ -39,9 +39,7 @@ describe("voice gateway generated protocol DTOs", () => {
       context: { text: "status update" },
     };
 
-    expect(JSON.stringify(msg)).toBe(
-      '{"kind":"context.update","context":{"text":"status update"}}',
-    );
+    expect(JSON.stringify(msg)).toBe('{"kind":"context.update","context":{"text":"status update"}}');
   });
 
   it("serializes user messages exactly", () => {
@@ -50,9 +48,7 @@ describe("voice gateway generated protocol DTOs", () => {
       text: "Say exactly one word: Ready",
     };
 
-    expect(JSON.stringify(msg)).toBe(
-      '{"kind":"user.message","text":"Say exactly one word: Ready"}',
-    );
+    expect(JSON.stringify(msg)).toBe('{"kind":"user.message","text":"Say exactly one word: Ready"}');
   });
 
   it("serializes tool results exactly", () => {
@@ -63,8 +59,6 @@ describe("voice gateway generated protocol DTOs", () => {
       result: { ok: true },
     };
 
-    expect(JSON.stringify(msg)).toBe(
-      '{"kind":"tool.result","id":"call-1","name":"tasks_list","result":{"ok":true}}',
-    );
+    expect(JSON.stringify(msg)).toBe('{"kind":"tool.result","id":"call-1","name":"tasks_list","result":{"ok":true}}');
   });
 });

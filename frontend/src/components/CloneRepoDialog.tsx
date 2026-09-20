@@ -73,12 +73,7 @@ export default function CloneRepoDialog(props: Props) {
         <p class={styles.error}>{props.error}</p>
       </Show>
       <div class={styles.actions}>
-        <button
-          type="button"
-          class={styles.cancelBtn}
-          onClick={() => props.onClose()}
-          disabled={props.loading}
-        >
+        <button type="button" class={styles.cancelBtn} onClick={() => props.onClose()} disabled={props.loading}>
           Cancel
         </button>
         <Button

@@ -6,12 +6,7 @@ import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
-import type {
-  DiffIndexCommit,
-  DiffIndexFileStat,
-  DiffIndexFileStatus,
-  DiffIndexRepository,
-} from "@sdk/types.gen";
+import type { DiffIndexCommit, DiffIndexFileStat, DiffIndexFileStatus, DiffIndexRepository } from "@sdk/types.gen";
 
 import { formatBytes } from "../formatting";
 import { taskDiffCache } from "../diffCache";
@@ -140,11 +135,7 @@ export default function DiffDetail(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button
-          class={styles.backBtn}
-          onClick={() => navigate(props.taskPath)}
-          title="Back to task"
-        >
+        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span class={styles.headerMeta}>Repository changes</span>
@@ -248,9 +239,7 @@ export default function DiffDetail(props: Props) {
                                               originalPath: "",
                                             })
                                           }
-                                          onLoadError={(err) =>
-                                            props.onTaskRefreshError?.(props.taskId, err) ?? false
-                                          }
+                                          onLoadError={(err) => props.onTaskRefreshError?.(props.taskId, err) ?? false}
                                           lineWrap={lineWrap()}
                                           variant="commit"
                                           expanded={expandedRows().has(file.id)}
@@ -261,8 +250,7 @@ export default function DiffDetail(props: Props) {
                                     }}
                                   </For>
                                   <div class={styles.commitSummary}>
-                                    {commit.stat.length}{" "}
-                                    {commit.stat.length === 1 ? "file" : "files"} changed
+                                    {commit.stat.length} {commit.stat.length === 1 ? "file" : "files"} changed
                                   </div>
                                 </div>
                               </Show>
@@ -299,9 +287,7 @@ export default function DiffDetail(props: Props) {
                                     originalPath: file.originalPath ?? "",
                                   })
                                 }
-                                onLoadError={(err) =>
-                                  props.onTaskRefreshError?.(props.taskId, err) ?? false
-                                }
+                                onLoadError={(err) => props.onTaskRefreshError?.(props.taskId, err) ?? false}
                                 statuses={statusLabels(file)}
                                 lineWrap={lineWrap()}
                                 variant="uncommitted"
@@ -354,16 +340,14 @@ function FileDiffRow(props: FileDiffRowProps) {
   onCleanup(() => {
     if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
   });
-  const pathLabel = () =>
-    props.originalPath ? `${props.originalPath} → ${props.path}` : props.path;
+  const pathLabel = () => (props.originalPath ? `${props.originalPath} → ${props.path}` : props.path);
 
   const load = async (version: number, force: boolean) => {
     if (loading()) {
       if (props.variant === "uncommitted") pendingVersion = Math.max(pendingVersion, version);
       return;
     }
-    if (!force && diff() !== null && (props.variant === "commit" || version <= loadedVersion))
-      return;
+    if (!force && diff() !== null && (props.variant === "commit" || version <= loadedVersion)) return;
     if (version >= pendingVersion) pendingVersion = -1;
     const retryWasFocused = document.activeElement === retryButton;
     setLoading(true);
@@ -466,9 +450,7 @@ function FileDiffRow(props: FileDiffRowProps) {
               </Show>
             }
           >
-            {(loadedDiff) => (
-              <UnifiedDiffBlock diff={loadedDiff()} hideFileHeader lineWrap={props.lineWrap} />
-            )}
+            {(loadedDiff) => <UnifiedDiffBlock diff={loadedDiff()} hideFileHeader lineWrap={props.lineWrap} />}
           </Show>
           <Show when={loadError()}>
             {(message) => (
@@ -509,11 +491,7 @@ function FilePath(props: { path: string; class?: string }) {
   const [displayPath, setDisplayPath] = createSignal("");
 
   const updateDisplayPath = (path: string) => {
-    if (
-      !pathEl ||
-      typeof window.matchMedia !== "function" ||
-      !window.matchMedia("(max-width: 768px)").matches
-    ) {
+    if (!pathEl || typeof window.matchMedia !== "function" || !window.matchMedia("(max-width: 768px)").matches) {
       setDisplayPath(path);
       return;
     }
@@ -524,8 +502,7 @@ function FilePath(props: { path: string; class?: string }) {
     context.font = style.font;
     const letterSpacing = Number.parseFloat(style.letterSpacing);
     const measureText = (text: string) =>
-      context.measureText(text).width +
-      (Number.isFinite(letterSpacing) ? letterSpacing * (text.length - 1) : 0);
+      context.measureText(text).width + (Number.isFinite(letterSpacing) ? letterSpacing * (text.length - 1) : 0);
     setDisplayPath(elidePathAtBoundary(path, pathEl.clientWidth, measureText));
   };
 
@@ -578,12 +555,7 @@ export function elidePathAtBoundary(
   return measureText(filenameWithEllipsis) <= availableWidth ? filenameWithEllipsis : filename;
 }
 
-function FileCounts(props: {
-  linesAdded: number;
-  linesDeleted: number;
-  oldSize: number;
-  newSize: number;
-}) {
+function FileCounts(props: { linesAdded: number; linesDeleted: number; oldSize: number; newSize: number }) {
   return (
     <Show
       when={props.oldSize >= 0 || props.newSize >= 0}

@@ -42,25 +42,36 @@ class HaloEmulatorBridgeClientTest {
         server.enqueue(
             MockResponse().withWebSocketUpgrade(
                 object : WebSocketListener() {
-                    override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                    override fun onOpen(
+                        webSocket: WebSocket,
+                        response: okhttp3.Response,
+                    ) {
                         serverSocket.set(webSocket)
                         serverSocketOpened.countDown()
                     }
 
-                    override fun onMessage(webSocket: WebSocket, text: String) {
+                    override fun onMessage(
+                        webSocket: WebSocket,
+                        text: String,
+                    ) {
                         val request = Json.parseToJsonElement(text) as JsonObject
                         lastRequest.set(request)
-                        val response = buildJsonObject {
-                            put("id", request.value("id"))
-                            put("ok", JsonPrimitive(true))
-                            if (request.text("op") == "ping") {
-                                put("running", JsonPrimitive(true))
+                        val response =
+                            buildJsonObject {
+                                put("id", request.value("id"))
+                                put("ok", JsonPrimitive(true))
+                                if (request.text("op") == "ping") {
+                                    put("running", JsonPrimitive(true))
+                                }
                             }
-                        }
                         webSocket.send(response.toString())
                     }
 
-                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    override fun onClosing(
+                        webSocket: WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) {
                         webSocket.close(code, reason)
                     }
                 },
@@ -77,42 +88,45 @@ class HaloEmulatorBridgeClientTest {
     }
 
     @Test
-    fun `ping parses bridge status`() = runBlocking {
-        client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
+    fun `ping parses bridge status`() =
+        runBlocking {
+            client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
 
-        val status = client.ping()
+            val status = client.ping()
 
-        assertTrue(status.running)
-        assertNull(status.error)
-        assertEquals("ping", lastRequest.get().text("op"))
-    }
-
-    @Test
-    fun `sendMessage encodes payload`() = runBlocking {
-        client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
-
-        client.sendMessage(0x10, byteArrayOf(1, 2, 3))
-
-        val request = lastRequest.get()
-        assertEquals("send_message", request.text("op"))
-        assertEquals(0x10, request.value("msgCode").jsonPrimitive.int)
-        assertArrayEquals(byteArrayOf(1, 2, 3), Base64.getDecoder().decode(request.text("payload")))
-    }
+            assertTrue(status.running)
+            assertNull(status.error)
+            assertEquals("ping", lastRequest.get().text("op"))
+        }
 
     @Test
-    fun `bluetooth event emits decoded data`() = runBlocking {
-        client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
-        awaitServerSocket().send(
-            buildJsonObject {
-                put("event", JsonPrimitive("bluetooth_sent"))
-                put("data", JsonPrimitive(Base64.getEncoder().encodeToString(byteArrayOf(4, 5, 6))))
-            }.toString(),
-        )
+    fun `sendMessage encodes payload`() =
+        runBlocking {
+            client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
 
-        val event = client.events.first() as HaloEmulatorEvent.BluetoothSent
+            client.sendMessage(0x10, byteArrayOf(1, 2, 3))
 
-        assertArrayEquals(byteArrayOf(4, 5, 6), event.data)
-    }
+            val request = lastRequest.get()
+            assertEquals("send_message", request.text("op"))
+            assertEquals(0x10, request.value("msgCode").jsonPrimitive.int)
+            assertArrayEquals(byteArrayOf(1, 2, 3), Base64.getDecoder().decode(request.text("payload")))
+        }
+
+    @Test
+    fun `bluetooth event emits decoded data`() =
+        runBlocking {
+            client.connect(server.url("/bridge").toString().replace("http://", "ws://"))
+            awaitServerSocket().send(
+                buildJsonObject {
+                    put("event", JsonPrimitive("bluetooth_sent"))
+                    put("data", JsonPrimitive(Base64.getEncoder().encodeToString(byteArrayOf(4, 5, 6))))
+                }.toString(),
+            )
+
+            val event = client.events.first() as HaloEmulatorEvent.BluetoothSent
+
+            assertArrayEquals(byteArrayOf(4, 5, 6), event.data)
+        }
 
     private fun awaitServerSocket(): WebSocket {
         assertTrue(serverSocketOpened.await(SERVER_SOCKET_TIMEOUT_SECONDS, TimeUnit.SECONDS))

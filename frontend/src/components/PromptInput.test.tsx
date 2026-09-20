@@ -13,13 +13,7 @@ const fakeImage: APIImageData = { mediaType: "image/png", data: "iVBOR" };
 describe("PromptInput", () => {
   it("renders textarea with placeholder", () => {
     const { getByRole } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        placeholder="Describe a task..."
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} placeholder="Describe a task..." />
     ));
     expect(getByRole("textbox")).toHaveAttribute("data-placeholder", "Describe a task...");
   });
@@ -28,13 +22,7 @@ describe("PromptInput", () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     const { getByRole } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        onSubmit={onSubmit}
-        images={[]}
-        onImagesChange={() => {}}
-      />
+      <PromptInput value="" onInput={() => {}} onSubmit={onSubmit} images={[]} onImagesChange={() => {}} />
     ));
     getByRole("textbox").focus();
     await user.keyboard("{Enter}");
@@ -43,26 +31,14 @@ describe("PromptInput", () => {
 
   it("shows attach button when supportsImages is true", () => {
     const { getByRole } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
     expect(getByRole("button", { name: "Attach images" })).toBeInTheDocument();
   });
 
   it("hides attach button when supportsImages is false", () => {
     const { queryByRole } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        supportsImages={false}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={false} />
     ));
     expect(queryByRole("button", { name: "Attach images" })).not.toBeInTheDocument();
   });
@@ -78,12 +54,7 @@ describe("PromptInput", () => {
     const user = userEvent.setup();
     const onImagesChange = vi.fn();
     const { getByRole } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[fakeImage]}
-        onImagesChange={onImagesChange}
-      />
+      <PromptInput value="" onInput={() => {}} images={[fakeImage]} onImagesChange={onImagesChange} />
     ));
     await user.click(getByRole("button", { name: "Remove" }));
     expect(onImagesChange).toHaveBeenCalledWith([]);
@@ -100,13 +71,7 @@ describe("PromptInput", () => {
 
   it("adds dragOver class on dragover and removes on dragleave", () => {
     const { container } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
     const wrapper = container.firstElementChild as HTMLElement;
     fireEvent.dragOver(wrapper, { dataTransfer: { files: [] } });
@@ -119,13 +84,7 @@ describe("PromptInput", () => {
   it("calls onImagesChange on drop with image files", async () => {
     const onImagesChange = vi.fn();
     const { container } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={onImagesChange}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={onImagesChange} supportsImages={true} />
     ));
     const wrapper = container.firstElementChild as HTMLElement;
     const file = new File(["fake"], "test.png", { type: "image/png" });
@@ -143,13 +102,7 @@ describe("PromptInput", () => {
   it("calls onImagesChange on paste with image data", async () => {
     const onImagesChange = vi.fn();
     const { getByRole } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={onImagesChange}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={onImagesChange} supportsImages={true} />
     ));
     const textarea = getByRole("textbox");
     const file = new File(["fake"], "paste.png", { type: "image/png" });
@@ -167,13 +120,7 @@ describe("PromptInput", () => {
   it("opens attach menu on attach button click", async () => {
     const user = userEvent.setup();
     const { getByRole, getByText, queryByText } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
     expect(queryByText("Take photo")).not.toBeInTheDocument();
     await user.click(getByRole("button", { name: "Attach images" }));
@@ -185,13 +132,7 @@ describe("PromptInput", () => {
   it("closes attach menu and opens file picker on Choose file", async () => {
     const user = userEvent.setup();
     const { getByRole, getByText, queryByText } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
     await user.click(getByRole("button", { name: "Attach images" }));
     const fileInput = document.querySelector("input[type=file]") as HTMLInputElement;
@@ -205,13 +146,7 @@ describe("PromptInput", () => {
   it("toggles attach menu closed on second click", async () => {
     const user = userEvent.setup();
     const { getByRole, getByText, queryByText } = render(() => (
-      <PromptInput
-        value=""
-        onInput={() => {}}
-        images={[]}
-        onImagesChange={() => {}}
-        supportsImages={true}
-      />
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
     await user.click(getByRole("button", { name: "Attach images" }));
     expect(getByText("Take photo")).toBeInTheDocument();

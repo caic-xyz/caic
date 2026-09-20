@@ -4,8 +4,6 @@ package com.fghbuild.gomode.ui.settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -14,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material3.Button
@@ -62,12 +62,13 @@ fun SettingsScreen(
 
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp)
-                .testTag("gomode-settings"),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+                    .testTag("gomode-settings"),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("Go Mode", style = MaterialTheme.typography.headlineMedium)
@@ -133,9 +134,10 @@ fun SettingsScreen(
                                 onDone()
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("gomode-service-${service.id}"),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .testTag("gomode-service-${service.id}"),
                     ) {
                         Text(service.label.ifBlank { service.url })
                     }
@@ -160,5 +162,4 @@ fun SettingsScreen(
     }
 }
 
-private fun hasSupportedScheme(url: String): Boolean =
-    url.startsWith("http://") || url.startsWith("https://")
+private fun hasSupportedScheme(url: String): Boolean = url.startsWith("http://") || url.startsWith("https://")

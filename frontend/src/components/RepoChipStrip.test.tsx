@@ -57,9 +57,7 @@ describe("RepoChipStrip", () => {
     await user.click(screen.getByRole("button", { name: `Branch for ${repoA.path}` }));
     expect(await screen.findByRole("option", { name: /available Adopt/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /occupied Branch off/ })).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: /remote-only.*origin.*Branch off/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /remote-only.*origin.*Branch off/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Default.*main.*Branch off/ })).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
@@ -85,9 +83,7 @@ describe("RepoChipStrip", () => {
     ));
 
     await user.click(screen.getByRole("button", { name: "Manage repositories" }));
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus());
     await user.keyboard("{ArrowDown}{Enter}");
 
     expect(onAdd).toHaveBeenCalledWith("repos/b");
@@ -112,9 +108,7 @@ describe("RepoChipStrip", () => {
     ));
 
     await user.click(screen.getByRole("button", { name: "Manage repositories" }));
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Manage repositories" })).toHaveFocus());
     expect(screen.queryByRole("option", { name: repoA.path })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: repoB.path })).toBeInTheDocument();
     await user.keyboard("{Enter}");

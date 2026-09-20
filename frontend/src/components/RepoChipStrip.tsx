@@ -135,9 +135,7 @@ export default function RepoChipStrip(props: Props) {
       </For>
       <Show
         when={
-          props.selectedRepos().length > 0 ||
-          props.availableRecent().length > 0 ||
-          props.availableRest().length > 0
+          props.selectedRepos().length > 0 || props.availableRecent().length > 0 || props.availableRest().length > 0
         }
       >
         <div class={styles.addRepoWrap}>

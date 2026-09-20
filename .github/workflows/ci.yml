@@ -29,16 +29,21 @@ jobs:
           runtime: node@26
           cache: true
           install: false
-      - name: Lint (Go)
+      - uses: actions/setup-python@v7
         if: runner.os == 'Linux'
-        run: make lint-go
-      - name: Lint (Frontend)
+        with:
+          python-version: "3.x"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         if: runner.os == 'Linux'
-        run: make lint-frontend
-      - name: Lint (Binaries)
+      - name: Verify (format check and lint)
         if: runner.os == 'Linux'
-        run: make lint-binaries
-      - run: make build
+        run: make verify
+      - name: Build and verify the generated files are committed
+        if: runner.os == 'Linux'
+        run: |
+          make build
+          status=$(git status --porcelain)
+          [ -z "$status" ] || { echo 'The build left a dirty worktree; commit the generated files it rewrote:' >&2; echo "$status" >&2; exit 1; }
       - name: Test
         if: runner.os != 'Linux'
         run: make test

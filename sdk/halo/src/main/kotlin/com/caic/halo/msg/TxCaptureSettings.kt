@@ -8,7 +8,9 @@ data class TxCaptureSettings(
     val raw: Boolean = false,
 ) : TxMessage {
     init {
-        require(resolution in 100..720 && resolution % 2 == 0) { "resolution must be an even value in 100..720, got $resolution" }
+        require(resolution in 100..720 && resolution % 2 == 0) {
+            "resolution must be an even value in 100..720, got $resolution"
+        }
         require(qualityIndex in 0..4) { "qualityIndex must be 0..4, got $qualityIndex" }
         require(pan in -140..140) { "pan must be -140..140, got $pan" }
     }

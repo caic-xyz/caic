@@ -73,8 +73,7 @@ interface SettingsFormProps {
 }
 
 export default function SettingsForm(props: SettingsFormProps) {
-  const refreshableHarnesses = () =>
-    props.harnesses().filter((harness) => harness.supportsModelRefresh);
+  const refreshableHarnesses = () => props.harnesses().filter((harness) => harness.supportsModelRefresh);
   const formatBytes = (bytes: number): string => {
     if (bytes <= 0) return "0 B";
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -96,16 +95,12 @@ export default function SettingsForm(props: SettingsFormProps) {
   };
   const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
     props.setCacheMappings((prev) =>
-      prev.map((mapping, i) =>
-        i === index ? { ...mapping, ...update, resolvedContainerPath: undefined } : mapping,
-      ),
+      prev.map((mapping, i) => (i === index ? { ...mapping, ...update, resolvedContainerPath: undefined } : mapping)),
     );
   };
   const updateCustomMount = (index: number, update: Partial<MountMappingResp>) => {
     props.setCustomMounts((prev) =>
-      prev.map((mount, i) =>
-        i === index ? { ...mount, ...update, resolvedContainerPath: undefined } : mount,
-      ),
+      prev.map((mount, i) => (i === index ? { ...mount, ...update, resolvedContainerPath: undefined } : mount)),
     );
   };
 
@@ -185,9 +180,7 @@ export default function SettingsForm(props: SettingsFormProps) {
               }}
             />
           </label>
-          <p class={styles.settingsDescription}>
-            Maximum CPU cores for each container (0 = use default).
-          </p>
+          <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
@@ -227,8 +220,8 @@ export default function SettingsForm(props: SettingsFormProps) {
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Custom caches</h3>
           <p class={styles.settingsDescription}>
-            Persistent host directories mounted into each container for tool caches. Leave the
-            container path blank to use the same <code>~</code> path.
+            Persistent host directories mounted into each container for tool caches. Leave the container path blank to
+            use the same <code>~</code> path.
           </p>
           <Index each={props.cacheMappings()}>
             {(mapping, index) => (
@@ -252,9 +245,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   />
                   <span class={styles.visuallyHidden}>Enable custom cache</span>
                 </label>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>
-                  Host path
-                </span>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingHostInput}`}
@@ -273,16 +264,13 @@ export default function SettingsForm(props: SettingsFormProps) {
                 <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">
                   →
                 </span>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>
-                  Container path
-                </span>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
                   aria-label="Container path"
                   placeholder={
-                    defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath) ||
-                    "Container path"
+                    defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath) || "Container path"
                   }
                   value={mapping().containerPath}
                   onInput={(e) =>
@@ -301,8 +289,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   }
                 >
                   <span class={styles.mappingPathHint}>
-                    Uses {defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)}{" "}
-                    by default
+                    Uses {defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)} by default
                   </span>
                 </Show>
                 <button
@@ -323,10 +310,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             type="button"
             class={styles.settingsButton}
             onClick={() => {
-              props.setCacheMappings([
-                ...props.cacheMappings(),
-                { hostPath: "", containerPath: "", enabled: true },
-              ]);
+              props.setCacheMappings([...props.cacheMappings(), { hostPath: "", containerPath: "", enabled: true }]);
             }}
           >
             + Add mapping
@@ -335,8 +319,8 @@ export default function SettingsForm(props: SettingsFormProps) {
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Custom mounts</h3>
           <p class={styles.settingsDescription}>
-            Additional host directories mounted into each container. Leave the container path blank
-            to use the same <code>~</code> path.
+            Additional host directories mounted into each container. Leave the container path blank to use the same{" "}
+            <code>~</code> path.
           </p>
           <Index each={props.customMounts()}>
             {(mount, index) => (
@@ -360,9 +344,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   />
                   <span class={styles.visuallyHidden}>Enable custom mount</span>
                 </label>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>
-                  Host path
-                </span>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingHostInput}`}
@@ -381,16 +363,13 @@ export default function SettingsForm(props: SettingsFormProps) {
                 <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">
                   →
                 </span>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>
-                  Container path
-                </span>
+                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
                 <input
                   type="text"
                   class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
                   aria-label="Container path"
                   placeholder={
-                    defaultContainerPath(mount().hostPath, mount().resolvedContainerPath) ||
-                    "Container path"
+                    defaultContainerPath(mount().hostPath, mount().resolvedContainerPath) || "Container path"
                   }
                   value={mount().containerPath}
                   onInput={(e) =>
@@ -409,15 +388,10 @@ export default function SettingsForm(props: SettingsFormProps) {
                   }
                 >
                   <span class={styles.mappingPathHint}>
-                    Uses {defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)} by
-                    default
+                    Uses {defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)} by default
                   </span>
                 </Show>
-                <label
-                  class={styles.mountOptionToggle}
-                  title="Mount read-only"
-                  data-testid="mount-read-only"
-                >
+                <label class={styles.mountOptionToggle} title="Mount read-only" data-testid="mount-read-only">
                   <input
                     type="checkbox"
                     checked={mount().readOnly ?? false}
@@ -467,9 +441,7 @@ export default function SettingsForm(props: SettingsFormProps) {
         <Show when={props.mcpOAuthAvailable()}>
           <div class={styles.settingsSection}>
             <h3 class={styles.settingsSectionTitle}>MCP clients</h3>
-            <p class={styles.settingsDescription}>
-              Remote clients authorized to access caic through MCP OAuth.
-            </p>
+            <p class={styles.settingsDescription}>Remote clients authorized to access caic through MCP OAuth.</p>
             <Show
               when={!props.oauthGrantError()}
               fallback={
@@ -488,9 +460,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                       <div class={styles.oauthGrantCard} data-status={grant.status}>
                         <div class={styles.oauthGrantHeader}>
                           <div>
-                            <div class={styles.oauthGrantName}>
-                              {grant.clientName || grant.clientID}
-                            </div>
+                            <div class={styles.oauthGrantName}>{grant.clientName || grant.clientID}</div>
                             <div class={styles.oauthGrantMeta}>{grant.clientID}</div>
                           </div>
                           <span class={styles.oauthGrantStatus}>{grant.status}</span>
@@ -511,9 +481,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                               void props.revokeOAuthClientGrant(grant.id);
                             }}
                           >
-                            {props.revokingOAuthGrantID() === grant.id
-                              ? "Revoking…"
-                              : "Revoke access"}
+                            {props.revokingOAuthGrantID() === grant.id ? "Revoking…" : "Revoke access"}
                           </button>
                         </Show>
                       </div>
@@ -535,9 +503,7 @@ export default function SettingsForm(props: SettingsFormProps) {
               aria-describedby="purge-delay-description"
               onInput={(e) => {
                 e.currentTarget.setCustomValidity(
-                  parseDuration(e.currentTarget.value) === null
-                    ? "Enter a duration such as 1m31s."
-                    : "",
+                  parseDuration(e.currentTarget.value) === null ? "Enter a duration such as 1m31s." : "",
                 );
               }}
               onChange={(e) => {
@@ -554,8 +520,8 @@ export default function SettingsForm(props: SettingsFormProps) {
             />
           </label>
           <p id="purge-delay-description" class={styles.settingsDescription}>
-            How long a task remains stopped and revivable before deletion. Use duration syntax such
-            as 1m31s; allowed range is 10s–24h.
+            How long a task remains stopped and revivable before deletion. Use duration syntax such as 1m31s; allowed
+            range is 10s–24h.
           </p>
           <label class={styles.settingsLabel}>
             <input
@@ -570,8 +536,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             Auto-fix CI failures
           </label>
           <p class={styles.settingsDescription}>
-            When CI fails on a PR and the agent has finished, automatically start a new task to fix
-            it.
+            When CI fails on a PR and the agent has finished, automatically start a new task to fix it.
           </p>
           <label class={styles.settingsLabel}>
             <input
@@ -586,24 +551,18 @@ export default function SettingsForm(props: SettingsFormProps) {
             Auto-fix PRs
           </label>
           <p class={styles.settingsDescription}>
-            When a pull request is opened or reopened, automatically start a task to review and fix
-            it.
+            When a pull request is opened or reopened, automatically start a task to review and fix it.
           </p>
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Models</h3>
           <p class={styles.settingsDescription}>
-            Reload a coding agent’s model list. Refreshing OpenCode also refreshes its models.dev
-            cache.
+            Reload a coding agent’s model list. Refreshing OpenCode also refreshes its models.dev cache.
           </p>
           <div class={styles.modelRefreshActions}>
             <For
               each={refreshableHarnesses()}
-              fallback={
-                <p class={styles.settingsDescription}>
-                  No installed coding agents support model refresh.
-                </p>
-              }
+              fallback={<p class={styles.settingsDescription}>No installed coding agents support model refresh.</p>}
             >
               {(harness) => (
                 <Button
@@ -651,10 +610,7 @@ export default function SettingsForm(props: SettingsFormProps) {
                   Current: <strong>caic v{v().current}</strong>
                   <Show when={v().latest}>
                     {" — "}
-                    <Show
-                      when={v().updateAvailable}
-                      fallback={<>latest: v{v().latest} (up to date)</>}
-                    >
+                    <Show when={v().updateAvailable} fallback={<>latest: v{v().latest} (up to date)</>}>
                       latest: <strong>v{v().latest}</strong> (update available)
                     </Show>
                   </Show>

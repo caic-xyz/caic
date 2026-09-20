@@ -30,12 +30,14 @@ frontend.
 
 ### Professionalism
 
-**Mandatory**: always run `make lint-fix` after making changes.
+**Mandatory**: after making changes run `make lint-fix`, then `make format`, then `make verify`.
 
-```bash
-make lint-fix  # Fix linting issues: Go + frontend + Python + binaries + file indexes.
-make check     # Refresh generated files, build, lint, and test (non-Android).
-```
+`make lint-fix` applies the autofixes (golangci-lint, eslint, stylelint, ruff) and refreshes generated file
+indexes and the architecture diagram; `make format` applies the formatters (prettier, gofmt, ruff format,
+shfmt, and ktlint for the Android and Halo Kotlin); `make verify` re-checks both and is the pre-push gate.
+A few rules still need a manual edit, such as `UP031` in `backend/internal/agent/relay/relay_v2.py`.
+Indentation and width come from `.editorconfig`; Ruff keeps its own copy of the width in `pyproject.toml`
+because it does not read `.editorconfig`.
 
 ### Git Hooks
 
@@ -130,6 +132,9 @@ Run `make` to get the current targets. It's fast.
 
 Run `make refresh-generated` after changing API DTOs/routes, generated SDK
 inputs, file-indexed source comments, or backend package layout.
+
+CI builds the frontend and fails if the build left the worktree dirty, so the
+committed frontend assets cannot drift from the sources that produce them.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

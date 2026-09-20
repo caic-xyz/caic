@@ -128,9 +128,7 @@ it("accepts a parent layout request to elide line totals", () => {
 
   const marker = screen.getByRole("img");
   expect(marker).toHaveAttribute("data-elide-diff-stats", "");
-  expect(marker).toHaveAccessibleName(
-    "4 changed files, 17 additions, 2 deletions, 1 commit ahead of upstream",
-  );
+  expect(marker).toHaveAccessibleName("4 changed files, 17 additions, 2 deletions, 1 commit ahead of upstream");
 });
 
 it("links a state marker to its repository diff", () => {

@@ -53,9 +53,7 @@ describe("ProcessDetail", () => {
     process.startedAt = new Date(Date.now() - 90_000).toISOString() as ISOTimestamp;
     vi.mocked(getTaskProcesses).mockResolvedValue({ processes: [process] });
 
-    render(() => (
-      <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />
-    ));
+    render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("1m 30s")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
@@ -161,13 +159,7 @@ describe("buildTree", () => {
   });
 
   it("flattens to expected depths", () => {
-    const procs = [
-      p(1, 0, "init"),
-      p(2, 1, "daemon"),
-      p(3, 2, "worker1"),
-      p(4, 2, "worker2"),
-      p(5, 0, "other"),
-    ];
+    const procs = [p(1, 0, "init"), p(2, 1, "daemon"), p(3, 2, "worker1"), p(4, 2, "worker2"), p(5, 0, "other")];
     const flat = flattenTree(buildTree(procs));
     expect(flat).toEqual([
       { pid: 1, depth: 0 },
@@ -245,9 +237,7 @@ describe("ProcessDetail tree collapsing", () => {
 
   function renderProcesses(procs: ProcessInfo[]): void {
     vi.mocked(getTaskProcesses).mockResolvedValue({ processes: procs });
-    render(() => (
-      <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />
-    ));
+    render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
   }
 
   it("collapses subtrees past the auto-collapse depth", async () => {

@@ -48,10 +48,7 @@ export class IncrementalToolTimingTracker {
   private dirty = false;
 
   derive(events: readonly EventMessage[]): ToolTimingSummary[] {
-    if (
-      events.length < this.processed ||
-      (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)
-    ) {
+    if (events.length < this.processed || (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)) {
       this.clear();
     }
     for (let i = this.processed; i < events.length; i++) this.append(events[i]);

@@ -3,13 +3,9 @@ import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } fr
 
 // Minimal 1×1 transparent PNG encoded as base64, used as a lightweight test fixture
 // when we need valid image bytes to send via the API.
-const TINY_PNG_B64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
+const TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
 
-test("API: images are accepted in task inputs when harness supports them", async ({
-  api,
-  uniquePrompt,
-}) => {
+test("API: images are accepted in task inputs when harness supports them", async ({ api, uniquePrompt }) => {
   const id = await createTaskAPI(api, uniquePrompt("image-api"));
   await waitForTaskState(api, id, "waiting");
 

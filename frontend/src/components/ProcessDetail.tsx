@@ -110,10 +110,7 @@ export function buildTree(procs: ProcessInfo[]): ProcessNode[] {
 // descendants of collapsed nodes. It returns the stable ProcessNode identities
 // so <For> reuses existing rows, and it is iterative so any tree depth renders
 // without growing the call stack.
-export function visibleProcesses(
-  roots: ProcessNode[],
-  isCollapsed: (node: ProcessNode) => boolean,
-): ProcessNode[] {
+export function visibleProcesses(roots: ProcessNode[], isCollapsed: (node: ProcessNode) => boolean): ProcessNode[] {
   const visible: ProcessNode[] = [];
   const stack: ProcessNode[] = [];
   for (let i = roots.length - 1; i >= 0; i--) {
@@ -171,10 +168,7 @@ function ProcessRow(props: RowProps) {
     <tr>
       <td class={`${styles.td} ${styles.actions}`}>
         <div class={styles.actionsRow}>
-          <span
-            class={styles.treeToggle}
-            style={{ width: `${indent()}px`, "min-width": `${indent()}px` }}
-          >
+          <span class={styles.treeToggle} style={{ width: `${indent()}px`, "min-width": `${indent()}px` }}>
             <Show when={hasChildren()}>
               <button
                 class={styles.toggleBtn}
@@ -182,11 +176,7 @@ function ProcessRow(props: RowProps) {
                 aria-expanded={!props.collapsed}
                 title={props.collapsed ? "Expand children" : "Collapse children"}
               >
-                {props.collapsed ? (
-                  <ChevronRightIcon width={12} height={12} />
-                ) : (
-                  <ExpandIcon width={12} height={12} />
-                )}
+                {props.collapsed ? <ChevronRightIcon width={12} height={12} /> : <ExpandIcon width={12} height={12} />}
               </button>
             </Show>
           </span>
@@ -225,9 +215,7 @@ function ProcessRow(props: RowProps) {
       <td class={styles.td}>{formatBytes(props.node.rssBytes)}</td>
       <td class={styles.td}>{formatElapsed(props.node.cpuTime / 1_000_000)}</td>
       <td class={styles.td}>{formatTime(props.node.startedAt)}</td>
-      <td class={styles.td}>
-        {formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}
-      </td>
+      <td class={styles.td}>{formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}</td>
       <td class={`${styles.td} ${styles.cmd}`}>{props.node.command}</td>
     </tr>
   );
@@ -322,8 +310,7 @@ export default function ProcessDetail(props: Props) {
       await signalProcess(id, String(pid), { signal: sig });
       await refresh();
     } catch (e: unknown) {
-      if (!onTaskRefreshError?.(id, e))
-        setError(e instanceof Error ? e.message : "Failed to send signal");
+      if (!onTaskRefreshError?.(id, e)) setError(e instanceof Error ? e.message : "Failed to send signal");
     } finally {
       setSignallingPid(null);
     }
@@ -332,11 +319,7 @@ export default function ProcessDetail(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button
-          class={styles.backBtn}
-          onClick={() => navigate(props.taskPath)}
-          title="Back to task"
-        >
+        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span class={styles.headerMeta}>
@@ -365,10 +348,7 @@ export default function ProcessDetail(props: Props) {
         <Show when={!loading() && !error()}>
           <Show when={tree()} keyed fallback={<div class={styles.empty}>No running processes</div>}>
             {(roots) => (
-              <Show
-                when={roots.length > 0}
-                fallback={<div class={styles.empty}>No running processes</div>}
-              >
+              <Show when={roots.length > 0} fallback={<div class={styles.empty}>No running processes</div>}>
                 <table class={styles.table}>
                   <thead>
                     <tr>

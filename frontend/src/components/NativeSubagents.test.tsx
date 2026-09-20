@@ -77,9 +77,7 @@ describe("NativeAgents", () => {
   it("marks a detached run and keeps its data attribute", () => {
     render(() => <NativeAgents activities={activities} settled={false} />);
     expect(screen.getByText("background")).toBeInTheDocument();
-    const detached = screen
-      .getByTestId("native-subagents")
-      .querySelector('[data-background="true"]');
+    const detached = screen.getByTestId("native-subagents").querySelector('[data-background="true"]');
     expect(detached).not.toBeNull();
     expect(detached?.getAttribute("data-native-id")).toBe("b");
   });

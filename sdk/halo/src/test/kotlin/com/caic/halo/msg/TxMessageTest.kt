@@ -11,7 +11,6 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class TxMessageTest {
-
     // ---- TxPlainText ----
 
     @Test
@@ -48,10 +47,26 @@ class TxMessageTest {
 
     @Test
     fun `plain text rejects out-of-bounds coordinates`() {
-        try { TxPlainText("x", x = 0); fail() } catch (_: IllegalArgumentException) { }
-        try { TxPlainText("x", x = 257); fail() } catch (_: IllegalArgumentException) { }
-        try { TxPlainText("x", y = 0); fail() } catch (_: IllegalArgumentException) { }
-        try { TxPlainText("x", y = 257); fail() } catch (_: IllegalArgumentException) { }
+        try {
+            TxPlainText("x", x = 0)
+            fail()
+        } catch (_: IllegalArgumentException) {
+        }
+        try {
+            TxPlainText("x", x = 257)
+            fail()
+        } catch (_: IllegalArgumentException) {
+        }
+        try {
+            TxPlainText("x", y = 0)
+            fail()
+        } catch (_: IllegalArgumentException) {
+        }
+        try {
+            TxPlainText("x", y = 257)
+            fail()
+        } catch (_: IllegalArgumentException) {
+        }
     }
 
     // ---- TxCode ----
@@ -72,27 +87,29 @@ class TxMessageTest {
 
     @Test
     fun `auto exposure settings pack format`() {
-        val packed = TxAutoExpSettings(
-            meteringIndex = 1,
-            exposure = 1.0,
-            exposureSpeed = 0.0,
-            shutterLimit = 0x1234,
-            analogGainLimit = 16,
-            whiteBalanceSpeed = 0.5,
-            rgbGainLimit = 0x0123,
-        ).pack()
+        val packed =
+            TxAutoExpSettings(
+                meteringIndex = 1,
+                exposure = 1.0,
+                exposureSpeed = 0.0,
+                shutterLimit = 0x1234,
+                analogGainLimit = 16,
+                whiteBalanceSpeed = 0.5,
+                rgbGainLimit = 0x0123,
+            ).pack()
         assertArrayEquals(byteArrayOf(0x01, 0xFF.toByte(), 0x00, 0x12, 0x34, 0x10, 0x80.toByte(), 0x01, 0x23), packed)
     }
 
     @Test
     fun `manual exposure settings pack format`() {
-        val packed = TxManualExpSettings(
-            manualShutter = 0x1234,
-            manualAnalogGain = 2,
-            manualRedGain = 0x0123,
-            manualGreenGain = 0x0204,
-            manualBlueGain = 0x03FF,
-        ).pack()
+        val packed =
+            TxManualExpSettings(
+                manualShutter = 0x1234,
+                manualAnalogGain = 2,
+                manualRedGain = 0x0123,
+                manualGreenGain = 0x0204,
+                manualBlueGain = 0x03FF,
+            ).pack()
         assertArrayEquals(byteArrayOf(0x12, 0x34, 0x02, 0x01, 0x23, 0x02, 0x04, 0x03, 0xFF.toByte()), packed)
     }
 

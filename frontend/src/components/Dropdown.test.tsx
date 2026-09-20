@@ -43,9 +43,7 @@ describe("Dropdown", () => {
 
     await user.keyboard("{ArrowDown}");
     await screen.findByRole("menu");
-    await vi.waitFor(() =>
-      expect(screen.getByRole("menuitem", { name: "First action" })).toHaveFocus(),
-    );
+    await vi.waitFor(() => expect(screen.getByRole("menuitem", { name: "First action" })).toHaveFocus());
 
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Last action" })).toHaveFocus();
@@ -56,9 +54,7 @@ describe("Dropdown", () => {
     await user.keyboard("{Escape}");
     trigger.focus();
     await user.keyboard("{ArrowUp}");
-    await vi.waitFor(() =>
-      expect(screen.getByRole("menuitem", { name: "Last action" })).toHaveFocus(),
-    );
+    await vi.waitFor(() => expect(screen.getByRole("menuitem", { name: "Last action" })).toHaveFocus());
   });
 
   it("closes on Escape and restores focus to its trigger", async () => {
@@ -67,11 +63,7 @@ describe("Dropdown", () => {
     function DropdownHost() {
       const [open, setOpen] = createSignal(false);
       return (
-        <Dropdown
-          open={open()}
-          onOpenChange={setOpen}
-          content={<button type="button">Menu action</button>}
-        >
+        <Dropdown open={open()} onOpenChange={setOpen} content={<button type="button">Menu action</button>}>
           <button type="button" onClick={() => setOpen(true)}>
             Open menu
           </button>

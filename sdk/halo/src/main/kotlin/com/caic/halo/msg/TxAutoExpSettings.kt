@@ -39,7 +39,10 @@ data class TxAutoExpSettings(
     }
 }
 
-private fun requireUnitInterval(name: String, value: Double) {
+private fun requireUnitInterval(
+    name: String,
+    value: Double,
+) {
     require(value in 0.0..1.0) { "$name must be 0.0..1.0, got $value" }
 }
 

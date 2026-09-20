@@ -14,11 +14,12 @@ import org.junit.Test
 class VoiceSessionTest {
     @Test
     fun voiceToolDeclarationsAddLocalHangUp() {
-        val tools = voiceToolDeclarations(
-            listOf(
-                ToolDescriptor(name = "tasks_list", description = "List tasks"),
-            ),
-        )
+        val tools =
+            voiceToolDeclarations(
+                listOf(
+                    ToolDescriptor(name = "tasks_list", description = "List tasks"),
+                ),
+            )
 
         assertEquals(listOf("hang_up", "tasks_list"), tools.map { it.name })
         assertTrue(tools.first().description.contains("End the current voice conversation"))
@@ -26,9 +27,10 @@ class VoiceSessionTest {
 
     @Test
     fun voiceToolDeclarationsRejectMCPHangUpName() {
-        val error = runCatching {
-            voiceToolDeclarations(listOf(ToolDescriptor(name = "hang_up")))
-        }.exceptionOrNull()
+        val error =
+            runCatching {
+                voiceToolDeclarations(listOf(ToolDescriptor(name = "hang_up")))
+            }.exceptionOrNull()
 
         assertTrue(error is IllegalArgumentException)
         assertEquals(
@@ -39,11 +41,12 @@ class VoiceSessionTest {
 
     @Test
     fun sessionSetupCarriesTheCapturedServiceBaseline() {
-        val setup = gatewaySessionSetup(
-            tools = emptyList(),
-            systemInstruction = "system prompt",
-            serviceContextText = "Current service items:\n- Build (running)",
-        )
+        val setup =
+            gatewaySessionSetup(
+                tools = emptyList(),
+                systemInstruction = "system prompt",
+                serviceContextText = "Current service items:\n- Build (running)",
+            )
 
         assertEquals("system prompt", setup.context.systemInstruction)
         assertEquals("Current service items:\n- Build (running)", setup.context.text)
@@ -63,10 +66,11 @@ class VoiceSessionTest {
 
     @Test
     fun summarizeSDPCandidatesReportsCandidateHostPortAndType() {
-        val sdp = "v=0\r\n" +
-            "a=candidate:1 1 udp 2130706431 70.51.33.231 42602 typ srflx " +
-            "raddr 192.168.1.123 rport 42602\r\n" +
-            "a=candidate:2 1 udp 2130706431 192.168.1.123 42602 typ host\r\n"
+        val sdp =
+            "v=0\r\n" +
+                "a=candidate:1 1 udp 2130706431 70.51.33.231 42602 typ srflx " +
+                "raddr 192.168.1.123 rport 42602\r\n" +
+                "a=candidate:2 1 udp 2130706431 192.168.1.123 42602 typ host\r\n"
 
         assertEquals(
             "70.51.33.231:42602 srflx, 192.168.1.123:42602 host",
@@ -81,18 +85,20 @@ class VoiceSessionTest {
 
     @Test
     fun formatVoiceRTCDiagnosticsSurfacesUDPMappingError() {
-        val message = formatVoiceRTCDiagnostics(
-            VoiceRTCDiagnosticsResp(
-                sessionID = "voice-session",
-                issue = VoiceRTCConnectivityIssue.UDPUnreachable,
-                side = VoiceRTCConnectivitySide.Network,
-                message = "server is waiting for a WebRTC data channel",
-                server = VoiceRTCServerDiagnostics(
-                    sessionFound = true,
-                    udpMappingError = "refresh UPnP UDP mapping 40000 -> 3478: timeout",
+        val message =
+            formatVoiceRTCDiagnostics(
+                VoiceRTCDiagnosticsResp(
+                    sessionID = "voice-session",
+                    issue = VoiceRTCConnectivityIssue.UDPUnreachable,
+                    side = VoiceRTCConnectivitySide.Network,
+                    message = "server is waiting for a WebRTC data channel",
+                    server =
+                        VoiceRTCServerDiagnostics(
+                            sessionFound = true,
+                            udpMappingError = "refresh UPnP UDP mapping 40000 -> 3478: timeout",
+                        ),
                 ),
-            ),
-        )
+            )
 
         assertTrue(message.contains("UDP mapping: refresh UPnP UDP mapping 40000 -> 3478: timeout"))
     }
@@ -131,13 +137,14 @@ class VoiceSessionTest {
 
     @Test
     fun recoveryContextPreservesFinalTranscriptAndBoundsMessage() {
-        val context = buildNetworkRecoveryContext(
-            listOf(
-                TranscriptEntry(TranscriptSpeaker.USER, "first", final = true),
-                TranscriptEntry(TranscriptSpeaker.ASSISTANT, "second", final = true),
-                TranscriptEntry(TranscriptSpeaker.USER, "partial", final = false),
-            ),
-        )
+        val context =
+            buildNetworkRecoveryContext(
+                listOf(
+                    TranscriptEntry(TranscriptSpeaker.USER, "first", final = true),
+                    TranscriptEntry(TranscriptSpeaker.ASSISTANT, "second", final = true),
+                    TranscriptEntry(TranscriptSpeaker.USER, "partial", final = false),
+                ),
+            )
 
         assertTrue(context.contains("do not treat this as a new user turn"))
         assertTrue(context.contains("user: first\nassistant: second"))

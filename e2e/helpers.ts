@@ -66,10 +66,7 @@ export type { Page } from "@playwright/test";
 // reliably fire input events on contenteditable divs).
 // ---------------------------------------------------------------------------
 
-export async function fillContentEditable(
-  locator: import("@playwright/test").Locator,
-  text: string,
-): Promise<void> {
+export async function fillContentEditable(locator: import("@playwright/test").Locator, text: string): Promise<void> {
   await locator.click();
   await locator.evaluate((el) => {
     el.textContent = "";

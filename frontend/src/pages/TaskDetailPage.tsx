@@ -50,12 +50,8 @@ export default function TaskDetailPage() {
               diffStat={t()?.diffStat}
               vncPort={t()?.runtime.vncPort ?? 0}
               sudoPassword={t()?.runtime.sudoPassword}
-              supportsImages={
-                s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages
-              }
-              supportsCompact={
-                s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact
-              }
+              supportsImages={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages}
+              supportsCompact={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact}
               rateLimit={t()?.rateLimit}
               now={s.now()}
               onStop={s.handleStop}

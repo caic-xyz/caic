@@ -48,8 +48,7 @@ export class NativeActivityTracker {
       const s = ev.nativeSubagent;
       if (ev.kind !== "nativeSubagent" || !s?.id) continue;
       const old = this.byID.get(s.id);
-      const status =
-        old && (nativeTerminal(old.status) || s.status === "unknown") ? old.status : s.status;
+      const status = old && (nativeTerminal(old.status) || s.status === "unknown") ? old.status : s.status;
       const next: NativeActivity = {
         ...s,
         toolUseID: old?.toolUseID || s.toolUseID,
@@ -68,16 +67,13 @@ export class NativeActivityTracker {
         background: old?.background || s.background,
         // Reposition only on creation or a folded status change, so running
         // heartbeats do not drag an active card toward the newest content.
-        anchorTs:
-          !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
+        anchorTs: !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
         startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
         endedAt: old?.endedAt ?? (nativeTerminal(s.status) && ev.ts > 0 ? ev.ts : null),
       };
       if (
         old &&
-        Object.keys(next).every(
-          (key) => next[key as keyof NativeActivity] === old[key as keyof NativeActivity],
-        )
+        Object.keys(next).every((key) => next[key as keyof NativeActivity] === old[key as keyof NativeActivity])
       )
         continue;
       this.byID.set(s.id, next);

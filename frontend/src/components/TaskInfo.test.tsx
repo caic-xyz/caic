@@ -134,10 +134,7 @@ describe("TaskInfo", () => {
 
     expect(await findByText("Forked from")).toBeInTheDocument();
     expect(await findByText("Child of")).toBeInTheDocument();
-    expect(await findByRole("link", { name: "snapshot-source" })).toHaveAttribute(
-      "href",
-      "/task/@snapshot-source",
-    );
+    expect(await findByRole("link", { name: "snapshot-source" })).toHaveAttribute("href", "/task/@snapshot-source");
     expect(await findByRole("link", { name: "parent" })).toHaveAttribute("href", "/task/@parent");
   });
 });

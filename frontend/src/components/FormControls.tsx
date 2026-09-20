@@ -70,9 +70,7 @@ export function HarnessControls(props: {
           aria-label={label("Harness")}
           aria-keyshortcuts={props.harnessKeyShortcuts}
           data-testid={props.labelPrefix ? "fork-harness-select" : "harness-select"}
-          title={
-            props.harnessKeyShortcuts ? `Choose harness (${props.harnessKeyShortcuts})` : undefined
-          }
+          title={props.harnessKeyShortcuts ? `Choose harness (${props.harnessKeyShortcuts})` : undefined}
           value={props.harness}
           onChange={(e) => props.onHarness(e.currentTarget.value)}
           onKeyDown={(e) => {

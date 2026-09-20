@@ -2,11 +2,7 @@
 
 import { expect, test, waitForTaskState } from "../helpers";
 
-test("task cards keep single- and multi-repository states coherent", async ({
-  page,
-  api,
-  uniquePrompt,
-}, testInfo) => {
+test("task cards keep single- and multi-repository states coherent", async ({ page, api, uniquePrompt }, testInfo) => {
   const repos = await api.listRepos();
   const harnesses = await api.listHarnesses();
   expect(repos.length).toBeGreaterThanOrEqual(2);
@@ -52,9 +48,7 @@ test("task cards keep single- and multi-repository states coherent", async ({
   await expect(multiCard.getByTestId("task-card-repo-state")).toHaveCount(2);
 
   const multiStateRows = multiCard.getByTestId("task-card-repo-state");
-  await expect(singleCard.getByTestId("task-card-repo-state")).toContainText(
-    singleRepoStatus.repositories[0].branch,
-  );
+  await expect(singleCard.getByTestId("task-card-repo-state")).toContainText(singleRepoStatus.repositories[0].branch);
   await expect(multiStateRows.nth(0)).toContainText(
     `${multiTask.repos![0].name} · ${multiRepoStatus.repositories[0].branch}`,
   );
@@ -64,10 +58,7 @@ test("task cards keep single- and multi-repository states coherent", async ({
   await expect
     .poll(async () => {
       const row = await singleCard.getByTestId("task-card-repo-state").boundingBox();
-      const stats = await singleCard
-        .getByTestId("task-card-repo-state")
-        .getByRole("img")
-        .boundingBox();
+      const stats = await singleCard.getByTestId("task-card-repo-state").getByRole("img").boundingBox();
       if (!row || !stats) return Number.POSITIVE_INFINITY;
       return Math.abs(row.x + row.width - stats.x - stats.width);
     })
@@ -75,10 +66,7 @@ test("task cards keep single- and multi-repository states coherent", async ({
   await expect
     .poll(async () => {
       const badge = await singleCard.getByTestId("state-badge").boundingBox();
-      const stats = await singleCard
-        .getByTestId("task-card-repo-state")
-        .getByRole("img")
-        .boundingBox();
+      const stats = await singleCard.getByTestId("task-card-repo-state").getByRole("img").boundingBox();
       if (!badge || !stats) return Number.POSITIVE_INFINITY;
       return Math.abs(badge.x + badge.width - stats.x - stats.width);
     })
@@ -94,11 +82,7 @@ test("task cards keep single- and multi-repository states coherent", async ({
 
   await expect
     .poll(async () =>
-      Promise.all(
-        [singleCard, multiCard].map((card) =>
-          card.evaluate((el) => el.scrollWidth <= el.clientWidth),
-        ),
-      ),
+      Promise.all([singleCard, multiCard].map((card) => card.evaluate((el) => el.scrollWidth <= el.clientWidth))),
     )
     .toEqual([true, true]);
 

@@ -32,14 +32,7 @@ import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
-import {
-  formatElapsed,
-  formatTokens,
-  tokenColor,
-  stateColor,
-  staleStateColor,
-  isCacheStale,
-} from "../formatting";
+import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { formatQuotaCountdown } from "../quota";
 
 export interface TaskCardProps {
@@ -119,17 +112,13 @@ function confirmDirectPurge(title: string, branch: string): boolean {
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
   const stale = () =>
-    !terminalStates.has(props.state) &&
-    props.state !== "running" &&
-    isCacheStale(props.now(), props.cacheExpiresAt);
+    !terminalStates.has(props.state) && props.state !== "running" && isCacheStale(props.now(), props.cacheExpiresAt);
   const cacheExpiryText = () =>
     props.cacheTTLSeconds
       ? `Prompt cache likely expired (${formatElapsed(props.cacheTTLSeconds * 1000)} TTL) — continuing may use more tokens`
       : "Prompt cache likely expired — continuing may use more tokens";
   const [titleTruncated, setTitleTruncated] = createSignal(false);
-  const [contextMenuPosition, setContextMenuPosition] = createSignal<
-    { x: number; y: number } | undefined
-  >();
+  const [contextMenuPosition, setContextMenuPosition] = createSignal<{ x: number; y: number } | undefined>();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
   const [repoStates, setRepoStates] = createSignal<GitRepositoryState[]>([]);
   let cardRef: HTMLDivElement | undefined;
@@ -165,9 +154,7 @@ export default function TaskCard(props: TaskCardProps) {
     }));
   const hasMultipleRepos = () => (props.repos?.length ?? 0) > 1;
   const repoStateText = (repo: { name: string; branch: string }) =>
-    hasMultipleRepos()
-      ? [repo.name, repo.branch].filter(Boolean).join(" · ")
-      : repo.branch || repo.name;
+    hasMultipleRepos() ? [repo.name, repo.branch].filter(Boolean).join(" · ") : repo.branch || repo.name;
 
   createEffect(() => {
     if (!contextMenuPosition()) return;
@@ -216,9 +203,7 @@ export default function TaskCard(props: TaskCardProps) {
         ...(target ? { target } : {}),
       });
       if (response.status !== "blocked") return;
-      const issues = response.safetyIssues
-        ?.map((issue) => `${issue.file}: ${issue.detail}`)
-        .join("; ");
+      const issues = response.safetyIssues?.map((issue) => `${issue.file}: ${issue.detail}`).join("; ");
       throw new Error(issues ? `blocked: ${issues}` : "blocked by safety checks");
     });
   }
@@ -331,10 +316,7 @@ export default function TaskCard(props: TaskCardProps) {
                     title="Revive"
                     data-testid="revive-task"
                   >
-                    <Show
-                      when={props.actionLoading}
-                      fallback={<RestoreIcon width="0.85rem" height="0.85rem" />}
-                    >
+                    <Show when={props.actionLoading} fallback={<RestoreIcon width="0.85rem" height="0.85rem" />}>
                       <span class={styles.reviveSpinner} />
                     </Show>
                   </button>
@@ -376,46 +358,28 @@ export default function TaskCard(props: TaskCardProps) {
                     if (e.shiftKey && props.onPurge) {
                       props.onPurge();
                     } else if (props.state === "running") {
-                      if (confirmStopTask(props.title, props.repos?.[0]?.branch ?? ""))
-                        props.onStop?.();
+                      if (confirmStopTask(props.title, props.repos?.[0]?.branch ?? "")) props.onStop?.();
                     } else {
                       props.onStop?.();
                     }
                   }}
                   onDblClick={(e) => {
                     e.stopPropagation();
-                    if (
-                      props.onPurge &&
-                      confirmDirectPurge(props.title, props.repos?.[0]?.branch ?? "")
-                    ) {
+                    if (props.onPurge && confirmDirectPurge(props.title, props.repos?.[0]?.branch ?? "")) {
                       props.onPurge();
                     }
                   }}
                   aria-label={props.purgeModifierActive ? "Purge" : "Stop"}
-                  title={
-                    props.purgeModifierActive
-                      ? "Purge"
-                      : "Stop (hold Shift or double-click to purge)"
-                  }
+                  title={props.purgeModifierActive ? "Purge" : "Stop (hold Shift or double-click to purge)"}
                   data-testid="stop-task"
                 >
                   <Show
                     when={props.actionLoading}
                     fallback={
                       props.purgeModifierActive ? (
-                        <DeleteIcon
-                          width="0.85rem"
-                          height="0.85rem"
-                          data-testid="purge-task-icon"
-                          aria-hidden="true"
-                        />
+                        <DeleteIcon width="0.85rem" height="0.85rem" data-testid="purge-task-icon" aria-hidden="true" />
                       ) : (
-                        <StopIcon
-                          width="0.85rem"
-                          height="0.85rem"
-                          data-testid="stop-task-icon"
-                          aria-hidden="true"
-                        />
+                        <StopIcon width="0.85rem" height="0.85rem" data-testid="stop-task-icon" aria-hidden="true" />
                       )
                     }
                   >
@@ -432,10 +396,7 @@ export default function TaskCard(props: TaskCardProps) {
           </span>
         </div>
 
-        <Show
-          when={props.forkedFromTaskID !== props.parentTaskID ? props.forkedFromTaskID : undefined}
-          keyed
-        >
+        <Show when={props.forkedFromTaskID !== props.parentTaskID ? props.forkedFromTaskID : undefined} keyed>
           {(parentID) => (
             <div class={styles.originRow}>
               <span class={styles.originGlyph} aria-hidden="true">
@@ -550,8 +511,7 @@ export default function TaskCard(props: TaskCardProps) {
                     text={`${props.rateLimit?.window} quota resets at ${new Date(props.rateLimit?.resetsAt ?? "").toLocaleString()}`}
                   >
                     <span class={styles.quotaCountdown} data-testid="quota-countdown">
-                      out of quota · resets in{" "}
-                      {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now())}
+                      out of quota · resets in {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now())}
                     </span>
                   </Tooltip>
                 </>
@@ -571,9 +531,7 @@ export default function TaskCard(props: TaskCardProps) {
                     }}
                   >
                     {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}
-                    <Show when={props.contextWindowLimit > 0}>
-                      /{formatTokens(props.contextWindowLimit)}
-                    </Show>
+                    <Show when={props.contextWindowLimit > 0}>/{formatTokens(props.contextWindowLimit)}</Show>
                   </span>
                 </Tooltip>
               </Show>
@@ -603,12 +561,7 @@ export default function TaskCard(props: TaskCardProps) {
           </div>
         </Show>
 
-        <Show
-          when={
-            props.rateLimit?.blocked && props.repos?.[0]?.name ? props.onQuotaRecovery : undefined
-          }
-          keyed
-        >
+        <Show when={props.rateLimit?.blocked && props.repos?.[0]?.name ? props.onQuotaRecovery : undefined} keyed>
           {(recover) => (
             <button
               type="button"

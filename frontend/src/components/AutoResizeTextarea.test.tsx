@@ -34,9 +34,7 @@ function selectionOffset(root: HTMLElement): number | undefined {
 
 describe("AutoResizeTextarea", () => {
   it("renders with placeholder", () => {
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="" onInput={() => {}} placeholder="Type here" />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={() => {}} placeholder="Type here" />);
     expect(getByRole("textbox")).toHaveAttribute("data-placeholder", "Type here");
   });
 
@@ -52,9 +50,7 @@ describe("AutoResizeTextarea", () => {
   it("calls onSubmit on Enter", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="" onInput={() => {}} onSubmit={onSubmit} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={() => {}} onSubmit={onSubmit} />);
     getByRole("textbox").focus();
     await user.keyboard("{Enter}");
     expect(onSubmit).toHaveBeenCalledOnce();
@@ -63,18 +59,14 @@ describe("AutoResizeTextarea", () => {
   it("does not call onSubmit on Shift+Enter", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="" onInput={() => {}} onSubmit={onSubmit} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={() => {}} onSubmit={onSubmit} />);
     getByRole("textbox").focus();
     await user.keyboard("{Shift>}{Enter}{/Shift}");
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("preserves newlines when value is restored", () => {
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value={"line1\nline2\nline3"} onInput={() => {}} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value={"line1\nline2\nline3"} onInput={() => {}} />);
     const el = getByRole("textbox");
     // The contentEditable should contain <br> elements for newlines.
     const brs = el.querySelectorAll("br");
@@ -130,9 +122,7 @@ describe("AutoResizeTextarea", () => {
   });
 
   it("is not editable when disabled", () => {
-    const { getByRole } = render(() => (
-      <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />
-    ));
+    const { getByRole } = render(() => <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />);
     expect(getByRole("textbox")).toHaveAttribute("contenteditable", "false");
   });
 });

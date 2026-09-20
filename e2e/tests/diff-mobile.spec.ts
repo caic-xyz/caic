@@ -54,16 +54,12 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
   await expect(displayedPath).toHaveText("backend/…/oauth_handlers_test.go");
   await expect(row).toHaveAttribute("title", path);
 
-  await expect
-    .poll(async () => displayedPath.evaluate((el) => getComputedStyle(el).whiteSpace))
-    .toBe("nowrap");
+  await expect.poll(async () => displayedPath.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap");
   await expect
     .poll(async () =>
       row.evaluate((button) => {
         const pathEl = button.querySelector<HTMLElement>('[data-testid="diff-file-path"]');
-        const addedEl = Array.from(button.querySelectorAll("span")).find(
-          (span) => span.textContent === "+27",
-        );
+        const addedEl = Array.from(button.querySelectorAll("span")).find((span) => span.textContent === "+27");
         if (!pathEl || !addedEl) return Number.POSITIVE_INFINITY;
         const pathBox = pathEl.getBoundingClientRect();
         const addedBox = addedEl.getBoundingClientRect();
@@ -83,9 +79,7 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
       return Math.abs(additionBox.x + additionBox.width - (deletionBox.x + deletionBox.width));
     })
     .toBeLessThan(1);
-  await expect
-    .poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
-    .toBe(true);
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("file patch retry preserves keyboard focus", async ({ page, api }) => {

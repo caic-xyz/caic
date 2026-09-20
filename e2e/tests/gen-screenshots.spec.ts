@@ -43,9 +43,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.goto("/");
 
   // Wait for repos to load.
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
   await api.updatePreferences({
@@ -75,9 +73,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
     expect(arrow.x + arrow.width).toBeLessThanOrEqual(containerInput.x);
     expect(containerInput.x + containerInput.width).toBeLessThanOrEqual(readOnly.x);
     expect(readOnly.x + readOnly.width).toBeLessThanOrEqual(remove.x);
-    expect(
-      Math.abs(arrow.y + arrow.height / 2 - (containerInput.y + containerInput.height / 2)),
-    ).toBeLessThanOrEqual(1);
+    expect(Math.abs(arrow.y + arrow.height / 2 - (containerInput.y + containerInput.height / 2))).toBeLessThanOrEqual(
+      1,
+    );
     expect(
       Math.abs(readOnly.y + readOnly.height / 2 - (containerInput.y + containerInput.height / 2)),
     ).toBeLessThanOrEqual(1);
@@ -88,9 +86,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await captureScreenshot(page, "desktop", "settings-mounts.png");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Create tasks that will reach different states for a populated task list.
   // Task 1: a long title and mapped repository state exercise the dense task
@@ -121,9 +117,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Reload to get fresh state.
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Wait for task cards to appear.
   await expect(page.locator("[data-task-id]").first()).toBeVisible({
@@ -134,18 +128,14 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
-  await expect(page.getByTestId("task-setup").locator("summary")).toContainText(
-    /(?:\d+ms|\d+\.\d+s)/,
-  );
+  await expect(page.getByTestId("task-setup").locator("summary")).toContainText(/(?:\d+ms|\d+\.\d+s)/);
   const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
   await expect(toolSummary).toBeVisible({ timeout: 10_000 });
   await toolSummary.click();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
   await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
-  const desktopHeaderStats = page
-    .getByTestId("task-detail-header")
-    .getByTestId("repo-state-diff-stats");
+  const desktopHeaderStats = page.getByTestId("task-detail-header").getByTestId("repo-state-diff-stats");
   await expect(desktopHeaderStats).toHaveCount(2);
   for (let i = 0; i < 2; i++) {
     await expect(desktopHeaderStats.nth(i)).toBeVisible();
@@ -276,10 +266,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
         await settleWidgetFrame();
         await animationBody.screenshot({
           caret: "hide",
-          path: path.join(
-            tmpDir,
-            `frame-${String(angles.length + (angles.length - 2 - i)).padStart(3, "0")}.png`,
-          ),
+          path: path.join(tmpDir, `frame-${String(angles.length + (angles.length - 2 - i)).padStart(3, "0")}.png`),
         });
       }
       await animationPage.close();
@@ -329,9 +316,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Reload to get fresh state.
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Find the VNC task and navigate to it.
   const vncTask = await api.getTask(vncResp.id);
@@ -364,9 +349,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Screenshot 7: Mobile — task detail at phone viewport.
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
   const bugFixCard2 = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard2).toBeVisible({ timeout: 10_000 });
   await bugFixCard2.click();
@@ -402,15 +385,10 @@ test("generate documentation screenshots", async ({ page, api }) => {
   expect(taskStatisticsBox).not.toBeNull();
   expect(
     Math.abs(
-      repositoryStateBox!.y +
-        repositoryStateBox!.height / 2 -
-        taskStatisticsBox!.y -
-        taskStatisticsBox!.height / 2,
+      repositoryStateBox!.y + repositoryStateBox!.height / 2 - taskStatisticsBox!.y - taskStatisticsBox!.height / 2,
     ),
   ).toBeLessThanOrEqual(1);
-  await expect
-    .poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth))
-    .toBe(true);
+  await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await captureScreenshot(page, "mobile", "task-detail-header-compact.png");
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -424,9 +402,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await Promise.all(scrollTaskIds.map((id) => waitForTaskState(api, id, "waiting", 30_000)));
 
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
   await expect(page.locator("[data-task-id]").first()).toBeVisible({
     timeout: 10_000,
   });
@@ -442,36 +418,26 @@ test("generate documentation screenshots", async ({ page, api }) => {
     )
     .toBe(true);
   const taskList = page.getByTestId("task-list");
-  await expect
-    .poll(async () => taskList.evaluate((el) => el.scrollHeight - el.clientHeight))
-    .toBeGreaterThan(0);
+  await expect.poll(async () => taskList.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
   await taskList.evaluate((el) => {
     el.scrollTop = Math.min(260, el.scrollHeight - el.clientHeight);
     el.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await expect.poll(async () => taskList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  await expect
-    .poll(async () => taskList.evaluate((el) => getComputedStyle(el, "::before").opacity))
-    .toBe("1");
+  await expect.poll(async () => taskList.evaluate((el) => getComputedStyle(el, "::before").opacity)).toBe("1");
   await captureScreenshot(page, "desktop", "task-list-scrolled.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
   const mobileTaskList = page.getByTestId("task-list");
-  await expect
-    .poll(async () => mobileTaskList.evaluate((el) => el.scrollHeight - el.clientHeight))
-    .toBeGreaterThan(0);
+  await expect.poll(async () => mobileTaskList.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
   await mobileTaskList.evaluate((el) => {
     el.scrollTop = Math.min(280, el.scrollHeight - el.clientHeight);
     el.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await expect.poll(async () => mobileTaskList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  await expect
-    .poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity))
-    .toBe("1");
+  await expect.poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity)).toBe("1");
   await captureScreenshot(page, "mobile", "task-list-scrolled-mobile.png");
 
   // Screenshot 10: Native subagents — inline lifecycle cards anchored to the
@@ -480,9 +446,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await waitForTaskState(api, nativeId, "waiting", 30_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
-  await expect(
-    page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first(),
-  ).toBeVisible();
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
   const nativeTaskCard = page.locator(`[data-task-id="${nativeId}"]`);
   await expect(nativeTaskCard).toBeVisible({ timeout: 10_000 });
   await nativeTaskCard.click();

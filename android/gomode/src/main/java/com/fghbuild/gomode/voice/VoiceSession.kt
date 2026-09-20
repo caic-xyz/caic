@@ -77,6 +77,7 @@ private const val ICE_GATHERING_TIMEOUT_MS = 10_000L
 private const val ICE_DISCONNECTED_GRACE_MS = 5_000L
 private const val MAX_RECONNECT_ATTEMPTS = 3
 private const val HANG_UP_TOOL_NAME = "hang_up"
+
 /** Conservative data-channel/model-safe bound for a recovery context update. */
 internal const val MAX_RECOVERY_CONTEXT_CHARS = 8_000
 private val sdpWhitespaceRegex = Regex("\\s+")
@@ -85,28 +86,30 @@ private val sdpWhitespaceRegex = Regex("\\s+")
  * Voice-local tool declarations, kept outside the service MCP tool set.
  * Keep this list and its dispatcher in sync with frontend/src/gomode/VoiceSession.ts.
  */
-internal fun voiceToolDeclarations(mcpTools: List<ToolDescriptor>): List<ToolDeclaration> = buildList {
-    require(mcpTools.none { it.name == HANG_UP_TOOL_NAME }) {
-        "MCP tool \"$HANG_UP_TOOL_NAME\" conflicts with the reserved voice command."
-    }
-    add(
-        ToolDeclaration(
-            name = HANG_UP_TOOL_NAME,
-            description = "End the current voice conversation immediately when the user asks to hang up, " +
-                "end the call, or stop voice mode.",
-            parameters = JsonObject(emptyMap()),
-        ),
-    )
-    mcpTools.forEach { tool ->
+internal fun voiceToolDeclarations(mcpTools: List<ToolDescriptor>): List<ToolDeclaration> =
+    buildList {
+        require(mcpTools.none { it.name == HANG_UP_TOOL_NAME }) {
+            "MCP tool \"$HANG_UP_TOOL_NAME\" conflicts with the reserved voice command."
+        }
         add(
             ToolDeclaration(
-                name = tool.name,
-                description = tool.description.orEmpty(),
-                parameters = tool.inputSchema as? JsonObject ?: JsonObject(emptyMap()),
+                name = HANG_UP_TOOL_NAME,
+                description =
+                    "End the current voice conversation immediately when the user asks to hang up, " +
+                        "end the call, or stop voice mode.",
+                parameters = JsonObject(emptyMap()),
             ),
         )
+        mcpTools.forEach { tool ->
+            add(
+                ToolDeclaration(
+                    name = tool.name,
+                    description = tool.description.orEmpty(),
+                    parameters = tool.inputSchema as? JsonObject ?: JsonObject(emptyMap()),
+                ),
+            )
+        }
     }
-}
 
 internal fun isUsableICECandidate(candidate: String): Boolean {
     val fields = candidate.trim().split(sdpWhitespaceRegex)
@@ -120,13 +123,16 @@ private fun isUsableIPv4(address: String): Boolean {
 }
 
 /** Tracks pending and completed network recovery attempts independently from WebRTC callbacks. */
-internal fun recoveryDelayMs(state: PeerConnection.IceConnectionState): Long = when (state) {
-    PeerConnection.IceConnectionState.FAILED -> 0L
-    PeerConnection.IceConnectionState.DISCONNECTED -> ICE_DISCONNECTED_GRACE_MS
-    else -> error("ICE state $state does not require recovery")
-}
+internal fun recoveryDelayMs(state: PeerConnection.IceConnectionState): Long =
+    when (state) {
+        PeerConnection.IceConnectionState.FAILED -> 0L
+        PeerConnection.IceConnectionState.DISCONNECTED -> ICE_DISCONNECTED_GRACE_MS
+        else -> error("ICE state $state does not require recovery")
+    }
 
-internal class VoiceRecoveryPolicy(private val maxAttempts: Int) {
+internal class VoiceRecoveryPolicy(
+    private val maxAttempts: Int,
+) {
     private var pending = false
     var attempts = 0
         private set
@@ -160,10 +166,11 @@ class VoiceSession(
     private val settingsClient: ServiceSettingsClient = ServiceSettingsClient(),
 ) {
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
-    private val json = Json {
-        encodeDefaults = true
-        ignoreUnknownKeys = true
-    }
+    private val json =
+        Json {
+            encodeDefaults = true
+            ignoreUnknownKeys = true
+        }
 
     private var peerConnection: PeerConnection? = null
     private var dataChannel: DataChannel? = null
@@ -297,11 +304,12 @@ class VoiceSession(
                     return@launch
                 }
 
-                val client = McpClient(
-                    endpointURL = mcpEndpointURL,
-                    protocolVersion = group.protocolVersion,
-                    cookieProvider = { cookieFor(mcpEndpointURL) },
-                )
+                val client =
+                    McpClient(
+                        endpointURL = mcpEndpointURL,
+                        protocolVersion = group.protocolVersion,
+                        cookieProvider = { cookieFor(mcpEndpointURL) },
+                    )
                 mcpClient = client
                 val systemInstruction = client.serverInstructions().ifBlank { FALLBACK_SYSTEM_INSTRUCTION }
                 mcpTools = client.listTools()
@@ -314,44 +322,49 @@ class VoiceSession(
                 // Initialize WebRTC factory.
                 if (pcFactory == null) {
                     PeerConnectionFactory.initialize(
-                        PeerConnectionFactory.InitializationOptions.builder(appContext)
+                        PeerConnectionFactory.InitializationOptions
+                            .builder(appContext)
                             .setEnableInternalTracer(false)
                             .createInitializationOptions(),
                     )
                     pcFactory = PeerConnectionFactory.builder().createPeerConnectionFactory()
                 }
-                val factory = pcFactory ?: run {
-                    setError("WebRTC factory init failed")
-                    return@launch
-                }
+                val factory =
+                    pcFactory ?: run {
+                        setError("WebRTC factory init failed")
+                        return@launch
+                    }
 
-                val iceServers = listOf(
-                    PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
-                )
+                val iceServers =
+                    listOf(
+                        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+                    )
                 val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
 
-                val pc = factory.createPeerConnection(
-                    rtcConfig,
-                    createPeerConnectionObserver(voiceGatewayClient, voiceGatewayHeaders),
-                ) ?: run {
-                    setError("Failed to create PeerConnection")
-                    return@launch
-                }
+                val pc =
+                    factory.createPeerConnection(
+                        rtcConfig,
+                        createPeerConnectionObserver(voiceGatewayClient, voiceGatewayHeaders),
+                    ) ?: run {
+                        setError("Failed to create PeerConnection")
+                        return@launch
+                    }
                 peerConnection = pc
 
                 // Add local audio track (mic → RTP) so the SDP offer
                 // contains an m=audio line required by the backend bridge.
-                val audioConstraints = MediaConstraints().apply {
-                    mandatory.add(
-                        MediaConstraints.KeyValuePair("googEchoCancellation", "true"),
-                    )
-                    mandatory.add(
-                        MediaConstraints.KeyValuePair("googAutoGainControl", "true"),
-                    )
-                    mandatory.add(
-                        MediaConstraints.KeyValuePair("googNoiseSuppression", "true"),
-                    )
-                }
+                val audioConstraints =
+                    MediaConstraints().apply {
+                        mandatory.add(
+                            MediaConstraints.KeyValuePair("googEchoCancellation", "true"),
+                        )
+                        mandatory.add(
+                            MediaConstraints.KeyValuePair("googAutoGainControl", "true"),
+                        )
+                        mandatory.add(
+                            MediaConstraints.KeyValuePair("googNoiseSuppression", "true"),
+                        )
+                    }
                 val audioSrc = factory.createAudioSource(audioConstraints)
                 rtcAudioSource = audioSrc
                 val micTrack = factory.createAudioTrack("mic-audio", audioSrc)
@@ -361,64 +374,77 @@ class VoiceSession(
                 startMicLevelMonitoring()
 
                 val dcInit = DataChannel.Init().apply { ordered = true }
-                val dc = pc.createDataChannel("voice-gateway", dcInit) ?: run {
-                    setError("Failed to create data channel")
-                    pc.dispose()
-                    return@launch
-                }
+                val dc =
+                    pc.createDataChannel("voice-gateway", dcInit) ?: run {
+                        setError("Failed to create data channel")
+                        pc.dispose()
+                        return@launch
+                    }
                 dataChannel = dc
 
-                dc.registerObserver(object : DataChannel.Observer {
-                    override fun onBufferedAmountChange(amount: Long) = Unit
-                    override fun onStateChange() {
-                        Log.d(TAG, "DC state: ${dc.state()}")
-                        if (dc.state() == DataChannel.State.OPEN) {
-                            recoveryPolicy.reset()
-                            setStatus("Waiting for server…")
-                            sendSetupMessage(systemInstruction, serviceContextText)
+                dc.registerObserver(
+                    object : DataChannel.Observer {
+                        override fun onBufferedAmountChange(amount: Long) = Unit
+
+                        override fun onStateChange() {
+                            Log.d(TAG, "DC state: ${dc.state()}")
+                            if (dc.state() == DataChannel.State.OPEN) {
+                                recoveryPolicy.reset()
+                                setStatus("Waiting for server…")
+                                sendSetupMessage(systemInstruction, serviceContextText)
+                            }
                         }
-                    }
-                    override fun onMessage(buffer: DataChannel.Buffer) {
-                        val data = ByteArray(buffer.data.remaining())
-                        buffer.data.get(data)
-                        val text = String(data, StandardCharsets.UTF_8)
-                        scope.launch { handleServerMessage(text) }
-                    }
-                })
+
+                        override fun onMessage(buffer: DataChannel.Buffer) {
+                            val data = ByteArray(buffer.data.remaining())
+                            buffer.data.get(data)
+                            val text = String(data, StandardCharsets.UTF_8)
+                            scope.launch { handleServerMessage(text) }
+                        }
+                    },
+                )
 
                 // SDP offer/answer exchange.
                 setStatus("Signaling…")
-                pc.createOffer(object : SdpObserver {
-                    override fun onCreateSuccess(desc: SessionDescription) {
-                        scope.launch {
-                            try {
-                                setLocalDescriptionAndWaitForICE(pc, desc)
-                                val offerSDP = pc.localDescription?.description
-                                    ?: error("WebRTC local offer SDP unavailable after ICE gathering")
-                                lastOfferSDP = offerSDP
-                                val resp = voiceGatewayClient.voiceRTCOffer(
-                                    VoiceRTCOfferReq(sdp = offerSDP),
-                                    headers = voiceGatewayHeaders,
-                                )
-                                rtcSessionID = resp.sessionID
-                                lastAnswerSDP = resp.sdp
-                                val answer = SessionDescription(SessionDescription.Type.ANSWER, resp.sdp)
-                                pc.setRemoteDescription(noOpSdpObserver(), answer)
-                                startSetupTimeout(pc, voiceGatewayClient, voiceGatewayHeaders)
-                                Log.i(TAG, "WebRTC signaling complete, session=${resp.sessionID}")
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                setError("SDP exchange failed: ${e.message}")
+                pc.createOffer(
+                    object : SdpObserver {
+                        override fun onCreateSuccess(desc: SessionDescription) {
+                            scope.launch {
+                                try {
+                                    setLocalDescriptionAndWaitForICE(pc, desc)
+                                    val offerSDP =
+                                        pc.localDescription?.description
+                                            ?: error("WebRTC local offer SDP unavailable after ICE gathering")
+                                    lastOfferSDP = offerSDP
+                                    val resp =
+                                        voiceGatewayClient.voiceRTCOffer(
+                                            VoiceRTCOfferReq(sdp = offerSDP),
+                                            headers = voiceGatewayHeaders,
+                                        )
+                                    rtcSessionID = resp.sessionID
+                                    lastAnswerSDP = resp.sdp
+                                    val answer = SessionDescription(SessionDescription.Type.ANSWER, resp.sdp)
+                                    pc.setRemoteDescription(noOpSdpObserver(), answer)
+                                    startSetupTimeout(pc, voiceGatewayClient, voiceGatewayHeaders)
+                                    Log.i(TAG, "WebRTC signaling complete, session=${resp.sessionID}")
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    setError("SDP exchange failed: ${e.message}")
+                                }
                             }
                         }
-                    }
-                    override fun onCreateFailure(error: String) {
-                        setError("Create offer failed: $error")
-                    }
-                    override fun onSetSuccess() = Unit
-                    override fun onSetFailure(p0: String) = Unit
-                }, MediaConstraints())
+
+                        override fun onCreateFailure(error: String) {
+                            setError("Create offer failed: $error")
+                        }
+
+                        override fun onSetSuccess() = Unit
+
+                        override fun onSetFailure(p0: String) = Unit
+                    },
+                    MediaConstraints(),
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -437,40 +463,62 @@ class VoiceSession(
                 usableICECandidateWaiter?.complete(Unit)
             }
         }
+
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
             lastIceConnectionState = state.name.lowercase()
             Log.d(TAG, "ICE state: $state")
             when (state) {
                 PeerConnection.IceConnectionState.FAILED,
-                PeerConnection.IceConnectionState.DISCONNECTED ->
+                PeerConnection.IceConnectionState.DISCONNECTED,
+                -> {
                     scheduleReconnect(peerConnection ?: return, state, recoveryDelayMs(state))
+                }
+
                 PeerConnection.IceConnectionState.CONNECTED -> {
                     recoveryPolicy.cancelPending()
                     reconnectJob?.cancel()
                     reconnectJob = null
                 }
-                PeerConnection.IceConnectionState.CLOSED -> setDiagnosticError(
-                    pc = peerConnection ?: return,
-                    gatewayClient = gatewayClient,
-                    headers = headers,
-                    fallback = "WebRTC ICE $state",
-                )
-                else -> Unit
+
+                PeerConnection.IceConnectionState.CLOSED -> {
+                    setDiagnosticError(
+                        pc = peerConnection ?: return,
+                        gatewayClient = gatewayClient,
+                        headers = headers,
+                        fallback = "WebRTC ICE $state",
+                    )
+                }
+
+                else -> {
+                    Unit
+                }
             }
         }
+
         override fun onSignalingChange(state: PeerConnection.SignalingState) {
             lastSignalingState = state.name.lowercase().replace('_', '-')
         }
+
         override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
+
         override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {
             lastIceGatheringState = state.name.lowercase()
         }
+
         override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) = Unit
+
         override fun onAddStream(stream: MediaStream) = Unit
+
         override fun onRemoveStream(stream: MediaStream) = Unit
+
         override fun onDataChannel(dc: DataChannel) = Unit
+
         override fun onRenegotiationNeeded() = Unit
-        override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
+
+        override fun onAddTrack(
+            receiver: RtpReceiver,
+            streams: Array<out MediaStream>,
+        ) {
             val track = receiver.track()
             if (track is org.webrtc.AudioTrack) {
                 track.setEnabled(true)
@@ -482,20 +530,21 @@ class VoiceSession(
     private fun startMicLevelMonitoring() {
         micLevelJob?.cancel()
         micEnergySamples.clear()
-        micLevelJob = scope.launch {
-            while (true) {
-                val pc = peerConnection ?: break
-                if (muted) {
-                    _state.update { it.copy(micLevel = 0f) }
-                } else {
-                    pc.getStats { report ->
-                        val level = micLevelFromStats(report) ?: return@getStats
-                        _state.update { it.copy(micLevel = level) }
+        micLevelJob =
+            scope.launch {
+                while (true) {
+                    val pc = peerConnection ?: break
+                    if (muted) {
+                        _state.update { it.copy(micLevel = 0f) }
+                    } else {
+                        pc.getStats { report ->
+                            val level = micLevelFromStats(report) ?: return@getStats
+                            _state.update { it.copy(micLevel = level) }
+                        }
                     }
+                    delay(MIC_LEVEL_POLL_MS)
                 }
-                delay(MIC_LEVEL_POLL_MS)
             }
-        }
     }
 
     private fun stopMicLevelMonitoring() {
@@ -532,7 +581,11 @@ class VoiceSession(
         return kind == null || kind == "audio"
     }
 
-    private fun scheduleReconnect(pc: PeerConnection, state: PeerConnection.IceConnectionState, delayMs: Long) {
+    private fun scheduleReconnect(
+        pc: PeerConnection,
+        state: PeerConnection.IceConnectionState,
+        delayMs: Long,
+    ) {
         if (peerConnection !== pc) return
         if (reconnectJob != null) {
             if (delayMs != 0L) return
@@ -543,16 +596,17 @@ class VoiceSession(
             return
         }
         setStatus("WebRTC ICE $state; reconnecting…")
-        reconnectJob = scope.launch {
-            delay(delayMs)
-            reconnectJob = null
-            if (peerConnection === pc && recoveryPolicy.beginScheduledRecovery()) {
-                speakerActive = false
-                _state.update { it.copy(speaking = false) }
-                recoveryContext = buildNetworkRecoveryContext(_state.value.transcript)
-                connect(preserveTranscript = true)
+        reconnectJob =
+            scope.launch {
+                delay(delayMs)
+                reconnectJob = null
+                if (peerConnection === pc && recoveryPolicy.beginScheduledRecovery()) {
+                    speakerActive = false
+                    _state.update { it.copy(speaking = false) }
+                    recoveryContext = buildNetworkRecoveryContext(_state.value.transcript)
+                    connect(preserveTranscript = true)
+                }
             }
-        }
     }
 
     private fun startSetupTimeout(
@@ -561,24 +615,31 @@ class VoiceSession(
         headers: Map<String, String>,
     ) {
         setupTimeoutJob?.cancel()
-        setupTimeoutJob = scope.launch {
-            delay(SETUP_TIMEOUT_MS)
-            if (peerConnection !== pc || _state.value.connected || _state.value.error != null) return@launch
-            setDiagnosticError(
-                pc = pc,
-                gatewayClient = gatewayClient,
-                headers = headers,
-                fallback = "Connection timed out — server did not respond",
-            )
-        }
+        setupTimeoutJob =
+            scope.launch {
+                delay(SETUP_TIMEOUT_MS)
+                if (peerConnection !== pc || _state.value.connected || _state.value.error != null) return@launch
+                setDiagnosticError(
+                    pc = pc,
+                    gatewayClient = gatewayClient,
+                    headers = headers,
+                    fallback = "Connection timed out — server did not respond",
+                )
+            }
     }
 
-    private fun clientDiagnostics() = VoiceRTCClientDiagnostics(
-        iceConnectionState = lastIceConnectionState?.let { VoiceRTCICEConnectionState.Other(it) },
-        iceGatheringState = lastIceGatheringState?.let { VoiceRTCICEGatheringState.Other(it) },
-        signalingState = lastSignalingState?.let { VoiceRTCSignalingState.Other(it) },
-        dataChannelState = dataChannel?.state()?.name?.lowercase()?.let { VoiceRTCDataChannelState.Other(it) },
-    )
+    private fun clientDiagnostics() =
+        VoiceRTCClientDiagnostics(
+            iceConnectionState = lastIceConnectionState?.let { VoiceRTCICEConnectionState.Other(it) },
+            iceGatheringState = lastIceGatheringState?.let { VoiceRTCICEGatheringState.Other(it) },
+            signalingState = lastSignalingState?.let { VoiceRTCSignalingState.Other(it) },
+            dataChannelState =
+                dataChannel
+                    ?.state()
+                    ?.name
+                    ?.lowercase()
+                    ?.let { VoiceRTCDataChannelState.Other(it) },
+        )
 
     private fun setDiagnosticError(
         pc: PeerConnection,
@@ -601,22 +662,28 @@ class VoiceSession(
     ): String {
         val sessionID = rtcSessionID ?: return fallback
         return try {
-            val diagnostics = gatewayClient.diagnoseVoiceRTC(
-                sessionID,
-                VoiceRTCDiagnosticsReq(client = clientDiagnostics()),
-                headers = headers,
-            )
+            val diagnostics =
+                gatewayClient.diagnoseVoiceRTC(
+                    sessionID,
+                    VoiceRTCDiagnosticsReq(client = clientDiagnostics()),
+                    headers = headers,
+                )
             logVoiceRTCDiagnostics(diagnostics)
             formatVoiceRTCDiagnostics(diagnostics)
         } catch (e: CancellationException) {
             throw e
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
             Log.w(TAG, "Voice RTC diagnostics failed", e)
             fallback
         }
     }
 
-    private suspend fun setLocalDescriptionAndWaitForICE(pc: PeerConnection, desc: SessionDescription) {
+    private suspend fun setLocalDescriptionAndWaitForICE(
+        pc: PeerConnection,
+        desc: SessionDescription,
+    ) {
         val candidate = CompletableDeferred<Unit>()
         usableICECandidateWaiter = candidate
         try {
@@ -629,18 +696,27 @@ class VoiceSession(
         }
     }
 
-    private suspend fun setLocalDescription(pc: PeerConnection, desc: SessionDescription) {
+    private suspend fun setLocalDescription(
+        pc: PeerConnection,
+        desc: SessionDescription,
+    ) {
         val result = CompletableDeferred<String?>()
-        pc.setLocalDescription(object : SdpObserver {
-            override fun onCreateSuccess(p0: SessionDescription) = Unit
-            override fun onSetSuccess() {
-                result.complete(null)
-            }
-            override fun onCreateFailure(p0: String) = Unit
-            override fun onSetFailure(p0: String) {
-                result.complete(p0)
-            }
-        }, desc)
+        pc.setLocalDescription(
+            object : SdpObserver {
+                override fun onCreateSuccess(p0: SessionDescription) = Unit
+
+                override fun onSetSuccess() {
+                    result.complete(null)
+                }
+
+                override fun onCreateFailure(p0: String) = Unit
+
+                override fun onSetFailure(p0: String) {
+                    result.complete(p0)
+                }
+            },
+            desc,
+        )
         val error = withTimeout(ICE_GATHERING_TIMEOUT_MS) { result.await() }
         if (error != null) {
             error("Set local description failed: $error")
@@ -649,7 +725,10 @@ class VoiceSession(
 
     // waitForUsableICECandidate does not wait for every configured STUN server.
     // A slow or unreachable STUN request must not delay LAN or Tailscale signaling.
-    private suspend fun waitForUsableICECandidate(pc: PeerConnection, candidate: CompletableDeferred<Unit>) {
+    private suspend fun waitForUsableICECandidate(
+        pc: PeerConnection,
+        candidate: CompletableDeferred<Unit>,
+    ) {
         if (!candidate.isCompleted && pc.iceGatheringState() == PeerConnection.IceGatheringState.COMPLETE) {
             error("WebRTC ICE gathering completed without a usable candidate")
         }
@@ -671,16 +750,20 @@ class VoiceSession(
         )
     }
 
-    private fun noOpSdpObserver() = object : SdpObserver {
-        override fun onCreateSuccess(p0: SessionDescription) = Unit
-        override fun onSetSuccess() = Unit
-        override fun onCreateFailure(p0: String) {
-            Log.w(TAG, "SDP failure: $p0")
+    private fun noOpSdpObserver() =
+        object : SdpObserver {
+            override fun onCreateSuccess(p0: SessionDescription) = Unit
+
+            override fun onSetSuccess() = Unit
+
+            override fun onCreateFailure(p0: String) {
+                Log.w(TAG, "SDP failure: $p0")
+            }
+
+            override fun onSetFailure(p0: String) {
+                Log.w(TAG, "SDP failure: $p0")
+            }
         }
-        override fun onSetFailure(p0: String) {
-            Log.w(TAG, "SDP failure: $p0")
-        }
-    }
 
     /** Toggle microphone mute via the RTP audio track. */
     fun toggleMute() {
@@ -777,7 +860,10 @@ class VoiceSession(
         sendClientContent(text)
     }
 
-    private fun sendSetupMessage(systemInstruction: String, serviceContextText: String) {
+    private fun sendSetupMessage(
+        systemInstruction: String,
+        serviceContextText: String,
+    ) {
         val setup = gatewaySessionSetup(voiceToolDeclarations(mcpTools), systemInstruction, serviceContextText)
         Log.i(TAG, "sending setup message")
         send(json.encodeToString(SessionSetup.serializer(), setup))
@@ -807,13 +893,16 @@ class VoiceSession(
                     flushPendingNotifications()
                     sendUserMessage("Say exactly one word: Ready")
                 }
+
                 MessageKind.TranscriptDelta -> {
                     handleTranscriptDelta(json.decodeFromString(TranscriptDelta.serializer(), text))
                 }
+
                 MessageKind.SpeechStarted -> {
                     speakerActive = true
                     _state.update { it.copy(speaking = true) }
                 }
+
                 MessageKind.SpeechEnded -> {
                     speakerActive = false
                     flushPendingNotifications()
@@ -824,18 +913,22 @@ class VoiceSession(
                         )
                     }
                 }
+
                 MessageKind.Interrupted -> {
                     speakerActive = false
                     flushPendingNotifications()
                     _state.update { it.copy(speaking = false, activeTool = null) }
                 }
+
                 MessageKind.ToolCall -> {
                     handleToolCall(json.decodeFromString(ToolCall.serializer(), text))
                 }
+
                 MessageKind.Error -> {
                     val msg = json.decodeFromString(Error.serializer(), text)
                     setError(msg.message)
                 }
+
                 else -> {
                     Log.w(TAG, "Unrecognized server message: ${env.kind}")
                 }
@@ -848,11 +941,12 @@ class VoiceSession(
     }
 
     private fun handleTranscriptDelta(msg: TranscriptDelta) {
-        val speaker = when (msg.speaker) {
-            Speaker.User -> TranscriptSpeaker.USER
-            Speaker.Assistant -> TranscriptSpeaker.ASSISTANT
-            else -> return
-        }
+        val speaker =
+            when (msg.speaker) {
+                Speaker.User -> TranscriptSpeaker.USER
+                Speaker.Assistant -> TranscriptSpeaker.ASSISTANT
+                else -> return
+            }
         val chunk = msg.text ?: return
         _state.update { it.copy(transcript = it.transcript.appendChunk(speaker, chunk)) }
     }
@@ -868,51 +962,78 @@ class VoiceSession(
         try {
             _state.update { it.copy(activeTool = name) }
             val args = msg.args as? JsonObject ?: JsonObject(emptyMap())
-            val client = mcpClient ?: run {
-                _state.update { it.copy(activeTool = null) }
-                sendToolResult(id, name, errorJson("No MCP client"))
-                return
-            }
+            val client =
+                mcpClient ?: run {
+                    _state.update { it.copy(activeTool = null) }
+                    sendToolResult(id, name, errorJson("No MCP client"))
+                    return
+                }
             val result = client.callTool(name, args)
             _state.update { it.copy(activeTool = null) }
             if (result.isError) {
                 val errMsg = result.structuredContent["error"]?.jsonPrimitive?.content ?: "Tool error"
                 Log.e(TAG, "Tool $name failed: $errMsg")
                 _state.update {
-                    it.copy(transcript = it.transcript + TranscriptEntry(
-                        TranscriptSpeaker.ASSISTANT, "[$name] $errMsg", final = true,
-                    ))
+                    it.copy(
+                        transcript =
+                            it.transcript +
+                                TranscriptEntry(
+                                    TranscriptSpeaker.ASSISTANT,
+                                    "[$name] $errMsg",
+                                    final = true,
+                                ),
+                    )
                 }
             }
             sendToolResult(id, name, result.structuredContent)
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
             _state.update { it.copy(activeTool = null) }
             val errMsg = e.message ?: "Unknown error"
             Log.e(TAG, "Tool $name threw: $errMsg", e)
             _state.update {
-                it.copy(transcript = it.transcript + TranscriptEntry(
-                    TranscriptSpeaker.ASSISTANT, "[$name] $errMsg", final = true,
-                ))
+                it.copy(
+                    transcript =
+                        it.transcript +
+                            TranscriptEntry(
+                                TranscriptSpeaker.ASSISTANT,
+                                "[$name] $errMsg",
+                                final = true,
+                            ),
+                )
             }
             sendToolResult(id, name, errorJson(errMsg))
         }
     }
 
-    private fun sendToolResult(id: String, name: String, result: JsonElement) {
+    private fun sendToolResult(
+        id: String,
+        name: String,
+        result: JsonElement,
+    ) {
         send(json.encodeToString(ToolResult.serializer(), gatewayToolResult(id, name, result)))
     }
 
-    private fun gatewayContextUpdate(text: String) = ContextUpdate(
-        kind = MessageKind.ContextUpdate,
-        context = com.caic.voicegateway.sdk.v1.Context(text = text),
-    )
+    private fun gatewayContextUpdate(text: String) =
+        ContextUpdate(
+            kind = MessageKind.ContextUpdate,
+            context =
+                com.caic.voicegateway.sdk.v1
+                    .Context(text = text),
+        )
 
-    private fun gatewayUserMessage(text: String) = UserMessage(
-        kind = MessageKind.UserMessage,
-        text = text,
-    )
+    private fun gatewayUserMessage(text: String) =
+        UserMessage(
+            kind = MessageKind.UserMessage,
+            text = text,
+        )
 
-    private fun gatewayToolResult(id: String, name: String, result: JsonElement) = ToolResult(
+    private fun gatewayToolResult(
+        id: String,
+        name: String,
+        result: JsonElement,
+    ) = ToolResult(
         kind = MessageKind.ToolResult,
         id = id,
         name = name,
@@ -925,21 +1046,23 @@ class VoiceSession(
 
     /** Populate available devices list and auto-select the best device. */
     private fun refreshAvailableDevices() {
-        val devices = audioManager.availableCommunicationDevices.map { info ->
-            AudioDevice(id = info.id, type = info.type, name = audioDeviceTypeName(info.type))
-        }
+        val devices =
+            audioManager.availableCommunicationDevices.map { info ->
+                AudioDevice(id = info.id, type = info.type, name = audioDeviceTypeName(info.type))
+            }
         val currentSelected = _state.value.selectedDeviceId
-        val autoSelect = if (currentSelected != null && devices.any { it.id == currentSelected }) {
-            currentSelected
-        } else {
-            // Priority: BT SCO > USB headset/device > wired headphones > built-in speaker.
-            devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }?.id
-                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_HEADSET }?.id
-                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE }?.id
-                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES }?.id
-                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }?.id
-                ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.id
-        }
+        val autoSelect =
+            if (currentSelected != null && devices.any { it.id == currentSelected }) {
+                currentSelected
+            } else {
+                // Priority: BT SCO > USB headset/device > wired headphones > built-in speaker.
+                devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }?.id
+                    ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_HEADSET }?.id
+                    ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE }?.id
+                    ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES }?.id
+                    ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }?.id
+                    ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.id
+            }
         _state.update { it.copy(availableDevices = devices, selectedDeviceId = autoSelect) }
         if (autoSelect != null) {
             applyCommunicationDevice(autoSelect)
@@ -947,29 +1070,33 @@ class VoiceSession(
     }
 
     private fun applyCommunicationDevice(deviceId: Int) {
-        val info = audioManager.availableCommunicationDevices.firstOrNull { it.id == deviceId }
-            ?: return
+        val info =
+            audioManager.availableCommunicationDevices.firstOrNull { it.id == deviceId }
+                ?: return
         audioManager.setCommunicationDevice(info)
     }
 
     private fun registerDeviceCallback() {
-        val cb = object : AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
-                refreshAvailableDevices()
-            }
-            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
-                val selectedId = _state.value.selectedDeviceId
-                val lostBt = selectedId != null && removedDevices?.any {
-                    it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                } == true
-                if (lostBt) {
-                    Log.i(TAG, "Selected Bluetooth device removed, disconnecting")
-                    disconnect()
-                } else {
+        val cb =
+            object : AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
                     refreshAvailableDevices()
                 }
+
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                    val selectedId = _state.value.selectedDeviceId
+                    val lostBt =
+                        selectedId != null && removedDevices?.any {
+                            it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        } == true
+                    if (lostBt) {
+                        Log.i(TAG, "Selected Bluetooth device removed, disconnecting")
+                        disconnect()
+                    } else {
+                        refreshAvailableDevices()
+                    }
+                }
             }
-        }
         deviceCallback = cb
         audioManager.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper()))
     }
@@ -983,29 +1110,36 @@ class VoiceSession(
      *  the audio channel without removing the BT device from the system. */
     private fun registerScoReceiver() {
         var scoWasConnected = false
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                if (intent.action != AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) return
-                val state = intent.getIntExtra(
-                    AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR,
-                )
-                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
-                    scoWasConnected = true
-                    return
-                }
-                if (state != AudioManager.SCO_AUDIO_STATE_DISCONNECTED) return
-                // Ignore spurious disconnects fired during HFP negotiation before SCO is up.
-                if (!scoWasConnected) return
-                val selectedId = _state.value.selectedDeviceId ?: return
-                val isBtSco = _state.value.availableDevices.any {
-                    it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                }
-                if (isBtSco) {
-                    Log.i(TAG, "SCO audio disconnected (HFP hang-up), disconnecting")
-                    disconnect()
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(
+                    context: Context,
+                    intent: Intent,
+                ) {
+                    if (intent.action != AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) return
+                    val state =
+                        intent.getIntExtra(
+                            AudioManager.EXTRA_SCO_AUDIO_STATE,
+                            AudioManager.SCO_AUDIO_STATE_ERROR,
+                        )
+                    if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                        scoWasConnected = true
+                        return
+                    }
+                    if (state != AudioManager.SCO_AUDIO_STATE_DISCONNECTED) return
+                    // Ignore spurious disconnects fired during HFP negotiation before SCO is up.
+                    if (!scoWasConnected) return
+                    val selectedId = _state.value.selectedDeviceId ?: return
+                    val isBtSco =
+                        _state.value.availableDevices.any {
+                            it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        }
+                    if (isBtSco) {
+                        Log.i(TAG, "SCO audio disconnected (HFP hang-up), disconnecting")
+                        disconnect()
+                    }
                 }
             }
-        }
         scoReceiver = receiver
         appContext.registerReceiver(
             receiver,
@@ -1024,22 +1158,23 @@ class VoiceSession(
 
     /** Request exclusive audio focus so music/podcasts pause while the voice session is active. */
     private fun requestAudioFocus() {
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setOnAudioFocusChangeListener { focusChange ->
-                if (focusChange == AudioManager.AUDIOFOCUS_LOSS ||
-                    focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
-                ) {
-                    Log.i(TAG, "Audio focus lost (change=$focusChange), disconnecting")
-                    disconnect()
-                }
-            }
-            .build()
+        val request =
+            AudioFocusRequest
+                .Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes
+                        .Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                ).setOnAudioFocusChangeListener { focusChange ->
+                    if (focusChange == AudioManager.AUDIOFOCUS_LOSS ||
+                        focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+                    ) {
+                        Log.i(TAG, "Audio focus lost (change=$focusChange), disconnecting")
+                        disconnect()
+                    }
+                }.build()
         audioFocusRequest = request
         audioManager.requestAudioFocus(request)
     }
@@ -1059,37 +1194,57 @@ class VoiceSession(
             "You are a concise voice assistant for a Go Mode service running in an Android shell. " +
                 "Use the service MCP tools whenever they are useful. Always speak fast and keep answers short."
 
-        fun resolveServiceURL(baseURL: String, advertisedURL: String): String =
-            com.fghbuild.gomode.service.resolveServiceURL(baseURL, advertisedURL)
+        fun resolveServiceURL(
+            baseURL: String,
+            advertisedURL: String,
+        ): String =
+            com.fghbuild.gomode.service
+                .resolveServiceURL(baseURL, advertisedURL)
     }
 }
 
 internal fun summarizeSDPCandidates(sdp: String): String {
-    val candidates = sdp.lineSequence().mapNotNull { line ->
-        val body = line.trim()
-        if (!body.startsWith("a=candidate:")) return@mapNotNull null
-        val fields = body.split(sdpWhitespaceRegex)
-        if (fields.size < 8) return@mapNotNull null
-        "${fields[4]}:${fields[5]} ${fields[7]}"
-    }.toList()
+    val candidates =
+        sdp
+            .lineSequence()
+            .mapNotNull { line ->
+                val body = line.trim()
+                if (!body.startsWith("a=candidate:")) return@mapNotNull null
+                val fields = body.split(sdpWhitespaceRegex)
+                if (fields.size < 8) return@mapNotNull null
+                "${fields[4]}:${fields[5]} ${fields[7]}"
+            }.toList()
     return candidates.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "none"
 }
 
 internal fun formatVoiceRTCDiagnostics(diagnostics: VoiceRTCDiagnosticsResp): String {
     val side = if (diagnostics.side.value == "none") "unknown" else diagnostics.side.value
-    val mappingError = diagnostics.server.udpMappingError?.takeIf { it.isNotBlank() }
-        ?.let { " UDP mapping: $it" }
-        .orEmpty()
+    val mappingError =
+        diagnostics.server.udpMappingError
+            ?.takeIf { it.isNotBlank() }
+            ?.let { " UDP mapping: $it" }
+            .orEmpty()
     return "Voice connection failed ($side: ${diagnostics.issue.value}) — ${diagnostics.message}$mappingError"
 }
 
 enum class TranscriptSpeaker { USER, ASSISTANT }
 
-data class TranscriptEntry(val speaker: TranscriptSpeaker, val text: String, val final: Boolean = false)
+data class TranscriptEntry(
+    val speaker: TranscriptSpeaker,
+    val text: String,
+    val final: Boolean = false,
+)
 
-data class AudioDevice(val id: Int, val type: Int, val name: String)
+data class AudioDevice(
+    val id: Int,
+    val type: Int,
+    val name: String,
+)
 
-private data class MicEnergySample(val energy: Double, val duration: Double)
+private data class MicEnergySample(
+    val energy: Double,
+    val duration: Double,
+)
 
 data class VoiceState(
     val connectStatus: String? = null,
@@ -1110,16 +1265,8 @@ data class VoiceState(
     val selectedDeviceId: Int? = null,
 )
 
-/**
- * Append a transcription chunk to the log.
- * If the last entry is from the same speaker and not yet finalized, concatenate the new
- * chunk onto it (the API streams one word/phrase at a time per message).
- * Otherwise start a new entry.
- */
 /** Build a bounded recovery-only context without replaying unfinished transcript deltas. */
-internal fun buildNetworkRecoveryContext(
-    transcript: List<TranscriptEntry>,
-): String {
+internal fun buildNetworkRecoveryContext(transcript: List<TranscriptEntry>): String {
     val prefix = "Network recovery context. Continue the existing conversation; do not treat this as a new user turn."
     val availableTranscriptChars = MAX_RECOVERY_CONTEXT_CHARS - prefix.length - 24
     val lines = mutableListOf<String>()
@@ -1133,9 +1280,11 @@ internal fun buildNetworkRecoveryContext(
         lines.add(0, line)
         lineChars += line.length + (if (lines.size == 1) 0 else 1)
     }
-    val transcriptSection = lines.takeIf { it.isNotEmpty() }
-        ?.joinToString(prefix = "\nFinalized transcript:\n", separator = "\n")
-        .orEmpty()
+    val transcriptSection =
+        lines
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(prefix = "\nFinalized transcript:\n", separator = "\n")
+            .orEmpty()
     return "$prefix$transcriptSection"
 }
 
@@ -1145,37 +1294,48 @@ internal fun gatewaySessionSetup(
     serviceContextText: String,
 ) = SessionSetup(
     kind = MessageKind.SessionSetup,
-    voice = VoiceConfig(
-        name = "Orus",
-        language = "en",
-    ),
+    voice =
+        VoiceConfig(
+            name = "Orus",
+            language = "en",
+        ),
     tools = tools,
-    context = com.caic.voicegateway.sdk.v1.Context(
-        systemInstruction = systemInstruction,
-        text = serviceContextText,
-    ),
+    context =
+        com.caic.voicegateway.sdk.v1.Context(
+            systemInstruction = systemInstruction,
+            text = serviceContextText,
+        ),
 )
 
-private fun List<TranscriptEntry>.appendChunk(speaker: TranscriptSpeaker, text: String): List<TranscriptEntry> =
+/**
+ * Append a transcription chunk to the log.
+ * If the last entry is from the same speaker and not yet finalized, concatenate the new
+ * chunk onto it (the API streams one word/phrase at a time per message).
+ * Otherwise start a new entry.
+ */
+private fun List<TranscriptEntry>.appendChunk(
+    speaker: TranscriptSpeaker,
+    text: String,
+): List<TranscriptEntry> =
     if (isNotEmpty() && last().speaker == speaker && !last().final) {
         dropLast(1) + TranscriptEntry(speaker, last().text + text)
     } else {
         this + TranscriptEntry(speaker, text)
     }
 
-private fun errorJson(message: String): JsonElement =
-    JsonObject(mapOf("error" to JsonPrimitive(message)))
+private fun errorJson(message: String): JsonElement = JsonObject(mapOf("error" to JsonPrimitive(message)))
 
 @Suppress("CyclomaticComplexMethod") // Simple exhaustive mapping, no logic.
-private fun audioDeviceTypeName(type: Int): String = when (type) {
-    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
-    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BT A2DP"
-    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
-    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
-    AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in Mic"
-    AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
-    AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
-    AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
-    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
-    else -> "Device $type"
-}
+private fun audioDeviceTypeName(type: Int): String =
+    when (type) {
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BT A2DP"
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
+        AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in Mic"
+        AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
+        AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
+        else -> "Device $type"
+    }

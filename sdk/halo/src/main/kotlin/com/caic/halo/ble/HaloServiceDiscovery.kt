@@ -4,8 +4,8 @@ package com.caic.halo.ble
 
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
-object HaloServiceDiscovery {
 
+object HaloServiceDiscovery {
     // ---- UUID aliases ----
 
     val LUA_SERVICE = HaloProtocol.LUA_SERVICE
@@ -32,8 +32,11 @@ object HaloServiceDiscovery {
      * Halo has AUDIO TX; Frame does not.
      */
     fun deviceType(service: BluetoothGattService): HaloDeviceType =
-        if (service.getCharacteristic(AUDIO_TX_CHAR) != null) HaloDeviceType.HALO
-        else HaloDeviceType.FRAME
+        if (service.getCharacteristic(AUDIO_TX_CHAR) != null) {
+            HaloDeviceType.HALO
+        } else {
+            HaloDeviceType.FRAME
+        }
 
     /**
      * Validate that the Lua service has the required TX and RX characteristics.
@@ -41,14 +44,19 @@ object HaloServiceDiscovery {
      * Throws [HaloException] if required characteristics are missing.
      */
     fun requiredCharacteristics(service: BluetoothGattService): Triple<
-        BluetoothGattCharacteristic,  // TX
-        BluetoothGattCharacteristic,  // RX
-        BluetoothGattCharacteristic?, // AUDIO TX (null on Frame)
+        // TX
+        BluetoothGattCharacteristic,
+        // RX
+        BluetoothGattCharacteristic,
+        // AUDIO TX (null on Frame)
+        BluetoothGattCharacteristic?,
     > {
-        val tx = service.getCharacteristic(LUA_TX_CHAR)
-            ?: throw HaloException("LUA TX characteristic not found")
-        val rx = service.getCharacteristic(LUA_RX_CHAR)
-            ?: throw HaloException("LUA RX characteristic not found")
+        val tx =
+            service.getCharacteristic(LUA_TX_CHAR)
+                ?: throw HaloException("LUA TX characteristic not found")
+        val rx =
+            service.getCharacteristic(LUA_RX_CHAR)
+                ?: throw HaloException("LUA RX characteristic not found")
         val audioTx = service.getCharacteristic(AUDIO_TX_CHAR)
         return Triple(tx, rx, audioTx)
     }
@@ -62,7 +70,10 @@ object HaloServiceDiscovery {
      * Raw data overhead: 4 bytes (ATT header + 0x01 prefix)
      * Halo data overhead: 6 bytes (ATT header + 0x01 prefix + 2 extra for AUDIO TX coexistence)
      */
-    fun payloadLimits(mtu: Int, type: HaloDeviceType): PayloadLimits {
+    fun payloadLimits(
+        mtu: Int,
+        type: HaloDeviceType,
+    ): PayloadLimits {
         require(mtu >= 23) { "MTU must be at least 23, got $mtu" }
         return PayloadLimits(
             maxStringLen = HaloProtocol.maxStringLength(mtu),
@@ -70,5 +81,8 @@ object HaloServiceDiscovery {
         )
     }
 
-    data class PayloadLimits(val maxStringLen: Int, val maxDataLen: Int)
+    data class PayloadLimits(
+        val maxStringLen: Int,
+        val maxDataLen: Int,
+    )
 }

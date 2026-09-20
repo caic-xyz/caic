@@ -39,17 +39,12 @@ export interface TaskListProps {
   getTaskNumber: (id: string) => number | undefined;
 }
 
-const naturalCompare = (a: string, b: string) =>
-  a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+const naturalCompare = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
 /** Sort tasks according to sidebar grouping: active by ID desc, stopped/purged by last state change desc. */
 export function sortTasks(tasks: Task[]): Task[] {
-  const stopped = tasks.filter(
-    (t) => t.state === "stopped" || t.state === "crashed" || t.state === "stopping",
-  );
-  const purged = tasks.filter(
-    (t) => t.state === "purged" || t.state === "failed" || t.state === "purging",
-  );
+  const stopped = tasks.filter((t) => t.state === "stopped" || t.state === "crashed" || t.state === "stopping");
+  const purged = tasks.filter((t) => t.state === "purged" || t.state === "failed" || t.state === "purging");
   const active = tasks.filter((t) => !stopped.includes(t) && !purged.includes(t));
 
   // Sort by length first (longer = larger numeric value), then lexicographically.
@@ -84,8 +79,7 @@ function ciDotURL(repo: Repo): string | undefined {
   if (repo.ci === "failure") {
     const failed = repo.ciChecks?.find((c) => NON_PASSING.has(c.conclusion));
     if (failed) {
-      if (isGitLab)
-        return `https://gitlab.com/${failed.owner}/${failed.repo}/-/jobs/${failed.jobID}`;
+      if (isGitLab) return `https://gitlab.com/${failed.owner}/${failed.repo}/-/jobs/${failed.jobID}`;
       if (failed.runID && failed.jobID)
         return `https://github.com/${failed.owner}/${failed.repo}/actions/runs/${failed.runID}/job/${failed.jobID}`;
     }
@@ -236,8 +230,7 @@ export default function TaskList(props: TaskListProps) {
     onCleanup(() => document.removeEventListener("focusin", trackFocusedTask));
   });
 
-  const taskCards = () =>
-    Array.from(listRef?.querySelectorAll<HTMLElement>("[data-task-id]") ?? []);
+  const taskCards = () => Array.from(listRef?.querySelectorAll<HTMLElement>("[data-task-id]") ?? []);
 
   const scrollSelectedTaskIntoView = () => {
     const selectedId = props.selectedId;
@@ -319,8 +312,7 @@ export default function TaskList(props: TaskListProps) {
         selected={props.selectedId === t().id}
         tabIndex={
           props.sidebarOpen() &&
-          (props.selectedId === t().id ||
-            (props.selectedId === null && firstVisibleTaskId() === t().id))
+          (props.selectedId === t().id || (props.selectedId === null && firstVisibleTaskId() === t().id))
             ? 0
             : -1
         }
@@ -353,11 +345,7 @@ export default function TaskList(props: TaskListProps) {
         <div class={styles.header}>
           <h2>Tasks</h2>
           <Show when={props.selectedId !== null}>
-            <button
-              class={styles.collapseBtn}
-              onClick={() => props.setSidebarOpen(false)}
-              title="Collapse sidebar"
-            >
+            <button class={styles.collapseBtn} onClick={() => props.setSidebarOpen(false)} title="Collapse sidebar">
               <LeftPanelClose width={20} height={20} />
             </button>
           </Show>
@@ -379,8 +367,7 @@ export default function TaskList(props: TaskListProps) {
             const purgedKey = `purged-${repo}`;
             const selectedInStopped = () =>
               !!props.selectedId && group().stopped.some((t) => t.id === props.selectedId);
-            const selectedInPurged = () =>
-              !!props.selectedId && group().purged.some((t) => t.id === props.selectedId);
+            const selectedInPurged = () => !!props.selectedId && group().purged.some((t) => t.id === props.selectedId);
             return (
               <div class={styles.repoGroup}>
                 <div class={styles.repoGroupHeader}>
@@ -390,19 +377,13 @@ export default function TaskList(props: TaskListProps) {
                       <Show when={meta.ci} keyed>
                         {(status) => (
                           <>
-                            <CIDot
-                              status={status as CIStatus}
-                              checks={meta.ciChecks}
-                              href={ciDotURL(meta)}
-                            />
+                            <CIDot status={status as CIStatus} checks={meta.ciChecks} href={ciDotURL(meta)} />
                             <Show when={status === "failure" && props.autoFixCI()}>
                               <span class={styles.autoBadge} title="Auto-fix CI enabled">
                                 auto
                               </span>
                             </Show>
-                            <Show
-                              when={status === "failure" && !props.autoFixCI() && props.onFixCI}
-                            >
+                            <Show when={status === "failure" && !props.autoFixCI() && props.onFixCI}>
                               <button
                                 class={styles.fixCIBtn}
                                 title="Fix CI"
@@ -455,11 +436,7 @@ export default function TaskList(props: TaskListProps) {
         </For>
       </div>
       <Show when={!props.sidebarOpen() && props.selectedId !== null}>
-        <button
-          class={styles.expandBtn}
-          onClick={() => props.setSidebarOpen(true)}
-          title="Expand sidebar"
-        >
+        <button class={styles.expandBtn} onClick={() => props.setSidebarOpen(true)} title="Expand sidebar">
           <LeftPanelOpen width={20} height={20} />
         </button>
       </Show>

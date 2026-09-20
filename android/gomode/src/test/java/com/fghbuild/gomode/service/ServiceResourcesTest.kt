@@ -14,32 +14,40 @@ import org.junit.Test
 class ServiceResourcesTest {
     @Test
     fun `missing items resource disables monitoring`() {
-        val resources = listOf(ResourceDescriptor(uri = "service://other", name = "other", mimeType = "application/json"))
+        val resources =
+            listOf(ResourceDescriptor(uri = "service://other", name = "other", mimeType = "application/json"))
 
         assertNull(serviceMonitoringPlan(resources))
     }
 
     @Test
     fun `non JSON items resource disables monitoring`() {
-        val resources = listOf(ResourceDescriptor(uri = GoModeItemsResourceURI, name = "items", mimeType = "text/plain"))
+        val resources =
+            listOf(ResourceDescriptor(uri = GOMODE_ITEMS_RESOURCE_URI, name = "items", mimeType = "text/plain"))
 
         assertNull(serviceMonitoringPlan(resources))
     }
 
     @Test
     fun `generic items produce attention and voice context`() {
-        val resources = listOf(
-            ResourceDescriptor(uri = GoModeItemsResourceURI, name = "items", mimeType = "application/json"),
-            ResourceDescriptor(uri = GoModeNotificationsResourceURI, name = "notifications", mimeType = "application/json"),
-        )
+        val resources =
+            listOf(
+                ResourceDescriptor(uri = GOMODE_ITEMS_RESOURCE_URI, name = "items", mimeType = "application/json"),
+                ResourceDescriptor(
+                    uri = GOMODE_NOTIFICATIONS_RESOURCE_URI,
+                    name = "notifications",
+                    mimeType = "application/json",
+                ),
+            )
         val plan = serviceMonitoringPlan(resources)
-        val snapshot = serviceMonitoringSnapshot(
-            mapOf(GoModeItemsResourceURI to itemsReadResult(ITEMS_JSON)),
-            requireNotNull(plan),
-        )
+        val snapshot =
+            serviceMonitoringSnapshot(
+                mapOf(GOMODE_ITEMS_RESOURCE_URI to itemsReadResult(ITEMS_JSON)),
+                requireNotNull(plan),
+            )
 
-        assertEquals(GoModeItemsResourceURI, plan.itemsResourceURI)
-        assertEquals(listOf(GoModeItemsResourceURI, GoModeNotificationsResourceURI), plan.resourceSubscriptions)
+        assertEquals(GOMODE_ITEMS_RESOURCE_URI, plan.itemsResourceURI)
+        assertEquals(listOf(GOMODE_ITEMS_RESOURCE_URI, GOMODE_NOTIFICATIONS_RESOURCE_URI), plan.resourceSubscriptions)
         assertEquals(listOf("i1", "i2", "i3"), snapshot.items.map { it.id })
         assertEquals(4, snapshot.omittedItemCount)
         assertEquals(listOf("Review plan", "Fix tests"), snapshot.attentionItems.map { it.title })
@@ -50,18 +58,20 @@ class ServiceResourcesTest {
         assertTrue(snapshot.voiceContext.contains("4 more items omitted. Call tasks_list and follow nextCursor."))
     }
 
-    private fun itemsReadResult(text: String) = ResourcesReadResult(
-        resultType = ResultType.Complete,
-        contents = listOf(
-            ResourceContent(
-                uri = GoModeItemsResourceURI,
-                mimeType = "application/json",
-                text = text,
-            )
-        ),
-        ttlMs = 1000,
-        cacheScope = CacheScope.Private,
-    )
+    private fun itemsReadResult(text: String) =
+        ResourcesReadResult(
+            resultType = ResultType.Complete,
+            contents =
+                listOf(
+                    ResourceContent(
+                        uri = GOMODE_ITEMS_RESOURCE_URI,
+                        mimeType = "application/json",
+                        text = text,
+                    ),
+                ),
+            ttlMs = 1000,
+            cacheScope = CacheScope.Private,
+        )
 
     private companion object {
         const val ITEMS_JSON = """

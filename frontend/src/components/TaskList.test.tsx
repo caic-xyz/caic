@@ -120,9 +120,7 @@ describe("TaskList", () => {
 
     selectTask("2");
 
-    await waitFor(() =>
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" }),
-    );
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" }));
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
   });
 
