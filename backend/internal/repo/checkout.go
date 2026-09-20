@@ -166,10 +166,13 @@ func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string, 
 
 // AllocateBranch allocates a caic-N branch from baseBranch. An empty baseBranch
 // uses the checkout default. Used to allocate branches for extra repositories.
-func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBranch string) (string, error) {
+// preferred, when non-empty, is a branch name shared across a multi-repo task's
+// repos (Manager.allocateBranches): it is tried first, and allocation falls back
+// to the next sequential name when it already exists in git.
+func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (string, error) {
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	return w.allocateBranchLocked(ctx, log, baseBranch)
+	return w.allocateBranchLocked(ctx, log, baseBranch, preferred)
 }
 
 // SyncToOrigin fetches the instance to refresh the host tracking refs, then
@@ -426,6 +429,15 @@ func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, log *slog.L
 	}
 }
 
+// NextBranchSeq returns the next unused caic-N sequence number without
+// consuming it. Callers must serialize branch allocation across tasks (see
+// Manager.allocateBranches) for the value to stay meaningful.
+func (w *Checkout) NextBranchSeq() int {
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	return w.nextID
+}
+
 // ReserveBranchName reserves and returns the next branch name ("caic-N") without
 // touching git (under branchMu, ~µs). The branch itself is created later — by the
 // runtime when forking, or by FetchAndCreateBranch for a fresh task.
@@ -435,6 +447,20 @@ func (w *Checkout) ReserveBranchName() string {
 	name := fmt.Sprintf("caic-%d", w.nextID)
 	w.nextID++
 	return name
+}
+
+// ReserveBranchNumber reserves the exact branch name "caic-n" without touching
+// git, advancing the sequence counter past n. Multi-repo tasks use it to share
+// one branch name across their repos: n is the highest next sequence number
+// across the task's checkouts (see NextBranchSeq), so the name is free in each.
+// Must run while branch allocation is serialized across tasks.
+func (w *Checkout) ReserveBranchNumber(n int) string {
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	if w.nextID <= n {
+		w.nextID = n + 1
+	}
+	return fmt.Sprintf("caic-%d", n)
 }
 
 // AdoptableBranches returns local branches that have a configured upstream.
@@ -526,7 +552,7 @@ func (w *Checkout) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
 
 // allocateBranchLocked fetches origin, resolves the start point, and creates
 // the task branch. Must be called under branchMu.
-func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, baseBranch string) (string, error) {
+func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, baseBranch, preferred string) (string, error) {
 	detached := context.WithoutCancel(ctx)
 	gitCtx, gitCancel := context.WithTimeout(detached, w.GitTimeout)
 	defer gitCancel()
@@ -550,15 +576,27 @@ func (w *Checkout) allocateBranchLocked(ctx context.Context, log *slog.Logger, b
 	if _, err := checkout.RevParse(gitCtx, startPoint); err != nil {
 		startPoint = effectiveBase
 	}
-	// Assign a sequential branch name, skipping existing ones.
+	// Assign a sequential branch name, skipping existing ones. preferred, when
+	// set, is tried once first so multi-repo tasks can share one branch name.
 	var branch string
 	var err error
+	triedPreferred := false
 	for range 100 {
 		if gitCtx.Err() != nil {
 			return "", gitCtx.Err()
 		}
-		branch = fmt.Sprintf("caic-%d", w.nextID)
-		w.nextID++
+		if preferred != "" && !triedPreferred {
+			triedPreferred = true
+			branch = preferred
+			// Consume the number even when creation fails, so a later
+			// allocation cannot reissue the name.
+			if n, ok := caicBranchNumber(preferred); ok && w.nextID <= n {
+				w.nextID = n + 1
+			}
+		} else {
+			branch = fmt.Sprintf("caic-%d", w.nextID)
+			w.nextID++
+		}
 		log.Info("creating branch", "br", branch, "base", effectiveBase)
 		err = checkout.CreateBranch(gitCtx, branch, startPoint, true)
 		if err == nil {

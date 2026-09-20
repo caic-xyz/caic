@@ -1076,12 +1076,24 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 // mounts[reserveOnly:] are new to the host, so their branch is created here from
 // their own checkout.
 //
+// Every non-adopted repo of the task shares one branch name — the highest next
+// sequence number across their checkouts — so checking out the task's branch in
+// another mapped repo takes the same command. Reserving the number in every
+// checkout before any branch is created keeps concurrent single-repo tasks from
+// reissuing it; a repo whose shared name already exists in its git (a stale
+// branch from an older task) falls back to its own next caic-N, so mixed names
+// within one task remain possible.
+//
 // Reservation happens before any task log opens: the log filename and metadata
 // header embed each repo's final branch name, and md.Fork creates the git
 // branches using these names verbatim (the caller owns their uniqueness).
 func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []taskslog.RepoMount, reserveOnly int, adoptLocal bool) error {
 	m.branchAllocationMu.Lock()
 	defer m.branchAllocationMu.Unlock()
+
+	// Resolve adoption first; adopted repos keep their own branch name.
+	var shared []int
+	var checkouts []*repo.Checkout
 	for i := range mounts {
 		ws, ok := m.Checkouts.Checkout(mounts[i].Name)
 		if !ok {
@@ -1097,11 +1109,36 @@ func (m *Manager) allocateBranches(ctx context.Context, t *task.Task, mounts []t
 				continue
 			}
 		}
+		shared = append(shared, i)
+		checkouts = append(checkouts, ws)
+	}
+	if len(shared) == 0 {
+		return nil
+	}
+
+	// One branch name for every repo that receives a fresh caic-N branch: the
+	// highest next sequence number across their checkouts, so it is free in
+	// each. branchAllocationMu makes the peek-and-reserve below atomic with
+	// respect to other tasks' allocations.
+	n := -1
+	for _, ws := range checkouts {
+		if next := ws.NextBranchSeq(); next > n {
+			n = next
+		}
+	}
+	preferred := fmt.Sprintf("caic-%d", n)
+	for k, i := range shared {
+		if i >= reserveOnly {
+			continue // AllocateBranch advances the counter itself.
+		}
+		checkouts[k].ReserveBranchNumber(n)
+	}
+	for k, i := range shared {
 		if i < reserveOnly {
-			t.SetRepoBranch(i, ws.ReserveBranchName())
+			t.SetRepoBranch(i, preferred)
 			continue
 		}
-		branch, err := ws.AllocateBranch(ctx, m.log, mounts[i].BaseBranch)
+		branch, err := checkouts[k].AllocateBranch(ctx, m.log, mounts[i].BaseBranch, preferred)
 		if err != nil {
 			return fmt.Errorf("allocate branch for %s: %w", mounts[i].Name, err)
 		}

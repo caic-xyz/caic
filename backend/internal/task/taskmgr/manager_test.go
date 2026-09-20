@@ -5400,9 +5400,10 @@ func TestAllocateBranches(t *testing.T) {
 	registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/tmp/caic"})
 
 	// Forking a 2-repo task carries both repos on their source branches. Every
-	// repo — primary and non-primary alike — is reallocated to its own fresh
-	// branch (from its own checkout), so the fork never shares a branch with the
-	// still-checked-out source instance. Index 0 is not special.
+	// repo — primary and non-primary alike — is reallocated to a fresh branch
+	// from its own checkout, so the fork never shares a branch with the
+	// still-checked-out source instance. Index 0 is not special. Both repos
+	// share one name: the highest next sequence number across their checkouts.
 	mounts := []taskslog.RepoMount{
 		{Name: "acme/app", Branch: "caic-2"},
 		{Name: "caic-xyz/caic", Branch: "caic-18"},
@@ -5490,6 +5491,147 @@ func TestAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 	}
 	if got := allocate("local-work").Primary().Branch; !strings.HasPrefix(got, "caic-") {
 		t.Errorf("associated local branch = %q, want caic-N", got)
+	}
+}
+
+// initTaskRepo creates a minimal git repo with a main commit and a self-referencing
+// origin remote with origin/main populated, ready for AllocateBranch to fetch from.
+func initTaskRepo(t *testing.T, dir string, args ...[]string) {
+	t.Helper()
+	run := func(args ...string) {
+		cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // Test helper receives only controlled arguments.
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "initial")
+	run("remote", "add", "origin", dir)
+	run("update-ref", "refs/remotes/origin/main", "main")
+	for _, extra := range args {
+		run(extra...)
+	}
+}
+
+// Multi-repo tasks share one branch name across their repos: the highest next
+// sequence number across the involved checkouts, so it is free in each. The
+// reservation also advances the low counter, so a later single-repo task on
+// that repo cannot reissue the shared name.
+func TestAllocateBranchesSharesBranchNameAcrossRepos(t *testing.T) {
+	t.Parallel()
+	dirApp, dirLib := t.TempDir(), t.TempDir()
+	initTaskRepo(t, dirApp)
+	initTaskRepo(t, dirLib)
+
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+	app := &repo.Checkout{Dir: dirApp, BaseBranch: "main", GitTimeout: time.Minute}
+	lib := &repo.Checkout{Dir: dirLib, BaseBranch: "main", GitTimeout: time.Minute}
+	registerCheckout(t, m.Checkouts, "acme/app", app)
+	registerCheckout(t, m.Checkouts, "acme/lib", lib)
+
+	// Drift the counters: acme/app has allocated two branches, acme/lib five.
+	for range 2 {
+		app.ReserveBranchName()
+	}
+	for range 5 {
+		lib.ReserveBranchName()
+	}
+
+	mounts := []taskslog.RepoMount{
+		{Name: "acme/app", GitRoot: dirApp},
+		{Name: "acme/lib", GitRoot: dirLib},
+	}
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+	tk.Repos = slices.Clone(mounts)
+	if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, false); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"caic-5", "caic-5"} {
+		if got := tk.ReposSnapshot()[i].Branch; got != want {
+			t.Errorf("repo %d branch = %q, want %q", i, got, want)
+		}
+	}
+
+	// The extra repo's branch was actually created from its base.
+	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "refs/heads/caic-5")
+	cmd.Dir = dirLib
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("caic-5 not created in acme/lib: %v\n%s", err, out)
+	}
+
+	// Both counters moved past the shared number, so neither repo reissues it.
+	for name, ws := range map[string]*repo.Checkout{"acme/app": app, "acme/lib": lib} {
+		if got := ws.ReserveBranchName(); got != "caic-6" {
+			t.Errorf("%s next reserve = %q, want caic-6", name, got)
+		}
+	}
+}
+
+// A repo whose shared name already exists in its git — a stale branch from an
+// older task the in-memory counter does not know about — falls back to its own
+// next sequential name.
+func TestAllocateBranchesFallsBackWhenSharedNameTaken(t *testing.T) {
+	t.Parallel()
+	dirApp, dirLib := t.TempDir(), t.TempDir()
+	initTaskRepo(t, dirApp)
+	initTaskRepo(t, dirLib, []string{"branch", "caic-0", "main"})
+
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+	registerCheckout(t, m.Checkouts, "acme/app", &repo.Checkout{Dir: dirApp, BaseBranch: "main", GitTimeout: time.Minute})
+	registerCheckout(t, m.Checkouts, "acme/lib", &repo.Checkout{Dir: dirLib, BaseBranch: "main", GitTimeout: time.Minute})
+
+	mounts := []taskslog.RepoMount{
+		{Name: "acme/app", GitRoot: dirApp},
+		{Name: "acme/lib", GitRoot: dirLib},
+	}
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+	tk.Repos = slices.Clone(mounts)
+	if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"caic-0", "caic-1"}
+	for i, w := range want {
+		if got := tk.ReposSnapshot()[i].Branch; got != w {
+			t.Errorf("repo %d branch = %q, want %q", i, got, w)
+		}
+	}
+}
+
+// An adopted local branch keeps its own name and disables sharing for that
+// repo; the remaining repos still share a name among themselves.
+func TestAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
+	t.Parallel()
+	dirApp, dirLib := t.TempDir(), t.TempDir()
+	initTaskRepo(t, dirApp, []string{"branch", "local-work"}, []string{"branch", "--set-upstream-to", "origin/main", "local-work"})
+	initTaskRepo(t, dirLib)
+
+	m := newTestManager(t, Config{ServerCtx: t.Context()})
+	registerCheckout(t, m.Checkouts, "acme/app", &repo.Checkout{Dir: dirApp, BaseBranch: "main", GitTimeout: time.Minute})
+	registerCheckout(t, m.Checkouts, "acme/lib", &repo.Checkout{Dir: dirLib, BaseBranch: "main", GitTimeout: time.Minute})
+
+	mounts := []taskslog.RepoMount{
+		{Name: "acme/app", BaseBranch: "local-work", GitRoot: dirApp},
+		{Name: "acme/lib", GitRoot: dirLib},
+	}
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+	tk.Repos = slices.Clone(mounts)
+	if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, true); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"local-work", "caic-0"}
+	for i, w := range want {
+		if got := tk.ReposSnapshot()[i].Branch; got != w {
+			t.Errorf("repo %d branch = %q, want %q", i, got, w)
+		}
 	}
 }
 
