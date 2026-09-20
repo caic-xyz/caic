@@ -834,8 +834,16 @@ object ProviderFetchStatusSerializer : KSerializer<ProviderFetchStatus> {
 sealed interface QuotaProvider {
     val value: String
     @Serializable
+    data object Alibaba : QuotaProvider {
+        override val value = "alibaba"
+    }
+    @Serializable
     data object Anthropic : QuotaProvider {
         override val value = "anthropic"
+    }
+    @Serializable
+    data object Cerebras : QuotaProvider {
+        override val value = "cerebras"
     }
     @Serializable
     data object ClaudeCode : QuotaProvider {
@@ -854,8 +862,20 @@ sealed interface QuotaProvider {
         override val value = "openrouter"
     }
     @Serializable
+    data object RunInfra : QuotaProvider {
+        override val value = "runinfra"
+    }
+    @Serializable
+    data object TypeSafe : QuotaProvider {
+        override val value = "typesafe"
+    }
+    @Serializable
     data object Xiaomi : QuotaProvider {
         override val value = "xiaomi"
+    }
+    @Serializable
+    data object Zai : QuotaProvider {
+        override val value = "zai"
     }
     @Serializable
     data class Other(override val value: String) : QuotaProvider
@@ -867,12 +887,17 @@ object QuotaProviderSerializer : KSerializer<QuotaProvider> {
     override fun deserialize(decoder: Decoder): QuotaProvider {
         val v = decoder.decodeString()
         return when (v) {
+            "alibaba" -> QuotaProvider.Alibaba
             "anthropic" -> QuotaProvider.Anthropic
+            "cerebras" -> QuotaProvider.Cerebras
             "claudecode" -> QuotaProvider.ClaudeCode
             "codex" -> QuotaProvider.Codex
             "deepseek" -> QuotaProvider.DeepSeek
             "openrouter" -> QuotaProvider.OpenRouter
+            "runinfra" -> QuotaProvider.RunInfra
+            "typesafe" -> QuotaProvider.TypeSafe
             "xiaomi" -> QuotaProvider.Xiaomi
+            "zai" -> QuotaProvider.Zai
             else -> QuotaProvider.Other(v)
         }
     }

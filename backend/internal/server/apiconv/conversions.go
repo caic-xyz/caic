@@ -289,8 +289,12 @@ func QuotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 	switch p {
 	case "":
 		return "", nil
+	case agent.QuotaProviderAlibaba:
+		return v1.QuotaProviderAlibaba, nil
 	case agent.QuotaProviderAnthropic:
 		return v1.QuotaProviderAnthropic, nil
+	case agent.QuotaProviderCerebras:
+		return v1.QuotaProviderCerebras, nil
 	case agent.QuotaProviderClaudeCode:
 		return v1.QuotaProviderClaudeCode, nil
 	case agent.QuotaProviderCodex:
@@ -299,8 +303,14 @@ func QuotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 		return v1.QuotaProviderDeepSeek, nil
 	case agent.QuotaProviderOpenRouter:
 		return v1.QuotaProviderOpenRouter, nil
+	case agent.QuotaProviderRunInfra:
+		return v1.QuotaProviderRunInfra, nil
+	case agent.QuotaProviderTypeSafe:
+		return v1.QuotaProviderTypeSafe, nil
 	case agent.QuotaProviderXiaomi:
 		return v1.QuotaProviderXiaomi, nil
+	case agent.QuotaProviderZai:
+		return v1.QuotaProviderZai, nil
 	default:
 		return "", fmt.Errorf("unsupported quota provider %q", p)
 	}

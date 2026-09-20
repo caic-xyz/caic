@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -101,7 +102,9 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 			h.log.ErrorContext(ctx, "convert provider quota", "provider", mergedQuotas[i].Provider, "err", err)
 			continue
 		}
-		out.LogoURL = "/logos/" + string(out.Provider) + ".svg"
+		if logo := frontend.LogoFile(string(out.Provider)); logo != "" {
+			out.LogoURL = "/logos/" + logo
+		}
 		out.UsageURL = usageURLs[agent.QuotaProvider(out.Provider)]
 		resp.Providers = append(resp.Providers, out)
 	}

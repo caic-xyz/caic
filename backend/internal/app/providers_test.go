@@ -81,3 +81,30 @@ func TestAppendProviderAPIKey(t *testing.T) {
 		}
 	})
 }
+
+func TestUsageFetcherKey(t *testing.T) {
+	t.Run("explicit env var precedence", func(t *testing.T) {
+		t.Setenv("DASHSCOPE_API_KEY_US", "us-key")
+		t.Setenv("DASHSCOPE_API_KEY", "fallback")
+		key := usageFetcherKey([]string{"DASHSCOPE_API_KEY_US", "DASHSCOPE_API_KEY"}, "alibaba", nil, nil)
+		if key != "us-key" {
+			t.Fatalf("key = %q, want DASHSCOPE_API_KEY_US", key)
+		}
+	})
+
+	t.Run("core env wins over process environment", func(t *testing.T) {
+		t.Setenv("ZAI_API_KEY", "process")
+		key := usageFetcherKey([]string{"ZAI_API_KEY"}, "zai", map[string]string{"ZAI_API_KEY": "core"}, nil)
+		if key != "core" {
+			t.Fatalf("key = %q, want core env value", key)
+		}
+	})
+
+	t.Run("falls back to provider registry", func(t *testing.T) {
+		t.Setenv("CEREBRAS_API_KEY", "registry")
+		key := usageFetcherKey(nil, "cerebras", nil, nil)
+		if key != "registry" {
+			t.Fatalf("key = %q, want CEREBRAS_API_KEY from registry", key)
+		}
+	})
+}

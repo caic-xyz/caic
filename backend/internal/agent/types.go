@@ -701,8 +701,10 @@ type QuotaProvider string
 // Valid reports whether p is a supported quota provider.
 func (p QuotaProvider) Valid() bool {
 	switch p {
-	case QuotaProviderAnthropic, QuotaProviderClaudeCode, QuotaProviderCodex,
-		QuotaProviderDeepSeek, QuotaProviderOpenRouter, QuotaProviderXiaomi:
+	case QuotaProviderAlibaba, QuotaProviderAnthropic, QuotaProviderCerebras,
+		QuotaProviderClaudeCode, QuotaProviderCodex, QuotaProviderDeepSeek,
+		QuotaProviderOpenRouter, QuotaProviderRunInfra, QuotaProviderTypeSafe,
+		QuotaProviderXiaomi, QuotaProviderZai:
 		return true
 	default:
 		return false
@@ -716,12 +718,22 @@ const (
 	QuotaProviderClaudeCode QuotaProvider = "claudecode"
 	// QuotaProviderCodex identifies Codex usage.
 	QuotaProviderCodex QuotaProvider = "codex"
+	// QuotaProviderAlibaba identifies Alibaba Cloud Model Studio (DashScope) API usage.
+	QuotaProviderAlibaba QuotaProvider = "alibaba"
+	// QuotaProviderCerebras identifies Cerebras Inference API usage.
+	QuotaProviderCerebras QuotaProvider = "cerebras"
 	// QuotaProviderDeepSeek identifies DeepSeek API usage.
 	QuotaProviderDeepSeek QuotaProvider = "deepseek"
 	// QuotaProviderOpenRouter identifies OpenRouter API usage.
 	QuotaProviderOpenRouter QuotaProvider = "openrouter"
+	// QuotaProviderRunInfra identifies RunInfra Model APIs usage.
+	QuotaProviderRunInfra QuotaProvider = "runinfra"
+	// QuotaProviderTypeSafe identifies TypeSafe API usage.
+	QuotaProviderTypeSafe QuotaProvider = "typesafe"
 	// QuotaProviderXiaomi identifies Xiaomi MiMo API usage.
 	QuotaProviderXiaomi QuotaProvider = "xiaomi"
+	// QuotaProviderZai identifies Z.ai (Zhipu) API usage.
+	QuotaProviderZai QuotaProvider = "zai"
 )
 
 // RateLimitStatus describes whether a provider accepted or rejected a request

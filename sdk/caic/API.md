@@ -358,12 +358,17 @@ QuotaProvider identifies a monitored quota source.
 
 | Value | Description |
 |-------|-------------|
+| `alibaba` |  |
 | `anthropic` |  |
+| `cerebras` |  |
 | `claudecode` |  |
 | `codex` |  |
 | `deepseek` |  |
 | `openrouter` |  |
+| `runinfra` |  |
+| `typesafe` |  |
 | `xiaomi` |  |
+| `zai` |  |
 
 ### SyncTarget
 

@@ -481,12 +481,17 @@ public struct QuotaProvider: Codable, Equatable, Hashable {
 
     public init(_ value: String) { self.value = value }
 
+    public static let Alibaba = QuotaProvider("alibaba")
     public static let Anthropic = QuotaProvider("anthropic")
+    public static let Cerebras = QuotaProvider("cerebras")
     public static let ClaudeCode = QuotaProvider("claudecode")
     public static let Codex = QuotaProvider("codex")
     public static let DeepSeek = QuotaProvider("deepseek")
     public static let OpenRouter = QuotaProvider("openrouter")
+    public static let RunInfra = QuotaProvider("runinfra")
+    public static let TypeSafe = QuotaProvider("typesafe")
     public static let Xiaomi = QuotaProvider("xiaomi")
+    public static let Zai = QuotaProvider("zai")
 
     public static func other(_ value: String) -> QuotaProvider { QuotaProvider(value) }
 

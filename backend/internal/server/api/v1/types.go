@@ -49,12 +49,17 @@ type QuotaProvider string
 
 // Supported quota providers.
 const (
+	QuotaProviderAlibaba    QuotaProvider = "alibaba"
 	QuotaProviderAnthropic  QuotaProvider = "anthropic"
+	QuotaProviderCerebras   QuotaProvider = "cerebras"
 	QuotaProviderClaudeCode QuotaProvider = "claudecode"
 	QuotaProviderCodex      QuotaProvider = "codex"
 	QuotaProviderDeepSeek   QuotaProvider = "deepseek"
 	QuotaProviderOpenRouter QuotaProvider = "openrouter"
+	QuotaProviderRunInfra   QuotaProvider = "runinfra"
+	QuotaProviderTypeSafe   QuotaProvider = "typesafe"
 	QuotaProviderXiaomi     QuotaProvider = "xiaomi"
+	QuotaProviderZai        QuotaProvider = "zai"
 )
 
 // HarnessInfo is the JSON representation of an available harness.

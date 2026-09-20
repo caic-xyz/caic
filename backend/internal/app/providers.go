@@ -38,7 +38,7 @@ func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]s
 	}
 
 	for _, entry := range apiKeyUsageFetchers {
-		key := providerAPIKey(entry.provider, coreEnv, harnessEnv)
+		key := usageFetcherKey(entry.envVars, entry.provider, coreEnv, harnessEnv)
 		if key == "" {
 			continue
 		}
@@ -151,11 +151,34 @@ func configuredAPIKey(coreEnv map[string]string, harnessEnv map[string][]string,
 
 var apiKeyUsageFetchers = []struct {
 	provider string
-	factory  func(string) usage.ProviderFetcher
+	// envVars overrides the genai provider registry's canonical API key env
+	// var; the first non-empty variable wins. Empty uses the registry.
+	envVars []string
+	factory func(string) usage.ProviderFetcher
 }{
 	{provider: "deepseek", factory: func(key string) usage.ProviderFetcher { return usage.NewDeepSeekFetcher(key) }},
 	{provider: "openrouter", factory: func(key string) usage.ProviderFetcher { return usage.NewOpenRouterFetcher(key) }},
 	{provider: "xiaomi", factory: func(key string) usage.ProviderFetcher { return usage.NewXiaomiFetcher(key) }},
+	{provider: "zai", envVars: []string{"ZAI_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewZaiFetcher(key) }},
+	{provider: "cerebras", factory: func(key string) usage.ProviderFetcher { return usage.NewCerebrasFetcher(key) }},
+	{provider: "alibaba", envVars: []string{"DASHSCOPE_API_KEY_US", "DASHSCOPE_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewAlibabaFetcher(key) }},
+	{provider: "runinfra", envVars: []string{"RUNINFRA_GATEWAY_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewRunInfraFetcher(key) }},
+	{provider: "typesafe", factory: func(key string) usage.ProviderFetcher { return usage.NewTypeSafeFetcher(key) }},
+}
+
+// usageFetcherKey resolves the API key for one usage fetcher entry: explicit
+// env vars first (core env, harness env, process environment), then the genai
+// provider registry's canonical env var.
+func usageFetcherKey(envVars []string, providerName string, coreEnv map[string]string, harnessEnv map[string][]string) string {
+	for _, envVar := range envVars {
+		if key := configuredAPIKey(coreEnv, harnessEnv, envVar); key != "" {
+			return key
+		}
+		if key := os.Getenv(envVar); key != "" {
+			return key
+		}
+	}
+	return providerAPIKey(providerName, coreEnv, harnessEnv)
 }
 
 // authForgeTokenSource adapts authenticated request users to forge OAuth tokens.

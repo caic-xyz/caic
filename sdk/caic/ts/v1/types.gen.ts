@@ -665,21 +665,31 @@ export const ProviderFetchStatusStale: ProviderFetchStatus = "stale";
 export const ProviderFetchStatusUnknown: ProviderFetchStatus = "unknown";
 
 export type QuotaProvider =
+  | "alibaba"
   | "anthropic"
+  | "cerebras"
   | "claudecode"
   | "codex"
   | "deepseek"
   | "openrouter"
-  | "xiaomi";
+  | "runinfra"
+  | "typesafe"
+  | "xiaomi"
+  | "zai";
 /**
  * Supported values.
  */
+export const QuotaProviderAlibaba: QuotaProvider = "alibaba";
 export const QuotaProviderAnthropic: QuotaProvider = "anthropic";
+export const QuotaProviderCerebras: QuotaProvider = "cerebras";
 export const QuotaProviderClaudeCode: QuotaProvider = "claudecode";
 export const QuotaProviderCodex: QuotaProvider = "codex";
 export const QuotaProviderDeepSeek: QuotaProvider = "deepseek";
 export const QuotaProviderOpenRouter: QuotaProvider = "openrouter";
+export const QuotaProviderRunInfra: QuotaProvider = "runinfra";
+export const QuotaProviderTypeSafe: QuotaProvider = "typesafe";
 export const QuotaProviderXiaomi: QuotaProvider = "xiaomi";
+export const QuotaProviderZai: QuotaProvider = "zai";
 
 export type SyncTarget =
   | "branch"
