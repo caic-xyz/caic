@@ -13,14 +13,15 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-var zaiCreditGrantsURL = "https://api.z.ai/api/paas/v4/user/credit_grants" //nolint:gosec // URL, not a credential; swapped in tests
+var zaiAccountReportURL = "https://api.z.ai/api/biz/account/query-customer-account-report"
 
-// zaiCreditGrantsPayload mirrors the Z.ai PAYG credit grants response, which
-// follows the OpenAI /dashboard/billing/credit_grants shape.
-type zaiCreditGrantsPayload struct {
-	TotalGranted   float64 `json:"total_granted"`
-	TotalUsed      float64 `json:"total_used"`
-	TotalAvailable float64 `json:"total_available"`
+// zaiAccountReportPayload mirrors the data object of the Z.ai account report
+// endpoint. Amounts are USD; null fields are absent on some accounts.
+type zaiAccountReportPayload struct {
+	Balance          *float64 `json:"balance"`
+	AvailableBalance *float64 `json:"availableBalance"`
+	GiveAmount       *float64 `json:"giveAmount"`
+	RechargeAmount   *float64 `json:"rechargeAmount"`
 }
 
 // ZaiFetcher fetches the Z.ai pay-as-you-go credit balance.
@@ -49,7 +50,7 @@ func (f *ZaiFetcher) Get(ctx context.Context) *ProviderQuota {
 }
 
 func (f *ZaiFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, zaiCreditGrantsURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, zaiAccountReportURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -64,47 +65,58 @@ func (f *ZaiFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("z.ai credit grants API returned %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("z.ai account report API returned %d: %s", resp.StatusCode, body)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	payload, err := parseZaiCreditGrants(body)
+	payload, err := parseZaiAccountReport(body)
 	if err != nil {
 		return nil, err
 	}
 
+	total := payload.Balance
+	if payload.AvailableBalance != nil {
+		total = payload.AvailableBalance
+	}
 	out := f.quota()
 	out.Balance = QuotaBalance{
 		Currency: "USD",
-		Total:    payload.TotalAvailable,
-		Granted:  payload.TotalGranted,
+		Total:    derefFloat(total),
+		Granted:  derefFloat(payload.GiveAmount),
+		ToppedUp: derefFloat(payload.RechargeAmount),
 	}
 	return out, nil
 }
 
-// parseZaiCreditGrants accepts the OpenAI-style payload at the top level or
-// wrapped in a {code, data} monitor envelope; both appear on z.ai hosts.
-func parseZaiCreditGrants(body []byte) (zaiCreditGrantsPayload, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return zaiCreditGrantsPayload{}, fmt.Errorf("decode Z.ai credit grants: %w", err)
+// parseZaiAccountReport accepts the {code, data} envelope the endpoint
+// returns, or the report object at the top level.
+func parseZaiAccountReport(body []byte) (zaiAccountReportPayload, error) {
+	var envelope struct {
+		Code int                     `json:"code"`
+		Data zaiAccountReportPayload `json:"data"`
 	}
-	if _, ok := fields["total_granted"]; ok {
-		var payload zaiCreditGrantsPayload
-		if err := json.Unmarshal(body, &payload); err != nil {
-			return zaiCreditGrantsPayload{}, fmt.Errorf("decode Z.ai credit grants: %w", err)
-		}
-		return payload, nil
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return zaiAccountReportPayload{}, fmt.Errorf("decode z.ai account report: %w", err)
 	}
-	if data, ok := fields["data"]; ok {
-		var payload zaiCreditGrantsPayload
-		if err := json.Unmarshal(data, &payload); err != nil {
-			return zaiCreditGrantsPayload{}, fmt.Errorf("decode Z.ai credit grants: %w", err)
-		}
-		return payload, nil
+	if envelope.Data.Balance != nil || envelope.Data.AvailableBalance != nil {
+		return envelope.Data, nil
 	}
-	return zaiCreditGrantsPayload{}, fmt.Errorf("unrecognized Z.ai credit grants response shape: %s", body)
+	var top zaiAccountReportPayload
+	if err := json.Unmarshal(body, &top); err != nil {
+		return zaiAccountReportPayload{}, fmt.Errorf("decode z.ai account report: %w", err)
+	}
+	if top.Balance == nil && top.AvailableBalance == nil {
+		return zaiAccountReportPayload{}, fmt.Errorf("unrecognized z.ai account report response shape: %s", body)
+	}
+	return top, nil
+}
+
+func derefFloat(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

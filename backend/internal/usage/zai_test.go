@@ -1,4 +1,4 @@
-// Tests Z.ai credit grants parsing and the cached fetcher over an HTTP stub.
+// Tests Z.ai account report parsing and the cached fetcher over an HTTP stub.
 
 package usage
 
@@ -12,50 +12,58 @@ import (
 
 func swapZaiURL(t *testing.T, url string) {
 	t.Helper()
-	orig := zaiCreditGrantsURL
-	zaiCreditGrantsURL = url
-	t.Cleanup(func() { zaiCreditGrantsURL = orig })
+	orig := zaiAccountReportURL
+	zaiAccountReportURL = url
+	t.Cleanup(func() { zaiAccountReportURL = orig })
 }
 
-func TestParseZaiCreditGrants(t *testing.T) {
+func TestParseZaiAccountReport(t *testing.T) {
 	t.Parallel()
-	t.Run("OpenAI-style payload", func(t *testing.T) {
+	t.Run("envelope with full report", func(t *testing.T) {
 		t.Parallel()
-		payload, err := parseZaiCreditGrants([]byte(`{"total_granted":18.0,"total_used":0.63,"total_available":17.37}`))
+		body := []byte(`{"code":200,"msg":"ok","success":true,"data":{
+			"balance":5.17,"rechargeAmount":10.0,"giveAmount":0.0,
+			"totalSpendAmount":4.83,"todaySpendAmount":null,
+			"availableBalance":5.17,"frozenBalance":0,"creditBalance":null,
+			"creditStatus":"NOT_OPEN","modelSpendAmountList":null,"isKA":false}}`)
+		payload, err := parseZaiAccountReport(body)
 		if err != nil {
-			t.Fatalf("parseZaiCreditGrants() err = %v", err)
+			t.Fatalf("parseZaiAccountReport() err = %v", err)
 		}
-		if payload.TotalGranted != 18 || payload.TotalUsed != 0.63 || payload.TotalAvailable != 17.37 {
-			t.Fatalf("payload = %#v, want granted 18 used 0.63 available 17.37", payload)
+		if payload.Balance == nil || *payload.Balance != 5.17 {
+			t.Fatalf("payload.Balance = %v, want 5.17", payload.Balance)
+		}
+		if payload.RechargeAmount == nil || *payload.RechargeAmount != 10 {
+			t.Fatalf("payload.RechargeAmount = %v, want 10", payload.RechargeAmount)
+		}
+	})
+
+	t.Run("top-level report", func(t *testing.T) {
+		t.Parallel()
+		payload, err := parseZaiAccountReport([]byte(`{"balance":2.5,"giveAmount":1,"rechargeAmount":1.5}`))
+		if err != nil {
+			t.Fatalf("parseZaiAccountReport() err = %v", err)
+		}
+		if payload.Balance == nil || *payload.Balance != 2.5 {
+			t.Fatalf("payload.Balance = %v, want 2.5", payload.Balance)
 		}
 	})
 
 	t.Run("zero balance keeps payload", func(t *testing.T) {
 		t.Parallel()
-		payload, err := parseZaiCreditGrants([]byte(`{"total_granted":0,"total_used":0,"total_available":0}`))
+		payload, err := parseZaiAccountReport([]byte(`{"code":200,"data":{"balance":0,"availableBalance":0,"giveAmount":0,"rechargeAmount":0}}`))
 		if err != nil {
-			t.Fatalf("parseZaiCreditGrants() err = %v", err)
+			t.Fatalf("parseZaiAccountReport() err = %v", err)
 		}
-		if payload.TotalAvailable != 0 {
-			t.Fatalf("payload = %#v, want zero balance", payload)
-		}
-	})
-
-	t.Run("monitor envelope", func(t *testing.T) {
-		t.Parallel()
-		payload, err := parseZaiCreditGrants([]byte(`{"code":200,"msg":"ok","data":{"total_granted":5,"total_used":1,"total_available":4}}`))
-		if err != nil {
-			t.Fatalf("parseZaiCreditGrants() err = %v", err)
-		}
-		if payload.TotalAvailable != 4 || payload.TotalGranted != 5 || payload.TotalUsed != 1 {
-			t.Fatalf("payload = %#v, want available 4", payload)
+		if payload.Balance == nil || *payload.Balance != 0 {
+			t.Fatalf("payload.Balance = %v, want 0", payload.Balance)
 		}
 	})
 
 	t.Run("unrecognized shape", func(t *testing.T) {
 		t.Parallel()
-		if _, err := parseZaiCreditGrants([]byte(`{"unexpected":true}`)); err == nil {
-			t.Fatal("parseZaiCreditGrants() err = nil, want unrecognized-shape error")
+		if _, err := parseZaiAccountReport([]byte(`{"unexpected":true}`)); err == nil {
+			t.Fatal("parseZaiAccountReport() err = nil, want unrecognized-shape error")
 		}
 	})
 }
@@ -66,7 +74,9 @@ func TestZaiFetcherGet(t *testing.T) {
 		t.Parallel()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"total_granted":18.0,"total_used":0.63,"total_available":17.37}`))
+			_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{
+				"balance":5.17,"rechargeAmount":10.0,"giveAmount":1.0,
+				"totalSpendAmount":5.83,"availableBalance":5.17}}`))
 		}))
 		defer server.Close()
 		swapZaiURL(t, server.URL)
@@ -79,8 +89,8 @@ func TestZaiFetcherGet(t *testing.T) {
 		if quota == nil || quota.Provider != agent.QuotaProviderZai {
 			t.Fatalf("Get() = %#v, want zai provider quota", quota)
 		}
-		if quota.Balance.Currency != "USD" || quota.Balance.Total != 17.37 || quota.Balance.Granted != 18 {
-			t.Fatalf("balance = %#v, want USD 17.37 granted 18", quota.Balance)
+		if quota.Balance.Currency != "USD" || quota.Balance.Total != 5.17 || quota.Balance.Granted != 1 || quota.Balance.ToppedUp != 10 {
+			t.Fatalf("balance = %#v, want USD 5.17 granted 1 topped up 10", quota.Balance)
 		}
 	})
 
