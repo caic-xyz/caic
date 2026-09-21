@@ -174,6 +174,8 @@ test-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
 test-smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
 
+# Slow: sends live audio through a local WebRTC loopback and needs the voice
+# gateway's audio setup.
 test-smoke-voice:
 	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./gomode/voicegateway/voicertc/
 
@@ -202,6 +204,8 @@ playwright-browser: $(FRONTEND_STAMP)
 android-sdk:
 	@python3 scripts/android_sdk.py check
 
+# Slow: every Gradle invocation here runs detekt, ktlint, builds, and tests
+# with coverage, minutes in total; CI runs it on every PR.
 android-check: android-sdk
 	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS) $(ANDROID_COVERAGE_TASKS)
 
@@ -226,10 +230,14 @@ android-push-gomode: android-check
 	done; \
 	wait
 
+# Slow: starts (or reuses) the emulator and runs the behavioral Android suite.
 android-e2e: android-setup-emulator
 	@python3 scripts/android_start_emulator.py --reuse-connected-device
 	@python3 scripts/android_e2e.py
 
+# Slow, maintainer-only: renders frontend and Android visuals twice and
+# compares decoded pixels against tracked baselines that encode the
+# development container's font stack.
 screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
 	@pnpm --silent build
 	@python3 scripts/android_start_emulator.py --auto-reuse
