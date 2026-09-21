@@ -995,7 +995,7 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 		// Forward the folded message to the usage rollup with the cost
 		// snapshot reflecting every prior entry, so resumed replays carry the
 		// correct cost delta for the unflushed tail.
-		t.observeRollupLocked(msg, entry.ProducerTime)
+		t.observeRollupLocked(msg, entry.ProducerTime, true)
 	}
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
@@ -1513,6 +1513,18 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 	return true
 }
 
+// DiscardRollup stops forwarding this task's events and tells its previous
+// sink to forget unflushed usage and replay state. It is called once a purge
+// begins, before cleanup can receive late agent messages.
+func (t *Task) DiscardRollup() {
+	t.mu.Lock()
+	meta := t.rollupMetaLocked()
+	sink := t.Rollup
+	t.Rollup = DiscardRollup{}
+	t.mu.Unlock()
+	sink.Discard(meta)
+}
+
 // snapshotLocked builds a Snapshot. Callers hold t.mu.
 func (t *Task) snapshotLocked() Snapshot {
 	return Snapshot{
@@ -1853,7 +1865,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	}
 	// Forward the folded message to the usage rollup with the cost snapshot
 	// reflecting every prior fold in this message.
-	t.observeRollupLocked(m, at)
+	t.observeRollupLocked(m, at, false)
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
 	// follows a cleanly completed turn: it is a spurious termination artifact
 	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
@@ -2091,13 +2103,13 @@ func (t *Task) activeModel() string {
 
 // observeRollupLocked forwards one agent message to the task's usage rollup
 // sink, which is never nil. The caller holds t.mu.
-func (t *Task) observeRollupLocked(m agent.Message, at time.Time) {
+func (t *Task) observeRollupLocked(m agent.Message, at time.Time, replayed bool) {
 	if q, ok := m.(*agent.RateLimitMessage); ok {
 		c := quotaChange(q, at)
 		t.Rollup.ObserveQuota(&c)
 		return
 	}
-	e, ok := rollupEvent(m, at, t.rollupModelLocked(m), t.liveCostUSD, t.Harness)
+	e, ok := rollupEvent(m, at, replayed, t.rollupModelLocked(m), t.liveCostUSD, t.Harness)
 	if !ok {
 		return
 	}

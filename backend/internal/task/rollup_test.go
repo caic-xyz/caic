@@ -23,6 +23,7 @@ import (
 type rollupSpy struct {
 	Observes []rollupObserve
 	Quotas   []usagedb.QuotaChange
+	Discards []usagedb.TaskMeta
 	Closed   int
 }
 
@@ -33,6 +34,9 @@ func (s *rollupSpy) Observe(meta usagedb.TaskMeta, e *usagedb.Event) {
 
 // ObserveQuota records the change.
 func (s *rollupSpy) ObserveQuota(c *usagedb.QuotaChange) { s.Quotas = append(s.Quotas, *c) }
+
+// Discard records the purge notification.
+func (s *rollupSpy) Discard(meta usagedb.TaskMeta) { s.Discards = append(s.Discards, meta) }
 
 // Close records the close.
 func (s *rollupSpy) Close() error { s.Closed++; return nil }
@@ -78,6 +82,9 @@ func TestTaskRollupForwarding(t *testing.T) {
 			if o.Event.At.IsZero() {
 				t.Errorf("observe %d producer time must be materialized", i)
 			}
+			if o.Event.Replayed {
+				t.Errorf("observe %d incorrectly marked as replay", i)
+			}
 		}
 		if model := sink.Observes[0].Event.Model; model != "claude-opus" {
 			t.Errorf("stamped usage model = %q, want claude-opus", model)
@@ -121,6 +128,9 @@ func TestTaskRollupForwarding(t *testing.T) {
 		for i, want := range []time.Time{timed.Add(time.Second), timed.Add(2 * time.Second), {}} {
 			if !sink.Observes[i].Event.At.Equal(want) {
 				t.Errorf("observe %d at = %v, want %v", i, sink.Observes[i].Event.At, want)
+			}
+			if !sink.Observes[i].Event.Replayed {
+				t.Errorf("observe %d not marked as replay", i)
 			}
 		}
 		if model := sink.Observes[0].Event.Model; model != "gpt-5.6" {
@@ -166,6 +176,21 @@ func TestTaskRollupForwarding(t *testing.T) {
 		tk2 := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk2.SeedTimelineEntries([]agent.TimedMessage{{Message: &agent.ResultMessage{MessageType: "result"}}})
 	})
+
+	t.Run("discard stops ingress", func(t *testing.T) {
+		t.Parallel()
+		sink := &rollupSpy{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "m", "")
+		tk.Rollup = sink
+		tk.DiscardRollup()
+		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
+		if len(sink.Discards) != 1 || sink.Discards[0].TaskID != tk.ID {
+			t.Errorf("discards = %+v, want task %s", sink.Discards, tk.ID)
+		}
+		if len(sink.Observes) != 0 || len(sink.Quotas) != 0 {
+			t.Errorf("events after discard = %+v / %+v, want none", sink.Observes, sink.Quotas)
+		}
+	})
 }
 
 func TestTaskRollupTranslation(t *testing.T) {
@@ -185,7 +210,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 		}
 		var total usagedb.TokenBuckets
 		for _, m := range claude {
-			e, ok := rollupEvent(m, at, "claude-opus", 0, harness.Claude)
+			e, ok := rollupEvent(m, at, false, "claude-opus", 0, harness.Claude)
 			if !ok {
 				t.Fatalf("%T must translate", m)
 			}
@@ -201,17 +226,17 @@ func TestTaskRollupTranslation(t *testing.T) {
 
 		// Pi's turn total arrives as the turn-end usage; its result carries
 		// only the last call and must not add tokens.
-		e, ok := rollupEvent(&agent.UsageMessage{ReportedModel: "zai/glm-5.3", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}}, at, "zai/glm-5.3", 0, harness.Pi)
+		e, ok := rollupEvent(&agent.UsageMessage{ReportedModel: "zai/glm-5.3", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}}, at, false, "zai/glm-5.3", 0, harness.Pi)
 		if !ok || e.Delta.Output != 30 {
 			t.Fatalf("pi usage tokens = %+v, ok = %v", e.Delta.TokenBuckets, ok)
 		}
-		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, "zai/glm-5.3", 0, harness.Pi)
+		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, false, "zai/glm-5.3", 0, harness.Pi)
 		if !ok || e.Delta.TokenBuckets != (usagedb.TokenBuckets{}) {
 			t.Errorf("pi result must carry no tokens, got %+v", e.Delta.TokenBuckets)
 		}
 
 		// OpenCode has no per-call records; its result is the only source.
-		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, "m", 0, harness.OpenCode)
+		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, false, "m", 0, harness.OpenCode)
 		if e.Delta.TokenBuckets != (usagedb.TokenBuckets{Input: 7, Output: 9}) {
 			t.Errorf("opencode result tokens = %+v", e.Delta.TokenBuckets)
 		}
@@ -233,7 +258,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 				t.Parallel()
 				e, ok := rollupEvent(&agent.UsageMessage{
 					Usage: agent.Usage{InputTokens: 10, CacheCreationInputTokens: 400, CacheReadInputTokens: 900, OutputTokens: 50, CacheTTLSeconds: tc.ttl},
-				}, at, "m", 0, harness.Pi)
+				}, at, false, "m", 0, harness.Pi)
 				if !ok {
 					t.Fatal("usage message must translate")
 				}
@@ -256,7 +281,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{Background: true}},
 		}
 		for _, m := range interesting {
-			if _, ok := rollupEvent(m, at, "m", 0, harness.Claude); !ok {
+			if _, ok := rollupEvent(m, at, false, "m", 0, harness.Claude); !ok {
 				t.Errorf("%T must translate", m)
 			}
 		}
@@ -267,7 +292,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.SkillReadMessage{},
 		}
 		for _, m := range skipped {
-			if _, ok := rollupEvent(m, at, "m", 0, harness.Claude); ok {
+			if _, ok := rollupEvent(m, at, false, "m", 0, harness.Claude); ok {
 				t.Errorf("%T must be skipped", m)
 			}
 		}

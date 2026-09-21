@@ -1,4 +1,4 @@
-// Task-side usage rollup contract: the RollupSink interface, DiscardRollup, and the agent-to-event translation.
+// Task-side usage rollup contract: the RollupSink interface, purge discard, and agent-to-event translation.
 //
 // The sink owns accumulation, day bucketing, and flush timing; the task
 // only translates timeline messages into rollup events and forwards them.
@@ -23,6 +23,9 @@ type RollupSink interface {
 	Observe(meta usagedb.TaskMeta, e *usagedb.Event)
 	// ObserveQuota records one provider quota-window status change.
 	ObserveQuota(c *usagedb.QuotaChange)
+	// Discard drops a purged task's unflushed data and resume bookkeeping.
+	// The task guarantees no later events reach the sink for this task.
+	Discard(meta usagedb.TaskMeta)
 	// Close flushes all pending deltas and releases resources.
 	Close() error
 }
@@ -38,6 +41,9 @@ func (DiscardRollup) Observe(usagedb.TaskMeta, *usagedb.Event) {}
 // ObserveQuota implements RollupSink by discarding the change.
 func (DiscardRollup) ObserveQuota(*usagedb.QuotaChange) {}
 
+// Discard implements RollupSink by discarding the purge notification.
+func (DiscardRollup) Discard(usagedb.TaskMeta) {}
+
 // Close implements RollupSink with no resources to release.
 func (DiscardRollup) Close() error { return nil }
 
@@ -51,8 +57,8 @@ func (DiscardRollup) Close() error { return nil }
 // arrives as the turn-end UsageMessage and its result carries only the last
 // call's usage. Non-token fields (turns, durations, context window) are
 // counted from every record that reports them.
-func rollupEvent(m agent.Message, at time.Time, model string, costUSD float64, h harness.Name) (usagedb.Event, bool) {
-	e := usagedb.Event{At: at, Model: model, CostUSD: costUSD}
+func rollupEvent(m agent.Message, at time.Time, replayed bool, model string, costUSD float64, h harness.Name) (usagedb.Event, bool) {
+	e := usagedb.Event{At: at, Replayed: replayed, Model: model, CostUSD: costUSD}
 	switch m := m.(type) {
 	case *agent.UsageMessage:
 		if h == harness.Pi {

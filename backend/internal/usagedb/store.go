@@ -1,4 +1,4 @@
-// Store is the usage rollup sink: append-only daily JSONL files, in-memory aggregates, and restart watermarks.
+// Store is the usage rollup sink: append-only daily JSONL files, in-memory aggregates, restart watermarks, and purge discard.
 //
 // It implements the task.RollupSink ingestion contract. Task folds call
 // Observe under their own task mutex, and the store serializes all file and
@@ -92,7 +92,10 @@ func New(cfg Config) (*Store, error) {
 // ordering identity: they are ingested only when the task has no watermark
 // at all (adopted tasks), attributed to the current day, and never advance
 // the watermark — so one replay pass is complete, but a re-replay of the
-// same timestamp-less history can duplicate its rows.
+// same timestamp-less history can duplicate its rows. Replayed events at or
+// before a watermark are skipped, while a live event before it is retained:
+// producer clocks can regress and the daily rollup must not silently lose
+// that usage.
 func (s *Store) Observe(meta TaskMeta, e *Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,7 +111,10 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 		}
 		e.At = time.Now()
 	} else if !wm.IsZero() && !e.At.After(wm) {
-		return
+		if e.Replayed || e.At.Equal(wm) {
+			return
+		}
+		s.log.Warn("retain live usage event before task watermark", "task", id, "producer_time", e.At, "watermark", wm)
 	}
 	p := s.pending[id]
 	if p == nil {
@@ -124,6 +130,23 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 		// Turn boundary: flush so a crash never loses completed-turn usage.
 		s.flushTaskLocked(id)
 	}
+}
+
+// Discard drops a purged task's unflushed usage and resume bookkeeping.
+//
+// Flushed rows remain immutable in their daily files and in-memory
+// aggregates. Callers must stop forwarding the task's events before calling
+// Discard; the task package enforces that boundary when a purge begins.
+func (s *Store) Discard(meta TaskMeta) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || meta.TaskID.IsZero() {
+		return
+	}
+	id := meta.TaskID.String()
+	delete(s.pending, id)
+	delete(s.watermarks, id)
+	delete(s.flushedCost, id)
 }
 
 // ObserveQuota records a provider quota-window status change; rows are

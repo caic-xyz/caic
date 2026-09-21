@@ -133,12 +133,14 @@ func (d *Delta) fold(o *Delta) {
 }
 
 // Event is one ingest record from a task fold. At is the record's producer
-// time (zero only for timestamp-less adopted replay), Model is the
-// attribution model (empty when unknown), and CostUSD is the task's live
-// priced-cost snapshot at the fold — the store derives cost movement from
-// consecutive snapshots and never prices itself.
+// time (zero only for timestamp-less adopted replay), Replayed identifies a
+// retained-history replay, Model is the attribution model (empty when
+// unknown), and CostUSD is the task's live priced-cost snapshot at the fold
+// — the store derives cost movement from consecutive snapshots and never
+// prices itself.
 type Event struct {
 	At           time.Time
+	Replayed     bool
 	Model        string
 	CostUSD      float64
 	TurnBoundary bool // a completed turn; the store flushes on it

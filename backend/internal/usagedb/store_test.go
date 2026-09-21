@@ -185,6 +185,46 @@ func TestObserve(t *testing.T) {
 		}
 	})
 
+	t.Run("live producer time regression is retained", func(t *testing.T) {
+		t.Parallel()
+		s := newTestStore(t, t.TempDir())
+		meta := testMeta(ksid.NewID())
+		current := atUTC(6, 0, 0, 1)
+		s.Observe(meta, &Event{At: current, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}, Turns: 1}})
+
+		if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 || rows[0].Output != 5 {
+			t.Errorf("regressed-day rows = %+v, want one retained row", rows)
+		}
+		if got := s.watermarks[meta.TaskID.String()]; !got.Equal(current) {
+			t.Errorf("watermark = %v, want %v", got, current)
+		}
+
+		// A historical replay before the watermark remains a duplicate and is
+		// skipped, preserving restart-resume behavior.
+		s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Replayed: true, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}, Turns: 1}})
+		if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 {
+			t.Errorf("rows after replay = %+v, want no duplicate", rows)
+		}
+	})
+
+	t.Run("discard removes task bookkeeping", func(t *testing.T) {
+		t.Parallel()
+		s := newTestStore(t, t.TempDir())
+		meta := testMeta(ksid.NewID())
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.10, TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
+		id := meta.TaskID.String()
+		if s.pending[id] == nil || s.watermarks[id].IsZero() {
+			t.Fatalf("task bookkeeping missing before discard")
+		}
+
+		s.Discard(meta)
+		if s.pending[id] != nil || !s.watermarks[id].IsZero() || s.flushedCost[id] != 0 {
+			t.Errorf("task bookkeeping survived discard: pending=%v watermark=%v flushedCost=%v", s.pending[id], s.watermarks[id], s.flushedCost[id])
+		}
+	})
+
 	t.Run("cost movement retried once after failed append", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

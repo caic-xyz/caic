@@ -645,6 +645,9 @@ func (r *Lifecycle) cleanup(ctx context.Context, reason taskslog.State) {
 	r.entry.Cleanup(func() {
 		start := time.Now()
 		t := r.entry.Task()
+		if reason == taskslog.StatePurged {
+			t.DiscardRollup()
+		}
 		result := r.agentRuntime.Cleanup(ctx, t, reason)
 		elapsed := time.Since(start).Round(time.Millisecond)
 		if result.Err != nil {
