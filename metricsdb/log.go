@@ -1,11 +1,11 @@
-// Package metricsdb appends operation observations to per-day JSONL files and
-// compresses completed days.
+// Package metricsdb durably logs operation observations to per-day JSONL files.
 //
 // Files live in one directory as YYYY-MM-DD.jsonl, named and timestamped in
 // UTC. Each line records one measurement as a name, an outcome, a kind, a unit,
 // and an amount in that unit. Rolling past midnight closes the finished day and
 // rewrites it as YYYY-MM-DD.jsonl.zstd, and days left behind by a restart are
-// compressed on the next start. The log is a durable record rather than a query
+// compressed on the next start. Days older than 90 days are discarded, at
+// startup and on each rollover. The log is a durable record rather than a query
 // surface: decompress it with zstd and read it with jq, or ship it to an
 // OpenTelemetry backend.
 //
@@ -32,12 +32,13 @@ import (
 )
 
 const (
-	dirMode     = 0o700
-	fileMode    = 0o600
-	dayLayout   = "2006-01-02"
-	jsonlSuffix = ".jsonl"
-	zstdSuffix  = ".jsonl.zstd"
-	tempSuffix  = ".tmp"
+	dirMode       = 0o700
+	fileMode      = 0o600
+	dayLayout     = "2006-01-02"
+	jsonlSuffix   = ".jsonl"
+	zstdSuffix    = ".jsonl.zstd"
+	tempSuffix    = ".tmp"
+	retentionDays = 90
 )
 
 // record is one measurement as written to the log.
@@ -74,9 +75,10 @@ type Log struct {
 	file   *os.File
 }
 
-// NewLog creates the log directory and compresses any day left unfinishable by
-// an earlier run. A day that cannot be compressed is reported as a warning
-// rather than an error: losing history is not worth refusing to start.
+// NewLog creates the log directory, compresses any day left unfinished by an
+// earlier run, and discards days past the retention window. A directory that
+// cannot be swept is reported as a warning rather than an error: losing history
+// is not worth refusing to start.
 func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 	if log == nil {
 		return nil, errors.New("logger is required")
@@ -100,8 +102,8 @@ func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 		log: log.With("cmp", "metricsdb"),
 		now: time.Now,
 	}
-	if err := l.compressFinished(); err != nil {
-		l.log.Warn("compress unfinished metrics days", "err", err)
+	if err := l.sweep(); err != nil {
+		l.log.Warn("sweep metrics directory", "err", err)
 	}
 	return l, nil
 }
@@ -158,6 +160,9 @@ func (l *Log) rollLocked(ctx context.Context, day string) error {
 		if err := l.finishLocked(); err != nil {
 			l.log.ErrorContext(ctx, "finish metrics day", "err", err, "day", finished)
 		}
+		if err := l.pruneExpired(); err != nil {
+			l.log.WarnContext(ctx, "discard expired metrics days", "err", err)
+		}
 	}
 	f, err := os.OpenFile(filepath.Join(l.dir, day+jsonlSuffix), os.O_CREATE|os.O_APPEND|os.O_WRONLY, fileMode) //nolint:gosec // G304: the configured metrics directory plus a UTC date.
 	if err != nil {
@@ -189,9 +194,15 @@ func (l *Log) detachLocked() error {
 	return errors.Join(f.Sync(), f.Close())
 }
 
-// compressFinished compresses every day except the current one and removes
-// leftover temporary files.
-func (l *Log) compressFinished() error {
+// sweep compresses days left behind by an earlier run and discards the days that
+// have aged past the retention window.
+func (l *Log) sweep() error {
+	return errors.Join(l.compressLeftovers(), l.pruneExpired())
+}
+
+// compressLeftovers compresses every finished day and removes leftover temporary
+// files. The current day stays plain so a later run can append to it.
+func (l *Log) compressLeftovers() error {
 	entries, err := os.ReadDir(l.dir)
 	if err != nil {
 		return fmt.Errorf("read metrics directory: %w", err)
@@ -214,6 +225,50 @@ func (l *Log) compressFinished() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// pruneExpired discards logged days that have aged out of the retention window.
+// Only names this package writes are considered, and each removal is reported so
+// a discarded day is never silent.
+func (l *Log) pruneExpired() error {
+	entries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return fmt.Errorf("read metrics directory: %w", err)
+	}
+	cutoff := l.now().UTC().AddDate(0, 0, -retentionDays)
+	var errs []error
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		day, ok := dayOf(entry.Name())
+		if !ok || !day.Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(l.dir, entry.Name())); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		l.log.Info("discarded expired metrics day", "day", day.Format(dayLayout), "file", entry.Name())
+	}
+	return errors.Join(errs...)
+}
+
+// dayOf returns the day a logged file covers, or false when the name is not one
+// this package writes.
+func dayOf(name string) (time.Time, bool) {
+	stem, found := strings.CutSuffix(name, zstdSuffix)
+	if !found {
+		stem, found = strings.CutSuffix(name, jsonlSuffix)
+		if !found {
+			return time.Time{}, false
+		}
+	}
+	day, err := time.Parse(dayLayout, stem)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return day, true
 }
 
 // compress rewrites the JSONL file at path as <path>.zstd and removes the

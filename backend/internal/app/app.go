@@ -357,8 +357,14 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
 	}
 	instanceRes := <-instanceCh
-	if instanceRes.err != nil {
+	if instanceRes.err != nil && instanceRes.instances == nil {
+		// Nothing answered, so the server cannot know which containers it owns.
 		return nil, fmt.Errorf("list runtime instances: %w", instanceRes.err)
+	}
+	if instanceRes.err != nil {
+		// Adopting the instances that did answer beats refusing to start because
+		// one runtime is unavailable.
+		appLog.WarnContext(ctx, "runtime inventory incomplete", "err", instanceRes.err)
 	}
 
 	liveBranches := repo.LiveBranchesByRoot(instanceRes.instances)
@@ -581,7 +587,7 @@ func cleanupLegacyReplayArtifacts(logDir string) error {
 
 func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config, rec metrics.Recorder) (*runtime.Router, []mdRuntime, error) {
 	if cfg.Runtime.System != nil {
-		runtimeRouter, err := runtime.NewRouter(log, []runtime.System{cfg.Runtime.System}, rec)
+		runtimeRouter, err := runtime.NewRouter([]runtime.System{cfg.Runtime.System}, rec)
 		if err != nil {
 			return nil, nil, fmt.Errorf("init fake runtime router: %w", err)
 		}
@@ -609,7 +615,7 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 		return nil, nil, errors.New("no container runtime available: install docker or podman")
 	}
 
-	runtimeRouter, err := runtime.NewRouter(log, runtimes, rec)
+	runtimeRouter, err := runtime.NewRouter(runtimes, rec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init runtime router: %w", err)
 	}

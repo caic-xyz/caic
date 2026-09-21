@@ -189,7 +189,7 @@ func newTestRuntimeRouter(t testing.TB, backend testRuntimeBackend) *runtime.Rou
 	if backend == nil {
 		return nil
 	}
-	rt, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
+	rt, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -846,7 +846,7 @@ func TestRunner(t *testing.T) {
 		t.Run("recordsStoppedDiskUsage", func(t *testing.T) {
 			t.Parallel()
 			stub := testContainer()
-			runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{
+			runtimes, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{
 				testRuntimeBackend: stub,
 				DiskSizes: map[runtime.ID]int64{
 					runtime.NewID("test-runtime", "ctr-1"): 700,

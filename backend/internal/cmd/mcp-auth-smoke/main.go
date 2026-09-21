@@ -171,7 +171,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	backend := smoketest.NewRuntimeBackend(0)
-	runtimeRouter, err := runtime.NewRouter(slog.New(slog.NewTextHandler(os.Stderr, nil)), []runtime.System{backend}, metrics.Nop{})
+	runtimeRouter, err := runtime.NewRouter([]runtime.System{backend}, metrics.Nop{})
 	if err != nil {
 		return "", "", nil, err
 	}

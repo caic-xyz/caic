@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log/slog"
 	"maps"
 	"slices"
 	"sync"
@@ -54,24 +53,24 @@ type Router struct {
 	ByName   map[Name]System
 
 	// Immutable.
-	log     *slog.Logger
-	metrics metrics.Recorder
+	metrics        metrics.Recorder
+	attrsByRuntime map[Name][]metrics.Attr
 }
 
 // NewRouter creates a runtime router. A recorder is required; pass
 // metrics.Nop{} to discard observations.
-func NewRouter(log *slog.Logger, runtimes []System, rec metrics.Recorder) (*Router, error) {
-	if log == nil {
-		return nil, errors.New("logger is required")
-	}
+//
+// A router reports unavailable backends to its caller rather than logging them,
+// so it holds no logger of its own.
+func NewRouter(runtimes []System, rec metrics.Recorder) (*Router, error) {
 	if rec == nil {
 		return nil, errors.New("metrics recorder is required")
 	}
 	r := &Router{
-		Runtimes: slices.Clone(runtimes),
-		ByName:   make(map[Name]System, len(runtimes)),
-		log:      log.With("cmp", "runtime"),
-		metrics:  rec,
+		Runtimes:       slices.Clone(runtimes),
+		ByName:         make(map[Name]System, len(runtimes)),
+		metrics:        rec,
+		attrsByRuntime: make(map[Name][]metrics.Attr, len(runtimes)),
 	}
 	if len(r.Runtimes) == 0 {
 		return nil, errors.New("no runtimes configured")
@@ -88,6 +87,7 @@ func NewRouter(log *slog.Logger, runtimes []System, rec metrics.Recorder) (*Rout
 			return nil, fmt.Errorf("duplicate runtime %q", name)
 		}
 		r.ByName[name] = rt
+		r.attrsByRuntime[name] = []metrics.Attr{{Key: attrContainerRuntime, Value: string(name)}}
 	}
 	return r, nil
 }
@@ -98,7 +98,7 @@ func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (
 	// The runtime is only known once the backend is resolved, so a launch that
 	// never found one records no runtime at all.
 	var runtimeName Name
-	defer func() { r.observe(ctx, metricContainerLaunch, start, err, runtimeAttr(runtimeName)...) }()
+	defer func() { r.observe(ctx, metricContainerLaunch, start, err, r.runtimeAttrs(runtimeName)...) }()
 	rt, err := r.runtimeForStart(opts)
 	if err != nil {
 		return "", err
@@ -119,7 +119,7 @@ func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (
 // Connect waits for transport readiness on the selected backend.
 func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (conn ConnectionInfo, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerConnect, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerConnect, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return ConnectionInfo{}, err
@@ -133,7 +133,7 @@ func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (conn C
 func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (out string, err error) {
 	start := time.Now()
 	defer func() {
-		attrs := runtimeAttr(id.RuntimeName())
+		attrs := r.runtimeAttrs(id.RuntimeName())
 		r.observe(ctx, metricRepoDiff, start, err, attrs...)
 		if err == nil {
 			r.metrics.Record(ctx, metricRepoDiffSize, metrics.OutcomeOK, metrics.Bytes(int64(len(out))), attrs...)
@@ -149,7 +149,7 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 // CommitDiffStat returns the net committed diff stat between two repository tips.
 func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (out string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoCommitDiff, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricRepoCommitDiff, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -160,7 +160,7 @@ func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, t
 // FileDiff returns one committed or uncommitted file patch from the owning backend.
 func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (out string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoFileDiff, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricRepoFileDiff, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -173,7 +173,7 @@ func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path,
 // RepositoryStatus returns the repository status from the owning backend.
 func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (status RepositoryStatus, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoStatus, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricRepoStatus, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return RepositoryStatus{}, err
@@ -185,7 +185,7 @@ func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (stat
 // owning backend.
 func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int) (status RepositoryStatus, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoCompactStatus, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricRepoCompactStatus, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return RepositoryStatus{}, err
@@ -197,7 +197,7 @@ func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int
 // the exact branch tips observed.
 func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []FetchedBranch, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoFetch, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricRepoFetch, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
@@ -208,7 +208,7 @@ func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []F
 // Stop gracefully stops a runtime instance on its owning backend.
 func (r *Router) Stop(ctx context.Context, id ID) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerStop, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerStop, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -219,7 +219,7 @@ func (r *Router) Stop(ctx context.Context, id ID) (err error) {
 // Purge removes a runtime instance from its owning backend.
 func (r *Router) Purge(ctx context.Context, id ID) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerPurge, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerPurge, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -230,7 +230,7 @@ func (r *Router) Purge(ctx context.Context, id ID) (err error) {
 // Revive restarts a stopped runtime instance on its owning backend.
 func (r *Router) Revive(ctx context.Context, id ID) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerRevive, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerRevive, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func (r *Router) Revive(ctx context.Context, id ID) (err error) {
 // Fork snapshots an instance on its owning backend. Cross-runtime forks are rejected.
 func (r *Router) Fork(ctx context.Context, id ID, opts *ForkOptions) (forkID ID, conn ConnectionInfo, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerFork, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerFork, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", ConnectionInfo{}, err
@@ -273,7 +273,7 @@ func (r *Router) VNCPort(ctx context.Context, id ID) int {
 // Processes returns the process list for an instance.
 func (r *Router) Processes(ctx context.Context, id ID) (procs []ProcessInfo, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerProcesses, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerProcesses, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
@@ -284,7 +284,7 @@ func (r *Router) Processes(ctx context.Context, id ID) (procs []ProcessInfo, err
 // Signal sends a signal to a process in an instance.
 func (r *Router) Signal(ctx context.Context, id ID, pid int, sig string) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerSignal, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerSignal, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -316,7 +316,7 @@ func (r *Router) DiskUsage(ctx context.Context, ids []ID) (usage map[ID]int64, e
 		maps.Copy(result, usage)
 	}
 	for id, size := range result {
-		r.metrics.Record(ctx, metricContainerDiskSize, metrics.OutcomeOK, metrics.Bytes(size), runtimeAttr(id.RuntimeName())...)
+		r.metrics.Record(ctx, metricContainerDiskSize, metrics.OutcomeOK, metrics.Bytes(size), r.runtimeAttrs(id.RuntimeName())...)
 	}
 	return result, nil
 }
@@ -413,6 +413,13 @@ func (r *Router) WatchEvents(ctx context.Context, filter EventFilter) (<-chan Ev
 }
 
 // List returns known runtime instances from all inventory backends.
+//
+// It tolerates a backend being unavailable. Instances from the runtimes that
+// answered come back alongside an error naming the ones that did not, so a
+// caller that can work with a partial inventory uses it and logs the error,
+// while a caller that needs a complete one checks err. The result is nil only
+// when no runtime answered at all, which lets a caller tell an unreadable
+// inventory from an empty one.
 func (r *Router) List(ctx context.Context) (out []Instance, err error) {
 	start := time.Now()
 	// Inventory spans every runtime, so neither the call nor the count it produces
@@ -439,21 +446,24 @@ func (r *Router) List(ctx context.Context) (out []Instance, err error) {
 	if successes == 0 && len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
-	for _, listErr := range errs {
-		r.log.WarnContext(ctx, "runtime inventory failed", "err", listErr)
+	if out == nil {
+		// A non-nil slice is how a caller tells an empty inventory from one that
+		// could not be read at all.
+		out = []Instance{}
 	}
-	if len(errs) == 0 {
-		// A gauge is a point-in-time count, so it is only recorded when every
-		// runtime answered. A partial inventory would understate it.
-		r.metrics.Record(ctx, metricContainerInstances, metrics.OutcomeOK, metrics.Gauge(float64(len(out)), metrics.UnitCount))
+	if len(errs) > 0 {
+		return out, errors.Join(errs...)
 	}
+	// A gauge is a point-in-time count, so it is only recorded for a complete
+	// inventory; a partial one would understate it.
+	r.metrics.Record(ctx, metricContainerInstances, metrics.OutcomeOK, metrics.Gauge(float64(len(out)), metrics.UnitCount))
 	return out, nil
 }
 
 // Metadata returns runtime metadata for an instance.
 func (r *Router) Metadata(ctx context.Context, id ID, key MetadataKey) (value string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerMetadata, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerMetadata, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -464,7 +474,7 @@ func (r *Router) Metadata(ctx context.Context, id ID, key MetadataKey) (value st
 // Inspect returns observed runtime configuration for an instance.
 func (r *Router) Inspect(ctx context.Context, id ID) (info *InstanceInspect, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerInspect, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerInspect, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
@@ -486,7 +496,7 @@ func (r *Router) Inspect(ctx context.Context, id ID) (info *InstanceInspect, err
 // SudoPassword fetches a sudo password from an instance's owning backend.
 func (r *Router) SudoPassword(ctx context.Context, id ID) (password string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerSudoPassword, start, err, runtimeAttr(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricContainerSudoPassword, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -500,13 +510,15 @@ func (r *Router) observe(ctx context.Context, name string, start time.Time, err 
 	r.metrics.Record(ctx, name, metrics.OutcomeOf(err), metrics.Duration(time.Since(start)), attrs...)
 }
 
-// runtimeAttr returns the runtime attribute for an operation served by name, or
-// nothing when the runtime is unknown, such as an ID that was never qualified.
-func runtimeAttr(name Name) []metrics.Attr {
-	if name == "" {
-		return nil
-	}
-	return []metrics.Attr{{Key: attrContainerRuntime, Value: string(name)}}
+// runtimeAttrs returns the attributes naming the runtime that served an
+// operation on name, or nothing when no configured runtime matches.
+//
+// Looking the attribute up instead of building it keeps a per-observation
+// allocation off the hot path, and binding the values to the configured runtimes
+// keeps the attribute bounded: an ID naming a runtime that is no longer
+// configured records no runtime rather than a value nothing served.
+func (r *Router) runtimeAttrs(name Name) []metrics.Attr {
+	return r.attrsByRuntime[name]
 }
 
 func (r *Router) runtimeForStart(opts *StartOptions) (System, error) {

@@ -155,7 +155,7 @@ type testRuntimeBackend interface {
 // call buildHandler; buildHandler re-syncs hostState into the MCP concern, and
 // the authHandlers copies must be synced by the test if exercised.
 func newTestRuntime(t testing.TB, backend testRuntimeBackend) *runtime.Router {
-	router, err := runtime.NewRouter(testLogger(), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
+	router, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 	if err != nil {
 		t.Fatalf("runtime.NewRouter: %v", err)
 	}

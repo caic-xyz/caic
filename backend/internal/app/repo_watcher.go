@@ -90,12 +90,11 @@ func (w *repoWatcher) syncReposInDir(ctx context.Context, dir string) {
 }
 
 func (w *repoWatcher) register(ctx context.Context, abs string) {
-	var liveBranches []string
-	if instances, err := w.runtimes.List(ctx); err != nil {
-		w.log.WarnContext(ctx, "list runtime instances failed; branch numbering may collide with a running container", "path", abs, "err", err)
-	} else {
-		liveBranches = repo.LiveBranchesByRoot(instances)[abs]
+	instances, err := w.runtimes.List(ctx)
+	if err != nil {
+		w.log.WarnContext(ctx, "runtime instance list incomplete; branch numbering may collide with a running container", "path", abs, "err", err)
 	}
+	liveBranches := repo.LiveBranchesByRoot(instances)[abs]
 	checkout, err := repo.DiscoverCheckout(ctx, w.log.With("path", abs), abs, liveBranches)
 	if err != nil {
 		w.log.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)

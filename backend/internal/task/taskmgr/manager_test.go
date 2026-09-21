@@ -142,7 +142,7 @@ func newTestRuntime(t testing.TB, backend testRuntimeBackend, info testRuntimeIn
 	if info != nil {
 		sys = testRuntimeInfoSystem{testRuntimeBackend: backend, Monitor: info, Inventory: info, PrivilegeInfo: info}
 	}
-	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{sys}, metrics.Nop{})
+	router, err := runtime.NewRouter([]runtime.System{sys}, metrics.Nop{})
 	if err != nil {
 		t.Fatalf("runtime.NewRouter: %v", err)
 	}
@@ -1237,7 +1237,7 @@ func TestNew(t *testing.T) {
 	t.Run("no-repo checkout is fully constructed", func(t *testing.T) {
 		t.Parallel()
 		backend := &mdruntime.Backend{}
-		router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
+		router, err := runtime.NewRouter([]runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -282,13 +282,13 @@ func NewStore(resource Resource) *Store {
 // say, a duration and a size keeps them apart instead of merging two
 // incommensurable quantities.
 func (s *Store) Record(_ context.Context, name string, outcome Outcome, m Measurement, attrs ...Attr) {
-	attrsKey, attrSet := canonicalAttrs(attrs)
+	attrsKey := canonicalKey(attrs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := seriesKey{name: name, outcome: outcome, kind: m.Kind, unit: m.Unit, attrs: attrsKey}
 	entry := s.series[key]
 	if entry == nil {
-		entry = &series{attributes: attrSet}
+		entry = &series{attributes: DedupAttrs(attrs)}
 		s.series[key] = entry
 	}
 	entry.observe(m.Amount)
@@ -397,22 +397,28 @@ func (s *series) snapshot(key *seriesKey) Series {
 	return out
 }
 
-// canonicalAttrs returns a stable series key and the deduplicated attribute
-// set. Later duplicates win, matching OpenTelemetry. Both results are empty
-// when attrs is empty, which is the common case.
-func canonicalAttrs(attrs []Attr) (key string, set map[string]string) {
-	set = DedupAttrs(attrs)
-	if set == nil {
-		return "", nil
+// canonicalKey builds the series key for attrs, with later duplicates winning so
+// the key always agrees with DedupAttrs.
+//
+// Most observations carry no attribute or exactly one, so those cases skip the
+// map and sort the general path needs. The attribute set itself is only
+// materialized when a series is seen for the first time.
+func canonicalKey(attrs []Attr) string {
+	switch len(attrs) {
+	case 0:
+		return ""
+	case 1:
+		return strconv.Quote(attrs[0].Key) + "=" + strconv.Quote(attrs[0].Value) + " "
 	}
+	set := DedupAttrs(attrs)
 	var b strings.Builder
-	for _, attrKey := range slices.Sorted(maps.Keys(set)) {
-		b.WriteString(strconv.Quote(attrKey))
+	for _, key := range slices.Sorted(maps.Keys(set)) {
+		b.WriteString(strconv.Quote(key))
 		b.WriteByte('=')
-		b.WriteString(strconv.Quote(set[attrKey]))
+		b.WriteString(strconv.Quote(set[key]))
 		b.WriteByte(' ')
 	}
-	return b.String(), set
+	return b.String()
 }
 
 // percentile returns the nearest-rank percentile of ascending samples, exact

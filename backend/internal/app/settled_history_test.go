@@ -60,7 +60,7 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 }
 
 func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskmgr.Manager {
-	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{
+	router, err := runtime.NewRouter([]runtime.System{
 		&runtimetest.FakeSystem{},
 	}, metrics.Nop{})
 	if err != nil {

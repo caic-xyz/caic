@@ -7,8 +7,8 @@ import (
 	"errors"
 	"io"
 	"iter"
-	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,8 +16,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/metrics"
 )
-
-func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func TestRouter(t *testing.T) {
 	t.Parallel()
@@ -48,7 +46,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		docker := newRouterFakeBackend("docker")
 		podman := newRouterFakeBackend("podman")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman}, metrics.Nop{})
+		router, err := runtime.NewRouter([]runtime.System{docker, podman}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +87,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		docker := newRouterFakeBackend("docker")
 		podman := newRouterFakeBackend("podman")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman}, metrics.Nop{})
+		router, err := runtime.NewRouter([]runtime.System{docker, podman}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +110,7 @@ func TestRouter(t *testing.T) {
 	t.Run("rejects unqualified instance IDs", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend}, metrics.Nop{})
+		router, err := runtime.NewRouter([]runtime.System{backend}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,7 +122,7 @@ func TestRouter(t *testing.T) {
 	t.Run("rejects cross runtime fork", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend, newRouterFakeBackend("podman")}, metrics.Nop{})
+		router, err := runtime.NewRouter([]runtime.System{backend, newRouterFakeBackend("podman")}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +136,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		events := make(chan runtime.Event, 1)
 		ctxDone := make(chan struct{})
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{
+		router, err := runtime.NewRouter([]runtime.System{
 			&routerEventSystem{RuntimeName: "docker", events: events, ctxDone: ctxDone},
 			&routerEventSystem{RuntimeName: "podman", err: errors.New("boom")},
 		}, metrics.Nop{})
@@ -157,11 +155,95 @@ func TestRouter(t *testing.T) {
 	})
 }
 
+func TestRouterList(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns partial instances with an error naming the unavailable runtime", func(t *testing.T) {
+		t.Parallel()
+		router, err := runtime.NewRouter([]runtime.System{
+			newRouterFakeBackend("docker"),
+			&listFailingBackend{routerFakeBackend: newRouterFakeBackend("podman")},
+		}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		instances, err := router.List(t.Context())
+		if err == nil {
+			t.Fatal("List returned no error for an unavailable runtime")
+		}
+		if len(instances) == 0 {
+			t.Fatalf("List returned no instances alongside %v", err)
+		}
+		if !strings.Contains(err.Error(), "podman") {
+			t.Fatalf("error = %v, want the unavailable runtime named", err)
+		}
+	})
+
+	t.Run("returns no instances when no runtime answered", func(t *testing.T) {
+		t.Parallel()
+		router, err := runtime.NewRouter([]runtime.System{
+			&listFailingBackend{routerFakeBackend: newRouterFakeBackend("docker")},
+		}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		instances, err := router.List(t.Context())
+		if err == nil {
+			t.Fatal("List returned no error when every runtime failed")
+		}
+		if instances != nil {
+			t.Fatalf("instances = %v, want nil", instances)
+		}
+	})
+
+	t.Run("returns an empty inventory when a runtime answered", func(t *testing.T) {
+		t.Parallel()
+		router, err := runtime.NewRouter([]runtime.System{
+			&listFailingBackend{routerFakeBackend: newRouterFakeBackend("podman")},
+			&listEmptyBackend{routerFakeBackend: newRouterFakeBackend("docker")},
+		}, metrics.Nop{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		instances, err := router.List(t.Context())
+		if err == nil {
+			t.Fatal("List returned no error for an unavailable runtime")
+		}
+		if instances == nil {
+			t.Fatal("List returned no instances although a runtime answered; an empty inventory is not an unreadable one")
+		}
+		if len(instances) != 0 {
+			t.Fatalf("instances = %v, want none", instances)
+		}
+	})
+}
+
+// listFailingBackend models a runtime whose inventory cannot be read.
+type listFailingBackend struct {
+	*routerFakeBackend
+}
+
+func (f *listFailingBackend) List(context.Context) ([]runtime.Instance, error) {
+	return nil, errors.New("inventory unavailable")
+}
+
+// listEmptyBackend models a healthy runtime that knows of no instances.
+type listEmptyBackend struct {
+	*routerFakeBackend
+}
+
+func (e *listEmptyBackend) List(context.Context) ([]runtime.Instance, error) {
+	return nil, nil
+}
+
 func TestRouterRecordsOperationMetrics(t *testing.T) {
 	t.Parallel()
 	store := metrics.NewStore(metrics.Resource{ServiceName: "caic"})
 	backend := newRouterFakeBackend("docker")
-	router, err := runtime.NewRouter(testLogger(), []runtime.System{backend}, store)
+	router, err := runtime.NewRouter([]runtime.System{backend}, store)
 	if err != nil {
 		t.Fatal(err)
 	}

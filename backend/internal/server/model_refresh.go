@@ -128,8 +128,7 @@ func refreshHarnessModels(ctx context.Context, log *slog.Logger, cacheDir string
 func purgeStaleModelRefreshInstances(ctx context.Context, log *slog.Logger, router *runtime.Router) {
 	instances, err := router.List(ctx)
 	if err != nil {
-		log.WarnContext(ctx, "stale instance scan failed", "err", err)
-		return
+		log.WarnContext(ctx, "stale instance scan incomplete", "err", err)
 	}
 	for i := range instances {
 		id := instances[i].ID

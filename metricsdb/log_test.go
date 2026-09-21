@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -207,7 +208,8 @@ func TestLog(t *testing.T) {
 	t.Run("compresses days left by an earlier run", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		stale := filepath.Join(dir, "2000-01-01.jsonl")
+		day := time.Now().UTC().AddDate(0, 0, -10).Format(dayLayout)
+		stale := filepath.Join(dir, day+jsonlSuffix)
 		if err := os.WriteFile(stale, []byte("{\"name\":\"repo.diff\"}\n"), fileMode); err != nil {
 			t.Fatalf("seed stale day: %v", err)
 		}
@@ -225,8 +227,58 @@ func TestLog(t *testing.T) {
 		if _, err := os.Stat(stale + tempSuffix); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("temporary file survived: %v", err)
 		}
-		if got := readZstd(t, filepath.Join(dir, "2000-01-01.jsonl.zstd")); got != "{\"name\":\"repo.diff\"}\n" {
+		if got := readZstd(t, filepath.Join(dir, day+zstdSuffix)); got != "{\"name\":\"repo.diff\"}\n" {
 			t.Fatalf("compressed day = %q", got)
+		}
+	})
+
+	t.Run("discards days past the retention window", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		expired := time.Now().UTC().AddDate(0, 0, -100).Format(dayLayout)
+		recent := time.Now().UTC().AddDate(0, 0, -10).Format(dayLayout)
+		for _, name := range []string{expired + jsonlSuffix, expired + zstdSuffix, recent + jsonlSuffix} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("{\"name\":\"repo.diff\"}\n"), fileMode); err != nil {
+				t.Fatalf("seed %s: %v", name, err)
+			}
+		}
+
+		log := newTestLog(t, dir, time.Time{})
+		if err := log.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read directory: %v", err)
+		}
+		got := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			got = append(got, entry.Name())
+		}
+		want := []string{recent + zstdSuffix}
+		if !slices.Equal(got, want) {
+			t.Fatalf("directory = %v, want %v: an aged-out day is discarded, a recent one is only compressed", got, want)
+		}
+	})
+
+	t.Run("discards days past the retention window on rollover", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		now := time.Now().UTC()
+		expired := now.AddDate(0, 0, -100).Format(dayLayout)
+		if err := os.WriteFile(filepath.Join(dir, expired+zstdSuffix), []byte("seeded"), fileMode); err != nil {
+			t.Fatalf("seed expired day: %v", err)
+		}
+		// A long-running process only sweeps at rollover, never at startup.
+		log := newTestLog(t, dir, now)
+		log.now = func() time.Time { return now.Add(24 * time.Hour) }
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
+		if err := log.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, expired+zstdSuffix)); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("expired day survived the rollover: %v", err)
 		}
 	})
 

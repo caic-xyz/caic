@@ -336,6 +336,23 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("one attribute and a repeated one form the same series", func(t *testing.T) {
+		t.Parallel()
+		store := metrics.NewStore(testResource())
+		// The single-attribute path skips the map and sort the general path needs,
+		// so both must still derive one key for the same attribute set.
+		store.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond),
+			metrics.Attr{Key: "container.runtime", Value: "podman"})
+		store.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond),
+			metrics.Attr{Key: "container.runtime", Value: "podman"},
+			metrics.Attr{Key: "container.runtime", Value: "podman"})
+
+		got := store.Snapshot()
+		if len(got) != 1 || got[0].Count != 2 {
+			t.Fatalf("snapshot = %#v, want one series of two calls", got)
+		}
+	})
+
 	t.Run("retains only the most recent samples", func(t *testing.T) {
 		t.Parallel()
 		store := metrics.NewStore(testResource())
