@@ -195,6 +195,23 @@ type ToolUseMessage struct {
 // Type implements Message.
 func (m *ToolUseMessage) Type() string { return "tool_use" }
 
+// SkillReadMessage records that the harness loaded a skill into the
+// conversation context (Claude Code's Skill tool). It is usage metadata for
+// analytics and is never rendered in the visible timeline; the tool call and
+// its result stay out of the transcript.
+//
+// Its JSON encoding is derived from harness records on replay; keep JSON
+// field names and their meanings backward-compatible with logs written by
+// released binaries.
+type SkillReadMessage struct {
+	ToolUseID string `json:"id"`
+	Skill     string `json:"skill"`
+	Args      string `json:"args,omitempty"`
+}
+
+// Type implements Message.
+func (m *SkillReadMessage) Type() string { return "skill_read" }
+
 // ToolInputViewKind identifies a normalized tool input view.
 type ToolInputViewKind string
 
@@ -389,6 +406,12 @@ type UsageMessage struct {
 	Usage         Usage  `json:"usage"`
 	ReportedModel string `json:"model,omitempty"`
 	ContextWindow int    `json:"context_window,omitempty"` // Non-zero when the backend reports the active context window size.
+	// ModelDerived reports that ReportedModel was derived by caic from session
+	// state because the harness record carried no model. Such records must not
+	// be priced per call: the harness prices this usage in its turn result, or
+	// another harness-reported record already covers the same API call. The
+	// model stamp remains valid for per-model usage analytics.
+	ModelDerived bool `json:"model_derived,omitempty"`
 }
 
 // Type implements Message.

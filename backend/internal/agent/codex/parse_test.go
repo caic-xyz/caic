@@ -1063,6 +1063,7 @@ func TestWireFormat(t *testing.T) {
 	t.Run("TokenUsageUpdatedEmitsUsageMessage", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
+		w.reportedModel = "gpt-5.6"
 		const input = `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"cachedInputTokens":500,"cacheWriteInputTokens":100,"outputTokens":200,"reasoningOutputTokens":0},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":50,"cacheWriteInputTokens":12,"outputTokens":20,"reasoningOutputTokens":5}}}}`
 		msgs, err := w.ParseMessage([]byte(input))
 		if err != nil {
@@ -1093,6 +1094,12 @@ func TestWireFormat(t *testing.T) {
 		if um.Usage.CacheTTLSeconds != 0 {
 			t.Errorf("CacheTTLSeconds = %d, want unknown", um.Usage.CacheTTLSeconds)
 		}
+		if um.ReportedModel != "gpt-5.6" {
+			t.Errorf("ReportedModel = %q, want session model gpt-5.6", um.ReportedModel)
+		}
+		if !um.ModelDerived {
+			t.Errorf("ModelDerived = false, want true (session model stamp, not harness-reported)")
+		}
 		// incremental is accumulated into totalUsage
 		w.mu.Lock()
 		total := w.totalUsage
@@ -1102,6 +1109,30 @@ func TestWireFormat(t *testing.T) {
 		}
 		if total.CacheCreationInputTokens != 12 {
 			t.Errorf("totalUsage.CacheCreationInputTokens = %d, want 12", total.CacheCreationInputTokens)
+		}
+	})
+	t.Run("ModelRerouteUpdatesUsageAttribution", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		w.reportedModel = "gpt-5.6"
+		reroute := []byte(`{"jsonrpc":"2.0","method":"model/rerouted","params":{"threadId":"t1","turnId":"turn_1","fromModel":"gpt-5.6","toModel":"gpt-5.6-codex"}}`)
+		if _, err := w.ParseMessage(reroute); err != nil {
+			t.Fatal(err)
+		}
+		usage := []byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{},"last":{"totalTokens":10,"inputTokens":10,"outputTokens":0,"reasoningOutputTokens":0}}}}`)
+		msgs, err := w.ParseMessage(usage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		um, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UsageMessage", msgs[0])
+		}
+		if um.ReportedModel != "gpt-5.6-codex" {
+			t.Errorf("ReportedModel = %q, want rerouted gpt-5.6-codex", um.ReportedModel)
 		}
 	})
 	t.Run("TokenUsageAccumulates", func(t *testing.T) {

@@ -1052,18 +1052,50 @@ func TestParseMessage(t *testing.T) {
 			})
 		}
 	})
-	t.Run("SkillToolUseSuppressed", func(t *testing.T) {
+	t.Run("SkillToolUseBecomesSkillRead", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget-plugin:widget"}}],"usage":{}}}`
+		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget-plugin:widget","args":"chart"}}],"usage":{}}}`
 		msgs, err := parseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Skill tool_use is suppressed; only a raw fallback for the empty assistant message.
+		var read *agent.SkillReadMessage
 		for _, m := range msgs {
-			if _, ok := m.(*agent.ToolUseMessage); ok {
-				t.Error("Skill tool_use should be suppressed, got ToolUseMessage")
+			if sr, ok := m.(*agent.SkillReadMessage); ok {
+				read = sr
 			}
+			if _, ok := m.(*agent.ToolUseMessage); ok {
+				t.Error("Skill tool_use should not surface as ToolUseMessage")
+			}
+		}
+		if read == nil {
+			t.Fatal("Skill tool_use should produce a SkillReadMessage")
+		}
+		if read.ToolUseID != "sk_1" || read.Skill != "widget-plugin:widget" || read.Args != "chart" {
+			t.Errorf("SkillReadMessage = %+v", read)
+		}
+	})
+	t.Run("SkillToolUseWithoutSkillNameYieldsPlaceholder", func(t *testing.T) {
+		t.Parallel()
+		// parseMessage always yields a SkillReadMessage so the wire layer can
+		// track the ID and suppress the paired tool result; the wire layer is
+		// responsible for dropping skill-less reads from the timeline.
+		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_2","name":"Skill","input":{}}],"usage":{}}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var read *agent.SkillReadMessage
+		for _, m := range msgs {
+			if sr, ok := m.(*agent.SkillReadMessage); ok {
+				read = sr
+			}
+		}
+		if read == nil {
+			t.Fatal("Skill tool_use without a skill name should yield a placeholder SkillReadMessage")
+		}
+		if read.Skill != "" || read.ToolUseID != "sk_2" {
+			t.Errorf("SkillReadMessage = %+v, want empty skill with ToolUseID sk_2", read)
 		}
 	})
 	t.Run("SyntheticUserSuppressed", func(t *testing.T) {

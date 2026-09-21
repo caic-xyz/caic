@@ -3662,6 +3662,57 @@ func TestPricedCost(t *testing.T) {
 		}
 	})
 
+	t.Run("CodexDerivedUsageNotPricedPerCall", func(t *testing.T) {
+		t.Parallel()
+		// Codex usage records carry a caic-derived session-model stamp for
+		// per-model usage analytics. Pricing must stay per turn via the
+		// result: derived records add no per-call cost on top of it.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-5.6-terra", "")
+		codexPrices := fakePricer{"gpt-5.6-terra": {InputPerMTok: 2.0, CachedInputPerMTok: 0.20, OutputPerMTok: 12.0}}
+		tk.Pricer = codexPrices
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "gpt-5.6-terra"}, false)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "gpt-5.6-terra",
+			ModelDerived:  true,
+			Usage:         agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
+		}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			Usage:       agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
+			NumTurns:    1,
+		}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		if want := 2.0 + 0.20; costUSD != want {
+			t.Errorf("costUSD = %v, want %v (per-turn pricing only)", costUSD, want)
+		}
+	})
+
+	t.Run("ClaudeDerivedDeltaUsageNotPriced", func(t *testing.T) {
+		t.Parallel()
+		// Claude's assistant records carry the harness-reported model and are
+		// priced per call. The backend-derived message_delta stamp describing
+		// the same API call must not price again.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "zai/glm-5.3-flash", "")
+		tk.Pricer = prices
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"}, false)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "zai/glm-5.3-flash",
+			Usage:         agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
+		}, false)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "zai/glm-5.3-flash",
+			ModelDerived:  true,
+			Usage:         agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
+		}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result", NumTurns: 1}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		if want := 0.15 + 0.50; costUSD != want {
+			t.Errorf("costUSD = %v, want %v (assistant-record pricing only)", costUSD, want)
+		}
+	})
+
 	t.Run("UnpricedModelKeepsReportedTotal", func(t *testing.T) {
 		t.Parallel()
 		// Claude Code reports the authoritative session total, which the

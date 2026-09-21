@@ -285,7 +285,7 @@ type wireFormat struct {
 	nextID            atomic.Int64
 	mu                sync.Mutex
 	agentVersion      string
-	reportedModel     string      // Resolved by thread/start.
+	reportedModel     string      // Resolved by thread/start; updated by model/rerouted.
 	reportedEffort    string      // Resolved by thread/start.
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
 }
@@ -416,13 +416,16 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 	return writeJSONInput(wr, req, log)
 }
 
-// ParseMessage wraps the package-level parseMessage with two interceptions:
+// ParseMessage wraps the package-level parseMessage with three interceptions:
 //
 //   - thread/tokenUsage/updated → emits UsageMessage (incremental Last
-//     breakdown); values are also accumulated into totalUsage. Not forwarded
-//     to the package-level parseMessage.
+//     breakdown) attributed to the session's active model; values are also
+//     accumulated into totalUsage. Not forwarded to the package-level
+//     parseMessage.
 //   - ResultMessage (from turn/completed) has Usage populated from totalUsage,
 //     then totalUsage is reset for the next turn.
+//   - model/rerouted system messages update the active model used for usage
+//     attribution.
 //
 // It also captures the thread ID from InitMessage (thread/started).
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
@@ -466,8 +469,8 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		w.totalUsage.CacheReadInputTokens += incremental.CacheReadInputTokens
 		w.totalUsage.OutputTokens += incremental.OutputTokens
 		w.totalUsage.ReasoningOutputTokens += incremental.ReasoningOutputTokens
+		usageMsg := &agent.UsageMessage{Usage: incremental, ReportedModel: w.reportedModel, ModelDerived: true}
 		w.mu.Unlock()
-		usageMsg := &agent.UsageMessage{Usage: incremental}
 		if p.TokenUsage.ModelContextWindow != nil {
 			usageMsg.ContextWindow = int(*p.TokenUsage.ModelContextWindow)
 		}
@@ -502,6 +505,13 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		if init, ok := msg.(*agent.InitMessage); ok && init.SessionID != "" {
 			w.mu.Lock()
 			w.threadID = init.SessionID
+			w.mu.Unlock()
+		}
+		// Track model reroutes so later usage stays attributed to the model
+		// that actually served it.
+		if sm, ok := msg.(*agent.SystemMessage); ok && sm.Subtype == agent.SystemSubtypeModelRerouted && sm.ReportedModel != "" {
+			w.mu.Lock()
+			w.reportedModel = sm.ReportedModel
 			w.mu.Unlock()
 		}
 		// Inject accumulated usage into ResultMessage and reset for next turn.

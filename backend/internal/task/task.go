@@ -949,11 +949,13 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			t.lastAPIUsage = m.Usage
 			if m.ReportedModel != "" {
 				t.reportedModel = m.ReportedModel
-				at := entry.ProducerTime
-				if at.IsZero() {
-					at = time.Now()
+				if !m.ModelDerived {
+					at := entry.ProducerTime
+					if at.IsZero() {
+						at = time.Now()
+					}
+					t.addPricedUsageLocked(m.ReportedModel, "", m.Usage, at)
 				}
-				t.addPricedUsageLocked(m.ReportedModel, "", m.Usage, at)
 			}
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
@@ -1719,7 +1721,9 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.lastAPIUsage = u.Usage
 		if u.ReportedModel != "" {
 			t.reportedModel = u.ReportedModel
-			t.addPricedUsageLocked(u.ReportedModel, "", u.Usage, at)
+			if !u.ModelDerived {
+				t.addPricedUsageLocked(u.ReportedModel, "", u.Usage, at)
+			}
 		}
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {

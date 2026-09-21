@@ -427,8 +427,9 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 	switch {
 	case b.Name == "Skill":
 		// Skill is a Claude Code built-in that loads plugin skills into
-		// context. Suppress it — internal machinery that adds noise.
-		return nil, nil
+		// context. The tool call itself stays out of the transcript; the
+		// read is recorded as metadata for usage analytics.
+		return skillReadFromClaude(b), nil
 	case b.Name == "AskUserQuestion":
 		var input claudecode.AskUserQuestionInput
 		if json.Unmarshal(inputRaw, &input) == nil && len(input.Questions) > 0 {
@@ -456,6 +457,28 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 	}
 	addEditInputView(use)
 	return []agent.Message{use}, nil
+}
+
+// skillInput is the Skill tool's input schema.
+type skillInput struct {
+	Skill string `json:"skill"`
+	Args  string `json:"args"`
+}
+
+// skillReadFromClaude converts a Skill tool_use block into a SkillReadMessage.
+// A block whose input names no skill still yields a message so the wire layer
+// can track its ID and suppress the paired tool result; the wire layer drops
+// such skill-less reads from the timeline.
+func skillReadFromClaude(b *claudecode.OutputContentBlock) []agent.Message {
+	var in skillInput
+	if raw, err := rawObject(b.Input); err == nil && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &in)
+	}
+	return []agent.Message{&agent.SkillReadMessage{
+		ToolUseID: b.ID,
+		Skill:     in.Skill,
+		Args:      in.Args,
+	}}
 }
 
 func addEditInputView(use *agent.ToolUseMessage) {

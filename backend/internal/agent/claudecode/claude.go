@@ -119,11 +119,12 @@ func (*Backend) NewWire() agent.WireFormat {
 var _ agent.Backend = (*Backend)(nil)
 
 // wireFormat holds per-session Claude Code parsing state: widget tracking,
-// reasoning-token accounting, native-subagent correlation, and the active model
+// reasoning-token accounting, native-subagent correlation, the active model
 // reported by the assistant so result records can resolve the model's context
-// window. A fresh instance is created for every session so this state can't
-// leak between concurrent Claude Code tasks sharing the registered Backend
-// singleton.
+// window and usage records without a model stay attributed, and the Skill
+// tool calls whose results must stay suppressed. A fresh instance is created
+// for every session so this state can't leak between concurrent Claude Code
+// tasks sharing the registered Backend singleton.
 type wireFormat struct {
 	nativeSubagents              nativeSubagents
 	backgroundCommands           backgroundCommands
@@ -131,6 +132,7 @@ type wireFormat struct {
 	pendingReasoningOutputTokens int
 	pendingReasoningEstimate     int
 	reportedModel                string
+	pendingSkillUses             map[string]struct{}
 }
 
 // newWireFormat builds a live wireFormat with fresh per-session state for use by
@@ -145,10 +147,13 @@ func newWireFormat() *wireFormat {
 		},
 		backgroundCommands: backgroundCommands{known: make(map[string]bool)},
 		widgetTracker:      newWidgetTracker(),
+		pendingSkillUses:   make(map[string]struct{}),
 	}
 }
 
-// ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
+// ParseMessage wraps the package-level parser with per-session state: widget
+// tracking for streaming deltas, session-model attribution for model-less
+// usage records, and Skill tool-result suppression.
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if estimate, ok := systemThinkingTokenEstimate(line); ok {
 		w.pendingReasoningEstimate += estimate
@@ -163,15 +168,42 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	}
 	msgs = append(msgs, native...)
 	msgs = append(msgs, w.backgroundCommands.parse(record)...)
+	out := msgs[:0]
 	for _, msg := range msgs {
+		keep := true
 		switch m := msg.(type) {
 		case *agent.InitMessage:
 			if m.ReportedModel != "" {
 				w.reportedModel = m.ReportedModel
 			}
+		case *agent.SkillReadMessage:
+			// Track the read so its paired tool result stays suppressed, even
+			// when the read itself is dropped below for lacking a skill name.
+			if m.ToolUseID != "" {
+				w.pendingSkillUses[m.ToolUseID] = struct{}{}
+			}
+			if m.Skill == "" {
+				// Parse-level placeholder for an unexpected Skill input shape;
+				// keep it out of the timeline like the pre-skill-read behavior.
+				keep = false
+			}
+		case *agent.ToolResultMessage:
+			if _, ok := w.pendingSkillUses[m.ToolUseID]; ok {
+				delete(w.pendingSkillUses, m.ToolUseID)
+				// The Skill tool's result is internal machinery; the read
+				// itself is already recorded.
+				keep = false
+			}
 		case *agent.UsageMessage:
 			if m.ReportedModel != "" {
 				w.reportedModel = m.ReportedModel
+			} else if w.reportedModel != "" {
+				// message_delta usage events carry no model; attribute them
+				// to the session's active model. The stamp is derived, so the
+				// task pricing fold must not price this record per call: the
+				// assistant record already covers the same API call.
+				m.ReportedModel = w.reportedModel
+				m.ModelDerived = true
 			}
 			w.pendingReasoningOutputTokens += m.Usage.ReasoningOutputTokens
 		case *agent.ResultMessage:
@@ -189,9 +221,14 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			}
 			w.pendingReasoningOutputTokens = 0
 			w.pendingReasoningEstimate = 0
+			// A turn boundary drops skill reads whose result never arrived.
+			clear(w.pendingSkillUses)
+		}
+		if keep {
+			out = append(out, msg)
 		}
 	}
-	return msgs, nil
+	return out, nil
 }
 
 // resultContextWindow returns the context window a Claude result record reports

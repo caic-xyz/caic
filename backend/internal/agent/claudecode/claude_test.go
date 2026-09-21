@@ -145,6 +145,154 @@ func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.TimedMessage) er
 
 // TestHasOAuth uses t.Setenv to point HOME at a temp dir and therefore cannot
 // run in parallel.
+// TestWireFormatSkillAndModel tests the stateful ParseMessage behavior:
+// Skill tool results stay suppressed, and model-less usage records are
+// attributed to the session's active model.
+func TestWireFormatSkillAndModel(t *testing.T) {
+	t.Parallel()
+	t.Run("SkillToolResultSuppressed", func(t *testing.T) {
+		t.Parallel()
+		var b wireFormat
+		b.widgetTracker = newWidgetTracker()
+		b.pendingSkillUses = make(map[string]struct{})
+		skillUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget"}}],"usage":{}}}`)
+		skillResult := []byte(`{"type":"user","parent_tool_use_id":"","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_1","content":"skill loaded"}]}}`)
+		otherResult := []byte(`{"type":"user","parent_tool_use_id":"","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}`)
+
+		msgs, err := b.ParseMessage(skillUse)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sawRead bool
+		for _, m := range msgs {
+			if _, ok := m.(*agent.SkillReadMessage); ok {
+				sawRead = true
+			}
+		}
+		if !sawRead {
+			t.Fatal("Skill tool_use should produce a SkillReadMessage")
+		}
+
+		msgs, err = b.ParseMessage(skillResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range msgs {
+			if _, ok := m.(*agent.ToolResultMessage); ok {
+				t.Error("paired Skill tool_result should be suppressed")
+			}
+		}
+
+		msgs, err = b.ParseMessage(otherResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.ToolResultMessage); !ok {
+			t.Errorf("type = %T, want *agent.ToolResultMessage", msgs[0])
+		}
+	})
+
+	t.Run("SkillPendingUsesClearedAtResult", func(t *testing.T) {
+		t.Parallel()
+		var b wireFormat
+		b.widgetTracker = newWidgetTracker()
+		b.pendingSkillUses = make(map[string]struct{})
+		skillUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget"}}],"usage":{}}}`)
+		if _, err := b.ParseMessage(skillUse); err != nil {
+			t.Fatal(err)
+		}
+		result := []byte(`{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"result":"","session_id":"s","usage":{}}`)
+		if _, err := b.ParseMessage(result); err != nil {
+			t.Fatal(err)
+		}
+		if len(b.pendingSkillUses) != 0 {
+			t.Errorf("pendingSkillUses = %v, want empty after turn result", b.pendingSkillUses)
+		}
+		// The result no longer suppresses an unrelated result with the same ID.
+		lateResult := []byte(`{"type":"user","parent_tool_use_id":"","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_1","content":"late"}]}}`)
+		msgs, err := b.ParseMessage(lateResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+	})
+
+	t.Run("ModellessUsageAttributedToSessionModel", func(t *testing.T) {
+		t.Parallel()
+		var b wireFormat
+		b.widgetTracker = newWidgetTracker()
+		b.pendingSkillUses = make(map[string]struct{})
+		assistant := []byte(`{"type":"assistant","message":{"model":"claude-opus","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5}}}`)
+		msgs, err := b.ParseMessage(assistant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range msgs {
+			if um, ok := m.(*agent.UsageMessage); ok {
+				if um.ReportedModel != "claude-opus" {
+					t.Errorf("assistant usage model = %q, want claude-opus", um.ReportedModel)
+				}
+				if um.ModelDerived {
+					t.Errorf("assistant usage ModelDerived = true, want false (harness reported the model)")
+				}
+			}
+		}
+		delta := []byte(`{"type":"stream_event","event":{"type":"message_delta","delta":{},"usage":{"input_tokens":10,"output_tokens":5}}}`)
+		msgs, err = b.ParseMessage(delta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		um, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UsageMessage", msgs[0])
+		}
+		if um.ReportedModel != "claude-opus" {
+			t.Errorf("delta usage model = %q, want claude-opus", um.ReportedModel)
+		}
+		if !um.ModelDerived {
+			t.Errorf("delta usage ModelDerived = false, want true (model derived from session state)")
+		}
+	})
+
+	t.Run("SkilllessSkillCallSuppressedWithResult", func(t *testing.T) {
+		t.Parallel()
+		// A Skill tool_use without a skill name is dropped by the wire layer,
+		// but its ID is still tracked so the paired tool result stays
+		// suppressed too.
+		var b wireFormat
+		b.widgetTracker = newWidgetTracker()
+		b.pendingSkillUses = make(map[string]struct{})
+		toolUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_9","name":"Skill","input":{}}],"usage":{}}}`)
+		msgs, err := b.ParseMessage(toolUse)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range msgs {
+			if _, ok := m.(*agent.SkillReadMessage); ok {
+				t.Errorf("skill-less Skill call should be dropped, got %T", m)
+			}
+		}
+		result := []byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"sk_9"}]}}`)
+		msgs, err = b.ParseMessage(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range msgs {
+			if _, ok := m.(*agent.ToolResultMessage); ok {
+				t.Errorf("paired Skill tool_result should be suppressed, got %T", m)
+			}
+		}
+	})
+}
+
 func TestHasOAuth(t *testing.T) {
 	writeClaudeJSON := func(t *testing.T, home, contents string) {
 		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
