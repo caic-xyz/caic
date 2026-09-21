@@ -13,7 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-var zaiAccountReportURL = "https://api.z.ai/api/biz/account/query-customer-account-report"
+const zaiAccountReportURL = "https://api.z.ai/api/biz/account/query-customer-account-report"
 
 // zaiAccountReportPayload mirrors the data object of the Z.ai account report
 // endpoint. Amounts are USD; null fields are absent on some accounts.

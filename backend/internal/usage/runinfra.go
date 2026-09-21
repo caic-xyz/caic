@@ -14,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-var runInfraCreditsURL = "https://api.runinfra.ai/v1/credits" //nolint:gosec // URL, not a credential; swapped in tests
+const runInfraCreditsURL = "https://api.runinfra.ai/v1/credits" //nolint:gosec // URL, not a credential
 
 // runInfraCreditsPayload mirrors the RunInfra GET /v1/credits response. All
 // monetary amounts are integer US cents.

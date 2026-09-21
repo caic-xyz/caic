@@ -10,11 +10,15 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-func swapZaiURL(t *testing.T, url string) {
-	t.Helper()
-	orig := zaiAccountReportURL
-	zaiAccountReportURL = url
-	t.Cleanup(func() { zaiAccountReportURL = orig })
+// stubZaiFetcher routes all Z.ai requests to server without changing the
+// production endpoint shared by parallel tests.
+func stubZaiFetcher(t *testing.T, server *httptest.Server, apiKey string) *ZaiFetcher {
+	f := NewZaiFetcher(apiKey)
+	if f == nil {
+		t.Fatal("NewZaiFetcher() = nil")
+	}
+	f.client.Transport = redirectTransport{server.URL}
+	return f
 }
 
 func TestParseZaiAccountReport(t *testing.T) {
@@ -78,13 +82,9 @@ func TestZaiFetcherGet(t *testing.T) {
 				"balance":5.17,"rechargeAmount":10.0,"giveAmount":1.0,
 				"totalSpendAmount":5.83,"availableBalance":5.17}}`))
 		}))
-		defer server.Close()
-		swapZaiURL(t, server.URL)
+		t.Cleanup(server.Close)
 
-		f := NewZaiFetcher("zai-key")
-		if f == nil {
-			t.Fatal("NewZaiFetcher(key) = nil")
-		}
+		f := stubZaiFetcher(t, server, "zai-key")
 		quota := f.Get(t.Context())
 		if quota == nil || quota.Provider != agent.QuotaProviderZai {
 			t.Fatalf("Get() = %#v, want zai provider quota", quota)

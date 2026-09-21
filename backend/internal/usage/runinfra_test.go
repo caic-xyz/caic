@@ -10,6 +10,17 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// stubRunInfraFetcher routes all RunInfra requests to server without changing
+// the production endpoint shared by parallel tests.
+func stubRunInfraFetcher(t *testing.T, server *httptest.Server, apiKey string) *RunInfraFetcher {
+	f := NewRunInfraFetcher(apiKey)
+	if f == nil {
+		t.Fatal("NewRunInfraFetcher() = nil")
+	}
+	f.client.Transport = redirectTransport{server.URL}
+	return f
+}
+
 func TestRunInfraFetcherGet(t *testing.T) {
 	t.Parallel()
 	t.Run("balance and spend cap", func(t *testing.T) {
@@ -27,15 +38,9 @@ func TestRunInfraFetcherGet(t *testing.T) {
 				"plan_tier": "pro"
 			}`))
 		}))
-		defer server.Close()
-		orig := runInfraCreditsURL
-		runInfraCreditsURL = server.URL
-		t.Cleanup(func() { runInfraCreditsURL = orig })
+		t.Cleanup(server.Close)
 
-		f := NewRunInfraFetcher("runinfra-key")
-		if f == nil {
-			t.Fatal("NewRunInfraFetcher(key) = nil")
-		}
+		f := stubRunInfraFetcher(t, server, "runinfra-key")
 		quota := f.Get(t.Context())
 		if quota == nil || quota.Provider != agent.QuotaProviderRunInfra {
 			t.Fatalf("Get() = %#v, want runinfra provider quota", quota)
@@ -53,12 +58,9 @@ func TestRunInfraFetcherGet(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"balance_cents":100,"available_cents":100,"currency":"usd","spend_cap":null}`))
 		}))
-		defer server.Close()
-		orig := runInfraCreditsURL
-		runInfraCreditsURL = server.URL
-		t.Cleanup(func() { runInfraCreditsURL = orig })
+		t.Cleanup(server.Close)
 
-		quota := NewRunInfraFetcher("key").Get(t.Context())
+		quota := stubRunInfraFetcher(t, server, "key").Get(t.Context())
 		if quota == nil {
 			t.Fatal("Get() = nil")
 		}
