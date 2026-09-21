@@ -5,7 +5,7 @@ import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 
 import { QuotaProviderDeepSeek } from "@sdk/types.gen";
-import type { ProviderQuota, QuotaRateLimit, QuotaBalance, QuotaExtraUsage, UsageResp } from "@sdk/types.gen";
+import type { ProviderQuota, QuotaRateLimit, QuotaBalance, UsageResp } from "@sdk/types.gen";
 
 import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
@@ -33,26 +33,32 @@ function formatReset(iso: string | undefined, now: number): string | undefined {
   return `in ${mins}m`;
 }
 
-function extraClass(extra: QuotaExtraUsage): string {
-  if (!extra.isEnabled) return `${styles.badge} ${styles.disabled}`;
-  return `${styles.badge} ${pctColor(extra.usedPct)}`;
-}
-
 function balanceClass(bal: QuotaBalance): string {
   return `${styles.badge} ${bal.total <= 0 ? styles.red : styles.green}`;
 }
 
-function extraLabel(extra: QuotaExtraUsage): string {
-  const s = currencySign(extra.currency);
-  return `${s}${extra.usedCredits.toFixed(0)}/${s}${extra.monthlyLimit.toFixed(0)}`;
+// hasSpend reports whether the balance carries pay-as-you-go spend info
+// (Anthropic-style extra credits or a spend cap).
+function hasSpend(bal: QuotaBalance): boolean {
+  return (bal.usedCredits ?? 0) !== 0 || (bal.monthlyLimit ?? 0) !== 0;
 }
 
-function extraTooltip(extra: QuotaExtraUsage): string {
-  const s = currencySign(extra.currency);
-  if (extra.isEnabled) {
-    return `${s}${extra.usedCredits.toFixed(2)} / ${s}${extra.monthlyLimit.toFixed(2)}`;
+function spendClass(bal: QuotaBalance): string {
+  if (!bal.extraEnabled) return `${styles.badge} ${styles.disabled}`;
+  return `${styles.badge} ${pctColor(bal.usedPct ?? 0)}`;
+}
+
+function spendLabel(bal: QuotaBalance): string {
+  const s = currencySign(bal.currency);
+  return `${s}${(bal.usedCredits ?? 0).toFixed(0)}/${s}${(bal.monthlyLimit ?? 0).toFixed(0)}`;
+}
+
+function spendTooltip(bal: QuotaBalance): string {
+  const s = currencySign(bal.currency);
+  if (bal.extraEnabled) {
+    return `${s}${(bal.usedCredits ?? 0).toFixed(2)} / ${s}${(bal.monthlyLimit ?? 0).toFixed(2)}`;
   }
-  return `Disabled — ${s}${extra.usedCredits.toFixed(2)} / ${s}${extra.monthlyLimit.toFixed(2)}`;
+  return `Disabled — ${s}${(bal.usedCredits ?? 0).toFixed(2)} / ${s}${(bal.monthlyLimit ?? 0).toFixed(2)}`;
 }
 
 function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; label: string }) {
@@ -148,19 +154,23 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
       </For>
       <Show when={props.pq.balance}>
         {(bal) => (
-          <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
-            <span class={balanceClass(bal())} data-testid="usage-badge">
-              {formatBalance(bal().currency, bal().total)}
-            </span>
-          </Tooltip>
+          <Show when={bal().total !== 0 || !hasSpend(bal())}>
+            <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
+              <span class={balanceClass(bal())} data-testid="usage-badge">
+                {formatBalance(bal().currency, bal().total)}
+              </span>
+            </Tooltip>
+          </Show>
         )}
       </Show>
-      <Show when={props.pq.extraUsage}>
-        {(extra) => (
-          <Show when={extra().usedCredits !== 0 || extra().monthlyLimit !== 0}>
-            <Tooltip text={`${props.pq.label}: ${extraTooltip(extra())}`}>
-              <span class={extraClass(extra())} data-testid="usage-badge">
-                {extraLabel(extra())}
+      <Show when={props.pq.balance}>
+        {(bal) => (
+          // Spend-only balances (e.g. Claude) report no wallet total, so the
+          // zero balance pill stays hidden and only the spend pill shows.
+          <Show when={hasSpend(bal())}>
+            <Tooltip text={`${props.pq.label}: ${spendTooltip(bal())}`}>
+              <span class={spendClass(bal())} data-testid="usage-badge">
+                {spendLabel(bal())}
               </span>
             </Tooltip>
           </Show>

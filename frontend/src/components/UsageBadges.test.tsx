@@ -11,6 +11,7 @@ import {
   type UsageResp,
   type ProviderQuota,
   type ISOTimestamp,
+  type QuotaBalance,
 } from "@sdk/types.gen";
 
 import UsageBadges from "./UsageBadges";
@@ -26,8 +27,15 @@ function makeBalance(total: number, currency = "USD", granted?: number, toppedUp
   return { currency, total, granted, toppedUp };
 }
 
-function makeExtra(isEnabled: boolean, usedCredits: number, monthlyLimit: number, usedPct: number, currency = "USD") {
-  return { currency, isEnabled, usedCredits, monthlyLimit, usedPct };
+/** Balance carrying pay-as-you-go spend info instead of a wallet total. */
+function makeSpend(
+  extraEnabled: boolean,
+  usedCredits: number,
+  monthlyLimit: number,
+  usedPct: number,
+  currency = "USD",
+): QuotaBalance {
+  return { currency, total: 0, extraEnabled, usedCredits, monthlyLimit, usedPct };
 }
 
 function makeProvider(overrides: Partial<ProviderQuota> = {}): ProviderQuota {
@@ -140,40 +148,42 @@ describe("UsageBadges", () => {
     });
   });
 
-  describe("extra usage badges", () => {
-    it("shows enabled extra usage", () => {
-      const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 3, 140, 2.1) })]);
+  describe("spend badges", () => {
+    it("shows enabled spend info", () => {
+      const u = makeUsage([makeProvider({ balance: makeSpend(true, 3, 140, 2.1) })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("$3/$140");
     });
 
-    it("shows CNY extra usage with ¥", () => {
-      const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 50, 500, 10, "CNY") })]);
+    it("shows CNY spend info with ¥", () => {
+      const u = makeUsage([makeProvider({ balance: makeSpend(true, 50, 500, 10, "CNY") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("¥50/¥500");
     });
 
-    it("shows ?? for unknown currency in extra", () => {
-      const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 10, 100, 10, "EUR") })]);
+    it("shows ?? for unknown currency in spend info", () => {
+      const u = makeUsage([makeProvider({ balance: makeSpend(true, 10, 100, 10, "EUR") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("??10/??100");
     });
 
-    it("disabled extra has disabled class", () => {
-      const u = makeUsage([makeProvider({ extraUsage: makeExtra(false, 3, 140, 2.1) })]);
+    it("disabled spend info has disabled class", () => {
+      const u = makeUsage([makeProvider({ balance: makeSpend(false, 3, 140, 2.1) })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(getBadge(container)?.className).toContain(styles.disabled);
     });
 
-    it("hides when usedCredits and monthlyLimit are both 0", () => {
-      const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 0, 0, 0) })]);
+    it("shows nothing when there is no balance", () => {
+      // Claude without extra usage reports no balance at all.
+      const u = makeUsage([makeProvider({ label: "Claude Code" })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).not.toContain("$0/$0");
+      expect(container.textContent).not.toContain("$0.00");
     });
   });
 

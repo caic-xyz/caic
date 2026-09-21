@@ -87,18 +87,16 @@ func (f *RunInfraFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 		currency = "USD"
 	}
 	out := f.quota()
-	out.Balance = QuotaBalance{
+	bal := QuotaBalance{
 		Currency: currency,
 		Total:    float64(raw.AvailableCents) / 100,
 	}
 	if raw.SpendCap != nil && raw.SpendCap.LimitCents > 0 {
-		out.ExtraUsage = QuotaExtraUsage{
-			Currency:     currency,
-			IsEnabled:    raw.SpendCap.Hard,
-			UsedCredits:  float64(raw.SpendCap.UsedCents) / 100,
-			MonthlyLimit: float64(raw.SpendCap.LimitCents) / 100,
-			UsedPct:      float64(raw.SpendCap.UsedCents) / float64(raw.SpendCap.LimitCents) * 100,
-		}
+		bal.ExtraEnabled = raw.SpendCap.Hard
+		bal.UsedCredits = float64(raw.SpendCap.UsedCents) / 100
+		bal.MonthlyLimit = float64(raw.SpendCap.LimitCents) / 100
+		bal.UsedPct = float64(raw.SpendCap.UsedCents) / float64(raw.SpendCap.LimitCents) * 100
 	}
+	out.Balance = bal
 	return out, nil
 }

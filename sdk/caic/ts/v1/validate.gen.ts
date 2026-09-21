@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -670,17 +670,10 @@ export function validateQuotaBalance(raw: ValidatorInput): QuotaBalance {
     total: asNumber(obj["total"], "QuotaBalance.total"),
     granted: (obj["granted"] === undefined || obj["granted"] === null ? undefined : asNumber(obj["granted"], "QuotaBalance.granted")),
     toppedUp: (obj["toppedUp"] === undefined || obj["toppedUp"] === null ? undefined : asNumber(obj["toppedUp"], "QuotaBalance.toppedUp")),
-  };
-}
-
-export function validateQuotaExtraUsage(raw: ValidatorInput): QuotaExtraUsage {
-  const obj = asObject(raw, "QuotaExtraUsage");
-  return {
-    currency: asString(obj["currency"], "QuotaExtraUsage.currency"),
-    isEnabled: asBoolean(obj["isEnabled"], "QuotaExtraUsage.isEnabled"),
-    usedCredits: asNumber(obj["usedCredits"], "QuotaExtraUsage.usedCredits"),
-    monthlyLimit: asNumber(obj["monthlyLimit"], "QuotaExtraUsage.monthlyLimit"),
-    usedPct: asNumber(obj["usedPct"], "QuotaExtraUsage.usedPct"),
+    extraEnabled: (obj["extraEnabled"] === undefined || obj["extraEnabled"] === null ? undefined : asBoolean(obj["extraEnabled"], "QuotaBalance.extraEnabled")),
+    usedCredits: (obj["usedCredits"] === undefined || obj["usedCredits"] === null ? undefined : asNumber(obj["usedCredits"], "QuotaBalance.usedCredits")),
+    monthlyLimit: (obj["monthlyLimit"] === undefined || obj["monthlyLimit"] === null ? undefined : asNumber(obj["monthlyLimit"], "QuotaBalance.monthlyLimit")),
+    usedPct: (obj["usedPct"] === undefined || obj["usedPct"] === null ? undefined : asNumber(obj["usedPct"], "QuotaBalance.usedPct")),
   };
 }
 
@@ -695,7 +688,6 @@ export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
     fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
     rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
     balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
-    extraUsage: (obj["extraUsage"] === undefined || obj["extraUsage"] === null ? undefined : validateQuotaExtraUsage(obj["extraUsage"])),
   };
 }
 

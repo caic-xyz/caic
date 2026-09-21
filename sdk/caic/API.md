@@ -1759,7 +1759,9 @@ QuotaRateLimit is a single rate-limit window snapshot from any provider.
 
 ### QuotaBalance
 
-QuotaBalance is a balance/credit snapshot from any provider.
+QuotaBalance is a balance/credit snapshot from any provider. When the
+provider also reports pay-as-you-go spending (Anthropic-style extra credits
+or a spend cap), the spend fields carry that information too.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -1767,18 +1769,10 @@ QuotaBalance is a balance/credit snapshot from any provider.
 | `total` | `float64` | total available balance | yes |
 | `granted` | `float64` | unexpired promotional/grant balance |  |
 | `toppedUp` | `float64` | self-funded recharge balance |  |
-
-### QuotaExtraUsage
-
-QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `currency` | `string` | "USD", "CNY", … | yes |
-| `isEnabled` | `boolean` |  | yes |
-| `usedCredits` | `float64` |  | yes |
-| `monthlyLimit` | `float64` |  | yes |
-| `usedPct` | `float64` |  | yes |
+| `extraEnabled` | `boolean` | ExtraEnabled reports whether the pay-as-you-go spend cap is active. |  |
+| `usedCredits` | `float64` | used against the cap |  |
+| `monthlyLimit` | `float64` | spend cap, 0 when unset |  |
+| `usedPct` | `float64` | 0–100 against the cap |  |
 
 ### ProviderQuota
 
@@ -1793,8 +1787,9 @@ ProviderQuota is the quota data for one provider.
 | `usageUrl` | `string` | link to provider's usage/billing page | yes |
 | `fetchStatus` | `ProviderFetchStatus` |  | yes |
 | `rateLimits` | `QuotaRateLimit[]` |  |  |
-| `balance` | `QuotaBalance` |  |  |
-| `extraUsage` | `QuotaExtraUsage` |  |  |
+| `balance` | `QuotaBalance` | Balance is the provider's money snapshot. Some providers, such as
+Anthropic, report it as "extra usage" on top of the subscription
+instead of a prepaid wallet balance. |  |
 
 ### LocalWindow
 

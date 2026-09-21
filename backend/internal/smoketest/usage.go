@@ -73,9 +73,9 @@ func UsageFetchers(visualFixtures bool) []usage.ProviderFetcher {
 					{Window: "5h", UsedPct: 42, ResetsAt: fiveHourReset},
 					{Window: "7d", UsedPct: 15, ResetsAt: sevenDayReset},
 				},
-				ExtraUsage: usage.QuotaExtraUsage{
+				Balance: usage.QuotaBalance{
 					Currency:     "USD",
-					IsEnabled:    true,
+					ExtraEnabled: true,
 					UsedCredits:  3.50,
 					MonthlyLimit: 25.00,
 					UsedPct:      14,

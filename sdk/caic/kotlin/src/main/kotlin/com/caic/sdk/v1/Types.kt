@@ -2324,7 +2324,11 @@ data class QuotaRateLimit(
     val resetsAt: Instant? = null,
 )
 
-/** QuotaBalance is a balance/credit snapshot from any provider. */
+/**
+ * QuotaBalance is a balance/credit snapshot from any provider. When the
+ * provider also reports pay-as-you-go spending (Anthropic-style extra credits
+ * or a spend cap), the spend fields carry that information too.
+ */
 @Serializable
 data class QuotaBalance(
     /** "USD", "CNY", "credits", … */
@@ -2335,17 +2339,14 @@ data class QuotaBalance(
     val granted: Double? = null,
     /** self-funded recharge balance */
     val toppedUp: Double? = null,
-)
-
-/** QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits). */
-@Serializable
-data class QuotaExtraUsage(
-    /** "USD", "CNY", … */
-    val currency: String,
-    val isEnabled: Boolean,
-    val usedCredits: Double,
-    val monthlyLimit: Double,
-    val usedPct: Double,
+    /** ExtraEnabled reports whether the pay-as-you-go spend cap is active. */
+    val extraEnabled: Boolean? = null,
+    /** used against the cap */
+    val usedCredits: Double? = null,
+    /** spend cap, 0 when unset */
+    val monthlyLimit: Double? = null,
+    /** 0–100 against the cap */
+    val usedPct: Double? = null,
 )
 
 /** ProviderQuota is the quota data for one provider. */
@@ -2361,8 +2362,12 @@ data class ProviderQuota(
     val usageUrl: String,
     val fetchStatus: ProviderFetchStatus,
     val rateLimits: List<QuotaRateLimit>? = null,
+    /**
+     * Balance is the provider's money snapshot. Some providers, such as
+     * Anthropic, report it as "extra usage" on top of the subscription
+     * instead of a prepaid wallet balance.
+     */
     val balance: QuotaBalance? = null,
-    val extraUsage: QuotaExtraUsage? = null,
 )
 
 /** LocalWindow is the aggregated local cost for a rolling time window. */

@@ -1740,7 +1740,9 @@ public struct QuotaRateLimit: Codable {
     public let resetsAt: ISOTimestamp?
 }
 
-/// QuotaBalance is a balance/credit snapshot from any provider.
+/// QuotaBalance is a balance/credit snapshot from any provider. When the
+/// provider also reports pay-as-you-go spending (Anthropic-style extra credits
+/// or a spend cap), the spend fields carry that information too.
 public struct QuotaBalance: Codable {
     /// "USD", "CNY", "credits", …
     public let currency: String
@@ -1750,16 +1752,14 @@ public struct QuotaBalance: Codable {
     public let granted: Double?
     /// self-funded recharge balance
     public let toppedUp: Double?
-}
-
-/// QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
-public struct QuotaExtraUsage: Codable {
-    /// "USD", "CNY", …
-    public let currency: String
-    public let isEnabled: Bool
-    public let usedCredits: Double
-    public let monthlyLimit: Double
-    public let usedPct: Double
+    /// ExtraEnabled reports whether the pay-as-you-go spend cap is active.
+    public let extraEnabled: Bool?
+    /// used against the cap
+    public let usedCredits: Double?
+    /// spend cap, 0 when unset
+    public let monthlyLimit: Double?
+    /// 0–100 against the cap
+    public let usedPct: Double?
 }
 
 /// ProviderQuota is the quota data for one provider.
@@ -1774,8 +1774,10 @@ public struct ProviderQuota: Codable {
     public let usageUrl: String
     public let fetchStatus: ProviderFetchStatus
     public let rateLimits: [QuotaRateLimit]?
+    /// Balance is the provider's money snapshot. Some providers, such as
+    /// Anthropic, report it as "extra usage" on top of the subscription
+    /// instead of a prepaid wallet balance.
     public let balance: QuotaBalance?
-    public let extraUsage: QuotaExtraUsage?
 }
 
 /// LocalWindow is the aggregated local cost for a rolling time window.

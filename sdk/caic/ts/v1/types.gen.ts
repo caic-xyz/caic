@@ -1583,7 +1583,11 @@ export interface QuotaRateLimit {
   resetsAt?: ISOTimestamp;
 }
 
-/** QuotaBalance is a balance/credit snapshot from any provider. */
+/**
+ * QuotaBalance is a balance/credit snapshot from any provider. When the
+ * provider also reports pay-as-you-go spending (Anthropic-style extra credits
+ * or a spend cap), the spend fields carry that information too.
+ */
 export interface QuotaBalance {
   /** "USD", "CNY", "credits", … */
   currency: string;
@@ -1593,16 +1597,14 @@ export interface QuotaBalance {
   granted?: number /* float64 */;
   /** self-funded recharge balance */
   toppedUp?: number /* float64 */;
-}
-
-/** QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits). */
-export interface QuotaExtraUsage {
-  /** "USD", "CNY", … */
-  currency: string;
-  isEnabled: boolean;
-  usedCredits: number /* float64 */;
-  monthlyLimit: number /* float64 */;
-  usedPct: number /* float64 */;
+  /** ExtraEnabled reports whether the pay-as-you-go spend cap is active. */
+  extraEnabled?: boolean;
+  /** used against the cap */
+  usedCredits?: number /* float64 */;
+  /** spend cap, 0 when unset */
+  monthlyLimit?: number /* float64 */;
+  /** 0–100 against the cap */
+  usedPct?: number /* float64 */;
 }
 
 /** ProviderQuota is the quota data for one provider. */
@@ -1617,8 +1619,12 @@ export interface ProviderQuota {
   usageUrl: string;
   fetchStatus: ProviderFetchStatus;
   rateLimits?: QuotaRateLimit[];
+  /**
+   * Balance is the provider's money snapshot. Some providers, such as
+   * Anthropic, report it as "extra usage" on top of the subscription
+   * instead of a prepaid wallet balance.
+   */
   balance?: QuotaBalance;
-  extraUsage?: QuotaExtraUsage;
 }
 
 /** LocalWindow is the aggregated local cost for a rolling time window. */

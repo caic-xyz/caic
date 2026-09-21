@@ -727,21 +727,20 @@ type QuotaRateLimit struct {
 	ResetsAt time.Time `json:"resetsAt,omitzero"` // zero when unknown
 }
 
-// QuotaBalance is a balance/credit snapshot from any provider.
+// QuotaBalance is a balance/credit snapshot from any provider. When the
+// provider also reports pay-as-you-go spending (Anthropic-style extra credits
+// or a spend cap), the spend fields carry that information too.
 type QuotaBalance struct {
 	Currency string  `json:"currency"`           // "USD", "CNY", "credits", …
 	Total    float64 `json:"total"`              // total available balance
 	Granted  float64 `json:"granted,omitempty"`  // unexpired promotional/grant balance
 	ToppedUp float64 `json:"toppedUp,omitempty"` // self-funded recharge balance
-}
 
-// QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
-type QuotaExtraUsage struct {
-	Currency     string  `json:"currency"` // "USD", "CNY", …
-	IsEnabled    bool    `json:"isEnabled"`
-	UsedCredits  float64 `json:"usedCredits"`
-	MonthlyLimit float64 `json:"monthlyLimit"`
-	UsedPct      float64 `json:"usedPct"`
+	// ExtraEnabled reports whether the pay-as-you-go spend cap is active.
+	ExtraEnabled bool    `json:"extraEnabled,omitempty"`
+	UsedCredits  float64 `json:"usedCredits,omitempty"`  // used against the cap
+	MonthlyLimit float64 `json:"monthlyLimit,omitempty"` // spend cap, 0 when unset
+	UsedPct      float64 `json:"usedPct,omitempty"`      // 0–100 against the cap
 }
 
 // ProviderQuota is the quota data for one provider.
@@ -754,8 +753,10 @@ type ProviderQuota struct {
 	FetchStatus ProviderFetchStatus `json:"fetchStatus"`
 
 	RateLimits []QuotaRateLimit `json:"rateLimits,omitzero"`
-	Balance    QuotaBalance     `json:"balance,omitzero"`
-	ExtraUsage QuotaExtraUsage  `json:"extraUsage,omitzero"`
+	// Balance is the provider's money snapshot. Some providers, such as
+	// Anthropic, report it as "extra usage" on top of the subscription
+	// instead of a prepaid wallet balance.
+	Balance QuotaBalance `json:"balance,omitzero"`
 }
 
 // ProviderFetchStatus describes whether provider quota data is current enough

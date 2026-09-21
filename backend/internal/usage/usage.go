@@ -57,18 +57,18 @@ type QuotaRateLimit struct {
 	ResetsAt time.Time
 }
 
-// QuotaBalance is a balance or credit snapshot reported by a provider.
+// QuotaBalance is a balance or credit snapshot reported by a provider. When
+// the provider also reports pay-as-you-go spending (Anthropic-style extra
+// credits or a spend cap), the spend fields carry that information too.
 type QuotaBalance struct {
 	Currency string
 	Total    float64
 	Granted  float64
 	ToppedUp float64
-}
 
-// QuotaExtraUsage is pay-as-you-go usage information reported by a provider.
-type QuotaExtraUsage struct {
-	Currency     string
-	IsEnabled    bool
+	// ExtraEnabled reports whether the pay-as-you-go spend cap is active.
+	// UsedCredits, MonthlyLimit, and UsedPct describe usage against the cap.
+	ExtraEnabled bool
 	UsedCredits  float64
 	MonthlyLimit float64
 	UsedPct      float64
@@ -83,8 +83,10 @@ type ProviderQuota struct {
 	FetchError bool
 
 	RateLimits []QuotaRateLimit
-	Balance    QuotaBalance
-	ExtraUsage QuotaExtraUsage
+	// Balance is the provider's money snapshot. Some providers, such as
+	// Anthropic, report it as "extra usage" on top of the subscription
+	// instead of a prepaid wallet balance.
+	Balance QuotaBalance
 }
 
 // TaskQuotaUpdate is a canonical, provider-neutral quota update emitted by a

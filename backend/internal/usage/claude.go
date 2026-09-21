@@ -128,10 +128,12 @@ func (f *ClaudeCodeFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 			ResetsAt: t,
 		})
 	}
-	if raw.ExtraUsage != nil {
-		out.ExtraUsage = QuotaExtraUsage{
+	// Report no balance when there is nothing to show: an extra-usage object
+	// with no usage and no limit would render a meaningless $0.00.
+	if raw.ExtraUsage != nil && (raw.ExtraUsage.UsedCredits != 0 || raw.ExtraUsage.MonthlyLimit != 0) {
+		out.Balance = QuotaBalance{
 			Currency:     "USD",
-			IsEnabled:    raw.ExtraUsage.IsEnabled,
+			ExtraEnabled: raw.ExtraUsage.IsEnabled,
 			MonthlyLimit: raw.ExtraUsage.MonthlyLimit / 100,
 			UsedCredits:  raw.ExtraUsage.UsedCredits / 100,
 			UsedPct:      raw.ExtraUsage.Utilization,

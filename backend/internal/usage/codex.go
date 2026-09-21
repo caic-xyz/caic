@@ -140,14 +140,13 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 			})
 		}
 	}
-	if raw.Credits != nil && raw.Credits.Balance != "" {
+	// Report no balance at all when the account has no credits, so the
+	// frontend does not show a meaningless $0.00.
+	if raw.Credits != nil && raw.Credits.Balance != "" && (raw.Credits.HasCredits || raw.Credits.Unlimited) {
 		bal, _ := strconv.ParseFloat(raw.Credits.Balance, 64)
 		out.Balance = QuotaBalance{
 			Currency: "USD",
 			Total:    bal,
-		}
-		if !raw.Credits.HasCredits && !raw.Credits.Unlimited {
-			out.Balance.Total = 0
 		}
 	}
 	return out, nil

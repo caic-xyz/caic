@@ -198,17 +198,14 @@ func ProviderQuota(q *usage.ProviderQuota, now time.Time) (v1.ProviderQuota, err
 		FetchStatus: providerFetchStatus(q, now),
 		RateLimits:  make([]v1.QuotaRateLimit, len(q.RateLimits)),
 		Balance: v1.QuotaBalance{
-			Currency: q.Balance.Currency,
-			Total:    q.Balance.Total,
-			Granted:  q.Balance.Granted,
-			ToppedUp: q.Balance.ToppedUp,
-		},
-		ExtraUsage: v1.QuotaExtraUsage{
-			Currency:     q.ExtraUsage.Currency,
-			IsEnabled:    q.ExtraUsage.IsEnabled,
-			UsedCredits:  q.ExtraUsage.UsedCredits,
-			MonthlyLimit: q.ExtraUsage.MonthlyLimit,
-			UsedPct:      q.ExtraUsage.UsedPct,
+			Currency:     q.Balance.Currency,
+			Total:        q.Balance.Total,
+			Granted:      q.Balance.Granted,
+			ToppedUp:     q.Balance.ToppedUp,
+			ExtraEnabled: q.Balance.ExtraEnabled,
+			UsedCredits:  q.Balance.UsedCredits,
+			MonthlyLimit: q.Balance.MonthlyLimit,
+			UsedPct:      q.Balance.UsedPct,
 		},
 	}
 	for i := range q.RateLimits {

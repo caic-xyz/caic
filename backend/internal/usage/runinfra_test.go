@@ -43,8 +43,8 @@ func TestRunInfraFetcherGet(t *testing.T) {
 		if quota.Balance.Currency != "USD" || quota.Balance.Total != 54.42 {
 			t.Fatalf("balance = %#v, want USD 54.42", quota.Balance)
 		}
-		if quota.ExtraUsage.MonthlyLimit != 200 || quota.ExtraUsage.UsedCredits != 16.20 {
-			t.Fatalf("extra usage = %#v, want limit 200 used 16.20", quota.ExtraUsage)
+		if quota.Balance.MonthlyLimit != 200 || quota.Balance.UsedCredits != 16.20 {
+			t.Fatalf("spend cap = %#v, want limit 200 used 16.20", quota.Balance)
 		}
 	})
 
@@ -62,7 +62,7 @@ func TestRunInfraFetcherGet(t *testing.T) {
 		if quota == nil {
 			t.Fatal("Get() = nil")
 		}
-		if quota.Balance.Total != 1 || quota.ExtraUsage.MonthlyLimit != 0 {
+		if quota.Balance.Total != 1 || quota.Balance.MonthlyLimit != 0 {
 			t.Fatalf("quota = %#v, want balance 1 without extra usage", quota)
 		}
 	})
