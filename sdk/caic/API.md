@@ -19,6 +19,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/harnesses/{harness}/refresh` | Refreshes one coding agent model inventory, bypassing its cache. | `RefreshHarnessReq` | `HarnessInfo` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
+| GET | `/api/caic/v1/server/metrics` | Returns aggregated operation latency statistics. |  | `MetricsResp` |
 | GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
 | POST | `/api/caic/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
 | GET | `/api/caic/v1/server/repos/branches` | Lists branches for a repository. |  | `RepoBranchesResp` |
@@ -680,6 +681,46 @@ CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `wellKnown` | `CacheSize[]` |  | yes |
+
+### MetricResource
+
+MetricResource identifies the process that produced the observations.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `serviceName` | `string` | ServiceName is the emitting binary, such as "caic". | yes |
+| `serviceVersion` | `string` | ServiceVersion is the build version, when known. |  |
+| `host` | `string` | Host is the machine the process runs on, when known. |  |
+
+### MetricSeries
+
+MetricSeries describes aggregated latency observations for one operation,
+outcome, and attribute set.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` | Name is the operation identifier, such as "container.launch" or
+"mcp.tool.task_create". | yes |
+| `outcome` | `string` | Outcome is "ok" or "error". | yes |
+| `attrs` | `Record<string, string>` | Attrs are the bounded dimensions that separate this series from
+others sharing its name and outcome, such as the container runtime.
+Omitted when the operation has no dimensions. |  |
+| `calls` | `int64` | Calls is the total number of recorded calls. | yes |
+| `samples` | `int64` | Samples is the number of retained observations used for the percentiles. | yes |
+| `minMs` | `float64` | MinMS is the fastest retained call in milliseconds. | yes |
+| `p50Ms` | `float64` | P50MS is the median retained call in milliseconds. | yes |
+| `p95Ms` | `float64` | P95MS is the 95th percentile retained call in milliseconds. | yes |
+| `maxMs` | `float64` | MaxMS is the slowest retained call in milliseconds. | yes |
+
+### MetricsResp
+
+MetricsResp is the response for GET /api/caic/v1/server/metrics.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `since` | `ISOTimestamp` | Since is when the server began recording observations. |  |
+| `resource` | `MetricResource` | Resource identifies the process that produced the observations. | yes |
+| `series` | `MetricSeries[]` | Series holds per-operation aggregates, slowest p95 first. | yes |
 
 ### BranchInfo
 

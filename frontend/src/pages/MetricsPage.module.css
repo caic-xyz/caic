@@ -1,0 +1,80 @@
+/* Styles for the MetricsPage server operation latency view. */
+
+.metricsPage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.25rem 0 2rem;
+  overflow: auto;
+}
+
+.metricsPanel {
+  width: 100%;
+  max-width: 64rem;
+  padding: 0.25rem 0 2rem;
+}
+
+.metricsPanelTitle {
+  margin: 0 0 1.25rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.metricsDescription {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.metricsMeta {
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.metricsError {
+  margin: 0.75rem 0 0;
+  color: var(--color-error);
+}
+
+.tableScroll {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  font-size: 0.85rem;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.35rem 0.5rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table thead th {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table tbody th {
+  font-weight: 500;
+  text-align: left;
+}
+
+.table tbody td {
+  font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr + tr th,
+.table tbody tr + tr td {
+  border-top: 1px solid var(--color-border-light);
+}
+
+.actions {
+  margin-top: 0.75rem;
+}

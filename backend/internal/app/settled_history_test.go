@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -17,7 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	"github.com/maruel/ksid"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 // writeSettledHistoryLog writes a minimal v1 task log (metadata header plus an
@@ -60,7 +62,7 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskmgr.Manager {
 	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{
 		&runtimetest.FakeSystem{},
-	})
+	}, metrics.Nop{})
 	if err != nil {
 		t.Fatal(err)
 	}

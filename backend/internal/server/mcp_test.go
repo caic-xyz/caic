@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth"
 )
 
@@ -819,6 +820,16 @@ func TestMCPHandlers(t *testing.T) {
 		}
 		if !bytes.Contains(data, []byte("structuredContent")) {
 			t.Fatalf("result = %s, want structuredContent", data)
+		}
+
+		var recorded bool
+		for _, metric := range s.serverHandlers.metrics.Snapshot() {
+			if metric.Name == "mcp.tool.tasks_list" && metric.Outcome == metrics.OutcomeOK && metric.Calls >= 1 {
+				recorded = true
+			}
+		}
+		if !recorded {
+			t.Fatalf("metrics = %+v, want a recorded tasks_list ok call", s.serverHandlers.metrics.Snapshot())
 		}
 	})
 

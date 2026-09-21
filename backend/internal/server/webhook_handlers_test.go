@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
@@ -504,6 +505,7 @@ func minimalRouter(t *testing.T) *testRouter {
 		CIService:   ciService,
 		Warnings:    NewWarningStore(taskMgr),
 		CacheSizes:  NewCacheSizeStore(testLogger()),
+		Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -47,7 +48,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		docker := newRouterFakeBackend("docker")
 		podman := newRouterFakeBackend("podman")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +89,7 @@ func TestRouter(t *testing.T) {
 		t.Parallel()
 		docker := newRouterFakeBackend("docker")
 		podman := newRouterFakeBackend("podman")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{docker, podman}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +112,7 @@ func TestRouter(t *testing.T) {
 	t.Run("rejects unqualified instance IDs", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +124,7 @@ func TestRouter(t *testing.T) {
 	t.Run("rejects cross runtime fork", func(t *testing.T) {
 		t.Parallel()
 		backend := newRouterFakeBackend("docker")
-		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend, newRouterFakeBackend("podman")})
+		router, err := runtime.NewRouter(testLogger(), []runtime.System{backend, newRouterFakeBackend("podman")}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +141,7 @@ func TestRouter(t *testing.T) {
 		router, err := runtime.NewRouter(testLogger(), []runtime.System{
 			&routerEventSystem{RuntimeName: "docker", events: events, ctxDone: ctxDone},
 			&routerEventSystem{RuntimeName: "podman", err: errors.New("boom")},
-		})
+		}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,6 +155,61 @@ func TestRouter(t *testing.T) {
 		}
 		events <- runtime.Event{InstanceID: "md-agent-1"}
 	})
+}
+
+func TestRouterRecordsOperationMetrics(t *testing.T) {
+	t.Parallel()
+	store := metrics.NewStore(metrics.Resource{ServiceName: "caic"})
+	backend := newRouterFakeBackend("docker")
+	router, err := runtime.NewRouter(testLogger(), []runtime.System{backend}, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := router.Launch(t.Context(), nil, &runtime.StartOptions{RuntimeName: "docker", Metadata: runtime.Metadata{}, LogWriter: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.Diff(t.Context(), id, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Stop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Purge(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+
+	series := make(map[string]metrics.Series)
+	for _, s := range store.Snapshot() {
+		series[s.Name] = s
+	}
+	for _, name := range []string{"container.launch", "container.stop", "container.purge", "repo.diff"} {
+		s, ok := series[name]
+		if !ok {
+			t.Fatalf("metrics = %+v, want %s", store.Snapshot(), name)
+		}
+		if s.Outcome != metrics.OutcomeOK || s.Calls != 1 {
+			t.Errorf("%s = %+v, want one ok call", name, s)
+		}
+	}
+
+	// A failing call must be recorded as an error. The deferred recorder reads
+	// the named return value when the function returns, so any form that read
+	// the error earlier would report every failure as a success and still look
+	// healthy here.
+	if _, err := router.Diff(t.Context(), runtime.NewID("missing-runtime", "ctr-1"), 0); err == nil {
+		t.Fatal("Diff on an unknown runtime succeeded")
+	}
+	failures := int64(0)
+	for _, s := range store.Snapshot() {
+		if s.Name == "repo.diff" && s.Outcome == metrics.OutcomeError {
+			failures = s.Calls
+		}
+	}
+	if failures != 1 {
+		t.Fatalf("metrics = %+v, want one repo.diff error call", store.Snapshot())
+	}
 }
 
 type routerEventSystem struct {

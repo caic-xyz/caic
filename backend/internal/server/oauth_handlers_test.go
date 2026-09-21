@@ -28,6 +28,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 	"github.com/caic-xyz/caic/oauth/oauthserver"
@@ -465,6 +466,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 		ForgeMgr:                   forgeManager,
 		Warnings:                   NewWarningStore(taskMgr),
 		CacheSizes:                 NewCacheSizeStore(testLogger()),
+		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		AuthStore:                  store,
 		SessionSecret:              []byte("0123456789abcdef0123456789abcdef"),
 		HostState:                  auth.NewHostState("https://caic.example.com", nil),

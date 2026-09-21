@@ -24,6 +24,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -40,6 +41,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/metrics"
+	"github.com/caic-xyz/caic/metricsdb"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
@@ -51,6 +54,7 @@ type App struct {
 
 	voiceBridge     *voicertc.Bridge
 	backgroundTasks []backgroundTask
+	metricsLog      *metricsdb.Log
 	taskMgr         *taskmgr.Manager
 }
 
@@ -84,7 +88,25 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	ctx, startTask := trace.NewTask(ctx, "server.startup")
 	defer startTask.End()
 
-	runtimes, mdRuntimes, err := initRuntimeSystem(ctx, appLog, cfg)
+	host, err := os.Hostname()
+	if err != nil {
+		appLog.Warn("hostname unavailable for metrics resource", "err", err)
+	}
+	resource := metrics.Resource{
+		ServiceName:    "caic",
+		ServiceVersion: autoupdate.Version,
+		Host:           host,
+	}
+	metricsStore := metrics.NewStore(resource)
+	metricsLog, err := metricsdb.NewLog(appLog, filepath.Join(cfg.Dirs.CacheDir, "metricsdb"), resource)
+	if err != nil {
+		return nil, fmt.Errorf("open metrics log: %w", err)
+	}
+	metricsRec, err := metrics.Multi(metricsStore, metricsLog)
+	if err != nil {
+		return nil, fmt.Errorf("compose metrics recorders: %w", err)
+	}
+	runtimes, mdRuntimes, err := initRuntimeSystem(ctx, appLog, cfg, metricsRec)
 	if err != nil {
 		return nil, err
 	}
@@ -307,6 +329,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		TaskClient:                 botClient,
 		Warnings:                   warnings,
 		CacheSizes:                 cacheSizes,
+		Metrics:                    metricsStore,
 		HarnessModels:              harnessModels,
 		GitHubAllowedUsers:         cfg.GitHub.OAuthAllowedUsers,
 		GitLabAllowedUsers:         cfg.GitLab.OAuthAllowedUsers,
@@ -471,12 +494,20 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		},
 	)
 	keepTaskMgr = true
-	return &App{Server: s, voiceBridge: voiceBridge, backgroundTasks: backgroundTasks, taskMgr: taskMgr}, nil
+	return &App{
+		Server:          s,
+		voiceBridge:     voiceBridge,
+		backgroundTasks: backgroundTasks,
+		metricsLog:      metricsLog,
+		taskMgr:         taskMgr,
+	}, nil
 }
 
 // Serve starts the HTTP server and closes app-owned resources when serving ends.
 func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
-	defer func() { err = errors.Join(err, a.taskMgr.Close()) }()
+	defer func() {
+		err = errors.Join(err, a.taskMgr.Close(), a.metricsLog.Close())
+	}()
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	for _, task := range a.backgroundTasks {
@@ -548,9 +579,9 @@ func cleanupLegacyReplayArtifacts(logDir string) error {
 	return nil
 }
 
-func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config) (*runtime.Router, []mdRuntime, error) {
+func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config, rec metrics.Recorder) (*runtime.Router, []mdRuntime, error) {
 	if cfg.Runtime.System != nil {
-		runtimeRouter, err := runtime.NewRouter(log, []runtime.System{cfg.Runtime.System})
+		runtimeRouter, err := runtime.NewRouter(log, []runtime.System{cfg.Runtime.System}, rec)
 		if err != nil {
 			return nil, nil, fmt.Errorf("init fake runtime router: %w", err)
 		}
@@ -578,7 +609,7 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 		return nil, nil, errors.New("no container runtime available: install docker or podman")
 	}
 
-	runtimeRouter, err := runtime.NewRouter(log, runtimes)
+	runtimeRouter, err := runtime.NewRouter(log, runtimes, rec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init runtime router: %w", err)
 	}

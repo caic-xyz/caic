@@ -36,6 +36,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -141,7 +142,7 @@ func newTestRuntime(t testing.TB, backend testRuntimeBackend, info testRuntimeIn
 	if info != nil {
 		sys = testRuntimeInfoSystem{testRuntimeBackend: backend, Monitor: info, Inventory: info, PrivilegeInfo: info}
 	}
-	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{sys})
+	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{sys}, metrics.Nop{})
 	if err != nil {
 		t.Fatalf("runtime.NewRouter: %v", err)
 	}
@@ -1236,7 +1237,7 @@ func TestNew(t *testing.T) {
 	t.Run("no-repo checkout is fully constructed", func(t *testing.T) {
 		t.Parallel()
 		backend := &mdruntime.Backend{}
-		router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
+		router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 		if err != nil {
 			t.Fatal(err)
 		}

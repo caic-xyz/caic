@@ -32,6 +32,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 	"github.com/caic-xyz/caic/oauth/oauthserver"
 )
@@ -113,6 +114,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	if d.CacheSizes == nil {
 		return nil, errors.New("cache size store is required")
 	}
+	if d.Metrics == nil {
+		return nil, errors.New("metrics store is required")
+	}
 	log = log.With("cmp", "server")
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
@@ -132,6 +136,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		authStore: d.AuthStore,
 		fakeCI:    d.FakeCI,
 		runtimes:  d.Runtimes,
+		metrics:   d.Metrics,
 	}
 	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)
@@ -180,6 +185,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			repoStatus:         d.RepoStatus,
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
+			metrics:            d.Metrics,
 			harnessModels:      d.HarnessModels,
 			authStore:          d.AuthStore,
 			githubOAuth:        d.GitHubOAuth,
@@ -251,6 +257,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		usage:         s.usageHandlers,
 		notifications: newNotificationFeed(),
 		audit:         audit,
+		metrics:       d.Metrics,
 	}
 	s.TaskMCPScoper = registry
 	s.mcpHandlers.protocol = &mcp.Handler{
@@ -585,6 +592,8 @@ type Dependencies struct {
 	TaskClient taskCreator // creates tasks for manual CI repair
 	Warnings   *WarningStore
 	CacheSizes *CacheSizeStore
+	// Metrics aggregates operation duration observations.
+	Metrics *metrics.Store
 	// HarnessModels refreshes coding-agent model inventories.
 	HarnessModels *HarnessModels
 	FakeCI        FakeCIHook // optional fake CI simulation hook for smoke/e2e tests

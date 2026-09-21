@@ -4,6 +4,7 @@ import { createSignal, Show } from "solid-js";
 import { A } from "@solidjs/router";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
+import MonitoringIcon from "@material-symbols/svg-400/outlined/monitoring.svg?solid";
 
 import { useAppState } from "../AppState";
 import Dropdown from "./Dropdown";
@@ -29,6 +30,10 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
           <A class={styles.dropdownItem} href="/settings" role="menuitem" onClick={() => setMenuOpen(false)}>
             <SettingsIcon width="1em" height="1em" class={styles.dropdownItemIcon} />
             Settings
+          </A>
+          <A class={styles.dropdownItem} href="/metrics" role="menuitem" onClick={() => setMenuOpen(false)}>
+            <MonitoringIcon width="1em" height="1em" class={styles.dropdownItemIcon} />
+            Metrics
           </A>
           <button
             type="button"

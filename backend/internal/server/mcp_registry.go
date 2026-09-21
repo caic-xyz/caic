@@ -34,6 +34,7 @@ import (
 	taskpkg "github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth"
 )
 
@@ -120,6 +121,7 @@ type mcpRegistry struct {
 	usage         *usageHandlers
 	notifications *notificationFeed
 	audit         *auditStore
+	metrics       metrics.Recorder
 }
 
 func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
@@ -162,16 +164,20 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 				mcp.ToolErrorCodeMetaKey: string(api.CodeUnauthorized),
 			}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
 		}
+		start := time.Now()
 		res, err := s.Handler(ctx, argsJSON)
 		// TODO(observability): Record pre-wire logical result size and truncation,
 		// keyed by tool name and outcome, at this registry boundary. Final encoded
 		// response bytes belong to the MCP transport writer.
 		status := "ok"
-		if err != nil {
-			status = "error"
-		} else if res.IsError {
-			status = "tool_error"
+		outcome := metrics.OutcomeOK
+		switch {
+		case err != nil:
+			status, outcome = "error", metrics.OutcomeError
+		case res.IsError:
+			status, outcome = "tool_error", metrics.OutcomeError
 		}
+		m.metrics.Record(ctx, "mcp.tool."+name, outcome, time.Since(start))
 		m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
 		return res, err
 	}
@@ -334,12 +340,14 @@ func (m *mcpRegistry) voiceSessionDefaults(ctx context.Context) string {
 //
 // Voice tool-call mode: the Gemini Live adapter currently declares every tool
 // as BLOCKING, because the provider-neutral ToolDeclaration has no per-tool
-// execution mode and the gateway tool round trip is synchronous. Per-tool voice
-// call durations are not measured yet. Once they are, a tool whose measured
-// call duration exceeds one second should become asynchronous (Gemini behavior
-// NON_BLOCKING) so the assistant can keep talking while it runs. Switching an
-// individual tool needs a mode hint carried from this catalog through
-// ToolDeclaration to the adapter; see gomode/voicegateway/voicertc/AGENTS.md.
+// execution mode and the gateway tool round trip is synchronous. Server-side
+// handler durations are recorded as "mcp.tool.<name>" and shown in Settings,
+// but they exclude the client round trip the model waits through. Once
+// voice-path durations are measured, a tool whose call exceeds one second
+// should become asynchronous (Gemini behavior NON_BLOCKING) so the assistant
+// can keep talking while it runs. Switching an individual tool needs a mode
+// hint carried from this catalog through ToolDeclaration to the adapter; see
+// gomode/voicegateway/voicertc/AGENTS.md.
 func (m *mcpRegistry) specs() []mcp.ToolSpec {
 	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
 	createSpec.InputSchema = buildTaskCreateSchema()

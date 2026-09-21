@@ -1255,6 +1255,52 @@ type CacheSizesResp struct {
 	WellKnown []CacheSize `json:"wellKnown"`
 }
 
+// MetricSeries describes aggregated latency observations for one operation,
+// outcome, and attribute set.
+type MetricSeries struct {
+	// Name is the operation identifier, such as "container.launch" or
+	// "mcp.tool.task_create".
+	Name string `json:"name"`
+	// Outcome is "ok" or "error".
+	Outcome string `json:"outcome"`
+	// Attrs are the bounded dimensions that separate this series from
+	// others sharing its name and outcome, such as the container runtime.
+	// Omitted when the operation has no dimensions.
+	Attrs map[string]string `json:"attrs,omitempty"`
+	// Calls is the total number of recorded calls.
+	Calls int64 `json:"calls"`
+	// Samples is the number of retained observations used for the percentiles.
+	Samples int64 `json:"samples"`
+	// MinMS is the fastest retained call in milliseconds.
+	MinMS float64 `json:"minMs"`
+	// P50MS is the median retained call in milliseconds.
+	P50MS float64 `json:"p50Ms"`
+	// P95MS is the 95th percentile retained call in milliseconds.
+	P95MS float64 `json:"p95Ms"`
+	// MaxMS is the slowest retained call in milliseconds.
+	MaxMS float64 `json:"maxMs"`
+}
+
+// MetricResource identifies the process that produced the observations.
+type MetricResource struct {
+	// ServiceName is the emitting binary, such as "caic".
+	ServiceName string `json:"serviceName"`
+	// ServiceVersion is the build version, when known.
+	ServiceVersion string `json:"serviceVersion,omitempty"`
+	// Host is the machine the process runs on, when known.
+	Host string `json:"host,omitempty"`
+}
+
+// MetricsResp is the response for GET /api/caic/v1/server/metrics.
+type MetricsResp struct {
+	// Since is when the server began recording observations.
+	Since time.Time `json:"since,omitzero"`
+	// Resource identifies the process that produced the observations.
+	Resource MetricResource `json:"resource"`
+	// Series holds per-operation aggregates, slowest p95 first.
+	Series []MetricSeries `json:"series"`
+}
+
 // VersionResp is the response for GET /api/caic/v1/server/version.
 type VersionResp struct {
 	Current      string `json:"current"`

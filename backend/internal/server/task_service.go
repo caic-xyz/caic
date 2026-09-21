@@ -30,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 // FakeCIHook generate fake tasks.
@@ -52,6 +53,7 @@ type taskService struct {
 	authStore *auth.Store
 	fakeCI    FakeCIHook
 	runtimes  *runtime.Router
+	metrics   metrics.Recorder
 }
 
 func (s *taskService) runtimeNameForCreate(requested string, settings *preferences.Settings) runtime.Name {
@@ -1061,7 +1063,9 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	if req.Target == v1.SyncTargetDefault {
 		target = taskmgr.SyncTargetDefault
 	}
+	start := time.Now()
 	res, err := entry.Lifecycle.Sync(ctx, target, req.Force)
+	s.metrics.Record(ctx, "task.push", metrics.OutcomeOf(err), time.Since(start))
 	if err != nil {
 		return nil, toDTO(err)
 	}

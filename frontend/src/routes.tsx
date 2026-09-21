@@ -13,6 +13,7 @@ import StatsPage from "./pages/StatsPage";
 import TaskInfoPage from "./pages/TaskInfoPage";
 import VncPage from "./pages/VncPage";
 import SettingsPage from "./pages/SettingsPage";
+import MetricsPage from "./pages/MetricsPage";
 
 /**
  * The application's route definitions. Returned as JSX (not a component) so it can be
@@ -32,6 +33,7 @@ export function appRoutes(): JSX.Element {
         <Route path="/task/:taskId/vnc" component={VncPage} />
       </Route>
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/metrics" component={MetricsPage} />
     </Route>
   );
 }

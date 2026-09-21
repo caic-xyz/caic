@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 func TestRefreshHarnessModels(t *testing.T) {
@@ -220,7 +221,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 }
 
 func newModelRefreshRouter(t *testing.T, runtimeBackend testRuntimeBackend, inventory runtime.Inventory) *runtime.Router {
-	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&modelRefreshSystem{testRuntimeBackend: runtimeBackend, Inventory: inventory}})
+	router, err := runtime.NewRouter(slog.New(slog.DiscardHandler), []runtime.System{&modelRefreshSystem{testRuntimeBackend: runtimeBackend, Inventory: inventory}}, metrics.Nop{})
 	if err != nil {
 		t.Fatal(err)
 	}

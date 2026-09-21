@@ -822,6 +822,52 @@ public struct CacheSizesResp: Codable {
     public let wellKnown: [CacheSize]
 }
 
+/// MetricResource identifies the process that produced the observations.
+public struct MetricResource: Codable {
+    /// ServiceName is the emitting binary, such as "caic".
+    public let serviceName: String
+    /// ServiceVersion is the build version, when known.
+    public let serviceVersion: String?
+    /// Host is the machine the process runs on, when known.
+    public let host: String?
+}
+
+/// MetricSeries describes aggregated latency observations for one operation,
+/// outcome, and attribute set.
+public struct MetricSeries: Codable {
+    /// Name is the operation identifier, such as "container.launch" or
+    /// "mcp.tool.task_create".
+    public let name: String
+    /// Outcome is "ok" or "error".
+    public let outcome: String
+    /// Attrs are the bounded dimensions that separate this series from
+    /// others sharing its name and outcome, such as the container runtime.
+    /// Omitted when the operation has no dimensions.
+    public let attrs: [String: String]?
+    /// Calls is the total number of recorded calls.
+    public let calls: Int
+    /// Samples is the number of retained observations used for the percentiles.
+    public let samples: Int
+    /// MinMS is the fastest retained call in milliseconds.
+    public let minMs: Double
+    /// P50MS is the median retained call in milliseconds.
+    public let p50Ms: Double
+    /// P95MS is the 95th percentile retained call in milliseconds.
+    public let p95Ms: Double
+    /// MaxMS is the slowest retained call in milliseconds.
+    public let maxMs: Double
+}
+
+/// MetricsResp is the response for GET /api/caic/v1/server/metrics.
+public struct MetricsResp: Codable {
+    /// Since is when the server began recording observations.
+    public let since: ISOTimestamp?
+    /// Resource identifies the process that produced the observations.
+    public let resource: MetricResource
+    /// Series holds per-operation aggregates, slowest p95 first.
+    public let series: [MetricSeries]
+}
+
 /// BranchInfo describes a single branch with its origin and task-creation action.
 public struct BranchInfo: Codable {
     public let name: String

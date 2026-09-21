@@ -31,6 +31,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 // statusFailingRuntime fails the compact status probe, simulating the
@@ -188,7 +189,7 @@ func newTestRuntimeRouter(t testing.TB, backend testRuntimeBackend) *runtime.Rou
 	if backend == nil {
 		return nil
 	}
-	rt, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
+	rt, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -850,7 +851,7 @@ func TestRunner(t *testing.T) {
 				DiskSizes: map[runtime.ID]int64{
 					runtime.NewID("test-runtime", "ctr-1"): 700,
 				},
-			}})
+			}}, metrics.Nop{})
 			if err != nil {
 				t.Fatal(err)
 			}

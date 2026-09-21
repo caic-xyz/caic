@@ -155,6 +155,13 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[CacheSizesResp](),
 	},
 	{
+		Name:   "getMetrics",
+		Doc:    "Returns aggregated operation latency statistics.",
+		Method: "GET",
+		Path:   "/api/caic/v1/server/metrics",
+		Resp:   reflect.TypeFor[MetricsResp](),
+	},
+	{
 		Name:    "listRepos",
 		Doc:     "Lists all discovered repositories.",
 		Method:  "GET",

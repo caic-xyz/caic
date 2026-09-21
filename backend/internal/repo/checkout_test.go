@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 // fakeTaskView is a minimal TaskView implementation for tests. It cannot be
@@ -96,7 +97,7 @@ func newTestCheckout(dir string) *Checkout {
 }
 
 func newTestRuntime(t *testing.T, backend testRuntimeBackend) *runtime.Router {
-	runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
+	runtimes, err := runtime.NewRouter(logtest.Logger(t), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 	if err != nil {
 		t.Fatal(err)
 	}

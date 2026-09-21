@@ -107,6 +107,7 @@ const apiSpyNames = [
   "refreshHarness",
   "listCaches",
   "getCacheSizes",
+  "getMetrics",
   "getConfig",
   "getVersion",
   "triggerUpdate",
@@ -215,6 +216,7 @@ beforeEach(() => {
   vi.mocked(api.taskEvents).mockImplementation((() => new FakeEventSource()) as unknown as typeof api.taskEvents);
   vi.mocked(api.listCaches).mockResolvedValue(null as never);
   vi.mocked(api.getCacheSizes).mockResolvedValue(null as never);
+  vi.mocked(api.getMetrics).mockResolvedValue({ series: [] } as never);
   vi.mocked(api.clearContext).mockResolvedValue({ status: "cleared" } as never);
   vi.mocked(api.compactContext).mockResolvedValue({ status: "compacting" } as never);
   vi.mocked(api.getTaskRepoStatus).mockResolvedValue({ repositories: [] });
@@ -1071,7 +1073,13 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus());
 
     await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Metrics" })).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveFocus();
+
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("menuitem", { name: "Metrics" })).toHaveFocus();
 
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
@@ -1549,6 +1557,54 @@ describe("App repo chips: No repository", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
+  });
+
+  it("links to the metrics page from the user menu", async () => {
+    const user = userEvent.setup();
+    const { history } = renderApp("/");
+
+    await user.click(screen.getByRole("button", { name: "Menu" }));
+    const metricsLink = screen.getByRole("menuitem", { name: "Metrics" });
+
+    expect(metricsLink).toHaveAttribute("href", "/metrics");
+
+    await user.click(metricsLink);
+
+    expect(history.get()).toBe("/metrics");
+    expect(screen.getByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+  });
+
+  it("renders operation latency as a routed page", async () => {
+    vi.mocked(api.getMetrics).mockResolvedValue({
+      since: "2026-01-01T00:00:00Z" as ISOTimestamp,
+      resource: { serviceName: "caic", serviceVersion: "1.2.3", host: "host-1" },
+      series: [
+        {
+          name: "container.launch",
+          outcome: "ok",
+          attrs: { "container.runtime": "podman" },
+          calls: 12,
+          samples: 12,
+          minMs: 120,
+          p50Ms: 1500,
+          p95Ms: 2400,
+          maxMs: 2600,
+        },
+        { name: "repo.diff", outcome: "ok", calls: 40, samples: 40, minMs: 3, p50Ms: 9, p95Ms: 320, maxMs: 900 },
+      ],
+    });
+
+    renderApp("/metrics");
+
+    expect(screen.getByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+    expect(await screen.findByText(/caic 1\.2\.3 on host-1\./)).toBeInTheDocument();
+    const table = await screen.findByRole("table");
+    const createRow = within(table).getByRole("rowheader", { name: "container.launch" }).closest("tr");
+    if (!createRow) throw new Error("container.launch row is missing");
+    expect(within(createRow).getByText("container.runtime=podman")).toBeInTheDocument();
+    expect(within(createRow).getByText("1.5 s")).toBeInTheDocument();
+    expect(within(createRow).getByText("2.4 s")).toBeInTheDocument();
+    expect(within(createRow).getByText("12")).toBeInTheDocument();
   });
 
   it("refreshes models from settings", async () => {

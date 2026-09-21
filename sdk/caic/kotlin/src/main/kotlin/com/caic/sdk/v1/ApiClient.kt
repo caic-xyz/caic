@@ -113,6 +113,8 @@ class ApiClient(
     suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/caic/v1/server/caches")
     /** Returns the latest size snapshot for well-known caches. */
     suspend fun getCacheSizes(): CacheSizesResp = request("GET", "/api/caic/v1/server/cache-sizes")
+    /** Returns aggregated operation latency statistics. */
+    suspend fun getMetrics(): MetricsResp = request("GET", "/api/caic/v1/server/metrics")
     /** Lists all discovered repositories. */
     suspend fun listRepos(): List<Repo> = request("GET", "/api/caic/v1/server/repos")
     /** Clones a repository into the server's root directory. */

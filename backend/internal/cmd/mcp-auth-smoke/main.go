@@ -30,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 const smokeSessionTTL = 30 * 24 * time.Hour
@@ -170,7 +171,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	backend := smoketest.NewRuntimeBackend(0)
-	runtimeRouter, err := runtime.NewRouter(slog.New(slog.NewTextHandler(os.Stderr, nil)), []runtime.System{backend})
+	runtimeRouter, err := runtime.NewRouter(slog.New(slog.NewTextHandler(os.Stderr, nil)), []runtime.System{backend}, metrics.Nop{})
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -214,6 +215,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		ForgeMgr:      forgemgr.New(slog.New(slog.NewTextHandler(os.Stderr, nil)), "", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:      server.NewWarningStore(taskMgr),
 		CacheSizes:    server.NewCacheSizeStore(slog.New(slog.NewTextHandler(os.Stderr, nil))),
+		Metrics:       metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		AuthStore:     store,
 		SessionSecret: secret,
 	})

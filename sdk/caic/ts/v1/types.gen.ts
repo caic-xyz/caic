@@ -999,6 +999,58 @@ export interface CacheSizesResp {
   wellKnown: CacheSize[];
 }
 
+/** MetricResource identifies the process that produced the observations. */
+export interface MetricResource {
+  /** ServiceName is the emitting binary, such as "caic". */
+  serviceName: string;
+  /** ServiceVersion is the build version, when known. */
+  serviceVersion?: string;
+  /** Host is the machine the process runs on, when known. */
+  host?: string;
+}
+
+/**
+ * MetricSeries describes aggregated latency observations for one operation,
+ * outcome, and attribute set.
+ */
+export interface MetricSeries {
+  /**
+   * Name is the operation identifier, such as "container.launch" or
+   * "mcp.tool.task_create".
+   */
+  name: string;
+  /** Outcome is "ok" or "error". */
+  outcome: string;
+  /**
+   * Attrs are the bounded dimensions that separate this series from
+   * others sharing its name and outcome, such as the container runtime.
+   * Omitted when the operation has no dimensions.
+   */
+  attrs?: { [key: string]: string};
+  /** Calls is the total number of recorded calls. */
+  calls: number /* int64 */;
+  /** Samples is the number of retained observations used for the percentiles. */
+  samples: number /* int64 */;
+  /** MinMS is the fastest retained call in milliseconds. */
+  minMs: number /* float64 */;
+  /** P50MS is the median retained call in milliseconds. */
+  p50Ms: number /* float64 */;
+  /** P95MS is the 95th percentile retained call in milliseconds. */
+  p95Ms: number /* float64 */;
+  /** MaxMS is the slowest retained call in milliseconds. */
+  maxMs: number /* float64 */;
+}
+
+/** MetricsResp is the response for GET /api/caic/v1/server/metrics. */
+export interface MetricsResp {
+  /** Since is when the server began recording observations. */
+  since?: ISOTimestamp;
+  /** Resource identifies the process that produced the observations. */
+  resource: MetricResource;
+  /** Series holds per-operation aggregates, slowest p95 first. */
+  series: MetricSeries[];
+}
+
 /** BranchInfo describes a single branch with its origin and task-creation action. */
 export interface BranchInfo {
   name: string;

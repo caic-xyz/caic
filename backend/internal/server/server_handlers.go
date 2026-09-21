@@ -33,6 +33,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
@@ -48,6 +49,7 @@ type serverHandlers struct {
 	repoStatus         *ci.RepoStatusStore
 	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
+	metrics            *metrics.Store
 	harnessModels      *HarnessModels
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
@@ -431,6 +433,33 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 	return &v1.CacheSizesResp{WellKnown: h.cacheSizes.Snapshot()}, nil
 }
 
+func (h *serverHandlers) getMetrics(_ context.Context, _ *api.EmptyReq) (*v1.MetricsResp, error) {
+	series := h.metrics.Snapshot()
+	out := make([]v1.MetricSeries, 0, len(series))
+	for _, s := range series {
+		out = append(out, v1.MetricSeries{
+			Name:    s.Name,
+			Outcome: string(s.Outcome),
+			Attrs:   s.Attrs,
+			Calls:   s.Calls,
+			Samples: s.Samples,
+			MinMS:   float64(s.Min) / float64(time.Millisecond),
+			P50MS:   float64(s.P50) / float64(time.Millisecond),
+			P95MS:   float64(s.P95) / float64(time.Millisecond),
+			MaxMS:   float64(s.Max) / float64(time.Millisecond),
+		})
+	}
+	return &v1.MetricsResp{
+		Since: h.metrics.Since,
+		Resource: v1.MetricResource{
+			ServiceName:    h.metrics.Resource.ServiceName,
+			ServiceVersion: h.metrics.Resource.ServiceVersion,
+			Host:           h.metrics.Resource.Host,
+		},
+		Series: out,
+	}, nil
+}
+
 func (h *serverHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
 	return repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus), nil
 }
@@ -631,6 +660,7 @@ func (h *serverHandlers) routes() http.Handler {
 	m.HandleFunc("POST /server/harnesses/{harness}/refresh", handle(h.refreshHarness))
 	m.HandleFunc("GET /server/caches", handle(h.listCaches))
 	m.HandleFunc("GET /server/cache-sizes", handle(h.getCacheSizes))
+	m.HandleFunc("GET /server/metrics", handle(h.getMetrics))
 	m.HandleFunc("GET /server/repos", handle(h.listRepos))
 	m.HandleFunc("POST /server/repos", handle(h.cloneRepo))
 	m.HandleFunc("POST /server/update", handle(h.triggerUpdate))

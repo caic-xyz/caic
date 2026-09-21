@@ -11,6 +11,23 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"time"
+
+	"github.com/caic-xyz/caic/metrics"
+)
+
+// Operation names recorded for runtime router calls.
+const (
+	metricContainerLaunch  = "container.launch"
+	metricContainerConnect = "container.connect"
+	metricContainerStop    = "container.stop"
+	metricContainerPurge   = "container.purge"
+	metricContainerRevive  = "container.revive"
+	metricContainerFork    = "container.fork"
+	metricRepoDiff         = "repo.diff"
+	metricRepoFileDiff     = "repo.file_diff"
+	metricRepoCommitDiff   = "repo.commit_diff"
+	metricRepoFetch        = "repo.fetch"
 )
 
 // Router dispatches runtime operations to one of several runtime backends.
@@ -19,18 +36,24 @@ type Router struct {
 	ByName   map[Name]System
 
 	// Immutable.
-	log *slog.Logger
+	log     *slog.Logger
+	metrics metrics.Recorder
 }
 
-// NewRouter creates a runtime router.
-func NewRouter(log *slog.Logger, runtimes []System) (*Router, error) {
+// NewRouter creates a runtime router. A recorder is required; pass
+// metrics.Nop{} to discard observations.
+func NewRouter(log *slog.Logger, runtimes []System, rec metrics.Recorder) (*Router, error) {
 	if log == nil {
 		return nil, errors.New("logger is required")
+	}
+	if rec == nil {
+		return nil, errors.New("metrics recorder is required")
 	}
 	r := &Router{
 		Runtimes: slices.Clone(runtimes),
 		ByName:   make(map[Name]System, len(runtimes)),
 		log:      log.With("cmp", "runtime"),
+		metrics:  rec,
 	}
 	if len(r.Runtimes) == 0 {
 		return nil, errors.New("no runtimes configured")
@@ -52,14 +75,16 @@ func NewRouter(log *slog.Logger, runtimes []System) (*Router, error) {
 }
 
 // Launch starts a runtime instance on the selected backend.
-func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (ID, error) {
+func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (id ID, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerLaunch, start, err) }()
 	rt, err := r.runtimeForStart(opts)
 	if err != nil {
 		return "", err
 	}
 	delegateOpts := *opts
 	delegateOpts.RuntimeName = rt.Name()
-	id, err := rt.Launch(ctx, repos, &delegateOpts)
+	id, err = rt.Launch(ctx, repos, &delegateOpts)
 	if err != nil {
 		return "", err
 	}
@@ -70,7 +95,9 @@ func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (
 }
 
 // Connect waits for transport readiness on the selected backend.
-func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (ConnectionInfo, error) {
+func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (conn ConnectionInfo, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerConnect, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return ConnectionInfo{}, err
@@ -81,7 +108,9 @@ func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (Connec
 }
 
 // Diff returns a diff from the owning backend.
-func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error) {
+func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (out string, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoDiff, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -90,7 +119,9 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 }
 
 // CommitDiffStat returns the net committed diff stat between two repository tips.
-func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (string, error) {
+func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (out string, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoCommitDiff, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -99,7 +130,9 @@ func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, t
 }
 
 // FileDiff returns one committed or uncommitted file patch from the owning backend.
-func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error) {
+func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (out string, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoFileDiff, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -129,7 +162,9 @@ func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int
 
 // Fetch fetches task repository changes from the owning backend and returns
 // the exact branch tips observed.
-func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error) {
+func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []FetchedBranch, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoFetch, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
@@ -138,7 +173,9 @@ func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBra
 }
 
 // Stop gracefully stops a runtime instance on its owning backend.
-func (r *Router) Stop(ctx context.Context, id ID) error {
+func (r *Router) Stop(ctx context.Context, id ID) (err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerStop, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -147,7 +184,9 @@ func (r *Router) Stop(ctx context.Context, id ID) error {
 }
 
 // Purge removes a runtime instance from its owning backend.
-func (r *Router) Purge(ctx context.Context, id ID) error {
+func (r *Router) Purge(ctx context.Context, id ID) (err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerPurge, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -156,7 +195,9 @@ func (r *Router) Purge(ctx context.Context, id ID) error {
 }
 
 // Revive restarts a stopped runtime instance on its owning backend.
-func (r *Router) Revive(ctx context.Context, id ID) error {
+func (r *Router) Revive(ctx context.Context, id ID) (err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerRevive, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -165,7 +206,9 @@ func (r *Router) Revive(ctx context.Context, id ID) error {
 }
 
 // Fork snapshots an instance on its owning backend. Cross-runtime forks are rejected.
-func (r *Router) Fork(ctx context.Context, id ID, opts *ForkOptions) (ID, ConnectionInfo, error) {
+func (r *Router) Fork(ctx context.Context, id ID, opts *ForkOptions) (forkID ID, conn ConnectionInfo, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerFork, start, err) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", ConnectionInfo{}, err
@@ -175,7 +218,7 @@ func (r *Router) Fork(ctx context.Context, id ID, opts *ForkOptions) (ID, Connec
 	}
 	delegateOpts := *opts
 	delegateOpts.RuntimeName = rt.Name()
-	forkID, conn, err := rt.Fork(ctx, id, &delegateOpts)
+	forkID, conn, err = rt.Fork(ctx, id, &delegateOpts)
 	if err != nil {
 		return "", ConnectionInfo{}, err
 	}
@@ -391,6 +434,11 @@ func (r *Router) SudoPassword(ctx context.Context, id ID) (string, error) {
 		return "", err
 	}
 	return rt.SudoPassword(ctx, id)
+}
+
+// observe records the duration of one router operation.
+func (r *Router) observe(ctx context.Context, name string, start time.Time, err error) {
+	r.metrics.Record(ctx, name, metrics.OutcomeOf(err), time.Since(start))
 }
 
 func (r *Router) runtimeForStart(opts *StartOptions) (System, error) {

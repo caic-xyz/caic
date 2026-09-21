@@ -46,6 +46,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
+	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
 )
 
@@ -154,7 +155,7 @@ type testRuntimeBackend interface {
 // call buildHandler; buildHandler re-syncs hostState into the MCP concern, and
 // the authHandlers copies must be synced by the test if exercised.
 func newTestRuntime(t testing.TB, backend testRuntimeBackend) *runtime.Router {
-	router, err := runtime.NewRouter(testLogger(), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}})
+	router, err := runtime.NewRouter(testLogger(), []runtime.System{&testRuntimeSystem{testRuntimeBackend: backend}}, metrics.Nop{})
 	if err != nil {
 		t.Fatalf("runtime.NewRouter: %v", err)
 	}
@@ -207,6 +208,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 		ForgeMgr:     forgeManager,
 		Warnings:     NewWarningStore(taskMgr),
 		CacheSizes:   NewCacheSizeStore(testLogger()),
+		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -239,6 +241,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		ForgeMgr:                   forgeManager,
 		Warnings:                   NewWarningStore(taskMgr),
 		CacheSizes:                 NewCacheSizeStore(testLogger()),
+		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthIssuer:                "https://caic.example.com",
@@ -278,6 +281,7 @@ func TestNew(t *testing.T) {
 			ForgeMgr:    forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource()),
 			Warnings:    NewWarningStore(taskMgr),
 			CacheSizes:  NewCacheSizeStore(testLogger()),
+			Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 		}
 	}
 
@@ -568,6 +572,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 		ForgeMgr:     forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource()),
 		Warnings:     NewWarningStore(taskMgr),
 		CacheSizes:   NewCacheSizeStore(testLogger()),
+		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -33,6 +33,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/metrics"
 )
 
 type staticUsageFetcher struct {
@@ -1112,7 +1113,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 	t.Run("scope denial supplies an authentication challenge and code", func(t *testing.T) {
 		t.Parallel()
 
-		c := &mcpRegistry{}
+		c := &mcpRegistry{metrics: metrics.NewStore(metrics.Resource{ServiceName: "caic"})}
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true})
 		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
 		result, err := c.CallTool(ctx, "task_create", nil)
@@ -1318,7 +1319,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		})
 		t.Run("error_extra_task_properties", func(t *testing.T) {
 			t.Parallel()
-			registry := &mcpRegistry{}
+			registry := &mcpRegistry{metrics: metrics.NewStore(metrics.Resource{ServiceName: "caic"})}
 			scopedRegistry := registry.ForTask(ksid.NewID())
 			result, err := scopedRegistry.CallTool(t.Context(), "task_create", json.RawMessage(`{"prompt":"child","repos":["repo"]}`))
 			if err != nil {
