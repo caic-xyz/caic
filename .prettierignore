@@ -14,3 +14,6 @@ backend/internal/agent/*/testdata/*.md
 # AGENTS.md indexes are written by scripts/update_agents_file_index.py.
 AGENTS.md
 CLAUDE.md
+# Playwright and screenshot failure artifacts written by the e2e targets.
+test-results
+visual-screenshots-failures
