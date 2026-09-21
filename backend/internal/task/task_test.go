@@ -3576,7 +3576,7 @@ func TestState(t *testing.T) {
 // fakePricer prices a fixed set of models; unlisted models are unpriced.
 type fakePricer map[string]quotausage.ModelPrice
 
-func (p fakePricer) ModelPrice(modelID string, _ time.Time) (quotausage.ModelPrice, bool) {
+func (p fakePricer) ModelPrice(_ agent.QuotaProvider, modelID string, _ time.Time) (quotausage.ModelPrice, bool) {
 	price, ok := p[modelID]
 	return price, ok
 }
@@ -3638,6 +3638,26 @@ func TestPricedCost(t *testing.T) {
 		costUSD, _, _, _, _ := tk.LiveStats()
 		want := 0.15 + 0.50 + 2*0.15 + 0.03
 		if costUSD != want {
+			t.Errorf("costUSD = %v, want %v", costUSD, want)
+		}
+	})
+
+	t.Run("CodexResultPricedPerTurn", func(t *testing.T) {
+		t.Parallel()
+		// Codex reports no cost; its prefixless per-turn result usage is
+		// priced at the hinted provider's API-equivalent rates.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-5.6-terra", "")
+		codexPrices := fakePricer{"gpt-5.6-terra": {InputPerMTok: 2.0, CachedInputPerMTok: 0.20, OutputPerMTok: 12.0}}
+		tk.Pricer = codexPrices
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "gpt-5.6-terra"}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			Usage:       agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
+			NumTurns:    1,
+		}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		if want := 2.0 + 0.20; costUSD != want {
 			t.Errorf("costUSD = %v, want %v", costUSD, want)
 		}
 	})

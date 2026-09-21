@@ -953,7 +953,7 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 				if at.IsZero() {
 					at = time.Now()
 				}
-				t.addPricedUsageLocked(m.ReportedModel, m.Usage, at)
+				t.addPricedUsageLocked(m.ReportedModel, "", m.Usage, at)
 			}
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
@@ -1719,7 +1719,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.lastAPIUsage = u.Usage
 		if u.ReportedModel != "" {
 			t.reportedModel = u.ReportedModel
-			t.addPricedUsageLocked(u.ReportedModel, u.Usage, at)
+			t.addPricedUsageLocked(u.ReportedModel, "", u.Usage, at)
 		}
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {
@@ -2014,13 +2014,15 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 }
 
 // addPricedUsageLocked accumulates quota-provider priced cost for one usage
-// report (per API call for Pi, per turn for OpenCode). Returns true when the
-// model was priced. The caller holds t.mu.
-func (t *Task) addPricedUsageLocked(model string, u agent.Usage, at time.Time) bool {
+// report (per API call for Pi, per turn for OpenCode and Codex). provider
+// hints at the billing provider for unprefixed model IDs; "" derives it from
+// the model ID prefix. Returns true when the model was priced. The caller
+// holds t.mu.
+func (t *Task) addPricedUsageLocked(model string, provider agent.QuotaProvider, u agent.Usage, at time.Time) bool {
 	if model == "" || t.Pricer == nil {
 		return false
 	}
-	price, ok := t.Pricer.ModelPrice(model, at)
+	price, ok := t.Pricer.ModelPrice(provider, model, at)
 	if !ok {
 		return false
 	}
@@ -2035,9 +2037,23 @@ func (t *Task) applyResultCostLocked(rm *agent.ResultMessage, at time.Time) {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	// OpenCode reports no per-call usage, so price its per-turn result usage.
-	if t.Harness == harness.OpenCode && t.addPricedUsageLocked(t.activeModel(), rm.Usage, at) {
-		return
+	// OpenCode reports no per-call usage, and Codex reports no cost at all:
+	// price their per-turn result usage, Codex at OpenAI API-equivalent
+	// rates. Claude Code reports the API-equivalent total itself, so its
+	// harness never prices here.
+	switch t.Harness {
+	case harness.OpenCode:
+		if t.addPricedUsageLocked(t.activeModel(), "", rm.Usage, at) {
+			return
+		}
+	case harness.Codex:
+		if t.addPricedUsageLocked(t.activeModel(), agent.QuotaProviderCodex, rm.Usage, at) {
+			return
+		}
+	case harness.Claude:
+		// Claude Code reports the API-equivalent total itself.
+	case harness.Pi:
+		// Pi's per-call usage messages are priced as they arrive.
 	}
 	if t.sessionPricedCost > 0 {
 		// Per-call pricing already accumulated this session's cost. Pi reports

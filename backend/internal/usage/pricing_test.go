@@ -78,7 +78,7 @@ func TestPricerModelPrice(t *testing.T) {
 			{"zai/glm-4.7-flash", ModelPrice{}},
 		}
 		for _, tc := range tests {
-			got, ok := p.ModelPrice(tc.model, time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+			got, ok := p.ModelPrice("", tc.model, time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
 			if !ok {
 				t.Errorf("ModelPrice(%q) not priced", tc.model)
 				continue
@@ -130,7 +130,7 @@ func TestPricerModelPrice(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				got, ok := p.ModelPrice("deepseek/deepseek-flash", tc.at)
+				got, ok := p.ModelPrice("", "deepseek/deepseek-flash", tc.at)
 				if !ok {
 					t.Fatal("deepseek-flash not priced")
 				}
@@ -146,7 +146,7 @@ func TestPricerModelPrice(t *testing.T) {
 		// 2026-09-25 (Friday) is the Mid-Autumn holiday; the following Monday
 		// peaks normally.
 		holiday := time.Date(2026, 9, 25, 2, 0, 0, 0, time.UTC)
-		got, ok := p.ModelPrice("deepseek/deepseek-flash", holiday)
+		got, ok := p.ModelPrice("", "deepseek/deepseek-flash", holiday)
 		if !ok {
 			t.Fatal("deepseek-flash not priced")
 		}
@@ -154,7 +154,7 @@ func TestPricerModelPrice(t *testing.T) {
 			t.Errorf("holiday peak-hour price = %+v, want off-peak %+v", got, want)
 		}
 		after := time.Date(2026, 9, 28, 2, 0, 0, 0, time.UTC)
-		got, ok = p.ModelPrice("deepseek/deepseek-flash", after)
+		got, ok = p.ModelPrice("", "deepseek/deepseek-flash", after)
 		if !ok {
 			t.Fatal("deepseek-flash not priced")
 		}
@@ -166,15 +166,70 @@ func TestPricerModelPrice(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
 		for _, model := range []string{
-			"openai-codex/gpt-5.6-terra",
-			"claude-sonnet-4-5",
-			"codex/gpt-5.6-terra",
 			"unknown-provider/glm-5.3-flash",
 			"",
 		} {
-			if _, ok := p.ModelPrice(model, time.Now()); ok {
+			if _, ok := p.ModelPrice("", model, time.Now()); ok {
 				t.Errorf("ModelPrice(%q) priced, want unpriced", model)
 			}
+		}
+		// The claudecode provider never prices: Claude Code's own reported
+		// total stays authoritative.
+		if _, ok := p.ModelPrice(agent.QuotaProviderClaudeCode, "claude-sonnet-4-5", time.Now()); ok {
+			t.Error("claudecode provider priced, want unpriced")
+		}
+	})
+	t.Run("CodexOpenAIApiEquivalent", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		want := ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0}
+		for _, model := range []string{
+			"openai-codex/gpt-5.6-terra",
+			"codex/gpt-5.6-terra",
+			"openai/gpt-5.6-terra",
+		} {
+			got, ok := p.ModelPrice("", model, time.Now())
+			if !ok {
+				t.Errorf("ModelPrice(%q) not priced", model)
+				continue
+			}
+			if got != want {
+				t.Errorf("%s price = %+v, want %+v", model, got, want)
+			}
+		}
+		// The Codex harness reports prefixless model IDs; the task hints the
+		// provider.
+		got, ok := p.ModelPrice(agent.QuotaProviderCodex, "gpt-5.6-terra", time.Now())
+		if !ok || got != want {
+			t.Errorf("hinted price = %+v/%v, want %+v", got, ok, want)
+		}
+		// Daybreak aliases price at the model they currently point to.
+		got, ok = p.ModelPrice(agent.QuotaProviderCodex, "gpt-daybreak-blue-latest", time.Now())
+		if !ok {
+			t.Fatal("daybreak blue not priced")
+		}
+		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0}); got != want {
+			t.Errorf("daybreak blue price = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("AnthropicApiEquivalent", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		got, ok := p.ModelPrice("", "anthropic/claude-sonnet-4-5", time.Now())
+		if !ok {
+			t.Fatal("anthropic model not priced")
+		}
+		want := ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}
+		if got != want {
+			t.Errorf("price = %+v, want %+v", got, want)
+		}
+		// Dated model IDs share the family price.
+		got, ok = p.ModelPrice("", "anthropic/claude-opus-4-6-20260115", time.Now())
+		if !ok {
+			t.Fatal("dated anthropic model not priced")
+		}
+		if want := (ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}); got != want {
+			t.Errorf("price = %+v, want %+v", got, want)
 		}
 	})
 	t.Run("OpenRouterViaFetcher", func(t *testing.T) {
@@ -187,7 +242,7 @@ func TestPricerModelPrice(t *testing.T) {
 		t.Cleanup(server.Close)
 		p := NewPricer([]ProviderFetcher{stubOpenRouterFetcher(t, server)})
 
-		price, ok := p.ModelPrice("openrouter/z-ai/glm-5.3-flash", time.Now())
+		price, ok := p.ModelPrice("", "openrouter/z-ai/glm-5.3-flash", time.Now())
 		if !ok {
 			t.Fatal("openrouter model not priced via fetcher")
 		}
@@ -204,7 +259,7 @@ func TestPricerModelPrice(t *testing.T) {
 		// Without a registered OpenRouter fetcher, pricing falls back to the
 		// upstream provider's static published prices.
 		p := NewPricer(nil)
-		price, ok := p.ModelPrice("openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+		price, ok := p.ModelPrice("", "openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
 		if !ok {
 			t.Fatal("openrouter model not priced via upstream fallback")
 		}
@@ -222,7 +277,7 @@ func TestPricerModelPrice(t *testing.T) {
 		t.Cleanup(server.Close)
 		p := NewPricer([]ProviderFetcher{stubOpenRouterFetcher(t, server)})
 
-		price, ok := p.ModelPrice("openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
+		price, ok := p.ModelPrice("", "openrouter/z-ai/glm-5.3-flash", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC))
 		if !ok {
 			t.Fatal("openrouter model not priced via upstream fallback")
 		}

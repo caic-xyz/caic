@@ -112,6 +112,21 @@ export async function waitForTaskState(
 }
 
 // ---------------------------------------------------------------------------
+// Utility: poll until the fake CI finishes walking a task's checks. The fake
+// transitions one check per second after the task settles, so captures and
+// assertions that run during the walk are nondeterministic.
+// ---------------------------------------------------------------------------
+
+export async function waitForCISettle(api: APIClient, taskIds: string[], timeoutMs = 15_000): Promise<void> {
+  await expect(async () => {
+    const tasks = await Promise.all(taskIds.map((id) => api.getTask(id)));
+    for (const task of tasks) {
+      expect(task.ciStatus).toBe("success");
+    }
+  }).toPass({ timeout: timeoutMs, intervals: [500] });
+}
+
+// ---------------------------------------------------------------------------
 // Utility: convert all PNGs in a directory to lossless WebP, removing originals.
 // ---------------------------------------------------------------------------
 

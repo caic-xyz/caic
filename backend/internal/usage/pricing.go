@@ -218,22 +218,24 @@ func (m ModelPricing) Price(at time.Time) (ModelPrice, bool) {
 // strings such as "zai/glm-5.3-flash" or "openrouter/z-ai/glm-5.3-flash".
 type ModelPricer interface {
 	// ModelPrice returns the per-million-token USD price for modelID that is
-	// in effect at at, and whether the model is priced at all. Subscription
-	// providers (Claude Code, Codex) are not priced per token.
-	ModelPrice(modelID string, at time.Time) (ModelPrice, bool)
+	// in effect at at, and whether the model is priced at all. provider hints
+	// at the billing provider for harnesses that report unprefixed model IDs;
+	// "" derives it from the model ID prefix. Subscription-backed providers
+	// price at their API-equivalent rates.
+	ModelPrice(provider agent.QuotaProvider, modelID string, at time.Time) (ModelPrice, bool)
 }
 
 // Pricer resolves per-model token pricing from the quota providers:
-// fetcher-supplied live pricing (OpenRouter) and static published schedules
-// (Z.ai, DeepSeek).
+// fetcher-supplied live pricing (OpenRouter), static published schedules
+// (Z.ai, DeepSeek), and API-equivalent schedules for subscription-backed
+// providers (Anthropic, OpenAI via Claude Code and Codex).
 type Pricer struct {
 	fetchers map[agent.QuotaProvider]ModelPricer
 }
 
 // NewPricer creates a quota-provider model pricer from the registered
 // provider fetchers. Fetchers may implement ModelPricer to supply live
-// per-model pricing; the rest of the resolution uses static published
-// schedules.
+// per-model pricing; the rest of the resolution uses static schedules.
 func NewPricer(fetchers []ProviderFetcher) *Pricer {
 	p := &Pricer{fetchers: make(map[agent.QuotaProvider]ModelPricer, len(fetchers))}
 	for _, f := range fetchers {
@@ -245,40 +247,56 @@ func NewPricer(fetchers []ProviderFetcher) *Pricer {
 }
 
 // ModelPrice implements ModelPricer.
-func (p *Pricer) ModelPrice(modelID string, at time.Time) (ModelPrice, bool) {
-	_, rest, ok := strings.Cut(strings.ToLower(modelID), "/")
-	if !ok {
-		return ModelPrice{}, false
+func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at time.Time) (ModelPrice, bool) {
+	lower := strings.ToLower(modelID)
+	prefix, rest, hasPrefix := strings.Cut(lower, "/")
+	if provider == "" {
+		provider = agent.QuotaProviderForModel(modelID)
 	}
-	provider := agent.QuotaProviderForModel(modelID)
+	model := lower
+	if hasPrefix {
+		model = rest
+	}
 	// Fetcher-supplied pricing wins: it reflects what the provider actually
 	// bills. The model ID is trimmed to the provider-native form first.
-	if f, ok := p.fetchers[provider]; ok {
-		if price, ok := f.ModelPrice(rest, at); ok {
+	if f, ok := p.fetchers[provider]; ok && hasPrefix {
+		if price, ok := f.ModelPrice(provider, rest, at); ok {
 			return price, true
 		}
 	}
 	switch provider {
 	case agent.QuotaProviderZai:
-		return lookupModelPricing(zaiModelPricing, rest, at)
+		return lookupModelPricing(zaiModelPricing, model, at)
 	case agent.QuotaProviderDeepSeek:
-		return lookupModelPricing(deepSeekModelPricing, rest, at)
+		return lookupModelPricing(deepSeekModelPricing, model, at)
 	case agent.QuotaProviderOpenRouter:
 		// Live OpenRouter pricing is unavailable (no fetcher configured, or
 		// the fetch failed): fall back to the upstream provider's published
 		// prices, which approximate what OpenRouter passes through.
+		if !hasPrefix {
+			return ModelPrice{}, false
+		}
 		upstream, model, ok := strings.Cut(rest, "/")
 		if !ok {
 			return ModelPrice{}, false
 		}
 		return staticModelPrice(upstream, model, at)
+	case agent.QuotaProviderAnthropic:
+		return lookupModelPricing(anthropicModelPricing, model, at)
+	case agent.QuotaProviderCodex:
+		return lookupModelPricing(openAIModelPricing, model, at)
 	default:
+		// Direct OpenAI API models ("openai/...") are not a quota provider
+		// but bill at OpenAI's published rates.
+		if provider == "" && prefix == "openai" {
+			return lookupModelPricing(openAIModelPricing, model, at)
+		}
 		return ModelPrice{}, false
 	}
 }
 
 // zaiModelPricing holds Z.ai's published per-million-token USD prices
-// (https://docs.z.ai/guides/overview/pricing, retrieved 2026-07). Z.ai bills
+// (https://docs.z.ai/guides/overview/pricing, retrieved 2026-09). Z.ai bills
 // cache creation at the input price and cache reads at the cached-input
 // price; its "cached input storage" fee is currently free.
 var zaiModelPricing = map[string]ModelPricing{
@@ -340,22 +358,71 @@ var workdays = []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Th
 
 // deepSeekModelPricing holds DeepSeek's published per-million-token USD
 // prices (https://api-docs.deepseek.com/quick_start/pricing, retrieved
-// 2026-07). DeepSeek bills cache reads at the cache-hit price and uncached
+// 2026-09). DeepSeek bills cache reads at the cache-hit price and uncached
 // input (including cache writes) at the cache-miss price.
 var deepSeekModelPricing = map[string]ModelPricing{
-	"deepseek-flash": {
-		{PeakWindows: deepSeekPeakWindows, Price: ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}},
-		{Price: ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.003, OutputPerMTok: 0.60}},
-	},
+	// deepSeekFlashTiers prices the DeepSeek-V4.1-Flash model and the retired
+	// legacy names that DeepSeek still serves and bills at the same price.
+	"deepseek-flash":               deepSeekFlashTiers,
+	"deepseek-v4-flash":            deepSeekFlashTiers,
+	"deepseek-v4-flash-vision-exp": deepSeekFlashTiers,
 	"deepseek-v4-pro": {
 		{PeakWindows: deepSeekPeakWindows, Price: ModelPrice{InputPerMTok: 1.32, CachedInputPerMTok: 0.044, OutputPerMTok: 3.96}},
 		{Price: ModelPrice{InputPerMTok: 0.66, CachedInputPerMTok: 0.022, OutputPerMTok: 1.98}},
 	},
 }
 
-// Legacy names for retired models that DeepSeek still serves and bills at the
-// DeepSeek-V4.1-Flash price.
-func init() {
-	deepSeekModelPricing["deepseek-v4-flash"] = deepSeekModelPricing["deepseek-flash"]
-	deepSeekModelPricing["deepseek-v4-flash-vision-exp"] = deepSeekModelPricing["deepseek-flash"]
+// deepSeekFlashTiers holds the peak and off-peak tiers shared by the
+// DeepSeek-V4.1-Flash model and its legacy names.
+var deepSeekFlashTiers = ModelPricing{
+	{PeakWindows: deepSeekPeakWindows, Price: ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}},
+	{Price: ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.003, OutputPerMTok: 0.60}},
+}
+
+// openAIModelPricing holds OpenAI's published per-million-token USD prices
+// (https://developers.openai.com/api/docs/pricing, retrieved 2026-09) for
+// models Codex can run, priced at API-equivalent rates: Codex subscriptions
+// are not billed per token. OpenAI bills cached input at a discount and cache
+// writes at the input price. Long-context pricing (2x for the GPT-5.6 family
+// beyond its threshold) is not encoded; short-context prices are used.
+var openAIModelPricing = map[string]ModelPricing{
+	"gpt-5.3-codex": {{Price: ModelPrice{InputPerMTok: 1.75, CachedInputPerMTok: 0.175, OutputPerMTok: 14.0}}},
+	"gpt-5.6-cyber": openAICyberTiers,
+	"gpt-5.6-luna":  {{Price: ModelPrice{InputPerMTok: 0.20, CachedInputPerMTok: 0.02, CacheWritePerMTok: 0.25, OutputPerMTok: 1.20}}},
+	"gpt-5.6-sol":   openAISolTiers,
+	"gpt-5.6-terra": {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0}}},
+	// OpenAI re-points its Daybreak aliases at the latest flagship models as
+	// the program rotates; when it does, update the referenced entry.
+	"gpt-daybreak-blue-latest": openAISolTiers,
+	"gpt-daybreak-red-latest":  openAICyberTiers,
+}
+
+// openAISolTiers and openAICyberTiers hold the prices shared by the GPT-5.6
+// flagships and the Daybreak aliases that point at them.
+var (
+	openAISolTiers   = ModelPricing{{Price: ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0}}}
+	openAICyberTiers = ModelPricing{{Price: ModelPrice{InputPerMTok: 12.50, CachedInputPerMTok: 1.25, CacheWritePerMTok: 15.625, OutputPerMTok: 75.0}}}
+)
+
+// anthropicModelPricing holds Anthropic's published per-million-token USD
+// prices (https://platform.claude.com/docs/en/about-claude/pricing,
+// retrieved 2026-09) for models Pi can run through the anthropic provider,
+// priced at API-equivalent rates: Claude Code subscriptions are not billed
+// per token, and Claude Code's own reported total stays authoritative for
+// the claudecode provider. Cache writes bill at 1.25x input (5m) and cache
+// reads at 0.1x input; the 1h cache write variant is not encoded.
+var anthropicModelPricing = map[string]ModelPricing{
+	"claude-fable-5":    {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
+	"claude-fable-5-1":  {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 0.25, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
+	"claude-haiku-4-5":  {{Price: ModelPrice{InputPerMTok: 1.0, CachedInputPerMTok: 0.10, CacheWritePerMTok: 1.25, OutputPerMTok: 5.0}}},
+	"claude-mythos-5":   {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
+	"claude-mythos-5-1": {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 0.25, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
+	"claude-opus-4-5":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
+	"claude-opus-4-6":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
+	"claude-opus-4-7":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
+	"claude-opus-4-8":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
+	"claude-opus-5":     {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
+	"claude-sonnet-4-5": {{Price: ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}}},
+	"claude-sonnet-4-6": {{Price: ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}}},
+	"claude-sonnet-5":   {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 10.0}}},
 }

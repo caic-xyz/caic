@@ -119,6 +119,14 @@ export default function TaskCard(props: TaskCardProps) {
       ? `Prompt cache likely expired (${formatElapsed(props.cacheTTLSeconds * 1000)} TTL) — continuing may use more tokens`
       : "Prompt cache likely expired — continuing may use more tokens";
   const [titleTruncated, setTitleTruncated] = createSignal(false);
+  // subscriptionLabel names the subscription for harnesses whose cost is
+  // API-equivalent pricing rather than actual spend; "" otherwise.
+  const subscriptionLabel = (): string => {
+    const h = props.harness;
+    if (h === "claude") return "Claude Code subscription";
+    if (h === "codex") return "Codex subscription";
+    return "";
+  };
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ x: number; y: number } | undefined>();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
@@ -523,7 +531,16 @@ export default function TaskCard(props: TaskCardProps) {
                 </Tooltip>
               </Show>
               <Show when={props.costUSD > 0}>
-                {" · "}${props.costUSD.toFixed(2)}
+                {/* The separator stays a sibling of the price: Tooltip's
+                    inline-flex wrapper blockifies its child, and CSS strips
+                    a leading space at the start of a line box. */}
+                {" · "}
+                <Show when={subscriptionLabel()}>
+                  <Tooltip text={`API-equivalent cost — ${subscriptionLabel()}`}>
+                    <span>${props.costUSD.toFixed(2)}</span>
+                  </Tooltip>
+                </Show>
+                <Show when={!subscriptionLabel()}>${props.costUSD.toFixed(2)}</Show>
               </Show>
             </span>
           </div>

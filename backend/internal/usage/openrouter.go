@@ -82,9 +82,10 @@ func (f *OpenRouterFetcher) Get(ctx context.Context) *ProviderQuota {
 
 // ModelPrice implements ModelPricer with OpenRouter's live per-model pricing,
 // refreshed at openRouterPricingTTL. modelID is an OpenRouter model ID such
-// as "z-ai/glm-5.3-flash"; a ":variant" suffix is ignored. The prices are
-// current, so at is unused.
-func (f *OpenRouterFetcher) ModelPrice(modelID string, _ time.Time) (ModelPrice, bool) {
+// as "z-ai/glm-5.3-flash"; a ":variant" suffix is ignored. The pricer only
+// consults it for openrouter models, so provider is unused, and the prices
+// are current, so at is unused.
+func (f *OpenRouterFetcher) ModelPrice(_ agent.QuotaProvider, modelID string, _ time.Time) (ModelPrice, bool) {
 	if i := strings.IndexByte(modelID, ':'); i >= 0 {
 		modelID = modelID[:i]
 	}

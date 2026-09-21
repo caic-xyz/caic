@@ -60,7 +60,7 @@ func TestOpenRouterFetcherModelPrice(t *testing.T) {
 		t.Cleanup(server.Close)
 		f := stubOpenRouterFetcher(t, server)
 
-		price, ok := f.ModelPrice("z-ai/glm-5.3-flash", time.Now())
+		price, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now())
 		if !ok {
 			t.Fatal("priced model not found")
 		}
@@ -70,7 +70,7 @@ func TestOpenRouterFetcherModelPrice(t *testing.T) {
 		}
 
 		// Variant suffixes resolve to the base model; lookups stay cached.
-		if _, ok := f.ModelPrice("z-ai/glm-5.3-flash:free", time.Now()); !ok {
+		if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash:free", time.Now()); !ok {
 			t.Error("variant-suffixed model not priced")
 		}
 		if hits != 1 {
@@ -87,10 +87,10 @@ func TestOpenRouterFetcherModelPrice(t *testing.T) {
 		t.Cleanup(server.Close)
 		f := stubOpenRouterFetcher(t, server)
 
-		if _, ok := f.ModelPrice("z-ai/glm-5.3-flash", time.Now()); ok {
+		if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now()); ok {
 			t.Error("priced a model despite fetch failure")
 		}
-		if _, ok := f.ModelPrice("z-ai/glm-5.3-flash", time.Now()); ok {
+		if _, ok := f.ModelPrice(agent.QuotaProviderOpenRouter, "z-ai/glm-5.3-flash", time.Now()); ok {
 			t.Error("priced a model on retry within backoff window")
 		}
 		if hits != 1 {

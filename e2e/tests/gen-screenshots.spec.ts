@@ -2,7 +2,7 @@
 //
 // Run with: make screenshots-check (or make screenshots-update to accept changes)
 // Output: e2e/screenshots/frontend/{desktop,mobile}/
-import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot } from "../visual";
 import type { Locator } from "@playwright/test";
 import path from "path";
@@ -114,6 +114,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Task 4: widget — "FAKE_WIDGET" triggers widget mode.
   const id4 = await createTaskAPI(api, "FAKE_WIDGET Explain light refraction in water");
   await waitForTaskState(api, id4, "waiting", 30_000);
+  await waitForCISettle(api, [id1, id2, id3, id4]);
 
   // Reload to get fresh state.
   await page.goto("/");
@@ -313,6 +314,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     display: true,
   });
   await waitForTaskState(api, vncResp.id, "waiting", 30_000);
+  await waitForCISettle(api, [vncResp.id]);
 
   // Reload to get fresh state.
   await page.goto("/");
@@ -400,6 +402,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     scrollTaskIds.push(id);
   }
   await Promise.all(scrollTaskIds.map((id) => waitForTaskState(api, id, "waiting", 30_000)));
+  await waitForCISettle(api, scrollTaskIds);
 
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
@@ -444,6 +447,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // parent narration that preceded each run settling.
   const nativeId = await createTaskAPI(api, "Delegate the auth review to three parallel subagents");
   await waitForTaskState(api, nativeId, "waiting", 30_000);
+  await waitForCISettle(api, [nativeId]);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();

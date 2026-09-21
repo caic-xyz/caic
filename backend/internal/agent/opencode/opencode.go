@@ -278,9 +278,13 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			if err := json.Unmarshal(sup.Update, &uprobe); err == nil && uprobe.SessionUpdate == opencode.UpdateUsageUpdate {
 				var u opencode.UsageUpdateUpdate
 				if err := json.Unmarshal(sup.Update, &u); err == nil {
-					// usage_update provides context window size and cost but not
-					// per-step token breakdown. We emit a UsageMessage with the
-					// context window; token details come from the prompt result.
+					// usage_update carries the context window fill and the cost,
+					// but no per-step token breakdown: token details come from
+					// the prompt result, which is priced per turn instead. The
+					// cost is not consumed because opencode reports it as a
+					// cumulative total over its whole ACP session, which spans
+					// caic's context_cleared boundaries and would double-count
+					// pre-boundary turns.
 					return []agent.Message{&agent.UsageMessage{
 						ContextWindow: u.Size,
 					}}, nil
