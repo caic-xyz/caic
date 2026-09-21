@@ -117,6 +117,16 @@ func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (Repo
 	return rt.RepositoryStatus(ctx, id, repoIdx)
 }
 
+// CompactRepositoryStatus returns the log-free repository status from the
+// owning backend.
+func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error) {
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return RepositoryStatus{}, err
+	}
+	return rt.CompactRepositoryStatus(ctx, id, repoIdx)
+}
+
 // Fetch fetches task repository changes from the owning backend and returns
 // the exact branch tips observed.
 func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error) {

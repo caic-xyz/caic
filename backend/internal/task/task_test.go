@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -3322,6 +3323,52 @@ func TestTask(t *testing.T) {
 			}
 			if lastAgentMessage(entries) != nil {
 				t.Error("lastAgentMessage should be nil when last semantic is not result")
+			}
+		})
+	})
+	t.Run("DiffStatMessageRepoStates", func(t *testing.T) {
+		t.Parallel()
+		probe := []agent.RepoState{{RepoIndex: 0, Branch: "caic-1", Ahead: 2, ChangedFiles: 3, LinesAdded: 10, LinesDeleted: 4, UncommittedFiles: 1}}
+		watcherDiff := agent.DiffStat{{Path: "relay.go", LinesAdded: 1}}
+		t.Run("LiveUpdateNotifies", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetState(taskslog.StateRunning)
+			stateChanged, _ := tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{
+				MessageType: "caic_diff_stat",
+				DiffStat:    agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 4}},
+				Repos:       probe,
+			}}, false)
+			if !stateChanged {
+				t.Fatal("diff data update must notify the task-list stream even without a state change")
+			}
+			if got := tk.Snapshot().RepoStates; !reflect.DeepEqual(got, probe) {
+				t.Fatalf("RepoStates = %+v, want %+v", got, probe)
+			}
+		})
+		t.Run("WatcherOnlyMessageKeepsStates", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SetState(taskslog.StateRunning)
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe}}, false)
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: watcherDiff}}, false)
+			if got := tk.Snapshot().RepoStates; !reflect.DeepEqual(got, probe) {
+				t.Fatalf("RepoStates = %+v, want the probe state %+v", got, probe)
+			}
+		})
+		t.Run("SeedTimelineRestoresLatestProbe", func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.SeedTimeline([]agent.Message{
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe},
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: watcherDiff},
+			})
+			snap := tk.Snapshot()
+			if !reflect.DeepEqual(snap.RepoStates, probe) {
+				t.Fatalf("RepoStates = %+v, want the latest probe %+v", snap.RepoStates, probe)
+			}
+			if !reflect.DeepEqual(snap.DiffStat, watcherDiff) {
+				t.Fatalf("DiffStat = %+v, want the latest watcher stat %+v", snap.DiffStat, watcherDiff)
 			}
 		})
 	})

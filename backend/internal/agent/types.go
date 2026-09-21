@@ -823,15 +823,34 @@ type StrippedEnvMessage struct {
 func (m *StrippedEnvMessage) Type() string { return messageTypeStrippedEnv }
 
 // DiffStatMessage is emitted periodically by the relay's diff watcher thread
-// with the current in-container git diff stats.
+// and by the backend after mutating tool calls, with the current in-container
+// git diff stats.
 type DiffStatMessage struct {
 	MessageType string   `json:"type"`
 	DiffStat    DiffStat `json:"diff_stat"`
-	Ts          float64  `json:"ts,omitempty"` // Unix epoch seconds (ms precision) when the relay emitted this record.
+	// Repos carries one compact git state per task repository, filled by the
+	// backend's post-tool probe. The relay watcher omits it.
+	Repos []RepoState `json:"repos,omitempty"`
+	Ts    float64     `json:"ts,omitempty"` // Unix epoch seconds (ms precision) when the relay emitted this record.
 }
 
 // Type implements Message.
 func (m *DiffStatMessage) Type() string { return messageTypeDiffStat }
+
+// RepoState is the compact git state of one task repository: exactly what the
+// task card and detail header render, without per-file details or history.
+type RepoState struct {
+	RepoIndex        int    `json:"repo_index"`
+	Branch           string `json:"branch"`
+	Operation        string `json:"operation,omitempty"` // runtime.RepositoryOperation while a merge/rebase is in progress.
+	Ahead            int    `json:"ahead"`
+	Behind           int    `json:"behind"`
+	ChangedFiles     int    `json:"changed_files"`
+	LinesAdded       int    `json:"added"`
+	LinesDeleted     int    `json:"deleted"`
+	UncommittedFiles int    `json:"uncommitted"`
+	Conflicts        int    `json:"conflicts"`
+}
 
 // ExitMessage is written by the relay to output.jsonl when the agent
 // subprocess exits, regardless of shutdown reason (crash, sentinel, EOF).

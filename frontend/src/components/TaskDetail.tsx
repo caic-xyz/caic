@@ -130,6 +130,7 @@ interface Props {
   cumulativeCacheReadInputTokens?: number;
   stoppedDiskUsedBytes: number;
   diffStat?: DiffFileStat[];
+  repoStates?: GitRepositoryState[];
   vncPort?: number;
   sudoPassword?: string;
   supportsImages?: boolean;
@@ -216,7 +217,8 @@ export default function TaskDetail(props: Props) {
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
-  const [repoStates, setRepoStates] = createSignal<GitRepositoryState[]>([]);
+  // Compact Git state is pushed with the task over the task-list stream.
+  const repoStates = () => props.repoStates ?? [];
   const [elideHeaderGitStats, setElideHeaderGitStats] = createSignal(false);
   let headerRef: HTMLDivElement | undefined;
   let headerMetaRef: HTMLSpanElement | undefined;
@@ -268,37 +270,6 @@ export default function TaskDetail(props: Props) {
       return;
     }
     scheduleHeaderGitStatsElision();
-  });
-
-  createEffect(() => {
-    const taskID = props.taskId;
-    const hasRuntime = ![
-      "pending",
-      "branching",
-      "provisioning",
-      "starting",
-      "stopped",
-      "purging",
-      "crashed",
-      "failed",
-      "purged",
-    ].includes(props.taskState);
-    if (!hasRuntime) {
-      setRepoStates([]);
-      return;
-    }
-    let current = true;
-    api
-      .getTaskRepoStatus(taskID)
-      .then((response) => {
-        if (current) setRepoStates(response.repositories);
-      })
-      .catch(() => {
-        if (current) setRepoStates([]);
-      });
-    onCleanup(() => {
-      current = false;
-    });
   });
 
   // The prompt may appear after the task fetch; focus it whenever its ref attaches.

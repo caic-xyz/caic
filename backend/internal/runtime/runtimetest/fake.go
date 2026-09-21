@@ -141,6 +141,11 @@ func (f *FakeBackend) RepositoryStatus(context.Context, runtime.ID, int) (runtim
 	return f.RepositoryStatusValue, nil
 }
 
+// CompactRepositoryStatus implements runtime.Repository.
+func (f *FakeBackend) CompactRepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
+	return f.RepositoryStatus(ctx, id, repoIdx)
+}
+
 // Fetch implements runtime.Repository.
 func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	f.mu.Lock()

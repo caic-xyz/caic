@@ -181,16 +181,18 @@ type Task struct {
 	lastAPIUsage   agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
 	cacheExpiresAt time.Time      // When the prompt cache from the last API call expires.
 	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
-	diffCreated    bool           // True after any non-empty diff was reported for the task.
-	lastExitError  string         // Most recent non-zero relay exit diagnostic.
-	forgeOwner     string
-	forgeRepo      string
-	forgePR        int
-	forgePRState   forge.PRState // "open", "closed", "merged"; empty when no PR.
-	ciStatus       forge.CIStatus
-	ciChecks       []forge.Check
-	rateLimit      RateLimit                    // Active task quota block resolved across provider windows.
-	rateLimits     map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
+	liveRepoStates []agent.RepoState
+	// Compact per-repo git state, updated by the backend's post-tool probe.
+	diffCreated   bool   // True after any non-empty diff was reported for the task.
+	lastExitError string // Most recent non-zero relay exit diagnostic.
+	forgeOwner    string
+	forgeRepo     string
+	forgePR       int
+	forgePRState  forge.PRState // "open", "closed", "merged"; empty when no PR.
+	ciStatus      forge.CIStatus
+	ciChecks      []forge.Check
+	rateLimit     RateLimit                    // Active task quota block resolved across provider windows.
+	rateLimits    map[quotaWindowKey]RateLimit // Latest quota status for each provider window.
 }
 
 // NewTask creates a task with a valid ID, a pending state, and prompt.
@@ -704,6 +706,7 @@ type Snapshot struct {
 	LastAPIUsage       agent.Usage
 	CacheExpiresAt     time.Time
 	DiffStat           agent.DiffStat
+	RepoStates         []agent.RepoState // Compact per-repo git state from the latest diff probe.
 	DiskUsed           int64
 	DiskKnown          bool
 	ForgeOwner         string
@@ -966,6 +969,8 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
 	// host-side diff stat but a DiffStatMessage from the relay may follow it.
+	// Repo states restore separately: only the backend's post-tool probe fills
+	// them, and a newer watcher-only DiffStatMessage must not hide it.
 	for _, entry := range slices.Backward(entries) {
 		if ds, ok := entry.Message.(*agent.DiffStatMessage); ok {
 			t.liveDiffStat = ds.DiffStat
@@ -974,6 +979,14 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 		if rm, ok := entry.Message.(*agent.ResultMessage); ok && len(rm.DiffStat) > 0 {
 			t.liveDiffStat = rm.DiffStat
 			break
+		}
+	}
+	for _, entry := range slices.Backward(entries) {
+		if ds, ok := entry.Message.(*agent.DiffStatMessage); ok {
+			if len(ds.Repos) > 0 {
+				t.liveRepoStates = ds.Repos
+				break
+			}
 		}
 	}
 	// Infer state: if the last agent-emitted message is a ResultMessage, the
@@ -1506,6 +1519,7 @@ func (t *Task) snapshotLocked() Snapshot {
 		LastAPIUsage:       t.lastAPIUsage,
 		CacheExpiresAt:     t.cacheExpiresAt,
 		DiffStat:           t.liveDiffStat,
+		RepoStates:         t.liveRepoStates,
 		DiskUsed:           t.diskUsed,
 		DiskKnown:          t.diskKnown,
 		ForgeOwner:         t.forgeOwner,
@@ -1545,6 +1559,16 @@ func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 	if len(ds) > 0 {
 		t.diffCreated = true
 	}
+}
+
+// setLiveRepoStatesLocked overwrites the compact per-repo git state. An empty
+// update keeps the previous state: the relay watcher emits DiffStatMessages
+// without per-repo sections.
+func (t *Task) setLiveRepoStatesLocked(states []agent.RepoState) {
+	if len(states) == 0 {
+		return
+	}
+	t.liveRepoStates = states
 }
 
 // setState updates the state and records the transition time. The caller must
@@ -1723,6 +1747,10 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
 		t.setLiveDiffStatLocked(ds.DiffStat)
+		t.setLiveRepoStatesLocked(ds.Repos)
+		// Diff data refreshes without a state change, but the task-list stream
+		// must still push the new card summary.
+		summaryChanged = true
 	}
 	if exit, ok := m.(*agent.ExitMessage); ok {
 		if rm := lastAgentMessage(t.timeline); exit.ExitCode != 0 && (rm == nil || rm.IsError) {

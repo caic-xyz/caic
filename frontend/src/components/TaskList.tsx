@@ -300,6 +300,7 @@ export default function TaskList(props: TaskListProps) {
         cacheExpiresAt={t().cacheExpiresAt}
         turnStartedAt={t().turnStartedAt}
         diffStat={t().diffStat}
+        repoStates={t().repoStates}
         error={t().error}
         inPlanMode={t().inPlanMode}
         runtime={t().runtime}

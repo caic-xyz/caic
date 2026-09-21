@@ -906,6 +906,20 @@ public struct DiffFileStat: Codable {
     public let diff: String?
 }
 
+/// GitRepositoryState summarizes the compact Git state of one task repository.
+public struct GitRepositoryState: Codable {
+    public let name: String
+    public let branch: String
+    public let ahead: Int
+    public let behind: Int
+    public let changedFiles: Int
+    public let linesAdded: Int
+    public let linesDeleted: Int
+    public let uncommittedFiles: Int
+    public let conflicts: Int
+    public let operation: GitOperation?
+}
+
 /// RuntimeInstance holds per-task runtime metadata.
 public struct RuntimeInstance: Codable {
     /// Runtime instance ID.
@@ -940,6 +954,8 @@ public struct Task: Codable {
     /// When the task state last changed.
     public let stateUpdatedAt: ISOTimestamp
     public let diffStat: DiffStat?
+    /// Pushed compact per-repo Git state from the latest diff probe.
+    public let repoStates: [GitRepositoryState]?
     public let costUSD: Double
     /// Seconds.
     public let duration: Double
@@ -1629,20 +1645,6 @@ public struct TaskDiffIndexResp: Codable {
 /// FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file.
 public struct FileDiffResp: Codable {
     public let diff: String
-}
-
-/// GitRepositoryState summarizes the compact Git state of one task repository.
-public struct GitRepositoryState: Codable {
-    public let name: String
-    public let branch: String
-    public let ahead: Int
-    public let behind: Int
-    public let changedFiles: Int
-    public let linesAdded: Int
-    public let linesDeleted: Int
-    public let uncommittedFiles: Int
-    public let conflicts: Int
-    public let operation: GitOperation?
 }
 
 /// TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status.

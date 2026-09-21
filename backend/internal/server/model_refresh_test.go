@@ -298,6 +298,10 @@ func (*modelRefreshRuntime) RepositoryStatus(_ context.Context, _ runtime.ID, _ 
 	return runtime.RepositoryStatus{}, nil
 }
 
+func (*modelRefreshRuntime) CompactRepositoryStatus(_ context.Context, _ runtime.ID, _ int) (runtime.RepositoryStatus, error) {
+	return runtime.RepositoryStatus{}, nil
+}
+
 func (*modelRefreshRuntime) Fetch(_ context.Context, _ runtime.ID, _ runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	return nil, nil
 }

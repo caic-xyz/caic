@@ -1069,6 +1069,20 @@ export interface DiffFileStat {
   diff?: string;
 }
 
+/** GitRepositoryState summarizes the compact Git state of one task repository. */
+export interface GitRepositoryState {
+  name: string;
+  branch: string;
+  ahead: number /* int */;
+  behind: number /* int */;
+  changedFiles: number /* int */;
+  linesAdded: number /* int */;
+  linesDeleted: number /* int */;
+  uncommittedFiles: number /* int */;
+  conflicts: number /* int */;
+  operation?: GitOperation;
+}
+
 /** RuntimeInstance holds per-task runtime metadata. */
 export interface RuntimeInstance {
   /** Runtime instance ID. */
@@ -1103,6 +1117,8 @@ export interface Task {
   /** When the task state last changed. */
   stateUpdatedAt: ISOTimestamp;
   diffStat?: DiffStat;
+  /** Pushed compact per-repo Git state from the latest diff probe. */
+  repoStates?: GitRepositoryState[];
   costUSD: number /* float64 */;
   /** Seconds. */
   duration: number /* float64 */;
@@ -1466,20 +1482,6 @@ export interface TaskDiffIndexResp {
 /** FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file. */
 export interface FileDiffResp {
   diff: string;
-}
-
-/** GitRepositoryState summarizes the compact Git state of one task repository. */
-export interface GitRepositoryState {
-  name: string;
-  branch: string;
-  ahead: number /* int */;
-  behind: number /* int */;
-  changedFiles: number /* int */;
-  linesAdded: number /* int */;
-  linesDeleted: number /* int */;
-  uncommittedFiles: number /* int */;
-  conflicts: number /* int */;
-  operation?: GitOperation;
 }
 
 /** TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status. */

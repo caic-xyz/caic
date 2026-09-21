@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -498,6 +498,22 @@ export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
   };
 }
 
+export function validateGitRepositoryState(raw: ValidatorInput): GitRepositoryState {
+  const obj = asObject(raw, "GitRepositoryState");
+  return {
+    name: asString(obj["name"], "GitRepositoryState.name"),
+    branch: asString(obj["branch"], "GitRepositoryState.branch"),
+    ahead: asNumber(obj["ahead"], "GitRepositoryState.ahead"),
+    behind: asNumber(obj["behind"], "GitRepositoryState.behind"),
+    changedFiles: asNumber(obj["changedFiles"], "GitRepositoryState.changedFiles"),
+    linesAdded: asNumber(obj["linesAdded"], "GitRepositoryState.linesAdded"),
+    linesDeleted: asNumber(obj["linesDeleted"], "GitRepositoryState.linesDeleted"),
+    uncommittedFiles: asNumber(obj["uncommittedFiles"], "GitRepositoryState.uncommittedFiles"),
+    conflicts: asNumber(obj["conflicts"], "GitRepositoryState.conflicts"),
+    operation: (obj["operation"] === undefined || obj["operation"] === null ? undefined : (asString(obj["operation"], "GitRepositoryState.operation") as GitOperation)),
+  };
+}
+
 export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
   const obj = asObject(raw, "ForgeCheck");
   return {
@@ -548,6 +564,7 @@ export function validateTask(raw: ValidatorInput): Task {
     state: (asString(obj["state"], "Task.state") as TaskState),
     stateUpdatedAt: asString(obj["stateUpdatedAt"], "Task.stateUpdatedAt") as ISOTimestamp,
     diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "Task.diffStat", validateDiffFileStat) as DiffFileStat[]),
+    repoStates: (obj["repoStates"] === undefined || obj["repoStates"] === null ? undefined : validateArray(obj["repoStates"], "Task.repoStates", validateGitRepositoryState) as GitRepositoryState[]),
     costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
     duration: asNumber(obj["duration"], "Task.duration"),
     numTurns: asNumber(obj["numTurns"], "Task.numTurns"),

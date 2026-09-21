@@ -418,6 +418,10 @@ type Repository interface {
 	Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error)
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
+	// CompactRepositoryStatus returns the branch, divergence, working-tree
+	// counts, operation, and branch-diff numstat of one repository without the
+	// per-commit log, cheap enough for periodic activity-driven probes.
+	CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 }
 
 // Monitor reads resource usage and lifecycle events.

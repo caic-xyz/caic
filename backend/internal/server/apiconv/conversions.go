@@ -281,6 +281,37 @@ func DiffStat(ds agent.DiffStat) v1.DiffStat {
 	return out
 }
 
+// RepoStates aligns compact per-repo git states with the task's repositories,
+// filling repository names by index. States without a matching repository are
+// dropped.
+func RepoStates(states []agent.RepoState, repos []v1.TaskRepo) []v1.GitRepositoryState {
+	if len(states) == 0 {
+		return nil
+	}
+	out := make([]v1.GitRepositoryState, 0, len(states))
+	for _, state := range states {
+		if state.RepoIndex < 0 || state.RepoIndex >= len(repos) {
+			continue
+		}
+		out = append(out, v1.GitRepositoryState{
+			Name:             repos[state.RepoIndex].Name,
+			Branch:           state.Branch,
+			Ahead:            state.Ahead,
+			Behind:           state.Behind,
+			ChangedFiles:     state.ChangedFiles,
+			LinesAdded:       state.LinesAdded,
+			LinesDeleted:     state.LinesDeleted,
+			UncommittedFiles: state.UncommittedFiles,
+			Conflicts:        state.Conflicts,
+			Operation:        v1.GitOperation(state.Operation),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // QuotaProvider converts a canonical agent quota provider to its API value.
 func QuotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 	switch p {

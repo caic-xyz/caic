@@ -149,6 +149,7 @@ func Task(in *TaskInput) (v1.Task, error) {
 	} else {
 		out.DiffStat = DiffStat(snap.DiffStat)
 	}
+	out.RepoStates = RepoStates(snap.RepoStates, in.Repos)
 	out.ForgeOwner = snap.ForgeOwner
 	out.ForgeRepo = snap.ForgeRepo
 	out.ForgePR = snap.ForgePR

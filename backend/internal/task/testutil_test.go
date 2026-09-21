@@ -113,10 +113,16 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 	return w.parse(line)
 }
 
-// testContainer returns a fake runtime whose Diff reports a fixed one-file
-// numstat, matching the diff the agent-runtime/session tests parse.
+// testContainer returns a fake runtime whose Diff and compact status probe
+// report a fixed one-file numstat, matching the diff the agent-runtime/session
+// tests parse.
 func testContainer() *runtimetest.FakeBackend {
-	return &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}
+	return &runtimetest.FakeBackend{
+		DiffOutput: "5\t1\tmain.go\n",
+		RepositoryStatusValue: runtime.RepositoryStatus{
+			DiffStat: []runtime.GitFileStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}},
+		},
+	}
 }
 
 // fetchRecorder is a fake runtime that additionally records whether Fetch was

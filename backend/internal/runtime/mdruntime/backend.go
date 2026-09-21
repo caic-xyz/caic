@@ -504,28 +504,14 @@ func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, comm
 
 // RepositoryStatus implements runtime.Repository.
 func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
-	localID, err := b.localID(id)
-	if err != nil {
-		return runtime.RepositoryStatus{}, err
-	}
-	ct, err := b.container(ctx, string(localID))
-	if err != nil {
-		return runtime.RepositoryStatus{}, err
-	}
-	repos := ct.Repos()
-	if repoIdx < 0 || repoIdx >= len(repos) {
-		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
-	}
-	repo := &repos[repoIdx]
-	out, err := b.commandOutput(ctx, ct, gitStatusCommand(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
-	if err != nil {
-		return runtime.RepositoryStatus{}, commandOutputError("git status", ct, err, out)
-	}
-	status, err := parseGitStatus(string(out))
-	if err != nil {
-		return runtime.RepositoryStatus{}, fmt.Errorf("parse git status in container %s: %w", ct.Name(), err)
-	}
-	return status, nil
+	return b.repositoryStatusFromProbe(ctx, id, repoIdx, gitStatusCommand, parseGitStatus)
+}
+
+// CompactRepositoryStatus returns branch, divergence, working-tree counts,
+// any in-progress operation, and the branch-diff numstat for one repository
+// in a single container probe, without the per-commit log walk.
+func (b *Backend) CompactRepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
+	return b.repositoryStatusFromProbe(ctx, id, repoIdx, compactGitStatusCommand, parseCompactGitStatus)
 }
 
 // Fetch implements runtime.Repository.
@@ -896,6 +882,39 @@ func commandOutputError(action string, ct mdContainer, err error, out []byte) er
 		out = append([]byte("…"), out[len(out)-limit:]...)
 	}
 	return fmt.Errorf("%s in container %s: %w (output: %q)", action, ct.Name(), err, out)
+}
+
+// repositoryStatusFromProbe runs one git status command in the container and
+// parses its report.
+func (b *Backend) repositoryStatusFromProbe(
+	ctx context.Context,
+	id runtime.ID,
+	repoIdx int,
+	command func(repo, defaultRemote, defaultBranch string) string,
+	parse func(string) (runtime.RepositoryStatus, error),
+) (runtime.RepositoryStatus, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return runtime.RepositoryStatus{}, err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return runtime.RepositoryStatus{}, err
+	}
+	repos := ct.Repos()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	repo := &repos[repoIdx]
+	out, err := b.commandOutput(ctx, ct, command(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
+	if err != nil {
+		return runtime.RepositoryStatus{}, commandOutputError("git status", ct, err, out)
+	}
+	status, err := parse(string(out))
+	if err != nil {
+		return runtime.RepositoryStatus{}, fmt.Errorf("parse git status in container %s: %w", ct.Name(), err)
+	}
+	return status, nil
 }
 
 func (b *Backend) container(ctx context.Context, name string) (mdContainer, error) {

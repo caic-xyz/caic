@@ -195,6 +195,12 @@ func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repo
 	return status, nil
 }
 
+// CompactRepositoryStatus implements runtime.Repository. The fake has no log
+// walk to skip, so it returns the same fixture as the full status.
+func (b *RuntimeBackend) CompactRepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
+	return b.RepositoryStatus(ctx, id, repoIdx)
+}
+
 // Fetch implements runtime.Repository.
 func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.ID, _ runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	return nil, nil

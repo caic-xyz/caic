@@ -776,6 +776,23 @@ are -1 for text files, with 0 on the side where the path is added or removed.
 | `newSize` | `int64` | NewSize is the binary post-image byte size, or -1 for text files. | yes |
 | `diff` | `string` |  |  |
 
+### GitRepositoryState
+
+GitRepositoryState summarizes the compact Git state of one task repository.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `branch` | `string` |  | yes |
+| `ahead` | `int` |  | yes |
+| `behind` | `int` |  | yes |
+| `changedFiles` | `int` |  | yes |
+| `linesAdded` | `int` |  | yes |
+| `linesDeleted` | `int` |  | yes |
+| `uncommittedFiles` | `int` |  | yes |
+| `conflicts` | `int` |  | yes |
+| `operation` | `GitOperation` |  |  |
+
 ### RuntimeInstance
 
 RuntimeInstance holds per-task runtime metadata.
@@ -815,6 +832,7 @@ Task is the JSON representation sent to the frontend.
 | `state` | `TaskState` |  | yes |
 | `stateUpdatedAt` | `ISOTimestamp` | When the task state last changed. | yes |
 | `diffStat` | `DiffStat` |  |  |
+| `repoStates` | `GitRepositoryState[]` | Pushed compact per-repo Git state from the latest diff probe. |  |
 | `costUSD` | `float64` |  | yes |
 | `duration` | `float64` | Seconds. | yes |
 | `numTurns` | `int` |  | yes |
@@ -1639,23 +1657,6 @@ FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `diff` | `string` |  | yes |
-
-### GitRepositoryState
-
-GitRepositoryState summarizes the compact Git state of one task repository.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `name` | `string` |  | yes |
-| `branch` | `string` |  | yes |
-| `ahead` | `int` |  | yes |
-| `behind` | `int` |  | yes |
-| `changedFiles` | `int` |  | yes |
-| `linesAdded` | `int` |  | yes |
-| `linesDeleted` | `int` |  | yes |
-| `uncommittedFiles` | `int` |  | yes |
-| `conflicts` | `int` |  | yes |
-| `operation` | `GitOperation` |  |  |
 
 ### TaskRepoStatusResp
 

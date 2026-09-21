@@ -19,7 +19,6 @@ const compactContextMock = vi.spyOn(api, "compactContext");
 const getTaskDiffMock = vi.spyOn(api, "getTaskDiff");
 const getTaskDiffIndexMock = vi.spyOn(api, "getTaskDiffIndex");
 const getTaskFileDiffMock = vi.spyOn(api, "getTaskFileDiff");
-const getTaskRepoStatusMock = vi.spyOn(api, "getTaskRepoStatus");
 
 taskEventStreamMock.mockImplementation(((_id: string, handlers: { onReady?: () => void }) => {
   const fakeES = {
@@ -38,23 +37,20 @@ compactContextMock.mockImplementation(() => Promise.resolve({ status: "compactin
 getTaskDiffMock.mockImplementation(() => Promise.resolve({} as never));
 getTaskDiffIndexMock.mockImplementation(() => Promise.resolve({ repositories: [] }));
 getTaskFileDiffMock.mockImplementation(() => Promise.resolve({ diff: "" }));
-getTaskRepoStatusMock.mockImplementation(() =>
-  Promise.resolve({
-    repositories: [
-      {
-        name: "my-repo",
-        branch: "task-branch",
-        ahead: 1,
-        behind: 0,
-        changedFiles: 2,
-        linesAdded: 15,
-        linesDeleted: 3,
-        uncommittedFiles: 1,
-        conflicts: 0,
-      },
-    ],
-  }),
-);
+
+const pushedRepoStates = [
+  {
+    name: "my-repo",
+    branch: "task-branch",
+    ahead: 1,
+    behind: 0,
+    changedFiles: 2,
+    linesAdded: 15,
+    linesDeleted: 3,
+    uncommittedFiles: 1,
+    conflicts: 0,
+  },
+];
 
 const baseProps = {
   taskId: "abc",
@@ -67,6 +63,7 @@ const baseProps = {
   harness: "claude",
   stoppedDiskUsedBytes: -1,
   now: Date.parse("2026-07-08T12:00:00Z"),
+  repoStates: pushedRepoStates,
   onClose: () => {},
   onStop: () => {},
   onPurge: () => {},

@@ -1287,18 +1287,20 @@ func (r *AgentRuntime) turnChangeStat(ctx context.Context, id runtime.ID, repos 
 }
 
 // emitDiffStatBranch emits a DiffStatMessage from the current in-container
-// diff. This keeps live UI diff stats fresh during a running turn.
+// diff. This keeps live UI diff stats and repository states fresh during a
+// running turn.
 func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
 	if r.Checkout == nil {
 		return
 	}
-	ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos)
-	if len(ds) == 0 {
+	ds, repoStates, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, id, repos)
+	if len(ds) == 0 && len(repoStates) == 0 {
 		return
 	}
 	t.addMessage(ctx, &agent.DiffStatMessage{
 		MessageType: "caic_diff_stat",
 		DiffStat:    ds,
+		Repos:       repoStates,
 	}, false)
 }
 

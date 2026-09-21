@@ -8,13 +8,15 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   expect(repos.length).toBeGreaterThanOrEqual(2);
   expect(harnesses.length).toBeGreaterThan(0);
 
+  // FAKE_DEMO makes the fake agent run a tool-using turn, which drives the
+  // backend's post-tool repository-state probe the cards render.
   const singleTask = await api.createTask({
-    initialPrompt: { text: uniquePrompt("single repository state") },
+    initialPrompt: { text: uniquePrompt("FAKE_DEMO single repository state") },
     repos: [{ name: repos[0].path }],
     harness: harnesses[0].name,
   });
   const multiTask = await api.createTask({
-    initialPrompt: { text: uniquePrompt("mapped repository state") },
+    initialPrompt: { text: uniquePrompt("FAKE_DEMO mapped repository state") },
     repos: [{ name: repos[0].path }, { name: repos[1].path }],
     harness: harnesses[0].name,
   });

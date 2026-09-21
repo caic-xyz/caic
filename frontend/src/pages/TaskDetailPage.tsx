@@ -48,6 +48,7 @@ export default function TaskDetailPage() {
               cumulativeCacheReadInputTokens={t()?.cumulativeCacheReadInputTokens}
               stoppedDiskUsedBytes={t()?.stoppedDiskUsedBytes ?? -1}
               diffStat={t()?.diffStat}
+              repoStates={t()?.repoStates}
               vncPort={t()?.runtime.vncPort ?? 0}
               sudoPassword={t()?.runtime.sudoPassword}
               supportsImages={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages}

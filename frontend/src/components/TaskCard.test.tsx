@@ -4,15 +4,13 @@ import { describe, it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { MemoryRouter, Route } from "@solidjs/router";
 import type { JSX } from "solid-js";
+import { createSignal } from "solid-js";
 import { expect, vi } from "@tests/expect";
 
 import type { ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
-import { api } from "../api";
-
-const getTaskRepoStatusMock = vi.spyOn(api, "getTaskRepoStatus");
 
 const now = () => Date.parse("2026-07-08T12:00:00Z");
 
@@ -82,22 +80,25 @@ describe("TaskCard", () => {
   });
 
   it("shows the complete repository-state component in the bottom row", async () => {
-    getTaskRepoStatusMock.mockResolvedValueOnce({
-      repositories: [
-        {
-          name: "repo",
-          branch: "task-branch",
-          ahead: 1,
-          behind: 0,
-          changedFiles: 2,
-          linesAdded: 12,
-          linesDeleted: 3,
-          uncommittedFiles: 1,
-          conflicts: 0,
-        },
-      ],
-    });
-    renderCard(() => <TaskCard {...props()} />);
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          repoStates: [
+            {
+              name: "repo",
+              branch: "task-branch",
+              ahead: 1,
+              behind: 0,
+              changedFiles: 2,
+              linesAdded: 12,
+              linesDeleted: 3,
+              uncommittedFiles: 1,
+              conflicts: 0,
+            },
+          ],
+        })}
+      />
+    ));
 
     expect(await screen.findByRole("img")).toHaveAccessibleName(
       "2 changed files, 12 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream",
@@ -108,6 +109,46 @@ describe("TaskCard", () => {
     expect(screen.getByText("2f")).toBeInTheDocument();
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("−3")).toBeInTheDocument();
+  });
+
+  it("updates the repository state when the task stream pushes new values", async () => {
+    const [repoStates, setRepoStates] = createSignal<TaskCardProps["repoStates"]>([
+      {
+        name: "repo",
+        branch: "task-branch",
+        ahead: 1,
+        behind: 0,
+        changedFiles: 2,
+        linesAdded: 12,
+        linesDeleted: 3,
+        uncommittedFiles: 1,
+        conflicts: 0,
+      },
+    ]);
+    renderCard(() => <TaskCard {...props()} repoStates={repoStates()} />);
+
+    expect(await screen.findByRole("img")).toHaveAccessibleName(
+      "2 changed files, 12 additions, 3 deletions, 1 uncommitted file, 1 commit ahead of upstream",
+    );
+
+    // The backend probe pushed a newer state; the card re-renders reactively
+    // without any client-side fetch.
+    setRepoStates([
+      {
+        name: "repo",
+        branch: "task-branch",
+        ahead: 3,
+        behind: 0,
+        changedFiles: 5,
+        linesAdded: 20,
+        linesDeleted: 4,
+        uncommittedFiles: 0,
+        conflicts: 0,
+      },
+    ]);
+    expect(await screen.findByRole("img")).toHaveAccessibleName(
+      "5 changed files, 20 additions, 4 deletions, 3 commits ahead of upstream",
+    );
   });
 
   it("does not invent a TTL when only a legacy cache expiry is available", () => {

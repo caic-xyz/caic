@@ -15,8 +15,8 @@ import type {
   DiffStat,
   CIStatus,
   ForgeCheck,
-  RuntimeInstance,
   GitRepositoryState,
+  RuntimeInstance,
   TaskRateLimit,
   TaskRepo,
   TaskState,
@@ -60,6 +60,7 @@ export interface TaskCardProps {
   cacheExpiresAt?: string;
   turnStartedAt?: string;
   diffStat?: DiffStat;
+  repoStates?: GitRepositoryState[];
   error?: string;
   inPlanMode?: boolean;
   runtime?: RuntimeInstance;
@@ -120,33 +121,19 @@ export default function TaskCard(props: TaskCardProps) {
   const [titleTruncated, setTitleTruncated] = createSignal(false);
   const [contextMenuPosition, setContextMenuPosition] = createSignal<{ x: number; y: number } | undefined>();
   const [menuActionPending, setMenuActionPending] = createSignal(false);
-  const [repoStates, setRepoStates] = createSignal<GitRepositoryState[]>([]);
+  // Compact Git state is pushed with the task over the task-list stream.
+  const repoStates = () => props.repoStates ?? [];
   let cardRef: HTMLDivElement | undefined;
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
   let contextMenuRef: HTMLDivElement | undefined;
 
-  createEffect(() => {
-    const taskID = props.id;
+  const repositoryState = (repoIndex: number) => {
+    // Without a runtime there is no Git state to push; purged tasks keep none.
     if (!props.runtime?.id || props.state === "purged") {
-      setRepoStates([]);
-      return;
+      return repoIndex === 0 ? diffStatState(props.diffStat) : undefined;
     }
-    let current = true;
-    api
-      .getTaskRepoStatus(taskID)
-      .then((response) => {
-        if (current) setRepoStates(response.repositories);
-      })
-      .catch(() => {
-        if (current) setRepoStates([]);
-      });
-    onCleanup(() => {
-      current = false;
-    });
-  });
-
-  const repositoryState = (repoIndex: number) =>
-    repoStates()[repoIndex] ?? (repoIndex === 0 ? diffStatState(props.diffStat) : undefined);
+    return repoStates()[repoIndex] ?? (repoIndex === 0 ? diffStatState(props.diffStat) : undefined);
+  };
   const repoStateRows = () =>
     (props.repos ?? []).map((repo, index) => ({
       name: repo.name,

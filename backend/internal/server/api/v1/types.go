@@ -295,39 +295,40 @@ type RuntimeInstance struct {
 
 // Task is the JSON representation sent to the frontend.
 type Task struct {
-	ID                                 ksid.ID      `json:"id"`
-	InitialPrompt                      string       `json:"initialPrompt"`
-	Title                              string       `json:"title"`
-	Repos                              []TaskRepo   `json:"repos,omitempty"`
-	State                              TaskState    `json:"state"`
-	StateUpdatedAt                     time.Time    `json:"stateUpdatedAt"` // When the task state last changed.
-	DiffStat                           DiffStat     `json:"diffStat,omitzero"`
-	CostUSD                            float64      `json:"costUSD"`
-	Duration                           float64      `json:"duration"` // Seconds.
-	NumTurns                           int          `json:"numTurns"`
-	CumulativeInputTokens              int          `json:"cumulativeInputTokens"`
-	CumulativeOutputTokens             int          `json:"cumulativeOutputTokens"`
-	CumulativeCacheCreationInputTokens int          `json:"cumulativeCacheCreationInputTokens"`
-	CumulativeCacheReadInputTokens     int          `json:"cumulativeCacheReadInputTokens"`
-	ActiveInputTokens                  int          `json:"activeInputTokens"`         // Last turn's non-cached input tokens (including cache creation).
-	ActiveCacheReadTokens              int          `json:"activeCacheReadTokens"`     // Last turn's cache-read input tokens.
-	CacheTTLSeconds                    int          `json:"cacheTTLSeconds,omitempty"` // Effective cache TTL from last API call (seconds); 0 = unknown.
-	CacheExpiresAt                     time.Time    `json:"cacheExpiresAt,omitzero"`   // When the prompt cache expires.
-	StoppedDiskUsedBytes               int64        `json:"stoppedDiskUsedBytes"`      // Final writable-layer size retained by a stopped task, or -1 when unavailable.
-	ContextWindowLimit                 int          `json:"contextWindowLimit"`        // Model context window limit (tokens).
-	Error                              string       `json:"error,omitempty"`
-	Result                             string       `json:"result,omitempty"`
-	ForgeOwner                         string       `json:"forgeOwner,omitempty"`
-	ForgeRepo                          string       `json:"forgeRepo,omitempty"`
-	ForgePR                            int          `json:"forgePR,omitempty"`
-	ForgePRState                       ForgePRState `json:"forgePRState,omitempty"`
-	ForgeIssue                         int          `json:"forgeIssue,omitempty"`
-	CIStatus                           CIStatus     `json:"ciStatus,omitempty"`
-	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`
-	Owner                              string       `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
-	ForkedFromTaskID                   ksid.ID      `json:"forkedFromTaskID,omitempty"`
-	ParentTaskID                       ksid.ID      `json:"parentTaskID,omitempty"`
-	CaicMCPEnabled                     bool         `json:"caicMCPEnabled,omitempty"`
+	ID                                 ksid.ID              `json:"id"`
+	InitialPrompt                      string               `json:"initialPrompt"`
+	Title                              string               `json:"title"`
+	Repos                              []TaskRepo           `json:"repos,omitempty"`
+	State                              TaskState            `json:"state"`
+	StateUpdatedAt                     time.Time            `json:"stateUpdatedAt"` // When the task state last changed.
+	DiffStat                           DiffStat             `json:"diffStat,omitzero"`
+	RepoStates                         []GitRepositoryState `json:"repoStates,omitempty"` // Pushed compact per-repo Git state from the latest diff probe.
+	CostUSD                            float64              `json:"costUSD"`
+	Duration                           float64              `json:"duration"` // Seconds.
+	NumTurns                           int                  `json:"numTurns"`
+	CumulativeInputTokens              int                  `json:"cumulativeInputTokens"`
+	CumulativeOutputTokens             int                  `json:"cumulativeOutputTokens"`
+	CumulativeCacheCreationInputTokens int                  `json:"cumulativeCacheCreationInputTokens"`
+	CumulativeCacheReadInputTokens     int                  `json:"cumulativeCacheReadInputTokens"`
+	ActiveInputTokens                  int                  `json:"activeInputTokens"`         // Last turn's non-cached input tokens (including cache creation).
+	ActiveCacheReadTokens              int                  `json:"activeCacheReadTokens"`     // Last turn's cache-read input tokens.
+	CacheTTLSeconds                    int                  `json:"cacheTTLSeconds,omitempty"` // Effective cache TTL from last API call (seconds); 0 = unknown.
+	CacheExpiresAt                     time.Time            `json:"cacheExpiresAt,omitzero"`   // When the prompt cache expires.
+	StoppedDiskUsedBytes               int64                `json:"stoppedDiskUsedBytes"`      // Final writable-layer size retained by a stopped task, or -1 when unavailable.
+	ContextWindowLimit                 int                  `json:"contextWindowLimit"`        // Model context window limit (tokens).
+	Error                              string               `json:"error,omitempty"`
+	Result                             string               `json:"result,omitempty"`
+	ForgeOwner                         string               `json:"forgeOwner,omitempty"`
+	ForgeRepo                          string               `json:"forgeRepo,omitempty"`
+	ForgePR                            int                  `json:"forgePR,omitempty"`
+	ForgePRState                       ForgePRState         `json:"forgePRState,omitempty"`
+	ForgeIssue                         int                  `json:"forgeIssue,omitempty"`
+	CIStatus                           CIStatus             `json:"ciStatus,omitempty"`
+	CIChecks                           []ForgeCheck         `json:"ciChecks,omitempty"`
+	Owner                              string               `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
+	ForkedFromTaskID                   ksid.ID              `json:"forkedFromTaskID,omitempty"`
+	ParentTaskID                       ksid.ID              `json:"parentTaskID,omitempty"`
+	CaicMCPEnabled                     bool                 `json:"caicMCPEnabled,omitempty"`
 	// Per-task harness/agent metadata.
 	Harness         Harness         `json:"harness"`
 	RequestedModel  string          `json:"requestedModel,omitempty"`

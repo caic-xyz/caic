@@ -532,6 +532,69 @@ func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *run
 	return w.diffStatLocked(ctx, log, runtimes, id, repos)
 }
 
+// DiffStatAndRepoStates returns the combined per-repo branch diff stat plus a
+// compact per-repo git state, from one log-free status probe per repository.
+// It returns an error if any repo's probe fails. Holds branchMu during diff.
+func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, []agent.RepoState, error) {
+	log = log.With("repo", w.RelPath)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer cancel()
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	var result agent.DiffStat
+	var states []agent.RepoState
+	var errs []error
+	for i := range repos {
+		repo := &repos[i]
+		status, err := runtimes.CompactRepositoryStatus(ctx, id, i)
+		if err != nil {
+			log.Warn("repository status failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
+			errs = append(errs, err)
+			continue
+		}
+		for j := range status.DiffStat {
+			stat := status.DiffStat[j]
+			path := stat.Path
+			if len(repos) > 1 {
+				path = diffRepoPrefix(repo) + "/" + path
+			}
+			result = append(result, agent.DiffFileStat{
+				Path:         path,
+				LinesAdded:   stat.LinesAdded,
+				LinesDeleted: stat.LinesDeleted,
+				Binary:       stat.Binary,
+				OldSize:      stat.OldSize,
+				NewSize:      stat.NewSize,
+			})
+		}
+		added, deleted := 0, 0
+		for _, stat := range status.DiffStat {
+			added += stat.LinesAdded
+			deleted += stat.LinesDeleted
+		}
+		conflicts := 0
+		for _, file := range status.Uncommitted {
+			if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
+				conflicts++
+			}
+		}
+		states = append(states, agent.RepoState{
+			RepoIndex:        i,
+			Branch:           status.Branch,
+			Operation:        string(status.Operation),
+			Ahead:            status.Ahead,
+			Behind:           status.Behind,
+			ChangedFiles:     len(status.DiffStat),
+			LinesAdded:       added,
+			LinesDeleted:     deleted,
+			UncommittedFiles: len(status.Uncommitted),
+			Conflicts:        conflicts,
+		})
+	}
+	return result, states, errors.Join(errs...)
+}
+
+// taskRuntime resolves the runtime instance and repos for a task.
 func (w *Checkout) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
 	if t == nil {
 		return "", nil, errors.New("task is nil")

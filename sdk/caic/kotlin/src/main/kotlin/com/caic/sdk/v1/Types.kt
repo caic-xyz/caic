@@ -1436,6 +1436,21 @@ data class DiffFileStat(
     val diff: String? = null,
 )
 
+/** GitRepositoryState summarizes the compact Git state of one task repository. */
+@Serializable
+data class GitRepositoryState(
+    val name: String,
+    val branch: String,
+    val ahead: Int,
+    val behind: Int,
+    val changedFiles: Int,
+    val linesAdded: Int,
+    val linesDeleted: Int,
+    val uncommittedFiles: Int,
+    val conflicts: Int,
+    val operation: GitOperation? = null,
+)
+
 /** RuntimeInstance holds per-task runtime metadata. */
 @Serializable
 data class RuntimeInstance(
@@ -1473,6 +1488,8 @@ data class Task(
     /** When the task state last changed. */
     val stateUpdatedAt: Instant,
     val diffStat: DiffStat? = null,
+    /** Pushed compact per-repo Git state from the latest diff probe. */
+    val repoStates: List<GitRepositoryState>? = null,
     @SerialName("costUSD") val costUSD: Double,
     /** Seconds. */
     val duration: Double,
@@ -2206,21 +2223,6 @@ data class TaskDiffIndexResp(val repositories: List<DiffIndexRepository>)
 /** FileDiffResp is the response for GET /api/caic/v1/tasks/{id}/diff/file. */
 @Serializable
 data class FileDiffResp(val diff: String)
-
-/** GitRepositoryState summarizes the compact Git state of one task repository. */
-@Serializable
-data class GitRepositoryState(
-    val name: String,
-    val branch: String,
-    val ahead: Int,
-    val behind: Int,
-    val changedFiles: Int,
-    val linesAdded: Int,
-    val linesDeleted: Int,
-    val uncommittedFiles: Int,
-    val conflicts: Int,
-    val operation: GitOperation? = null,
-)
 
 /** TaskRepoStatusResp is the response for GET /api/caic/v1/tasks/{id}/repo-status. */
 @Serializable

@@ -26,6 +26,36 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 	if defaultRemote != "" && defaultBranch != "" {
 		comparison = defaultRemote + "/" + defaultBranch
 	}
+	return gitStatusHeader(repo, comparison) + ` && ` +
+		untrackedDiffSetup() + ` && ` +
+		`printf '` + gitTotalStatMarker + `\0' && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$comparison" --numstat --stat -z -- .; fi && ` +
+		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
+		`untracked_diff git diff HEAD --numstat --stat -z -- . && ` +
+		`printf '\0` + gitLogMarker + `\0' && ` +
+		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
+		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat --stat -z "$comparison..HEAD"; fi`
+}
+
+// compactGitStatusCommand returns the status, divergence, operation, and
+// branch-diff numstat sections of the full status report in one probe. It
+// omits the per-commit log and per-file worktree stats that only the diff
+// view needs, so periodic callers never walk history.
+func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
+	comparison := ""
+	if defaultRemote != "" && defaultBranch != "" {
+		comparison = defaultRemote + "/" + defaultBranch
+	}
+	return gitStatusHeader(repo, comparison) + ` && ` +
+		untrackedDiffSetup() + ` && ` +
+		`printf '` + gitTotalStatMarker + `\0' && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$comparison" --numstat --stat -z -- .; fi && ` +
+		`printf '\0` + gitWorktreeStatMarker + `\0'`
+}
+
+// gitStatusHeader returns the status porcelain, upstream comparison, and
+// operation detection shared by the full and compact status commands.
+func gitStatusHeader(repo, comparison string) string {
 	return "cd " + shellQuote(repo) + ` && export GIT_OPTIONAL_LOCKS=0 LC_ALL=C && ` +
 		`git status --porcelain=v2 --branch -z --untracked-files=all && ` +
 		`upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true) && ` +
@@ -40,15 +70,7 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`elif git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null; then operation=cherry-pick; ` +
 		`elif git rev-parse --verify --quiet REVERT_HEAD >/dev/null; then operation=revert; ` +
 		`elif [ -f "$git_dir/BISECT_LOG" ]; then operation=bisect; fi && ` +
-		`if [ -n "$operation" ]; then printf '` + gitOperationMarker + `\0%s\0' "$operation"; fi && ` +
-		untrackedDiffSetup() + ` && ` +
-		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then untracked_diff git diff "$comparison" --numstat --stat -z -- .; fi && ` +
-		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
-		`untracked_diff git diff HEAD --numstat --stat -z -- . && ` +
-		`printf '\0` + gitLogMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
-		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat --stat -z "$comparison..HEAD"; fi`
+		`if [ -n "$operation" ]; then printf '` + gitOperationMarker + `\0%s\0' "$operation"; fi`
 }
 
 func shellQuote(s string) string {
@@ -186,6 +208,34 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 			i += consumed
 		}
 		status.Commits = append(status.Commits, commit)
+	}
+	return status, nil
+}
+
+// parseCompactGitStatus parses the compact status report: status records,
+// comparison divergence, operation, and the branch-diff numstat section. It
+// has no per-file worktree stats and no commit-log section.
+func parseCompactGitStatus(out string) (runtime.RepositoryStatus, error) {
+	var status runtime.RepositoryStatus
+	records := strings.Split(out, "\x00")
+	for i := 0; i < len(records); {
+		if records[i] == gitWorktreeStatMarker {
+			break // the compact report ends after the numstat section
+		}
+		if records[i] == gitTotalStatMarker {
+			stats, consumed, err := parseGitNumstats(records[i+1:], gitWorktreeStatMarker)
+			if err != nil {
+				return runtime.RepositoryStatus{}, err
+			}
+			status.DiffStat = stats
+			i += consumed + 1
+			continue
+		}
+		consumed, err := parseGitStatusRecord(&status, records[i:])
+		if err != nil {
+			return runtime.RepositoryStatus{}, err
+		}
+		i += consumed
 	}
 	return status, nil
 }
