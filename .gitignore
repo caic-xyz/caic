@@ -16,3 +16,4 @@ node_modules/
 go.work
 go.work.sum
 /custom-gcl
+/.custom-gcl.sha

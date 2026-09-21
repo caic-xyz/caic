@@ -28,8 +28,8 @@ transitive dependencies. Check and update eligible packages with:
 ```bash
 pnpm outdated
 make upgrade
-make lint
-make check
+make fix
+make verify
 ```
 
 ## Contributing

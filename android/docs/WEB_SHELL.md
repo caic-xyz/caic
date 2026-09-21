@@ -150,7 +150,7 @@ make android-e2e
 After Android changes:
 
 ```bash
-make lint
+make verify
 python3 scripts/android_e2e.py --module gomode
 ```
 
@@ -161,4 +161,4 @@ make android-e2e
 ```
 
 After frontend or backend integration changes, also run the relevant project
-checks (`make check`, `make frontend-e2e`) based on touched code.
+checks (`make verify`, `make test-e2e`) based on touched code.

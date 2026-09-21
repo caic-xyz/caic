@@ -1,4 +1,26 @@
 // End-to-end browser test configuration using a fake backend server.
+//
+// The fake server (scripts/run-dev.py --fake) replaces containers, runtime
+// inventory, runtime events, CI, usage providers, VNC, and agent processes
+// with deterministic fakes, so the suite never depends on Docker, Podman, md,
+// SSH, external LLMs, or network credentials. A smoke test for the real
+// runtime must not use it; see backend/cmd/caic/smoke_test.go.
+//
+// Playwright transpiles the TypeScript itself, so e2e/tsconfig.json exists
+// solely for `pnpm typecheck`, which checks both the root project
+// (frontend/src, sdk/) and this directory. Note that Playwright matchers like
+// `toContain` accept `unknown`, so assertion arguments are not type checked.
+//
+// Never run this suite concurrently with itself or with frontend builds
+// (`make build`, screenshots targets): they share backend/frontend/dist, so
+// simultaneous builds can delete or replace one another's generated assets.
+// Always run through this config (`make test-e2e`); a bare
+// `pnpm playwright test` bypasses it. For a targeted run keep the explicit
+// configuration:
+//   pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/account-menu.spec.ts
+//
+// The webServer dynamically allocates a port for the fake backend and verifies
+// it before running instrumented tests.
 
 import { defineConfig } from "@playwright/test";
 

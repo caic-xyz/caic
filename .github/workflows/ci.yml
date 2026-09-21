@@ -56,7 +56,7 @@ jobs:
       - name: End-to-end tests
         id: frontend-e2e
         if: runner.os == 'Linux'
-        run: make frontend-e2e
+        run: make test-e2e
       - name: Upload E2E failure artifacts
         if: failure() && steps.frontend-e2e.outcome == 'failure'
         uses: actions/upload-artifact@v7
@@ -114,7 +114,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Smoke test
-        run: make smoke
+        run: make test-smoke
       - name: Upload Smoke Coverage
         uses: codecov/codecov-action@v7
         with:

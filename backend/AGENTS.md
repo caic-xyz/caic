@@ -9,10 +9,10 @@ Go backend for caic. Packages under `internal/` are private.
 
 ## API Verification
 
-Any change to an API DTO, route, handler, or API conversion must run both
-`make lint-frontend` and `make frontend-e2e`. The first checks TypeScript and
-ESLint against the generated SDK; the second verifies the browser-facing API
-contract against the fake backend.
+Any change to an API DTO, route, handler, or API conversion must run
+`make verify` (which typechecks against the generated SDK) and
+`make test-e2e` (which verifies the browser-facing API contract against the
+fake backend).
 
 ## Container Adoption
 

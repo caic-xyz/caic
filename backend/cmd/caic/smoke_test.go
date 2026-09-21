@@ -34,7 +34,10 @@ import (
 
 // TestSmoke verifies the real runtime path: start the server, launch an md
 // container, run a deterministic agent through the relay over SSH, and
-// exercise the task lifecycle.
+// exercise the task lifecycle. Unlike the e2e suite it must not use the fake
+// server or the smoketest runtime backend: it intentionally exercises the
+// md/container runtime path, which makes it host-dependent and isolated
+// behind the smoke build tag and its own make target (make test-smoke).
 func TestSmoke(t *testing.T) {
 	smoke := startSmokeServer(t)
 	baseURL := smoke.baseURL

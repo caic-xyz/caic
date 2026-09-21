@@ -4,15 +4,10 @@ SolidJS web UI for caic. Vite builds into `backend/frontend/dist/`.
 
 ## Required Validation
 
-Run `make build` after every frontend change. Keep regenerated tracked
-`backend/frontend/dist/*.br` assets.
-
-Use:
-
-```bash
-pnpm test:coverage
-pnpm typecheck
-```
+Run `make fix`, then `make verify` (which runs `pnpm typecheck` and the
+linters) and `make test` (the unit tests). After changes to the built assets,
+`make build` regenerates the tracked `backend/frontend/dist/*.br` files; CI
+fails if the build leaves the worktree dirty.
 
 ## Testing
 

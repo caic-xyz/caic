@@ -4,7 +4,7 @@ GitHub Actions workflows for CI/CD.
 
 ## Linting
 
-Follow the root guidance: run `make lint` after workflow changes.
+Follow the root guidance: run `make fix`, then `make verify`, after workflow changes.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

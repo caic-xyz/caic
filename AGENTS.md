@@ -8,6 +8,9 @@ For specific guidelines, see:
 - [Backend Guidelines](backend/AGENTS.md) - Read before editing Go code in backend/
 - [Frontend Guidelines](frontend/AGENTS.md) - Read before editing frontend code
 
+Run `make` for the current targets; each slow or environment-dependent target
+documents its cost beside its definition.
+
 ## Project Overview
 
 caic manages multiple coding agents in parallel. Each task runs in an isolated [md](https://github.com/caic-xyz/md) container with Claude Code communicating via streaming JSON over SSH.
@@ -15,10 +18,9 @@ caic manages multiple coding agents in parallel. Each task runs in an isolated [
 ### Frontend / Android Boundary
 
 `frontend/` (SolidJS) owns caic screen-mode product UI. `android/gomode/` owns
-the Android shell around backend-hosted frontends: settings bootstrap, WebView
-hosting, permissions, notifications, voice endpoint behavior, screenshot
-capture, and Halo/BLE. User-facing parity applies to shared shell capabilities,
-not to caic task-list/detail/diff/widget UI, which must stay in the hosted web
+the Android shell around backend-hosted frontends; see `android/AGENTS.md` for
+the module split. User-facing parity applies to shared shell capabilities, not
+to caic task-list/detail/diff/widget UI, which must stay in the hosted web
 frontend.
 
 ### Documentation Changes
@@ -30,109 +32,34 @@ frontend.
 
 ### Professionalism
 
-**Mandatory**: after making changes run `make lint`, then `make format`, then `make verify`.
-
-`make lint` applies the autofixes (golangci-lint, eslint, stylelint, ruff), refreshes generated file
-indexes and the architecture diagram, then runs `make lint-check`, the read-only check; `make format`
-applies the formatters (prettier, gofmt, ruff format, shfmt, and ktlint for the Android and Halo Kotlin);
-`make verify` re-checks both (`format-check` and `lint-check`) and is the pre-push gate.
-A few rules still need a manual edit, such as `UP031` in `backend/internal/agent/relay/relay_v2.py`.
-Indentation and width come from `.editorconfig`; Ruff keeps its own copy of the width in `pyproject.toml`
-because it does not read `.editorconfig`.
+**Mandatory**: after making changes run `make fix`, then `make verify`.
+`make fix` applies every autofix and refreshes the generated file index and
+architecture diagram; `make verify` is the read-only static gate and the
+pre-push gate. Unit tests are `make test`. Run `make refresh-generated` after
+changing API DTOs/routes, generated SDK inputs, file-indexed source comments,
+or backend package layout.
 
 ### Git Hooks
 
-`pnpm install` configures the versioned hooks in `scripts/hooks/`. Run
-`pnpm hooks:install` to restore them after an installation that skipped lifecycle scripts;
-`make git-hooks` also configures the repository merge driver. Pre-commit validates the
-fully staged snapshot. Commit-msg requires a subject, a blank separator before any body,
-and message lines no longer than 120 characters; it also rejects `Co-authored-by:` trailers.
-Pre-push only allows pushing the checked-out commit (deleting a remote ref is the
-exception); it rejects dirty worktrees, unexpected binary files, WIP commits, and
-multi-commit pushes to `main`.
+`pnpm install` configures the versioned hooks in `scripts/hooks/`; run
+`pnpm hooks:install` (or `make git-hooks`, which also configures the merge
+driver) to restore them after an installation that skipped lifecycle scripts.
+The hook scripts document their own rules.
 
 ### Performance
 
 When changing startup, parsing, serialization, cache, compression, hot-loop, or
-request-path behavior, run `make benchmark` before and after the change. Add a
-focused benchmark when the changed path has none, and report the relevant
-benchmark deltas. Benchmarks requiring local production data remain documented
-beside their source and are not part of `make benchmark`.
-
-### Unit tests
-
-Unit tests run on Node's built-in test runner (`tsx --test`) reporting through
-`scripts/quiet-test-reporter.mjs`; `test:coverage` adds coverage. Frontend test
-conventions are documented in `frontend/AGENTS.md`.
-
-### Benchmarks
-
-`make benchmark` runs Go benchmarks plus `scripts/bench.ts` (tinybench) over
-`*.bench.ts` files. Use `--save`/`--compare` for JSON baselines when reporting
-deltas.
+request-path behavior, run `make benchmark` (Go benchmarks plus `scripts/bench.ts`)
+before and after the change, add a focused benchmark when the changed path has
+none, and report the deltas. Benchmarks requiring local production data remain
+documented beside their source and are not part of `make benchmark`.
 
 ### E2E Tests
 
-The `e2e/` directory contains Playwright tests. Playwright transpiles the
-TypeScript itself without type checking, so `e2e/tsconfig.json` exists solely to
-give `tsc` a project to check: `make lint-frontend` runs `pnpm typecheck`, which
-checks both the root project (`frontend/src`, `sdk/`) and `e2e/`. Run
-`make frontend-e2e` to actually execute the tests; it starts the fake backend
-server and runs Playwright.
-
-Do not run E2E or screenshot targets concurrently with each other or with
-commands such as `make build` or `make check` that build the frontend. These
-targets share `backend/frontend/dist`, so simultaneous builds can delete or
-replace one another's generated assets.
-
-Type checking catches e2e drift against the generated SDK (wrong field names,
-wrong request shapes), but note that Playwright matchers like `toContain` accept
-`unknown`, so assertion arguments are not type checked.
-
-Run the full behavioral frontend E2E suite with `make frontend-e2e`. It installs
-the Playwright-version-pinned Chromium build and excludes documentation screenshot
-generators. Use `make screenshots-check` to render frontend and Android visuals
-twice in temporary directories and verify decoded pixels against tracked baselines;
-use `make screenshots-update` to accept intentional visual changes. The tracked
-baselines encode the development container's font stack, so that comparison is a
-maintainer check. CI carries `make screenshots-generate-frontend` and
-`make screenshots-generate-android` to render without comparing, which catches a stale
-generator, but both are parked behind the repository variable `CAIC_RENDER_SCREENSHOTS`
-until the project wants them on pull requests. Do not use bare `pnpm playwright test`:
-it bypasses `e2e/playwright.config.ts`. For a targeted run, keep the explicit
-configuration, for example:
-
-```bash
-pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/account-menu.spec.ts
-```
-
-`make android-e2e` sets up and starts or reuses the emulator before running the
-behavioral Android suite. Documentation screenshot generation is gated behind the
-explicit screenshot targets.
-The test script dynamically allocates a port for the fake backend and verifies it
-before running instrumented tests.
-
-### Fake E2E vs Runtime Smoke
-
-The fake server is the e2e backend. It replaces containers, runtime inventory,
-runtime events, CI, usage providers, VNC, and agent processes with deterministic
-fakes. Use it for UI/API/task-lifecycle coverage that must not depend on Docker,
-Podman, md, SSH, external LLMs, or network credentials.
-
-A smoke test for the real runtime must not use the fake server or the
-`smoketest` runtime backend. It should intentionally exercise the md/container
-runtime path and be isolated behind its own target, build tag, or environment
-guard because it is host-dependent.
-
-### Make Targets
-
-Run `make` to get the current targets. It's fast.
-
-Run `make refresh-generated` after changing API DTOs/routes, generated SDK
-inputs, file-indexed source comments, or backend package layout.
-
-CI builds the frontend and fails if the build left the worktree dirty, so the
-committed frontend assets cannot drift from the sources that produce them.
+`make test-e2e` runs the Playwright suite against the fake backend server; see
+the header of `e2e/playwright.config.ts` for the constraints (frontend-build
+sharing, targeted runs, screenshot gating). Android flows use
+`make android-e2e`, which starts or reuses the emulator first.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index
@@ -144,7 +71,7 @@ Autogenerated from first-line comments. Run scripts/update_agents_file_index.py 
 - `.golangci.yml`: Static analysis linter rules and enabled checks for the Go codebase.
 - `.goreleaser.yml`: Defines cross-platform build targets, archives, and release publishing for the CLI binary.
 - `DEV.md`: Development
-- `Makefile`: Build, benchmark, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
+- `Makefile`: Build, verify, test, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 - `README.md`: caic
 - `android/AGENTS.md`: Android Project
 - `android/gomode/AGENTS.md`: Go Mode Android App
@@ -191,6 +118,7 @@ Autogenerated from first-line comments. Run scripts/update_agents_file_index.py 
 - `scripts/lint_frontend_styles.mjs`: Lints frontend CSS tokens, modules, raw colors, and presentation embedded in TSX.
 - `scripts/precompress_dist.py`: Precompress built assets so a static handler can serve them verbatim.
 - `scripts/quiet-test-reporter.mjs`: Reports Node test failures and diagnostics, with compact progress only on CI.
+- `scripts/run-concurrently.sh`: Runs independent commands concurrently, or sequentially in serial mode.
 - `scripts/run-dev.py`: Run caic development server with a temporary config directory.
 - `scripts/run_python_tests.py`: Run every Python unit-test script and propagate the first failure.
 - `scripts/test_android_e2e.py`: Unit tests for Android E2E device discovery and fake fixture selection.

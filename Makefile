@@ -1,6 +1,7 @@
-# Build, benchmark, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
+# Build, verify, test, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help benchmark build check check-agent-logs fake-dev test test-all smoke smoke-voice coverage lint lint-check lint-go lint-frontend lint-python lint-kotlin lint-binaries lint-docs format format-check format-kotlin verify refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e playwright-browser screenshots-check screenshots-check-frontend screenshots-check-android screenshots-generate-frontend screenshots-generate-android screenshots-update android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator tools
+.DEFAULT_GOAL := help
+.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-dev playwright-browser refresh-generated test test-e2e test-smoke test-smoke-voice tools upgrade verify android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator screenshots-check screenshots-check-frontend screenshots-check-android screenshots-generate-frontend screenshots-generate-android screenshots-update
 
 # Tool versions. The tools target installs a tool that is missing or at another version, so
 # these are the only places the versions are written down.
@@ -23,9 +24,11 @@ tools:
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
 ANDROID_GRADLE=cd android && ./gradlew --no-daemon --quiet
-# Kotlin is checked only when the branch changes it: the Gradle invocation is slow,
-# and this keeps pre-push cheap in the common case.
+# Kotlin is formatted and checked only when the branch changes it: a Gradle
+# invocation costs about a minute regardless of how few files changed, and this
+# keeps verify and fix cheap in the common case.
 KOTLIN_BASE?=$(shell git merge-base HEAD @{u} 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
+KOTLIN_FILES = git diff --name-only "$(KOTLIN_BASE)" -- "*.kt" "*.kts"; git ls-files --others --exclude-standard -- "*.kt" "*.kts"
 ANDROID_BUILD_TASKS=:gomode:assembleDebug :halo-sdk:assembleDebug :caic-sdk:assemble :gomode-sdk:assemble :mcp-sdk:assemble :voicegateway-sdk:assemble
 ANDROID_TEST_BUILD_TASKS=:gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest
 ANDROID_TEST_TASKS=:gomode:testDebugUnitTest :caic-sdk:test :gomode-sdk:test :mcp-sdk:test :voicegateway-sdk:test
@@ -33,42 +36,64 @@ ANDROID_COVERAGE_REPORT_TASKS=:gomode:createDebugUnitTestCoverageReport :halo-sd
 ANDROID_COVERAGE_TASKS=$(ANDROID_TEST_TASKS) $(ANDROID_COVERAGE_REPORT_TASKS)
 ANDROID_LINT_TASKS=:gomode:detekt :halo-sdk:detekt :gomode:ktlintCheck :halo-sdk:ktlintCheck :gomode:lint :halo-sdk:lint
 
+# Static checks for verify, grouped into independent lanes run concurrently by
+# scripts/run-concurrently.sh. Each is read-only; fix applies their autofixes.
+#
+# The verify recipe passes these single-quoted through two shell layers, so a
+# lane variable must not contain a single quote; use double quotes inside.
+#
+# The gofmt and goimports formatters are checked by custom-gcl run itself
+# (formatters section of .golangci.yml) with its warm analysis cache; a separate
+# `golangci-lint fmt --diff` pass would re-typecheck the whole tree without that
+# cache. Caveat: when another linter fails on the same file, run reports the
+# lint error only, so a formatting problem there surfaces on the next verify
+# after the lint fix. fix applies the formatters through `golangci-lint fmt`.
+# methodfilecheck (see .golangci.yml) is a golangci-lint module plugin, so Go
+# linting must run through the custom binary built from the published plugin
+# module; the plain binary is fine for `fmt`.
+VERIFY_GO = ./custom-gcl run --show-stats=false ./...
+VERIFY_GOBUILD = python3 scripts/lint_build_tags.py
+VERIFY_JS = pnpm --silent format:check && pnpm --silent lint:style && node scripts/lint_frontend_styles.mjs
+VERIFY_TS = pnpm --silent typecheck
+VERIFY_ESLINT = pnpm --silent lint:check
+VERIFY_PY = ruff format --check --quiet . && ruff check --quiet .
+VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || { out=$$(shfmt -l $$files); [ -z "$$out" ] || { echo "Shell files need shfmt:" >&2; echo "$$out" >&2; exit 1; }; }
+VERIFY_MISC = python3 scripts/lint_binaries.py && python3 scripts/update_agents_file_index.py --check && python3 scripts/update_backend_architecture.py --check
+VERIFY_KOTLIN = changed=$$($(KOTLIN_FILES)); if [ -n "$$changed" ]; then $(ANDROID_GRADLE) :gomode:ktlintCheck :halo-sdk:ktlintCheck; fi
+
 help:
-	@echo "caic - Manage multiple coding agents"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  make benchmark              - Run Go and frontend benchmarks"
-	@echo "  make check                  - Refresh generated files, build, lint, and test (non-Android)"
-	@echo "  make test-all               - Run every non-smoke test and deterministic visual check"
-	@echo "  make check-agent-logs       - Validate recent v2 task logs against genai wire DTOs"
-	@echo "  make lint                   - Fix what is autofixable, then run lint-check"
-	@echo "  make lint-check             - Check lint without writing (Go + frontend + Python + Kotlin + binaries + docs)"
-	@echo "  make format                 - Apply the shared formatters (prettier, gofmt, ruff, shfmt, ktlint)"
-	@echo "  make format-kotlin          - Apply ktlint to the Android and Halo Kotlin sources"
-	@echo "  make format-check           - Verify formatting without writing"
-	@echo "  make build                  - Build Go server (includes frontend build)"
-	@echo "  make fake-dev               - Run the server with fake backend (no containers)"
-	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
-	@echo "  make frontend-e2e           - Run Playwright end-to-end tests"
-	@echo "  make screenshots-check      - Verify deterministic frontend and Android screenshots"
-	@echo "  make screenshots-check-frontend - Verify only the frontend screenshots (no emulator)"
-	@echo "  make screenshots-check-android  - Verify only the Android screenshots (needs the emulator)"
-	@echo "  make screenshots-generate-frontend - Render the frontend screenshots without comparing"
-	@echo "  make screenshots-generate-android  - Render the Android screenshots without comparing"
-	@echo "  make screenshots-update     - Explicitly update deterministic screenshot baselines"
-	@echo "  make smoke                  - Run real runtime smoke test"
-	@echo "  make smoke-voice            - Run local voice WebRTC smoke test"
-	@echo "  make refresh-generated      - Regenerate API SDKs, AGENTS indexes, and backend architecture docs"
-	@echo "  make android-check          - Run Android lint, build, unit tests, and coverage"
-	@echo "  make android-e2e            - Start the emulator and run Android E2E tests"
-	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
-	@echo "  make android-start-emulator - Set up and start the headless Android emulator"
-	@echo "  make android-stop-emulator  - Stop the running Android emulator"
-	@echo "  make android-sdk            - Install required Android SDK packages"
-	@echo "  make git-hooks              - Install git pre-commit hooks"
-	@echo "  make upgrade                - Upgrade Go and pnpm dependencies"
+	@echo 'caic - Manage multiple coding agents'
+	@echo ''
+	@echo 'Available targets:'
+	@printf '  %-34s - %s\n' 'make fix' 'Apply every autofix, then refresh generated indexes'
+	@printf '  %-34s - %s\n' 'make verify' 'Fast static gate: lint, formatting, generated docs (pre-push gate)'
+	@printf '  %-34s - %s\n' 'make test' 'Run unit tests (Go, frontend, Python)'
+	@printf '  %-34s - %s\n' 'make test-e2e' 'Run Playwright end-to-end tests (slow, needs a frontend build)'
+	@printf '  %-34s - %s\n' 'make test-smoke' 'Run real runtime smoke test (slow, needs md containers)'
+	@printf '  %-34s - %s\n' 'make test-smoke-voice' 'Run local voice WebRTC smoke test (slow, needs audio setup)'
+	@printf '  %-34s - %s\n' 'make benchmark' 'Run Go and frontend benchmarks'
+	@printf '  %-34s - %s\n' 'make check-agent-logs' 'Validate recent v2 task logs against genai wire DTOs'
+	@printf '  %-34s - %s\n' 'make build' 'Build Go server (includes frontend build)'
+	@printf '  %-34s - %s\n' 'make fake-dev' 'Run the server with fake backend (no containers)'
+	@printf '  %-34s - %s\n' 'make frontend-dev' 'Run frontend dev server (http://localhost:5173)'
+	@printf '  %-34s - %s\n' 'make refresh-generated' 'Regenerate API SDKs, AGENTS indexes, and backend architecture docs'
+	@printf '  %-34s - %s\n' 'make android-check' 'Run Android lint, build, unit tests, and coverage'
+	@printf '  %-34s - %s\n' 'make android-e2e' 'Start the emulator and run Android E2E tests'
+	@printf '  %-34s - %s\n' 'make android-push-gomode' 'Build, install, and start GoMode APK on connected device'
+	@printf '  %-34s - %s\n' 'make android-start-emulator' 'Set up and start the headless Android emulator'
+	@printf '  %-34s - %s\n' 'make android-stop-emulator' 'Stop the running Android emulator'
+	@printf '  %-34s - %s\n' 'make android-sdk' 'Install required Android SDK packages'
+	@printf '  %-34s - %s\n' 'make screenshots-check' 'Verify deterministic frontend and Android screenshots'
+	@printf '  %-34s - %s\n' 'make screenshots-check-frontend' 'Verify only the frontend screenshots (no emulator)'
+	@printf '  %-34s - %s\n' 'make screenshots-check-android' 'Verify only the Android screenshots (needs the emulator)'
+	@printf '  %-34s - %s\n' 'make screenshots-generate-frontend' 'Render the frontend screenshots without comparing'
+	@printf '  %-34s - %s\n' 'make screenshots-generate-android' 'Render the Android screenshots without comparing'
+	@printf '  %-34s - %s\n' 'make screenshots-update' 'Explicitly update deterministic screenshot baselines'
+	@printf '  %-34s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
+	@printf '  %-34s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
 
 $(FRONTEND_STAMP): pnpm-lock.yaml
+	@echo 'Installing frontend dependencies (one-off after a lockfile change)...'
 	@pnpm install --frozen-lockfile --silent
 	@touch $@
 
@@ -82,24 +107,44 @@ refresh-generated: generate-sdks
 frontend-build: $(FRONTEND_STAMP) generate-sdks
 	@pnpm --silent build
 
-
-# methodfilecheck (see .golangci.yml) is a golangci-lint module plugin, so the
-# Go linting must run through the custom binary built from the published
-# plugin module.
-custom-gcl: .custom-gcl.yml
-	@golangci-lint custom --version $(GOLANGCI_LINT_VERSION)
+# The custom-gcl binary is not byte-reproducible (golangci-lint custom builds
+# in a random temp directory and stamps VCS metadata), so staleness is tracked
+# by hashing the build inputs instead of comparing mtimes: the plugin config
+# plus the pinned golangci-lint version and the Go toolchain. A branch switch
+# that recreates .custom-gcl.yml with a fresh timestamp must not trigger a
+# rebuild; a version or config change must.
+.PHONY: custom-gcl
+custom-gcl:
+	@want=$$({ sha256sum .custom-gcl.yml | cut -d" " -f1; echo "$(GOLANGCI_LINT_VERSION)"; go env GOVERSION; } | sha256sum | cut -d" " -f1); \
+	if [ -x custom-gcl ] && [ "$$want" = "$$(cat .custom-gcl.sha 2>/dev/null)" ]; then exit 0; fi; \
+	echo 'Building custom-gcl with the methodfilecheck plugin (one-off; runs when the config, golangci-lint version, or Go toolchain changes)...'; \
+	golangci-lint custom --version $(GOLANGCI_LINT_VERSION) && echo "$$want" > .custom-gcl.sha
 
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
-check: refresh-generated build lint-check test
+# The one static gate. Runs every check-only lane concurrently; the read-only
+# counterpart of fix and the pre-push gate. Independent of test.
+verify: tools custom-gcl $(FRONTEND_STAMP)
+	@./scripts/run-concurrently.sh go,buildtags,js,ts,eslint,python,shell,misc,kotlin '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)' '$(VERIFY_KOTLIN)'
 
-test-all:
-	@$(MAKE) check
-	@$(MAKE) frontend-e2e
-	@$(MAKE) android-check
-	@$(MAKE) android-e2e
-	@$(MAKE) screenshots-check
+# Apply every autofix, then refresh the generated file index and architecture
+# diagram. Order matters: the stylelint fixer runs last because its
+# cascade-sensitive rewrites must not be undone by another formatter, and the
+# index refresh runs after fixes so the index matches the fixed tree. Does not
+# re-check; run verify for that.
+fix: tools custom-gcl $(FRONTEND_STAMP)
+	@./custom-gcl run --show-stats=false ./... --fix
+	@golangci-lint fmt
+	@pnpm --silent lint:fix
+	@pnpm --silent format
+	@ruff check --quiet --fix .
+	@ruff format --quiet .
+	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || shfmt -w $$files
+	@pnpm --silent lint:style:fix
+	@./scripts/update_agents_file_index.py
+	@./scripts/update_backend_architecture.py
+	@changed=$$($(KOTLIN_FILES)); if [ -n "$$changed" ]; then $(ANDROID_GRADLE) :gomode:ktlintFormat :halo-sdk:ktlintFormat; fi
 
 check-agent-logs:
 	@go run ./backend/internal/cmd/check-agent-logs
@@ -116,10 +161,20 @@ test: $(FRONTEND_STAMP)
 	@pnpm --silent test:coverage
 	@python3 scripts/run_python_tests.py
 
-smoke:
+# End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
+# slow, needs a frontend build and the Playwright chromium build, and shares
+# backend/frontend/dist with build targets, so never run it concurrently with
+# them. CI runs it; verify and test do not.
+test-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
+	@pnpm --silent build
+	@pnpm --silent exec playwright test --config e2e/playwright.config.ts
+
+# Real runtime smoke tests exercise the md container path and cannot run
+# without that runtime (see the smoke build tag sources for what they need).
+test-smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
 
-smoke-voice:
+test-smoke-voice:
 	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./gomode/voicegateway/voicertc/
 
 coverage: $(FRONTEND_STAMP)
@@ -133,61 +188,16 @@ coverage: $(FRONTEND_STAMP)
 	@echo "=== Frontend coverage ==="
 	@pnpm --silent test:coverage
 
-lint-check: tools lint-go lint-frontend lint-python lint-kotlin lint-binaries lint-docs
+git-hooks:
+	@./scripts/install-git-hooks.sh
+	@git config merge.ours.driver true
+	@echo "✓ Git hooks installed"
 
-verify: format-check lint-check
+frontend-dev: $(FRONTEND_STAMP)
+	@pnpm --silent dev
 
-lint-docs:
-	@python3 scripts/update_agents_file_index.py --check
-	@python3 scripts/update_backend_architecture.py --check
-
-lint-go: tools custom-gcl
-	@./custom-gcl run --show-stats=false ./...
-	@# Compile-check build-tagged code (e.g. smoke tests) that golangci-lint skips.
-	@python3 scripts/lint_build_tags.py
-
-lint-frontend: $(FRONTEND_STAMP)
-	@pnpm --silent typecheck
-	@pnpm --silent lint:check
-	@pnpm --silent lint:style
-	@node scripts/lint_frontend_styles.mjs
-
-# Apply and verify the shared formatters: prettier for the web and prose sources,
-# gofmt and goimports through golangci-lint for Go, ruff format for the Python
-# scripts, and shfmt for the shell scripts.
-# Prettier skips whatever .prettierignore excludes (locks, generated code, testdata).
-# The stylelint fixer runs last: its cascade-sensitive rewrites must not be undone by
-# another formatter.
-format: tools format-kotlin $(FRONTEND_STAMP)
-	@pnpm --silent format
-	@golangci-lint fmt
-	@ruff format --quiet .
-	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || shfmt -w $$files
-	@pnpm --silent lint:style:fix
-
-format-check: tools $(FRONTEND_STAMP)
-	@pnpm --silent format:check
-	@out=$$(golangci-lint fmt --diff); [ -z "$$out" ] || { echo 'Go files need formatting (gofmt, goimports):' >&2; echo "$$out" >&2; exit 1; }
-	@ruff format --check --quiet .
-	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || { out=$$(shfmt -l $$files); [ -z "$$out" ] || { echo 'Shell files need shfmt:' >&2; echo "$$out" >&2; exit 1; }; }
-
-lint-python: tools
-	@ruff check --quiet .
-
-# Format the hand-written Kotlin modules. Generated SDK Kotlin is tool-owned and
-# intentionally not wired to ktlint.
-format-kotlin:
-	@$(ANDROID_GRADLE) :gomode:ktlintFormat :halo-sdk:ktlintFormat
-
-lint-kotlin:
-	@base="$(KOTLIN_BASE)"; \
-	changed=$$(git diff --name-only "$$base" -- '*.kt' '*.kts'; git ls-files --others --exclude-standard -- '*.kt' '*.kts'); \
-	if [ -n "$$changed" ]; then \
-		$(ANDROID_GRADLE) :gomode:ktlintCheck :halo-sdk:ktlintCheck; \
-	fi
-
-lint-binaries:
-	@python3 scripts/lint_binaries.py
+playwright-browser: $(FRONTEND_STAMP)
+	@pnpm --silent exec playwright install chromium
 
 android-sdk:
 	@python3 scripts/android_sdk.py check
@@ -219,31 +229,6 @@ android-push-gomode: android-check
 android-e2e: android-setup-emulator
 	@python3 scripts/android_start_emulator.py --reuse-connected-device
 	@python3 scripts/android_e2e.py
-
-# Apply the autofixes, then report what is left to fix by hand.
-lint: tools custom-gcl $(FRONTEND_STAMP)
-	@./custom-gcl run --show-stats=false ./... --fix
-	@pnpm --silent lint:fix
-	@pnpm --silent lint:style:fix
-	@ruff check --quiet --fix .
-	@./scripts/update_agents_file_index.py
-	@./scripts/update_backend_architecture.py
-	@$(MAKE) --no-print-directory lint-check
-
-git-hooks:
-	@./scripts/install-git-hooks.sh
-	@git config merge.ours.driver true
-	@echo "✓ Git hooks installed"
-
-frontend-dev: $(FRONTEND_STAMP)
-	@pnpm --silent dev
-
-playwright-browser: $(FRONTEND_STAMP)
-	@pnpm --silent exec playwright install chromium
-
-frontend-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
-	@pnpm --silent build
-	@pnpm --silent exec playwright test --config e2e/playwright.config.ts
 
 screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
 	@pnpm --silent build
