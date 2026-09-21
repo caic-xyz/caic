@@ -1,7 +1,8 @@
-// Incrementally folds canonical native activity across turns, compaction, and replaced
-// history. A terminal observation's result supersedes an earlier interim one.
+// Incrementally folds canonical native activity and background commands across turns,
+// compaction, and replaced history, and hosts the transcript anchor rules shared by every
+// anchored card kind. A terminal observation's result supersedes an earlier interim one.
 
-import type { EventMessage, EventNativeSubagent } from "@sdk/types.gen";
+import type { EventBackgroundCommand, EventMessage, EventNativeSubagent } from "@sdk/types.gen";
 
 import type { MessageGroup, MsgItem, Session, Turn } from "./grouping";
 
@@ -125,12 +126,14 @@ function itemAnchorTs(item: MsgItem): number | null {
 // renders below: the last content item at or before its anchor timestamp. A
 // settled card therefore appears where it settled, and a running card stays
 // where it spawned. An activity before any content, or without a timestamp,
-// falls back to the first anchorable item.
-export function assignNativeAnchors(
+// falls back to the first anchorable item. The anchor rules are shared by every
+// anchored card kind, so the entry type is the common timing shape rather than
+// one activity type.
+export function assignNativeAnchors<T extends { anchorTs: number }>(
   items: readonly MsgItem[],
-  activities: readonly NativeActivity[],
-): Map<string, NativeActivity[]> {
-  const byAnchor = new Map<string, NativeActivity[]>();
+  activities: readonly T[],
+): Map<string, T[]> {
+  const byAnchor = new Map<string, T[]>();
   const anchors: { key: string; endTs: number }[] = [];
   let previousEndTs = 0;
   for (const item of items) {
@@ -155,4 +158,82 @@ export function assignNativeAnchors(
     else byAnchor.set(key, [activity]);
   }
   return byAnchor;
+}
+
+export interface BackgroundCommandActivity extends EventBackgroundCommand {
+  startedAt: number | null;
+  endedAt: number | null;
+  // anchorTs positions the card in the transcript: the observation that created
+  // it or last changed its folded lifecycle status. A running card therefore
+  // stays at its spawn while the command runs, and moves once when it settles.
+  // 0 when no observation carried a timestamp.
+  anchorTs: number;
+}
+
+export function backgroundTerminal(status: EventBackgroundCommand["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
+// Missing terminal evidence is not success or interruption. A settled parent only
+// makes its last running observation stale; it never invents a terminal outcome.
+export function backgroundCommandStatus(activity: BackgroundCommandActivity, settled: boolean): string {
+  if (settled && activity.status === "running") return "Last observed running · outcome unknown";
+  return activity.status[0].toUpperCase() + activity.status.slice(1);
+}
+
+export class BackgroundCommandTracker {
+  private previous: EventMessage[] = [];
+  private byID = new Map<string, BackgroundCommandActivity>();
+  private snapshot: BackgroundCommandActivity[] = [];
+
+  derive(messages: EventMessage[]): BackgroundCommandActivity[] {
+    const reset =
+      messages.length < this.previous.length ||
+      (this.previous.length > 0 &&
+        (messages[0] !== this.previous[0] ||
+          messages[this.previous.length - 1] !== this.previous[this.previous.length - 1]));
+    let changed = reset;
+    if (reset) {
+      this.byID.clear();
+      this.previous = [];
+    }
+    for (let i = this.previous.length; i < messages.length; i++) {
+      const ev = messages[i];
+      const s = ev.backgroundCommand;
+      if (ev.kind !== "backgroundCommand" || !s?.id) continue;
+      const old = this.byID.get(s.id);
+      const status = old && (backgroundTerminal(old.status) || s.status === "running") ? old.status : s.status;
+      const next: BackgroundCommandActivity = {
+        ...s,
+        toolUseID: old?.toolUseID || s.toolUseID,
+        label: old?.label || s.label,
+        // A terminal observation upgrades an interim result, but terminal
+        // results do not overwrite each other.
+        result:
+          s.result && (!old?.result || (!backgroundTerminal(old.status) && backgroundTerminal(s.status)))
+            ? s.result
+            : old?.result || s.result,
+        outputRef: old?.outputRef || s.outputRef,
+        exitCode: old?.exitCode ?? s.exitCode,
+        status,
+        // Reposition only on creation or a folded status change, so repeated
+        // running observations do not drag an active card toward newer content.
+        anchorTs: !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
+        startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
+        endedAt: old?.endedAt ?? (backgroundTerminal(s.status) && ev.ts > 0 ? ev.ts : null),
+      };
+      if (
+        old &&
+        Object.keys(next).every(
+          (key) => next[key as keyof BackgroundCommandActivity] === old[key as keyof BackgroundCommandActivity],
+        )
+      )
+        continue;
+      this.byID.set(s.id, next);
+      changed = true;
+    }
+    this.previous = messages.slice();
+    if (changed) this.snapshot = [...this.byID.values()];
+    return this.snapshot;
+  }
 }

@@ -1,4 +1,4 @@
-// Correlates Claude Agent invocations with native task updates without treating shell tasks as agents.
+// Correlates Claude Agent invocations with native task updates and folds detached shell commands, keeping shell tasks out of the subagent card set.
 
 package claudecode
 
@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/maruel/genai/providers/claudecode"
+
+	"regexp"
+	"strconv"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -29,24 +32,14 @@ type decodedLine struct {
 // cards whenever a session resumes from history the wire has not seen: the
 // restored card would be keyed by the tool use seen at spawn time, and a later
 // task record keyed by the task ID would look like a different agent.
+// Its correlation maps are allocated with the wire, created once per session,
+// instead of by the first record that uses them.
 type nativeSubagents struct {
 	timeline   agent.NativeSubagentTimeline
 	tasks      map[string]agent.NativeSubagent // canonical task ID → card
 	byTool     map[string]string               // tool use ID → canonical task ID
 	tools      map[string]agent.NativeSubagent // tool use ID → delegation metadata
 	background map[string]bool                 // tool use ID → launched in background
-}
-
-// newNativeSubagents returns an adapter whose correlation maps are ready. A wire
-// is created once per session, so the maps are allocated with it instead of being
-// created by the first record that uses them.
-func newNativeSubagents() nativeSubagents {
-	return nativeSubagents{
-		tasks:      make(map[string]agent.NativeSubagent),
-		byTool:     make(map[string]string),
-		tools:      make(map[string]agent.NativeSubagent),
-		background: make(map[string]bool),
-	}
 }
 
 // parse folds one decoded line: a delegation tool use records the metadata that
@@ -223,5 +216,124 @@ func claudeSubagentStatus(status string) agent.NativeSubagentStatus {
 		return agent.NativeSubagentStatusInterrupted
 	default:
 		return agent.NativeSubagentStatusUnknown
+	}
+}
+
+// claudeShellIdentity is the canonical card identity for a Claude background
+// shell command. It is distinct from the native-subagent adapter's
+// "claude:task:" prefix so the two card sets cannot collide in logs even
+// though the wire addresses both by native task ID.
+func claudeShellIdentity(taskID string) string {
+	return "claude:shell:" + taskID
+}
+
+// exitCodePattern extracts the exit status Claude Code folds into a task
+// notification's summary prose ("Background command ... completed (exit code 0)").
+var exitCodePattern = regexp.MustCompile(`\(exit code (\d+)\)`)
+
+// backgroundCommands folds Claude's detached shell evidence into canonical
+// lifecycles. It shares the nativeSubagents adapter's decoded records but keeps
+// its own card set: a background bash command is not a subagent, and folding it
+// through the subagent timeline would feed the task state machine that only
+// detached delegations may drive.
+// Its card set is allocated with the wire, created once per session, instead of
+// by the first record that stores a card.
+type backgroundCommands struct {
+	timeline agent.BackgroundCommandTimeline
+	known    map[string]bool // canonical task ID → the wire has proven this command
+}
+
+// parse folds one decoded task record. Only a backgrounded task_started proves
+// a command: foreground shell tasks settle inside their own tool call and must
+// never become cards, and an update or notification for a task the wire has not
+// proven cannot invent one.
+func (b *backgroundCommands) parse(record decodedLine) []agent.Message {
+	ev := record.system
+	if ev == nil {
+		return nil
+	}
+	switch ev.Subtype {
+	case claudecode.SystemTaskStarted:
+		return b.parseStarted(ev)
+	case claudecode.SystemTaskUpdated:
+		return b.parseUpdated(ev)
+	case claudecode.SystemTaskNotification:
+		return b.parseNotification(ev)
+	default:
+		return nil
+	}
+}
+
+// parseStarted proves a background command. A local_bash task started without
+// is_backgrounded runs synchronously inside its tool result; only a detached
+// one outlives that result and needs a card.
+func (b *backgroundCommands) parseStarted(ev *claudecode.OutputSystemMsg) []agent.Message {
+	if ev.TaskType != "local_bash" || !ev.IsBackgrounded || ev.TaskID == "" {
+		return nil
+	}
+	id := claudeShellIdentity(ev.TaskID)
+	b.known[id] = true
+	s := agent.BackgroundCommand{ID: id, Label: ev.Description, Status: agent.BackgroundCommandStatusRunning, ToolUseID: ev.ToolUseID}
+	return b.timeline.Observe(&s)
+}
+
+// parseUpdated folds a task_updated status patch into an already-proven
+// command. Claude reports patches without repeating the task type, so the
+// patch is trusted only for cards the wire has already seen.
+func (b *backgroundCommands) parseUpdated(ev *claudecode.OutputSystemMsg) []agent.Message {
+	if ev.TaskID == "" {
+		return nil
+	}
+	id := claudeShellIdentity(ev.TaskID)
+	if !b.known[id] {
+		return nil
+	}
+	s := agent.BackgroundCommand{ID: id}
+	if ev.Patch.Status != "" {
+		s.Status = claudeBackgroundCommandStatus(string(ev.Patch.Status))
+	}
+	if ev.Patch.IsBackgrounded {
+		b.known[id] = true
+	}
+	return b.timeline.Observe(&s)
+}
+
+// parseNotification folds a task_notification into an already-proven command.
+// The notification is the authoritative terminal report: its summary carries
+// the outcome prose and its output_file points at the captured output.
+func (b *backgroundCommands) parseNotification(ev *claudecode.OutputSystemMsg) []agent.Message {
+	if ev.TaskID == "" {
+		return nil
+	}
+	id := claudeShellIdentity(ev.TaskID)
+	if !b.known[id] {
+		return nil
+	}
+	s := agent.BackgroundCommand{ID: id, Status: claudeBackgroundCommandStatus(ev.Status), Result: ev.Summary, OutputRef: ev.OutputFile}
+	if m := exitCodePattern.FindStringSubmatch(ev.Summary); m != nil {
+		if code, err := strconv.Atoi(m[1]); err == nil {
+			s.ExitCode = &code
+		}
+	}
+	return b.timeline.Observe(&s)
+}
+
+// claudeBackgroundCommandStatus maps the protocol's reported task status onto
+// the canonical lifecycle. "pending" is a queued command that has not started,
+// which the canonical vocabulary does not distinguish from running; "killed"
+// and its synonyms are interruptions. Anything unrecognized keeps the card's
+// existing state instead of inventing one.
+func claudeBackgroundCommandStatus(status string) agent.BackgroundCommandStatus {
+	switch status {
+	case "running", "in_progress", "pending":
+		return agent.BackgroundCommandStatusRunning
+	case "completed":
+		return agent.BackgroundCommandStatusCompleted
+	case "failed", "error":
+		return agent.BackgroundCommandStatusFailed
+	case "killed", "stopped", "interrupted":
+		return agent.BackgroundCommandStatusInterrupted
+	default:
+		return ""
 	}
 }

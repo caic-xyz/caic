@@ -188,6 +188,7 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let SubagentStart = EventKind("subagentStart")
     public static let SubagentEnd = EventKind("subagentEnd")
     public static let NativeSubagent = EventKind("nativeSubagent")
+    public static let BackgroundCommand = EventKind("backgroundCommand")
     public static let Log = EventKind("log")
     public static let ToolOutputDelta = EventKind("toolOutputDelta")
     public static let Widget = EventKind("widget")
@@ -1349,6 +1350,20 @@ public struct EventNativeSubagent: Codable {
     public let background: Bool?
 }
 
+/// EventBackgroundCommand reports one harness-native detached shell command's
+/// folded lifecycle. ExitCode is the command's numeric outcome when the harness
+/// reported one; OutputRef is an opaque harness-owned output reference, not a
+/// caic resource.
+public struct EventBackgroundCommand: Codable {
+    public let id: String
+    public let label: String?
+    public let status: String
+    public let result: String?
+    public let exitCode: Int?
+    public let outputRef: String?
+    public let toolUseID: String?
+}
+
 /// EventLog is a provisioning/startup log line from the runtime backend.
 public struct EventLog: Codable {
     public let line: String
@@ -1459,6 +1474,7 @@ public struct EventMessage: Codable {
     public let subagentStart: EventSubagentStart?
     public let subagentEnd: EventSubagentEnd?
     public let nativeSubagent: EventNativeSubagent?
+    public let backgroundCommand: EventBackgroundCommand?
     public let log: EventLog?
     public let toolOutputDelta: EventToolOutputDelta?
     public let widget: EventWidget?

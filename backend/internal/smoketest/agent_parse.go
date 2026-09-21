@@ -110,6 +110,12 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			return nil, err
 		}
 		return []agent.Message{&m}, nil
+	case "background_command":
+		var m agent.BackgroundCommandMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	case "rate_limit":
 		var m agent.RateLimitMessage
 		if err := json.Unmarshal(line, &m); err != nil {

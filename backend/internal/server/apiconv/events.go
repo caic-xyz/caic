@@ -274,6 +274,20 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				Background: m.Subagent.Background,
 			},
 		}}
+	case *agent.BackgroundCommandMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindBackgroundCommand,
+			Ts:   ts,
+			BackgroundCommand: &v1.EventBackgroundCommand{
+				ID:        m.Command.ID,
+				Label:     m.Command.Label,
+				Status:    string(m.Command.Status),
+				Result:    m.Command.Result,
+				ExitCode:  m.Command.ExitCode,
+				OutputRef: m.Command.OutputRef,
+				ToolUseID: m.Command.ToolUseID,
+			},
+		}}
 	case *agent.DiffStatMessage:
 		return []v1.EventMessage{{
 			Kind:     v1.EventKindDiffStat,

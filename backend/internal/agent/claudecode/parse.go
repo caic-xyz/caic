@@ -68,8 +68,8 @@ type WidgetTracker struct {
 	bufferedJSONBytes int
 }
 
-// NewWidgetTracker creates a new WidgetTracker.
-func NewWidgetTracker() *WidgetTracker {
+// newWidgetTracker returns a WidgetTracker whose maps are ready.
+func newWidgetTracker() *WidgetTracker {
 	return &WidgetTracker{
 		activeWidgets: make(map[int]string),
 		accum:         make(map[int]string),
@@ -334,14 +334,20 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 		return nil, err
 	}
 	switch w.Subtype {
-	case claudecode.SystemTaskStarted, "task_updated", claudecode.SystemTaskNotification:
+	case claudecode.SystemTaskStarted, claudecode.SystemTaskUpdated, claudecode.SystemTaskNotification:
 		// Lifecycle correlation belongs to the stateful adapter, which requires
 		// task_type "local_agent" as proof, so hand it the decoded record rather
 		// than let it decode the same line again. These records also describe shell
 		// tasks, so they stay out of the transcript: rendering them would add
 		// "[task_started]" noise and split surrounding tool groups, and they are
-		// not subagent evidence on their own.
+		// not subagent evidence on their own. The background-command adapter folds
+		// the detached shell subset from the same record.
 		record.system = &w
+		return nil, nil
+	case claudecode.SystemBackgroundTasksChanged:
+		// A snapshot of the live background-task list; the per-task records above
+		// already carry the same facts with richer lifecycle detail, so emitting
+		// the snapshot would only duplicate them as bracket noise.
 		return nil, nil
 	case claudecode.SystemStatus, claudecode.SystemTaskProgress, claudecode.SystemCommandsChanged, claudecode.SystemTurnDuration:
 		return nil, nil

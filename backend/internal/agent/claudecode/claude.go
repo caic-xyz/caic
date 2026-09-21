@@ -126,6 +126,7 @@ var _ agent.Backend = (*Backend)(nil)
 // singleton.
 type wireFormat struct {
 	nativeSubagents              nativeSubagents
+	backgroundCommands           backgroundCommands
 	widgetTracker                *WidgetTracker
 	pendingReasoningOutputTokens int
 	pendingReasoningEstimate     int
@@ -136,8 +137,14 @@ type wireFormat struct {
 // Start and AttachRelay. Schema drift is checked offline by check-agent-logs.
 func newWireFormat() *wireFormat {
 	return &wireFormat{
-		nativeSubagents: newNativeSubagents(),
-		widgetTracker:   NewWidgetTracker(),
+		nativeSubagents: nativeSubagents{
+			tasks:      make(map[string]agent.NativeSubagent),
+			byTool:     make(map[string]string),
+			tools:      make(map[string]agent.NativeSubagent),
+			background: make(map[string]bool),
+		},
+		backgroundCommands: backgroundCommands{known: make(map[string]bool)},
+		widgetTracker:      newWidgetTracker(),
 	}
 }
 
@@ -155,6 +162,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return nil, err
 	}
 	msgs = append(msgs, native...)
+	msgs = append(msgs, w.backgroundCommands.parse(record)...)
 	for _, msg := range msgs {
 		switch m := msg.(type) {
 		case *agent.InitMessage:

@@ -27,6 +27,7 @@ export type EventKind =
   | "subagentStart"
   | "subagentEnd"
   | "nativeSubagent"
+  | "backgroundCommand"
   | "log"
   | "toolOutputDelta"
   | "widget"
@@ -55,6 +56,7 @@ export const EventKindThinkingDelta: EventKind = "thinkingDelta";
 export const EventKindSubagentStart: EventKind = "subagentStart";
 export const EventKindSubagentEnd: EventKind = "subagentEnd";
 export const EventKindNativeSubagent: EventKind = "nativeSubagent";
+export const EventKindBackgroundCommand: EventKind = "backgroundCommand";
 export const EventKindLog: EventKind = "log";
 export const EventKindToolOutputDelta: EventKind = "toolOutputDelta";
 export const EventKindWidget: EventKind = "widget";
@@ -346,6 +348,22 @@ export interface EventNativeSubagent {
   background?: boolean;
 }
 
+/**
+ * EventBackgroundCommand reports one harness-native detached shell command's
+ * folded lifecycle. ExitCode is the command's numeric outcome when the harness
+ * reported one; OutputRef is an opaque harness-owned output reference, not a
+ * caic resource.
+ */
+export interface EventBackgroundCommand {
+  id: string;
+  label?: string;
+  status: string;
+  result?: string;
+  exitCode?: number /* int */;
+  outputRef?: string;
+  toolUseID?: string;
+}
+
 /** EventLog is a provisioning/startup log line from the runtime backend. */
 export interface EventLog {
   line: string;
@@ -462,6 +480,7 @@ export interface EventMessage {
   subagentStart?: EventSubagentStart;
   subagentEnd?: EventSubagentEnd;
   nativeSubagent?: EventNativeSubagent;
+  backgroundCommand?: EventBackgroundCommand;
   log?: EventLog;
   toolOutputDelta?: EventToolOutputDelta;
   widget?: EventWidget;

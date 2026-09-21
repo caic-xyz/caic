@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -303,6 +303,19 @@ export function validateEventNativeSubagent(raw: ValidatorInput): EventNativeSub
   };
 }
 
+export function validateEventBackgroundCommand(raw: ValidatorInput): EventBackgroundCommand {
+  const obj = asObject(raw, "EventBackgroundCommand");
+  return {
+    id: asString(obj["id"], "EventBackgroundCommand.id"),
+    label: (obj["label"] === undefined || obj["label"] === null ? undefined : asString(obj["label"], "EventBackgroundCommand.label")),
+    status: asString(obj["status"], "EventBackgroundCommand.status"),
+    result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "EventBackgroundCommand.result")),
+    exitCode: (obj["exitCode"] === undefined || obj["exitCode"] === null ? undefined : asNumber(obj["exitCode"], "EventBackgroundCommand.exitCode")),
+    outputRef: (obj["outputRef"] === undefined || obj["outputRef"] === null ? undefined : asString(obj["outputRef"], "EventBackgroundCommand.outputRef")),
+    toolUseID: (obj["toolUseID"] === undefined || obj["toolUseID"] === null ? undefined : asString(obj["toolUseID"], "EventBackgroundCommand.toolUseID")),
+  };
+}
+
 export function validateEventLog(raw: ValidatorInput): EventLog {
   const obj = asObject(raw, "EventLog");
   return {
@@ -453,6 +466,9 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
       break;
     case "nativeSubagent":
       result.nativeSubagent = validateEventNativeSubagent(obj["nativeSubagent"]);
+      break;
+    case "backgroundCommand":
+      result.backgroundCommand = validateEventBackgroundCommand(obj["backgroundCommand"]);
       break;
     case "log":
       result.log = validateEventLog(obj["log"]);

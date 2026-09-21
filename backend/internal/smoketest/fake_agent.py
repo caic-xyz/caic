@@ -26,6 +26,7 @@ JOKES = [
 NATURAL_ASK_RE = re.compile(r"\b(?:which|should i|choose|prefer)\b")
 NATURAL_DEMO_RE = re.compile(r"\b(?:fix|bug|refactor|update|add|implement)\b")
 NATURAL_NATIVE_RE = re.compile(r"\bparallel subagents?\b")
+NATURAL_BACKGROUND_RE = re.compile(r"\bbackground commands?\b")
 NATURAL_PLAN_RE = re.compile(r"\b(?:plan|design|architect|outline)\b")
 
 TOOL_DURATIONS_MS = {
@@ -567,6 +568,53 @@ def emit_quota_recovery_turn(turns: int) -> None:
     emit_result(turns, "Quota exhausted")
 
 
+def emit_background_commands_turn(turns: int) -> None:
+    """Emit detached shell lifecycles; one settles, one stays running past the result."""
+    emit_text("Kicking off the lint check in the background.")
+    emit_tool_use("bgtool", "Bash", {"command": "pnpm install && pnpm lint", "run_in_background": True})
+    emit(
+        {
+            "type": "background_command",
+            "command": {
+                "id": "claude:shell:lint1",
+                "label": "Install and run lint",
+                "status": "running",
+                "tool_use_id": "bgtool",
+            },
+        }
+    )
+    emit_tool_result("bgtool", 120)
+    # A second detached command the turn never waits on.
+    emit(
+        {
+            "type": "background_command",
+            "command": {
+                "id": "claude:shell:watch1",
+                "label": "Watch build output",
+                "status": "running",
+                "tool_use_id": "bgtool",
+            },
+        }
+    )
+    emit_text("The lint command finished while I kept working.")
+    emit(
+        {
+            "type": "background_command",
+            "command": {
+                "id": "claude:shell:lint1",
+                "status": "completed",
+                "result": 'Background command "Install and run lint" completed (exit code 0)',
+                "exit_code": 0,
+                "output_ref": "/tmp/tasks/lint1.output",
+            },
+        }
+    )
+    # The second command stays running past the result, so a settled replay must
+    # report it as last-observed-running instead of inventing an outcome.
+    time.sleep(0.05)
+    emit_result(turns, "Background commands finished")
+
+
 def emit_native_subagents_turn(turns: int) -> None:
     """Emit canonical concurrent activity; this is UI coverage, not harness evidence."""
     # Parent narration before, between, and after the runs gives the transcript
@@ -668,6 +716,9 @@ def main() -> None:
         if line.startswith("FAKE_NATIVE_SUBAGENTS"):
             emit_native_subagents_turn(turns)
             continue
+        if line.startswith("FAKE_BACKGROUND_COMMANDS"):
+            emit_background_commands_turn(turns)
+            continue
         if line == "FAKE_LIFECYCLE" or line.startswith("FAKE_LIFECYCLE "):
             emit_lifecycle_turn(turns)
             continue
@@ -691,6 +742,9 @@ def main() -> None:
         lower = line.lower()
         if NATURAL_NATIVE_RE.search(lower):
             emit_native_subagents_turn(turns)
+            continue
+        if NATURAL_BACKGROUND_RE.search(lower):
+            emit_background_commands_turn(turns)
             continue
         if NATURAL_PLAN_RE.search(lower):
             emit_plan_turn(turns)

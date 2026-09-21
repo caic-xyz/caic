@@ -207,7 +207,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 		threadID:          opts.ResumeSessionID,
 		requestedEffort:   opts.Effort,
 		suppressUserInput: true,
-		nativeSubagents:   newNativeSubagents(),
+		nativeSubagents:   nativeSubagents{spawns: make(map[string]agent.NativeSubagent)},
 	}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
@@ -215,7 +215,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
-	return &wireFormat{nativeSubagents: newNativeSubagents()}
+	return &wireFormat{nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}
 }
 
 var (
@@ -297,7 +297,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: newNativeSubagents()}
+	w := &wireFormat{requestedEffort: opts.Effort, nativeSubagents: nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct relay reader: %w", err)

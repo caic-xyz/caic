@@ -631,6 +631,63 @@ type NativeSubagentMessage struct {
 // Type implements Message.
 func (m *NativeSubagentMessage) Type() string { return "native_subagent" }
 
+// BackgroundCommandStatus describes the lifecycle state a harness actually
+// reported for a detached shell command. The vocabulary is deliberately
+// minimal: a shell command only runs and then settles, so there is no paused
+// or unknown state and none of NativeSubagentStatus's resumable semantics.
+type BackgroundCommandStatus string
+
+// Terminal reports whether the status ends a background-command lifecycle.
+func (s BackgroundCommandStatus) Terminal() bool {
+	switch s {
+	case BackgroundCommandStatusCompleted, BackgroundCommandStatusFailed, BackgroundCommandStatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	// BackgroundCommandStatusRunning means the harness reported the command as active.
+	BackgroundCommandStatusRunning BackgroundCommandStatus = "running"
+	// BackgroundCommandStatusCompleted means the harness reported the command finished.
+	BackgroundCommandStatusCompleted BackgroundCommandStatus = "completed"
+	// BackgroundCommandStatusFailed means the harness reported the command failed.
+	BackgroundCommandStatusFailed BackgroundCommandStatus = "failed"
+	// BackgroundCommandStatusInterrupted means the harness reported the command
+	// was killed, stopped, or otherwise cut short before finishing.
+	BackgroundCommandStatusInterrupted BackgroundCommandStatus = "interrupted"
+)
+
+// BackgroundCommand is one harness-owned detached shell command. ID is an
+// opaque harness identity, prefixed per harness ("claude:shell:", ...) so
+// card sets from different adapters never collide in logs. ExitCode is the
+// canonical numeric outcome the harness reported; it stays nil when the
+// harness did not expose one, even for a terminal status.
+type BackgroundCommand struct {
+	ID     string                  `json:"id"`
+	Label  string                  `json:"label,omitempty"`
+	Status BackgroundCommandStatus `json:"status"`
+	Result string                  `json:"result,omitempty"`
+	// ExitCode is the command's exit status when the harness reported one.
+	ExitCode *int `json:"exit_code,omitempty"`
+	// OutputRef is an opaque reference to the command's captured output (a
+	// harness-owned path or buffer id); it is not a caic-owned resource.
+	OutputRef string `json:"output_ref,omitempty"`
+	// ToolUseID correlates the command with the tool call that spawned it.
+	ToolUseID string `json:"tool_use_id,omitempty"`
+}
+
+// BackgroundCommandMessage records an observed background-command lifecycle
+// update. It is informational harness activity: unlike a background subagent,
+// a detached shell command never justifies keeping its task running.
+type BackgroundCommandMessage struct {
+	Command BackgroundCommand `json:"command"`
+}
+
+// Type implements Message.
+func (m *BackgroundCommandMessage) Type() string { return "background_command" }
+
 // MaxWidgetHTMLBytes is the maximum size of widget HTML the backend will
 // forward to clients. Widgets exceeding this limit are replaced with an
 // error message.

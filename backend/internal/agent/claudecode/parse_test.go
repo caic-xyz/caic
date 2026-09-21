@@ -66,7 +66,7 @@ func TestWidgetTrackerBounds(t *testing.T) {
 
 	t.Run("tracked blocks", func(t *testing.T) {
 		t.Parallel()
-		wt := NewWidgetTracker()
+		wt := newWidgetTracker()
 		for index := range maxTrackedWidgetBlocks + 8 {
 			start(t, wt, index)
 		}
@@ -80,7 +80,7 @@ func TestWidgetTrackerBounds(t *testing.T) {
 
 	t.Run("aggregate JSON", func(t *testing.T) {
 		t.Parallel()
-		wt := NewWidgetTracker()
+		wt := newWidgetTracker()
 		start(t, wt, 0)
 		stream(t, wt, map[string]any{
 			"type": "content_block_delta", "index": 0,
@@ -957,7 +957,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("WidgetStreamStart", func(t *testing.T) {
 		t.Parallel()
-		wt := NewWidgetTracker()
+		wt := newWidgetTracker()
 		line := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_2","name":"show_widget"}}}`
 		msgs, _, err := parseMessageWithTracker([]byte(line), wt)
 		if err != nil {
@@ -972,7 +972,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("WidgetInputDelta", func(t *testing.T) {
 		t.Parallel()
-		wt := NewWidgetTracker()
+		wt := newWidgetTracker()
 		// Register a widget block.
 		start := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_3","name":"show_widget"}}}`
 		if _, _, err := parseMessageWithTracker([]byte(start), wt); err != nil {
@@ -1012,7 +1012,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("WidgetBlockStop", func(t *testing.T) {
 		t.Parallel()
-		wt := NewWidgetTracker()
+		wt := newWidgetTracker()
 		start := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_4","name":"show_widget"}}}`
 		if _, _, err := parseMessageWithTracker([]byte(start), wt); err != nil {
 			t.Fatal(err)

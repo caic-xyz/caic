@@ -18,31 +18,32 @@ type EventKind string
 
 // Event kind constants.
 const (
-	EventKindInit            EventKind = "init"
-	EventKindText            EventKind = "text"
-	EventKindTextDelta       EventKind = "textDelta"
-	EventKindToolUse         EventKind = "toolUse"
-	EventKindToolResult      EventKind = "toolResult"
-	EventKindAsk             EventKind = "ask"
-	EventKindUsage           EventKind = "usage"
-	EventKindResult          EventKind = "result"
-	EventKindSystem          EventKind = "system"
-	EventKindUserInput       EventKind = "userInput"
-	EventKindTodo            EventKind = "todo"
-	EventKindDiffStat        EventKind = "diffStat"
-	EventKindError           EventKind = "error"
-	EventKindThinking        EventKind = "thinking"
-	EventKindThinkingDelta   EventKind = "thinkingDelta"
-	EventKindSubagentStart   EventKind = "subagentStart"
-	EventKindSubagentEnd     EventKind = "subagentEnd"
-	EventKindNativeSubagent  EventKind = "nativeSubagent"
-	EventKindLog             EventKind = "log"
-	EventKindToolOutputDelta EventKind = "toolOutputDelta"
-	EventKindWidget          EventKind = "widget"
-	EventKindWidgetDelta     EventKind = "widgetDelta"
-	EventKindRateLimit       EventKind = "rateLimit"
-	EventKindStats           EventKind = "stats"
-	EventKindCommitSnapshot  EventKind = "commitSnapshot"
+	EventKindInit              EventKind = "init"
+	EventKindText              EventKind = "text"
+	EventKindTextDelta         EventKind = "textDelta"
+	EventKindToolUse           EventKind = "toolUse"
+	EventKindToolResult        EventKind = "toolResult"
+	EventKindAsk               EventKind = "ask"
+	EventKindUsage             EventKind = "usage"
+	EventKindResult            EventKind = "result"
+	EventKindSystem            EventKind = "system"
+	EventKindUserInput         EventKind = "userInput"
+	EventKindTodo              EventKind = "todo"
+	EventKindDiffStat          EventKind = "diffStat"
+	EventKindError             EventKind = "error"
+	EventKindThinking          EventKind = "thinking"
+	EventKindThinkingDelta     EventKind = "thinkingDelta"
+	EventKindSubagentStart     EventKind = "subagentStart"
+	EventKindSubagentEnd       EventKind = "subagentEnd"
+	EventKindNativeSubagent    EventKind = "nativeSubagent"
+	EventKindBackgroundCommand EventKind = "backgroundCommand"
+	EventKindLog               EventKind = "log"
+	EventKindToolOutputDelta   EventKind = "toolOutputDelta"
+	EventKindWidget            EventKind = "widget"
+	EventKindWidgetDelta       EventKind = "widgetDelta"
+	EventKindRateLimit         EventKind = "rateLimit"
+	EventKindStats             EventKind = "stats"
+	EventKindCommitSnapshot    EventKind = "commitSnapshot"
 
 	// TODO: remove subagentStart and subagentEnd with their payload types and
 	// EventMessage fields once SDK consumers no longer switch on the kinds.
@@ -56,33 +57,34 @@ type TaskHistoryStreamError struct {
 // EventMessage is a single SSE event in the backend-neutral stream
 // (/api/caic/v1/tasks/{id}/events). All backends produce these events.
 type EventMessage struct {
-	Kind            EventKind             `json:"kind"`
-	Ts              int64                 `json:"ts"`
-	Init            *EventInit            `json:"init,omitempty"`
-	Text            *EventText            `json:"text,omitempty"`
-	TextDelta       *EventTextDelta       `json:"textDelta,omitempty"`
-	ToolUse         *EventToolUse         `json:"toolUse,omitempty"`
-	ToolResult      *EventToolResult      `json:"toolResult,omitempty"`
-	Ask             *EventAsk             `json:"ask,omitempty"`
-	Usage           *EventUsage           `json:"usage,omitempty"`
-	Result          *EventResult          `json:"result,omitempty"`
-	System          *EventSystem          `json:"system,omitempty"`
-	UserInput       *EventUserInput       `json:"userInput,omitempty"`
-	Todo            *EventTodo            `json:"todo,omitempty"`
-	DiffStat        *EventDiffStat        `json:"diffStat,omitempty"`
-	Error           *EventError           `json:"error,omitempty"`
-	Thinking        *EventThinking        `json:"thinking,omitempty"`
-	ThinkingDelta   *EventThinkingDelta   `json:"thinkingDelta,omitempty"`
-	SubagentStart   *EventSubagentStart   `json:"subagentStart,omitempty"`
-	SubagentEnd     *EventSubagentEnd     `json:"subagentEnd,omitempty"`
-	NativeSubagent  *EventNativeSubagent  `json:"nativeSubagent,omitempty"`
-	Log             *EventLog             `json:"log,omitempty"`
-	ToolOutputDelta *EventToolOutputDelta `json:"toolOutputDelta,omitempty"`
-	Widget          *EventWidget          `json:"widget,omitempty"`
-	WidgetDelta     *EventWidgetDelta     `json:"widgetDelta,omitempty"`
-	RateLimit       *EventRateLimit       `json:"rateLimit,omitempty"`
-	Stats           *EventStats           `json:"stats,omitempty"`
-	CommitSnapshot  *EventCommitSnapshot  `json:"commitSnapshot,omitempty"`
+	Kind              EventKind               `json:"kind"`
+	Ts                int64                   `json:"ts"`
+	Init              *EventInit              `json:"init,omitempty"`
+	Text              *EventText              `json:"text,omitempty"`
+	TextDelta         *EventTextDelta         `json:"textDelta,omitempty"`
+	ToolUse           *EventToolUse           `json:"toolUse,omitempty"`
+	ToolResult        *EventToolResult        `json:"toolResult,omitempty"`
+	Ask               *EventAsk               `json:"ask,omitempty"`
+	Usage             *EventUsage             `json:"usage,omitempty"`
+	Result            *EventResult            `json:"result,omitempty"`
+	System            *EventSystem            `json:"system,omitempty"`
+	UserInput         *EventUserInput         `json:"userInput,omitempty"`
+	Todo              *EventTodo              `json:"todo,omitempty"`
+	DiffStat          *EventDiffStat          `json:"diffStat,omitempty"`
+	Error             *EventError             `json:"error,omitempty"`
+	Thinking          *EventThinking          `json:"thinking,omitempty"`
+	ThinkingDelta     *EventThinkingDelta     `json:"thinkingDelta,omitempty"`
+	SubagentStart     *EventSubagentStart     `json:"subagentStart,omitempty"`
+	SubagentEnd       *EventSubagentEnd       `json:"subagentEnd,omitempty"`
+	NativeSubagent    *EventNativeSubagent    `json:"nativeSubagent,omitempty"`
+	BackgroundCommand *EventBackgroundCommand `json:"backgroundCommand,omitempty"`
+	Log               *EventLog               `json:"log,omitempty"`
+	ToolOutputDelta   *EventToolOutputDelta   `json:"toolOutputDelta,omitempty"`
+	Widget            *EventWidget            `json:"widget,omitempty"`
+	WidgetDelta       *EventWidgetDelta       `json:"widgetDelta,omitempty"`
+	RateLimit         *EventRateLimit         `json:"rateLimit,omitempty"`
+	Stats             *EventStats             `json:"stats,omitempty"`
+	CommitSnapshot    *EventCommitSnapshot    `json:"commitSnapshot,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -343,6 +345,20 @@ type EventNativeSubagent struct {
 // EventLog is a provisioning/startup log line from the runtime backend.
 type EventLog struct {
 	Line string `json:"line"`
+}
+
+// EventBackgroundCommand reports one harness-native detached shell command's
+// folded lifecycle. ExitCode is the command's numeric outcome when the harness
+// reported one; OutputRef is an opaque harness-owned output reference, not a
+// caic resource.
+type EventBackgroundCommand struct {
+	ID        string `json:"id"`
+	Label     string `json:"label,omitempty"`
+	Status    string `json:"status"`
+	Result    string `json:"result,omitempty"`
+	ExitCode  *int   `json:"exitCode,omitempty"`
+	OutputRef string `json:"outputRef,omitempty"`
+	ToolUseID string `json:"toolUseID,omitempty"`
 }
 
 // EventToolOutputDelta is a streaming output fragment from a running tool.

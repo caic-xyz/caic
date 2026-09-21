@@ -1,4 +1,4 @@
-// Benchmarks for the Claude wire parser and its native-subagent adapter.
+// Benchmarks for the Claude wire parser and its stateful lifecycle adapters.
 
 package claudecode
 
@@ -30,6 +30,47 @@ func BenchmarkParseNativeSubagentLines(b *testing.B) {
 		{
 			name: "task_notification",
 			line: `{"type":"system","subtype":"task_notification","task_id":"agent-1","tool_use_id":"toolu_1","status":"completed","output_file":"/workspace/tasks/agent-1.output","summary":"a joke","uuid":"u","session_id":"s"}`,
+		},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			line := []byte(test.line)
+			wire := New().NewWire()
+			b.ReportAllocs()
+			b.SetBytes(int64(len(line)))
+			b.ResetTimer()
+			for range b.N {
+				if _, err := wire.ParseMessage(line); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParseBackgroundCommandLines measures the per-line cost the
+// background-command adapter adds to every Claude record: the detached shell
+// start that proves a command, the notification that settles it, and the
+// background_tasks_changed snapshot that must fold to nothing.
+func BenchmarkParseBackgroundCommandLines(b *testing.B) {
+	for _, test := range []struct {
+		name string
+		line string
+	}{
+		{
+			name: "task_started_background",
+			line: `{"type":"system","subtype":"task_started","task_id":"shell-1","tool_use_id":"toolu_1","description":"Run lint","is_backgrounded":true,"task_type":"local_bash","uuid":"u","session_id":"s"}`,
+		},
+		{
+			name: "task_notification_background",
+			line: `{"type":"system","subtype":"task_notification","task_id":"shell-1","tool_use_id":"toolu_1","status":"completed","output_file":"/workspace/tasks/shell-1.output","summary":"Background command \"Run lint\" completed (exit code 0)","uuid":"u","session_id":"s"}`,
+		},
+		{
+			name: "background_tasks_changed",
+			line: `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"shell-1","task_type":"local_bash","description":"Run lint"}],"uuid":"u","session_id":"s"}`,
+		},
+		{
+			name: "task_started_foreground",
+			line: `{"type":"system","subtype":"task_started","task_id":"shell-2","tool_use_id":"toolu_2","description":"Commit","is_backgrounded":false,"task_type":"local_bash","uuid":"u","session_id":"s"}`,
 		},
 	} {
 		b.Run(test.name, func(b *testing.B) {

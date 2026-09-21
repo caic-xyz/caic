@@ -28,3 +28,37 @@ for (const width of [390, 1280]) {
     await expect(page.getByText("Paused", { exact: true })).toBeVisible();
   });
 }
+
+for (const width of [390, 1280]) {
+  test(`background command lifecycle survives reload at ${width}px`, async ({ page, uniquePrompt }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+    await fillContentEditable(page.getByTestId("prompt-input"), uniquePrompt("FAKE_BACKGROUND_COMMANDS"));
+    await page.getByTestId("submit-task").click();
+    await expect(page).toHaveURL(/\/task\//);
+    // The spawning tool row resolves its chip to the command's exit code.
+    const chip = page.getByTestId("background-command-chip");
+    await expect(chip.first()).toContainText(/exit 0|running in background/);
+    // Cards render inline in the transcript, where each lifecycle settled.
+    const cards = page.getByTestId("background-command-card");
+    await expect(cards).toHaveCount(2);
+    const lintCard = page.locator('[data-command-id="claude:shell:lint1"]');
+    await lintCard.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(lintCard.getByText("claude:shell:lint1")).toBeVisible();
+    await expect(lintCard.getByText("/tmp/tasks/lint1.output")).toBeVisible();
+    for (const card of await cards.all()) {
+      await expect(card.getByRole("link")).toHaveCount(0);
+      expect(await card.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(width);
+    }
+    // One command settled (exit 0); the other is still running, and the replay
+    // keeps reporting it as running instead of inventing an outcome.
+    const watchCard = page.locator('[data-command-id="claude:shell:watch1"]');
+    await page.reload();
+    await expect(cards).toHaveCount(2);
+    await expect(page.getByText("exit 0").first()).toBeVisible();
+    await expect(watchCard.locator("summary")).toContainText("Running");
+    await expect(watchCard.getByTestId("background-command-exit")).toHaveCount(0);
+  });
+}

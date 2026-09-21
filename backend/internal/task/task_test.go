@@ -2360,6 +2360,63 @@ func TestTask(t *testing.T) {
 				}
 			})
 		})
+		t.Run("BackgroundCommandState", func(t *testing.T) {
+			t.Parallel()
+			// A detached shell command is informational: it is folded into its card
+			// set, but unlike a background subagent it never justifies keeping the
+			// task running, live or replayed.
+			command := func(id string, status agent.BackgroundCommandStatus) *agent.BackgroundCommandMessage {
+				return &agent.BackgroundCommandMessage{Command: agent.BackgroundCommand{ID: id, Status: status}}
+			}
+			result := func() *agent.ResultMessage { return &agent.ResultMessage{MessageType: "result"} }
+
+			t.Run("SeedTimelineKeepsWaitingForRunningCommand", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.SeedTimeline([]agent.Message{
+					result(),
+					command("shell-1", agent.BackgroundCommandStatusRunning),
+				})
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v (a shell command never drives state)", got, taskslog.StateWaiting)
+				}
+			})
+			t.Run("LateRunningCommandAfterResultKeepsWaiting", func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.SetState(taskslog.StateRunning)
+				tk.addMessage(t.Context(), result(), false)
+				tk.addMessage(t.Context(), command("shell-1", agent.BackgroundCommandStatusRunning), false)
+				if got := tk.GetState(); got != taskslog.StateWaiting {
+					t.Errorf("state = %v, want %v after the parent settled", got, taskslog.StateWaiting)
+				}
+			})
+			t.Run("CommandUpdateBetweenResultAndExitKeepsExitSpurious", func(t *testing.T) {
+				t.Parallel()
+				// Live and replay must agree that a command update between the clean
+				// result and the exit does not turn the exit into a real error.
+				live := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				live.SetState(taskslog.StateRunning)
+				live.addMessage(t.Context(), result(), false)
+				live.addMessage(t.Context(), command("shell-1", agent.BackgroundCommandStatusCompleted), false)
+				live.addMessage(t.Context(), &agent.ExitMessage{ExitCode: -2}, false)
+				if got := live.LastExitError(); got != "" {
+					t.Errorf("live LastExitError = %q, want the exit dropped after a clean turn", got)
+				}
+
+				replayed := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				replayed.SetState(taskslog.StateRunning)
+				replayed.SeedTimeline([]agent.Message{
+					result(),
+					command("shell-1", agent.BackgroundCommandStatusCompleted),
+					&agent.ExitMessage{ExitCode: -2},
+				})
+				if got := replayed.LastExitError(); got != "" {
+					t.Errorf("replayed LastExitError = %q, want the exit dropped after a clean turn", got)
+				}
+			})
+		})
 		t.Run("Subscribe", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

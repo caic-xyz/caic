@@ -73,8 +73,14 @@ import PromptInput from "./PromptInput";
 import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
-import NativeAgents, { NativeActivityStatus } from "./NativeSubagents";
-import { NativeActivityTracker, assignNativeAnchors, type NativeActivity } from "../nativeSubagents";
+import NativeAgents, { BackgroundCommands, BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
+import {
+  BackgroundCommandTracker,
+  NativeActivityTracker,
+  assignNativeAnchors,
+  type BackgroundCommandActivity,
+  type NativeActivity,
+} from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
 import TimingIcon from "./TimingIcon";
 import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
@@ -828,6 +834,28 @@ export default function TaskDetail(props: Props) {
     for (const list of nativeByAnchor().values()) for (const a of list) anchored.add(a.id);
     return nativeActivities().filter((activity) => !anchored.has(activity.id));
   });
+  // One tracker per mount folds canonical background commands across turns,
+  // compaction, and replaced history. A detached shell never drives task state,
+  // so this is presentation-only folding.
+  const backgroundTracker = new BackgroundCommandTracker();
+  const backgroundCommands = createMemo(() => backgroundTracker.derive(messages()));
+  const backgroundSettled = () => !isActive();
+  const backgroundByToolUseID = createMemo(() => {
+    const byTool = new Map<string, BackgroundCommandActivity[]>();
+    for (const command of backgroundCommands()) {
+      if (!command.toolUseID) continue;
+      const list = byTool.get(command.toolUseID);
+      if (list) list.push(command);
+      else byTool.set(command.toolUseID, [command]);
+    }
+    return byTool;
+  });
+  const backgroundByAnchor = createMemo(() => assignNativeAnchors(items(), backgroundCommands()));
+  const backgroundUnanchored = createMemo(() => {
+    const anchored = new Set<string>();
+    for (const list of backgroundByAnchor().values()) for (const c of list) anchored.add(c.id);
+    return backgroundCommands().filter((command) => !anchored.has(command.id));
+  });
 
   return (
     <div class={styles.container}>
@@ -1283,15 +1311,21 @@ export default function TaskDetail(props: Props) {
                             turnTiming={(event) => turnTimingsByResultEvent().get(event)}
                             nativeByToolUseID={nativeByToolUseID}
                             nativeSettled={nativeSettled}
+                            backgroundByToolUseID={backgroundByToolUseID}
+                            backgroundSettled={backgroundSettled}
                           />
                         </div>
                       </div>
                     )}
                   </Match>
                 </Switch>
-                <Show when={anchored().length > 0}>
+                <Show when={anchored().length > 0 || backgroundByAnchor().get(item().key)?.length}>
                   <div class={anchorIndent()}>
                     <NativeAgents activities={anchored()} settled={nativeSettled()} />
+                    <BackgroundCommands
+                      commands={backgroundByAnchor().get(item().key) ?? []}
+                      settled={backgroundSettled()}
+                    />
                   </div>
                 </Show>
               </>
@@ -1300,6 +1334,9 @@ export default function TaskDetail(props: Props) {
         </Index>
         <Show when={nativeUnanchored().length > 0}>
           <NativeAgents activities={nativeUnanchored()} settled={nativeSettled()} />
+        </Show>
+        <Show when={backgroundUnanchored().length > 0}>
+          <BackgroundCommands commands={backgroundUnanchored()} settled={backgroundSettled()} />
         </Show>
         <Show when={messages().length === 0}>
           <p class={styles.placeholder}>Waiting for agent output...</p>
@@ -1458,6 +1495,8 @@ function GroupContent(props: {
   turnTiming: (event: EventMessage) => TurnTiming | undefined;
   nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
   nativeSettled: () => boolean;
+  backgroundByToolUseID: () => ReadonlyMap<string, BackgroundCommandActivity[]>;
+  backgroundSettled: () => boolean;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
   const group = props.group;
@@ -1503,6 +1542,8 @@ function GroupContent(props: {
             pendingAction={props.pendingAction}
             nativeByToolUseID={props.nativeByToolUseID}
             nativeSettled={props.nativeSettled}
+            backgroundByToolUseID={props.backgroundByToolUseID}
+            backgroundSettled={props.backgroundSettled}
           />
         </Show>
       </Match>
@@ -1773,6 +1814,8 @@ function ToolMessageGroup(props: {
   pendingAction?: () => string | null;
   nativeByToolUseID: () => ReadonlyMap<string, NativeActivity[]>;
   nativeSettled: () => boolean;
+  backgroundByToolUseID: () => ReadonlyMap<string, BackgroundCommandActivity[]>;
+  backgroundSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
@@ -1799,6 +1842,8 @@ function ToolMessageGroup(props: {
             pendingAction={props.pendingAction}
             nativeActivity={props.nativeByToolUseID().get(calls()[0].use.toolUseID)}
             nativeSettled={props.nativeSettled}
+            backgroundCommands={props.backgroundByToolUseID().get(calls()[0].use.toolUseID)}
+            backgroundSettled={props.backgroundSettled}
           />
         }
       >
@@ -1828,6 +1873,8 @@ function ToolMessageGroup(props: {
                     pendingAction={props.pendingAction}
                     nativeActivity={props.nativeByToolUseID().get(call().use.toolUseID)}
                     nativeSettled={props.nativeSettled}
+                    backgroundCommands={props.backgroundByToolUseID().get(call().use.toolUseID)}
+                    backgroundSettled={props.backgroundSettled}
                   />
                 )}
               </Index>
@@ -2064,6 +2111,8 @@ function ToolCallCard(props: {
   suppressPlanContent?: boolean;
   nativeActivity?: NativeActivity[];
   nativeSettled?: () => boolean;
+  backgroundCommands?: BackgroundCommandActivity[];
+  backgroundSettled?: () => boolean;
 }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
@@ -2094,10 +2143,23 @@ function ToolCallCard(props: {
               <Show
                 when={!props.call.done}
                 fallback={
-                  <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
-                    <span class={styles.toolBackground} title="Running in background">
-                      &#8943;
-                    </span>
+                  // A folded background command outranks the static badge: the
+                  // chip resolves to the command's outcome instead of leaving a
+                  // perpetual "running in background" mark on a finished call.
+                  <Show
+                    when={props.backgroundCommands?.[0]}
+                    keyed
+                    fallback={
+                      <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
+                        <span class={styles.toolBackground} title="Running in background">
+                          &#8943;
+                        </span>
+                      </Show>
+                    }
+                  >
+                    {(command) => (
+                      <BackgroundCommandStatusChip command={command} settled={props.backgroundSettled?.() ?? false} />
+                    )}
                   </Show>
                 }
               >

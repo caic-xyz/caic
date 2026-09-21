@@ -106,14 +106,14 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{nativeSubagents: newNativeSubagents()}
+	wire := &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
-	return &piWireFormat{nativeSubagents: newNativeSubagents()}
+	return &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
 }
 
 // WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
@@ -135,7 +135,7 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 }
 
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	wire := &piWireFormat{nativeSubagents: newNativeSubagents()}
+	wire := &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
 
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 	var relayArgs []string

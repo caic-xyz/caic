@@ -217,6 +217,7 @@ EventKind identifies the type of SSE event.
 | `subagentStart` |  |
 | `subagentEnd` |  |
 | `nativeSubagent` |  |
+| `backgroundCommand` |  |
 | `log` |  |
 | `toolOutputDelta` |  |
 | `widget` |  |
@@ -1301,6 +1302,23 @@ when the harness did not expose them.
 | `background` | `boolean` | Background reports that the harness launched the delegation detached from
 the parent turn, so it can outlive that turn's result. |  |
 
+### EventBackgroundCommand
+
+EventBackgroundCommand reports one harness-native detached shell command's
+folded lifecycle. ExitCode is the command's numeric outcome when the harness
+reported one; OutputRef is an opaque harness-owned output reference, not a
+caic resource.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `label` | `string` |  |  |
+| `status` | `string` |  | yes |
+| `result` | `string` |  |  |
+| `exitCode` | `int` |  |  |
+| `outputRef` | `string` |  |  |
+| `toolUseID` | `string` |  |  |
+
 ### EventLog
 
 EventLog is a provisioning/startup log line from the runtime backend.
@@ -1431,6 +1449,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `subagentStart` | `EventSubagentStart` |  |  |
 | `subagentEnd` | `EventSubagentEnd` |  |  |
 | `nativeSubagent` | `EventNativeSubagent` |  |  |
+| `backgroundCommand` | `EventBackgroundCommand` |  |  |
 | `log` | `EventLog` |  |  |
 | `toolOutputDelta` | `EventToolOutputDelta` |  |  |
 | `widget` | `EventWidget` |  |  |

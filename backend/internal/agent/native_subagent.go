@@ -1,4 +1,4 @@
-// Native-subagent replay state preserves only lifecycle facts reported by a harness.
+// Native-subagent and background-command replay state preserve only the lifecycle facts a harness reported.
 
 package agent
 
@@ -15,9 +15,6 @@ type NativeSubagentTimeline struct {
 // once terminal, a lifecycle cannot be reopened by replayed history and its result
 // is not replaced by a later terminal report.
 func (t *NativeSubagentTimeline) Apply(s *NativeSubagent) {
-	if s == nil {
-		return
-	}
 	observed := *s
 	if observed.ID == "" {
 		return
@@ -120,4 +117,84 @@ func (t *NativeSubagentTimeline) Observe(s *NativeSubagent) []Message {
 		return nil
 	}
 	return []Message{&NativeSubagentMessage{Subagent: current}}
+}
+
+// BackgroundCommandTimeline folds background-command observations into one
+// stable card per harness identity. It deliberately mirrors NativeSubagentTimeline
+// instead of generalizing it: a shell command has no resumable semantics, no
+// scope, and never influences task state, so the two invariants stay separate.
+type BackgroundCommandTimeline struct {
+	byID  map[string]BackgroundCommand
+	order []string
+}
+
+// Apply records an observation. Empty identities cannot be correlated safely
+// and are ignored. Repeated observations enrich missing optional information,
+// except that a terminal observation's result upgrades an earlier interim one;
+// once terminal, a lifecycle cannot be reopened by replayed history and its
+// result is not replaced by a later terminal report.
+func (t *BackgroundCommandTimeline) Apply(s *BackgroundCommand) {
+	observed := *s
+	if observed.ID == "" {
+		return
+	}
+	if observed.Status != BackgroundCommandStatusRunning &&
+		observed.Status != BackgroundCommandStatusCompleted &&
+		observed.Status != BackgroundCommandStatusFailed &&
+		observed.Status != BackgroundCommandStatusInterrupted {
+		observed.Status = BackgroundCommandStatusRunning
+	}
+	if t.byID == nil {
+		t.byID = make(map[string]BackgroundCommand)
+	}
+	old, found := t.byID[observed.ID]
+	if !found {
+		t.byID[observed.ID] = observed
+		t.order = append(t.order, observed.ID)
+		return
+	}
+	if old.ToolUseID == "" {
+		old.ToolUseID = observed.ToolUseID
+	}
+	if old.Label == "" {
+		old.Label = observed.Label
+	}
+	if old.OutputRef == "" {
+		old.OutputRef = observed.OutputRef
+	}
+	if old.ExitCode == nil && observed.ExitCode != nil {
+		code := *observed.ExitCode
+		old.ExitCode = &code
+	}
+	// A terminal observation upgrades an interim result, but terminal results do
+	// not overwrite each other: the first terminal report stays the outcome.
+	if observed.Result != "" && (old.Result == "" || (!old.Status.Terminal() && observed.Status.Terminal())) {
+		old.Result = observed.Result
+	}
+	if !old.Status.Terminal() {
+		old.Status = observed.Status
+	}
+	t.byID[observed.ID] = old
+}
+
+// Commands returns the replayed cards in first-observed order. The returned
+// slice is independent of the timeline's internal ordering.
+func (t *BackgroundCommandTimeline) Commands() []BackgroundCommand {
+	out := make([]BackgroundCommand, 0, len(t.order))
+	for _, id := range t.order {
+		out = append(out, t.byID[id])
+	}
+	return out
+}
+
+// Observe folds a parser observation and emits only changed lifecycle facts.
+// It is shared by the stateful harness adapters, including during raw-log replay.
+func (t *BackgroundCommandTimeline) Observe(s *BackgroundCommand) []Message {
+	old, found := t.byID[s.ID]
+	t.Apply(s)
+	current, valid := t.byID[s.ID]
+	if !valid || (found && old == current) {
+		return nil
+	}
+	return []Message{&BackgroundCommandMessage{Command: current}}
 }

@@ -25,16 +25,11 @@ type decodedItem struct {
 	turnCompleted *codex.TurnCompletedNotification
 }
 
+// The card map is allocated with the wire, created once per session, instead of
+// by the first record that stores a card.
 type nativeSubagents struct {
 	timeline agent.NativeSubagentTimeline
 	spawns   map[string]agent.NativeSubagent // canonical identity → card
-}
-
-// newNativeSubagents returns an adapter whose card map is ready. A wire is
-// created once per session, so the map is allocated with it instead of being
-// created by the first record that stores a card.
-func newNativeSubagents() nativeSubagents {
-	return nativeSubagents{spawns: make(map[string]agent.NativeSubagent)}
 }
 
 // known returns the card for a thread and whether the session has seen it.

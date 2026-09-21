@@ -352,6 +352,10 @@ sealed interface EventKind {
         override val value = "nativeSubagent"
     }
     @Serializable
+    data object BackgroundCommand : EventKind {
+        override val value = "backgroundCommand"
+    }
+    @Serializable
     data object Log : EventKind {
         override val value = "log"
     }
@@ -407,6 +411,7 @@ object EventKindSerializer : KSerializer<EventKind> {
             "subagentStart" -> EventKind.SubagentStart
             "subagentEnd" -> EventKind.SubagentEnd
             "nativeSubagent" -> EventKind.NativeSubagent
+            "backgroundCommand" -> EventKind.BackgroundCommand
             "log" -> EventKind.Log
             "toolOutputDelta" -> EventKind.ToolOutputDelta
             "widget" -> EventKind.Widget
@@ -1909,6 +1914,23 @@ data class EventNativeSubagent(
     val background: Boolean? = null,
 )
 
+/**
+ * EventBackgroundCommand reports one harness-native detached shell command's
+ * folded lifecycle. ExitCode is the command's numeric outcome when the harness
+ * reported one; OutputRef is an opaque harness-owned output reference, not a
+ * caic resource.
+ */
+@Serializable
+data class EventBackgroundCommand(
+    val id: String,
+    val label: String? = null,
+    val status: String,
+    val result: String? = null,
+    val exitCode: Int? = null,
+    val outputRef: String? = null,
+    @SerialName("toolUseID") val toolUseID: String? = null,
+)
+
 /** EventLog is a provisioning/startup log line from the runtime backend. */
 @Serializable
 data class EventLog(val line: String)
@@ -2035,6 +2057,7 @@ data class EventMessage(
     val subagentStart: EventSubagentStart? = null,
     val subagentEnd: EventSubagentEnd? = null,
     val nativeSubagent: EventNativeSubagent? = null,
+    val backgroundCommand: EventBackgroundCommand? = null,
     val log: EventLog? = null,
     val toolOutputDelta: EventToolOutputDelta? = null,
     val widget: EventWidget? = null,

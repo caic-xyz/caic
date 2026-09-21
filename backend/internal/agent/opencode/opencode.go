@@ -132,14 +132,14 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	if opts.ResumeSessionID == "" {
 		return nil, errors.New("opencode: missing session ID for relay attach")
 	}
-	wire := &wireFormat{sessionID: opts.ResumeSessionID, nativeSubagents: newNativeSubagents()}
+	wire := &wireFormat{sessionID: opts.ResumeSessionID, nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
 	return agent.AttachRelaySession(ctx, opts, wire, nil)
 }
 
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	// Schema drift is checked offline by check-agent-logs.
-	return &wireFormat{nativeSubagents: newNativeSubagents()}
+	return &wireFormat{nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
 }
 
 // FetchModelInventory implements agent.ModelFetcher.
@@ -427,7 +427,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{nativeSubagents: newNativeSubagents()}
+	w := &wireFormat{nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
 	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct relay reader: %w", err)

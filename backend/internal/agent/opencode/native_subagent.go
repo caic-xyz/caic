@@ -11,20 +11,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// Its correlation maps are allocated with the wire, created once per session,
+// instead of by the first tool call that needs them.
 type nativeSubagents struct {
 	timeline  agent.NativeSubagentTimeline
 	tasks     map[string]agent.NativeSubagent
 	taskTools map[string]struct{}
-}
-
-// newNativeSubagents returns an adapter whose correlation maps are ready. A wire
-// is created once per session, so the maps are allocated with it instead of being
-// created by the first tool call that needs them.
-func newNativeSubagents() nativeSubagents {
-	return nativeSubagents{
-		tasks:     make(map[string]agent.NativeSubagent),
-		taskTools: make(map[string]struct{}),
-	}
 }
 
 // parse folds one decoded session update. A tool call announcement or update is

@@ -164,7 +164,8 @@ type Task struct {
 	inPlanMode            bool              // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title                 string            // LLM-generated short title; set via SetTitle.
 	timeline              []agent.TimedMessage
-	nativeSubagents       agent.NativeSubagentTimeline // harness-native subagent cards folded from timeline
+	nativeSubagents       agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
+	backgroundCommands    agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
 
 	subs           []*sub          // active sequenced message subscribers
 	rateLimitSubs  []*rateLimitSub // active lossless quota subscribers
@@ -926,6 +927,9 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			t.recordRateLimitLocked(m)
 		case *agent.NativeSubagentMessage:
 			t.nativeSubagents.Apply(&m.Subagent)
+		case *agent.BackgroundCommandMessage:
+			// Informational only: a detached shell command never drives task state.
+			t.backgroundCommands.Apply(&m.Command)
 		case *agent.ToolUseMessage:
 			t.trackToolUse(m)
 		case *agent.UsageMessage:
@@ -1744,6 +1748,12 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 			}
 		}
 	}
+	// Fold detached shell activity into its card set. Unlike a background
+	// subagent, a shell command never justifies settling the task as running,
+	// so no state transition reads it.
+	if bc, ok := m.(*agent.BackgroundCommandMessage); ok {
+		t.backgroundCommands.Apply(&bc.Command)
+	}
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
 		t.setLiveDiffStatLocked(ds.DiffStat)
@@ -2010,7 +2020,7 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
 // messages (DiffStatMessage, ExitMessage, TurnCommitSnapshotMessage, PendingUserActionMessage,
-// TextDeltaMessage, NativeSubagentMessage, RawMessage), and returns the trailing
+// TextDeltaMessage, NativeSubagentMessage, BackgroundCommandMessage, RawMessage), and returns the trailing
 // ResultMessage if the last semantically meaningful message is a result. Returns
 // nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
 func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
@@ -2028,6 +2038,8 @@ func lastAgentMessage(entries []agent.TimedMessage) *agent.ResultMessage {
 			continue // Streaming delta; skip.
 		case *agent.NativeSubagentMessage:
 			continue // Harness-native child activity; skip.
+		case *agent.BackgroundCommandMessage:
+			continue // Harness-native shell activity; skip.
 		case *agent.RawMessage:
 			continue // tool_progress, etc.; skip.
 		case *agent.UsageMessage:
@@ -2117,14 +2129,16 @@ func fallbackBoundary(msg agent.Message) bool {
 
 // ClearsExitError reports whether a message clears the last exit error from a
 // prior turn. Messages that accompany a turn without starting a new one (exit,
-// diff stat, native subagent updates, raw relay lines, pending user actions,
-// parse errors, log output, stripped env) never clear it; a ResultMessage clears
-// it only when the turn succeeded; every other message starts a new turn. The
-// live fold (addParsedMessage), the seed fold (SeedTimeline), and the server SSE
-// replay filter must all agree on this rule, so it lives in one place.
+// diff stat, native subagent updates, background command updates, raw relay
+// lines, pending user actions, parse errors, log output, stripped env) never
+// clear it; a ResultMessage clears it only when the turn succeeded; every
+// other message starts a new turn. The live fold (addParsedMessage), the seed
+// fold (SeedTimeline), and the server SSE replay filter must all agree on this
+// rule, so it lives in one place.
 func ClearsExitError(msg agent.Message) bool {
 	switch m := msg.(type) {
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
+		*agent.BackgroundCommandMessage,
 		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
 		*agent.LogMessage, *agent.StrippedEnvMessage:
 		return false

@@ -69,16 +69,11 @@ type decodedRecord struct {
 	extensionUI *pi.ExtensionUIRequest
 }
 
+// The spawn map is allocated with the wire, created once per session, instead of
+// by the first delegation that needs it.
 type nativeSubagents struct {
 	timeline agent.NativeSubagentTimeline
 	calls    map[string]agent.NativeSubagent // tool call ID → spawn metadata, before a run ID exists
-}
-
-// newNativeSubagents returns an adapter whose spawn map is ready. A wire is
-// created once per session, so the map is allocated with it instead of being
-// created by the first delegation that needs it.
-func newNativeSubagents() nativeSubagents {
-	return nativeSubagents{calls: make(map[string]agent.NativeSubagent)}
 }
 
 // parse folds one decoded record: a subagent start remembers the delegation the
