@@ -20,6 +20,13 @@ export default defineConfig({
     },
   },
   build: {
+    // No <link rel="modulepreload"> hints. The caic service worker serves every
+    // /assets/ request cache-first via respondWith, and Chrome refuses to reuse
+    // an SW-served preload across script worlds ("cross-world service worker
+    // resource mismatch"), so each hint would fetch its chunk twice and spam
+    // "preloaded but not used" console warnings. The SW cache already makes
+    // these chunks instant on repeat visits.
+    modulePreload: false,
     // Matches the browsers Vite 8 supports by default; pinned so a Vite upgrade
     // cannot silently move the floor.
     target: "baseline-widely-available",
