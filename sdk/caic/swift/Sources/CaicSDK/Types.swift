@@ -868,9 +868,10 @@ public struct MetricSeries: Codable {
     public let last: Double
 }
 
-/// MetricsResp is the response for GET /api/caic/v1/server/metrics.
+/// MetricsResp is the historical and live aggregate for GET
+/// /api/caic/v1/server/metrics.
 public struct MetricsResp: Codable {
-    /// Since is when the server began recording observations.
+    /// Since is the earliest retained observation in the aggregate.
     public let since: ISOTimestamp?
     /// Resource identifies the process that produced the observations.
     public let resource: MetricResource

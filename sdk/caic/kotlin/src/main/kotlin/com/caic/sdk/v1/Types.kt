@@ -1406,10 +1406,13 @@ data class MetricSeries(
     val last: Double,
 )
 
-/** MetricsResp is the response for GET /api/caic/v1/server/metrics. */
+/**
+ * MetricsResp is the historical and live aggregate for GET
+ * /api/caic/v1/server/metrics.
+ */
 @Serializable
 data class MetricsResp(
-    /** Since is when the server began recording observations. */
+    /** Since is the earliest retained observation in the aggregate. */
     val since: Instant? = null,
     /** Resource identifies the process that produced the observations. */
     val resource: MetricResource,

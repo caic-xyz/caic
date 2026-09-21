@@ -720,11 +720,12 @@ the measurement has no dimensions. |  |
 
 ### MetricsResp
 
-MetricsResp is the response for GET /api/caic/v1/server/metrics.
+MetricsResp is the historical and live aggregate for GET
+/api/caic/v1/server/metrics.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `since` | `ISOTimestamp` | Since is when the server began recording observations. |  |
+| `since` | `ISOTimestamp` | Since is the earliest retained observation in the aggregate. |  |
 | `resource` | `MetricResource` | Resource identifies the process that produced the observations. | yes |
 | `series` | `MetricSeries[]` | Series holds per-operation aggregates, slowest p95 first. | yes |
 
