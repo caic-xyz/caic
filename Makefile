@@ -167,7 +167,13 @@ test: $(FRONTEND_STAMP)
 # them. CI runs it; verify and test do not.
 test-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
 	@pnpm --silent build
-	@pnpm --silent exec playwright test --config e2e/playwright.config.ts
+	@pnpm --silent exec playwright test --config e2e/playwright.config.ts; \
+	status=$$?; \
+	if [ $$status -ne 0 ]; then \
+	  echo ""; echo "=== Fake server log (test-results/e2e-server.log), last 100 lines: ==="; \
+	  tail -n 100 test-results/e2e-server.log 2>/dev/null; \
+	fi; \
+	exit $$status
 
 # Real runtime smoke tests exercise the md container path and cannot run
 # without that runtime (see the smoke build tag sources for what they need).

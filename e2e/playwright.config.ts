@@ -45,8 +45,13 @@ export default defineConfig({
   testIgnore: includeVisuals ? [] : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
   timeout: 60_000,
   outputDir: process.env.CAIC_E2E_OUTPUT_DIR,
+  // The dot reporter keeps progress to one line; failures still print in full at the end.
+  reporter: "dot",
   webServer: {
-    command: `../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake`,
+    // Both streams go to the log file instead of the terminal: the fake server is
+    // chatty and the dot reporter keeps the run to one line. The test-e2e make
+    // target prints the log tail when the suite fails.
+    command: `mkdir -p ../test-results && ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake > ../test-results/e2e-server.log 2>&1`,
     url: `${serverURL}/api/caic/v1/server/config`,
     reuseExistingServer: false,
     timeout: 30_000,
