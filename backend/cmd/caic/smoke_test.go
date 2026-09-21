@@ -331,6 +331,9 @@ type smokeServer struct {
 	baseURL string
 	cancel  context.CancelFunc
 	done    chan error
+
+	serverLog     *os.File
+	serverLogPath string
 }
 
 func (s *smokeServer) close() {
@@ -356,25 +359,10 @@ func (s *smokeServer) start() {
 		s.t.Fatalf("listen: %v", err)
 	}
 
-	// CAIC_SMOKE_LOG writes the fixture's server logs to a file, which is how a
-	// host-dependent smoke failure gets diagnosed.
-	var logWriter io.Writer = io.Discard
-	var logOptions *slog.HandlerOptions
-	if path := os.Getenv("CAIC_SMOKE_LOG"); path != "" {
-		logFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // path comes from the test operator.
-		if err != nil {
-			s.t.Fatalf("open CAIC_SMOKE_LOG %s: %v", path, err)
-		}
-		s.t.Cleanup(func() {
-			if err := logFile.Close(); err != nil {
-				s.t.Error(err)
-			}
-		})
-		logWriter = logFile
-		logOptions = &slog.HandlerOptions{Level: slog.LevelDebug}
-	}
-
-	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(logWriter, logOptions)), s.rootDir, s.cfg)
+	// The fixture always logs at debug level to its server log; the failure dump
+	// set up by startServerFixture is what makes a host-dependent failure
+	// diagnosable.
+	srv, err := app.New(ctx, slog.New(slog.NewTextHandler(s.serverLog, &slog.HandlerOptions{Level: slog.LevelDebug})), s.rootDir, s.cfg)
 	if err != nil {
 		cancel()
 		if closeErr := ln.Close(); closeErr != nil {
@@ -507,6 +495,35 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 			},
 		},
 	}
+	// The fixture always writes one server log, at debug level, because a
+	// host-dependent failure leaves no evidence otherwise: these logs go to the
+	// process, not to the test output. CAIC_SMOKE_LOG keeps the log at a
+	// caller-chosen path; otherwise it lives beside the fixture's temp dirs.
+	s.serverLogPath = filepath.Join(tmpDir, "server.log")
+	if path := os.Getenv("CAIC_SMOKE_LOG"); path != "" {
+		s.serverLogPath = path
+	}
+	serverLog, err := os.OpenFile(s.serverLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the path is a temp dir or the operator's CAIC_SMOKE_LOG.
+	if err != nil {
+		t.Fatalf("open server log %s: %v", s.serverLogPath, err)
+	}
+	s.serverLog = serverLog
+	// Registered before the server and container cleanups, which run first because
+	// cleanups are last-in-first-out, so the dump sees the server's shutdown.
+	t.Cleanup(func() {
+		if err := serverLog.Close(); err != nil {
+			t.Error(err)
+		}
+		if !t.Failed() {
+			return
+		}
+		tail, err := readFileTail(s.serverLogPath, smokeServerLogTailBytes)
+		if err != nil {
+			t.Errorf("read server log %s: %v", s.serverLogPath, err)
+			return
+		}
+		t.Logf("server log %s (last %d of at most %d bytes):\n%s", s.serverLogPath, len(tail), smokeServerLogTailBytes, tail)
+	})
 	t.Cleanup(s.close)
 	t.Cleanup(func() {
 		s.stop()
@@ -523,7 +540,35 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 // smokeTaskTimeout bounds one smoke task's wait for a state or a runtime.
 const smokeTaskTimeout = 10 * time.Minute
 
-// waitForTaskState polls the task list until the task reaches want.
+// smokeServerLogTailBytes bounds how much of the fixture's server log a failure
+// copies into the test output.
+const smokeServerLogTailBytes = 256 << 10
+
+// readFileTail returns the last maxBytes of path, so a failure dump stays
+// bounded whatever the server logged.
+func readFileTail(path string, maxBytes int64) (string, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	size := min(info.Size(), maxBytes)
+	buf := make([]byte, size)
+	if size > 0 {
+		if _, err := f.ReadAt(buf, info.Size()-size); err != nil {
+			return "", err
+		}
+	}
+	return string(buf), nil
+}
+
+// waitForTaskState polls the task list until the task reaches want. A task that
+// reaches a terminal state can never reach want, so the wait reports the real
+// outcome instead of burning the timeout.
 func waitForTaskState(t *testing.T, s *smokeServer, taskID, want string) v1.Task {
 	t.Helper()
 	deadline := time.Now().Add(smokeTaskTimeout)
@@ -532,10 +577,70 @@ func waitForTaskState(t *testing.T, s *smokeServer, taskID, want string) v1.Task
 		if string(task.State) == want {
 			return task
 		}
+		if isTerminalTaskState(task.State) {
+			t.Fatalf("task %s: reached %q while waiting for %q; error %q result %q turns %d",
+				taskID, task.State, want, task.Error, task.Result, task.NumTurns)
+		}
 		if time.Now().After(deadline) {
 			t.Fatalf("task %s: timed out waiting for state %q, current %q error %q", taskID, want, task.State, task.Error)
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// isTerminalTaskState reports whether a task state is final, so waiting for any
+// other state can never succeed. A stopped task is not terminal: it can be
+// revived.
+func isTerminalTaskState(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStateCrashed, v1.TaskStateFailed, v1.TaskStatePurged:
+		return true
+	default:
+		return false
+	}
+}
+
+// TestSmokeFailureDiagnostics verifies the two helpers that make a smoke failure
+// diagnosable: the bounded tail read that dumps the fixture's server log, and
+// the terminal-state classification that ends a wait with the real outcome. It
+// needs no container runtime.
+func TestSmokeFailureDiagnostics(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	if err := os.WriteFile(path, []byte("first\nsecond\nthird\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name     string
+		maxBytes int64
+		want     string
+	}{
+		{"whole file", 1 << 20, "first\nsecond\nthird\n"},
+		{"bounded tail", 7, "\nthird\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := readFileTail(path, c.maxBytes)
+			if err != nil {
+				t.Fatalf("readFileTail(%d): %v", c.maxBytes, err)
+			}
+			if got != c.want {
+				t.Fatalf("readFileTail(%d) = %q, want %q", c.maxBytes, got, c.want)
+			}
+		})
+	}
+	for _, c := range []struct {
+		state v1.TaskState
+		want  bool
+	}{
+		{v1.TaskStateRunning, false},
+		{v1.TaskStateWaiting, false},
+		{v1.TaskStateStopped, false},
+		{v1.TaskStateCrashed, true},
+		{v1.TaskStateFailed, true},
+		{v1.TaskStatePurged, true},
+	} {
+		if got := isTerminalTaskState(c.state); got != c.want {
+			t.Errorf("isTerminalTaskState(%q) = %v, want %v", c.state, got, c.want)
+		}
 	}
 }
 

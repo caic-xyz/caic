@@ -1001,6 +1001,11 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			t.SetSessionMetadata(lt.SessionID, lt.ReportedModel, lt.ReportedEffort, lt.AgentVersion)
 		}
 		if lt.State == taskslog.StateRunning {
+			// Nothing adopted the instance that was running this log, so the task can
+			// never settle. Name the downgrade: a bare failure with no error gives the
+			// task list no way to explain what happened.
+			m.log.Warn("loaded running task log without an adopted instance; marking failed",
+				"task", lt.TaskID, "harness", lt.Harness, "log", lt.LogPath(), "state", lt.State)
 			t.SetState(taskslog.StateFailed)
 		}
 		if lt.ForgePR > 0 {

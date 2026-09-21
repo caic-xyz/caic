@@ -114,7 +114,20 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Smoke test
+        id: smoke
+        env:
+          # Absolute so the artifact step does not depend on the test binary's
+          # working directory, which Go sets to the package directory.
+          CAIC_SMOKE_LOG: ${{ github.workspace }}/smoke-server.log
         run: make test-smoke
+      - name: Upload Smoke failure artifacts
+        if: failure() && steps.smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-failure-artifacts
+          path: smoke-server.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Upload Smoke Coverage
         uses: codecov/codecov-action@v7
         with:
