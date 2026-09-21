@@ -177,7 +177,7 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 		case res.IsError:
 			status, outcome = "tool_error", metrics.OutcomeError
 		}
-		m.metrics.Record(ctx, "mcp.tool."+name, outcome, time.Since(start))
+		m.metrics.Record(ctx, "mcp.tool."+name, outcome, metrics.Duration(time.Since(start)))
 		m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
 		return res, err
 	}

@@ -18,17 +18,35 @@ import (
 
 // Operation names recorded for runtime router calls.
 const (
-	metricContainerLaunch  = "container.launch"
-	metricContainerConnect = "container.connect"
-	metricContainerStop    = "container.stop"
-	metricContainerPurge   = "container.purge"
-	metricContainerRevive  = "container.revive"
-	metricContainerFork    = "container.fork"
-	metricRepoDiff         = "repo.diff"
-	metricRepoFileDiff     = "repo.file_diff"
-	metricRepoCommitDiff   = "repo.commit_diff"
-	metricRepoFetch        = "repo.fetch"
+	metricContainerLaunch       = "container.launch"
+	metricContainerConnect      = "container.connect"
+	metricContainerStop         = "container.stop"
+	metricContainerPurge        = "container.purge"
+	metricContainerRevive       = "container.revive"
+	metricContainerFork         = "container.fork"
+	metricContainerProcesses    = "container.processes"
+	metricContainerSignal       = "container.signal"
+	metricContainerDiskUsage    = "container.disk_usage"
+	metricContainerList         = "container.list"
+	metricContainerInspect      = "container.inspect"
+	metricContainerMetadata     = "container.metadata"
+	metricContainerSudoPassword = "container.sudo_password"
+	metricRepoDiff              = "repo.diff"
+	metricRepoFileDiff          = "repo.file_diff"
+	metricRepoCommitDiff        = "repo.commit_diff"
+	metricRepoFetch             = "repo.fetch"
+	metricRepoStatus            = "repo.status"
+	metricRepoCompactStatus     = "repo.compact_status"
+	metricRepoDiffSize          = "repo.diff_size"
+	metricContainerDiskSize     = "container.disk_size"
+	metricContainerInstances    = "container.instances"
 )
+
+// attrContainerRuntime names the runtime backend that served an operation.
+//
+// It is per-observation rather than part of the Resource: one process serves
+// several runtimes at once, so no single runtime identifies the process.
+const attrContainerRuntime = "container.runtime"
 
 // Router dispatches runtime operations to one of several runtime backends.
 type Router struct {
@@ -77,11 +95,15 @@ func NewRouter(log *slog.Logger, runtimes []System, rec metrics.Recorder) (*Rout
 // Launch starts a runtime instance on the selected backend.
 func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (id ID, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerLaunch, start, err) }()
+	// The runtime is only known once the backend is resolved, so a launch that
+	// never found one records no runtime at all.
+	var runtimeName Name
+	defer func() { r.observe(ctx, metricContainerLaunch, start, err, runtimeAttr(runtimeName)...) }()
 	rt, err := r.runtimeForStart(opts)
 	if err != nil {
 		return "", err
 	}
+	runtimeName = rt.Name()
 	delegateOpts := *opts
 	delegateOpts.RuntimeName = rt.Name()
 	id, err = rt.Launch(ctx, repos, &delegateOpts)
@@ -97,7 +119,7 @@ func (r *Router) Launch(ctx context.Context, repos []Repo, opts *StartOptions) (
 // Connect waits for transport readiness on the selected backend.
 func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (conn ConnectionInfo, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerConnect, start, err) }()
+	defer func() { r.observe(ctx, metricContainerConnect, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return ConnectionInfo{}, err
@@ -110,7 +132,13 @@ func (r *Router) Connect(ctx context.Context, id ID, opts *StartOptions) (conn C
 // Diff returns a diff from the owning backend.
 func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (out string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoDiff, start, err) }()
+	defer func() {
+		attrs := runtimeAttr(id.RuntimeName())
+		r.observe(ctx, metricRepoDiff, start, err, attrs...)
+		if err == nil {
+			r.metrics.Record(ctx, metricRepoDiffSize, metrics.OutcomeOK, metrics.Bytes(int64(len(out))), attrs...)
+		}
+	}()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -121,7 +149,7 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 // CommitDiffStat returns the net committed diff stat between two repository tips.
 func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (out string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoCommitDiff, start, err) }()
+	defer func() { r.observe(ctx, metricRepoCommitDiff, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -132,7 +160,7 @@ func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, t
 // FileDiff returns one committed or uncommitted file patch from the owning backend.
 func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (out string, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoFileDiff, start, err) }()
+	defer func() { r.observe(ctx, metricRepoFileDiff, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -142,7 +170,10 @@ func (r *Router) FileDiff(ctx context.Context, id ID, repoIdx int, commit, path,
 
 // RepositoryStatus returns git branch, commit, and working-tree state from the
 // owning backend.
-func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error) {
+// RepositoryStatus returns the repository status from the owning backend.
+func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (status RepositoryStatus, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoStatus, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return RepositoryStatus{}, err
@@ -152,7 +183,9 @@ func (r *Router) RepositoryStatus(ctx context.Context, id ID, repoIdx int) (Repo
 
 // CompactRepositoryStatus returns the log-free repository status from the
 // owning backend.
-func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error) {
+func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int) (status RepositoryStatus, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoCompactStatus, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return RepositoryStatus{}, err
@@ -164,7 +197,7 @@ func (r *Router) CompactRepositoryStatus(ctx context.Context, id ID, repoIdx int
 // the exact branch tips observed.
 func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []FetchedBranch, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoFetch, start, err) }()
+	defer func() { r.observe(ctx, metricRepoFetch, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
@@ -175,7 +208,7 @@ func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []F
 // Stop gracefully stops a runtime instance on its owning backend.
 func (r *Router) Stop(ctx context.Context, id ID) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerStop, start, err) }()
+	defer func() { r.observe(ctx, metricContainerStop, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -186,7 +219,7 @@ func (r *Router) Stop(ctx context.Context, id ID) (err error) {
 // Purge removes a runtime instance from its owning backend.
 func (r *Router) Purge(ctx context.Context, id ID) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerPurge, start, err) }()
+	defer func() { r.observe(ctx, metricContainerPurge, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -197,7 +230,7 @@ func (r *Router) Purge(ctx context.Context, id ID) (err error) {
 // Revive restarts a stopped runtime instance on its owning backend.
 func (r *Router) Revive(ctx context.Context, id ID) (err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerRevive, start, err) }()
+	defer func() { r.observe(ctx, metricContainerRevive, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -208,7 +241,7 @@ func (r *Router) Revive(ctx context.Context, id ID) (err error) {
 // Fork snapshots an instance on its owning backend. Cross-runtime forks are rejected.
 func (r *Router) Fork(ctx context.Context, id ID, opts *ForkOptions) (forkID ID, conn ConnectionInfo, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricContainerFork, start, err) }()
+	defer func() { r.observe(ctx, metricContainerFork, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", ConnectionInfo{}, err
@@ -238,7 +271,9 @@ func (r *Router) VNCPort(ctx context.Context, id ID) int {
 }
 
 // Processes returns the process list for an instance.
-func (r *Router) Processes(ctx context.Context, id ID) ([]ProcessInfo, error) {
+func (r *Router) Processes(ctx context.Context, id ID) (procs []ProcessInfo, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerProcesses, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
@@ -247,7 +282,9 @@ func (r *Router) Processes(ctx context.Context, id ID) ([]ProcessInfo, error) {
 }
 
 // Signal sends a signal to a process in an instance.
-func (r *Router) Signal(ctx context.Context, id ID, pid int, sig string) error {
+func (r *Router) Signal(ctx context.Context, id ID, pid int, sig string) (err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerSignal, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return err
@@ -257,7 +294,11 @@ func (r *Router) Signal(ctx context.Context, id ID, pid int, sig string) error {
 
 // DiskUsage returns writable-layer sizes across the requested runtime
 // instances. Each owning runtime receives one batched request.
-func (r *Router) DiskUsage(ctx context.Context, ids []ID) (map[ID]int64, error) {
+func (r *Router) DiskUsage(ctx context.Context, ids []ID) (usage map[ID]int64, err error) {
+	start := time.Now()
+	// A batched query spans runtimes, so its own duration names none of them. The
+	// sizes it returns are attributed per instance below.
+	defer func() { r.observe(ctx, metricContainerDiskUsage, start, err) }()
 	groups := map[Name][]ID{}
 	for _, id := range ids {
 		rt, err := r.runtimeForInstance(id)
@@ -273,6 +314,9 @@ func (r *Router) DiskUsage(ctx context.Context, ids []ID) (map[ID]int64, error) 
 			return nil, fmt.Errorf("disk usage %s: %w", runtimeName, err)
 		}
 		maps.Copy(result, usage)
+	}
+	for id, size := range result {
+		r.metrics.Record(ctx, metricContainerDiskSize, metrics.OutcomeOK, metrics.Bytes(size), runtimeAttr(id.RuntimeName())...)
 	}
 	return result, nil
 }
@@ -369,8 +413,11 @@ func (r *Router) WatchEvents(ctx context.Context, filter EventFilter) (<-chan Ev
 }
 
 // List returns known runtime instances from all inventory backends.
-func (r *Router) List(ctx context.Context) ([]Instance, error) {
-	var out []Instance
+func (r *Router) List(ctx context.Context) (out []Instance, err error) {
+	start := time.Now()
+	// Inventory spans every runtime, so neither the call nor the count it produces
+	// belongs to one of them.
+	defer func() { r.observe(ctx, metricContainerList, start, err) }()
 	var errs []error
 	successes := 0
 	for _, rt := range r.Runtimes {
@@ -392,14 +439,21 @@ func (r *Router) List(ctx context.Context) ([]Instance, error) {
 	if successes == 0 && len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
-	for _, err := range errs {
-		r.log.WarnContext(ctx, "runtime inventory failed", "err", err)
+	for _, listErr := range errs {
+		r.log.WarnContext(ctx, "runtime inventory failed", "err", listErr)
+	}
+	if len(errs) == 0 {
+		// A gauge is a point-in-time count, so it is only recorded when every
+		// runtime answered. A partial inventory would understate it.
+		r.metrics.Record(ctx, metricContainerInstances, metrics.OutcomeOK, metrics.Gauge(float64(len(out)), metrics.UnitCount))
 	}
 	return out, nil
 }
 
 // Metadata returns runtime metadata for an instance.
-func (r *Router) Metadata(ctx context.Context, id ID, key MetadataKey) (string, error) {
+func (r *Router) Metadata(ctx context.Context, id ID, key MetadataKey) (value string, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerMetadata, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -408,12 +462,14 @@ func (r *Router) Metadata(ctx context.Context, id ID, key MetadataKey) (string, 
 }
 
 // Inspect returns observed runtime configuration for an instance.
-func (r *Router) Inspect(ctx context.Context, id ID) (*InstanceInspect, error) {
+func (r *Router) Inspect(ctx context.Context, id ID) (info *InstanceInspect, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerInspect, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return nil, err
 	}
-	info, err := rt.Inspect(ctx, id)
+	info, err = rt.Inspect(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +484,9 @@ func (r *Router) Inspect(ctx context.Context, id ID) (*InstanceInspect, error) {
 }
 
 // SudoPassword fetches a sudo password from an instance's owning backend.
-func (r *Router) SudoPassword(ctx context.Context, id ID) (string, error) {
+func (r *Router) SudoPassword(ctx context.Context, id ID) (password string, err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricContainerSudoPassword, start, err, runtimeAttr(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
 		return "", err
@@ -436,9 +494,19 @@ func (r *Router) SudoPassword(ctx context.Context, id ID) (string, error) {
 	return rt.SudoPassword(ctx, id)
 }
 
-// observe records the duration of one router operation.
-func (r *Router) observe(ctx context.Context, name string, start time.Time, err error) {
-	r.metrics.Record(ctx, name, metrics.OutcomeOf(err), time.Since(start))
+// observe records the duration of one router operation, attributed to the
+// runtime that served it when there is one.
+func (r *Router) observe(ctx context.Context, name string, start time.Time, err error, attrs ...metrics.Attr) {
+	r.metrics.Record(ctx, name, metrics.OutcomeOf(err), metrics.Duration(time.Since(start)), attrs...)
+}
+
+// runtimeAttr returns the runtime attribute for an operation served by name, or
+// nothing when the runtime is unknown, such as an ID that was never qualified.
+func runtimeAttr(name Name) []metrics.Attr {
+	if name == "" {
+		return nil
+	}
+	return []metrics.Attr{{Key: attrContainerRuntime, Value: string(name)}}
 }
 
 func (r *Router) runtimeForStart(opts *StartOptions) (System, error) {

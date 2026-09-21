@@ -824,7 +824,7 @@ func TestMCPHandlers(t *testing.T) {
 
 		var recorded bool
 		for _, metric := range s.serverHandlers.metrics.Snapshot() {
-			if metric.Name == "mcp.tool.tasks_list" && metric.Outcome == metrics.OutcomeOK && metric.Calls >= 1 {
+			if metric.Name == "mcp.tool.tasks_list" && metric.Outcome == metrics.OutcomeOK && metric.Count >= 1 {
 				recorded = true
 			}
 		}

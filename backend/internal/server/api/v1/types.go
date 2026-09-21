@@ -1255,30 +1255,40 @@ type CacheSizesResp struct {
 	WellKnown []CacheSize `json:"wellKnown"`
 }
 
-// MetricSeries describes aggregated latency observations for one operation,
+// MetricSeries describes aggregated measurements sharing one name, kind, unit,
 // outcome, and attribute set.
 type MetricSeries struct {
-	// Name is the operation identifier, such as "container.launch" or
+	// Name is the measurement identifier, such as "container.launch" or
 	// "mcp.tool.task_create".
 	Name string `json:"name"`
 	// Outcome is "ok" or "error".
 	Outcome string `json:"outcome"`
-	// Attrs are the bounded dimensions that separate this series from
-	// others sharing its name and outcome, such as the container runtime.
-	// Omitted when the operation has no dimensions.
+	// Kind is the OpenTelemetry instrument kind: "histogram", "counter",
+	// "updowncounter", or "gauge". It decides which statistics are meaningful.
+	Kind string `json:"kind"`
+	// Unit is the unit the amounts are expressed in, in UCUM notation: "s" for
+	// seconds, "By" for bytes, "1" for a dimensionless count.
+	Unit string `json:"unit"`
+	// Attrs are the bounded dimensions that separate this series from others
+	// sharing its name and outcome, such as the container runtime. Omitted when
+	// the measurement has no dimensions.
 	Attrs map[string]string `json:"attrs,omitempty"`
-	// Calls is the total number of recorded calls.
-	Calls int64 `json:"calls"`
-	// Samples is the number of retained observations used for the percentiles.
+	// Count is the number of recorded measurements.
+	Count int64 `json:"count"`
+	// Samples is the number of retained measurements used for the percentiles.
 	Samples int64 `json:"samples"`
-	// MinMS is the fastest retained call in milliseconds.
-	MinMS float64 `json:"minMs"`
-	// P50MS is the median retained call in milliseconds.
-	P50MS float64 `json:"p50Ms"`
-	// P95MS is the 95th percentile retained call in milliseconds.
-	P95MS float64 `json:"p95Ms"`
-	// MaxMS is the slowest retained call in milliseconds.
-	MaxMS float64 `json:"maxMs"`
+	// Sum is the total of every recorded amount, in Unit.
+	Sum float64 `json:"sum"`
+	// Min is the smallest retained amount, in Unit.
+	Min float64 `json:"min"`
+	// P50 is the median retained amount, in Unit.
+	P50 float64 `json:"p50"`
+	// P95 is the 95th percentile retained amount, in Unit.
+	P95 float64 `json:"p95"`
+	// Max is the largest retained amount, in Unit.
+	Max float64 `json:"max"`
+	// Last is the most recently recorded amount, in Unit.
+	Last float64 `json:"last"`
 }
 
 // MetricResource identifies the process that produced the observations.

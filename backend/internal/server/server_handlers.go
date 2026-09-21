@@ -436,17 +436,22 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 func (h *serverHandlers) getMetrics(_ context.Context, _ *api.EmptyReq) (*v1.MetricsResp, error) {
 	series := h.metrics.Snapshot()
 	out := make([]v1.MetricSeries, 0, len(series))
-	for _, s := range series {
+	for i := range series {
+		s := &series[i]
 		out = append(out, v1.MetricSeries{
 			Name:    s.Name,
 			Outcome: string(s.Outcome),
+			Kind:    string(s.Kind),
+			Unit:    string(s.Unit),
 			Attrs:   s.Attrs,
-			Calls:   s.Calls,
+			Count:   s.Count,
 			Samples: s.Samples,
-			MinMS:   float64(s.Min) / float64(time.Millisecond),
-			P50MS:   float64(s.P50) / float64(time.Millisecond),
-			P95MS:   float64(s.P95) / float64(time.Millisecond),
-			MaxMS:   float64(s.Max) / float64(time.Millisecond),
+			Sum:     s.Sum,
+			Min:     s.Min,
+			P50:     s.P50,
+			P95:     s.P95,
+			Max:     s.Max,
+			Last:    s.Last,
 		})
 	}
 	return &v1.MetricsResp{

@@ -832,30 +832,40 @@ public struct MetricResource: Codable {
     public let host: String?
 }
 
-/// MetricSeries describes aggregated latency observations for one operation,
+/// MetricSeries describes aggregated measurements sharing one name, kind, unit,
 /// outcome, and attribute set.
 public struct MetricSeries: Codable {
-    /// Name is the operation identifier, such as "container.launch" or
+    /// Name is the measurement identifier, such as "container.launch" or
     /// "mcp.tool.task_create".
     public let name: String
     /// Outcome is "ok" or "error".
     public let outcome: String
-    /// Attrs are the bounded dimensions that separate this series from
-    /// others sharing its name and outcome, such as the container runtime.
-    /// Omitted when the operation has no dimensions.
+    /// Kind is the OpenTelemetry instrument kind: "histogram", "counter",
+    /// "updowncounter", or "gauge". It decides which statistics are meaningful.
+    public let kind: String
+    /// Unit is the unit the amounts are expressed in, in UCUM notation: "s" for
+    /// seconds, "By" for bytes, "1" for a dimensionless count.
+    public let unit: String
+    /// Attrs are the bounded dimensions that separate this series from others
+    /// sharing its name and outcome, such as the container runtime. Omitted when
+    /// the measurement has no dimensions.
     public let attrs: [String: String]?
-    /// Calls is the total number of recorded calls.
-    public let calls: Int
-    /// Samples is the number of retained observations used for the percentiles.
+    /// Count is the number of recorded measurements.
+    public let count: Int
+    /// Samples is the number of retained measurements used for the percentiles.
     public let samples: Int
-    /// MinMS is the fastest retained call in milliseconds.
-    public let minMs: Double
-    /// P50MS is the median retained call in milliseconds.
-    public let p50Ms: Double
-    /// P95MS is the 95th percentile retained call in milliseconds.
-    public let p95Ms: Double
-    /// MaxMS is the slowest retained call in milliseconds.
-    public let maxMs: Double
+    /// Sum is the total of every recorded amount, in Unit.
+    public let sum: Double
+    /// Min is the smallest retained amount, in Unit.
+    public let min: Double
+    /// P50 is the median retained amount, in Unit.
+    public let p50: Double
+    /// P95 is the 95th percentile retained amount, in Unit.
+    public let p95: Double
+    /// Max is the largest retained amount, in Unit.
+    public let max: Double
+    /// Last is the most recently recorded amount, in Unit.
+    public let last: Double
 }
 
 /// MetricsResp is the response for GET /api/caic/v1/server/metrics.

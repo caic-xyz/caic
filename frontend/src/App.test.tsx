@@ -1582,15 +1582,46 @@ describe("App repo chips: No repository", () => {
         {
           name: "container.launch",
           outcome: "ok",
+          kind: "histogram",
+          unit: "s",
           attrs: { "container.runtime": "podman" },
-          calls: 12,
+          count: 12,
           samples: 12,
-          minMs: 120,
-          p50Ms: 1500,
-          p95Ms: 2400,
-          maxMs: 2600,
+          sum: 18,
+          min: 0.12,
+          p50: 1.5,
+          p95: 2.4,
+          max: 2.6,
+          last: 2.6,
         },
-        { name: "repo.diff", outcome: "ok", calls: 40, samples: 40, minMs: 3, p50Ms: 9, p95Ms: 320, maxMs: 900 },
+        {
+          name: "container.disk_size",
+          outcome: "ok",
+          kind: "histogram",
+          unit: "By",
+          count: 3,
+          samples: 3,
+          sum: 12288,
+          min: 4096,
+          p50: 4096,
+          p95: 4096,
+          max: 4096,
+          last: 4096,
+        },
+        {
+          name: "container.instances",
+          outcome: "ok",
+          kind: "gauge",
+          unit: "1",
+          count: 2,
+          samples: 2,
+          sum: 9,
+          min: 3,
+          p50: 3,
+          p95: 5,
+          max: 5,
+          last: 4,
+        },
       ],
     });
 
@@ -1602,9 +1633,23 @@ describe("App repo chips: No repository", () => {
     const createRow = within(table).getByRole("rowheader", { name: "container.launch" }).closest("tr");
     if (!createRow) throw new Error("container.launch row is missing");
     expect(within(createRow).getByText("container.runtime=podman")).toBeInTheDocument();
-    expect(within(createRow).getByText("1.5 s")).toBeInTheDocument();
-    expect(within(createRow).getByText("2.4 s")).toBeInTheDocument();
+    expect(within(createRow).getByText("1.5s")).toBeInTheDocument();
+    expect(within(createRow).getByText("2.4s")).toBeInTheDocument();
     expect(within(createRow).getByText("12")).toBeInTheDocument();
+
+    const sizeRow = within(table).getByRole("rowheader", { name: "container.disk_size" }).closest("tr");
+    if (!sizeRow) throw new Error("container.disk_size row is missing");
+    expect(within(sizeRow).getByText("12 KiB")).toBeInTheDocument();
+    expect(within(sizeRow).getAllByText("4.0 KiB").length).toBe(4);
+
+    // A gauge has no total or percentiles, so those cells stay blank instead of
+    // reporting the sum of its samples.
+    const gaugeRow = within(table).getByRole("rowheader", { name: "container.instances" }).closest("tr");
+    if (!gaugeRow) throw new Error("container.instances row is missing");
+    expect(within(gaugeRow).getAllByText("—").length).toBe(4);
+    expect(within(gaugeRow).getByText("5")).toBeInTheDocument();
+    expect(within(gaugeRow).getByText("4")).toBeInTheDocument();
+    expect(within(gaugeRow).queryByText("9")).toBeNull();
   });
 
   it("refreshes models from settings", async () => {

@@ -18,7 +18,7 @@ func TestGetMetrics(t *testing.T) {
 	t.Run("valid_handler_returns_snapshot", func(t *testing.T) {
 		t.Parallel()
 		store := metrics.NewStore(metrics.Resource{ServiceName: "caic", ServiceVersion: "1.2.3", Host: "host-1"})
-		store.Record(t.Context(), "repo.diff", metrics.OutcomeOK, 5*time.Millisecond,
+		store.Record(t.Context(), "repo.diff", metrics.OutcomeOK, metrics.Duration(5*time.Millisecond),
 			metrics.Attr{Key: "forge.name", Value: "github"})
 		h := &serverHandlers{metrics: store}
 

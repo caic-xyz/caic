@@ -92,57 +92,6 @@ func TestNewLog(t *testing.T) {
 	})
 }
 
-func TestSeconds(t *testing.T) {
-	t.Parallel()
-
-	t.Run("rounds to the nearest microsecond", func(t *testing.T) {
-		t.Parallel()
-		cases := []struct {
-			in   time.Duration
-			want time.Duration
-		}{
-			{in: 0, want: 0},
-			{in: 1500 * time.Millisecond, want: 1500 * time.Millisecond},
-			{in: 30 * time.Microsecond, want: 30 * time.Microsecond},
-			{in: 999 * time.Nanosecond, want: time.Microsecond},
-			{in: 1499 * time.Nanosecond, want: time.Microsecond},
-			{in: 1499*time.Nanosecond + 500, want: 2 * time.Microsecond},
-		}
-		for _, tc := range cases {
-			if got := NewSeconds(tc.in).Duration(); got != tc.want {
-				t.Fatalf("NewSeconds(%v).Duration() = %v, want %v", tc.in, got, tc.want)
-			}
-		}
-	})
-
-	t.Run("stores whole seconds as decimals", func(t *testing.T) {
-		t.Parallel()
-		cases := []struct {
-			in   time.Duration
-			want Seconds
-		}{
-			{in: 90 * time.Second, want: 90},
-			{in: 1500 * time.Millisecond, want: 1.5},
-			{in: time.Millisecond, want: 0.001},
-			{in: 30 * time.Microsecond, want: 0.00003},
-		}
-		for _, tc := range cases {
-			if got := NewSeconds(tc.in); got != tc.want {
-				t.Fatalf("NewSeconds(%v) = %v, want %v", tc.in, got, tc.want)
-			}
-		}
-	})
-
-	t.Run("round trips through a duration", func(t *testing.T) {
-		t.Parallel()
-		for _, d := range []time.Duration{0, time.Microsecond, 1500 * time.Millisecond, 90 * time.Second} {
-			if got := NewSeconds(d).Duration(); got != d {
-				t.Fatalf("NewSeconds(%v).Duration() = %v", d, got)
-			}
-		}
-	})
-}
-
 func TestLog(t *testing.T) {
 	t.Parallel()
 
@@ -151,9 +100,9 @@ func TestLog(t *testing.T) {
 		dir := t.TempDir()
 		day := time.Date(2026, 9, 21, 10, 30, 0, 0, time.UTC)
 		log := newTestLog(t, dir, day)
-		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, 1500*time.Millisecond,
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(1500*time.Millisecond),
 			metrics.Attr{Key: "container.runtime", Value: "podman"})
-		log.Record(t.Context(), "repo.diff", metrics.OutcomeError, 30*time.Millisecond)
+		log.Record(t.Context(), "repo.diff", metrics.OutcomeError, metrics.Duration(30*time.Millisecond))
 		if err := log.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -163,7 +112,7 @@ func TestLog(t *testing.T) {
 			t.Fatalf("lines = %d, want 2", len(lines))
 		}
 		wantLine := `{"time":"2026-09-21T10:30:00Z","name":"container.launch","outcome":"ok",` +
-			`"duration":1.5,"attrs":{"container.runtime":"podman"},` +
+			`"kind":"histogram","unit":"s","amount":1.5,"attrs":{"container.runtime":"podman"},` +
 			`"resource":{"service":"caic","version":"1.2.3","host":"host-1"}}`
 		if lines[0] != wantLine {
 			t.Fatalf("first line = %s, want %s", lines[0], wantLine)
@@ -176,7 +125,9 @@ func TestLog(t *testing.T) {
 			Time:     day,
 			Name:     "container.launch",
 			Outcome:  metrics.OutcomeOK,
-			Duration: NewSeconds(1500 * time.Millisecond),
+			Kind:     metrics.KindHistogram,
+			Unit:     metrics.UnitSeconds,
+			Amount:   metrics.Duration(1500 * time.Millisecond).Amount,
 			Attrs:    map[string]string{"container.runtime": "podman"},
 			Resource: resource{Service: "caic", Version: "1.2.3", Host: "host-1"},
 		}
@@ -197,15 +148,46 @@ func TestLog(t *testing.T) {
 		}
 	})
 
+	t.Run("records sizes and gauges", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		day := time.Date(2026, 9, 21, 10, 30, 0, 0, time.UTC)
+		log := newTestLog(t, dir, day)
+		log.Record(t.Context(), "container.disk_size", metrics.OutcomeOK, metrics.Bytes(4096))
+		log.Record(t.Context(), "container.instances", metrics.OutcomeOK, metrics.Gauge(3, metrics.UnitCount))
+		if err := log.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		lines := readLines(t, filepath.Join(dir, "2026-09-21.jsonl"))
+		if len(lines) != 2 {
+			t.Fatalf("lines = %d, want 2", len(lines))
+		}
+		var size record
+		if err := json.Unmarshal([]byte(lines[0]), &size); err != nil {
+			t.Fatalf("decode size: %v", err)
+		}
+		if size.Kind != metrics.KindHistogram || size.Unit != metrics.UnitBytes || size.Amount != 4096 {
+			t.Fatalf("size record = %+v, want a 4096 byte histogram", size)
+		}
+		var gauge record
+		if err := json.Unmarshal([]byte(lines[1]), &gauge); err != nil {
+			t.Fatalf("decode gauge: %v", err)
+		}
+		if gauge.Kind != metrics.KindGauge || gauge.Unit != metrics.UnitCount || gauge.Amount != 3 {
+			t.Fatalf("gauge record = %+v, want a gauge at 3", gauge)
+		}
+	})
+
 	t.Run("compresses the finished day on rollover", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		day := time.Date(2026, 9, 21, 23, 59, 0, 0, time.UTC)
 		log := newTestLog(t, dir, day)
-		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, time.Millisecond)
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
 
 		log.now = func() time.Time { return day.Add(2 * time.Minute) }
-		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, time.Millisecond)
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
 		if err := log.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -256,7 +238,7 @@ func TestLog(t *testing.T) {
 			t.Fatalf("seed current day: %v", err)
 		}
 		log := newTestLog(t, dir, time.Time{})
-		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, time.Millisecond)
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
 		if err := log.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -273,7 +255,7 @@ func TestLog(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 		log.now = func() time.Time { return time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC) }
-		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, time.Millisecond)
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -293,7 +275,7 @@ func TestLog(t *testing.T) {
 		for range writers {
 			wg.Go(func() {
 				for range each {
-					log.Record(t.Context(), "container.launch", metrics.OutcomeOK, time.Millisecond)
+					log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
 				}
 			})
 		}

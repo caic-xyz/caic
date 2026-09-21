@@ -2,12 +2,12 @@
 // compresses completed days.
 //
 // Files live in one directory as YYYY-MM-DD.jsonl, named and timestamped in
-// UTC, and durations are stored in seconds to the nearest microsecond. Rolling
-// past midnight closes the finished day and rewrites it as
-// YYYY-MM-DD.jsonl.zstd, and days left behind by a restart are compressed on
-// the next start. The log is a durable record rather than a query surface:
-// decompress it with zstd and read it with jq, or ship it to an OpenTelemetry
-// backend.
+// UTC. Each line records one measurement as a name, an outcome, a kind, a unit,
+// and an amount in that unit. Rolling past midnight closes the finished day and
+// rewrites it as YYYY-MM-DD.jsonl.zstd, and days left behind by a restart are
+// compressed on the next start. The log is a durable record rather than a query
+// surface: decompress it with zstd and read it with jq, or ship it to an
+// OpenTelemetry backend.
 //
 // A failed write never fails the operation being measured; it is logged and
 // dropped, because metrics must not take down the work they describe.
@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,31 +40,14 @@ const (
 	tempSuffix  = ".tmp"
 )
 
-// Seconds is a duration in seconds, quantized to the nearest microsecond.
-//
-// Seconds is the unit OpenTelemetry, Prometheus, and a metrics backend expect,
-// so importing the log is a field copy rather than a conversion that can be
-// wrong by a factor of a thousand. Microseconds are the precision the measured
-// operations carry; nanoseconds would be resolution they do not have.
-type Seconds float64
-
-// NewSeconds converts d to seconds, rounded to the nearest microsecond.
-func NewSeconds(d time.Duration) Seconds {
-	return Seconds(d.Round(time.Microsecond).Microseconds()) / 1e6
-}
-
-// Duration returns s as a standard library duration, rounded to the nearest
-// microsecond.
-func (s Seconds) Duration() time.Duration {
-	return time.Duration(math.Round(float64(s)*1e6)) * time.Microsecond
-}
-
-// record is one observation as written to the log.
+// record is one measurement as written to the log.
 type record struct {
 	Time     time.Time         `json:"time"`
 	Name     string            `json:"name"`
 	Outcome  metrics.Outcome   `json:"outcome"`
-	Duration Seconds           `json:"duration"`
+	Kind     metrics.Kind      `json:"kind"`
+	Unit     metrics.Unit      `json:"unit"`
+	Amount   float64           `json:"amount"`
 	Attrs    map[string]string `json:"attrs,omitempty"`
 	Resource resource          `json:"resource"`
 }
@@ -124,14 +106,16 @@ func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 	return l, nil
 }
 
-// Record appends one observation. It implements metrics.Recorder.
-func (l *Log) Record(ctx context.Context, name string, outcome metrics.Outcome, d time.Duration, attrs ...metrics.Attr) {
+// Record appends one measurement. It implements metrics.Recorder.
+func (l *Log) Record(ctx context.Context, name string, outcome metrics.Outcome, m metrics.Measurement, attrs ...metrics.Attr) {
 	now := l.now()
 	line, err := json.Marshal(record{
 		Time:     now,
 		Name:     name,
 		Outcome:  outcome,
-		Duration: NewSeconds(d),
+		Kind:     m.Kind,
+		Unit:     m.Unit,
+		Amount:   m.Amount,
 		Attrs:    metrics.DedupAttrs(attrs),
 		Resource: l.resource,
 	})

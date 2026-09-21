@@ -1065,7 +1065,7 @@ func (s *taskService) syncTask(ctx context.Context, entry *taskmgr.Entry, req *v
 	}
 	start := time.Now()
 	res, err := entry.Lifecycle.Sync(ctx, target, req.Force)
-	s.metrics.Record(ctx, "task.push", metrics.OutcomeOf(err), time.Since(start))
+	s.metrics.Record(ctx, "task.push", metrics.OutcomeOf(err), metrics.Duration(time.Since(start)))
 	if err != nil {
 		return nil, toDTO(err)
 	}

@@ -179,18 +179,77 @@ func TestRouterRecordsOperationMetrics(t *testing.T) {
 	if err := router.Purge(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := router.RepositoryStatus(t.Context(), id, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CompactRepositoryStatus(t.Context(), id, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.Processes(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.Signal(t.Context(), id, 1234, "TERM"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.DiskUsage(t.Context(), []runtime.ID{id}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.List(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.Metadata(t.Context(), id, runtime.MetadataTaskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.Inspect(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.SudoPassword(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
 
 	series := make(map[string]metrics.Series)
 	for _, s := range store.Snapshot() {
 		series[s.Name] = s
 	}
-	for _, name := range []string{"container.launch", "container.stop", "container.purge", "repo.diff"} {
-		s, ok := series[name]
+	// runtime is the container.runtime attribute expected on the series, empty
+	// when the operation spans runtimes and so belongs to none of them.
+	want := []struct {
+		name    string
+		kind    metrics.Kind
+		unit    metrics.Unit
+		runtime string
+	}{
+		{"container.launch", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.stop", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.purge", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.processes", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.signal", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.metadata", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.inspect", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.sudo_password", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"repo.diff", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"repo.status", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"repo.compact_status", metrics.KindHistogram, metrics.UnitSeconds, "docker"},
+		{"container.disk_usage", metrics.KindHistogram, metrics.UnitSeconds, ""},
+		{"container.list", metrics.KindHistogram, metrics.UnitSeconds, ""},
+		// Sizes and counts share the pipeline with durations but not the unit.
+		{"repo.diff_size", metrics.KindHistogram, metrics.UnitBytes, "docker"},
+		{"container.disk_size", metrics.KindHistogram, metrics.UnitBytes, "docker"},
+		{"container.instances", metrics.KindGauge, metrics.UnitCount, ""},
+	}
+	for _, w := range want {
+		s, ok := series[w.name]
 		if !ok {
-			t.Fatalf("metrics = %+v, want %s", store.Snapshot(), name)
+			t.Fatalf("metrics = %+v, want %s", store.Snapshot(), w.name)
 		}
-		if s.Outcome != metrics.OutcomeOK || s.Calls != 1 {
-			t.Errorf("%s = %+v, want one ok call", name, s)
+		if s.Outcome != metrics.OutcomeOK || s.Count != 1 {
+			t.Errorf("%s = %+v, want one ok measurement", w.name, s)
+		}
+		if s.Kind != w.kind || s.Unit != w.unit {
+			t.Errorf("%s = %+v, want %s in %s", w.name, s, w.kind, w.unit)
+		}
+		if got := s.Attrs["container.runtime"]; got != w.runtime {
+			t.Errorf("%s runtime = %q, want %q", w.name, got, w.runtime)
 		}
 	}
 
@@ -204,7 +263,7 @@ func TestRouterRecordsOperationMetrics(t *testing.T) {
 	failures := int64(0)
 	for _, s := range store.Snapshot() {
 		if s.Name == "repo.diff" && s.Outcome == metrics.OutcomeError {
-			failures = s.Calls
+			failures = s.Count
 		}
 	}
 	if failures != 1 {

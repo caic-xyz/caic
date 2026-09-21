@@ -1360,36 +1360,50 @@ data class MetricResource(
 )
 
 /**
- * MetricSeries describes aggregated latency observations for one operation,
+ * MetricSeries describes aggregated measurements sharing one name, kind, unit,
  * outcome, and attribute set.
  */
 @Serializable
 data class MetricSeries(
     /**
-     * Name is the operation identifier, such as "container.launch" or
+     * Name is the measurement identifier, such as "container.launch" or
      * "mcp.tool.task_create".
      */
     val name: String,
     /** Outcome is "ok" or "error". */
     val outcome: String,
     /**
-     * Attrs are the bounded dimensions that separate this series from
-     * others sharing its name and outcome, such as the container runtime.
-     * Omitted when the operation has no dimensions.
+     * Kind is the OpenTelemetry instrument kind: "histogram", "counter",
+     * "updowncounter", or "gauge". It decides which statistics are meaningful.
+     */
+    val kind: String,
+    /**
+     * Unit is the unit the amounts are expressed in, in UCUM notation: "s" for
+     * seconds, "By" for bytes, "1" for a dimensionless count.
+     */
+    val unit: String,
+    /**
+     * Attrs are the bounded dimensions that separate this series from others
+     * sharing its name and outcome, such as the container runtime. Omitted when
+     * the measurement has no dimensions.
      */
     val attrs: Map<String, String>? = null,
-    /** Calls is the total number of recorded calls. */
-    val calls: Long,
-    /** Samples is the number of retained observations used for the percentiles. */
+    /** Count is the number of recorded measurements. */
+    val count: Long,
+    /** Samples is the number of retained measurements used for the percentiles. */
     val samples: Long,
-    /** MinMS is the fastest retained call in milliseconds. */
-    val minMs: Double,
-    /** P50MS is the median retained call in milliseconds. */
-    val p50Ms: Double,
-    /** P95MS is the 95th percentile retained call in milliseconds. */
-    val p95Ms: Double,
-    /** MaxMS is the slowest retained call in milliseconds. */
-    val maxMs: Double,
+    /** Sum is the total of every recorded amount, in Unit. */
+    val sum: Double,
+    /** Min is the smallest retained amount, in Unit. */
+    val min: Double,
+    /** P50 is the median retained amount, in Unit. */
+    val p50: Double,
+    /** P95 is the 95th percentile retained amount, in Unit. */
+    val p95: Double,
+    /** Max is the largest retained amount, in Unit. */
+    val max: Double,
+    /** Last is the most recently recorded amount, in Unit. */
+    val last: Double,
 )
 
 /** MetricsResp is the response for GET /api/caic/v1/server/metrics. */

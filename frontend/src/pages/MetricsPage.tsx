@@ -1,23 +1,50 @@
-// MetricsPage is the /metrics route for server operation latency.
+// MetricsPage is the /metrics route for server measurements.
 
 import { For, Show, createSignal, onMount } from "solid-js";
 
-import type { MetricsResp } from "@sdk/types.gen";
+import type { MetricSeries, MetricsResp } from "@sdk/types.gen";
 
 import { api } from "../api";
 import Button from "../components/Button";
 import { Layout } from "../components/Layout";
+import { formatBytes, formatDuration } from "../formatting";
 import styles from "./MetricsPage.module.css";
 
 const noMetricSeries: MetricsResp["series"] = [];
 
-function formatMillis(ms: number): string {
-  if (ms < 1) return "<1 ms";
-  if (ms < 1000) return `${ms.toFixed(0)} ms`;
-  return `${Math.round(ms / 10) / 100} s`;
+type Stat = "sum" | "p50" | "p95" | "max" | "last";
+
+// A statistic only means something for some kinds: a counter has a running
+// total, and a gauge has a current value and an observed range, but neither has
+// a distribution.
+function hasStat(kind: string, stat: Stat): boolean {
+  switch (kind) {
+    case "counter":
+    case "updowncounter":
+      return stat === "sum" || stat === "last";
+    case "gauge":
+      return stat === "max" || stat === "last";
+    default:
+      return true;
+  }
 }
 
-function formatAttrs(attrs: MetricsResp["series"][number]["attrs"]): string {
+function formatAmount(amount: number, unit: string): string {
+  switch (unit) {
+    case "s":
+      return formatDuration(amount);
+    case "By":
+      return formatBytes(amount);
+    default:
+      return Number.isInteger(amount) ? String(amount) : String(Math.round(amount * 100) / 100);
+  }
+}
+
+function formatStat(metric: MetricSeries, stat: Stat): string {
+  return hasStat(metric.kind, stat) ? formatAmount(metric[stat], metric.unit) : "—";
+}
+
+function formatAttrs(attrs: MetricSeries["attrs"]): string {
   if (!attrs) return "—";
   const entries = Object.entries(attrs);
   return entries.length === 0 ? "—" : entries.map(([key, value]) => `${key}=${value}`).join(", ");
@@ -65,8 +92,9 @@ export default function MetricsPage() {
         <div class={styles.metricsPanel}>
           <h2 class={styles.metricsPanelTitle}>Metrics</h2>
           <p class={styles.metricsDescription}>
-            Duration of server operations such as container launch, diff, and push, slowest p95 first. Percentiles cover
-            the most recent retained calls per operation.
+            Measurements of server operations and resources. A histogram is read through its percentiles, a counter
+            through its total, and a gauge through its current value and observed range. Percentiles and totals cover
+            the most recent retained measurements per series.
           </p>
           <Show when={meta()}>
             <p class={styles.metricsMeta}>{meta()}</p>
@@ -76,21 +104,21 @@ export default function MetricsPage() {
               {error()}
             </p>
           </Show>
-          <Show
-            when={series().length > 0}
-            fallback={<p class={styles.metricsDescription}>No operations recorded yet.</p>}
-          >
+          <Show when={series().length > 0} fallback={<p class={styles.metricsDescription}>Nothing recorded yet.</p>}>
             <div class={styles.tableScroll}>
               <table class={styles.table}>
                 <thead>
                   <tr>
-                    <th scope="col">Operation</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Kind</th>
                     <th scope="col">Outcome</th>
                     <th scope="col">Attributes</th>
-                    <th scope="col">Calls</th>
+                    <th scope="col">Count</th>
+                    <th scope="col">Total</th>
                     <th scope="col">p50</th>
                     <th scope="col">p95</th>
                     <th scope="col">Max</th>
+                    <th scope="col">Last</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -98,12 +126,15 @@ export default function MetricsPage() {
                     {(metric) => (
                       <tr>
                         <th scope="row">{metric.name}</th>
+                        <td>{metric.kind}</td>
                         <td>{metric.outcome}</td>
                         <td>{formatAttrs(metric.attrs)}</td>
-                        <td>{metric.calls}</td>
-                        <td>{formatMillis(metric.p50Ms)}</td>
-                        <td>{formatMillis(metric.p95Ms)}</td>
-                        <td>{formatMillis(metric.maxMs)}</td>
+                        <td>{metric.count}</td>
+                        <td>{formatStat(metric, "sum")}</td>
+                        <td>{formatStat(metric, "p50")}</td>
+                        <td>{formatStat(metric, "p95")}</td>
+                        <td>{formatStat(metric, "max")}</td>
+                        <td>{formatStat(metric, "last")}</td>
                       </tr>
                     )}
                   </For>

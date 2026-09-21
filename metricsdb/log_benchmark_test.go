@@ -27,7 +27,7 @@ func BenchmarkLogRecord(b *testing.B) {
 			b.Cleanup(func() { _ = log.Close() })
 			b.ReportAllocs()
 			for b.Loop() {
-				log.Record(b.Context(), "container.launch", metrics.OutcomeOK, 1500*time.Millisecond, tc.attr...)
+				log.Record(b.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(1500*time.Millisecond), tc.attr...)
 			}
 		})
 	}

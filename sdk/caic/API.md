@@ -694,23 +694,29 @@ MetricResource identifies the process that produced the observations.
 
 ### MetricSeries
 
-MetricSeries describes aggregated latency observations for one operation,
+MetricSeries describes aggregated measurements sharing one name, kind, unit,
 outcome, and attribute set.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` | Name is the operation identifier, such as "container.launch" or
+| `name` | `string` | Name is the measurement identifier, such as "container.launch" or
 "mcp.tool.task_create". | yes |
 | `outcome` | `string` | Outcome is "ok" or "error". | yes |
-| `attrs` | `Record<string, string>` | Attrs are the bounded dimensions that separate this series from
-others sharing its name and outcome, such as the container runtime.
-Omitted when the operation has no dimensions. |  |
-| `calls` | `int64` | Calls is the total number of recorded calls. | yes |
-| `samples` | `int64` | Samples is the number of retained observations used for the percentiles. | yes |
-| `minMs` | `float64` | MinMS is the fastest retained call in milliseconds. | yes |
-| `p50Ms` | `float64` | P50MS is the median retained call in milliseconds. | yes |
-| `p95Ms` | `float64` | P95MS is the 95th percentile retained call in milliseconds. | yes |
-| `maxMs` | `float64` | MaxMS is the slowest retained call in milliseconds. | yes |
+| `kind` | `string` | Kind is the OpenTelemetry instrument kind: "histogram", "counter",
+"updowncounter", or "gauge". It decides which statistics are meaningful. | yes |
+| `unit` | `string` | Unit is the unit the amounts are expressed in, in UCUM notation: "s" for
+seconds, "By" for bytes, "1" for a dimensionless count. | yes |
+| `attrs` | `Record<string, string>` | Attrs are the bounded dimensions that separate this series from others
+sharing its name and outcome, such as the container runtime. Omitted when
+the measurement has no dimensions. |  |
+| `count` | `int64` | Count is the number of recorded measurements. | yes |
+| `samples` | `int64` | Samples is the number of retained measurements used for the percentiles. | yes |
+| `sum` | `float64` | Sum is the total of every recorded amount, in Unit. | yes |
+| `min` | `float64` | Min is the smallest retained amount, in Unit. | yes |
+| `p50` | `float64` | P50 is the median retained amount, in Unit. | yes |
+| `p95` | `float64` | P95 is the 95th percentile retained amount, in Unit. | yes |
+| `max` | `float64` | Max is the largest retained amount, in Unit. | yes |
+| `last` | `float64` | Last is the most recently recorded amount, in Unit. | yes |
 
 ### MetricsResp
 
