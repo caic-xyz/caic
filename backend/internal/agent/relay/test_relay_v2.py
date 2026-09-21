@@ -823,7 +823,18 @@ def test_exit_and_stripped_environment_controls() -> None:
             stderr=subprocess.PIPE,
             env=env,
         )
-        stdout, _stderr = proc.communicate(timeout=10)
+        # Keep stdin open until the daemon closes the attach socket at
+        # subprocess EOF. Closing stdin first exercises the plain-EOF
+        # (SSH-drop) path, where the daemon tears down the live socket before
+        # the subprocess output arrives, so stdout can be an early truncation
+        # of output.jsonl instead of the full stream.
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        stdout = proc.stdout.read()
+        proc.stdin.close()
+        if proc.stderr is not None:
+            proc.stderr.read()
+        proc.wait(timeout=10)
         with open(output_path, "rb") as output_file:
             persisted = output_file.read()
         assert stdout == persisted
