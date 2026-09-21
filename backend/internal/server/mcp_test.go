@@ -790,6 +790,63 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("subscriptionDoesNotMissTaskChangeWhileDeliveringPreviousChange", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		id := ksid.NewID()
+		tk := mustNewTask(t, id, agent.Prompt{Text: "subscription state changes"}, harness.Claude)
+		insertTestTask(s, id.String(), tk)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		updates := make(chan mcp.ResourceUpdate, 2)
+		done := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			defer close(done)
+			count := 0
+			for update := range changes {
+				updates <- update
+				count++
+				if count == 1 {
+					tk.SetState(taskslog.StateWaiting)
+					s.taskMgr.NotifyTaskChange()
+				}
+				if count == 2 {
+					return
+				}
+			}
+		})
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+		})
+
+		tk.SetState(taskslog.StateRunning)
+		s.taskMgr.NotifyTaskChange()
+		for range 2 {
+			select {
+			case update := <-updates:
+				if !slices.Equal(update.ResourceURIs, []string{"gomode://items"}) {
+					t.Fatalf("update resource uris = %#v, want gomode://items", update.ResourceURIs)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for task state update")
+			}
+		}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for subscription iterator to stop")
+		}
+	})
+
 	t.Run("toolsCall", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

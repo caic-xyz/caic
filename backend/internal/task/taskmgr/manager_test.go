@@ -1653,6 +1653,24 @@ func TestManager(t *testing.T) {
 				t.Error("old Changed() channel not closed after mutation")
 			}
 		})
+		t.Run("valid_change_snapshot_tracks_version", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			version, oldCh := m.ChangeSnapshot()
+			m.NotifyTaskChange()
+			nextVersion, nextCh := m.ChangeSnapshot()
+			if nextVersion != version+1 {
+				t.Fatalf("change version = %d, want %d", nextVersion, version+1)
+			}
+			if oldCh == nextCh {
+				t.Fatal("ChangeSnapshot returned the same channel after mutation")
+			}
+			select {
+			case <-oldCh:
+			default:
+				t.Fatal("ChangeSnapshot's old channel is not closed after mutation")
+			}
+		})
 	})
 
 	t.Run("FindTasksByPR", func(t *testing.T) {

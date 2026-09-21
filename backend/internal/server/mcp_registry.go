@@ -284,15 +284,28 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 			defer usageTicker.Stop()
 			usageC = usageTicker.C
 		}
+		pendingTaskUpdate := false
 		for {
+			if pendingTaskUpdate {
+				pendingTaskUpdate = false
+				if !yield(sources.taskUpdate(), nil) {
+					return
+				}
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-taskC:
+				// Re-arm before yielding. yield may block while another task mutation
+				// closes the replacement channel; retaining the versioned snapshot
+				// makes that later mutation observable after the callback returns.
+				previousVersion := sources.taskVersion
+				sources.taskVersion, taskC = m.taskSvc.taskMgr.ChangeSnapshot()
+				pendingTaskUpdate = sources.taskVersion > previousVersion+1
 				if !yield(sources.taskUpdate(), nil) {
 					return
 				}
-				taskC = m.taskSvc.taskMgr.Changed()
 			case <-repoC:
 				if !yield(sources.repoUpdate(), nil) {
 					return
@@ -396,17 +409,17 @@ func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.Subscr
 		hasFilter = true
 		switch {
 		case strings.HasPrefix(uri, "caic://tasks/"):
-			sources.taskC = m.taskSvc.taskMgr.Changed()
+			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 		case strings.HasPrefix(uri, "caic://repos/"):
 			sources.repoC = m.serverConfig.checkouts.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		case uri == "gomode://items":
-			sources.taskC = m.taskSvc.taskMgr.Changed()
+			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 		case uri == "gomode://notifications":
-			sources.taskC = m.taskSvc.taskMgr.Changed()
+			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
 			sources.usagePolling = true
 			sources.usageResourceURIs = append(sources.usageResourceURIs, uri)
@@ -419,7 +432,7 @@ func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.Subscr
 			return subscriptionSources{}, mcp.ErrInvalidParams("missing required MCP scope: %s", mcpScopeRead)
 		}
 		hasFilter = true
-		sources.taskC = m.taskSvc.taskMgr.Changed()
+		sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 		sources.repoC = m.serverConfig.checkouts.Changed()
 		sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 		sources.resourcesListChanged = true
@@ -1967,6 +1980,7 @@ func mcpScopeChallenge(scope string) string {
 
 type subscriptionSources struct {
 	taskC        <-chan struct{}
+	taskVersion  uint64
 	repoC        <-chan struct{}
 	repoStatusC  <-chan struct{}
 	usagePolling bool

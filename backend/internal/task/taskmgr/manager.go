@@ -136,9 +136,10 @@ type Manager struct {
 	branchAllocationMu sync.Mutex // Serializes branch adoption checks and reservations across task startups.
 
 	// Guarded by mu.
-	mu      sync.Mutex
-	tasks   map[string]*Entry
-	changed chan struct{} // closed on mutation, replaced under mu
+	mu            sync.Mutex
+	tasks         map[string]*Entry
+	changed       chan struct{} // closed on mutation, replaced under mu
+	changeVersion uint64        // incremented with changed under mu
 
 	// Guarded by settledMu. Tracks the background settled-history pass so the
 	// task-list stream can report it (loading -> completed | failed). The zero
@@ -333,6 +334,17 @@ func (m *Manager) Changed() <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.changed
+}
+
+// ChangeSnapshot returns the current task-change version and its notification
+// channel. Callers that re-arm a change subscription must retain the version:
+// it lets them install the replacement channel before handling the update that
+// woke them, preventing another mutation in that handling window from being
+// missed.
+func (m *Manager) ChangeSnapshot() (version uint64, changed <-chan struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.changeVersion, m.changed
 }
 
 // CompleteSettledLoad records the outcome of the settled-history pass and
@@ -1649,6 +1661,7 @@ func (m *Manager) recordRateLimitMessage(rateLimit *agent.RateLimitMessage) bool
 func (m *Manager) taskChangedLocked() {
 	close(m.changed)
 	m.changed = make(chan struct{})
+	m.changeVersion++
 }
 
 // resolveCheckout returns the checkout for a task's primary repo, if any.
