@@ -32,6 +32,12 @@ var knownBackends = map[string]struct{}{
 	BackendLocalStack: {},
 }
 
+// DefaultGeminiModel is the Gemini Live model used when config.model is empty.
+//
+// Model IDs are bare, without the models/ resource-name prefix; the Gemini
+// adapter qualifies them for the wire.
+const DefaultGeminiModel = "gemini-3.8-live"
+
 // Config is the static voice gateway configuration.
 //
 // A gateway instance serves exactly one backend. Operators run multiple
@@ -51,7 +57,7 @@ func DefaultConfig() Config {
 			HTTP:          ":3479",
 			WebRTCUDPPort: 0,
 		},
-		Model:   "gemini-3.1-flash-live-preview",
+		Model:   DefaultGeminiModel,
 		Backend: BackendGeminiLive,
 	}
 }

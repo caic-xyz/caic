@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
@@ -21,11 +22,31 @@ const (
 	// geminiWSEndpoint is the Gemini Live BidiGenerateContent WebSocket URL.
 	geminiWSEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
-	// geminiModelName is the default Gemini Live model used by the first gateway backend.
-	geminiModelName = "models/gemini-3.1-flash-live-preview"
+	// geminiModelPrefix qualifies a bare model ID as a Gemini resource name.
+	geminiModelPrefix = "models/"
 
 	// wsReadLimit is the max WebSocket message size (16 MiB for audio chunks).
 	wsReadLimit = 16 * 1024 * 1024
+
+	// geminiResponseModalityAudio requests audio-only output. Native audio
+	// models support only AUDIO; text arrives as output transcription.
+	geminiResponseModalityAudio = "AUDIO"
+
+	// geminiActivityHandlingStartOfActivityInterrupts lets user speech interrupt
+	// model generation.
+	geminiActivityHandlingStartOfActivityInterrupts = "START_OF_ACTIVITY_INTERRUPTS"
+
+	// geminiTurnCoverageOnlyActivity keeps silence out of the user turn. Gemini
+	// 3.8 Live otherwise includes all video since the last turn, and this
+	// adapter never sends video.
+	geminiTurnCoverageOnlyActivity = "TURN_INCLUDES_ONLY_ACTIVITY"
+
+	// geminiBehaviorBlocking waits for each function response before the model
+	// continues. Gemini 3.8 Live defaults to NON_BLOCKING, but the gateway's
+	// tool round trip is synchronous, so declarations opt back into blocking.
+	// Reclassify a tool to NON_BLOCKING only once its measured call duration
+	// justifies it; the host tool catalog records the threshold.
+	geminiBehaviorBlocking = "BLOCKING"
 )
 
 // Gemini Live type maintenance:
@@ -44,6 +65,30 @@ const (
 //    gomode/voicegateway/api/v1 and must be translated explicitly in
 //    protocol.go.
 // 6. After edits, run the focused voicertc tests and make lint.
+//
+// Model-specific setup rules were verified for gemini-3.8-live against the
+// Gemini Live capabilities page
+// (https://ai.google.dev/gemini-api/docs/live-api/capabilities) and the model
+// migration guide
+// (https://ai.google.dev/gemini-api/docs/models/gemini-3.8-live):
+//   - thinkingLevel is rejected, so geminiGenerationConfig carries no
+//     thinkingConfig.
+//   - enableAffectiveDialog is removed from the API, and proactive audio is
+//     permanently enabled with an explicit false rejected, so the setup omits
+//     both.
+//   - Asynchronous function calling is the default; declarations request
+//     BLOCKING to preserve the gateway's synchronous tool round trip.
+//
+// AGENTS.md records the upgrade breadcrumbs for future model bumps.
+
+// geminiQualifyModel returns name as a Gemini resource name, adding the
+// models/ prefix when absent. Config stores bare IDs such as gemini-3.8-live.
+func geminiQualifyModel(name string) string {
+	if name == "" || strings.HasPrefix(name, geminiModelPrefix) {
+		return name
+	}
+	return geminiModelPrefix + name
+}
 
 // geminiBridgeBackend adapts the provider-neutral voice gateway protocol to a
 // Gemini Live WebSocket session.
@@ -65,6 +110,7 @@ const (
 //     transcription/tool-call messages are translated back to gateway messages.
 type geminiBridgeBackend struct {
 	apiKey string
+	model  string
 }
 
 // Close releases backend-wide resources. The Gemini Live backend holds none;
@@ -88,17 +134,19 @@ func (b *geminiBridgeBackend) connect(
 	}
 	wsConn.SetReadLimit(wsReadLimit)
 	sess := &geminiBridgeSession{
-		id:   sessionID,
-		sink: sink,
-		ws:   wsConn,
+		id:    sessionID,
+		model: b.model,
+		sink:  sink,
+		ws:    wsConn,
 	}
 	go sess.rxLoop(ctx)
 	return sess, nil
 }
 
 type geminiBridgeSession struct {
-	id   string
-	sink backendSink
+	id    string
+	model string
+	sink  backendSink
 
 	mu                sync.Mutex
 	ws                *websocket.Conn
@@ -106,7 +154,7 @@ type geminiBridgeSession struct {
 }
 
 func (s *geminiBridgeSession) acceptClientMessage(ctx context.Context, data []byte) error {
-	providerMsg, err := translateGatewayClientMessage(data)
+	providerMsg, err := translateGatewayClientMessage(data, s.model)
 	if err != nil {
 		return err
 	}
@@ -349,7 +397,6 @@ type geminiSetup struct {
 	ContextWindowCompression geminiContextWindowCompression `json:"contextWindowCompression,omitzero"`
 	InputAudioTranscription  geminiAudioTranscriptionConfig `json:"inputAudioTranscription"`
 	OutputAudioTranscription geminiAudioTranscriptionConfig `json:"outputAudioTranscription"`
-	Proactivity              geminiProactivityConfig        `json:"proactivity,omitzero"`
 	ExplicitVADSignal        *bool                          `json:"explicitVadSignal,omitempty"`
 	AvatarConfig             geminiAvatarConfig             `json:"avatarConfig,omitzero"`
 	SafetySettings           []json.RawMessage              `json:"safetySettings,omitempty"`
@@ -367,21 +414,9 @@ type geminiGenerationConfig struct {
 	// MediaResolution controls input media sampling for token usage and detail.
 	MediaResolution string `json:"mediaResolution,omitzero"`
 	// Seed asks Gemini to make repeated requests more reproducible.
-	Seed                  *int32                `json:"seed,omitempty"`
-	SpeechConfig          geminiSpeechConfig    `json:"speechConfig,omitzero"`
-	ThinkingConfig        *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
-	EnableAffectiveDialog *bool                 `json:"enableAffectiveDialog,omitempty"`
-	TranslationConfig     json.RawMessage       `json:"translationConfig,omitempty"`
-}
-
-// geminiThinkingLevel controls the amount of Gemini reasoning before a response.
-type geminiThinkingLevel string
-
-const geminiThinkingLevelLow geminiThinkingLevel = "LOW"
-
-// geminiThinkingConfig controls Gemini reasoning features for a live session.
-type geminiThinkingConfig struct {
-	ThinkingLevel geminiThinkingLevel `json:"thinkingLevel,omitempty"`
+	Seed              *int32             `json:"seed,omitempty"`
+	SpeechConfig      geminiSpeechConfig `json:"speechConfig,omitzero"`
+	TranslationConfig json.RawMessage    `json:"translationConfig,omitempty"`
 }
 
 // geminiSpeechConfig controls generated speech and transcription behavior.
@@ -431,7 +466,8 @@ type geminiFunctionDeclaration struct {
 	Response             json.RawMessage `json:"response,omitempty"`
 	// ResponseJsonSchema is mutually exclusive with Response.
 	ResponseJsonSchema json.RawMessage `json:"responseJsonSchema,omitempty"`
-	// Behavior controls Live function-call behavior for supported modes.
+	// Behavior selects blocking or non-blocking function execution. Gemini 3.8
+	// Live supports both; the gateway requests BLOCKING.
 	Behavior string `json:"behavior,omitzero"`
 }
 
@@ -485,11 +521,6 @@ type geminiAudioTranscriptionConfig struct {
 	LanguageCodes []string `json:"languageCodes,omitempty"`
 }
 
-// geminiProactivityConfig controls whether Gemini may stay silent for irrelevant input.
-type geminiProactivityConfig struct {
-	ProactiveAudio *bool `json:"proactiveAudio,omitempty"`
-}
-
 // geminiAvatarConfig configures avatar output for supported live sessions.
 type geminiAvatarConfig struct {
 	// AvatarName selects a prebuilt avatar.
@@ -531,6 +562,11 @@ type serverContent struct {
 	TurnCompleteReason string `json:"turnCompleteReason,omitzero"`
 	// WaitingForInput means Gemini is holding response generation for more input.
 	WaitingForInput bool `json:"waitingForInput,omitzero"`
+	// InterimInputTranscription carries low-latency text while the user speaks.
+	InterimInputTranscription transcription `json:"interimInputTranscription,omitzero"`
+	// InteractionStatus reports session activity and is always sent with turnComplete.
+	// Extended-thinking sessions use it instead of turnComplete to detect idleness.
+	InteractionStatus string `json:"interactionStatus,omitzero"`
 }
 
 // modelTurn is generated content from Gemini.

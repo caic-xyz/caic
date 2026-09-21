@@ -24,8 +24,8 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.Server.WebRTCUDPPort != 0 {
 			t.Errorf("Server.WebRTCUDPPort = %d, want 0", cfg.Server.WebRTCUDPPort)
 		}
-		if cfg.Model != "gemini-3.1-flash-live-preview" {
-			t.Errorf("Model = %q, want gemini-3.1-flash-live-preview", cfg.Model)
+		if cfg.Model != DefaultGeminiModel {
+			t.Errorf("Model = %q, want %q", cfg.Model, DefaultGeminiModel)
 		}
 	})
 

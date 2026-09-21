@@ -152,6 +152,12 @@ Clients select a gateway by URL, not by provider name. A host that offers more
 than one backend advertises or chooses among multiple gateway URLs outside the
 v1 voice session protocol.
 
+The `gemini-live` backend reads the top-level `model` config key
+(`voicegateway.DefaultGeminiModel` when unset). Bare model IDs such as
+`gemini-3.8-live` are qualified with the `models/` prefix for the wire. The
+setup shape is model-specific; see `gomode/voicegateway/voicertc/AGENTS.md` for
+the upgrade rules and sources.
+
 Local stack runtime details live in `gomode/docs/VOICE_LOCAL_STACK.md`.
 
 ## Tests Needed

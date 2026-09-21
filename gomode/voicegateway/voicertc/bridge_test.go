@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/maruel/gopus"
@@ -81,7 +82,7 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 	t.Parallel()
 	t.Run("setup", func(t *testing.T) {
 		t.Parallel()
-		got, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"tasks_list","description":"List tasks","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt","text":"Current service items:\n- Task #1: Build (running)"}}`))
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"tasks_list","description":"List tasks","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt","text":"Current service items:\n- Task #1: Build (running)"}}`), "gemini-3.8-live")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,11 +90,17 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if err := json.Unmarshal(got, &msg); err != nil {
 			t.Fatal(err)
 		}
-		if msg.Setup.Model != geminiModelName {
-			t.Errorf("model = %q, want %q", msg.Setup.Model, geminiModelName)
+		if msg.Setup.Model != "models/gemini-3.8-live" {
+			t.Errorf("model = %q, want models/gemini-3.8-live", msg.Setup.Model)
 		}
-		if msg.Setup.GenerationConfig.ThinkingConfig == nil || msg.Setup.GenerationConfig.ThinkingConfig.ThinkingLevel != geminiThinkingLevelLow {
-			t.Errorf("thinking config = %#v, want low", msg.Setup.GenerationConfig.ThinkingConfig)
+		if strings.Contains(string(got), "thinkingConfig") {
+			t.Errorf("setup = %s, want no thinkingConfig", got)
+		}
+		if modalities := msg.Setup.GenerationConfig.ResponseModalities; len(modalities) != 1 || modalities[0] != geminiResponseModalityAudio {
+			t.Errorf("responseModalities = %v, want [%s]", modalities, geminiResponseModalityAudio)
+		}
+		if coverage := msg.Setup.RealtimeInputConfig.TurnCoverage; coverage != geminiTurnCoverageOnlyActivity {
+			t.Errorf("turnCoverage = %q, want %q", coverage, geminiTurnCoverageOnlyActivity)
 		}
 		if len(msg.Setup.SystemInstruction.Parts) != 2 || msg.Setup.SystemInstruction.Parts[0].Text != "system prompt" ||
 			msg.Setup.SystemInstruction.Parts[1].Text != "Current service items:\n- Task #1: Build (running)" {
@@ -109,11 +116,14 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		if string(decl.ParametersJsonSchema) != `{"type":"object","properties":{}}` {
 			t.Errorf("parametersJsonSchema = %s, want empty object schema", decl.ParametersJsonSchema)
 		}
+		if decl.Behavior != geminiBehaviorBlocking {
+			t.Errorf("behavior = %q, want %q", decl.Behavior, geminiBehaviorBlocking)
+		}
 	})
 
 	t.Run("context update", func(t *testing.T) {
 		t.Parallel()
-		got, err := translateGatewayClientMessage([]byte(`{"kind":"context.update","context":{"text":"status update"}}`))
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"context.update","context":{"text":"status update"}}`), voicegateway.DefaultGeminiModel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +138,7 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 
 	t.Run("user message", func(t *testing.T) {
 		t.Parallel()
-		got, err := translateGatewayClientMessage([]byte(`{"kind":"user.message","text":"Say exactly one word: Ready"}`))
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"user.message","text":"Say exactly one word: Ready"}`), voicegateway.DefaultGeminiModel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +153,7 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 
 	t.Run("tool result", func(t *testing.T) {
 		t.Parallel()
-		got, err := translateGatewayClientMessage([]byte(`{"kind":"tool.result","id":"call-1","name":"tasks_list","result":{"ok":true}}`))
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"tool.result","id":"call-1","name":"tasks_list","result":{"ok":true}}`), voicegateway.DefaultGeminiModel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +168,7 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 
 	t.Run("rejects malformed setup", func(t *testing.T) {
 		t.Parallel()
-		_, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[],"context":{}}`))
+		_, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[],"context":{}}`), voicegateway.DefaultGeminiModel)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -166,7 +176,7 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 
 	t.Run("rejects provider message", func(t *testing.T) {
 		t.Parallel()
-		_, err := translateGatewayClientMessage([]byte(`{"setup":{"model":"provider"}}`))
+		_, err := translateGatewayClientMessage([]byte(`{"setup":{"model":"provider"}}`), voicegateway.DefaultGeminiModel)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -356,6 +366,38 @@ func TestNewBridge(t *testing.T) {
 			t.Fatal("set local description:", err)
 		}
 	})
+}
+
+func TestBackendForConfigGeminiModel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{name: "configured model", model: "gemini-3.8-live-extended-thinking", want: "gemini-3.8-live-extended-thinking"},
+		{name: "empty model falls back to default", want: voicegateway.DefaultGeminiModel},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			backend, err := backendForConfig(t.Context(), &voicegateway.Config{
+				Backend: voicegateway.BackendGeminiLive,
+				Model:   tc.model,
+			}, "test-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = backend.Close() })
+			gemini, ok := backend.(*geminiBridgeBackend)
+			if !ok {
+				t.Fatalf("backend = %T, want *geminiBridgeBackend", backend)
+			}
+			if gemini.model != tc.want {
+				t.Errorf("model = %q, want %q", gemini.model, tc.want)
+			}
+		})
+	}
 }
 
 func TestRewriteSDPMappedCandidates(t *testing.T) {

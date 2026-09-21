@@ -12,7 +12,7 @@ import (
 
 var errSessionClosed = errors.New("session closed")
 
-func translateGatewayClientMessage(data []byte) ([]byte, error) {
+func translateGatewayClientMessage(data []byte, model string) ([]byte, error) {
 	var env voicev1.MessageEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("decode gateway message: %w", err)
@@ -23,7 +23,7 @@ func translateGatewayClientMessage(data []byte) ([]byte, error) {
 		if err := decodeGatewayMessage(data, env.Kind, &msg); err != nil {
 			return nil, err
 		}
-		return buildGeminiSetup(&msg)
+		return buildGeminiSetup(&msg, model)
 	case voicev1.MessageKindContextUpdate:
 		var msg voicev1.ContextUpdate
 		if err := decodeGatewayMessage(data, env.Kind, &msg); err != nil {
@@ -65,7 +65,7 @@ func decodeGatewayMessage(data []byte, want voicev1.MessageKind, msg any) error 
 	return nil
 }
 
-func buildGeminiSetup(msg *voicev1.SessionSetup) ([]byte, error) {
+func buildGeminiSetup(msg *voicev1.SessionSetup, model string) ([]byte, error) {
 	if msg.Context.SystemInstruction == "" {
 		return nil, errors.New("session.setup context.systemInstruction is required")
 	}
@@ -86,16 +86,14 @@ func buildGeminiSetup(msg *voicev1.SessionSetup) ([]byte, error) {
 			Name:                 tool.Name,
 			Description:          tool.Description,
 			ParametersJsonSchema: parameters,
+			Behavior:             geminiBehaviorBlocking,
 		})
 	}
 	setup := geminiSetupMessage{
 		Setup: geminiSetup{
-			Model: geminiModelName,
+			Model: geminiQualifyModel(model),
 			GenerationConfig: geminiGenerationConfig{
-				ResponseModalities: []string{"AUDIO"},
-				ThinkingConfig: &geminiThinkingConfig{
-					ThinkingLevel: geminiThinkingLevelLow,
-				},
+				ResponseModalities: []string{geminiResponseModalityAudio},
 				SpeechConfig: geminiSpeechConfig{
 					VoiceConfig: geminiVoiceConfig{
 						PrebuiltVoiceConfig: geminiPrebuiltVoiceConfig{
@@ -111,7 +109,8 @@ func buildGeminiSetup(msg *voicev1.SessionSetup) ([]byte, error) {
 				FunctionDeclarations: decls,
 			}},
 			RealtimeInputConfig: geminiRealtimeInputConfig{
-				ActivityHandling: "START_OF_ACTIVITY_INTERRUPTS",
+				ActivityHandling: geminiActivityHandlingStartOfActivityInterrupts,
+				TurnCoverage:     geminiTurnCoverageOnlyActivity,
 			},
 			InputAudioTranscription:  geminiAudioTranscriptionConfig{},
 			OutputAudioTranscription: geminiAudioTranscriptionConfig{},

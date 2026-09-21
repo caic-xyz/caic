@@ -330,6 +330,16 @@ func (m *mcpRegistry) voiceSessionDefaults(ctx context.Context) string {
 	return strings.Join(parts, "\n")
 }
 
+// specs returns the caic MCP tool catalog.
+//
+// Voice tool-call mode: the Gemini Live adapter currently declares every tool
+// as BLOCKING, because the provider-neutral ToolDeclaration has no per-tool
+// execution mode and the gateway tool round trip is synchronous. Per-tool voice
+// call durations are not measured yet. Once they are, a tool whose measured
+// call duration exceeds one second should become asynchronous (Gemini behavior
+// NON_BLOCKING) so the assistant can keep talking while it runs. Switching an
+// individual tool needs a mode hint carried from this catalog through
+// ToolDeclaration to the adapter; see gomode/voicegateway/voicertc/AGENTS.md.
 func (m *mcpRegistry) specs() []mcp.ToolSpec {
 	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
 	createSpec.InputSchema = buildTaskCreateSchema()

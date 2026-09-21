@@ -4,8 +4,9 @@
 # ── Gemini ───────────────────────────────────────────────────────────────────
 
 # Gemini Live model used by the gateway. The API key is always read from
-# GEMINI_API_KEY.
-#model = "gemini-3.1-flash-live-preview"
+# GEMINI_API_KEY. Use gemini-3.8-live, or gemini-3.8-live-extended-thinking
+# for background reasoning. Bare IDs are accepted; the models/ prefix is added.
+#model = "gemini-3.8-live"
 
 # Use the local half-duplex stack instead of Gemini Live. Omit
 # [local_stack.llm] to let voice-gateway manage llama.cpp with the default
