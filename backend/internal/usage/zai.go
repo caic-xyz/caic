@@ -38,7 +38,7 @@ func NewZaiFetcher(apiKey string) *ZaiFetcher {
 		return nil
 	}
 	return &ZaiFetcher{
-		baseFetcher: newBaseFetcher(agent.QuotaProviderZai, "Z.ai", AuthKindAPIKey, "https://z.ai/manage-apikey/billing"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderZai, AuthKindAPIKey, "https://z.ai/manage-apikey/billing"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		apiKey:      apiKey,
 	}

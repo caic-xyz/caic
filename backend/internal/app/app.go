@@ -37,6 +37,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/oauth/oauthclient"
@@ -217,6 +218,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		mdRuntimes[i].backend.Provider = provider
 	}
 
+	fetchers := usageFetchers(ctx, appLog, cfg)
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
@@ -229,6 +231,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		RuntimeMetadata:     cfg.Runtime.Metadata,
 		RuntimeStartTimeout: time.Hour,
 		Provider:            provider,
+		Pricer:              usage.NewPricer(fetchers),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)
@@ -289,7 +292,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		GitLabOAuth:                gitlabOAuth,
 		GoogleOAuth:                googleOAuth,
 		HostState:                  hostState,
-		UsageFetchers:              usageFetchers(ctx, appLog, cfg),
+		UsageFetchers:              fetchers,
 		VoiceBridge:                voiceBridge,
 		VoiceGateway:               cfg.Voice.Gateway,
 		ForgeMgr:                   forgeManager,

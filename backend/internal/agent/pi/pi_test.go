@@ -359,12 +359,36 @@ func TestPiWireFormat(t *testing.T) {
 		if rl.Status != "rejected" {
 			t.Fatalf("RateLimitMessage.Status = %q, want rejected", rl.Status)
 		}
+		// Without a seen model provider the rejection stays unattributed.
+		if rl.QuotaProvider != "" || rl.QuotaWindow != "" {
+			t.Fatalf("RateLimitMessage attribution = %q/%q, want empty", rl.QuotaProvider, rl.QuotaWindow)
+		}
 		res, ok := msgs[1].(*agent.ResultMessage)
 		if !ok {
 			t.Fatalf("message[1] type = %T, want *agent.ResultMessage", msgs[1])
 		}
 		if !res.IsError || res.Subtype != "error" || !strings.Contains(res.Result, "usage limit") {
 			t.Fatalf("ResultMessage = %+v", res)
+		}
+	})
+
+	t.Run("QuotaErrorAttributedToActiveModelProvider", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{}
+		// A message_start from the codex provider records the active provider.
+		if _, err := w.ParseMessage([]byte(`{"type":"message_start","message":{"role":"assistant","content":[],"model":"gpt-5.6-terra","provider":"openai-codex"}}`)); err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := w.ParseMessage([]byte(`{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"The usage limit has been reached"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rl, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("message[0] type = %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if rl.QuotaProvider != agent.QuotaProviderCodex || rl.QuotaLabel != "Codex" || rl.QuotaWindow != agent.QuotaWindowRequest {
+			t.Fatalf("RateLimitMessage attribution = %q/%q/%q, want codex/Codex/request", rl.QuotaProvider, rl.QuotaLabel, rl.QuotaWindow)
 		}
 	})
 

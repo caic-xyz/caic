@@ -67,7 +67,7 @@ func NewClaudeCodeFetcher(ctx context.Context) *ClaudeCodeFetcher {
 	}
 
 	f := &ClaudeCodeFetcher{
-		baseFetcher: newBaseFetcher(agent.QuotaProviderClaudeCode, "Claude Code", AuthKindOAuth, "https://claude.ai/settings/usage"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderClaudeCode, AuthKindOAuth, "https://claude.ai/settings/usage"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		token:       token,
 		credPath:    credPath,

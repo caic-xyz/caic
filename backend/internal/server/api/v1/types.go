@@ -758,6 +758,15 @@ type ProviderQuota struct {
 	// Anthropic, report it as "extra usage" on top of the subscription
 	// instead of a prepaid wallet balance.
 	Balance QuotaBalance `json:"balance,omitzero"`
+
+	// PricingPhase reports time-dependent pricing as of the snapshot:
+	// "peak", "peak-soon", or "off-peak". Empty when the provider's pricing
+	// does not vary by time of day.
+	PricingPhase string `json:"pricingPhase,omitempty"`
+	// PricingTransitionAt is when PricingPhase next changes; zero for
+	// off-peak. Clients should interpolate between snapshots, which arrive
+	// at the usage cache TTL cadence.
+	PricingTransitionAt time.Time `json:"pricingTransitionAt,omitzero"`
 }
 
 // ProviderFetchStatus describes whether provider quota data is current enough

@@ -755,6 +755,14 @@ func (m *WidgetDeltaMessage) Type() string { return "widget_delta" }
 // coupled at compile time.
 type QuotaProvider string
 
+// QuotaProviderForModel maps a harness-reported model ID (for example
+// "zai/glm-5.3-flash" or "openrouter/z-ai/glm-5.3-flash") to the quota
+// provider that bills it. Returns "" when no quota provider matches.
+func QuotaProviderForModel(model string) QuotaProvider {
+	provider, _, _ := strings.Cut(strings.ToLower(model), "/")
+	return quotaProviderModelAliases[provider]
+}
+
 // Valid reports whether p is a supported quota provider.
 func (p QuotaProvider) Valid() bool {
 	switch p {
@@ -800,6 +808,68 @@ const (
 	QuotaProviderZai QuotaProvider = "zai"
 )
 
+// String returns the human-readable provider name shown in the UI.
+func (p QuotaProvider) String() string {
+	switch p {
+	case QuotaProviderAlibaba:
+		return "Alibaba"
+	case QuotaProviderAnthropic:
+		return "Anthropic"
+	case QuotaProviderCerebras:
+		return "Cerebras"
+	case QuotaProviderClaudeCode:
+		return "Claude Code"
+	case QuotaProviderCodex:
+		return "Codex"
+	case QuotaProviderDeepSeek:
+		return "DeepSeek"
+	case QuotaProviderGemini:
+		return "Gemini"
+	case QuotaProviderGrok:
+		return "Grok"
+	case QuotaProviderGroq:
+		return "Groq"
+	case QuotaProviderOpenRouter:
+		return "OpenRouter"
+	case QuotaProviderRunInfra:
+		return "RunInfra"
+	case QuotaProviderTypeSafe:
+		return "TypeSafe"
+	case QuotaProviderXiaomi:
+		return "Xiaomi MiMo"
+	case QuotaProviderZai:
+		return "Z.ai"
+	default:
+		return string(p)
+	}
+}
+
+// quotaProviderModelAliases maps harness model provider prefixes (the part of
+// a model ID before the first "/") to the quota provider that bills them.
+var quotaProviderModelAliases = map[string]QuotaProvider{
+	"alibaba":         QuotaProviderAlibaba,
+	"anthropic":       QuotaProviderAnthropic,
+	"bigmodel":        QuotaProviderZai,
+	"cerebras":        QuotaProviderCerebras,
+	"claudecode":      QuotaProviderClaudeCode,
+	"codex":           QuotaProviderCodex,
+	"dashscope":       QuotaProviderAlibaba,
+	"deepseek":        QuotaProviderDeepSeek,
+	"gemini":          QuotaProviderGemini,
+	"google":          QuotaProviderGemini,
+	"grok":            QuotaProviderGrok,
+	"groq":            QuotaProviderGroq,
+	"openai-codex":    QuotaProviderCodex,
+	"openrouter":      QuotaProviderOpenRouter,
+	"runinfra":        QuotaProviderRunInfra,
+	"typesafe":        QuotaProviderTypeSafe,
+	"xiaomi":          QuotaProviderXiaomi,
+	"z-ai":            QuotaProviderZai,
+	"zai":             QuotaProviderZai,
+	"zai-coding-plan": QuotaProviderZai,
+	"zhipu":           QuotaProviderZai,
+}
+
 // RateLimitStatus describes whether a provider accepted or rejected a request
 // for a quota window.
 type RateLimitStatus string
@@ -813,6 +883,12 @@ func (s RateLimitStatus) Valid() bool {
 		return false
 	}
 }
+
+const (
+	// QuotaWindowRequest marks a per-request rejection reported without a
+	// quota window, such as a harness relaying only an error message.
+	QuotaWindowRequest = "request"
+)
 
 const (
 	// RateLimitStatusAllowed means the provider accepted the request.

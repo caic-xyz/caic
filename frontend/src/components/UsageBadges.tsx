@@ -1,15 +1,14 @@
 // Usage badges: per-provider grouped pills with color-coded thresholds, an icon
-// tooltip that always names the provider, and a DeepSeek peak-pricing icon tint.
+// tooltip that always names the provider, and a backend-reported pricing-phase
+// icon tint (e.g. DeepSeek peak hours).
 
 import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 
-import { QuotaProviderDeepSeek } from "@sdk/types.gen";
 import type { ProviderQuota, QuotaRateLimit, QuotaBalance, UsageResp } from "@sdk/types.gen";
 
 import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
-import { deepseekPricing, type DeepseekPricing } from "../deepseekPricing";
 import styles from "./UsageBadges.module.css";
 
 function pctColor(pct: number) {
@@ -75,7 +74,21 @@ function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; labe
   );
 }
 
-function pricingClass(pricing: DeepseekPricing | null): string | undefined {
+/** Pricing phase reported by the backend for time-dependent provider pricing. */
+type PricingPhase = "peak" | "peak-soon" | "off-peak";
+
+// pricingOf reads the provider's pricing phase from the usage snapshot.
+function pricingOf(pq: ProviderQuota): { phase: PricingPhase; transitionAt: number | null } | null {
+  if (pq.pricingPhase !== "peak" && pq.pricingPhase !== "peak-soon" && pq.pricingPhase !== "off-peak") {
+    return null;
+  }
+  return {
+    phase: pq.pricingPhase,
+    transitionAt: pq.pricingTransitionAt ? new Date(pq.pricingTransitionAt).getTime() : null,
+  };
+}
+
+function pricingClass(pricing: { phase: PricingPhase } | null): string | undefined {
   switch (pricing?.phase) {
     case "peak":
       return styles.pricingPeak;
@@ -91,20 +104,24 @@ function formatUTCClock(ts: number): string {
   return `${new Date(ts).toISOString().slice(11, 16)} UTC`;
 }
 
-function pricingTooltip(pricing: DeepseekPricing, now: number): string {
+function pricingTooltip(
+  label: string,
+  pricing: { phase: PricingPhase; transitionAt: number | null },
+  now: number,
+): string {
   switch (pricing.phase) {
     case "peak":
-      return `DeepSeek peak pricing until ${formatUTCClock(pricing.transitionAt)}`;
+      return `${label} peak pricing until ${formatUTCClock(pricing.transitionAt ?? now)}`;
     case "peak-soon": {
-      const minutes = Math.max(1, Math.round((pricing.transitionAt - now) / 60_000));
-      return `DeepSeek peak pricing in ${minutes}m (${formatUTCClock(pricing.transitionAt)})`;
+      const minutes = Math.max(1, Math.round(((pricing.transitionAt ?? now) - now) / 60_000));
+      return `${label} peak pricing in ${minutes}m (${formatUTCClock(pricing.transitionAt ?? now)})`;
     }
     case "off-peak":
-      return "DeepSeek off-peak pricing";
+      return `${label} off-peak pricing`;
   }
 }
 
-function pricingAnnouncement(pricing: DeepseekPricing): string {
+function pricingAnnouncement(pricing: { phase: PricingPhase }): string {
   switch (pricing.phase) {
     case "peak":
       return "peak pricing";
@@ -118,12 +135,12 @@ function pricingAnnouncement(pricing: DeepseekPricing): string {
 function ProviderIcon(props: {
   logoUrl?: string;
   label: string;
-  pricing: DeepseekPricing | null;
+  pricing: { phase: PricingPhase; transitionAt: number | null } | null;
   now: Accessor<number>;
 }) {
   // Name the provider even when there is no money or rate-limit data to show;
-  // the pricing tooltip supersedes it for DeepSeek.
-  const tip = () => (props.pricing ? pricingTooltip(props.pricing, props.now()) : props.label);
+  // the pricing tooltip supersedes it for time-dependent pricing.
+  const tip = () => (props.pricing ? pricingTooltip(props.label, props.pricing, props.now()) : props.label);
   const iconClass = () => {
     const phase = pricingClass(props.pricing);
     return phase ? `${styles.providerIcon} ${phase}` : styles.providerIcon;
@@ -145,7 +162,7 @@ function ProviderIcon(props: {
 }
 
 function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
-  const pricing = () => (props.pq.provider === QuotaProviderDeepSeek ? deepseekPricing(props.now()) : null);
+  const pricing = () => pricingOf(props.pq);
 
   const badgeSpan = (
     <span class={styles.providerBadges}>

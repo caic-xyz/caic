@@ -2393,6 +2393,18 @@ data class ProviderQuota(
      * instead of a prepaid wallet balance.
      */
     val balance: QuotaBalance? = null,
+    /**
+     * PricingPhase reports time-dependent pricing as of the snapshot:
+     * "peak", "peak-soon", or "off-peak". Empty when the provider's pricing
+     * does not vary by time of day.
+     */
+    val pricingPhase: String? = null,
+    /**
+     * PricingTransitionAt is when PricingPhase next changes; zero for
+     * off-peak. Clients should interpolate between snapshots, which arrive
+     * at the usage cache TTL cadence.
+     */
+    val pricingTransitionAt: Instant? = null,
 )
 
 /** LocalWindow is the aggregated local cost for a rolling time window. */

@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 type failingConn struct {
@@ -3569,5 +3570,132 @@ func TestState(t *testing.T) {
 				t.Errorf("state = %v, want %v (should be unchanged)", tk.GetState(), taskslog.StatePurging)
 			}
 		})
+	})
+}
+
+// fakePricer prices a fixed set of models; unlisted models are unpriced.
+type fakePricer map[string]quotausage.ModelPrice
+
+func (p fakePricer) ModelPrice(modelID string, _ time.Time) (quotausage.ModelPrice, bool) {
+	price, ok := p[modelID]
+	return price, ok
+}
+
+func TestPricedCost(t *testing.T) {
+	t.Parallel()
+	// glm-5.3-flash: $0.15/M input, $0.03/M cache read, $0.50/M output.
+	prices := fakePricer{"zai/glm-5.3-flash": {InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}}
+
+	t.Run("UsageMessagesAccumulatePerCall", func(t *testing.T) {
+		t.Parallel()
+		// Pi reports usage per API call; its result carries only the last
+		// call's cost, which must not regress the accumulated value.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "zai/glm-5.3-flash", "")
+		tk.Pricer = prices
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"}, false)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "zai/glm-5.3-flash",
+			Usage:         agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
+		}, false)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "zai/glm-5.3-flash",
+			Usage:         agent.Usage{InputTokens: 2_000_000, CacheReadInputTokens: 1_000_000},
+		}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		want := 0.15 + 0.50 + 2*0.15 + 0.03
+		if costUSD != want {
+			t.Fatalf("costUSD = %v, want %v", costUSD, want)
+		}
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType:  "result",
+			TotalCostUSD: 0.01, // Last call only.
+			NumTurns:     2,
+		}, false)
+		if costUSD, _, _, _, _ = tk.LiveStats(); costUSD != want {
+			t.Errorf("costUSD after result = %v, want %v (must keep accumulated value)", costUSD, want)
+		}
+	})
+
+	t.Run("OpenCodeResultPricedPerTurn", func(t *testing.T) {
+		t.Parallel()
+		// OpenCode reports no per-call usage; its per-turn result usage is
+		// priced and accumulated.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "zai/glm-5.3-flash", "")
+		tk.Pricer = prices
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			Usage:       agent.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
+			NumTurns:    1,
+		}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			Usage:       agent.Usage{InputTokens: 2_000_000, CacheReadInputTokens: 1_000_000},
+			NumTurns:    1,
+		}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		want := 0.15 + 0.50 + 2*0.15 + 0.03
+		if costUSD != want {
+			t.Errorf("costUSD = %v, want %v", costUSD, want)
+		}
+	})
+
+	t.Run("UnpricedModelKeepsReportedTotal", func(t *testing.T) {
+		t.Parallel()
+		// Claude Code reports the authoritative session total, which the
+		// priced path does not touch for unpriced models.
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "claude-sonnet-4-5", "")
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "claude-sonnet-4-5"}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType:  "result",
+			TotalCostUSD: 10.0,
+			Usage:        agent.Usage{InputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
+			NumTurns:     1,
+		}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		if want := 10.0 + 0.10*10.0; costUSD != want {
+			t.Errorf("costUSD = %v, want %v (reported total + cache-read surcharge)", costUSD, want)
+		}
+	})
+
+	t.Run("PricedCostAccumulatesAcrossSessions", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "zai/glm-5.3-flash", "")
+		tk.Pricer = prices
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"}, false)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "zai/glm-5.3-flash",
+			Usage:         agent.Usage{InputTokens: 1_000_000},
+		}, false)
+		tk.ClearMessages(t.Context())
+		tk.SetState(taskslog.StateRunning)
+		tk.addMessage(t.Context(), &agent.UsageMessage{
+			ReportedModel: "zai/glm-5.3-flash",
+			Usage:         agent.Usage{InputTokens: 1_000_000},
+		}, false)
+		costUSD, _, _, _, _ := tk.LiveStats()
+		if costUSD != 0.30 {
+			t.Errorf("costUSD = %v, want 0.30", costUSD)
+		}
+	})
+
+	t.Run("SeedTimelinePricesUsageMessages", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "zai/glm-5.3-flash", "")
+		tk.Pricer = prices
+		tk.SetState(taskslog.StatePurged)
+		tk.SeedTimeline([]agent.Message{
+			&agent.InitMessage{ReportedModel: "zai/glm-5.3-flash"},
+			&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
+			&agent.ResultMessage{MessageType: "result", NumTurns: 1},
+		})
+		costUSD, _, _, _, _ := tk.LiveStats()
+		if costUSD != 0.15 {
+			t.Errorf("costUSD = %v, want 0.15", costUSD)
+		}
 	})
 }

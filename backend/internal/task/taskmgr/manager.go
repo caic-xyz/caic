@@ -84,7 +84,10 @@ type Config struct {
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
 	Provider            genai.Provider // nil-safe
-	Checkouts           *repo.Registry
+	// Pricer resolves per-model token pricing for cost reporting. When nil,
+	// a default quota-provider pricer is used.
+	Pricer    quotausage.ModelPricer
+	Checkouts *repo.Registry
 }
 
 // TaskMCPScoper derives a server-authorized MCP registry for a task.
@@ -112,6 +115,7 @@ type Manager struct {
 	runtimeMetadata     runtime.Metadata
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
+	pricer              quotausage.ModelPricer
 	taskMCPScoper       TaskMCPScoper
 	relay               relayReader
 
@@ -164,6 +168,11 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		return nil, errors.New("task manager logger is required")
 	}
 	serverCtx, cancelServerCtx := context.WithCancel(cfg.ServerCtx)
+	// Without an injected pricer, fall back to static quota-provider pricing.
+	pricer := cfg.Pricer
+	if pricer == nil {
+		pricer = quotausage.NewPricer(nil)
+	}
 	m := &Manager{
 		Runtimes:            cfg.Runtimes,
 		QuotaTracker:        quotausage.NewTracker(),
@@ -176,6 +185,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeMetadata:     maps.Clone(cfg.RuntimeMetadata),
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
+		pricer:              pricer,
 		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
@@ -409,7 +419,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		mounts[i] = taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, ContainerPath: m.containerPathForRepo(rs.Name)}
 	}
 
-	t, err := task.NewTask(ksid.NewID(), p.Prompt, p.Harness, p.Model, p.Effort, p.BaseImage, p.ContainerPlatform, "")
+	t, err := m.newTask(p.Prompt, p.Harness, p.Model, p.Effort, p.BaseImage, p.ContainerPlatform, "")
 	if err != nil {
 		return "", badRequestf("%v", err)
 	}
@@ -885,6 +895,16 @@ func (m *Manager) BranchAssociated(repoName, branch string) bool {
 	return false
 }
 
+// newTask creates a task and attaches the manager's model pricer.
+func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*task.Task, error) {
+	t, err := task.NewTask(ksid.NewID(), prompt, h, model, effort, baseImage, containerPlatform, title)
+	if err != nil {
+		return nil, err
+	}
+	t.Pricer = m.pricer
+	return t, nil
+}
+
 // insertLoadedTasks inserts loaded task logs into the registry, skipping tasks
 // whose id or repo/branch already exists. It is shared by LoadUnsettledTasks
 // (plain logs, uncapped) and LoadPurgedTasks (settled logs, pre-capped by the
@@ -951,6 +971,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			m.log.Warn("skipping purged task with invalid metadata", "task", lt.TaskID, "err", err)
 			continue
 		}
+		t.Pricer = m.pricer
 		t.RuntimeName = rt
 		t.Repos = lt.Repos
 		t.MaxCPUs = lt.MaxCPUs
@@ -1827,6 +1848,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if err != nil {
 		return nil, fmt.Errorf("import task %q: %w", taskID.String(), err)
 	}
+	t.Pricer = m.pricer
 	t.Repos = mounts
 	t.RuntimeName = rt
 	t.MaxCPUs = lt.MaxCPUs

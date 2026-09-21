@@ -215,6 +215,10 @@ func ProviderQuota(q *usage.ProviderQuota, now time.Time) (v1.ProviderQuota, err
 			ResetsAt: q.RateLimits[i].ResetsAt,
 		}
 	}
+	if phase, transition := usage.PricingPhaseFor(q.Provider, now); phase != "" {
+		out.PricingPhase = string(phase)
+		out.PricingTransitionAt = transition
+	}
 	return out, nil
 }
 

@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/ksid"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -343,7 +341,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	mounts := make([]taskslog.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
 	copy(mounts, sourceRepos)
 	mounts = append(mounts, extraMounts...)
-	t, err := task.NewTask(ksid.NewID(), p.Prompt, forkHarness, forkModel, forkEffort, source.BaseImage, source.ContainerPlatform, "")
+	t, err := r.manager.newTask(p.Prompt, forkHarness, forkModel, forkEffort, source.BaseImage, source.ContainerPlatform, "")
 	if err != nil {
 		return "", badRequestf("%v", err)
 	}

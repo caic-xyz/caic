@@ -21,7 +21,7 @@ func NewTypeSafeFetcher(apiKey string) *TypeSafeFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &TypeSafeFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderTypeSafe, "TypeSafe", AuthKindAPIKey, "https://console.typesafe.ai/usage")}
+	return &TypeSafeFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderTypeSafe, AuthKindAPIKey, "https://console.typesafe.ai/usage")}
 }
 
 // Get returns provider metadata with no balance data.

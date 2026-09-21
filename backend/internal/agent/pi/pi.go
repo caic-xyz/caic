@@ -421,7 +421,8 @@ type piWireFormat struct {
 	startTime       time.Time // When the prompt was written.
 	numTurns        int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
 
-	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
+	modelCtxWindow int64  // Model's context window from set_model response; 0 if unknown.
+	modelProvider  string // Provider of the active model, from message events; "" if unknown.
 
 	// Per-tool accumulated output length for computing incremental deltas.
 	// Pi's tool_execution_update events carry the full accumulated output;
@@ -598,7 +599,7 @@ func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal message_end: %w", err)
 	}
 	if ev.Message.StopReason == pi.StopReasonError {
-		return errorResultMessages(ev.Message.ErrorMessage), nil
+		return w.errorResultMessages(ev.Message.ErrorMessage), nil
 	}
 	return messagesFromAgentMessage(&ev.Message), nil
 }
@@ -638,6 +639,9 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if ev.Message.Provider != "" {
+		w.modelProvider = ev.Message.Provider
+	}
 	if w.initSent {
 		return nil, nil
 	}
@@ -665,17 +669,30 @@ func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, 
 	if ev.AssistantMessageEvent.Error != nil && ev.AssistantMessageEvent.Error.ErrorMessage != "" {
 		result = ev.AssistantMessageEvent.Error.ErrorMessage
 	}
-	return errorResultMessages(result), nil
+	return w.errorResultMessages(result), nil
 }
 
 // errorResultMessages builds the terminal messages for a Pi error stop. When
 // the error text names a provider quota or rate limit, it prepends a
-// RateLimitMessage so the UI surfaces the quota banner instead of a bare error;
-// Pi relays only free-text errors, so status is "rejected" with no reset time.
-func errorResultMessages(errMsg string) []agent.Message {
+// RateLimitMessage attributed to the active model's quota provider so the UI
+// surfaces the quota banner instead of a bare error; Pi relays only free-text
+// errors, so status is "rejected" with no reset time or window.
+func (w *piWireFormat) errorResultMessages(errMsg string) []agent.Message {
 	var msgs []agent.Message
 	if isQuotaError(errMsg) {
-		msgs = append(msgs, &agent.RateLimitMessage{Status: "rejected"})
+		w.mu.Lock()
+		provider := agent.QuotaProviderForModel(w.modelProvider + "/x")
+		w.mu.Unlock()
+		if provider.Valid() {
+			msgs = append(msgs, &agent.RateLimitMessage{
+				Status:        "rejected",
+				QuotaProvider: provider,
+				QuotaLabel:    provider.String(),
+				QuotaWindow:   agent.QuotaWindowRequest,
+			})
+		} else {
+			msgs = append(msgs, &agent.RateLimitMessage{Status: "rejected"})
+		}
 	}
 	return append(msgs, &agent.ResultMessage{
 		MessageType: "result",
@@ -790,6 +807,9 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal turn_end: %w", err)
 	}
 	w.mu.Lock()
+	if ev.Message.Provider != "" {
+		w.modelProvider = ev.Message.Provider
+	}
 	w.numTurns++
 	w.mu.Unlock()
 	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {

@@ -566,6 +566,26 @@ func TestProviderQuota(t *testing.T) {
 		t.Error("ProviderQuota(other provider) error = nil, want error")
 	}
 
+	t.Run("PricingPhase", func(t *testing.T) {
+		t.Parallel()
+		// Monday 10:00 UTC is not near DeepSeek's peak windows.
+		got, err := ProviderQuota(&usage.ProviderQuota{Provider: agent.QuotaProviderDeepSeek, AuthKind: usage.AuthKindAPIKey}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PricingPhase != "off-peak" || !got.PricingTransitionAt.IsZero() {
+			t.Errorf("PricingPhase = %q/%v, want off-peak", got.PricingPhase, got.PricingTransitionAt)
+		}
+		// Non-time-dependent providers carry no phase.
+		got, err = ProviderQuota(&usage.ProviderQuota{Provider: agent.QuotaProviderAnthropic, AuthKind: usage.AuthKindOAuth}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PricingPhase != "" || !got.PricingTransitionAt.IsZero() {
+			t.Errorf("PricingPhase = %q/%v, want empty", got.PricingPhase, got.PricingTransitionAt)
+		}
+	})
+
 	for _, test := range []struct {
 		name  string
 		quota usage.ProviderQuota

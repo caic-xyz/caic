@@ -22,7 +22,7 @@ func NewCerebrasFetcher(apiKey string) *CerebrasFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &CerebrasFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderCerebras, "Cerebras", AuthKindAPIKey, "https://cloud.cerebras.ai/platform/")}
+	return &CerebrasFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderCerebras, AuthKindAPIKey, "https://cloud.cerebras.ai/platform/")}
 }
 
 // Get returns provider metadata with no balance data.

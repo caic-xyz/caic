@@ -1796,6 +1796,14 @@ public struct ProviderQuota: Codable {
     /// Anthropic, report it as "extra usage" on top of the subscription
     /// instead of a prepaid wallet balance.
     public let balance: QuotaBalance?
+    /// PricingPhase reports time-dependent pricing as of the snapshot:
+    /// "peak", "peak-soon", or "off-peak". Empty when the provider's pricing
+    /// does not vary by time of day.
+    public let pricingPhase: String?
+    /// PricingTransitionAt is when PricingPhase next changes; zero for
+    /// off-peak. Clients should interpolate between snapshots, which arrive
+    /// at the usage cache TTL cadence.
+    public let pricingTransitionAt: ISOTimestamp?
 }
 
 /// LocalWindow is the aggregated local cost for a rolling time window.

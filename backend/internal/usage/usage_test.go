@@ -14,7 +14,7 @@ import (
 func TestBaseFetcherGet(t *testing.T) {
 	t.Parallel()
 
-	b := newBaseFetcher(agent.QuotaProviderCodex, "Codex", AuthKindOAuth, "")
+	b := newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "")
 	got := b.get(t.Context(), func(context.Context) (*ProviderQuota, error) {
 		return &ProviderQuota{Provider: agent.QuotaProviderCodex}, nil
 	})

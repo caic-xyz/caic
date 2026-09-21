@@ -47,7 +47,7 @@ func NewRunInfraFetcher(apiKey string) *RunInfraFetcher {
 		return nil
 	}
 	return &RunInfraFetcher{
-		baseFetcher: newBaseFetcher(agent.QuotaProviderRunInfra, "RunInfra", AuthKindAPIKey, "https://runinfra.ai/inference/usage"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderRunInfra, AuthKindAPIKey, "https://runinfra.ai/inference/usage"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		apiKey:      apiKey,
 	}

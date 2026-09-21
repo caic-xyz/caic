@@ -22,7 +22,7 @@ func NewAlibabaFetcher(apiKey string) *AlibabaFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &AlibabaFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderAlibaba, "Alibaba", AuthKindAPIKey, "https://modelstudio.console.alibabacloud.com/us-east-1/model/model-telemetry")}
+	return &AlibabaFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderAlibaba, AuthKindAPIKey, "https://modelstudio.console.alibabacloud.com/us-east-1/model/model-telemetry")}
 }
 
 // Get returns provider metadata with no balance data.

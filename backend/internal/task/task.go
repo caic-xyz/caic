@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 // CreateRequest describes an automated task creation request for one managed repository.
@@ -123,6 +124,7 @@ type Task struct {
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
 	CaicMCPEnabled    bool                 // Enables task-scoped CAIC MCP delegation.
+	Pricer            usage.ModelPricer    // Quota-provider per-model pricing for cost reporting; set by the task manager before the task runs. Nil keeps harness-reported totals only.
 	Provider          genai.Provider
 
 	timelineID string
@@ -167,22 +169,23 @@ type Task struct {
 	nativeSubagents       agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
 	backgroundCommands    agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
 
-	subs           []*sub          // active sequenced message subscribers
-	rateLimitSubs  []*rateLimitSub // active lossless quota subscribers
-	handle         *SessionHandle  // current active session; nil when no session is attached
-	priorCostUSD   float64         // accumulated cost from all cleared sessions
-	priorNumTurns  int             // accumulated turns from all cleared sessions
-	priorDuration  time.Duration   // accumulated duration from all cleared sessions
-	turnStartedAt  time.Time       // when the current running turn started; zero when not running
-	liveCostUSD    float64
-	liveNumTurns   int
-	liveDuration   time.Duration
-	liveUsage      agent.Usage
-	lastUsage      agent.Usage    // Most recent ResultMessage usage (active context).
-	lastAPIUsage   agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
-	cacheExpiresAt time.Time      // When the prompt cache from the last API call expires.
-	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
-	liveRepoStates []agent.RepoState
+	subs              []*sub          // active sequenced message subscribers
+	rateLimitSubs     []*rateLimitSub // active lossless quota subscribers
+	handle            *SessionHandle  // current active session; nil when no session is attached
+	priorCostUSD      float64         // accumulated cost from all cleared sessions
+	priorNumTurns     int             // accumulated turns from all cleared sessions
+	priorDuration     time.Duration   // accumulated duration from all cleared sessions
+	turnStartedAt     time.Time       // when the current running turn started; zero when not running
+	sessionPricedCost float64         // quota-provider priced cost accumulated in the current session
+	liveCostUSD       float64
+	liveNumTurns      int
+	liveDuration      time.Duration
+	liveUsage         agent.Usage
+	lastUsage         agent.Usage    // Most recent ResultMessage usage (active context).
+	lastAPIUsage      agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
+	cacheExpiresAt    time.Time      // When the prompt cache from the last API call expires.
+	liveDiffStat      agent.DiffStat // Updated by DiffStatMessage from relay.
+	liveRepoStates    []agent.RepoState
 	// Compact per-repo git state, updated by the backend's post-tool probe.
 	diffCreated   bool   // True after any non-empty diff was reported for the task.
 	lastExitError string // Most recent non-zero relay exit diagnostic.
@@ -917,6 +920,7 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 				t.priorCostUSD = t.liveCostUSD
 				t.priorNumTurns = t.liveNumTurns
 				t.priorDuration = t.liveDuration
+				t.sessionPricedCost = 0
 				// Compaction replaces the conversation with a summary, so the
 				// pre-compaction usage no longer describes the live context.
 				if m.ContextTokensAfter > 0 {
@@ -936,6 +940,11 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			t.lastAPIUsage = m.Usage
 			if m.ReportedModel != "" {
 				t.reportedModel = m.ReportedModel
+				at := entry.ProducerTime
+				if at.IsZero() {
+					at = time.Now()
+				}
+				t.addPricedUsageLocked(m.ReportedModel, m.Usage, at)
 			}
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
@@ -963,9 +972,7 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			t.liveUsage.CacheReadInputTokens += m.Usage.CacheReadInputTokens
 			t.liveUsage.ReasoningOutputTokens += m.Usage.ReasoningOutputTokens
 			t.lastUsage = m.Usage
-			// Compute cost from token counts: TotalCostUSD from Claude Code excludes
-			// cache_read_input_tokens, which are charged but omitted from its total.
-			t.liveCostUSD = t.priorCostUSD + computeCost(m.TotalCostUSD, m.Usage)
+			t.applyResultCostLocked(m, entry.ProducerTime)
 			t.liveNumTurns += m.NumTurns
 			t.liveDuration += time.Duration(m.DurationMs) * time.Millisecond
 		}
@@ -1079,6 +1086,7 @@ func (t *Task) ClearMessages(ctx context.Context) {
 	t.priorCostUSD = t.liveCostUSD
 	t.priorNumTurns = t.liveNumTurns
 	t.priorDuration = t.liveDuration
+	t.sessionPricedCost = 0
 	t.inPlanMode = false
 	t.planFile = ""
 	t.planContent = ""
@@ -1702,6 +1710,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.lastAPIUsage = u.Usage
 		if u.ReportedModel != "" {
 			t.reportedModel = u.ReportedModel
+			t.addPricedUsageLocked(u.ReportedModel, u.Usage, at)
 		}
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {
@@ -1780,6 +1789,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.priorCostUSD = t.liveCostUSD
 		t.priorNumTurns = t.liveNumTurns
 		t.priorDuration = t.liveDuration
+		t.sessionPricedCost = 0
 		// Compaction replaces the conversation with a summary, so the
 		// pre-compaction usage no longer describes the live context.
 		if sm.ContextTokensAfter > 0 {
@@ -1798,9 +1808,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
 		t.liveUsage.ReasoningOutputTokens += rm.Usage.ReasoningOutputTokens
 		t.lastUsage = rm.Usage
-		// Compute cost from token counts: TotalCostUSD from Claude Code excludes
-		// cache_read_input_tokens, which are charged but omitted from its total.
-		t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
+		t.applyResultCostLocked(rm, at)
 		t.liveNumTurns += rm.NumTurns
 		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
 		if rm.ContextWindow > 0 {
@@ -1994,6 +2002,50 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 		DiffCreated:       t.DiffCreated(),
 		LastTrailer:       res,
 	}
+}
+
+// addPricedUsageLocked accumulates quota-provider priced cost for one usage
+// report (per API call for Pi, per turn for OpenCode). Returns true when the
+// model was priced. The caller holds t.mu.
+func (t *Task) addPricedUsageLocked(model string, u agent.Usage, at time.Time) bool {
+	if model == "" || t.Pricer == nil {
+		return false
+	}
+	price, ok := t.Pricer.ModelPrice(model, at)
+	if !ok {
+		return false
+	}
+	t.sessionPricedCost += price.Cost(u)
+	t.liveCostUSD = t.priorCostUSD + t.sessionPricedCost
+	return true
+}
+
+// applyResultCostLocked folds one turn result into the running cost. The
+// caller holds t.mu.
+func (t *Task) applyResultCostLocked(rm *agent.ResultMessage, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	// OpenCode reports no per-call usage, so price its per-turn result usage.
+	if t.Harness == harness.OpenCode && t.addPricedUsageLocked(t.activeModel(), rm.Usage, at) {
+		return
+	}
+	if t.sessionPricedCost > 0 {
+		// Per-call pricing already accumulated this session's cost. Pi reports
+		// only the last API call's cost in its result, so a harness-reported
+		// total would regress the accumulated value.
+		return
+	}
+	t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
+}
+
+// activeModel returns the model to price usage against: the harness-reported
+// model when known, else the user-requested one.
+func (t *Task) activeModel() string {
+	if t.reportedModel != "" {
+		return t.reportedModel
+	}
+	return t.RequestedModel
 }
 
 // TimelineMessage is an immutable task message and its stable, one-based
@@ -2272,8 +2324,8 @@ type rateLimitSub struct {
 	ch chan *agent.RateLimitMessage
 }
 
-// computeCost returns the true USD cost for a Claude API result by adding the
-// cache-read surcharge that TotalCostUSD omits.
+// computeCost returns the true USD cost for a Claude Code result by adding
+// the cache-read surcharge that TotalCostUSD omits.
 //
 // Claude Code's TotalCostUSD correctly prices input, output, and cache-write
 // tokens but excludes cache_read_input_tokens. All Claude models share the same

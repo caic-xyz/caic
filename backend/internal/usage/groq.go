@@ -21,7 +21,7 @@ func NewGroqFetcher(apiKey string) *GroqFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &GroqFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderGroq, "Groq", AuthKindAPIKey, "https://console.groq.com/settings/usage")}
+	return &GroqFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderGroq, AuthKindAPIKey, "https://console.groq.com/settings/usage")}
 }
 
 // Get returns provider metadata with no balance data.

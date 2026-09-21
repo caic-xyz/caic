@@ -232,10 +232,10 @@ func mergeTaskQuotaUpdate(quota *ProviderQuota, update *TaskQuotaUpdate) {
 	})
 }
 
-func newBaseFetcher(provider agent.QuotaProvider, label string, authKind AuthKind, usageURL string) baseFetcher {
+func newBaseFetcher(provider agent.QuotaProvider, authKind AuthKind, usageURL string) baseFetcher {
 	return baseFetcher{
 		provider: provider,
-		label:    label,
+		label:    provider.String(),
 		authKind: authKind,
 		usageURL: usageURL,
 	}

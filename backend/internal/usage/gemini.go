@@ -23,7 +23,7 @@ func NewGeminiFetcher(apiKey string) *GeminiFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &GeminiFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderGemini, "Gemini", AuthKindAPIKey, "https://aistudio.google.com/spend")}
+	return &GeminiFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderGemini, AuthKindAPIKey, "https://aistudio.google.com/spend")}
 }
 
 // Get returns provider metadata with no balance data.

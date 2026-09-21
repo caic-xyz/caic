@@ -23,7 +23,7 @@ func NewGrokFetcher(apiKey string) *GrokFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &GrokFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderGrok, "Grok", AuthKindAPIKey, "https://console.x.ai/team/default/billing")}
+	return &GrokFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderGrok, AuthKindAPIKey, "https://console.x.ai/team/default/billing")}
 }
 
 // Get returns provider metadata with no balance data.

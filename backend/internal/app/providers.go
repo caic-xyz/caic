@@ -42,7 +42,7 @@ func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]s
 		if key == "" {
 			continue
 		}
-		if f := entry.factory(key); f != nil {
+		if f := entry.factory(ctx, key); f != nil {
 			fetchers = append(fetchers, f)
 		}
 	}
@@ -154,19 +154,21 @@ var apiKeyUsageFetchers = []struct {
 	// envVars overrides the genai provider registry's canonical API key env
 	// var; the first non-empty variable wins. Empty uses the registry.
 	envVars []string
-	factory func(string) usage.ProviderFetcher
+	factory func(ctx context.Context, key string) usage.ProviderFetcher
 }{
-	{provider: "deepseek", factory: func(key string) usage.ProviderFetcher { return usage.NewDeepSeekFetcher(key) }},
-	{provider: "openrouter", factory: func(key string) usage.ProviderFetcher { return usage.NewOpenRouterFetcher(key) }},
-	{provider: "xiaomi", factory: func(key string) usage.ProviderFetcher { return usage.NewXiaomiFetcher(key) }},
-	{provider: "zai", envVars: []string{"ZAI_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewZaiFetcher(key) }},
-	{provider: "cerebras", factory: func(key string) usage.ProviderFetcher { return usage.NewCerebrasFetcher(key) }},
-	{provider: "alibaba", envVars: []string{"DASHSCOPE_API_KEY_US", "DASHSCOPE_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewAlibabaFetcher(key) }},
-	{provider: "runinfra", envVars: []string{"RUNINFRA_GATEWAY_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewRunInfraFetcher(key) }},
-	{provider: "typesafe", factory: func(key string) usage.ProviderFetcher { return usage.NewTypeSafeFetcher(key) }},
-	{provider: "groq", factory: func(key string) usage.ProviderFetcher { return usage.NewGroqFetcher(key) }},
-	{provider: "grok", envVars: []string{"GROK_API_KEY"}, factory: func(key string) usage.ProviderFetcher { return usage.NewGrokFetcher(key) }},
-	{provider: "gemini", factory: func(key string) usage.ProviderFetcher { return usage.NewGeminiFetcher(key) }},
+	{provider: "deepseek", factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewDeepSeekFetcher(key) }},
+	{provider: "openrouter", factory: func(ctx context.Context, key string) usage.ProviderFetcher {
+		return usage.NewOpenRouterFetcher(ctx, key)
+	}},
+	{provider: "xiaomi", factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewXiaomiFetcher(key) }},
+	{provider: "zai", envVars: []string{"ZAI_API_KEY"}, factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewZaiFetcher(key) }},
+	{provider: "cerebras", factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewCerebrasFetcher(key) }},
+	{provider: "alibaba", envVars: []string{"DASHSCOPE_API_KEY_US", "DASHSCOPE_API_KEY"}, factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewAlibabaFetcher(key) }},
+	{provider: "runinfra", envVars: []string{"RUNINFRA_GATEWAY_KEY"}, factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewRunInfraFetcher(key) }},
+	{provider: "typesafe", factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewTypeSafeFetcher(key) }},
+	{provider: "groq", factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewGroqFetcher(key) }},
+	{provider: "grok", envVars: []string{"GROK_API_KEY"}, factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewGrokFetcher(key) }},
+	{provider: "gemini", factory: func(_ context.Context, key string) usage.ProviderFetcher { return usage.NewGeminiFetcher(key) }},
 }
 
 // usageFetcherKey resolves the API key for one usage fetcher entry: explicit

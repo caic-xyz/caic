@@ -721,6 +721,8 @@ export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
     fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
     rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
     balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
+    pricingPhase: (obj["pricingPhase"] === undefined || obj["pricingPhase"] === null ? undefined : asString(obj["pricingPhase"], "ProviderQuota.pricingPhase")),
+    pricingTransitionAt: (obj["pricingTransitionAt"] === undefined || obj["pricingTransitionAt"] === null ? undefined : asString(obj["pricingTransitionAt"], "ProviderQuota.pricingTransitionAt") as ISOTimestamp),
   };
 }
 

@@ -22,7 +22,7 @@ func NewXiaomiFetcher(apiKey string) *XiaomiFetcher {
 	if apiKey == "" {
 		return nil
 	}
-	return &XiaomiFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderXiaomi, "Xiaomi MiMo", AuthKindAPIKey, "https://platform.xiaomimimo.com/console/balance")}
+	return &XiaomiFetcher{baseFetcher: newBaseFetcher(agent.QuotaProviderXiaomi, AuthKindAPIKey, "https://platform.xiaomimimo.com/console/balance")}
 }
 
 // Get returns provider metadata with no balance data.

@@ -42,7 +42,7 @@ func NewDeepSeekFetcher(apiKey string) *DeepSeekFetcher {
 		return nil
 	}
 	return &DeepSeekFetcher{
-		baseFetcher: newBaseFetcher(agent.QuotaProviderDeepSeek, "DeepSeek", AuthKindAPIKey, "https://platform.deepseek.com/usage"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderDeepSeek, AuthKindAPIKey, "https://platform.deepseek.com/usage"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		apiKey:      apiKey,
 	}

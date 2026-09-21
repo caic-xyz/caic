@@ -78,7 +78,7 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	}
 
 	f := &CodexFetcher{
-		baseFetcher: newBaseFetcher(agent.QuotaProviderCodex, "Codex", AuthKindOAuth, "https://chatgpt.com/codex/cloud/settings/analytics"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "https://chatgpt.com/codex/cloud/settings/analytics"),
 		client:      &http.Client{Timeout: 10 * time.Second},
 		token:       token,
 		accountID:   accountID,

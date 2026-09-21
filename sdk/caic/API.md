@@ -1810,6 +1810,12 @@ ProviderQuota is the quota data for one provider.
 | `balance` | `QuotaBalance` | Balance is the provider's money snapshot. Some providers, such as
 Anthropic, report it as "extra usage" on top of the subscription
 instead of a prepaid wallet balance. |  |
+| `pricingPhase` | `string` | PricingPhase reports time-dependent pricing as of the snapshot:
+"peak", "peak-soon", or "off-peak". Empty when the provider's pricing
+does not vary by time of day. |  |
+| `pricingTransitionAt` | `ISOTimestamp` | PricingTransitionAt is when PricingPhase next changes; zero for
+off-peak. Clients should interpolate between snapshots, which arrive
+at the usage cache TTL cadence. |  |
 
 ### LocalWindow
 
