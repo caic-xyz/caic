@@ -638,10 +638,17 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 		return nil, r.finishReviveFailure(ctx, t, err, nil)
 	}
 
-	// 4. Compute host-side diff stat once.
+	// 4. Compute host-side diff stat and per-repo states once. The resume
+	// replay keeps side effects off, so this one-shot restore is what the
+	// card shows until the next mutating tool call.
 	if r.Checkout != nil {
-		if ds := r.Checkout.BranchDiffStat(ctx, r.Log, r.Runtimes, t); len(ds) > 0 {
-			t.SetLiveDiffStat(ds)
+		if ds, states, err := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, instanceID, t.RuntimeRepos()); err == nil {
+			if len(ds) > 0 {
+				t.SetLiveDiffStat(ds)
+			}
+			if len(states) > 0 {
+				t.SetLiveRepoStates(states)
+			}
 		}
 	}
 	tlog.Info("agent ready after revive", "state", t.GetState())

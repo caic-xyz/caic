@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -4065,6 +4066,67 @@ func TestManager(t *testing.T) {
 				t.Errorf("tracked rate limit = %#v, want 100%% used with reset %v", got, resetAt)
 			}
 		})
+		t.Run("restores_diff_stat_and_repo_states", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-caic-caic-6\x00caic.id":      taskID.String(),
+				"md-caic-caic-6\x00caic.harness": string(harness.Claude),
+			}}
+			runtimeBackend := &runtimetest.FakeBackend{
+				DiffOutput: "5\t1\tmain.go\n",
+				RepositoryStatusValue: runtime.RepositoryStatus{
+					Branch: "caic-6",
+					Ahead:  2,
+					DiffStat: []runtime.GitFileStat{
+						{Path: "main.go", LinesAdded: 5, LinesDeleted: 1},
+					},
+					Uncommitted: []runtime.GitFileStatus{
+						{Path: "main.go", WorktreeStatus: "M"},
+						{Path: "new.go", IndexStatus: "A"},
+					},
+				},
+			}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}}})
+			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
+
+			adopted, err := m.ImportInstances(t.Context(),
+				[]runtime.Instance{{
+					ID:    runtime.NewID("test-runtime", "md-caic-caic-6"),
+					State: "running",
+					Repos: []runtime.Repo{{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-6", ContainerPath: "/home/user/src/caic-xyz/caic"}},
+				}}, []*taskslog.LoadedTask{{
+					TaskID:     taskID.String(),
+					Harness:    harness.Claude,
+					Repos:      []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-6"}},
+					LogVersion: agent.LogVersionV2,
+				}})
+			if err != nil {
+				t.Fatalf("ImportInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			// The adopted card must immediately carry the probe summary: an
+			// adopted session would otherwise publish nothing until its next
+			// mutating tool call, leaving the card without stats.
+			snap := adopted[0].Task().Snapshot()
+			if len(snap.DiffStat) != 1 || snap.DiffStat[0].Path != "main.go" {
+				t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", snap.DiffStat)
+			}
+			want := []agent.RepoState{{
+				RepoIndex:        0,
+				Branch:           "caic-6",
+				Ahead:            2,
+				ChangedFiles:     1,
+				LinesAdded:       5,
+				LinesDeleted:     1,
+				UncommittedFiles: 2,
+			}}
+			if len(snap.RepoStates) != 1 || !reflect.DeepEqual(snap.RepoStates[0], want[0]) {
+				t.Errorf("RepoStates = %+v, want %+v", snap.RepoStates, want)
+			}
+		})
 		t.Run("error_does_not_match_log_by_repo_only", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
@@ -4213,7 +4275,19 @@ func TestManager(t *testing.T) {
 				"restore-diff\x00caic.id":      taskID.String(),
 				"restore-diff\x00caic.harness": string(harness.Claude),
 			}}
-			runtimeBackend := &runtimetest.FakeBackend{DiffOutput: "10\t2\tfrontend/src/App.tsx\n5\t1\tfrontend/src/App.test.tsx\n"}
+			runtimeBackend := &runtimetest.FakeBackend{
+				RepositoryStatusValue: runtime.RepositoryStatus{
+					Branch: "caic-9",
+					Ahead:  3,
+					DiffStat: []runtime.GitFileStat{
+						{Path: "frontend/src/App.tsx", LinesAdded: 10, LinesDeleted: 2},
+						{Path: "frontend/src/App.test.tsx", LinesAdded: 5, LinesDeleted: 1},
+					},
+					Uncommitted: []runtime.GitFileStatus{
+						{Path: "frontend/src/App.tsx", WorktreeStatus: "M"},
+					},
+				},
+			}
 			m := newTestManager(t, Config{
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, runtimeBackend, info),
@@ -4241,6 +4315,18 @@ func TestManager(t *testing.T) {
 			}
 			if got := adopted[0].Task().LiveDiffStat(); !slices.Equal(got, want) {
 				t.Fatalf("LiveDiffStat = %+v, want %+v", got, want)
+			}
+			wantStates := []agent.RepoState{{
+				RepoIndex:        0,
+				Branch:           "caic-9",
+				Ahead:            3,
+				ChangedFiles:     2,
+				LinesAdded:       15,
+				LinesDeleted:     3,
+				UncommittedFiles: 1,
+			}}
+			if got := adopted[0].Task().Snapshot().RepoStates; !reflect.DeepEqual(got, wantStates) {
+				t.Fatalf("RepoStates = %+v, want %+v", got, wantStates)
 			}
 		})
 		t.Run("valid_restores_launch_config_from_log", func(t *testing.T) {

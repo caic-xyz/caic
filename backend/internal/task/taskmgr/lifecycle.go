@@ -530,7 +530,12 @@ func (r *Lifecycle) reconnectImportedSession() {
 		branch = primary.Branch
 	}
 	tlog := r.manager.log.With("repo", repoName, "br", branch, "instance", t.RuntimeInstanceID())
-	h, err := r.agentRuntime.Reconnect(r.ctx, t, true)
+	// Side effects stay enabled: the attach is a live tail at the imported
+	// offset (the import already merged the history), and warm history is
+	// parsed through the wire without reaching the dispatch loop. Skipping
+	// them here would permanently disable the post-tool repository-state
+	// probe and the result-time diff stat for this session.
+	h, err := r.agentRuntime.Reconnect(r.ctx, t, false)
 	if err != nil {
 		tlog.Warn("auto-reconnect failed", "err", err)
 		r.manager.NotifyTaskChange()

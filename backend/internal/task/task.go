@@ -609,6 +609,15 @@ func (t *Task) SetLiveDiffStat(ds agent.DiffStat) {
 	t.setLiveDiffStatLocked(ds)
 }
 
+// SetLiveRepoStates overwrites the compact per-repo Git state. Used by task
+// import and revive to restore the card summary, because an adopted session
+// only publishes states from the post-tool probe that follows it.
+func (t *Task) SetLiveRepoStates(states []agent.RepoState) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.setLiveRepoStatesLocked(states)
+}
+
 // SetPR stores the forge owner, repo, and PR/MR number. Does not change task state.
 func (t *Task) SetPR(owner, repo string, pr int) {
 	t.mu.Lock()

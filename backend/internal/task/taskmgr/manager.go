@@ -1936,11 +1936,20 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 	// The durable log only retains a sticky diff-created signal, and relay-tail
 	// overlap filtering omits diff-stat controls. Restore the authoritative full
-	// branch diff before publishing the adopted task, including for exited and
-	// mid-turn instances that do not run the post-reconnect refresh below.
+	// branch diff and compact per-repo states before publishing the adopted
+	// task, including for exited and mid-turn instances that do not run the
+	// post-reconnect refresh below. Without this restore an adopted task's card
+	// stays blank until its next mutating tool call.
 	if checkout != nil {
-		if ds := checkout.BranchDiffStat(ctx, m.log, m.Runtimes, t); len(ds) > 0 {
-			t.SetLiveDiffStat(ds)
+		if ds, states, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, t.RuntimeInstanceID(), t.RuntimeRepos()); err == nil {
+			if len(ds) > 0 {
+				t.SetLiveDiffStat(ds)
+			}
+			if len(states) > 0 {
+				t.SetLiveRepoStates(states)
+			}
+		} else {
+			m.log.WarnContext(ctx, "adopt", "msg", "restore diff stat failed", "task", t.ID, "err", err)
 		}
 	}
 	applyLoadedSessionMetadata(t, lt)
