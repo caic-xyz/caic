@@ -1,6 +1,6 @@
 # Build, benchmark, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help benchmark build check check-agent-logs fake-dev test test-all smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-kotlin lint-binaries lint-fix lint-docs format format-check format-kotlin verify refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e playwright-browser screenshots-check screenshots-check-frontend screenshots-check-android screenshots-generate-frontend screenshots-generate-android screenshots-update android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator tools
+.PHONY: help benchmark build check check-agent-logs fake-dev test test-all smoke smoke-voice coverage lint lint-check lint-go lint-frontend lint-python lint-kotlin lint-binaries lint-docs format format-check format-kotlin verify refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e playwright-browser screenshots-check screenshots-check-frontend screenshots-check-android screenshots-generate-frontend screenshots-generate-android screenshots-update android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator tools
 
 # Tool versions. The tools target installs a tool that is missing or at another version, so
 # these are the only places the versions are written down.
@@ -41,7 +41,8 @@ help:
 	@echo "  make check                  - Refresh generated files, build, lint, and test (non-Android)"
 	@echo "  make test-all               - Run every non-smoke test and deterministic visual check"
 	@echo "  make check-agent-logs       - Validate recent v2 task logs against genai wire DTOs"
-	@echo "  make lint-fix               - Fix linting issues (Go + frontend + Python + binaries + file indexes)"
+	@echo "  make lint                   - Fix what is autofixable, then run lint-check"
+	@echo "  make lint-check             - Check lint without writing (Go + frontend + Python + Kotlin + binaries + docs)"
 	@echo "  make format                 - Apply the shared formatters (prettier, gofmt, ruff, shfmt, ktlint)"
 	@echo "  make format-kotlin          - Apply ktlint to the Android and Halo Kotlin sources"
 	@echo "  make format-check           - Verify formatting without writing"
@@ -91,7 +92,7 @@ custom-gcl: .custom-gcl.yml
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
-check: refresh-generated build lint test
+check: refresh-generated build lint-check test
 
 test-all:
 	@$(MAKE) check
@@ -132,9 +133,9 @@ coverage: $(FRONTEND_STAMP)
 	@echo "=== Frontend coverage ==="
 	@pnpm --silent test:coverage
 
-lint: tools lint-go lint-frontend lint-python lint-kotlin lint-binaries lint-docs
+lint-check: tools lint-go lint-frontend lint-python lint-kotlin lint-binaries lint-docs
 
-verify: format-check lint
+verify: format-check lint-check
 
 lint-docs:
 	@python3 scripts/update_agents_file_index.py --check
@@ -147,7 +148,7 @@ lint-go: tools custom-gcl
 
 lint-frontend: $(FRONTEND_STAMP)
 	@pnpm --silent typecheck
-	@pnpm --silent lint
+	@pnpm --silent lint:check
 	@pnpm --silent lint:style
 	@node scripts/lint_frontend_styles.mjs
 
@@ -219,13 +220,15 @@ android-e2e: android-setup-emulator
 	@python3 scripts/android_start_emulator.py --reuse-connected-device
 	@python3 scripts/android_e2e.py
 
-lint-fix: tools $(FRONTEND_STAMP)
+# Apply the autofixes, then report what is left to fix by hand.
+lint: tools custom-gcl $(FRONTEND_STAMP)
 	@./custom-gcl run --show-stats=false ./... --fix
 	@pnpm --silent lint:fix
 	@ruff check --quiet --fix .
 	@ruff format --quiet .
 	@./scripts/update_agents_file_index.py
 	@./scripts/update_backend_architecture.py
+	@$(MAKE) --no-print-directory lint-check
 
 git-hooks:
 	@./scripts/install-git-hooks.sh

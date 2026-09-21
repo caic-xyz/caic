@@ -25,7 +25,7 @@
     "test:watch": "pnpm --silent test -- --watch",
     "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --conditions=browser --test-force-exit --experimental-test-coverage --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json",
-    "lint": "eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .",
+    "lint:check": "eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .",
     "lint:fix": "eslint . --fix",
     "lint:style": "pnpm --silent lint:style:files -- \"frontend/src/**/*.css\"",
     "lint:style:files": "stylelint",

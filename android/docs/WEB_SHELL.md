@@ -150,7 +150,7 @@ make android-e2e
 After Android changes:
 
 ```bash
-make lint-fix
+make lint
 python3 scripts/android_e2e.py --module gomode
 ```
 

@@ -30,11 +30,12 @@ frontend.
 
 ### Professionalism
 
-**Mandatory**: after making changes run `make lint-fix`, then `make format`, then `make verify`.
+**Mandatory**: after making changes run `make lint`, then `make format`, then `make verify`.
 
-`make lint-fix` applies the autofixes (golangci-lint, eslint, stylelint, ruff) and refreshes generated file
-indexes and the architecture diagram; `make format` applies the formatters (prettier, gofmt, ruff format,
-shfmt, and ktlint for the Android and Halo Kotlin); `make verify` re-checks both and is the pre-push gate.
+`make lint` applies the autofixes (golangci-lint, eslint, stylelint, ruff), refreshes generated file
+indexes and the architecture diagram, then runs `make lint-check`, the read-only check; `make format`
+applies the formatters (prettier, gofmt, ruff format, shfmt, and ktlint for the Android and Halo Kotlin);
+`make verify` re-checks both (`format-check` and `lint-check`) and is the pre-push gate.
 A few rules still need a manual edit, such as `UP031` in `backend/internal/agent/relay/relay_v2.py`.
 Indentation and width come from `.editorconfig`; Ruff keeps its own copy of the width in `pyproject.toml`
 because it does not read `.editorconfig`.

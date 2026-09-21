@@ -43,7 +43,7 @@ const (
 // 5. Keep only provider wire DTOs here. Gateway protocol changes belong in
 //    gomode/voicegateway/api/v1 and must be translated explicitly in
 //    protocol.go.
-// 6. After edits, run the focused voicertc tests and make lint-fix.
+// 6. After edits, run the focused voicertc tests and make lint.
 
 // geminiBridgeBackend adapts the provider-neutral voice gateway protocol to a
 // Gemini Live WebSocket session.
