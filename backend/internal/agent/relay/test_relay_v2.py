@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
+import logging
 import os
 import re
 import shutil
@@ -14,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -860,6 +863,18 @@ def test_parse_numstat() -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the v2 relay unit tests.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="print one progress line per test",
+    )
+    args = parser.parse_args()
+    if not args.verbose:
+        # The relay logs expected warnings (for example, dropping a partial
+        # trailing record); silence them unless progress is requested.
+        logging.disable(logging.ERROR)
     tests = (
         test_shared_encoder_vectors,
         test_native_bytes_and_outer_shape,
@@ -880,17 +895,21 @@ def main() -> int:
     )
     failed: list[str] = []
     for test in tests:
-        print(f"{test.__name__}...", end=" ", flush=True)
+        if args.verbose:
+            print(f"{test.__name__}...", end=" ", flush=True)
         try:
             test()
-            print("OK")
-        except Exception as error:
-            print(f"FAIL: {error}")
+        except Exception:
+            if args.verbose:
+                print("FAIL")
             failed.append(test.__name__)
+            print(f"FAILED: {test.__name__}", file=sys.stderr)
+            traceback.print_exc()
     if failed:
-        print(f"\n{len(failed)} FAILED: {', '.join(failed)}")
+        print(f"\n{len(failed)} of {len(tests)} tests FAILED: {', '.join(failed)}", file=sys.stderr)
         return 1
-    print(f"\nAll {len(tests)} tests passed.")
+    if args.verbose:
+        print(f"\nAll {len(tests)} tests passed.")
     return 0
 
 
