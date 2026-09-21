@@ -146,6 +146,251 @@ func TestParseGitStatus(t *testing.T) {
 	})
 }
 
+func TestParseCompactGitStatus(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		out := strings.Join([]string{
+			"# branch.oid 0123456789abcdef",
+			"# branch.head caic-42",
+			"1 .M N... 100644 100644 100644 abc def src/working.go",
+			"2 R. N... 100644 100644 100644 abc def R100 src/new name.go",
+			"src/old name.go",
+			"? notes/new.txt",
+			gitComparisonMarker + "origin/main",
+			gitDivergenceMarker + "1\t2",
+			gitOperationMarker,
+			"rebase",
+			gitTotalStatMarker,
+			"14\t1\tsrc/status.go",
+			"-\t-\tassets/logo.png",
+			"1\t1\t",
+			"src/old.tsx",
+			"src/new.tsx",
+			" src/status.go       | 14 +-\n assets/logo.png     | Bin 100 -> 250 bytes\n src/old.tsx => src/new.tsx    | 1 +-\n 3 files changed\n",
+			gitWorktreeStatMarker,
+			"anything after the terminal marker must be ignored",
+		}, "\x00")
+
+		got, err := parseCompactGitStatus(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := runtime.RepositoryStatus{
+			Branch:    "caic-42",
+			Upstream:  "origin/main",
+			Operation: runtime.RepositoryOperationRebase,
+			Ahead:     2,
+			Behind:    1,
+			DiffStat: []runtime.GitFileStat{
+				{Path: "src/status.go", LinesAdded: 14, LinesDeleted: 1},
+				{Path: "assets/logo.png", Binary: true, OldSize: 100, NewSize: 250},
+				{Path: "src/new.tsx", LinesAdded: 1, LinesDeleted: 1},
+			},
+			Uncommitted: []runtime.GitFileStatus{
+				{Path: "src/working.go", WorktreeStatus: "M"},
+				{Path: "src/new name.go", OriginalPath: "src/old name.go", IndexStatus: "R"},
+				{Path: "notes/new.txt", IndexStatus: "?", WorktreeStatus: "?"},
+			},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("parseCompactGitStatus() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for name, out := range map[string]string{
+			"bad comparison": gitDivergenceMarker + "ahead\x00" + gitTotalStatMarker + "\x00" + gitWorktreeStatMarker + "\x00",
+			"bad total stat": gitTotalStatMarker + "\x00words\x00" + gitWorktreeStatMarker + "\x00",
+			"bad additions":  gitTotalStatMarker + "\x00many\t1\tfile\x00" + gitWorktreeStatMarker + "\x00",
+			"bad deletions":  gitTotalStatMarker + "\x001\tmany\tfile\x00" + gitWorktreeStatMarker + "\x00",
+			"bad ordinary":   "1 M. short\x00" + gitWorktreeStatMarker + "\x00",
+			"bad rename":     "2 R. short\x00" + gitWorktreeStatMarker + "\x00",
+			"bad unmerged":   "u UU short\x00" + gitWorktreeStatMarker + "\x00",
+			"bad operation":  gitOperationMarker + "\x00bogus\x00" + gitWorktreeStatMarker + "\x00",
+			"unknown record": "x surprise\x00" + gitWorktreeStatMarker + "\x00",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				if _, err := parseCompactGitStatus(out); err == nil {
+					t.Fatal("parseCompactGitStatus() succeeded, want error")
+				}
+			})
+		}
+	})
+}
+
+func TestCompactGitStatusCommand(t *testing.T) {
+	t.Parallel()
+	t.Run("quotes repository and omits the history walk", func(t *testing.T) {
+		t.Parallel()
+		cmd := compactGitStatusCommand("/work/repo's copy", "upstream", "trunk")
+		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
+			t.Errorf("compactGitStatusCommand() does not safely quote repo: %q", cmd)
+		}
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", `git diff "$comparison" --numstat --stat -z`, "GIT_OPTIONAL_LOCKS=0", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker} {
+			if !strings.Contains(cmd, fragment) {
+				t.Errorf("compactGitStatusCommand() missing %q", fragment)
+			}
+		}
+		for _, fragment := range []string{gitLogMarker, gitCommitMarker, "$comparison..HEAD", "git diff HEAD"} {
+			if strings.Contains(cmd, fragment) {
+				t.Errorf("compactGitStatusCommand() includes history-walk fragment %q", fragment)
+			}
+		}
+	})
+
+	t.Run("runs against repository", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		runTestGit(t, dir, "checkout", "-b", "caic-42")
+		if err := os.WriteFile(filepath.Join(dir, "committed.txt"), []byte("committed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "committed.txt")
+		runTestGit(t, dir, "commit", "-m", "one ahead")
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "staged.txt")
+		if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseCompactGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Branch != "caic-42" || status.Upstream != "origin/main" || status.Ahead != 1 || status.Behind != 0 {
+			t.Errorf("branch status = %+v", status)
+		}
+		if len(status.Commits) != 0 {
+			t.Errorf("compact status walked commits = %+v", status.Commits)
+		}
+		if len(status.Uncommitted) != 3 {
+			t.Errorf("uncommitted = %+v", status.Uncommitted)
+		}
+		wantDiffStat := []runtime.GitFileStat{
+			{Path: "committed.txt", LinesAdded: 1},
+			{Path: "staged.txt", LinesAdded: 1},
+			{Path: "tracked.txt", LinesAdded: 1, LinesDeleted: 1},
+			{Path: "untracked.txt", LinesAdded: 1},
+		}
+		if !reflect.DeepEqual(status.DiffStat, wantDiffStat) {
+			t.Errorf("diff stat = %+v, want %+v", status.DiffStat, wantDiffStat)
+		}
+		if cached := runTestGitOutput(t, dir, "diff", "--cached", "--name-only"); cached != "staged.txt" {
+			t.Errorf("cached diff after status = %q, want staged.txt", cached)
+		}
+	})
+
+	t.Run("unresolvable comparison reports counts without a branch stat", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		runTestGit(t, dir, "checkout", "-b", "caic-42")
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "missing", "branch")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseCompactGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// caic-42 has no upstream and missing/branch does not resolve, so the
+		// probe degrades to uncommitted counts instead of failing the whole
+		// report and blanking the task card.
+		if status.Branch != "caic-42" || status.Upstream != "" || status.Ahead != 0 || status.Behind != 0 {
+			t.Errorf("branch status = %+v", status)
+		}
+		if len(status.DiffStat) != 0 {
+			t.Errorf("diff stat = %+v, want none", status.DiffStat)
+		}
+		if len(status.Uncommitted) != 1 {
+			t.Errorf("uncommitted = %+v", status.Uncommitted)
+		}
+	})
+
+	t.Run("reports an in-progress merge", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		runTestGit(t, dir, "checkout", "-b", "feature")
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("feature\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "commit", "-am", "feature change")
+		runTestGit(t, dir, "checkout", "main")
+		if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("main\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "commit", "-am", "main change")
+		runTestGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+		runTestGit(t, dir, "checkout", "feature")
+		if err := exec.CommandContext(t.Context(), "git", "-C", dir, "merge", "main").Run(); err == nil { //nolint:gosec // temporary repository is test-owned.
+			t.Fatal("expected the merge to conflict")
+		}
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseCompactGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Operation != runtime.RepositoryOperationMerge {
+			t.Errorf("operation = %q, want merge", status.Operation)
+		}
+		if status.Ahead != 1 || status.Behind != 1 {
+			t.Errorf("divergence = +%d -%d, want +1 -1", status.Ahead, status.Behind)
+		}
+		conflicts := 0
+		for _, file := range status.Uncommitted {
+			if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
+				conflicts++
+			}
+		}
+		if conflicts == 0 {
+			t.Errorf("uncommitted = %+v, want a conflicted file", status.Uncommitted)
+		}
+	})
+
+	t.Run("unborn branch", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		runTestGit(t, dir, "init", "-b", "main")
+		runTestGit(t, dir, "config", "user.email", "caic@example.com")
+		runTestGit(t, dir, "config", "user.name", "caic test")
+		if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "staged.txt")
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseCompactGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Branch != "main" || status.Upstream != "" || len(status.DiffStat) != 0 || len(status.Uncommitted) != 1 {
+			t.Errorf("unborn branch status = %+v", status)
+		}
+	})
+}
+
 func TestGitStatusCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("quotes repository and includes protocol", func(t *testing.T) {
@@ -154,7 +399,7 @@ func TestGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_INDEX_FILE", "git add -N", `git diff "$comparison" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_OPTIONAL_LOCKS=0", "git add -N", `git diff "$comparison" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}

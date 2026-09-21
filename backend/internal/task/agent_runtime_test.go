@@ -33,6 +33,16 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
+// statusFailingRuntime fails the compact status probe, simulating the
+// transient container probe failures the task card must survive.
+type statusFailingRuntime struct {
+	*runtimetest.FakeBackend
+}
+
+func (*statusFailingRuntime) CompactRepositoryStatus(context.Context, runtime.ID, int) (runtime.RepositoryStatus, error) {
+	return runtime.RepositoryStatus{}, errors.New("probe failed")
+}
+
 // instantExitBackend embeds testBackend but spawns a process that exits
 // immediately (no stdin read), so tests exercising EnsureSession's
 // already-done branch don't have to wait out its 10-second liveness timer.
@@ -1606,6 +1616,11 @@ func testRunnerSessions(t *testing.T) {
 					if len(ds.DiffStat) != 1 || ds.DiffStat[0].Path != "main.go" {
 						t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds.DiffStat)
 					}
+					// The compact per-repo state is what the task summary card
+					// renders; without it the card loses its Git summary.
+					if len(ds.Repos) != 1 || ds.Repos[0].RepoIndex != 0 || ds.Repos[0].ChangedFiles != 1 || ds.Repos[0].LinesAdded != 5 || ds.Repos[0].LinesDeleted != 1 {
+						t.Errorf("Repos = %+v, want one repo with 1 changed file, +5 -1", ds.Repos)
+					}
 					if stub.fetched.Load() {
 						t.Error("Fetch was called for mutating tool result")
 					}
@@ -1648,6 +1663,64 @@ func testRunnerSessions(t *testing.T) {
 				t.Error("Fetch was called for non-mutating tool")
 			}
 			close(msgCh)
+		})
+
+		t.Run("EmitDiffStatBranch", func(t *testing.T) {
+			probe := []agent.RepoState{{RepoIndex: 0, Branch: "caic-1", ChangedFiles: 3, LinesAdded: 10, LinesDeleted: 4}}
+			repos := []runtime.Repo{{GitRoot: "/repo", Branch: "caic-0", ContainerPath: "/repo"}}
+			newRuntime := func(t *testing.T, backend testRuntimeBackend) *AgentRuntime {
+				r := newTestAgentRuntime(t, nil, "", nil)
+				r.Runtimes = newTestRuntimeRouter(t, backend)
+				r.Checkout = &repo.Checkout{Dir: "/repo", RelPath: "repo", GitTimeout: time.Minute}
+				return r
+			}
+			newTask := func(t *testing.T) *Task {
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				tk.Repos = []taskslog.RepoMount{{Branch: "caic-0"}}
+				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+				return tk
+			}
+
+			t.Run("FailedProbeKeepsPreviousState", func(t *testing.T) {
+				t.Parallel()
+				r := newRuntime(t, &statusFailingRuntime{FakeBackend: testContainer()})
+				tk := newTask(t)
+				tk.addMessage(t.Context(), &agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe}, false)
+				before := len(tk.timeline)
+
+				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos)
+
+				// A transient probe failure must not push an empty update
+				// that would blank the stats the card already shows.
+				if len(tk.timeline) != before {
+					t.Errorf("timeline grew from %d to %d messages, want no emission", before, len(tk.timeline))
+				}
+				if got := tk.Snapshot().RepoStates; !reflect.DeepEqual(got, probe) {
+					t.Errorf("RepoStates = %+v, want the previous probe %+v", got, probe)
+				}
+			})
+
+			t.Run("SuccessfulProbeEmitsRepos", func(t *testing.T) {
+				t.Parallel()
+				r := newRuntime(t, testContainer())
+				tk := newTask(t)
+
+				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos)
+
+				if len(tk.timeline) != 1 {
+					t.Fatalf("timeline = %d messages, want the one DiffStatMessage", len(tk.timeline))
+				}
+				ds, ok := tk.timeline[0].Message.(*agent.DiffStatMessage)
+				if !ok {
+					t.Fatalf("message = %T, want *agent.DiffStatMessage", tk.timeline[0].Message)
+				}
+				if len(ds.Repos) != 1 || ds.Repos[0].RepoIndex != 0 || ds.Repos[0].ChangedFiles != 1 {
+					t.Errorf("Repos = %+v, want one repo with 1 changed file", ds.Repos)
+				}
+				if got := tk.Snapshot().RepoStates; len(got) != 1 || got[0].ChangedFiles != 1 {
+					t.Errorf("Snapshot().RepoStates = %+v, want the probe state", got)
+				}
+			})
 		})
 
 		t.Run("SkipSideEffects", func(t *testing.T) {

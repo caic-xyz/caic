@@ -131,6 +131,48 @@ func TestDiffStat(t *testing.T) {
 	}
 }
 
+func TestRepoStates(t *testing.T) {
+	t.Parallel()
+	t.Run("nil", func(t *testing.T) {
+		t.Parallel()
+		if got := RepoStates(nil, nil); got != nil {
+			t.Errorf("RepoStates(nil) = %#v, want nil", got)
+		}
+	})
+
+	t.Run("fills repository names and drops unmatched indexes", func(t *testing.T) {
+		t.Parallel()
+		repos := []v1.TaskRepo{{Name: "caic"}, {Name: "genai"}}
+		states := []agent.RepoState{
+			{RepoIndex: 0, Branch: "caic-3", Ahead: 2, Behind: 1, ChangedFiles: 4, LinesAdded: 10, LinesDeleted: 3, UncommittedFiles: 2, Conflicts: 1, Operation: "merge"},
+			{RepoIndex: 5, Branch: "orphan"},
+		}
+		want := []v1.GitRepositoryState{{
+			Name:             "caic",
+			Branch:           "caic-3",
+			Ahead:            2,
+			Behind:           1,
+			ChangedFiles:     4,
+			LinesAdded:       10,
+			LinesDeleted:     3,
+			UncommittedFiles: 2,
+			Conflicts:        1,
+			Operation:        "merge",
+		}}
+		if got := RepoStates(states, repos); !reflect.DeepEqual(got, want) {
+			t.Errorf("RepoStates() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("all indexes unmatched", func(t *testing.T) {
+		t.Parallel()
+		states := []agent.RepoState{{RepoIndex: 5, Branch: "orphan"}}
+		if got := RepoStates(states, []v1.TaskRepo{{Name: "caic"}}); got != nil {
+			t.Errorf("RepoStates() = %#v, want nil", got)
+		}
+	})
+}
+
 func TestForgePRState(t *testing.T) {
 	t.Parallel()
 

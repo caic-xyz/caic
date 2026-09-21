@@ -151,6 +151,62 @@ describe("TaskCard", () => {
     );
   });
 
+  it("falls back to the task diff stat while repository states are not pushed yet", () => {
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          diffStat: [{ path: "main.go", linesAdded: 5, linesDeleted: 1, oldSize: -1, newSize: -1 }],
+        })}
+      />
+    ));
+
+    // The compact probe has not produced a DiffStatMessage with repository
+    // states yet; the card must still summarize the pushed diff stat instead
+    // of going blank.
+    expect(screen.getByTestId("task-card-repo-state")).toHaveTextContent("task-branch");
+    expect(screen.getByRole("img")).toHaveAccessibleName("1 changed file, 5 additions, 1 deletion");
+    expect(screen.getByText("1f")).toBeInTheDocument();
+    expect(screen.getByText("+5")).toBeInTheDocument();
+    expect(screen.getByText("−1")).toBeInTheDocument();
+  });
+
+  it("replaces the diff-stat fallback once repository states are pushed", async () => {
+    const [repoStates, setRepoStates] = createSignal<TaskCardProps["repoStates"]>(undefined);
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          diffStat: [{ path: "main.go", linesAdded: 5, linesDeleted: 1, oldSize: -1, newSize: -1 }],
+        })}
+        repoStates={repoStates()}
+      />
+    ));
+
+    expect(await screen.findByText("1f")).toBeInTheDocument();
+    setRepoStates([
+      {
+        name: "repo",
+        branch: "task-branch",
+        ahead: 0,
+        behind: 0,
+        changedFiles: 3,
+        linesAdded: 7,
+        linesDeleted: 2,
+        uncommittedFiles: 0,
+        conflicts: 0,
+      },
+    ]);
+    expect(await screen.findByText("3f")).toBeInTheDocument();
+    expect(screen.queryByText("1f")).not.toBeInTheDocument();
+  });
+
+  it("shows the repository row without stats when no Git data arrived", () => {
+    renderCard(() => <TaskCard {...props()} />);
+
+    expect(screen.getByTestId("task-card-repo-state")).toHaveTextContent("task-branch");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByText(/changed file/)).not.toBeInTheDocument();
+  });
+
   it("does not invent a TTL when only a legacy cache expiry is available", () => {
     renderCard(() => (
       <TaskCard
