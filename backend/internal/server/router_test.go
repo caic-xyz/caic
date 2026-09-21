@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,6 +63,28 @@ func (w *reviveDuringStoppedScanWriter) Write(data []byte) (int, error) {
 		w.revive()
 	}
 	return n, err
+}
+
+// gatedSSEWriter blocks the first "event: ready" write until gate closes and
+// reports that block on reached. The SSE handler subscribes to the task
+// timeline before writing ready, so a test can hold the handler between
+// subscription and the live drain to arrange a slow-subscriber drop.
+type gatedSSEWriter struct {
+	*httptest.ResponseRecorder
+
+	once    sync.Once
+	gate    chan struct{}
+	reached chan struct{}
+}
+
+func (w *gatedSSEWriter) Write(data []byte) (int, error) {
+	if bytes.Contains(data, []byte("event: ready")) {
+		w.once.Do(func() {
+			close(w.reached)
+			<-w.gate
+		})
+	}
+	return w.ResponseRecorder.Write(data)
 }
 
 func decodeError(t *testing.T, w *httptest.ResponseRecorder) api.ErrorDetails {
@@ -2551,6 +2574,86 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		if !strings.Contains(body, `"kind":"textDelta"`) {
 			t.Error("expected raw disk history to retain text delta events")
+		}
+	})
+
+	t.Run("SlowSubscriberDropEndsStreamForResume", func(t *testing.T) {
+		t.Parallel()
+		// Regression test: when the task drops a slow live subscriber, the
+		// handler must end the response so the client reconnects with
+		// Last-Event-ID and resumes. Previously the loop kept the response open
+		// on the stats channel and silently delivered no further messages.
+		taskID := ksid.NewID()
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
+		tk.SetState(taskslog.StateRunning)
+
+		// Attach a live session so SendInput can append synthetic user messages.
+		sessCtx, sessCancel := context.WithCancel(t.Context())
+		defer sessCancel()
+		cmd := exec.CommandContext(sessCtx, "cat")
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		conn := agent.NewConn(sessCtx, testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, (&agenttest.FakeBackend{}).NewWire())
+		sess := agent.NewSession(sessCtx, cmd, conn, stdout, make(chan agent.TimedMessage, 256), testLogger())
+		tk.AttachSession(&task.SessionHandle{Session: sess})
+		t.Cleanup(func() {
+			_ = cmd.Process.Kill()
+			_ = sess.Wait()
+		})
+
+		s := newTestRouter(t, nil)
+		insertTestTask(s, taskID.String(), tk)
+
+		w := &gatedSSEWriter{
+			ResponseRecorder: httptest.NewRecorder(),
+			gate:             make(chan struct{}),
+			reached:          make(chan struct{}),
+		}
+		reqCtx, reqCancel := context.WithCancel(sessCtx)
+		t.Cleanup(reqCancel)
+		req := httptest.NewRequestWithContext(reqCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			testTaskHandlers(s).handleTaskEvents(w, req)
+		}()
+
+		// Wait until the handler has subscribed and is blocked writing ready.
+		select {
+		case <-w.reached:
+		case <-time.After(5 * time.Second):
+			t.Fatal("handler never reached the ready frame")
+		}
+
+		// Overrun the 256-message subscriber buffer while the handler is gated.
+		for i := range 300 {
+			if err := tk.SendInput(sessCtx, agent.Prompt{Text: "noise"}); err != nil {
+				t.Fatalf("SendInput %d: %v", i, err)
+			}
+		}
+		close(w.gate)
+
+		// The handler must end the dropped-subscriber stream instead of holding
+		// it open while every later message is discarded.
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("handler kept the dropped-subscriber stream open")
+		}
+
+		if body := w.Body.String(); !strings.Contains(body, "event: ready") {
+			t.Fatalf("stream body is missing the ready marker:\n%s", body)
 		}
 	})
 }

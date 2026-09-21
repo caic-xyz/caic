@@ -208,12 +208,21 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 
 	liveCh := live
 	statsCh := statsLive
-	for liveCh != nil || statsCh != nil {
+	for {
 		select {
 		case msg, ok := <-liveCh:
 			if !ok {
-				liveCh = nil
-				continue
+				// A client disconnect cancels the request context and closes both
+				// channels; that is a normal end. Any other close means the task
+				// dropped this subscriber (slow-consumer backpressure). End the
+				// response so the client reconnects with Last-Event-ID and resumes
+				// from the retained timeline. Continuing here would leave an open
+				// stream that only carries stats and silently never delivers
+				// messages again.
+				if stream.ctx.Err() != nil {
+					return nil
+				}
+				return errTaskEventSubscriberDropped
 			}
 			sequence := msg.Sequence
 			if rawHistory {
@@ -232,8 +241,9 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			}
 		case cs, ok := <-statsCh:
 			if !ok {
-				statsCh = nil
-				continue
+				// The stats subscription is gone (request context cancelled), so
+				// the response has no consumer left to serve.
+				return nil
 			}
 			if err := stream.writeStats([]runtime.Stats{cs}); err != nil {
 				return err
@@ -243,7 +253,6 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			}
 		}
 	}
-	return nil
 }
 
 func isTaskEventTerminal(state taskslog.State) bool {
@@ -897,6 +906,12 @@ func (id taskEventID) appendTo(dst []byte) []byte {
 }
 
 var errInvalidTaskEventID = errors.New("invalid task SSE event ID")
+
+// errTaskEventSubscriberDropped reports that the task dropped this stream's
+// live subscriber because it could not keep up with the message rate. The
+// handler ends the response so the client reconnects with Last-Event-ID and
+// resumes from the retained timeline.
+var errTaskEventSubscriberDropped = errors.New("task event subscriber dropped")
 
 type taskEventResume struct {
 	lastEventID string
