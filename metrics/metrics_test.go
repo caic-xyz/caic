@@ -201,6 +201,22 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("restores historical observations", func(t *testing.T) {
+		t.Parallel()
+		store := metrics.NewStore(testResource())
+		history := time.Now().UTC().Add(-time.Hour)
+		store.Restore(history, "repo.diff", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
+		store.Record(t.Context(), "repo.diff", metrics.OutcomeOK, metrics.Duration(2*time.Millisecond))
+
+		if !store.Since.Equal(history) {
+			t.Fatalf("Since = %s, want %s", store.Since, history)
+		}
+		got := store.Snapshot()
+		if len(got) != 1 || got[0].Count != 2 || got[0].Last != atSeconds(2*time.Millisecond) {
+			t.Fatalf("snapshot = %#v, want two observations ending in 2ms", got)
+		}
+	})
+
 	t.Run("orders series by name", func(t *testing.T) {
 		t.Parallel()
 		store := metrics.NewStore(testResource())

@@ -28,7 +28,11 @@ func testResource() metrics.Resource {
 
 // newTestLog opens a log in dir and pins its clock when now is set.
 func newTestLog(t *testing.T, dir string, now time.Time) *Log {
-	log, err := NewLog(slog.New(slog.DiscardHandler), dir, testResource())
+	return newTestLogResource(t, dir, now, testResource())
+}
+
+func newTestLogResource(t *testing.T, dir string, now time.Time, res metrics.Resource) *Log {
+	log, err := NewLog(slog.New(slog.DiscardHandler), dir, res)
 	if err != nil {
 		t.Fatalf("NewLog: %v", err)
 	}
@@ -36,6 +40,10 @@ func newTestLog(t *testing.T, dir string, now time.Time) *Log {
 		log.now = func() time.Time { return now }
 	}
 	return log
+}
+
+func dayPath(log *Log, day string) string {
+	return filepath.Join(log.dir, day+jsonlSuffix)
 }
 
 func readLines(t *testing.T, path string) []string {
@@ -96,7 +104,7 @@ func TestNewLog(t *testing.T) {
 func TestLog(t *testing.T) {
 	t.Parallel()
 
-	t.Run("appends one json line per observation", func(t *testing.T) {
+	t.Run("writes one metadata header followed by each observation", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		day := time.Date(2026, 9, 21, 10, 30, 0, 0, time.UTC)
@@ -108,29 +116,38 @@ func TestLog(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 
-		lines := readLines(t, filepath.Join(dir, "2026-09-21.jsonl"))
-		if len(lines) != 2 {
-			t.Fatalf("lines = %d, want 2", len(lines))
+		lines := readLines(t, dayPath(log, "2026-09-21"))
+		if len(lines) != 3 {
+			t.Fatalf("lines = %d, want 3", len(lines))
+		}
+		wantHeader := `{"type":"metrics","version":2,"resource":{"service":"caic","version":"1.2.3","host":"host-1"}}`
+		if lines[0] != wantHeader {
+			t.Fatalf("header = %s, want %s", lines[0], wantHeader)
+		}
+		var header fileHeader
+		if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+			t.Fatalf("decode header: %v", err)
+		}
+		if header != log.header() {
+			t.Fatalf("header = %+v, want %+v", header, log.header())
 		}
 		wantLine := `{"time":"2026-09-21T10:30:00Z","name":"container.launch","outcome":"ok",` +
-			`"kind":"histogram","unit":"s","amount":1.5,"attrs":{"container.runtime":"podman"},` +
-			`"resource":{"service":"caic","version":"1.2.3","host":"host-1"}}`
-		if lines[0] != wantLine {
-			t.Fatalf("first line = %s, want %s", lines[0], wantLine)
+			`"kind":"histogram","unit":"s","amount":1.5,"attrs":{"container.runtime":"podman"}}`
+		if lines[1] != wantLine {
+			t.Fatalf("first observation = %s, want %s", lines[1], wantLine)
 		}
 		var got record
-		if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
-			t.Fatalf("decode first line: %v", err)
+		if err := json.Unmarshal([]byte(lines[1]), &got); err != nil {
+			t.Fatalf("decode first observation: %v", err)
 		}
 		want := record{
-			Time:     day,
-			Name:     "container.launch",
-			Outcome:  metrics.OutcomeOK,
-			Kind:     metrics.KindHistogram,
-			Unit:     metrics.UnitSeconds,
-			Amount:   metrics.Duration(1500 * time.Millisecond).Amount,
-			Attrs:    map[string]string{"container.runtime": "podman"},
-			Resource: resource{Service: "caic", Version: "1.2.3", Host: "host-1"},
+			Time:    day,
+			Name:    "container.launch",
+			Outcome: metrics.OutcomeOK,
+			Kind:    metrics.KindHistogram,
+			Unit:    metrics.UnitSeconds,
+			Amount:  metrics.Duration(1500 * time.Millisecond).Amount,
+			Attrs:   map[string]string{"container.runtime": "podman"},
 		}
 		if !got.Time.Equal(want.Time) {
 			t.Fatalf("time = %v, want %v", got.Time, want.Time)
@@ -141,7 +158,7 @@ func TestLog(t *testing.T) {
 		}
 
 		var second record
-		if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		if err := json.Unmarshal([]byte(lines[2]), &second); err != nil {
 			t.Fatalf("decode second line: %v", err)
 		}
 		if second.Name != "repo.diff" || second.Outcome != metrics.OutcomeError || second.Attrs != nil {
@@ -160,19 +177,19 @@ func TestLog(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 
-		lines := readLines(t, filepath.Join(dir, "2026-09-21.jsonl"))
-		if len(lines) != 2 {
-			t.Fatalf("lines = %d, want 2", len(lines))
+		lines := readLines(t, dayPath(log, "2026-09-21"))
+		if len(lines) != 3 {
+			t.Fatalf("lines = %d, want 3", len(lines))
 		}
 		var size record
-		if err := json.Unmarshal([]byte(lines[0]), &size); err != nil {
+		if err := json.Unmarshal([]byte(lines[1]), &size); err != nil {
 			t.Fatalf("decode size: %v", err)
 		}
 		if size.Kind != metrics.KindHistogram || size.Unit != metrics.UnitBytes || size.Amount != 4096 {
 			t.Fatalf("size record = %+v, want a 4096 byte histogram", size)
 		}
 		var gauge record
-		if err := json.Unmarshal([]byte(lines[1]), &gauge); err != nil {
+		if err := json.Unmarshal([]byte(lines[2]), &gauge); err != nil {
 			t.Fatalf("decode gauge: %v", err)
 		}
 		if gauge.Kind != metrics.KindGauge || gauge.Unit != metrics.UnitCount || gauge.Amount != 3 {
@@ -193,14 +210,14 @@ func TestLog(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 
-		if _, err := os.Stat(filepath.Join(dir, "2026-09-21.jsonl")); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Stat(dayPath(log, "2026-09-21")); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("finished day is still plain: %v", err)
 		}
-		body := readZstd(t, filepath.Join(dir, "2026-09-21.jsonl.zstd"))
-		if got := strings.Count(body, "\n"); got != 1 {
-			t.Fatalf("compressed day holds %d lines, want 1: %q", got, body)
+		body := readZstd(t, dayPath(log, "2026-09-21")+".zstd")
+		if got := strings.Count(body, "\n"); got != 2 {
+			t.Fatalf("compressed day holds %d lines, want 2: %q", got, body)
 		}
-		if _, err := os.Stat(filepath.Join(dir, "2026-09-22.jsonl")); err != nil {
+		if _, err := os.Stat(dayPath(log, "2026-09-22")); err != nil {
 			t.Fatalf("current day is missing: %v", err)
 		}
 	})
@@ -209,7 +226,11 @@ func TestLog(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		day := time.Now().UTC().AddDate(0, 0, -10).Format(dayLayout)
-		stale := filepath.Join(dir, day+jsonlSuffix)
+		resourceDir := filepath.Join(dir, (resource{Service: "caic", Version: "1.2.3", Host: "host-1"}).id())
+		if err := os.MkdirAll(resourceDir, dirMode); err != nil {
+			t.Fatalf("create resource directory: %v", err)
+		}
+		stale := filepath.Join(resourceDir, day+jsonlSuffix)
 		if err := os.WriteFile(stale, []byte("{\"name\":\"repo.diff\"}\n"), fileMode); err != nil {
 			t.Fatalf("seed stale day: %v", err)
 		}
@@ -227,7 +248,7 @@ func TestLog(t *testing.T) {
 		if _, err := os.Stat(stale + tempSuffix); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("temporary file survived: %v", err)
 		}
-		if got := readZstd(t, filepath.Join(dir, day+zstdSuffix)); got != "{\"name\":\"repo.diff\"}\n" {
+		if got := readZstd(t, filepath.Join(resourceDir, day+zstdSuffix)); got != "{\"name\":\"repo.diff\"}\n" {
 			t.Fatalf("compressed day = %q", got)
 		}
 	})
@@ -237,8 +258,12 @@ func TestLog(t *testing.T) {
 		dir := t.TempDir()
 		expired := time.Now().UTC().AddDate(0, 0, -100).Format(dayLayout)
 		recent := time.Now().UTC().AddDate(0, 0, -10).Format(dayLayout)
+		resourceDir := filepath.Join(dir, (resource{Service: "caic", Version: "1.2.3", Host: "host-1"}).id())
+		if err := os.MkdirAll(resourceDir, dirMode); err != nil {
+			t.Fatalf("create resource directory: %v", err)
+		}
 		for _, name := range []string{expired + jsonlSuffix, expired + zstdSuffix, recent + jsonlSuffix} {
-			if err := os.WriteFile(filepath.Join(dir, name), []byte("{\"name\":\"repo.diff\"}\n"), fileMode); err != nil {
+			if err := os.WriteFile(filepath.Join(resourceDir, name), []byte("{\"name\":\"repo.diff\"}\n"), fileMode); err != nil {
 				t.Fatalf("seed %s: %v", name, err)
 			}
 		}
@@ -248,7 +273,7 @@ func TestLog(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 
-		entries, err := os.ReadDir(dir)
+		entries, err := os.ReadDir(log.dir)
 		if err != nil {
 			t.Fatalf("read directory: %v", err)
 		}
@@ -267,7 +292,11 @@ func TestLog(t *testing.T) {
 		dir := t.TempDir()
 		now := time.Now().UTC()
 		expired := now.AddDate(0, 0, -100).Format(dayLayout)
-		if err := os.WriteFile(filepath.Join(dir, expired+zstdSuffix), []byte("seeded"), fileMode); err != nil {
+		resourceDir := filepath.Join(dir, (resource{Service: "caic", Version: "1.2.3", Host: "host-1"}).id())
+		if err := os.MkdirAll(resourceDir, dirMode); err != nil {
+			t.Fatalf("create resource directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(resourceDir, expired+zstdSuffix), []byte("seeded"), fileMode); err != nil {
 			t.Fatalf("seed expired day: %v", err)
 		}
 		// A long-running process only sweeps at rollover, never at startup.
@@ -277,7 +306,7 @@ func TestLog(t *testing.T) {
 		if err := log.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(dir, expired+zstdSuffix)); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(log.dir, expired+zstdSuffix)); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("expired day survived the rollover: %v", err)
 		}
 	})
@@ -285,17 +314,102 @@ func TestLog(t *testing.T) {
 	t.Run("appends to the current day after a restart", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		path := filepath.Join(dir, time.Now().UTC().Format(dayLayout)+jsonlSuffix)
-		if err := os.WriteFile(path, []byte("{\"name\":\"repo.diff\"}\n"), fileMode); err != nil {
-			t.Fatalf("seed current day: %v", err)
+		first := newTestLog(t, dir, time.Time{})
+		first.Record(t.Context(), "repo.diff", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
+		if err := first.Close(); err != nil {
+			t.Fatalf("close first log: %v", err)
 		}
+		second := newTestLog(t, dir, time.Time{})
+		second.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
+		if err := second.Close(); err != nil {
+			t.Fatalf("close second log: %v", err)
+		}
+		if got := len(readLines(t, dayPath(second, time.Now().UTC().Format(dayLayout)))); got != 3 {
+			t.Fatalf("current day holds %d lines, want one header and two observations", got)
+		}
+	})
+
+	t.Run("restores retained observations after a restart", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		history := time.Now().UTC().AddDate(0, 0, -1).Truncate(time.Second)
+		first := newTestLog(t, dir, history)
+		first.Record(t.Context(), "repo.diff", metrics.OutcomeOK, metrics.Duration(time.Millisecond),
+			metrics.Attr{Key: "forge.name", Value: "github"})
+		if err := first.Close(); err != nil {
+			t.Fatalf("close first log: %v", err)
+		}
+
+		second := newTestLog(t, dir, time.Time{})
+		t.Cleanup(func() { _ = second.Close() })
+		store := metrics.NewStore(testResource())
+		if err := second.Restore(t.Context(), store); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		store.Record(t.Context(), "repo.diff", metrics.OutcomeOK, metrics.Duration(2*time.Millisecond),
+			metrics.Attr{Key: "forge.name", Value: "github"})
+
+		if !store.Since.Equal(history) {
+			t.Fatalf("Since = %s, want %s", store.Since, history)
+		}
+		got := store.Snapshot()
+		if len(got) != 1 {
+			t.Fatalf("snapshot = %#v, want one series", got)
+		}
+		if got[0].Count != 2 || got[0].Sum != 0.003 || got[0].Last != 0.002 {
+			t.Fatalf("series = %+v, want two restored and live observations", got[0])
+		}
+		if forgeName := got[0].Attrs["forge.name"]; forgeName != "github" {
+			t.Fatalf("attributes = %#v, want forge.name github", got[0].Attrs)
+		}
+	})
+
+	t.Run("rejects a mismatched metadata header", func(t *testing.T) {
+		t.Parallel()
+		log := newTestLog(t, t.TempDir(), time.Time{})
+		header, err := json.Marshal(fileHeader{
+			Type:     "metrics",
+			Version:  formatVersion,
+			Resource: resource{Service: "caic-voice-gateway"},
+		})
+		if err != nil {
+			t.Fatalf("marshal header: %v", err)
+		}
+		path := dayPath(log, time.Now().UTC().Format(dayLayout))
+		if err := os.WriteFile(path, append(header, '\n'), fileMode); err != nil {
+			t.Fatalf("write mismatched header: %v", err)
+		}
+
+		store := metrics.NewStore(testResource())
+		err = log.Restore(t.Context(), store)
+		if err == nil || !strings.Contains(err.Error(), "unexpected metric resource or format") {
+			t.Fatalf("Restore error = %v, want resource or format mismatch", err)
+		}
+		if got := store.Snapshot(); len(got) != 0 {
+			t.Fatalf("snapshot = %#v, want no observations", got)
+		}
+	})
+
+	t.Run("separates services into distinct resource directories", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		foreign := newTestLogResource(t, dir, time.Now().UTC(), metrics.Resource{ServiceName: "caic-voice-gateway"})
+		foreign.Record(t.Context(), "voice.session", metrics.OutcomeOK, metrics.Count(1))
+		if err := foreign.Close(); err != nil {
+			t.Fatalf("close foreign log: %v", err)
+		}
+
 		log := newTestLog(t, dir, time.Time{})
-		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
-		if err := log.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
+		t.Cleanup(func() { _ = log.Close() })
+		store := metrics.NewStore(testResource())
+		if err := log.Restore(t.Context(), store); err != nil {
+			t.Fatalf("Restore: %v", err)
 		}
-		if got := len(readLines(t, path)); got != 2 {
-			t.Fatalf("current day holds %d lines, want 2", got)
+		if foreign.dir == log.dir {
+			t.Fatal("foreign and caic resources share a directory")
+		}
+		if got := store.Snapshot(); len(got) != 0 {
+			t.Fatalf("snapshot = %#v, want no observations from another resource", got)
 		}
 	})
 
@@ -309,7 +423,7 @@ func TestLog(t *testing.T) {
 		log.now = func() time.Time { return time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC) }
 		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Duration(time.Millisecond))
 
-		entries, err := os.ReadDir(dir)
+		entries, err := os.ReadDir(log.dir)
 		if err != nil {
 			t.Fatalf("read directory: %v", err)
 		}
@@ -335,8 +449,8 @@ func TestLog(t *testing.T) {
 		if err := log.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
-		if got := len(readLines(t, filepath.Join(dir, "2026-09-21.jsonl"))); got != writers*each {
-			t.Fatalf("lines = %d, want %d", got, writers*each)
+		if got := len(readLines(t, dayPath(log, "2026-09-21"))); got != writers*each+1 {
+			t.Fatalf("lines = %d, want one header and %d observations", got, writers*each)
 		}
 	})
 }

@@ -25,8 +25,8 @@
 // as a time series, so an unbounded set leaks memory and remote storage. A
 // varying dimension belongs in an Attr with a bounded value, not in the name.
 //
-// Store is a single-process view of recent observations. Durable sinks, such as
-// the metricsdb package, and exporters also implement Recorder.
+// Store is a bounded in-memory aggregation of observations. Durable sinks, such
+// as the metricsdb package, and exporters also implement Recorder.
 package metrics
 
 import (
@@ -252,12 +252,14 @@ type Series struct {
 	Last    float64
 }
 
-// Store aggregates measurements for one process.
+// Store aggregates live measurements and retained historical measurements for
+// one process.
 //
 // It is safe for concurrent use and keeps memory flat: each series retains at
 // most sampleLimit amounts.
 type Store struct {
-	// Since is when the store started recording; it never changes.
+	// Since is the earliest observation in the store. It is set at creation and
+	// can move earlier while retained observations are restored during startup.
 	Since time.Time
 	// Resource identifies the process that produced the observations. It is
 	// set by NewStore and must not change afterwards.
@@ -282,16 +284,22 @@ func NewStore(resource Resource) *Store {
 // say, a duration and a size keeps them apart instead of merging two
 // incommensurable quantities.
 func (s *Store) Record(_ context.Context, name string, outcome Outcome, m Measurement, attrs ...Attr) {
+	s.record(name, outcome, m, attrs)
+}
+
+// Restore adds an observation that was recorded at before this process
+// started. It moves Since earlier when needed.
+//
+// Call Restore only during startup, before the store is shared with request
+// handlers. Record is the normal path for live observations.
+func (s *Store) Restore(at time.Time, name string, outcome Outcome, m Measurement, attrs ...Attr) {
 	attrsKey := canonicalKey(attrs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := seriesKey{name: name, outcome: outcome, kind: m.Kind, unit: m.Unit, attrs: attrsKey}
-	entry := s.series[key]
-	if entry == nil {
-		entry = &series{attributes: DedupAttrs(attrs)}
-		s.series[key] = entry
+	if at.Before(s.Since) {
+		s.Since = at
 	}
-	entry.observe(m.Amount)
+	s.recordLocked(attrsKey, name, outcome, m, attrs)
 }
 
 // Snapshot returns the aggregated series in name order.
@@ -325,6 +333,23 @@ func (s *Store) Snapshot() []Series {
 		out = append(out, entries[i].series)
 	}
 	return out
+}
+
+func (s *Store) record(name string, outcome Outcome, m Measurement, attrs []Attr) {
+	attrsKey := canonicalKey(attrs)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordLocked(attrsKey, name, outcome, m, attrs)
+}
+
+func (s *Store) recordLocked(attrsKey, name string, outcome Outcome, m Measurement, attrs []Attr) {
+	key := seriesKey{name: name, outcome: outcome, kind: m.Kind, unit: m.Unit, attrs: attrsKey}
+	entry := s.series[key]
+	if entry == nil {
+		entry = &series{attributes: DedupAttrs(attrs)}
+		s.series[key] = entry
+	}
+	entry.observe(m.Amount)
 }
 
 // snapshotEntry pairs an aggregated series with the key it was aggregated

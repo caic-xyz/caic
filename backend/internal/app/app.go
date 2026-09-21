@@ -110,6 +110,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err != nil {
 		return nil, fmt.Errorf("open metrics log: %w", err)
 	}
+	if err := metricsLog.Restore(ctx, metricsStore); err != nil {
+		appLog.WarnContext(ctx, "restore metrics history", "err", err)
+	}
 	metricsRec, err := metrics.Multi(metricsStore, metricsLog)
 	if err != nil {
 		return nil, fmt.Errorf("compose metrics recorders: %w", err)

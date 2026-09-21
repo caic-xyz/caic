@@ -1,13 +1,14 @@
-// Package metricsdb durably logs operation observations to per-day JSONL files.
+// Package metricsdb manages durable, restart-restored operation metrics.
 //
-// Files live in one directory as YYYY-MM-DD.jsonl, named and timestamped in
-// UTC. Each line records one measurement as a name, an outcome, a kind, a unit,
-// and an amount in that unit. Rolling past midnight closes the finished day and
+// Each resource owns a SHA-256-named directory of UTC daily JSONL files. A
+// versioned metadata header is the first line in every file, followed by its
+// metric observations. Rolling past midnight closes the finished day and
 // rewrites it as YYYY-MM-DD.jsonl.zstd, and days left behind by a restart are
 // compressed on the next start. Days older than 90 days are discarded, at
-// startup and on each rollover. The log is a durable record rather than a query
-// surface: decompress it with zstd and read it with jq, or ship it to an
-// OpenTelemetry backend.
+// startup and on each rollover. At startup, the caic server restores retained
+// observations into its bounded in-memory aggregate. The log can also be
+// decompressed with zstd and read with jq, or shipped to an OpenTelemetry
+// backend.
 //
 // A failed write never fails the operation being measured; it is logged and
 // dropped, because metrics must not take down the work they describe.
@@ -15,13 +16,17 @@ package metricsdb
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,26 +44,37 @@ const (
 	zstdSuffix    = ".jsonl.zstd"
 	tempSuffix    = ".tmp"
 	retentionDays = 90
+	formatVersion = 2
 )
 
 // record is one measurement as written to the log.
 type record struct {
-	Time     time.Time         `json:"time"`
-	Name     string            `json:"name"`
-	Outcome  metrics.Outcome   `json:"outcome"`
-	Kind     metrics.Kind      `json:"kind"`
-	Unit     metrics.Unit      `json:"unit"`
-	Amount   float64           `json:"amount"`
-	Attrs    map[string]string `json:"attrs,omitempty"`
-	Resource resource          `json:"resource"`
+	Time    time.Time         `json:"time"`
+	Name    string            `json:"name"`
+	Outcome metrics.Outcome   `json:"outcome"`
+	Kind    metrics.Kind      `json:"kind"`
+	Unit    metrics.Unit      `json:"unit"`
+	Amount  float64           `json:"amount"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
 }
 
-// resource names the process that produced a record so one directory can hold
-// more than one service.
+// resource names the process that owns a directory of metric files.
 type resource struct {
 	Service string `json:"service"`
 	Version string `json:"version,omitempty"`
 	Host    string `json:"host,omitempty"`
+}
+
+func (r resource) id() string {
+	sum := sha256.Sum256([]byte(r.Service + "\x00" + r.Version + "\x00" + r.Host))
+	return hex.EncodeToString(sum[:])
+}
+
+// fileHeader identifies the resource and format of one daily metric file.
+type fileHeader struct {
+	Type     string   `json:"type"`
+	Version  int      `json:"version"`
+	Resource resource `json:"resource"`
 }
 
 // Log appends observations to per-day JSONL files. It implements
@@ -89,18 +105,15 @@ func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 	if res.ServiceName == "" {
 		return nil, errors.New("service name is required")
 	}
-	if err := os.MkdirAll(dir, dirMode); err != nil {
+	r := resource{Service: res.ServiceName, Version: res.ServiceVersion, Host: res.Host}
+	if err := os.MkdirAll(filepath.Join(dir, r.id()), dirMode); err != nil {
 		return nil, fmt.Errorf("create metrics directory: %w", err)
 	}
 	l := &Log{
-		dir: dir,
-		resource: resource{
-			Service: res.ServiceName,
-			Version: res.ServiceVersion,
-			Host:    res.Host,
-		},
-		log: log.With("cmp", "metricsdb"),
-		now: time.Now,
+		dir:      filepath.Join(dir, r.id()),
+		resource: r,
+		log:      log.With("cmp", "metricsdb"),
+		now:      time.Now,
 	}
 	if err := l.sweep(); err != nil {
 		l.log.Warn("sweep metrics directory", "err", err)
@@ -112,14 +125,13 @@ func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 func (l *Log) Record(ctx context.Context, name string, outcome metrics.Outcome, m metrics.Measurement, attrs ...metrics.Attr) {
 	now := l.now()
 	line, err := json.Marshal(record{
-		Time:     now,
-		Name:     name,
-		Outcome:  outcome,
-		Kind:     m.Kind,
-		Unit:     m.Unit,
-		Amount:   m.Amount,
-		Attrs:    metrics.DedupAttrs(attrs),
-		Resource: l.resource,
+		Time:    now,
+		Name:    name,
+		Outcome: outcome,
+		Kind:    m.Kind,
+		Unit:    m.Unit,
+		Amount:  m.Amount,
+		Attrs:   metrics.DedupAttrs(attrs),
 	})
 	if err != nil {
 		l.log.ErrorContext(ctx, "encode metrics observation", "err", err, "name", name)
@@ -147,6 +159,81 @@ func (l *Log) Close() error {
 	return l.detachLocked()
 }
 
+// Restore loads retained observations into dst in timestamp order.
+//
+// A damaged file does not prevent other days from being restored. Callers get
+// the combined errors and can surface them without losing valid history.
+func (l *Log) Restore(ctx context.Context, dst *metrics.Store) error {
+	entries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return fmt.Errorf("read metrics directory: %w", err)
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if _, ok := dayOf(entry.Name()); ok {
+			paths = append(paths, filepath.Join(l.dir, entry.Name()))
+		}
+	}
+	slices.Sort(paths)
+	var errs []error
+	for _, path := range paths {
+		if err := l.restoreFile(ctx, dst, path); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (l *Log) restoreFile(ctx context.Context, dst *metrics.Store, path string) (err error) {
+	f, err := os.Open(path) //nolint:gosec // G304: a metrics log path under the configured directory.
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+
+	var in io.Reader = f
+	var dec *zstd.Decoder
+	if strings.HasSuffix(path, zstdSuffix) {
+		dec, err = zstd.NewReader(f)
+		if err != nil {
+			return err
+		}
+		defer dec.Close()
+		in = dec
+	}
+	jsonDec := json.NewDecoder(in)
+	var h fileHeader
+	if err := jsonDec.Decode(&h); err != nil {
+		return fmt.Errorf("decode header %s: %w", filepath.Base(path), err)
+	}
+	if h != l.header() {
+		return fmt.Errorf("decode header %s: unexpected metric resource or format", filepath.Base(path))
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var r record
+		if err := jsonDec.Decode(&r); errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("decode %s: %w", filepath.Base(path), err)
+		}
+		if r.Time.IsZero() {
+			return fmt.Errorf("decode %s: metric observation has no timestamp", filepath.Base(path))
+		}
+		attrs := make([]metrics.Attr, 0, len(r.Attrs))
+		for key, value := range r.Attrs {
+			attrs = append(attrs, metrics.Attr{Key: key, Value: value})
+		}
+		slices.SortFunc(attrs, func(a, b metrics.Attr) int { return strings.Compare(a.Key, b.Key) })
+		dst.Restore(r.Time, r.Name, r.Outcome, metrics.Measurement{Kind: r.Kind, Unit: r.Unit, Amount: r.Amount}, attrs...)
+	}
+}
+
 // rollLocked opens the file for day, finishing the previous day first.
 func (l *Log) rollLocked(ctx context.Context, day string) error {
 	if l.closed {
@@ -164,12 +251,55 @@ func (l *Log) rollLocked(ctx context.Context, day string) error {
 			l.log.WarnContext(ctx, "discard expired metrics days", "err", err)
 		}
 	}
-	f, err := os.OpenFile(filepath.Join(l.dir, day+jsonlSuffix), os.O_CREATE|os.O_APPEND|os.O_WRONLY, fileMode) //nolint:gosec // G304: the configured metrics directory plus a UTC date.
+	path := filepath.Join(l.dir, day+jsonlSuffix)
+	info, err := os.Stat(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	empty := errors.Is(err, fs.ErrNotExist)
+	if !empty {
+		empty = info.Size() == 0
+	}
+	if !empty {
+		if err := l.validateHeader(path); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, fileMode) //nolint:gosec // G304: the configured metrics directory plus a UTC date.
 	if err != nil {
 		return err
 	}
+	if empty {
+		line, err := json.Marshal(l.header())
+		if err != nil {
+			return errors.Join(err, f.Close())
+		}
+		if _, err := f.Write(append(line, '\n')); err != nil {
+			return errors.Join(err, f.Close())
+		}
+	}
 	l.day = day
 	l.file = f
+	return nil
+}
+
+func (l *Log) header() fileHeader {
+	return fileHeader{Type: "metrics", Version: formatVersion, Resource: l.resource}
+}
+
+func (l *Log) validateHeader(path string) (err error) {
+	f, err := os.Open(path) //nolint:gosec // G304: a metrics log path under the configured directory.
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+	var h fileHeader
+	if err := json.NewDecoder(f).Decode(&h); err != nil {
+		return err
+	}
+	if h != l.header() {
+		return errors.New("unexpected metric resource or format")
+	}
 	return nil
 }
 

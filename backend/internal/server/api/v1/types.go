@@ -1301,9 +1301,10 @@ type MetricResource struct {
 	Host string `json:"host,omitempty"`
 }
 
-// MetricsResp is the response for GET /api/caic/v1/server/metrics.
+// MetricsResp is the historical and live aggregate for GET
+// /api/caic/v1/server/metrics.
 type MetricsResp struct {
-	// Since is when the server began recording observations.
+	// Since is the earliest retained observation in the aggregate.
 	Since time.Time `json:"since,omitzero"`
 	// Resource identifies the process that produced the observations.
 	Resource MetricResource `json:"resource"`
