@@ -224,8 +224,8 @@ android-e2e: android-setup-emulator
 lint: tools custom-gcl $(FRONTEND_STAMP)
 	@./custom-gcl run --show-stats=false ./... --fix
 	@pnpm --silent lint:fix
+	@pnpm --silent lint:style:fix
 	@ruff check --quiet --fix .
-	@ruff format --quiet .
 	@./scripts/update_agents_file_index.py
 	@./scripts/update_backend_architecture.py
 	@$(MAKE) --no-print-directory lint-check
