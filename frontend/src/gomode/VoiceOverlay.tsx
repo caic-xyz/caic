@@ -11,7 +11,7 @@ import { buildTaskCIContext, buildTaskCreatedContext, buildTaskStateContext } fr
 
 import { voiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
-import { setVoiceActive } from "./notifications";
+import { notifications } from "./notifications";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
 import styles from "./VoiceOverlay.module.css";
 
@@ -91,7 +91,7 @@ export default function VoiceOverlay(props: Props) {
   });
 
   // Suppress browser notifications while voice is connected.
-  createEffect(() => setVoiceActive(session.state.connected));
+  createEffect(() => notifications.setVoiceActive(session.state.connected));
 
   // No onCleanup disconnect — the singleton voice session survives component remounts.
   // Only explicit user action or page unload (beforeunload handler) disconnects.
@@ -144,7 +144,7 @@ export default function VoiceOverlay(props: Props) {
   return (
     <>
       <div class={styles.spacer} style={{ "--spacer-height": `${spacerHeight()}px` }} aria-hidden="true" />
-      <div class={styles.panel} ref={panelRef} role="region" aria-label="Voice assistant">
+      <div class={styles.panel} ref={panelRef} role="region" aria-label="Voice assistant" data-testid="voice-overlay">
         <div class={styles.panelInner}>
           {/* Idle state: mic button right-aligned */}
           <Show when={!isActive()}>

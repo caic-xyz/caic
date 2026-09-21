@@ -1,6 +1,6 @@
 // Benchmarks shared task-diff cache request coalescing across navigation and live refresh bursts.
 
-import { test } from "vitest";
+import { bench } from "@tests/bench";
 
 import type { TaskDiffIndexResp } from "@sdk/types.gen";
 
@@ -8,8 +8,9 @@ import { DiffCache } from "./diffCache";
 
 const index: TaskDiffIndexResp = { repositories: [] };
 
-test("diff cache request scheduling", async ({ bench }) => {
-  await bench("coalesces navigation and live-refresh request bursts", async () => {
+bench(
+  "coalesces navigation and live-refresh request bursts",
+  async () => {
     let loads = 0;
     const cache = new DiffCache({
       freshnessMs: 1_500,
@@ -37,5 +38,6 @@ test("diff cache request scheduling", async ({ bench }) => {
     if (loads !== 3) {
       throw new Error(`expected 3 index loads, received ${loads}`);
     }
-  }).run({ time: 1_000, warmupTime: 200 });
-});
+  },
+  { time: 1_000, warmupTime: 200 },
+);

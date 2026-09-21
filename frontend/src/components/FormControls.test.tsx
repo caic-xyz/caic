@@ -1,5 +1,7 @@
 // Tests shared form controls' keyboard behavior.
 
+import { describe, it } from "node:test";
+import { vi, expect } from "@tests/expect";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 

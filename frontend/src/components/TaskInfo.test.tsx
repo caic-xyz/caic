@@ -1,30 +1,23 @@
 // Tests for TaskInfo runtime metadata rendering.
 
-import { render } from "@solidjs/testing-library";
+import { describe, it } from "node:test";
 import type { JSX } from "solid-js";
-import { describe, expect, it, vi } from "vitest";
+import { Route, Router } from "@solidjs/router";
+import { render } from "@solidjs/testing-library";
+import { expect, vi } from "@tests/expect";
 
-import type { TaskInfo as TaskInfoData } from "@sdk/types.gen";
-
-const { navigateMock, getTaskInfoMock } = vi.hoisted(() => ({
-  navigateMock: vi.fn(),
-  getTaskInfoMock: vi.fn<() => Promise<TaskInfoData>>(),
-}));
-
-vi.mock("@solidjs/router", () => ({
-  A: (props: { href: string; class?: string; children: JSX.Element }) => (
-    <a class={props.class} href={props.href}>
-      {props.children}
-    </a>
-  ),
-  useNavigate: () => navigateMock,
-}));
-
-vi.mock("../api", () => ({
-  getTaskInfo: getTaskInfoMock,
-}));
-
+import { api } from "../api";
 import TaskInfo from "./TaskInfo";
+
+function renderWithRouter(ui: () => JSX.Element) {
+  return render(() => (
+    <Router>
+      <Route path="/*" component={ui} />
+    </Router>
+  ));
+}
+
+const getTaskInfoMock = vi.spyOn(api, "getTaskInfo");
 
 describe("TaskInfo", () => {
   it("shows the runtime OS and CPU architecture as separate fields", async () => {
@@ -43,7 +36,7 @@ describe("TaskInfo", () => {
       },
     });
 
-    const { findByText } = render(() => (
+    const { findByText } = renderWithRouter(() => (
       <TaskInfo taskId="task-1" repo="repo" branch="branch" taskPath="/task/task-1" />
     ));
 
@@ -65,7 +58,7 @@ describe("TaskInfo", () => {
       },
     });
 
-    const { findByText, queryByText } = render(() => (
+    const { findByText, queryByText } = renderWithRouter(() => (
       <TaskInfo taskId="task-1" repo="repo" branch="branch" taskPath="/task/task-1" />
     ));
 
@@ -85,7 +78,7 @@ describe("TaskInfo", () => {
       },
     });
 
-    const { findByRole, findByText } = render(() => (
+    const { findByRole, findByText } = renderWithRouter(() => (
       <TaskInfo taskId="3BVLTPC1U000" repo="repo" branch="branch" taskPath="/task/3BVLTPC1U000" />
     ));
 
@@ -107,7 +100,7 @@ describe("TaskInfo", () => {
       },
     });
 
-    const { findByText, queryByText } = render(() => (
+    const { findByText, queryByText } = renderWithRouter(() => (
       <TaskInfo taskId="child" repo="repo" branch="branch" taskPath="/task/child" />
     ));
 
@@ -128,7 +121,7 @@ describe("TaskInfo", () => {
       },
     });
 
-    const { findByText, findByRole } = render(() => (
+    const { findByText, findByRole } = renderWithRouter(() => (
       <TaskInfo taskId="child" repo="repo" branch="branch" taskPath="/task/child" />
     ));
 

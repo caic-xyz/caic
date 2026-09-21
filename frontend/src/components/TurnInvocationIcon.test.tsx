@@ -1,8 +1,9 @@
 // Tests per-turn invocation details surfaced from a completed result card.
 
+import { describe, it } from "node:test";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { expect } from "@tests/expect";
 
 import type { TurnTiming } from "../timing";
 import TurnInvocationIcon from "./TurnInvocationIcon";

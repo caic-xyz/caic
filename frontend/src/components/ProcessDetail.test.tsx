@@ -1,22 +1,27 @@
 // Tests for the ProcessDetail process tree builder, flattening, and collapsing.
 
+import type { JSX } from "solid-js";
+import { describe, it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
-import { describe, it, expect, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import type { ISOTimestamp, ProcessInfo } from "@sdk/types.gen";
 
-import { getTaskProcesses } from "../api";
+import { Route, Router } from "@solidjs/router";
+
+import { api } from "../api";
 import { buildTree, default as ProcessDetail, visibleProcesses } from "./ProcessDetail";
 import type { ProcessNode } from "./ProcessDetail";
 
-vi.mock("@solidjs/router", () => ({
-  useNavigate: () => vi.fn(),
-}));
+const getTaskProcessesMock = vi.spyOn(api, "getTaskProcesses");
 
-vi.mock("../api", () => ({
-  getTaskProcesses: vi.fn(),
-  signalProcess: vi.fn(),
-}));
+function renderWithRouter(ui: () => JSX.Element) {
+  return render(() => (
+    <Router>
+      <Route path="/*" component={ui} />
+    </Router>
+  ));
+}
 
 function p(pid: number, ppid: number, command: string): ProcessInfo {
   return {
@@ -51,9 +56,9 @@ describe("ProcessDetail", () => {
     const process = p(1, 0, "bash");
     process.openFDs = 17;
     process.startedAt = new Date(Date.now() - 90_000).toISOString() as ISOTimestamp;
-    vi.mocked(getTaskProcesses).mockResolvedValue({ processes: [process] });
+    getTaskProcessesMock.mockResolvedValue({ processes: [process] });
 
-    render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
+    renderWithRouter(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("1m 30s")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
@@ -241,8 +246,8 @@ describe("ProcessDetail tree collapsing", () => {
   }
 
   function renderProcesses(procs: ProcessInfo[]): void {
-    vi.mocked(getTaskProcesses).mockResolvedValue({ processes: procs });
-    render(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
+    getTaskProcessesMock.mockResolvedValue({ processes: procs });
+    renderWithRouter(() => <ProcessDetail taskId="task-1" repo="repo" branch="main" taskPath="/task/task-1" />);
   }
 
   it("collapses subtrees past the auto-collapse depth", { timeout: HEAVY_TREE_TIMEOUT }, async () => {

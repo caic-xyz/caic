@@ -1,6 +1,7 @@
 // Tests for app-shell task creation, repo selection, and harness preferences.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
@@ -67,81 +68,7 @@ class FakeEventSource {
   onerror: ((e: Event) => void) | null = null;
 }
 
-vi.mock("./api", () => ({
-  listRepos: vi.fn(),
-  getPreferences: vi.fn(),
-  updatePreferences: vi.fn(),
-  listHarnesses: vi.fn(),
-  refreshHarness: vi.fn(),
-  listCaches: vi.fn(() => Promise.resolve(null)),
-  getCacheSizes: vi.fn(() => Promise.resolve(null)),
-  getConfig: vi.fn(),
-  getVersion: vi.fn(),
-  triggerUpdate: vi.fn(),
-  listOAuthGrants: vi.fn(),
-  revokeOAuthGrant: vi.fn(),
-  getUsage: vi.fn(),
-  listRepoBranches: vi.fn(),
-  cloneRepo: vi.fn(),
-  createTask: vi.fn(),
-  getTaskHandoff: vi.fn(),
-  forkTask: vi.fn(),
-  getTask: vi.fn(),
-  botFixCI: vi.fn(),
-  stopTask: vi.fn(),
-  purgeTask: vi.fn(),
-  reviveTask: vi.fn(),
-  globalTaskEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
-    const es = new FakeEventSource();
-    // Mirror the real client: parse the SSE payload before invoking the handler.
-    es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
-    return es;
-  }),
-  globalUsageEvents: vi.fn((handlers: { onMessage: (event: unknown) => void }) => {
-    const es = new FakeEventSource();
-    fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
-    return es;
-  }),
-  // Used by TaskDetail once a created task navigates into its detail route.
-  taskEventStream: vi.fn(() => new FakeEventSource()),
-  sendInput: vi.fn(),
-  restartTask: vi.fn(),
-  clearContext: vi.fn(() => Promise.resolve({ status: "cleared" })),
-  compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
-  syncTask: vi.fn(),
-  getTaskDiff: vi.fn(),
-  getTaskDiffIndex: vi.fn(),
-  getTaskFileDiff: vi.fn(),
-  getTaskRepoStatus: vi.fn(() => Promise.resolve({ repositories: [] })),
-  getTaskProcesses: vi.fn(),
-  signalProcess: vi.fn(),
-  getTaskInfo: vi.fn(),
-}));
-
-vi.mock("./AuthContext", () => ({
-  // eslint-disable-next-line solid/reactivity
-  AuthProvider: (props: { children: unknown }) => props.children,
-  useAuth: () => ({
-    ready: () => true,
-    providers: () => [],
-    user: () => null,
-    logout: async () => {},
-  }),
-}));
-
-vi.mock("./gomode/notifications", () => ({
-  requestNotificationPermission: vi.fn(),
-  notifyWaiting: vi.fn(),
-  dismissNotification: vi.fn(),
-  notifyServiceEvent: vi.fn(),
-}));
-
 vi.stubGlobal("EventSource", FakeEventSource);
-
-// Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
-vi.mock("./gomode/VoiceOverlay", () => ({
-  default: () => <div data-testid="voice-overlay" />,
-}));
 
 function dispatchSSE(data: unknown) {
   const payload = { data: JSON.stringify(data) };
@@ -161,18 +88,80 @@ async function waitForTaskEventsSubscription() {
   await waitFor(() => expect(fakeESListeners.length).toBeGreaterThan(0));
 }
 
-// Imports must follow vi.mock declarations.
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
-import * as api from "./api";
+import { notifications } from "./gomode/notifications";
+import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
-import * as notifications from "./gomode/notifications";
+import { AuthProvider } from "./AuthContext";
+import { installFetchRouter } from "@tests/fetch-router";
+
+// Spies on the real api singleton and the notifications object replace the former module
+// mocks; SSE streams arrive through the stubbed global EventSource. Re-applied in beforeEach
+// because afterEach's restoreAllMocks returns the originals.
+const apiSpyNames = [
+  "listRepos",
+  "getPreferences",
+  "updatePreferences",
+  "listHarnesses",
+  "refreshHarness",
+  "listCaches",
+  "getCacheSizes",
+  "getConfig",
+  "getVersion",
+  "triggerUpdate",
+  "listOAuthGrants",
+  "revokeOAuthGrant",
+  "getUsage",
+  "listRepoBranches",
+  "cloneRepo",
+  "createTask",
+  "getTaskHandoff",
+  "forkTask",
+  "getTask",
+  "botFixCI",
+  "stopTask",
+  "purgeTask",
+  "reviveTask",
+  "globalTaskEvents",
+  "globalUsageEvents",
+  "taskEvents",
+  "sendInput",
+  "restartTask",
+  "clearContext",
+  "compactContext",
+  "syncTask",
+  "getTaskDiff",
+  "getTaskDiffIndex",
+  "getTaskFileDiff",
+  "getTaskRepoStatus",
+  "getTaskProcesses",
+  "signalProcess",
+  "getTaskInfo",
+] as const;
+function spySeams(): void {
+  for (const name of apiSpyNames) {
+    vi.spyOn(api, name);
+  }
+  vi.spyOn(notifications, "requestNotificationPermission");
+  vi.spyOn(notifications, "notifyWaiting");
+  vi.spyOn(notifications, "notifyServiceEvent");
+  vi.spyOn(notifications, "dismissNotification");
+}
+
+// Real AuthProvider fetches server info on mount; serve it through the network seam.
+const fetchRouter = installFetchRouter();
+fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
 
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
   const history = createMemoryHistory();
   history.set({ value: initial });
-  const utils = render(() => <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>);
+  const utils = render(() => (
+    <AuthProvider>
+      <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>
+    </AuthProvider>
+  ));
   return { history, ...utils };
 }
 
@@ -203,12 +192,32 @@ function chipPathValues(): string[] {
 }
 
 beforeEach(() => {
+  spySeams();
   vi.clearAllMocks();
+  fetchRouter.reset();
+  fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
   fakeESListeners.length = 0;
   fakeUsageESListeners.length = 0;
   fakeESOpenListeners.length = 0;
   window.history.replaceState(null, "", "/");
   delete window.goModeHost;
+  vi.mocked(api.globalTaskEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
+    const es = new FakeEventSource();
+    // Mirror the real client: parse the SSE payload before invoking the handler.
+    es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
+    return es;
+  }) as unknown as typeof api.globalTaskEvents);
+  vi.mocked(api.globalUsageEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
+    const es = new FakeEventSource();
+    fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
+    return es;
+  }) as unknown as typeof api.globalUsageEvents);
+  vi.mocked(api.taskEvents).mockImplementation((() => new FakeEventSource()) as unknown as typeof api.taskEvents);
+  vi.mocked(api.listCaches).mockResolvedValue(null as never);
+  vi.mocked(api.getCacheSizes).mockResolvedValue(null as never);
+  vi.mocked(api.clearContext).mockResolvedValue({ status: "cleared" } as never);
+  vi.mocked(api.compactContext).mockResolvedValue({ status: "compacting" } as never);
+  vi.mocked(api.getTaskRepoStatus).mockResolvedValue({ repositories: [] });
   vi.mocked(api.listRepos).mockResolvedValue([repoA, repoB]);
   vi.mocked(api.getPreferences).mockResolvedValue({
     repositories: [{ path: "repos/a" }],
@@ -655,7 +664,7 @@ describe("App keyboard shortcuts", () => {
     expect(screen.getByText("Toggle voice mode")).toBeInTheDocument();
   });
 
-  it.each([
+  const f3Targets = [
     {
       harnesses: [
         {
@@ -686,16 +695,19 @@ describe("App keyboard shortcuts", () => {
       targetTestId: "model-select",
       help: "Focus model for the new task",
     },
-  ])("describes the visible $targetTestId as the F3 target", async ({ harnesses, targetTestId, help }) => {
-    const user = userEvent.setup();
-    vi.mocked(api.listHarnesses).mockResolvedValue(harnesses as unknown as HarnessInfo[]);
-    renderApp();
-    await screen.findByTestId(targetTestId);
+  ] as const;
+  for (const { harnesses, targetTestId, help } of f3Targets) {
+    it(`describes the visible ${targetTestId} as the F3 target`, async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.listHarnesses).mockResolvedValue(harnesses as unknown as HarnessInfo[]);
+      renderApp();
+      await screen.findByTestId(targetTestId);
 
-    await user.keyboard("{F1}");
+      await user.keyboard("{F1}");
 
-    expect(screen.getByText(help)).toBeInTheDocument();
-  });
+      expect(screen.getByText(help)).toBeInTheDocument();
+    });
+  }
 
   it("omits F3 from help when there is no dropdown to focus", async () => {
     const user = userEvent.setup();
@@ -740,8 +752,7 @@ describe("App keyboard shortcuts", () => {
 
     taskLoad.resolve(makeTask());
 
-    const prompt = await screen.findByTestId("task-detail-prompt");
-    await waitFor(() => expect(prompt).toHaveFocus());
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
   });
 
   it("does not autofocus a task-detail prompt on touch-primary devices", async () => {
@@ -847,14 +858,13 @@ describe("App keyboard shortcuts", () => {
     const task = makeTask();
     vi.mocked(api.getTask).mockResolvedValue(task);
     renderApp("/task/@task1+do-something");
-    const prompt = await screen.findByTestId("task-detail-prompt");
-    await waitFor(() => expect(prompt).toHaveFocus());
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
 
     await user.click(screen.getByTestId("task-detail-form"));
-    expect(prompt).not.toHaveFocus();
+    expect(screen.getByTestId("task-detail-prompt")).not.toHaveFocus();
     await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
 
-    await waitFor(() => expect(prompt).toHaveFocus());
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
   });
 
   it("navigates from focused task cards with shifted and unshifted arrows", async () => {
@@ -1218,7 +1228,7 @@ describe("App repo chips: No repository", () => {
     await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
   });
 
-  it.each([
+  const dismissPanes = [
     ["diff", "/task/@task1+do-something/diff", () => vi.mocked(api.getTaskDiffIndex).mockRejectedValue(apiError(404))],
     [
       "processes",
@@ -1226,12 +1236,15 @@ describe("App repo chips: No repository", () => {
       () => vi.mocked(api.getTaskProcesses).mockRejectedValue(apiError(404)),
     ],
     ["info", "/task/@task1+do-something/info", () => vi.mocked(api.getTaskInfo).mockRejectedValue(apiError(404))],
-  ] as const)("dismisses the %s pane when its task refresh returns 404", async (_name, route, rejectRefresh) => {
-    rejectRefresh();
-    const { history } = renderApp(route);
+  ] as const;
+  for (const [_name, route, rejectRefresh] of dismissPanes) {
+    it(`dismisses the ${_name} pane when its task refresh returns 404`, async () => {
+      rejectRefresh();
+      const { history } = renderApp(route);
 
-    await waitFor(() => expect(history.get()).toBe("/"));
-  });
+      await waitFor(() => expect(history.get()).toBe("/"));
+    });
+  }
 
   it("does not dismiss a task pane when its refresh returns 403", async () => {
     vi.mocked(api.getTaskDiffIndex).mockRejectedValue(apiError(403));
@@ -1399,6 +1412,7 @@ describe("App repo chips: No repository", () => {
 
     const { history } = renderApp("/");
     // Seed a task card so the global ArrowUp/Down handler would otherwise navigate.
+    await waitForTaskEventsSubscription();
     dispatchSSE({
       kind: "snapshot",
       snapshot: [makeTask({ id: "taskX", title: "other task" })],

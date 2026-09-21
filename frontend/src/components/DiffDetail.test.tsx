@@ -1,32 +1,31 @@
 // Tests for DiffDetail repository status rendering and diff parsing utilities.
 
+import type { JSX } from "solid-js";
+import { beforeEach, describe, it } from "node:test";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import type { FileDiffResp, TaskDiffIndexResp } from "@sdk/types.gen";
 
-const { getTaskDiffIndexMock, getTaskFileDiffMock } = vi.hoisted(() => ({
-  getTaskDiffIndexMock: vi.fn<(id: string) => Promise<TaskDiffIndexResp>>(),
-  getTaskFileDiffMock:
-    vi.fn<
-      (id: string, repository: string, commit: string, path: string, originalPath: string) => Promise<FileDiffResp>
-    >(),
-}));
+import { Route, Router } from "@solidjs/router";
 
-vi.mock("@solidjs/router", () => ({
-  useNavigate: () => vi.fn(),
-}));
-
-vi.mock("../api", () => ({
-  getTaskDiffIndex: getTaskDiffIndexMock,
-  getTaskFileDiff: getTaskFileDiffMock,
-}));
-
+import { api } from "../api";
 import { annotateDiffLines, extractDiffPath, splitDiff } from "./diffLines";
 import DiffDetail, { elidePathAtBoundary } from "./DiffDetail";
 import { taskDiffCache } from "../diffCache";
 import styles from "./DiffDetail.module.css";
+
+const getTaskDiffIndexMock = vi.spyOn(api, "getTaskDiffIndex");
+const getTaskFileDiffMock = vi.spyOn(api, "getTaskFileDiff");
+
+function renderWithRouter(ui: () => JSX.Element) {
+  return render(() => (
+    <Router>
+      <Route path="/*" component={ui} />
+    </Router>
+  ));
+}
 
 describe("DiffDetail", () => {
   beforeEach(() => {
@@ -43,7 +42,7 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
     getTaskFileDiffMock.mockReturnValueOnce(patch);
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("Commits ahead (1)")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: "committed.go" });
@@ -71,7 +70,7 @@ describe("DiffDetail", () => {
       diff: "@@ -1 +1 @@\n-old\n+new",
     });
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", {
       name: "old.go → working.go",
     });
@@ -106,7 +105,7 @@ describe("DiffDetail", () => {
       diff: "@@ -0,0 +1 @@\n+second",
     });
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "second.go" }));
 
     expect(await screen.findByText("+second")).toBeInTheDocument();
@@ -122,7 +121,7 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
     getTaskFileDiffMock.mockRejectedValueOnce(new Error("patch unavailable")).mockReturnValueOnce(retry);
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
 
@@ -156,7 +155,7 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockReturnValueOnce(refreshedIndex);
     getTaskFileDiffMock.mockRejectedValueOnce(new Error("patch unavailable")).mockReturnValueOnce(refreshedPatch);
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
     expect(await screen.findByRole("alert")).toHaveTextContent("patch unavailable");
@@ -183,7 +182,7 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
     getTaskFileDiffMock.mockReturnValueOnce(new Promise(() => undefined));
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
     fireEvent.click(row);
@@ -199,7 +198,7 @@ describe("DiffDetail", () => {
       diff: "@@ -1 +1 @@\n-old\n+loaded",
     });
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
     expect(await screen.findByText("+loaded")).toBeInTheDocument();
@@ -223,7 +222,7 @@ describe("DiffDetail", () => {
       diff: "@@ -1 +1 @@\n-old\n+loaded",
     });
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
     expect(await screen.findByText("+loaded")).toBeInTheDocument();
@@ -244,7 +243,7 @@ describe("DiffDetail", () => {
 
   it("keeps stale metadata without claiming a failed refresh is active", async () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockRejectedValueOnce(new Error("refresh failed"));
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     expect(await screen.findByText("Commits ahead (1)")).toBeInTheDocument();
 
     taskDiffCache.invalidate("task-1");
@@ -255,7 +254,7 @@ describe("DiffDetail", () => {
 
   it("clears repositories when a subscribed task cache is evicted", async () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     expect(await screen.findByText("Commit subject")).toBeInTheDocument();
 
     taskDiffCache.evictTask("task-1");
@@ -277,7 +276,7 @@ describe("DiffDetail", () => {
         resolvePatch = resolve;
       }),
     );
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", {
       name: "old.go → working.go",
     });
@@ -305,7 +304,7 @@ describe("DiffDetail", () => {
         }),
       )
       .mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "old.go → working.go" }));
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
 
@@ -326,7 +325,7 @@ describe("DiffDetail", () => {
     });
     getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
     getTaskFileDiffMock.mockReturnValueOnce(firstPatch).mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", {
       name: "old.go → working.go",
     });
@@ -353,7 +352,9 @@ describe("DiffDetail", () => {
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture());
     getTaskFileDiffMock.mockRejectedValueOnce(err);
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />);
+    renderWithRouter(() => (
+      <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />
+    ));
     fireEvent.click(await screen.findByRole("button", { name: "committed.go" }));
 
     await vi.waitFor(() => {
@@ -440,7 +441,7 @@ describe("DiffDetail", () => {
           : "@@ -1 +1,2 @@\n-old working\n+new working\n+line",
     }));
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("origin/main")).toBeInTheDocument();
     expect(screen.getByText(/2 commits ahead/)).toHaveTextContent("2 commits ahead · 1 behind");
@@ -505,7 +506,7 @@ describe("DiffDetail", () => {
       ],
     });
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText("2.0 KiB")).toBeInTheDocument();
     expect(screen.getByText("1.0 KiB → 4.0 KiB")).toBeInTheDocument();
@@ -557,7 +558,7 @@ describe("DiffDetail", () => {
       ],
     });
 
-    render(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
 
     expect(await screen.findByText(branch)).toBeInTheDocument();
     expect(screen.getByText(upstream)).toBeInTheDocument();

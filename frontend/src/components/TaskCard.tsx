@@ -24,7 +24,6 @@ import type {
 } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
-import { compactContext, getTaskRepoStatus, syncTask } from "../api";
 import CIDot from "./CIDot";
 import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import TaskActionsMenu from "./TaskActionsMenu";
@@ -34,6 +33,7 @@ import TokenIcon from "./github.svg?solid";
 import styles from "./TaskCard.module.css";
 import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 import { formatQuotaCountdown } from "../quota";
+import { api } from "../api";
 
 export interface TaskCardProps {
   id: string;
@@ -132,7 +132,8 @@ export default function TaskCard(props: TaskCardProps) {
       return;
     }
     let current = true;
-    getTaskRepoStatus(taskID)
+    api
+      .getTaskRepoStatus(taskID)
       .then((response) => {
         if (current) setRepoStates(response.repositories);
       })
@@ -198,7 +199,7 @@ export default function TaskCard(props: TaskCardProps) {
   function doSync(target?: SyncTarget) {
     const taskId = props.id;
     void runMenuAction("sync", async () => {
-      const response = await syncTask(taskId, {
+      const response = await api.syncTask(taskId, {
         force: false,
         ...(target ? { target } : {}),
       });
@@ -211,7 +212,7 @@ export default function TaskCard(props: TaskCardProps) {
   function doCompact() {
     const taskId = props.id;
     void runMenuAction("compact", async () => {
-      await compactContext(taskId, {});
+      await api.compactContext(taskId, {});
     });
   }
 

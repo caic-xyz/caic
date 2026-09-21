@@ -1,35 +1,23 @@
 // Tests compact Git state markers for task repository rows.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { expect, it, vi } from "vitest";
 import type { JSX } from "solid-js";
+import { it } from "node:test";
+import { Route, Router } from "@solidjs/router";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { expect, vi } from "@tests/expect";
 
 import RepoStateIcons from "./RepoStateIcons";
 
-vi.mock("@solidjs/router", () => ({
-  A: (props: JSX.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a
-      class={props.class}
-      href={props.href}
-      title={props.title}
-      aria-label={props["aria-label"]}
-      onFocus={(event) => {
-        if (typeof props.onFocus === "function") props.onFocus(event);
-      }}
-      onPointerEnter={(event) => {
-        if (typeof props.onPointerEnter === "function") props.onPointerEnter(event);
-      }}
-      onPointerDown={(event) => {
-        if (typeof props.onPointerDown === "function") props.onPointerDown(event);
-      }}
-    >
-      {props.children}
-    </a>
-  ),
-}));
+function renderWithRouter(ui: () => JSX.Element) {
+  return render(() => (
+    <Router>
+      <Route path="/*" component={ui} />
+    </Router>
+  ));
+}
 
 it("renders dense markers with an accessible state summary", () => {
-  render(() => (
+  renderWithRouter(() => (
     <RepoStateIcons
       state={{
         name: "repo",
@@ -57,7 +45,7 @@ it("renders dense markers with an accessible state summary", () => {
 });
 
 it("does not render a clean repository", () => {
-  render(() => (
+  renderWithRouter(() => (
     <RepoStateIcons
       state={{
         name: "repo",
@@ -77,7 +65,7 @@ it("does not render a clean repository", () => {
 });
 
 it("elides line totals when its row overflows", async () => {
-  render(() => (
+  renderWithRouter(() => (
     <RepoStateIcons
       state={{
         name: "repo",
@@ -109,7 +97,7 @@ it("elides line totals when its row overflows", async () => {
 });
 
 it("accepts a parent layout request to elide line totals", () => {
-  render(() => (
+  renderWithRouter(() => (
     <RepoStateIcons
       elideDiffStats
       state={{
@@ -132,7 +120,7 @@ it("accepts a parent layout request to elide line totals", () => {
 });
 
 it("links a state marker to its repository diff", () => {
-  render(() => (
+  renderWithRouter(() => (
     <RepoStateIcons
       href="/task/@abc+task/diff"
       state={{
@@ -159,7 +147,7 @@ it("links a state marker to its repository diff", () => {
 
 it("reports keyboard and pointer navigation intent", () => {
   const onNavigateIntent = vi.fn();
-  render(() => (
+  renderWithRouter(() => (
     <RepoStateIcons
       href="/task/@abc+task/diff"
       onNavigateIntent={onNavigateIntent}

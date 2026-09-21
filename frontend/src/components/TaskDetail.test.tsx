@@ -1,80 +1,60 @@
 // Tests for TaskDetail navigation, prompts, and SSE connection behaviour.
 
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
+import { Route, Router } from "@solidjs/router";
 import { render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { type JSX } from "solid-js";
 
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
-const navigateMock = vi.fn();
-
-// Mock the router so SSE tests don't need a real Router context.
-vi.mock("@solidjs/router", () => ({
-  useNavigate: () => navigateMock,
-  useLocation: () => ({ pathname: "/task/@abc+test-task", query: {} }),
-  A: (props: Record<string, unknown>) => (
-    <a
-      href={props.href as string}
-      class={props.class as string}
-      aria-label={props["aria-label"] as string}
-      data-elide-diff-stats={props["data-elide-diff-stats"] as string}
-      title={props.title as string}
-      onClick={(e: MouseEvent) => {
-        e.preventDefault();
-        navigateMock(props.href);
-      }}
-    >
-      {props.children as JSX.Element}
-    </a>
-  ),
-}));
-
-// Mock the API module to stub out EventSource (SSE) and other network calls.
-vi.mock("../api", () => ({
-  taskEventStream: vi.fn((_id: string, handlers: { onReady?: () => void }) => {
-    const fakeES = {
-      addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
-      close: vi.fn(),
-      onerror: null as ((e: Event) => void) | null,
-    };
-    // Fire "ready" asynchronously so the component transitions to live mode.
-    setTimeout(() => {
-      handlers.onReady?.();
-    }, 0);
-    return fakeES;
-  }),
-  sendInput: vi.fn(),
-  restartTask: vi.fn(),
-  clearContext: vi.fn(() => Promise.resolve({ status: "cleared" })),
-  compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
-  syncTask: vi.fn(),
-  getTaskDiff: vi.fn(),
-  getTaskDiffIndex: vi.fn(() => Promise.resolve({ repositories: [] })),
-  getTaskFileDiff: vi.fn(() => Promise.resolve({ diff: "" })),
-  getTaskRepoStatus: vi.fn(() =>
-    Promise.resolve({
-      repositories: [
-        {
-          name: "my-repo",
-          branch: "task-branch",
-          ahead: 1,
-          behind: 0,
-          changedFiles: 2,
-          linesAdded: 15,
-          linesDeleted: 3,
-          uncommittedFiles: 1,
-          conflicts: 0,
-        },
-      ],
-    }),
-  ),
-}));
-
-// Import after mocks are set up.
 import TaskDetail from "./TaskDetail";
-import { taskEventStream } from "../api";
+import { api } from "../api";
 import { HostModeProvider } from "../gomode/HostMode";
+
+// Spies on the real api singleton replace the former module mocks.
+const taskEventStreamMock = vi.spyOn(api, "taskEvents");
+const clearContextMock = vi.spyOn(api, "clearContext");
+const compactContextMock = vi.spyOn(api, "compactContext");
+const getTaskDiffMock = vi.spyOn(api, "getTaskDiff");
+const getTaskDiffIndexMock = vi.spyOn(api, "getTaskDiffIndex");
+const getTaskFileDiffMock = vi.spyOn(api, "getTaskFileDiff");
+const getTaskRepoStatusMock = vi.spyOn(api, "getTaskRepoStatus");
+
+taskEventStreamMock.mockImplementation(((_id: string, handlers: { onReady?: () => void }) => {
+  const fakeES = {
+    addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
+    close: vi.fn(),
+    onerror: null as ((e: Event) => void) | null,
+  };
+  // Fire "ready" asynchronously so the component transitions to live mode.
+  setTimeout(() => {
+    handlers.onReady?.();
+  }, 0);
+  return fakeES as unknown as EventSource;
+}) as typeof api.taskEvents);
+clearContextMock.mockImplementation(() => Promise.resolve({ status: "cleared" }) as never);
+compactContextMock.mockImplementation(() => Promise.resolve({ status: "compacting" }) as never);
+getTaskDiffMock.mockImplementation(() => Promise.resolve({} as never));
+getTaskDiffIndexMock.mockImplementation(() => Promise.resolve({ repositories: [] }));
+getTaskFileDiffMock.mockImplementation(() => Promise.resolve({ diff: "" }));
+getTaskRepoStatusMock.mockImplementation(() =>
+  Promise.resolve({
+    repositories: [
+      {
+        name: "my-repo",
+        branch: "task-branch",
+        ahead: 1,
+        behind: 0,
+        changedFiles: 2,
+        linesAdded: 15,
+        linesDeleted: 3,
+        uncommittedFiles: 1,
+        conflicts: 0,
+      },
+    ],
+  }),
+);
 
 const baseProps = {
   taskId: "abc",
@@ -100,10 +80,18 @@ const baseProps = {
 };
 
 function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
+  window.history.replaceState(null, "", "/task/@abc+test-task");
   return render(() => (
-    <HostModeProvider>
-      <TaskDetail {...baseProps} {...props} />
-    </HostModeProvider>
+    <Router>
+      <Route
+        path="/*"
+        component={() => (
+          <HostModeProvider>
+            <TaskDetail {...baseProps} {...props} />
+          </HostModeProvider>
+        )}
+      />
+    </Router>
   ));
 }
 
@@ -146,10 +134,6 @@ function resultEvent(ts: number): EventMessage {
 }
 
 describe("TaskDetail", () => {
-  afterEach(() => {
-    navigateMock.mockClear();
-  });
-
   it("replaces the Diff link with a repository state marker", async () => {
     renderTaskDetail();
 
@@ -241,7 +225,7 @@ describe("TaskDetail", () => {
     });
 
     try {
-      vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+      taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
         handlers.onMessage({
           kind: "text",
           ts: 1_000,
@@ -345,11 +329,11 @@ describe("TaskDetail", () => {
     const user = userEvent.setup();
     renderTaskDetail();
     await user.click(await screen.findByRole("link", { name: /my-repo: 2 changed files/ }));
-    expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
+    await waitFor(() => expect(window.location.pathname).toBe("/task/@abc+test-task/diff"));
   });
 
   it("renders Codex file-change diffs with colored lines", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -402,7 +386,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows canonical native status on the tool call that spawned it", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const events: EventMessage[] = [
         {
           kind: "toolUse",
@@ -456,7 +440,7 @@ describe("TaskDetail", () => {
   });
 
   it("renders a native card that has no transcript item to anchor to", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "nativeSubagent",
         ts: 1_000,
@@ -475,7 +459,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows elapsed time on a single-event message block", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "userInput",
         ts: 1_000,
@@ -500,7 +484,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows one timing control for a thinking-only block", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "userInput",
         ts: 1_000,
@@ -527,7 +511,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows one summed timing control for collapsed Codex thinking", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const usage = (ts: number): EventMessage => ({
         kind: "usage",
         ts,
@@ -578,7 +562,7 @@ describe("TaskDetail", () => {
   });
 
   it("formats short result durations without misleading zero seconds", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.duration = 0.125;
@@ -599,7 +583,7 @@ describe("TaskDetail", () => {
   });
 
   it("does not repeat a successful assistant response from the result payload", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "text",
         ts: 1_000,
@@ -623,7 +607,7 @@ describe("TaskDetail", () => {
   });
 
   it("keeps result payload text for failed turns", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.isError = true;
@@ -644,7 +628,7 @@ describe("TaskDetail", () => {
 
   it("opens invocation details from a completed turn's result card", async () => {
     const user = userEvent.setup();
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const event = resultEvent(2_000);
       if (!event.result) throw new Error("result fixture is missing payload");
       event.result.usage.inputTokens = 1_000;
@@ -667,7 +651,7 @@ describe("TaskDetail", () => {
 
   it("opens invocation details from a collapsed turn without expanding it", async () => {
     const user = userEvent.setup();
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(2_000);
       const latestResult = resultEvent(4_000);
       if (!firstResult.result || !latestResult.result) throw new Error("result fixture is missing payload");
@@ -699,7 +683,7 @@ describe("TaskDetail", () => {
   });
 
   it("right-aligns the duration on collapsed turns", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(333_000);
       if (firstResult.result) firstResult.result.duration = 332;
       const events: EventMessage[] = [
@@ -725,7 +709,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows an explicit zero duration on collapsed turns without timing metadata", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(0);
       const secondResult = resultEvent(0);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
@@ -754,7 +738,7 @@ describe("TaskDetail", () => {
 
   it("summarizes every turn in the collapsed session details", async () => {
     const user = userEvent.setup();
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       const firstResult = resultEvent(3_000);
       const secondResult = resultEvent(65_000);
       if (!firstResult.result || !secondResult.result) throw new Error("result fixture is missing payload");
@@ -860,7 +844,7 @@ describe("TaskDetail", () => {
   });
 
   it("keeps the prompt visible when a later input repeats it", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "text",
         ts: 1,
@@ -885,7 +869,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows setup logs inside task details", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "log",
         ts: 1,
@@ -919,7 +903,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows zero instead of an implausible reconstructed setup duration", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "log",
         ts: 1_500,
@@ -952,7 +936,7 @@ describe("TaskDetail", () => {
   });
 
   it("collapses setup logs after the agent session starts", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "log",
         ts: 1_500,
@@ -986,7 +970,7 @@ describe("TaskDetail", () => {
   });
 
   it("shows in-progress context compaction", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "system",
         ts: 1_000,
@@ -1006,7 +990,7 @@ describe("TaskDetail", () => {
   });
 
   it("reports the harness context size on a compaction boundary", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "system",
         ts: 1_000,
@@ -1032,7 +1016,7 @@ describe("TaskDetail", () => {
   });
 
   it("surfaces a failed context compaction", () => {
-    vi.mocked(taskEventStream).mockImplementationOnce((_id, handlers) => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "system",
         ts: 1_000,
@@ -1062,7 +1046,7 @@ type FakeES = {
 // Build a mock that fires the "ready" event synchronously so tests don't need
 // to advance timers just to get the component into live mode.
 function makeSyncReadyMock(created: FakeES[], capturedCb?: { value: ((ev: EventMessage) => void) | null }) {
-  vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+  taskEventStreamMock.mockImplementation((_id, handlers) => {
     if (capturedCb) capturedCb.value = handlers.onMessage;
     const fakeES: FakeES = {
       addEventListener: vi.fn(),
@@ -1080,7 +1064,7 @@ function makeManualReadyMock(
   capturedCb: { value: ((ev: EventMessage) => void) | null },
   readyHandler: { value: (() => void) | null },
 ) {
-  vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+  taskEventStreamMock.mockImplementation((_id, handlers) => {
     capturedCb.value = handlers.onMessage;
     readyHandler.value = handlers.onReady ?? null;
     const fakeES: FakeES = {
@@ -1149,7 +1133,7 @@ describe("SSE connection", () => {
     let onMessage: ((ev: EventMessage) => void) | undefined;
     let onReady: (() => void) | undefined;
     let onReset: (() => void) | undefined;
-    vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+    taskEventStreamMock.mockImplementation((_id, handlers) => {
       onMessage = handlers.onMessage;
       onReady = handlers.onReady;
       onReset = handlers.onReset;
@@ -1211,7 +1195,7 @@ describe("SSE connection", () => {
   it("reports terminal history errors and does not retry after the native error", () => {
     const created: FakeES[] = [];
     let historyError: ((error: { message: string }) => void) | undefined;
-    vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+    taskEventStreamMock.mockImplementation((_id, handlers) => {
       historyError = handlers.onHistoryError;
       const fakeES: FakeES = {
         addEventListener: vi.fn(),
@@ -1257,7 +1241,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     const callbacks: Array<(ev: EventMessage) => void> = [];
     const readyHandlers: Array<() => void> = [];
-    vi.mocked(taskEventStream).mockImplementation((_id, handlers) => {
+    taskEventStreamMock.mockImplementation((_id, handlers) => {
       callbacks.push(handlers.onMessage);
       if (handlers.onReady) readyHandlers.push(handlers.onReady);
       const fakeES: FakeES = {

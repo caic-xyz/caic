@@ -1,5 +1,7 @@
 // Tests for reusable dropdown keyboard dismissal and focus restoration.
 
+import { describe, it } from "node:test";
+import { vi, expect } from "@tests/expect";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";

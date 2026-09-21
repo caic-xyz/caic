@@ -1,9 +1,10 @@
 // Tests for the SearchableSelect combobox: filtering, keyboard navigation,
 // and selection via Enter/click.
 
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { vi, expect } from "@tests/expect";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach } from "vitest";
 
 import SearchableSelect, { type SearchableOption } from "./SearchableSelect";
 

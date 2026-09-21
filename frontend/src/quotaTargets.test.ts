@@ -1,6 +1,7 @@
 // Tests quota-aware harness ordering and conservative availability labels.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import type { HarnessInfo, ISOTimestamp, QuotaProvider, UsageResp } from "@sdk/types.gen";
 import { quotaRecoveryTargets } from "./quotaTargets";
@@ -97,17 +98,19 @@ describe("quotaRecoveryTargets", () => {
     expect(target.label).toBe("Quota status unknown");
   });
 
-  it.each(["stale", "error"] as const)("treats %s provider data as unknown", (fetchStatus) => {
-    const [target] = quotaRecoveryTargets(
-      [harness("codex", "codex")],
-      usage([{ provider: "codex", usedPct: 25, fetchStatus }]),
-      "claudecode",
-      "codex",
-      now,
-    );
+  for (const fetchStatus of ["stale", "error"] as const) {
+    it(`treats ${fetchStatus} provider data as unknown`, () => {
+      const [target] = quotaRecoveryTargets(
+        [harness("codex", "codex")],
+        usage([{ provider: "codex", usedPct: 25, fetchStatus }]),
+        "claudecode",
+        "codex",
+        now,
+      );
 
-    expect(target.status).toBe("unknown");
-    expect(target.recommended).toBe(false);
-    expect(target.label).toBe("Quota status unknown");
-  });
+      expect(target.status).toBe("unknown");
+      expect(target.recommended).toBe(false);
+      expect(target.label).toBe("Quota status unknown");
+    });
+  }
 });

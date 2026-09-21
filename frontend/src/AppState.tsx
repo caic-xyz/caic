@@ -26,44 +26,14 @@ import type {
 
 import { useHostMode } from "./gomode/HostMode";
 
-import {
-  getConfig,
-  getPreferences,
-  updatePreferences,
-  listOAuthGrants,
-  revokeOAuthGrant,
-  listHarnesses,
-  refreshHarness,
-  listCaches,
-  getCacheSizes,
-  listRepos,
-  createTask,
-  cloneRepo,
-  getUsage,
-  getTaskHandoff,
-  forkTask,
-  stopTask,
-  purgeTask,
-  reviveTask,
-  botFixCI,
-  getTask,
-  globalTaskEvents,
-  globalUsageEvents,
-  getVersion,
-  triggerUpdate,
-} from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
-import {
-  requestNotificationPermission,
-  notifyServiceEvent,
-  notifyWaiting,
-  dismissNotification,
-} from "./gomode/notifications";
+import { notifications } from "./gomode/notifications";
 import { QuotaRecoveryTracker } from "./quota";
 import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 import { evictTaskDiff, invalidateTaskDiff } from "./diffCache";
+import { api } from "./api";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -185,8 +155,8 @@ function createAppStore() {
     }
   });
 
-  /** Build the current settings payload for updatePreferences, with optional overrides. */
-  const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => {
+  /** Build the current settings payload for api.updatePreferences, with optional overrides. */
+  const currentSettings = (overrides: Partial<Parameters<typeof api.updatePreferences>[0]["settings"]> = {}) => {
     const settings = {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
@@ -309,7 +279,7 @@ function createAppStore() {
 
   async function refreshServerConfig() {
     try {
-      applyServerConfig(await getConfig());
+      applyServerConfig(await api.getConfig());
     } catch {
       setVoiceGatewayAvailable(false);
     }
@@ -447,7 +417,7 @@ function createAppStore() {
   const quotaRecoveryTracker = new QuotaRecoveryTracker();
   const notifyQuotaRecoveries = (currentTasks: Task[]) => {
     for (const task of quotaRecoveryTracker.update(currentTasks)) {
-      notifyServiceEvent(task.id, `${task.title} quota is available`, {
+      notifications.notifyServiceEvent(task.id, `${task.title} quota is available`, {
         enabled: hostMode.browserNotificationsEnabled(),
       });
     }
@@ -457,11 +427,11 @@ function createAppStore() {
     const prevState = prevStates.get(task.id);
     const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
     if (needsInput && prevState === "running") {
-      notifyWaiting(task.id, task.title, {
+      notifications.notifyWaiting(task.id, task.title, {
         enabled: hostMode.browserNotificationsEnabled(),
       });
     } else if (!needsInput && prevNeedsInput) {
-      dismissNotification(task.id);
+      notifications.dismissNotification(task.id);
     }
   };
   const applyAuthoritativeTask = (task: Task) => {
@@ -508,10 +478,10 @@ function createAppStore() {
       setOAuthGrantError("");
       try {
         const [v, sizes, grants] = await Promise.all([
-          getVersion(),
-          getCacheSizes().catch(() => null),
+          api.getVersion(),
+          api.getCacheSizes().catch(() => null),
           initialMcpOAuthAvailable
-            ? listOAuthGrants().catch((e: unknown) => {
+            ? api.listOAuthGrants().catch((e: unknown) => {
                 setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
                 return null;
               })
@@ -569,7 +539,7 @@ function createAppStore() {
       let task: Task | null = null;
       let getTaskError: unknown = null;
       try {
-        task = await getTask(id);
+        task = await api.getTask(id);
       } catch (e) {
         getTaskError = e;
       }
@@ -624,13 +594,13 @@ function createAppStore() {
     void (async () => {
       try {
         const [data, prefs, h, config, usageData, cachesData, cacheSizesData] = await Promise.all([
-          listRepos(),
-          getPreferences().catch(() => null),
-          listHarnesses().catch(() => [] as HarnessInfo[]),
-          getConfig().catch(() => null),
-          getUsage().catch(() => null),
-          listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
-          getCacheSizes().catch(() => null),
+          api.listRepos(),
+          api.getPreferences().catch(() => null),
+          api.listHarnesses().catch(() => [] as HarnessInfo[]),
+          api.getConfig().catch(() => null),
+          api.getUsage().catch(() => null),
+          api.listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
+          api.getCacheSizes().catch(() => null),
         ]);
         if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
         if (cacheSizesData) updateWellKnownCacheSizes(cacheSizesData.wellKnown);
@@ -703,7 +673,7 @@ function createAppStore() {
     }
 
     function connectTasks() {
-      taskES = globalTaskEvents({
+      taskES = api.globalTaskEvents({
         onMessage: (event) => {
           if (event.kind === "snapshot" && event.snapshot) {
             const snapshotByID = new Map(event.snapshot.map((task) => [task.id, task]));
@@ -807,7 +777,7 @@ function createAppStore() {
     }
 
     function connectUsage() {
-      usageES = globalUsageEvents({
+      usageES = api.globalUsageEvents({
         onMessage: (event) => setUsage(event),
         onError: (err) => {
           const msg = err instanceof Error ? err.message : String(err);
@@ -907,7 +877,7 @@ function createAppStore() {
     const target = selectedId() === id ? nextAliveFocusTarget(id) : null;
     setActionId(id);
     try {
-      await stopTask(id);
+      await api.stopTask(id);
       if (target && selectedId() === id) navigateToAliveFocusTarget(target);
     } catch {
       setActionId(null);
@@ -923,7 +893,7 @@ function createAppStore() {
     const target = selectedId() === id ? nextAliveFocusTarget(id) : null;
     setActionId(id);
     try {
-      await purgeTask(id);
+      await api.purgeTask(id);
       if (target && selectedId() === id) navigateToAliveFocusTarget(target);
     } catch {
       setActionId(null);
@@ -934,7 +904,7 @@ function createAppStore() {
     if (actionId()) return;
     setActionId(id);
     try {
-      await reviveTask(id);
+      await api.reviveTask(id);
     } catch {
       setActionId(null);
     }
@@ -1062,7 +1032,7 @@ function createAppStore() {
     setForkHandoffLoading(true);
     setForkHandoffError("");
     try {
-      const resp = await getTaskHandoff(id);
+      const resp = await api.getTaskHandoff(id);
       if (forkTaskId() === id && forkDialogGeneration === generation) {
         setForkPrompt(resp.prompt);
       }
@@ -1086,7 +1056,7 @@ function createAppStore() {
       const e = forkEffort();
       const extras = forkExtraRepos();
       const sourceTask = tasks().find((t) => t.id === id);
-      const resp = await forkTask(id, {
+      const resp = await api.forkTask(id, {
         prompt: { text },
         harness: h !== (sourceTask?.harness ?? "") ? (h as Harness) : undefined,
         model: m !== (sourceTask?.requestedModel ?? "") ? m : undefined,
@@ -1123,7 +1093,7 @@ function createAppStore() {
     const imgs = pendingImages();
     const selRepos = selectedRepos();
     if (!p && imgs.length === 0) return;
-    requestNotificationPermission({
+    notifications.requestNotificationPermission({
       enabled: hostMode.browserNotificationsEnabled(),
     });
     setSubmitting(true);
@@ -1156,7 +1126,7 @@ function createAppStore() {
               ...(r.branch ? { baseBranch: r.branch } : {}),
             }))
           : undefined;
-      const data = await createTask({
+      const data = await api.createTask({
         initialPrompt: {
           text: p,
           ...(imgs.length > 0 ? { images: imgs } : {}),
@@ -1187,7 +1157,7 @@ function createAppStore() {
     setCloning(true);
     setCloneError("");
     try {
-      const repo = await cloneRepo({ url, ...(path ? { path } : {}) });
+      const repo = await api.cloneRepo({ url, ...(path ? { path } : {}) });
       // Insert at the start of "All repositories" (after recent repos) without
       // incrementing recentCount. The repo becomes "recent" when the first task
       // is created for it via submitTask's optimistic reorder.
@@ -1202,13 +1172,15 @@ function createAppStore() {
     }
   }
 
-  function saveSettings(overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}): Promise<void> {
+  function saveSettings(
+    overrides: Partial<Parameters<typeof api.updatePreferences>[0]["settings"]> = {},
+  ): Promise<void> {
     const saveID = ++latestSettingsSave;
     const settings = currentSettings(overrides);
     setSettingsError("");
     settingsSaveQueue = settingsSaveQueue.then(async () => {
       try {
-        const preferences = await updatePreferences(settings);
+        const preferences = await api.updatePreferences(settings);
         if (saveID === latestSettingsSave) applyResolvedContainerPaths(preferences.settings);
       } catch (e: unknown) {
         if (saveID === latestSettingsSave) setSettingsError(e instanceof Error ? e.message : "Could not save settings");
@@ -1221,8 +1193,8 @@ function createAppStore() {
     setRevokingOAuthGrantID(grantID);
     setOAuthGrantError("");
     try {
-      await revokeOAuthGrant(grantID, {});
-      const grants = await listOAuthGrants();
+      await api.revokeOAuthGrant(grantID, {});
+      const grants = await api.listOAuthGrants();
       setOAuthGrants(grants.grants);
     } catch (e: unknown) {
       setOAuthGrantError(e instanceof Error ? e.message : "Could not revoke MCP client");
@@ -1235,7 +1207,7 @@ function createAppStore() {
     setUpdating(true);
     setUpdateStatus("");
     try {
-      const resp = await triggerUpdate();
+      const resp = await api.triggerUpdate();
       setUpdateStatus(
         resp.status === "started"
           ? "Update started in background. The server will restart shortly."
@@ -1252,7 +1224,7 @@ function createAppStore() {
     setRefreshingHarness(harness);
     setModelRefreshStatus("");
     try {
-      const refreshed = await refreshHarness(harness, {});
+      const refreshed = await api.refreshHarness(harness, {});
       setHarnesses((prev) => prev.map((info) => (info.name === harness ? refreshed : info)));
       if (selectedHarness() === harness) selectHarness(harness);
       setModelRefreshStatus(`${harness} models refreshed.`);
@@ -1269,7 +1241,7 @@ function createAppStore() {
     navigate(found ? taskPathForTask(found) : `/task/@${id}`);
   };
   const fixCI = (repoPath: string) => {
-    void botFixCI({ repo: repoPath }).then((data) => {
+    void api.botFixCI({ repo: repoPath }).then((data) => {
       seedTask(data);
       navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
     });

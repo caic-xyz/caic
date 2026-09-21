@@ -6,8 +6,8 @@ import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?sol
 
 import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
 
-import { getTaskInfo } from "../api";
 import styles from "./TaskInfo.module.css";
+import { api } from "../api";
 
 interface Props {
   taskId: string;
@@ -226,7 +226,8 @@ export default function TaskInfo(props: Props) {
     const onTaskRefreshError = props.onTaskRefreshError;
     setInfo(null);
     setError(null);
-    void getTaskInfo(id)
+    void api
+      .getTaskInfo(id)
       .then(setInfo)
       .catch((err: unknown) => {
         if (onTaskRefreshError?.(id, err)) return;

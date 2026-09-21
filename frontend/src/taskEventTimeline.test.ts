@@ -1,20 +1,16 @@
 // Focused tests for task SSE replay buffering, native retry ownership, and cleanup.
 
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { createRoot, createSignal } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import type { TaskEventsHandlers } from "@sdk/api.gen";
 import type { EventMessage } from "@sdk/types.gen";
 
-const { taskEventStreamMock } = vi.hoisted(() => ({
-  taskEventStreamMock: vi.fn(),
-}));
-
-vi.mock("./api", () => ({
-  taskEventStream: taskEventStreamMock,
-}));
-
+import { api } from "./api";
 import { createTaskEventTimeline } from "./taskEventTimeline";
+
+const taskEventStreamMock = vi.spyOn(api, "taskEvents");
 
 interface FakeEventSource {
   close: ReturnType<typeof vi.fn>;

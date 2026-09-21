@@ -1,6 +1,7 @@
 // Tests for the PromptInput component.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
 import { render, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 

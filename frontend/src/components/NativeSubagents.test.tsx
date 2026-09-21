@@ -1,8 +1,9 @@
 // Tests native activity card accessibility, explicit batch scope, background marking, and stale running observations.
 
+import { afterEach, describe, it } from "node:test";
 import { render, screen, cleanup } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { expect } from "@tests/expect";
 import NativeAgents, { NativeAgentCard } from "./NativeSubagents";
 import type { NativeActivity } from "../nativeSubagents";
 

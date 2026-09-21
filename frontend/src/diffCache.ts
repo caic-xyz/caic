@@ -1,8 +1,7 @@
 // Shared bounded task-diff cache: deduplicates index and patch loads, supports stale refresh, and evicts deleted tasks.
 
 import type { FileDiffResp, TaskDiffIndexResp } from "@sdk/types.gen";
-
-import { getTaskDiffIndex, getTaskFileDiff } from "./api";
+import { api } from "./api";
 
 export interface FileDiffSelector {
   taskId: string;
@@ -262,10 +261,12 @@ export const taskDiffCache = new DiffCache({
   freshnessMs: 1_500,
   indexLimit: 20,
   patchLimit: 100,
-  loadIndex: getTaskDiffIndex,
+  // Late-bound api calls: tests spy on the api object, so the cache must read the
+  // methods through it instead of capturing the function references at import time.
+  loadIndex: (taskId) => api.getTaskDiffIndex(taskId),
   maxPatchCharacters: 1_000_000,
   loadPatch: (selector) =>
-    getTaskFileDiff(selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath),
+    api.getTaskFileDiff(selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath),
 });
 
 export const prefetchTaskDiff = (taskId: string) => taskDiffCache.loadIndex(taskId);

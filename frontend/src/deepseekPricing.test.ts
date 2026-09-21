@@ -1,6 +1,7 @@
 // Tests for the DeepSeek peak/off-peak pricing schedule helper.
 
-import { describe, it, expect } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { deepseekPricing } from "./deepseekPricing";
 

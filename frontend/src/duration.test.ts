@@ -1,6 +1,7 @@
 // Tests duration parsing and formatting for user-configurable settings.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { formatDuration, parseDuration } from "./duration";
 

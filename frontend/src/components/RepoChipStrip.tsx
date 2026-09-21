@@ -4,10 +4,10 @@ import { createSignal, For, Show } from "solid-js";
 
 import type { BranchInfo, Repo } from "@sdk/types.gen";
 
-import { listRepoBranches } from "../api";
 import SearchableSelect, { type SearchableOption } from "./SearchableSelect";
 import selectStyles from "./SearchableSelect.module.css";
 import styles from "./RepoChipStrip.module.css";
+import { api } from "../api";
 
 export type RepoEntry = { path: string; branch: string };
 
@@ -30,7 +30,8 @@ export default function RepoChipStrip(props: Props) {
   const [branchCache, setBranchCache] = createSignal<Record<string, BranchInfo[]>>({});
 
   function loadBranches(path: string) {
-    listRepoBranches(path)
+    api
+      .listRepoBranches(path)
       .then((r) => setBranchCache((c) => ({ ...c, [path]: r.branches })))
       .catch((err: unknown) => console.error("Failed to load repository branches", err));
   }

@@ -1,6 +1,7 @@
 // Tests task SSE API parsing for history errors and resume resets.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
 
 import { taskEventStream } from "./api";
 

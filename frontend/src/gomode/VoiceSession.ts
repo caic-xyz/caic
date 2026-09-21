@@ -29,13 +29,7 @@ import {
 } from "@voicegateway-sdk/types.gen";
 
 import { TaskNumberMap } from "../TaskNumberMap";
-import {
-  mcpListTools,
-  mcpCallTool,
-  mcpServerInstructions,
-  mcpReadAdvertisedTextResource,
-  type McpToolDescriptor,
-} from "./McpClient";
+import { mcpClient, type McpToolDescriptor } from "./McpClient";
 import { GO_MODE_ITEMS_RESOURCE_URI, initialServiceContext } from "./ServiceItems";
 
 // Constants
@@ -50,9 +44,8 @@ const HANG_UP_TOOL_NAME = "hang_up";
 /** Conservative data-channel/model-safe bound for a recovery context update. */
 export const MAX_RECOVERY_CONTEXT_CHARS = 8000;
 
-export const voiceGatewayApi = voicegatewaySDK.createApiClient();
-
-export const { voiceRTCOffer, diagnoseVoiceRTC, closeVoiceRTC } = voiceGatewayApi;
+// Late-bound fetch so tests can stub globalThis.fetch (the network seam).
+export const voiceGatewayApi = voicegatewaySDK.createApiClient((path, init) => fetch(path, init));
 
 /**
  * Voice-local tool declarations, kept outside the service MCP tool set.
@@ -118,7 +111,8 @@ export interface VoiceState {
 
 export class VoiceSession {
   readonly state: VoiceState;
-  private readonly _setState: (fn: (s: VoiceState) => VoiceState) => void;
+  /** Public store updater (also the seam tests use to arrange session state). */
+  readonly setState: (fn: (s: VoiceState) => VoiceState) => void;
 
   readonly taskNumberMap = new TaskNumberMap();
 
@@ -158,7 +152,7 @@ export class VoiceSession {
       selectedOutputId: "",
     });
     this.state = state;
-    this._setState = setState as (fn: (s: VoiceState) => VoiceState) => void;
+    this.setState = setState as (fn: (s: VoiceState) => VoiceState) => void;
   }
 
   // -----------------------------------------------------------------------
@@ -297,11 +291,11 @@ export class VoiceSession {
 
     try {
       const [systemInstruction, mcpTools, serviceItemsText] = await Promise.all([
-        mcpServerInstructions(),
-        mcpListTools(),
+        mcpClient.serverInstructions(),
+        mcpClient.listTools(),
         // Initial service context is advisory. A resource failure must not make
         // the independent voice transport unavailable.
-        mcpReadAdvertisedTextResource(GO_MODE_ITEMS_RESOURCE_URI).catch(() => null),
+        mcpClient.readAdvertisedTextResource(GO_MODE_ITEMS_RESOURCE_URI).catch(() => null),
       ]);
       // This client owns the bounded session baseline and refreshes it on every
       // reconnect; see gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
@@ -415,7 +409,7 @@ export class VoiceSession {
       const offer = await pc.createOffer();
       const offerSDP = await completeLocalOffer(pc, offer);
       this._lastOfferSDP = offerSDP;
-      const resp = await voiceRTCOffer({ sdp: offerSDP });
+      const resp = await voiceGatewayApi.voiceRTCOffer({ sdp: offerSDP });
       this._rtcSessionID = resp.sessionID;
       this._lastAnswerSDP = resp.sdp;
       await pc.setRemoteDescription({ type: "answer", sdp: resp.sdp });
@@ -561,7 +555,7 @@ export class VoiceSession {
       return;
     }
     try {
-      const diagnostics = await diagnoseVoiceRTC(sessionID, {
+      const diagnostics = await voiceGatewayApi.diagnoseVoiceRTC(sessionID, {
         client: this._clientDiagnostics(pc),
       });
       logVoiceRTCDiagnostics(diagnostics, this._lastOfferSDP, this._lastAnswerSDP);
@@ -604,7 +598,7 @@ export class VoiceSession {
   }
 
   private _update(fn: (s: VoiceState) => void): void {
-    this._setState(produce(fn));
+    this.setState(produce(fn));
   }
 
   // -----------------------------------------------------------------------
@@ -715,7 +709,7 @@ export class VoiceSession {
       this._update((s) => {
         s.activeTool = msg.name ?? null;
       });
-      const result = await mcpCallTool(msg.name, msg.args ?? {});
+      const result = await mcpClient.callTool(msg.name, msg.args ?? {});
       this._update((s) => {
         s.activeTool = null;
       });

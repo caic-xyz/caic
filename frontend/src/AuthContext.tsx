@@ -3,8 +3,7 @@
 import { createContext, createSignal, useContext, onMount, type ParentComponent } from "solid-js";
 
 import type { AuthBootstrapResp, Config, UserResp } from "@sdk/types.gen";
-
-import { getMe, logout as apiLogout } from "./api";
+import { api } from "./api";
 
 interface AuthState {
   /** True once the initial auth check has completed. */
@@ -54,7 +53,7 @@ export const AuthProvider: ParentComponent = (props) => {
       setProviders(authProviders);
       if (authProviders.length > 0) {
         try {
-          const me = await getMe();
+          const me = await api.getMe();
           setUser(me);
         } catch {
           // Not logged in.
@@ -68,7 +67,7 @@ export const AuthProvider: ParentComponent = (props) => {
   });
 
   const logout = async () => {
-    await apiLogout();
+    await api.logout();
     setUser(null);
   };
 

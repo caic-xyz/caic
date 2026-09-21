@@ -6,7 +6,8 @@
 // non-kind field on the union), which is what made the feature inert on the real
 // client.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 import { validateTaskListEvent } from "@sdk/validate.gen";
 
 // Parse a raw wire payload the same way globalTaskEvents does before validation.

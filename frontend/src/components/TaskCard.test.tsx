@@ -1,21 +1,18 @@
 // Tests for the compact task card summary.
 
+import { describe, it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { MemoryRouter, Route } from "@solidjs/router";
 import type { JSX } from "solid-js";
-import { describe, expect, it, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import type { ISOTimestamp } from "@sdk/types.gen";
 import type { TaskCardProps } from "./TaskCard";
 
 import TaskCard from "./TaskCard";
-import { getTaskRepoStatus } from "../api";
+import { api } from "../api";
 
-vi.mock("../api", () => ({
-  compactContext: vi.fn(),
-  getTaskRepoStatus: vi.fn(() => Promise.resolve({ repositories: [] })),
-  syncTask: vi.fn(),
-}));
+const getTaskRepoStatusMock = vi.spyOn(api, "getTaskRepoStatus");
 
 const now = () => Date.parse("2026-07-08T12:00:00Z");
 
@@ -85,7 +82,7 @@ describe("TaskCard", () => {
   });
 
   it("shows the complete repository-state component in the bottom row", async () => {
-    vi.mocked(getTaskRepoStatus).mockResolvedValueOnce({
+    getTaskRepoStatusMock.mockResolvedValueOnce({
       repositories: [
         {
           name: "repo",

@@ -1,6 +1,7 @@
 // Golden tests for generated voice gateway protocol DTO JSON.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import {
   type ContextUpdate,

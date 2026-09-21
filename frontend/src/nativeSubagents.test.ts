@@ -1,6 +1,7 @@
 // Tests canonical native lifecycle folding, replay identity, timing, and partial observability.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 import type { EventMessage, EventNativeSubagent } from "@sdk/types.gen";
 import type { MessageGroup, MsgItem } from "./grouping";
 import {

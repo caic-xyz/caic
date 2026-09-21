@@ -1,9 +1,10 @@
 // Tests for compact task token totals and detailed per-invocation usage statistics.
 
+import { afterEach, describe, it } from "node:test";
 import { render, within } from "@solidjs/testing-library";
 import { MemoryRouter, Route } from "@solidjs/router";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import type { EventStats } from "@sdk/types.gen";
 

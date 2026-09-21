@@ -1,6 +1,7 @@
 // Tests for UsageBadges component.
 
-import { describe, it, expect } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 import { render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 
@@ -215,6 +216,10 @@ describe("UsageBadges", () => {
       return render(() => <UsageBadges usage={usage} now={() => ms} />);
     }
 
+    function hasClass(el: Element | null | undefined, cls: string): boolean {
+      return el?.className.split(" ").includes(cls) ?? false;
+    }
+
     function pricingIcon(container: HTMLElement): Element | null {
       return container.querySelector('[data-testid="provider-pricing-icon"]');
     }
@@ -223,8 +228,8 @@ describe("UsageBadges", () => {
       const { container } = renderAt(Date.parse("2026-09-21T02:00:00Z"));
       const el = pricingIcon(container);
       expect(el?.getAttribute("data-pricing-phase")).toBe("peak");
-      expect(el?.className).toContain(styles.pricingPeak);
-      expect(el?.className).not.toContain(styles.pricingPeakSoon);
+      expect(hasClass(el, styles.pricingPeak)).toBe(true);
+      expect(hasClass(el, styles.pricingPeakSoon)).toBe(false);
       expect(container.textContent).toContain("peak pricing");
     });
 
@@ -232,8 +237,8 @@ describe("UsageBadges", () => {
       const { container } = renderAt(Date.parse("2026-09-21T00:45:00Z"));
       const el = pricingIcon(container);
       expect(el?.getAttribute("data-pricing-phase")).toBe("peak-soon");
-      expect(el?.className).toContain(styles.pricingPeakSoon);
-      expect(el?.className).not.toContain(styles.pricingPeak);
+      expect(hasClass(el, styles.pricingPeakSoon)).toBe(true);
+      expect(hasClass(el, styles.pricingPeak)).toBe(false);
       expect(container.textContent).toContain("peak pricing soon");
     });
 
@@ -241,8 +246,8 @@ describe("UsageBadges", () => {
       const { container } = renderAt(Date.parse("2026-09-19T02:00:00Z"));
       const el = pricingIcon(container);
       expect(el?.getAttribute("data-pricing-phase")).toBe("off-peak");
-      expect(el?.className).not.toContain(styles.pricingPeak);
-      expect(el?.className).not.toContain(styles.pricingPeakSoon);
+      expect(hasClass(el, styles.pricingPeak)).toBe(false);
+      expect(hasClass(el, styles.pricingPeakSoon)).toBe(false);
       expect(container.textContent).toContain("off-peak pricing");
     });
 
@@ -253,8 +258,8 @@ describe("UsageBadges", () => {
       });
       const el = pricingIcon(container);
       expect(el?.hasAttribute("data-pricing-phase")).toBe(false);
-      expect(el?.className).not.toContain(styles.pricingPeak);
-      expect(el?.className).not.toContain(styles.pricingPeakSoon);
+      expect(hasClass(el, styles.pricingPeak)).toBe(false);
+      expect(hasClass(el, styles.pricingPeakSoon)).toBe(false);
     });
   });
 });

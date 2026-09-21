@@ -4,8 +4,8 @@ import { batch, createEffect, createMemo, createSignal, onCleanup, untrack, type
 
 import type { EventMessage } from "@sdk/types.gen";
 
-import { taskEventStream } from "./api";
 import { isSessionBoundary } from "./grouping";
+import { api } from "./api";
 
 const liveFlushDelayMs = 100;
 
@@ -78,7 +78,7 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
       liveFlushTimer = setTimeout(flushPendingEvents, liveFlushDelayMs);
     }
 
-    const connected = taskEventStream(id, {
+    const connected = api.taskEvents(id, {
       onMessage: (event) => {
         if (!active || historyFailed) return;
         pendingEvents.push(event);

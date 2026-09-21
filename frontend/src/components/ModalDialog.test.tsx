@@ -1,6 +1,7 @@
 // Tests for the shared native modal dialog's dismissal and Escape behavior.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal, Show } from "solid-js";

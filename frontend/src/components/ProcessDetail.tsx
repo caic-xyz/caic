@@ -13,9 +13,9 @@ import ExpandIcon from "@material-symbols/svg-400/outlined/expand.svg?solid";
 
 import type { ProcessInfo } from "@sdk/types.gen";
 
-import { getTaskProcesses, signalProcess } from "../api";
 import { formatBytes, formatElapsed, formatTime } from "../formatting";
 import styles from "./ProcessDetail.module.css";
+import { api } from "../api";
 
 // AUTO_COLLAPSE_DEPTH is the tree depth at which subtrees start collapsed. A
 // container can hold tens of thousands of processes in one parent chain, and
@@ -276,7 +276,7 @@ export default function ProcessDetail(props: Props) {
     setLoading(true);
     setError(null);
     try {
-      const resp = await getTaskProcesses(id);
+      const resp = await api.getTaskProcesses(id);
       setProcesses(resp.processes);
     } catch (e: unknown) {
       if (!onTaskRefreshError?.(id, e)) setError(e instanceof Error ? e.message : "Unknown error");
@@ -307,7 +307,7 @@ export default function ProcessDetail(props: Props) {
     const onTaskRefreshError = props.onTaskRefreshError;
     setSignallingPid(pid);
     try {
-      await signalProcess(id, String(pid), { signal: sig });
+      await api.signalProcess(id, String(pid), { signal: sig });
       await refresh();
     } catch (e: unknown) {
       if (!onTaskRefreshError?.(id, e)) setError(e instanceof Error ? e.message : "Failed to send signal");

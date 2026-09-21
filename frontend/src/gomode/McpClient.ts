@@ -71,11 +71,11 @@ export interface McpToolDescriptor {
   annotations?: McpToolAnnotations;
 }
 
-export async function mcpServerInstructions(): Promise<string> {
+async function mcpServerInstructions(): Promise<string> {
   return mcpApi.serverInstructions();
 }
 
-export async function mcpListTools(): Promise<McpToolDescriptor[]> {
+async function mcpListTools(): Promise<McpToolDescriptor[]> {
   const tools: McpToolDescriptor[] = [];
   let cursor: string | undefined;
   do {
@@ -92,7 +92,7 @@ export async function mcpListTools(): Promise<McpToolDescriptor[]> {
 }
 
 /** Read a text resource when its URI is advertised to this scoped client. */
-export async function mcpReadAdvertisedTextResource(uri: string): Promise<string | null> {
+async function mcpReadAdvertisedTextResource(uri: string): Promise<string | null> {
   let cursor: string | undefined;
   let advertised = false;
   do {
@@ -116,7 +116,7 @@ export interface McpToolResult {
   isError?: boolean;
 }
 
-export async function mcpCallTool(name: string, args: JsonObject): Promise<McpToolResult> {
+async function mcpCallTool(name: string, args: JsonObject): Promise<McpToolResult> {
   const result = (await mcpRequest(
     "tools/call",
     { name, arguments: args },
@@ -174,3 +174,11 @@ function isPlainMcpHeaderValue(value: string): boolean {
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/** The four MCP operations VoiceSession uses, as one object so tests can spy on it. */
+export const mcpClient = {
+  serverInstructions: mcpServerInstructions,
+  listTools: mcpListTools,
+  readAdvertisedTextResource: mcpReadAdvertisedTextResource,
+  callTool: mcpCallTool,
+};

@@ -1,30 +1,7 @@
 // Tests for the browser voice gateway session manager.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const sdkMocks = vi.hoisted(() => ({
-  closeVoiceRTC: vi.fn(),
-  diagnoseVoiceRTC: vi.fn(),
-  voiceRTCOffer: vi.fn(async () => ({ sdp: "answer-sdp", sessionID: "session-1" })),
-}));
-
-const mcpMocks = vi.hoisted(() => ({
-  mcpCallTool: vi.fn(),
-  mcpListTools: vi.fn(async () => []),
-  mcpReadAdvertisedTextResource: vi.fn(async () => '{"items":[]}'),
-  mcpServerInstructions: vi.fn(async () => "instructions"),
-}));
-
-vi.mock("@voicegateway-sdk/api.gen", () => ({
-  createApiClient: () => sdkMocks,
-}));
-
-vi.mock("./McpClient", () => ({
-  mcpCallTool: mcpMocks.mcpCallTool,
-  mcpListTools: mcpMocks.mcpListTools,
-  mcpReadAdvertisedTextResource: mcpMocks.mcpReadAdvertisedTextResource,
-  mcpServerInstructions: mcpMocks.mcpServerInstructions,
-}));
+import { beforeEach, describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
 
 import {
   buildRecoveryContext,
@@ -32,8 +9,23 @@ import {
   MAX_RECOVERY_CONTEXT_CHARS,
   summarizeSDPCandidates,
   VoiceSession,
+  voiceGatewayApi,
   voiceToolDeclarations,
 } from "./VoiceSession";
+import { mcpClient } from "./McpClient";
+
+// Spies on the voicegateway API client and the MCP client object replace the former module mocks.
+const sdkMocks = {
+  voiceRTCOffer: vi.spyOn(voiceGatewayApi, "voiceRTCOffer"),
+  diagnoseVoiceRTC: vi.spyOn(voiceGatewayApi, "diagnoseVoiceRTC"),
+  closeVoiceRTC: vi.spyOn(voiceGatewayApi, "closeVoiceRTC"),
+};
+const mcpMocks = {
+  mcpCallTool: vi.spyOn(mcpClient, "callTool"),
+  mcpListTools: vi.spyOn(mcpClient, "listTools"),
+  mcpReadAdvertisedTextResource: vi.spyOn(mcpClient, "readAdvertisedTextResource"),
+  mcpServerInstructions: vi.spyOn(mcpClient, "serverInstructions"),
+};
 import {
   MessageKindToolCall,
   type ToolCall,

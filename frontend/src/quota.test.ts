@@ -1,6 +1,7 @@
 // Tests for task quota countdown helpers.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import type { ISOTimestamp, Task } from "@sdk/types.gen";
 

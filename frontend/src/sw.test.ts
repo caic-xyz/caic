@@ -1,7 +1,8 @@
 // Tests that the service worker caches only immutable frontend assets.
 
+import { describe, it } from "node:test";
 import vm from "node:vm";
-import { describe, expect, it, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import workerSource from "../public/sw.js?raw";
 

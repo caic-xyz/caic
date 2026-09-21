@@ -1,6 +1,7 @@
 // Tests for task turn durations and user-response wait derivation.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import type { EventMessage } from "@sdk/types.gen";
 

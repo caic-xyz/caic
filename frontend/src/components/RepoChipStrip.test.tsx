@@ -1,14 +1,16 @@
 // Tests for RepoChipStrip repository selection and keyboard behavior.
 
+import { afterEach, describe, it } from "node:test";
+import { vi, expect } from "@tests/expect";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import type { Repo } from "@sdk/types.gen";
 
-import * as api from "../api";
+import { api } from "../api";
 import RepoChipStrip from "./RepoChipStrip";
 
-vi.mock("../api", () => ({ listRepoBranches: vi.fn() }));
+const listRepoBranchesMock = vi.spyOn(api, "listRepoBranches");
 
 const repoA: Repo = {
   path: "repos/a",
@@ -33,7 +35,7 @@ describe("RepoChipStrip", () => {
 
   it("shows whether each branch will be adopted or branched off", async () => {
     const user = userEvent.setup();
-    vi.mocked(api.listRepoBranches).mockResolvedValue({
+    listRepoBranchesMock.mockResolvedValue({
       branches: [
         { name: "available", action: "adopt" },
         { name: "occupied", action: "branch_off" },

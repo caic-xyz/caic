@@ -43,17 +43,8 @@ import type {
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "../gomode/HostMode";
-import { requestNotificationPermission } from "../gomode/notifications";
+import { notifications } from "../gomode/notifications";
 
-import {
-  sendInput as apiSendInput,
-  restartTask as apiRestartTask,
-  compactContext as apiCompactContext,
-  syncTask as apiSyncTask,
-  getTaskRepoStatus,
-  getTaskToolInput,
-  botFixPR,
-} from "../api";
 import {
   IncrementalMessageGrouper,
   groupSessions,
@@ -93,6 +84,7 @@ import TaskActionsMenu from "./TaskActionsMenu";
 import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons";
 import { prefetchTaskDiff } from "../diffCache";
 import styles from "./TaskDetail.module.css";
+import { api } from "../api";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
 // Keys: toolUseID, "group:<firstToolUseID>", "thinking:<firstEventTs>".
@@ -296,7 +288,8 @@ export default function TaskDetail(props: Props) {
       return;
     }
     let current = true;
-    getTaskRepoStatus(taskID)
+    api
+      .getTaskRepoStatus(taskID)
       .then((response) => {
         if (current) setRepoStates(response.repositories);
       })
@@ -308,13 +301,9 @@ export default function TaskDetail(props: Props) {
     });
   });
 
-  // The prompt may appear after the task fetch; defer desktop autofocus until its ref exists.
+  // The prompt may appear after the task fetch; focus it whenever its ref attaches.
   // Touch-primary devices skip this to avoid opening the software keyboard.
-  let initialPromptFocusPending = true;
-
   function setPromptRef(element: HTMLElement) {
-    if (!initialPromptFocusPending) return;
-    initialPromptFocusPending = false;
     if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
     requestAnimationFrame(() => {
       if (element.isConnected) element.focus();
@@ -702,12 +691,12 @@ export default function TaskDetail(props: Props) {
     const text = props.inputDraft.trim();
     const imgs = props.inputImages;
     if (!text && imgs.length === 0) return;
-    requestNotificationPermission({
+    notifications.requestNotificationPermission({
       enabled: hostMode.browserNotificationsEnabled(),
     });
     setSending(true);
     try {
-      await apiSendInput(props.taskId, {
+      await api.sendInput(props.taskId, {
         prompt: { text, ...(imgs.length > 0 ? { images: imgs } : {}) },
       });
       props.onInputDraft("");
@@ -724,7 +713,7 @@ export default function TaskDetail(props: Props) {
   async function sendAskAnswer(text: string) {
     setSending(true);
     try {
-      await apiSendInput(props.taskId, { prompt: { text } });
+      await api.sendInput(props.taskId, { prompt: { text } });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       setActionError(`send failed: ${msg}`);
@@ -780,14 +769,14 @@ export default function TaskDetail(props: Props) {
     const prompt = props.inputDraft.trim();
     // eslint-disable-next-line solid/reactivity -- only called from onClick
     runAction("restart", async () => {
-      await apiRestartTask(props.taskId, { prompt: { text: prompt } });
+      await api.restartTask(props.taskId, { prompt: { text: prompt } });
       props.onInputDraft("");
     });
   }
 
   function doCompact() {
     // eslint-disable-next-line solid/reactivity -- only called from onClick
-    runAction("compact", () => apiCompactContext(props.taskId, {}));
+    runAction("compact", () => api.compactContext(props.taskId, {}));
   }
 
   async function doSync(force: boolean, target?: SyncTarget) {
@@ -796,7 +785,7 @@ export default function TaskDetail(props: Props) {
     setActionError(null);
     setSafetyIssues([]);
     try {
-      const resp = await apiSyncTask(props.taskId, {
+      const resp = await api.syncTask(props.taskId, {
         force,
         ...(target ? { target } : {}),
       });
@@ -817,7 +806,7 @@ export default function TaskDetail(props: Props) {
     setFixingPR(true);
     setActionError(null);
     try {
-      await botFixPR({ taskId: props.taskId });
+      await api.botFixPR({ taskId: props.taskId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       setActionError(`fix PR failed: ${msg}`);
@@ -2118,7 +2107,7 @@ function ToolCallCard(props: {
   async function loadInput() {
     setLoading(true);
     try {
-      const resp = await getTaskToolInput(props.taskId, props.call.use.toolUseID);
+      const resp = await api.getTaskToolInput(props.taskId, props.call.use.toolUseID);
       setLoadedInput(resp.input as Record<string, unknown>);
     } finally {
       setLoading(false);

@@ -1,6 +1,7 @@
 // Tests for frontend error diagnostic report formatting.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { formatErrorReport } from "./errorReport";
 

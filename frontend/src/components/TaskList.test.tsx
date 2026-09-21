@@ -1,18 +1,13 @@
 // Tests for task-list selection visibility and navigation behavior.
 
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expect, vi } from "@tests/expect";
 
 import type { Task } from "@sdk/types.gen";
 
 import TaskList, { type TaskListProps } from "./TaskList";
-
-vi.mock("./TaskCard", () => ({
-  default: (props: { id: string; purgeModifierActive: boolean }) => (
-    <div data-task-id={props.id} data-purge-modifier={String(props.purgeModifierActive)} />
-  ),
-}));
 
 function task(id: string): Task {
   return {
@@ -66,14 +61,15 @@ function taskListProps(tasks: Task[]): Omit<TaskListProps, "selectedId"> {
 describe("TaskList", () => {
   const scrollIntoView = vi.fn();
   const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-  let resize: ResizeObserverCallback;
+  // TaskList and the real TaskCard each create a ResizeObserver; capture every callback.
+  const resizeCallbacks: ResizeObserverCallback[] = [];
 
   beforeEach(() => {
     vi.stubGlobal(
       "ResizeObserver",
       class ResizeObserverMock {
         constructor(callback: ResizeObserverCallback) {
-          resize = callback;
+          resizeCallbacks.push(callback);
         }
 
         observe() {}
@@ -130,7 +126,7 @@ describe("TaskList", () => {
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
     scrollIntoView.mockClear();
 
-    resize([], {} as ResizeObserver);
+    resizeCallbacks.forEach((callback) => callback([], {} as ResizeObserver));
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.querySelector("[data-task-id='2']"));
@@ -166,13 +162,14 @@ describe("TaskList", () => {
     if (!card) throw new Error("task card not rendered");
 
     fireEvent.keyDown(document.body, { key: "Shift" });
-    expect(card).toHaveAttribute("data-purge-modifier", "true");
+    expect(card.querySelector("[data-testid='stop-task-icon']")).toBeNull();
+    expect(card.querySelector("[data-testid='purge-task-icon']")).toBeTruthy();
     fireEvent.keyUp(document.body, { key: "Shift" });
-    expect(card).toHaveAttribute("data-purge-modifier", "false");
+    expect(card.querySelector("[data-testid='purge-task-icon']")).toBeNull();
 
     const editor = getByTestId("editor");
     editor.focus();
     fireEvent.keyDown(editor, { key: "Shift" });
-    expect(card).toHaveAttribute("data-purge-modifier", "true");
+    expect(card.querySelector("[data-testid='purge-task-icon']")).toBeTruthy();
   });
 });

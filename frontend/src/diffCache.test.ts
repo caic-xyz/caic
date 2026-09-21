@@ -1,6 +1,7 @@
 // Tests shared task-diff cache deduplication, stale refresh, selective invalidation, and bounded eviction.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
 import type { FileDiffResp, TaskDiffIndexResp } from "@sdk/types.gen";
 
 import { DiffCache, type FileDiffSelector } from "./diffCache";

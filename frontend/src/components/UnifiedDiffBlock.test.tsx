@@ -1,7 +1,8 @@
 // Tests for the shared UnifiedDiffBlock component.
 
+import { describe, it } from "node:test";
 import { render, screen } from "@solidjs/testing-library";
-import { describe, expect, it } from "vitest";
+import { expect } from "@tests/expect";
 
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import styles from "./UnifiedDiffBlock.module.css";

@@ -1,6 +1,7 @@
 // Tests for Go Mode host-mode detection.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { hasHostModeQuery, nativeVoiceConnected } from "./HostMode";
 

@@ -1,72 +1,25 @@
 // Tests for VoiceOverlay voice session connection.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { beforeEach, describe, it } from "node:test";
+import { expect, vi } from "@tests/expect";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 
 import type { Task } from "@sdk/types.gen";
 
-const { connectMock, disconnectMock, injectTextMock, taskNumberForIDMock, voiceState } = vi.hoisted(() => ({
-  connectMock: vi.fn(),
-  disconnectMock: vi.fn(),
-  injectTextMock: vi.fn(),
-  taskNumberForIDMock: vi.fn((id: string) => (id === "new-task" ? 2 : 1)),
-  voiceState: {
-    connectStatus: null,
-    connected: false,
-    listening: false,
-    speaking: false,
-    muted: false,
-    activeTool: null,
-    transcript: [],
-    micLevel: 0,
-    error: null,
-    audioInputs: [],
-    audioOutputs: [],
-    selectedInputId: "",
-    selectedOutputId: "",
-  },
-}));
-
-vi.mock("./VoiceSession", () => ({
-  voiceSession: {
-    state: voiceState,
-    taskNumberMap: { update: vi.fn(), reset: vi.fn(), toNumber: taskNumberForIDMock },
-    excludedTaskIds: new Set<string>(),
-    connect: connectMock,
-    disconnect: disconnectMock,
-    toggleMute: vi.fn(),
-    injectText: injectTextMock,
-    clearTranscript: vi.fn(),
-    enumerateDevices: vi.fn(),
-    selectInputDevice: vi.fn(),
-    selectOutputDevice: vi.fn(),
-  },
-}));
-
-vi.mock("./notifications", () => ({
-  setVoiceActive: vi.fn(),
-}));
-
-vi.mock("./VoiceState", () => ({
-  voiceConnected: vi.fn(() => false),
-  setVoiceConnected: vi.fn(),
-  setVoiceTaskNumberMap: vi.fn(),
-  getVoiceTaskNumber: vi.fn(() => undefined),
-}));
-
-// Stub SVG imports.
-vi.mock("@material-symbols/svg-400/outlined/mic.svg?solid", () => ({ default: () => null }));
-vi.mock("@material-symbols/svg-400/outlined/mic_off.svg?solid", () => ({ default: () => null }));
-vi.mock("@material-symbols/svg-400/outlined/call_end.svg?solid", () => ({ default: () => null }));
-vi.mock("@material-symbols/svg-400/outlined/close.svg?solid", () => ({ default: () => null }));
-
 import VoiceOverlay from "./VoiceOverlay";
+import { voiceSession } from "./VoiceSession";
+
+// Spies on the real voice session singleton replace the former module mocks.
+const connectMock = vi.spyOn(voiceSession, "connect").mockResolvedValue(undefined as never);
+const disconnectMock = vi.spyOn(voiceSession, "disconnect");
+const injectTextMock = vi.spyOn(voiceSession, "injectText");
+vi.spyOn(voiceSession.taskNumberMap, "toNumber").mockImplementation((id: string) => (id === "new-task" ? 2 : 1));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  voiceState.connected = false;
+  voiceSession.setState((s) => ({ ...s, connected: false }));
 });
 
 function task(id: string, title: string): Task {
@@ -109,18 +62,18 @@ describe("VoiceOverlay connection", () => {
   });
 
   it("stops voice mode when F4 is pressed while connected", async () => {
-    const user = userEvent.setup();
-    voiceState.connected = true;
+    voiceSession.setState((s) => ({ ...s, connected: true }));
     render(() => <VoiceOverlay tasks={() => []} />);
 
-    await user.keyboard("{F4}");
+    fireEvent.keyDown(document, { key: "F4" });
+    await waitFor(() => expect(voiceSession.state.connected).toBe(false));
 
     expect(disconnectMock).toHaveBeenCalledOnce();
     expect(connectMock).not.toHaveBeenCalled();
   });
 
   it("injects newly created tasks into an active voice session", async () => {
-    voiceState.connected = true;
+    voiceSession.setState((s) => ({ ...s, connected: true }));
     const [tasks, setTasks] = createSignal([task("existing-task", "Existing work")]);
     render(() => <VoiceOverlay tasks={tasks} />);
 

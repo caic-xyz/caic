@@ -1,7 +1,8 @@
 // Tests task analytics derivation from canonical event history.
 
+import { describe, it } from "node:test";
 import type { EventMessage } from "@sdk/types.gen";
-import { describe, expect, it } from "vitest";
+import { expect } from "@tests/expect";
 
 import { deriveNetworkRates, deriveToolTimingSummaries, IncrementalToolTimingTracker } from "./taskStats";
 

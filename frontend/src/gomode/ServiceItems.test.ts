@@ -1,6 +1,7 @@
 // Tests for bounded Go Mode service-item context used during browser voice setup.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { initialServiceContext } from "./ServiceItems";
 

@@ -1,6 +1,7 @@
 // Tests for task URL path helpers.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { taskIdFromPath, taskPath, taskPathForTask } from "./taskPath";
 

@@ -1,6 +1,7 @@
 // Tests for shared formatting utilities.
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import { expect } from "@tests/expect";
 
 import { formatBytes, formatElapsed, staleStateColor, stateColor, toolCallDetail } from "./formatting";
 
