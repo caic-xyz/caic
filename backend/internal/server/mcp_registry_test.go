@@ -154,6 +154,81 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("task scoped list contains only direct children", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
+		parentID := ksid.NewID()
+		firstChildID := ksid.NewID()
+		firstChild := mustNewTask(t, firstChildID, agent.Prompt{Text: "first child"}, harness.Claude)
+		firstChild.ParentTaskID = parentID
+		insertTestTask(s, firstChildID.String(), firstChild)
+		secondChildID := ksid.NewID()
+		secondChild := mustNewTask(t, secondChildID, agent.Prompt{Text: "second child"}, harness.Codex)
+		secondChild.ParentTaskID = parentID
+		insertTestTask(s, secondChildID.String(), secondChild)
+		unrelatedID := ksid.NewID()
+		unrelated := mustNewTask(t, unrelatedID, agent.Prompt{Text: "unrelated"}, harness.Claude)
+		insertTestTask(s, unrelatedID.String(), unrelated)
+		grandchildID := ksid.NewID()
+		grandchild := mustNewTask(t, grandchildID, agent.Prompt{Text: "grandchild"}, harness.Codex)
+		grandchild.ParentTaskID = firstChildID
+		insertTestTask(s, grandchildID.String(), grandchild)
+
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
+		result := registry.handleTasksList(ctx, mcpTaskListArgs{})
+		output, ok := result.Structured.(mcpTaskListOutput)
+		if result.IsError || !ok {
+			t.Fatalf("task-scoped list = %#v, want task-list output", result.Structured)
+		}
+		if len(output.Tasks) != 2 {
+			t.Fatalf("task-scoped tasks = %#v, want two direct children", output.Tasks)
+		}
+		got := map[string]struct{}{}
+		for _, summary := range output.Tasks {
+			got[summary.TaskID] = struct{}{}
+		}
+		want := map[string]struct{}{firstChildID.String(): {}, secondChildID.String(): {}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("task-scoped task IDs = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("task scoped controls resolve children and its own fork source", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
+		parentID := ksid.NewID()
+		parent := mustNewTask(t, parentID, agent.Prompt{Text: "parent"}, harness.Claude)
+		parent.SetState(taskslog.StateWaiting)
+		insertTestTask(s, parentID.String(), parent)
+		childID := ksid.NewID()
+		child := mustNewTask(t, childID, agent.Prompt{Text: "child"}, harness.Codex)
+		child.ParentTaskID = parentID
+		child.SetState(taskslog.StateWaiting)
+		insertTestTask(s, childID.String(), child)
+		unrelatedID := ksid.NewID()
+		unrelated := mustNewTask(t, unrelatedID, agent.Prompt{Text: "unrelated"}, harness.Claude)
+		unrelated.SetState(taskslog.StateWaiting)
+		insertTestTask(s, unrelatedID.String(), unrelated)
+
+		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
+		_, self, ok := registry.taskScopedEntryByNumber(ctx, 0, true)
+		if !ok || self.Task().ID != parentID {
+			t.Fatalf("self fork source = %#v, %t; want parent", self, ok)
+		}
+		_, childEntry, ok := registry.taskScopedEntryByNumber(ctx, 1, false)
+		if !ok || childEntry.Task().ID != childID {
+			t.Fatalf("child control target = %#v, %t; want child", childEntry, ok)
+		}
+		if _, _, ok := registry.taskScopedEntryByNumber(ctx, 0, false); ok {
+			t.Fatal("task-scoped stop resolved the calling task")
+		}
+		if _, _, ok := registry.taskScopedEntryByNumber(ctx, 2, false); ok {
+			t.Fatal("task-scoped control resolved an unrelated task")
+		}
+	})
 }
 
 func TestMCPResultBounds(t *testing.T) {
@@ -1290,7 +1365,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		assertMCPToolVisibility(t, tools, "task_push_branch_to_remote", true)
 	})
 
-	t.Run("task scoped client exposes only prompt-only creation", func(t *testing.T) {
+	t.Run("task scoped client exposes bounded child controls", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_schema", func(t *testing.T) {
 			t.Parallel()
@@ -1300,10 +1375,23 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Tools() error: %v", err)
 			}
-			if len(tools) != 1 || tools[0].Name != "task_create" {
-				t.Fatalf("Tools() = %#v, want only task_create", tools)
+			if len(tools) != 5 {
+				t.Fatalf("Tools() = %#v, want five task-scoped tools", tools)
 			}
-			schema, err := json.Marshal(tools[0].InputSchema)
+			assertMCPToolVisibility(t, tools, "task_create", true)
+			assertMCPToolVisibility(t, tools, "tasks_list", true)
+			assertMCPToolVisibility(t, tools, "task_fork", true)
+			assertMCPToolVisibility(t, tools, "task_stop", true)
+			assertMCPToolVisibility(t, tools, "task_purge", true)
+			assertMCPToolVisibility(t, tools, "task_get_detail", false)
+			var create mcp.ToolDescriptor
+			for _, tool := range tools {
+				if tool.Name == "task_create" {
+					create = tool
+					break
+				}
+			}
+			schema, err := json.Marshal(create.InputSchema)
 			if err != nil {
 				t.Fatalf("marshal delegated schema: %v", err)
 			}
@@ -1331,10 +1419,21 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		})
 	})
 
-	t.Run("task scoped client cannot read or subscribe", func(t *testing.T) {
+	t.Run("task scoped client can manage its children", func(t *testing.T) {
 		t.Parallel()
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
 		registry := &mcpRegistry{}
+		tools, err := registry.Tools(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertMCPToolVisibility(t, tools, "task_create", true)
+		assertMCPToolVisibility(t, tools, "tasks_list", true)
+		assertMCPToolVisibility(t, tools, "task_fork", true)
+		assertMCPToolVisibility(t, tools, "task_stop", true)
+		assertMCPToolVisibility(t, tools, "task_purge", true)
+		assertMCPToolVisibility(t, tools, "task_get_detail", false)
+		assertMCPToolVisibility(t, tools, "repos_list", false)
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
 			t.Run("voice_session_defaults", func(t *testing.T) {

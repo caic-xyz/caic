@@ -44,6 +44,8 @@ type relayReader interface {
 	ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string
 }
 
+const maxDelegatedTasksPerParent = 10
+
 type agentRelayReader struct{}
 
 func (agentRelayReader) Status(ctx context.Context, target runtime.ConnectionTarget) (alive bool, diag string, err error) {
@@ -1613,6 +1615,29 @@ func (m *Manager) insertEntry(id string, entry *Entry) {
 	m.taskChangedLocked()
 	m.mu.Unlock()
 	m.watchRateLimitEvents(entry.Task())
+}
+
+// insertDelegatedEntry registers a direct child while enforcing the temporary
+// per-parent limit atomically with registration.
+func (m *Manager) insertDelegatedEntry(entry *Entry) error {
+	t := entry.Task()
+	m.mu.Lock()
+	children := 0
+	for _, candidate := range m.tasks {
+		child := candidate.Task()
+		if child.ParentTaskID == t.ParentTaskID && child.GetState() != taskslog.StatePurged {
+			children++
+		}
+	}
+	if children >= maxDelegatedTasksPerParent {
+		m.mu.Unlock()
+		return conflict(fmt.Sprintf("delegating task already has %d non-purged child tasks", maxDelegatedTasksPerParent))
+	}
+	m.tasks[t.ID.String()] = entry
+	m.taskChangedLocked()
+	m.mu.Unlock()
+	m.watchRateLimitEvents(t)
+	return nil
 }
 
 // watchRateLimitEvents forwards task quota changes to the shared change

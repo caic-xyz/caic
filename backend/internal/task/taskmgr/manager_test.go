@@ -2266,6 +2266,19 @@ func TestManager(t *testing.T) {
 				t.Error("delegated child inherited delegation capability")
 			}
 		})
+		t.Run("delegated_fork_rejects_eleventh_non_purged_child", func(t *testing.T) {
+			t.Parallel()
+			m, src := newForkManager(t)
+			for range maxDelegatedTasksPerParent {
+				child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, "", "")
+				child.ParentTaskID = src.Task().ID
+				m.Insert(child.ID.String(), m.NewEntry(child, nil))
+			}
+			_, err := src.Lifecycle.ForkDelegated(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "one too many"}})
+			if err == nil || !strings.Contains(err.Error(), "10 non-purged child tasks") {
+				t.Fatalf("ForkDelegated() error = %v, want child-task limit", err)
+			}
+		})
 		t.Run("parent_stop_does_not_change_child", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})

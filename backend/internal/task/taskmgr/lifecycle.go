@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -360,7 +362,14 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	t.ParentTaskID = p.parentTaskID
 	t.Provider = r.manager.provider
 	forkEntry := r.manager.NewEntry(t, nil)
-	r.manager.insertEntry(t.ID.String(), forkEntry)
+	if p.parentTaskID != 0 {
+		// TODO: Replace this temporary per-parent cap with configurable, time-based delegation quotas.
+		if err := r.manager.insertDelegatedEntry(forkEntry); err != nil {
+			return "", err
+		}
+	} else {
+		r.manager.insertEntry(t.ID.String(), forkEntry)
+	}
 	forkEntry.Lifecycle.generateTitle()
 
 	forkEntry.Lifecycle.wg.Go(func() { //nolint:contextcheck // fork must finish during shutdown
@@ -398,7 +407,13 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 // ForkDelegated creates a child from this task's server-owned runtime snapshot.
 // The source task is recorded as the child's parent; callers cannot choose it.
 func (r *Lifecycle) ForkDelegated(ctx context.Context, p *ForkParams) (string, error) {
-	p.parentTaskID = r.entry.Task().ID
+	return r.ForkDelegatedFor(ctx, r.entry.Task().ID, p)
+}
+
+// ForkDelegatedFor creates a child from this task's runtime snapshot for a
+// server-authorized delegating task.
+func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, p *ForkParams) (string, error) {
+	p.parentTaskID = parentTaskID
 	return r.Fork(ctx, p)
 }
 

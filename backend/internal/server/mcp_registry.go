@@ -147,6 +147,12 @@ func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
 				description = "Create a child task from this task's snapshot. Provide only the child prompt; caic derives the repository, runtime, and parent from this task."
 			}
 		}
+		if s.Name == "task_fork" {
+			if _, ok := taskMCPTaskID(ctx); ok {
+				inputSchema = buildDelegatedTaskForkSchema()
+				description = "Fork this task or one of its child tasks. Use task_number 0 for this task, or a child task number returned by tasks_list. Provide only the fork prompt."
+			}
+		}
 		tools = append(tools, mcp.ToolDescriptor{Name: s.Name, Title: s.Title, Description: description, InputSchema: inputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations})
 	}
 	return tools, nil
@@ -867,7 +873,7 @@ func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcp
 }
 
 func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
+	num, entry, ok := m.taskScopedEntryByNumber(ctx, args.TaskNumber, false)
 	if !ok {
 		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
@@ -879,7 +885,7 @@ func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs
 }
 
 func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
+	num, entry, ok := m.taskScopedEntryByNumber(ctx, args.TaskNumber, false)
 	if !ok {
 		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
 	}
@@ -968,7 +974,7 @@ func (m *mcpRegistry) forkWithoutModelValid(source *taskpkg.Task, harnessOverrid
 }
 
 func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
+	num, entry, ok := m.taskScopedEntryByNumber(ctx, args.TaskNumber, true)
 	if !ok {
 		return domainToolError[mcpTaskForkOutput](taskNumberError(args.TaskNumber))
 	}
@@ -1183,6 +1189,28 @@ func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *taskmgr
 	return num, entry, ok
 }
 
+// taskScopedEntryByNumber resolves task numbers from a task-scoped list and
+// may additionally resolve 0 to the calling task.
+func (m *mcpRegistry) taskScopedEntryByNumber(ctx context.Context, num int, allowSelf bool) (int, *taskmgr.Entry, bool) {
+	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
+	if !taskScoped {
+		return m.entryByNumber(ctx, num)
+	}
+	if num == 0 && allowSelf {
+		entry, ok := m.taskSvc.taskMgr.GetEntry(delegatingTaskID.String())
+		return num, entry, ok
+	}
+	if num < 1 {
+		return num, nil, false
+	}
+	keys, _ := m.taskKeys(ctx)
+	if num > len(keys) {
+		return num, nil, false
+	}
+	entry, ok := m.taskSvc.taskMgr.GetEntry(keys[num-1].ID.String())
+	return num, entry, ok
+}
+
 func taskNumberError(num int) *api.Error {
 	if num < 1 {
 		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task_number must be a positive integer"}
@@ -1222,6 +1250,15 @@ func buildTaskForkSchema() *jsonschema.Schema {
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked task"})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Override harness (optional, inherits from source if omitted)"})
 	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional, inherits from source if omitted)"})
+	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
+	mcp.AddHeaderToProperty(schema, "task_number", "Task-Number")
+	return schema
+}
+
+func buildDelegatedTaskForkSchema() *jsonschema.Schema {
+	props := orderedmap.New[string, *jsonschema.Schema]()
+	props.Set("task_number", &jsonschema.Schema{Type: "integer", Description: "Use 0 to fork this task, or a child task number returned by tasks_list"})
+	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked child task"})
 	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
 	mcp.AddHeaderToProperty(schema, "task_number", "Task-Number")
 	return schema
@@ -1674,6 +1711,7 @@ func (m *mcpRegistry) taskResourceEntry(ctx context.Context, id string) (*taskmg
 }
 
 func (m *mcpRegistry) taskKeys(ctx context.Context) (keys []mcpTaskKey, revision string) {
+	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
 	var ownerID string
 	if m.taskSvc.authStore != nil {
 		if user, ok := auth.UserFromContext(ctx); ok {
@@ -1683,6 +1721,9 @@ func (m *mcpRegistry) taskKeys(ctx context.Context) (keys []mcpTaskKey, revision
 	keys = make([]mcpTaskKey, 0)
 	for _, entry := range m.taskSvc.taskMgr.Entries() {
 		task := entry.Task()
+		if taskScoped && task.ParentTaskID != delegatingTaskID {
+			continue
+		}
 		if ownerID != "" && task.OwnerID != "" && task.OwnerID != ownerID {
 			continue
 		}
@@ -1927,6 +1968,13 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 }
 
 func authorizeToolScope(ctx context.Context, name string) (string, bool) {
+	if _, ok := taskMCPTaskID(ctx); ok {
+		switch name {
+		case "task_create", "tasks_list", "task_fork", "task_stop", "task_purge":
+			return "allow", true
+		}
+		return "task-scoped MCP only permits task_create, tasks_list, task_fork, task_stop, and task_purge", false
+	}
 	required := requiredScopeForTool(name)
 	if required == "" {
 		if isRemoteMCP(ctx) {

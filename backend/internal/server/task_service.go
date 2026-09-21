@@ -16,6 +16,7 @@ import (
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -728,6 +729,9 @@ func (s *taskService) getTaskHandoff(_ context.Context, entry *taskmgr.Entry, _ 
 }
 
 func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
+	if delegatingTaskID, ok := taskMCPTaskID(ctx); ok {
+		return s.forkDelegatedTask(ctx, delegatingTaskID, entry, req)
+	}
 	source := entry.Task()
 
 	var ownerID string
@@ -796,6 +800,49 @@ func (s *taskService) forkTask(ctx context.Context, entry *taskmgr.Entry, req *v
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "forked task not found"}
 	}
 	dto, err := taskDTO(ctx, forkEntry, s.taskMgr, s.checkouts, s.authStore)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return &dto, nil
+}
+
+// forkDelegatedTask creates a child of the task-scoped MCP caller from a
+// permitted source snapshot. The caller cannot override inherited settings.
+func (s *taskService) forkDelegatedTask(ctx context.Context, delegatingTaskID ksid.ID, sourceEntry *taskmgr.Entry, req *v1.ForkTaskReq) (*v1.Task, error) {
+	if req.Prompt.Text == "" || len(req.Prompt.Images) > 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || len(req.ExtraRepos) != 0 || req.Tailscale != nil || req.USB != nil || req.Display != nil || req.Sudo != nil || req.GitHubToken != nil {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task fork may only set prompt"}
+	}
+	delegatingEntry, ok := s.taskMgr.GetEntry(delegatingTaskID.String())
+	if !ok {
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "delegating task not found"}
+	}
+	delegatingTask := delegatingEntry.Task()
+	if !delegatingTask.CaicMCPEnabled || !taskMCPStateActive(delegatingTask.GetState()) {
+		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "delegating task is not active"}
+	}
+	source := sourceEntry.Task()
+	if source.ID != delegatingTaskID && source.ParentTaskID != delegatingTaskID {
+		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "fork source is not owned by delegating task"}
+	}
+	githubToken := source.GitHubTokenEnabled()
+	newID, err := sourceEntry.Lifecycle.ForkDelegatedFor(ctx, delegatingTaskID, &taskmgr.ForkParams{
+		OwnerID:             delegatingTask.OwnerID,
+		Prompt:              apiconv.PromptToAgent(req.Prompt),
+		GitHubToken:         githubToken,
+		ResolvedGitHubToken: s.resolveGitHubTokenForOwner(delegatingTask.OwnerID, githubToken),
+		Tailscale:           source.Tailscale,
+		USB:                 source.USB,
+		Display:             source.Display,
+		Sudo:                source.Sudo,
+	})
+	if err != nil {
+		return nil, toDTO(err)
+	}
+	entry, ok := s.taskMgr.GetEntry(newID)
+	if !ok {
+		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "created delegated fork not found"}
+	}
+	dto, err := taskDTO(ctx, entry, s.taskMgr, s.checkouts, s.authStore)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
