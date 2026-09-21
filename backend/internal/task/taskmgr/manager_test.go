@@ -103,6 +103,9 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
+	if cfg.Rollup == nil {
+		cfg.Rollup = task.DiscardRollup{}
+	}
 	if cfg.LogStore == nil {
 		cfg.LogStore = taskslog.NewStore(testLogger(), t.TempDir())
 	}
@@ -1204,8 +1207,9 @@ func TestNew(t *testing.T) {
 			{name: "task log store", cfg: Config{ServerCtx: t.Context()}, want: "task manager task log store is required"},
 			{name: "runtime router", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir)}, want: "task manager runtime router is required"},
 			{name: "checkout registry", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes}, want: "task manager checkout registry is required"},
-			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager runtime start timeout is required"},
-			{name: "logger", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry(), RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
+			{name: "usage rollup", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry()}, want: "task manager usage rollup sink is required"},
+			{name: "runtime start timeout", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry(), Rollup: task.DiscardRollup{}}, want: "task manager runtime start timeout is required"},
+			{name: "logger", cfg: Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), cacheDir), Runtimes: runtimes, Checkouts: repo.NewRegistry(), Rollup: task.DiscardRollup{}, RuntimeStartTimeout: time.Hour}, want: "task manager logger is required"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -1250,6 +1254,7 @@ func TestNew(t *testing.T) {
 			Backends:            map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
 			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 			Checkouts:           repo.NewRegistry(),
+			Rollup:              task.DiscardRollup{},
 			RuntimeStartTimeout: time.Hour,
 		}
 		m, err := New(cfg)

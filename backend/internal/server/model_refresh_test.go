@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
@@ -212,6 +213,7 @@ func newModelRefreshTestManager(t testing.TB, router *runtime.Router, backends m
 		Runtimes:            router,
 		Backends:            backends,
 		Checkouts:           repo.NewRegistry(),
+		Rollup:              task.DiscardRollup{},
 		RuntimeStartTimeout: time.Hour,
 	})
 	if err != nil {

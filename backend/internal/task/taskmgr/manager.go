@@ -1,5 +1,4 @@
-// Package taskmgr owns task registry state, creation, resource sampling, and
-// runtime-instance import.
+// Package taskmgr owns the task registry: task state, creation, lifecycle, and runtime-instance import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task): task.Task / repo.Checkout are domain types, Manager owns
@@ -86,7 +85,9 @@ type Config struct {
 	Provider            genai.Provider // nil-safe
 	// Pricer resolves per-model token pricing for cost reporting. When nil,
 	// a default quota-provider pricer is used.
-	Pricer    quotausage.ModelPricer
+	Pricer quotausage.ModelPricer
+	// Rollup consumes task messages for the cross-task usage rollup. Required.
+	Rollup    task.RollupSink
 	Checkouts *repo.Registry
 }
 
@@ -116,6 +117,7 @@ type Manager struct {
 	runtimeStartTimeout time.Duration
 	provider            genai.Provider
 	pricer              quotausage.ModelPricer
+	rollup              task.RollupSink
 	taskMCPScoper       TaskMCPScoper
 	relay               relayReader
 
@@ -161,6 +163,9 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	if cfg.Checkouts == nil {
 		return nil, errors.New("task manager checkout registry is required")
 	}
+	if cfg.Rollup == nil {
+		return nil, errors.New("task manager usage rollup sink is required")
+	}
 	if cfg.RuntimeStartTimeout <= 0 {
 		return nil, errors.New("task manager runtime start timeout is required")
 	}
@@ -186,6 +191,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		runtimeStartTimeout: cfg.RuntimeStartTimeout,
 		provider:            cfg.Provider,
 		pricer:              pricer,
+		rollup:              cfg.Rollup,
 		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
 		tasks:               make(map[string]*Entry),
@@ -194,8 +200,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 	return m, nil
 }
 
-// Close stops background work and waits for task lifecycles and all Manager
-// watchers to finish. It currently always returns nil.
+// Close stops background work and waits for task lifecycles and all Manager watchers to finish.
 func (m *Manager) Close() error {
 	m.quotaWatchMu.Lock()
 	m.quotaWatchClosed = true
@@ -209,7 +214,9 @@ func (m *Manager) Close() error {
 	})
 	m.quotaWatchers.Wait()
 	m.background.Wait()
-	return nil
+	// After all task activity has settled, flush the usage rollup's pending
+	// deltas so a graceful shutdown never loses them.
+	return m.rollup.Close()
 }
 
 // Start activates m with its task-scoped MCP authority and starts its runtime
@@ -902,6 +909,7 @@ func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, ba
 		return nil, err
 	}
 	t.Pricer = m.pricer
+	t.Rollup = m.rollup
 	return t, nil
 }
 
@@ -972,6 +980,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			continue
 		}
 		t.Pricer = m.pricer
+		t.Rollup = m.rollup
 		t.RuntimeName = rt
 		t.Repos = lt.Repos
 		t.MaxCPUs = lt.MaxCPUs
@@ -1849,6 +1858,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("import task %q: %w", taskID.String(), err)
 	}
 	t.Pricer = m.pricer
+	t.Rollup = m.rollup
 	t.Repos = mounts
 	t.RuntimeName = rt
 	t.MaxCPUs = lt.MaxCPUs

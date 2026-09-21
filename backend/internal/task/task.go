@@ -1,5 +1,7 @@
-// Package task orchestrates a single coding agent task: branch creation,
-// instance lifecycle, agent execution, resource history, and git integration.
+// Package task orchestrates one coding agent task end to end.
+//
+// It owns branch creation, instance lifecycle, agent execution, resource
+// history, and git integration.
 package task
 
 import (
@@ -24,6 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
 // CreateRequest describes an automated task creation request for one managed repository.
@@ -125,6 +128,7 @@ type Task struct {
 	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
 	CaicMCPEnabled    bool                 // Enables task-scoped CAIC MCP delegation.
 	Pricer            usage.ModelPricer    // Quota-provider per-model pricing for cost reporting; set by the task manager before the task runs. Nil keeps harness-reported totals only.
+	Rollup            RollupSink           // Cross-task usage rollup sink; NewTask defaults to DiscardRollup, the task manager replaces it with the wired store.
 	Provider          genai.Provider
 
 	timelineID string
@@ -217,6 +221,7 @@ func NewTask(id ksid.ID, prompt agent.Prompt, h harness.Name, model, effort, bas
 		BaseImage:         baseImage,
 		ContainerPlatform: containerPlatform,
 		StartedAt:         time.Now().UTC(),
+		Rollup:            DiscardRollup{},
 	}
 	t.SetState(taskslog.StatePending)
 	if title == "" {
@@ -987,6 +992,10 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 			t.liveNumTurns += m.NumTurns
 			t.liveDuration += time.Duration(m.DurationMs) * time.Millisecond
 		}
+		// Forward the folded message to the usage rollup with the cost
+		// snapshot reflecting every prior entry, so resumed replays carry the
+		// correct cost delta for the unflushed tail.
+		t.observeRollupLocked(msg, entry.ProducerTime)
 	}
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
@@ -1842,6 +1851,9 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 			generateTitle = true
 		}
 	}
+	// Forward the folded message to the usage rollup with the cost snapshot
+	// reflecting every prior fold in this message.
+	t.observeRollupLocked(m, at)
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
 	// follows a cleanly completed turn: it is a spurious termination artifact
 	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
@@ -2075,6 +2087,46 @@ func (t *Task) activeModel() string {
 		return t.reportedModel
 	}
 	return t.RequestedModel
+}
+
+// observeRollupLocked forwards one agent message to the task's usage rollup
+// sink, which is never nil. The caller holds t.mu.
+func (t *Task) observeRollupLocked(m agent.Message, at time.Time) {
+	if q, ok := m.(*agent.RateLimitMessage); ok {
+		c := quotaChange(q, at)
+		t.Rollup.ObserveQuota(&c)
+		return
+	}
+	e, ok := rollupEvent(m, at, t.rollupModelLocked(m), t.liveCostUSD, t.Harness)
+	if !ok {
+		return
+	}
+	t.Rollup.Observe(t.rollupMetaLocked(), &e)
+}
+
+// rollupMetaLocked snapshots the task identity for the rollup. The caller
+// holds t.mu.
+func (t *Task) rollupMetaLocked() usagedb.TaskMeta {
+	repos := make([]string, len(t.Repos))
+	for i, r := range t.Repos {
+		repos[i] = r.Name
+	}
+	return usagedb.TaskMeta{
+		TaskID:         t.ID,
+		Harness:        string(t.Harness),
+		Repos:          repos,
+		RequestedModel: t.RequestedModel,
+	}
+}
+
+// rollupModelLocked resolves the attribution model for one message: the
+// model the message itself reports when present, else the task's active
+// model. The caller holds t.mu.
+func (t *Task) rollupModelLocked(m agent.Message) string {
+	if u, ok := m.(*agent.UsageMessage); ok && u.ReportedModel != "" {
+		return u.ReportedModel
+	}
+	return t.activeModel()
 }
 
 // TimelineMessage is an immutable task message and its stable, one-based

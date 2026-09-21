@@ -39,6 +39,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/gomode/voicegateway"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/metrics"
@@ -79,6 +80,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	logStore := taskslog.NewStore(log, filepath.Join(cfg.Dirs.CacheDir, "tasks"))
 	if err := cleanupLegacyReplayArtifacts(logStore.LogDir); err != nil {
 		return nil, fmt.Errorf("remove legacy replay artifacts: %w", err)
+	}
+	usageRollup, err := usagedb.New(usagedb.Config{
+		Log: log.With("cmp", "usagedb"),
+		Dir: filepath.Join(cfg.Dirs.CacheDir, "usagedb"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open usage rollup: %w", err)
 	}
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -254,6 +262,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		RuntimeStartTimeout: time.Hour,
 		Provider:            provider,
 		Pricer:              usage.NewPricer(fetchers),
+		Rollup:              usageRollup,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("task manager: %w", err)

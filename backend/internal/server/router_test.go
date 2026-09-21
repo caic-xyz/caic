@@ -166,6 +166,9 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
+	if cfg.Rollup == nil {
+		cfg.Rollup = task.DiscardRollup{}
+	}
 	if cfg.LogStore == nil {
 		cfg.LogStore = taskslog.NewStore(testLogger(), t.TempDir())
 	}

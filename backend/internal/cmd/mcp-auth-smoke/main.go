@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
@@ -183,6 +184,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		LogStore:            taskslog.NewStore(stateLog, filepath.Join(stateDir, "tasks")),
 		Runtimes:            runtimeRouter,
 		Checkouts:           checkoutRegistry,
+		Rollup:              task.DiscardRollup{},
 		RuntimeStartTimeout: time.Hour,
 	})
 	if err != nil {
