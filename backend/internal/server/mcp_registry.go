@@ -715,6 +715,7 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 		USB:           args.USB,
 		Sudo:          args.Sudo,
 		GitHubToken:   args.GitHubToken,
+		CaicMCP:       true,
 	}
 	for i, repo := range args.Repos {
 		req.Repos[i] = v1.RepoSpec{Name: repo}

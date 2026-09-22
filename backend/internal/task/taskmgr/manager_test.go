@@ -2245,7 +2245,7 @@ func TestManager(t *testing.T) {
 				t.Errorf("ForkedFromTaskID = %s, want %s", tk.ForkedFromTaskID, src.Task().ID)
 			}
 		})
-		t.Run("valid_delegated_fork_sets_parent_without_propagating_delegation", func(t *testing.T) {
+		t.Run("valid_delegated_fork_sets_parent_with_CAIC_MCP_disabled", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
 			src.Task().CaicMCP = true
@@ -2263,7 +2263,7 @@ func TestManager(t *testing.T) {
 				t.Errorf("ParentTaskID = %s, want %s", child.ParentTaskID, src.Task().ID)
 			}
 			if child.CaicMCP {
-				t.Error("delegated child inherited delegation capability")
+				t.Error("delegated child CAIC MCP = true, want false")
 			}
 		})
 		t.Run("delegated_fork_rejects_eleventh_non_purged_child", func(t *testing.T) {

@@ -360,6 +360,11 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	t.OwnerID = p.OwnerID
 	t.ForkedFromTaskID = source.ID
 	t.ParentTaskID = p.parentTaskID
+	if p.parentTaskID != 0 {
+		// TODO(delegation): Enable CAIC MCP for delegated children after recursive
+		// delegation has bounded depth and resource policies.
+		t.CaicMCP = false
+	}
 	t.Provider = r.manager.provider
 	forkEntry := r.manager.NewEntry(t, nil)
 	if p.parentTaskID != 0 {

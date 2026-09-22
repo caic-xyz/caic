@@ -626,6 +626,20 @@ func TestMCPResultBounds(t *testing.T) {
 func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 	t.Parallel()
 
+	t.Run("enables CAIC MCP by default", func(t *testing.T) {
+		t.Parallel()
+
+		s := newMCPTaskCreateTestRouter(t)
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
+		result := registry.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "delegate the review", Repos: []string{"myrepo"}})
+		if result.IsError {
+			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
+		}
+		if !singleCreatedTask(t, s).CaicMCP {
+			t.Fatal("MCP-created task CaicMCP = false, want true")
+		}
+	})
+
 	t.Run("bounds generated title", func(t *testing.T) {
 		t.Parallel()
 
@@ -1269,6 +1283,9 @@ func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 		harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "claude-default"}}}},
 		harness.Pi:     &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "pi-default"}}}},
 	})
+	if err := s.taskMgr.Start(s.TaskMCPScoper); err != nil {
+		t.Fatalf("Start task manager: %v", err)
+	}
 	registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 	return s
 }
