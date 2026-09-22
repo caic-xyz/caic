@@ -460,7 +460,17 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Read initialize response.
-	initResp, err := readJSONRPCResponse(ctx, records)
+	handleMCP := func(req agent.MCPRequest) error {
+		result, resultErr := agent.MCPRequestResult(ctx, opts.MCP, req)
+		response, err := agent.MCPResponseBytes(req.ID, result, resultErr)
+		if err != nil {
+			return err
+		}
+		_, err = stdin.Write(response)
+		return err
+	}
+
+	initResp, err := readJSONRPCResponse(ctx, records, handleMCP)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read initialize response: %w", err)
 	}
@@ -504,7 +514,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Read session response.
-	resp, err := readJSONRPCResponse(ctx, records)
+	resp, err := readJSONRPCResponse(ctx, records, handleMCP)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read session response: %w", err)
 	}
@@ -534,12 +544,12 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		model = res.currentModel
 	}
 	if model != "" && model != res.currentModel {
-		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model, opts.Log); err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionModel, model, opts.Log, handleMCP); err != nil {
 			return nil, nil, err
 		}
 	}
 	if opts.Effort != "" {
-		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionEffort, opts.Effort, opts.Log); err != nil {
+		if err := res.setSessionConfigOption(ctx, stdin, records, opencode.ConfigOptionEffort, opts.Effort, opts.Log, handleMCP); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -575,7 +585,7 @@ func (res *handshakeResult) configOption(id opencode.ConfigOptionID) *opencode.S
 	return nil
 }
 
-func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string, log agent.LogSink) error {
+func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io.Writer, records *agent.RelayRecordReader, id opencode.ConfigOptionID, value string, log agent.LogSink, handleMCP func(agent.MCPRequest) error) error {
 	option := res.configOption(id)
 	if option == nil {
 		return fmt.Errorf("opencode ACP does not expose %q for the selected model", id)
@@ -595,7 +605,7 @@ func (res *handshakeResult) setSessionConfigOption(ctx context.Context, stdin io
 	}, log); err != nil {
 		return fmt.Errorf("write session/set_config_option: %w", err)
 	}
-	resp, err := readJSONRPCResponse(ctx, records)
+	resp, err := readJSONRPCResponse(ctx, records, handleMCP)
 	if err != nil {
 		return fmt.Errorf("read session/set_config_option response: %w", err)
 	}
@@ -669,9 +679,9 @@ func writeJSONInput(w io.Writer, v any, log agent.LogSink) error {
 }
 
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
-// (has "id" field). Notifications encountered during the handshake are logged
-// and skipped.
-func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader) (*opencode.JSONRPCMessage, error) {
+// (has "id" field). It services task-scoped MCP controls so an eager MCP
+// client cannot block the ACP handshake; other notifications are skipped.
+func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, handleMCP func(agent.MCPRequest) error) (*opencode.JSONRPCMessage, error) {
 	type result struct {
 		msg *opencode.JSONRPCMessage
 		err error
@@ -688,6 +698,15 @@ func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader) (*open
 				if exit, ok := control.Message.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
 					ch <- result{nil, errors.New(exit.ExitError())}
 					return
+				}
+				if request, ok := control.Message.(*agent.MCPRequestMessage); ok {
+					if handleMCP == nil {
+						continue
+					}
+					if err := handleMCP(agent.MCPRequest{ID: request.ID, Method: request.Method, Name: request.Name, Arguments: request.Arguments}); err != nil {
+						ch <- result{nil, fmt.Errorf("respond task-scoped MCP: %w", err)}
+						return
+					}
 				}
 			}
 			if len(line) == 0 {

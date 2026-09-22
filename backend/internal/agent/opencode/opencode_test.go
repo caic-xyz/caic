@@ -110,7 +110,7 @@ func TestHandshake(t *testing.T) {
 		if hs.currentModel != selectedModel || hs.currentEffort != "high" {
 			t.Fatalf("reported settings = %q/%q, want %q/high", hs.currentModel, hs.currentEffort, selectedModel)
 		}
-		lines := strings.Fields(stdin.String())
+		lines := strings.Split(strings.TrimSpace(stdin.String()), "\n")
 		if len(lines) != 4 {
 			t.Fatalf("request count = %d, want 4; requests = %s", len(lines), stdin.String())
 		}
@@ -164,6 +164,32 @@ func TestHandshake(t *testing.T) {
 		}
 		if log.Len() != 0 {
 			t.Fatalf("v2 handshake log = %s, want no legacy stdin persistence", log.Bytes())
+		}
+	})
+
+	t.Run("services task scoped MCP during session creation", func(t *testing.T) {
+		t.Parallel()
+
+		const initializeResponse = `{"jsonrpc":"2.0","id":1,"result":{}}`
+		const sessionResponse = `{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}`
+		records := v2Records(initializeResponse) +
+			`{"t":"mcp_request","id":"tools-1","method":"tools/list"}` + "\n" +
+			v2Records(sessionResponse)
+		var stdin bytes.Buffer
+		_, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(records)), &agent.Options{Dir: "/workspace", Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(stdin.String()), "\n")
+		if len(lines) != 3 {
+			t.Fatalf("request count = %d, want initialize, session/new, MCP response: %s", len(lines), stdin.String())
+		}
+		var response agent.MCPResponseEnvelope
+		if err := json.Unmarshal([]byte(lines[2]), &response); err != nil {
+			t.Fatalf("unmarshal MCP response: %v", err)
+		}
+		if response.ID != "tools-1" || response.Error != "task-scoped MCP is unavailable" {
+			t.Fatalf("MCP response = %#v", response)
 		}
 	})
 }

@@ -243,22 +243,28 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) handleMCP(req MCPRequest) error {
-	if c.mcp == nil {
-		return RespondMCP(c, req.ID, nil, errors.New("task-scoped MCP is unavailable"))
+	result, err := MCPRequestResult(c.ctx, c.mcp, req)
+	return RespondMCP(c, req.ID, result, err)
+}
+
+// MCPRequestResult handles one task-scoped MCP request and returns its bridge
+// response payload. Callers must encode and send that payload to the relay.
+func MCPRequestResult(ctx context.Context, registry mcp.Registry, req MCPRequest) (any, error) {
+	if registry == nil {
+		return nil, errors.New("task-scoped MCP is unavailable")
 	}
 	if req.Method == mcp.MethodToolsList {
-		tools, err := c.mcp.Tools(c.ctx)
-		return RespondMCP(c, req.ID, MCPToolsListResponse{Tools: tools}, err)
+		tools, err := registry.Tools(ctx)
+		return MCPToolsListResponse{Tools: tools}, err
 	}
 	if req.Method == mcp.MethodToolsCall {
-		result, err := c.mcp.CallTool(c.ctx, req.Name, req.Arguments)
+		result, err := registry.CallTool(ctx, req.Name, req.Arguments)
 		if err != nil {
-			return RespondMCP(c, req.ID, nil, err)
+			return nil, err
 		}
-		response, err := MCPToolResultResponse(result)
-		return RespondMCP(c, req.ID, response, err)
+		return MCPToolResultResponse(result)
 	}
-	return RespondMCP(c, req.ID, nil, fmt.Errorf("unsupported MCP method: %s", req.Method))
+	return nil, fmt.Errorf("unsupported MCP method: %s", req.Method)
 }
 
 // NewConn creates a connection using the task log's physical record version.
@@ -297,11 +303,20 @@ func MCPToolResultResponse(result mcp.RawToolResult) (MCPToolResponse, error) {
 
 // RespondMCP returns one bridge result to the task-local MCP process.
 func RespondMCP(c Conn, id string, result any, err error) error {
+	data, marshalErr := MCPResponseBytes(id, result, err)
+	if marshalErr != nil {
+		return marshalErr
+	}
+	return c.SendRaw(data)
+}
+
+// MCPResponseBytes encodes one bridge result for delivery to the relay.
+func MCPResponseBytes(id string, result any, err error) ([]byte, error) {
 	response := MCPResponseEnvelope{Type: "mcp_response", ID: id}
 	if result != nil {
 		encoded, marshalErr := json.Marshal(result)
 		if marshalErr != nil {
-			return marshalErr
+			return nil, marshalErr
 		}
 		response.Result = encoded
 	}
@@ -310,9 +325,9 @@ func RespondMCP(c Conn, id string, result any, err error) error {
 	}
 	data, marshalErr := json.Marshal(response)
 	if marshalErr != nil {
-		return marshalErr
+		return nil, marshalErr
 	}
-	return c.SendRaw(append(data, '\n'))
+	return append(data, '\n'), nil
 }
 
 func isMCPResponse(data []byte) bool {
