@@ -63,6 +63,123 @@ func TestTaskListSnapshotOrdersActiveTasksFirst(t *testing.T) {
 	}
 }
 
+func TestMCPEndpointTaskAccessContract(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	owner := &auth.User{ID: "owner"}
+	ownedID := ksid.NewID()
+	owned := mustNewTask(t, ownedID, agent.Prompt{Text: "owned task"}, harness.Claude)
+	owned.OwnerID = owner.ID
+	insertTestTask(s, ownedID.String(), owned)
+	delegatingID := ksid.NewID()
+	delegating := mustNewTask(t, delegatingID, agent.Prompt{Text: "delegating task"}, harness.Claude)
+	insertTestTask(s, delegatingID.String(), delegating)
+	childID := ksid.NewID()
+	child := mustNewTask(t, childID, agent.Prompt{Text: "child task"}, harness.Claude)
+	child.ParentTaskID = delegatingID
+	insertTestTask(s, childID.String(), child)
+	foreignID := ksid.NewID()
+	foreign := mustNewTask(t, foreignID, agent.Prompt{Text: "foreign task"}, harness.Claude)
+	foreign.OwnerID = "other"
+	insertTestTask(s, foreignID.String(), foreign)
+
+	post := func(t *testing.T, ctx context.Context, method, name, params string) string {
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON(method, params)))
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+		req.Header.Set("Mcp-Method", method)
+		if name != "" {
+			req.Header.Set("Mcp-Name", name)
+		}
+		w := httptest.NewRecorder()
+		s.mcpHandlers.handleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d: %s", method, w.Code, http.StatusOK, w.Body.String())
+		}
+		return w.Body.String()
+	}
+
+	for _, tc := range []struct {
+		name        string
+		ctx         context.Context
+		visibleID   ksid.ID
+		hiddenID    ksid.ID
+		createShown bool
+	}{
+		{
+			name:        "user",
+			ctx:         newMCPPrincipalContext(auth.NewContext(t.Context(), owner), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeTasksRead}}),
+			visibleID:   ownedID,
+			hiddenID:    foreignID,
+			createShown: false,
+		},
+		{
+			name:        "task principal",
+			ctx:         newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: delegatingID, Remote: true}),
+			visibleID:   childID,
+			hiddenID:    foreignID,
+			createShown: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			visibleURI := "caic://tasks/" + tc.visibleID.String()
+			hiddenURI := "caic://tasks/" + tc.hiddenID.String()
+
+			tools := post(t, tc.ctx, "tools/list", "", "{}")
+			if !strings.Contains(tools, `"name":"tasks_list"`) {
+				t.Fatalf("tools/list does not advertise tasks_list: %s", tools)
+			}
+			if got := strings.Contains(tools, `"name":"task_create"`); got != tc.createShown {
+				t.Fatalf("tools/list task_create visibility = %t, want %t: %s", got, tc.createShown, tools)
+			}
+
+			resources := post(t, tc.ctx, "resources/list", "", "{}")
+			if !strings.Contains(resources, visibleURI) {
+				t.Fatalf("resources/list does not contain visible task resource %s: %s", visibleURI, resources)
+			}
+			if strings.Contains(resources, hiddenURI) {
+				t.Fatalf("resources/list contains hidden task resource %s: %s", hiddenURI, resources)
+			}
+
+			read := post(t, tc.ctx, "resources/read", visibleURI, `"uri":"`+visibleURI+`"`)
+			if !strings.Contains(read, tc.visibleID.String()) {
+				t.Fatalf("resources/read does not contain visible task %s: %s", tc.visibleID, read)
+			}
+			hiddenRead := post(t, tc.ctx, "resources/read", hiddenURI, `"uri":"`+hiddenURI+`"`)
+			var hiddenReadResp mcp.JSONRPCResponse
+			if err := json.Unmarshal([]byte(hiddenRead), &hiddenReadResp); err != nil {
+				t.Fatalf("decode hidden resources/read response: %v", err)
+			}
+			if hiddenReadResp.Error == nil {
+				t.Fatalf("resources/read of hidden task succeeded: %s", hiddenRead)
+			}
+
+			list := post(t, tc.ctx, "tools/call", "tasks_list", `"name":"tasks_list","arguments":{}`)
+			if !strings.Contains(list, tc.visibleID.String()) {
+				t.Fatalf("tasks_list does not contain visible task %s: %s", tc.visibleID, list)
+			}
+			if strings.Contains(list, tc.hiddenID.String()) {
+				t.Fatalf("tasks_list contains hidden task %s: %s", tc.hiddenID, list)
+			}
+
+			streamCtx, cancel := context.WithCancel(tc.ctx)
+			cancel()
+			subscription := post(t, streamCtx, "subscriptions/listen", "", `"notifications":{"resourceSubscriptions":["`+visibleURI+`"]}`)
+			if !strings.Contains(subscription, tc.visibleID.String()) {
+				t.Fatalf("subscription initial state does not contain visible task %s: %s", tc.visibleID, subscription)
+			}
+			hiddenSubscription := post(t, tc.ctx, "subscriptions/listen", "", `"notifications":{"resourceSubscriptions":["`+hiddenURI+`"]}`)
+			var hiddenSubscriptionResp mcp.JSONRPCResponse
+			if err := json.Unmarshal([]byte(hiddenSubscription), &hiddenSubscriptionResp); err != nil {
+				t.Fatalf("decode hidden subscription response: %v", err)
+			}
+			if hiddenSubscriptionResp.Error == nil {
+				t.Fatalf("subscription to hidden task succeeded: %s", hiddenSubscription)
+			}
+		})
+	}
+}
+
 func TestMCPHandlers(t *testing.T) {
 	t.Parallel()
 
