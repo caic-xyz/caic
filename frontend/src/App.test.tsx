@@ -114,6 +114,7 @@ const apiSpyNames = [
   "listOAuthGrants",
   "revokeOAuthGrant",
   "getUsage",
+  "getUsageDashboard",
   "listRepoBranches",
   "cloneRepo",
   "createTask",
@@ -260,6 +261,7 @@ beforeEach(() => {
   });
   vi.mocked(api.listOAuthGrants).mockResolvedValue({ grants: [] });
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
+  vi.mocked(api.getUsageDashboard).mockRejectedValue(new Error("no usage dashboard"));
   vi.mocked(api.listRepoBranches).mockResolvedValue({
     branches: [{ name: "main" }, { name: "dev", remote: "origin" }],
   });
@@ -1076,7 +1078,13 @@ describe("App keyboard shortcuts", () => {
     expect(screen.getByRole("menuitem", { name: "Metrics" })).toHaveFocus();
 
     await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Usage" })).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveFocus();
+
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("menuitem", { name: "Usage" })).toHaveFocus();
 
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Metrics" })).toHaveFocus();
@@ -1572,6 +1580,21 @@ describe("App repo chips: No repository", () => {
 
     expect(history.get()).toBe("/metrics");
     expect(screen.getByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+  });
+
+  it("links to the usage dashboard from the user menu", async () => {
+    const user = userEvent.setup();
+    const { history } = renderApp("/");
+
+    await user.click(screen.getByRole("button", { name: "Menu" }));
+    const usageLink = screen.getByRole("menuitem", { name: "Usage" });
+
+    expect(usageLink).toHaveAttribute("href", "/usage");
+
+    await user.click(usageLink);
+
+    expect(history.get()).toBe("/usage");
+    expect(screen.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
   });
 
   it("renders operation latency as a routed page", async () => {

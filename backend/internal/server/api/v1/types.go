@@ -812,6 +812,76 @@ type UsageResp struct {
 	Local     LocalUsage      `json:"local"`
 }
 
+// UsageDashboardTokens separates usage totals by their prompt-cache bucket.
+// Input, cache writes, and cache reads are disjoint; their sum is the full
+// prompt context consumed by the model.
+type UsageDashboardTokens struct {
+	Input        int64 `json:"inputTokens"`
+	CacheWrite5m int64 `json:"cacheWrite5mTokens"`
+	CacheWrite1h int64 `json:"cacheWrite1hTokens"`
+	CacheRead    int64 `json:"cacheReadTokens"`
+	Output       int64 `json:"outputTokens"`
+	Reasoning    int64 `json:"reasoningTokens"`
+}
+
+// UsageDashboardModel is one model's totals within a UTC day.
+type UsageDashboardModel struct {
+	Model         string               `json:"model"`
+	Tokens        UsageDashboardTokens `json:"tokens"`
+	Turns         int                  `json:"turns"`
+	CostUSD       float64              `json:"costUSD"`
+	ContextWindow int                  `json:"contextWindow"`
+}
+
+// UsageDashboardHarness is one coding harness's totals within a UTC day.
+type UsageDashboardHarness struct {
+	Harness string               `json:"harness"`
+	Tokens  UsageDashboardTokens `json:"tokens"`
+	Turns   int                  `json:"turns"`
+	CostUSD float64              `json:"costUSD"`
+}
+
+// UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+// Tasks is the number of distinct tasks that touched the repository.
+type UsageDashboardRepo struct {
+	Repo  string `json:"repo"`
+	Tasks int    `json:"tasks"`
+}
+
+// UsageDashboardCount is a named counter such as a skill read or tool call.
+type UsageDashboardCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// UsageDashboardDay is the complete daily usage snapshot from the durable
+// cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
+type UsageDashboardDay struct {
+	Day                      string                  `json:"day"`
+	Tokens                   UsageDashboardTokens    `json:"tokens"`
+	Turns                    int                     `json:"turns"`
+	ErroredTurns             int                     `json:"erroredTurns"`
+	APIMs                    int64                   `json:"apiMs"`
+	WallMs                   int64                   `json:"wallMs"`
+	Compactions              int                     `json:"compactions"`
+	SubagentSpawns           int                     `json:"subagentSpawns"`
+	SubagentSpawnsBackground int                     `json:"subagentSpawnsBackground"`
+	CostUSD                  float64                 `json:"costUSD"`
+	Models                   []UsageDashboardModel   `json:"models"`
+	Harnesses                []UsageDashboardHarness `json:"harnesses"`
+	Repos                    []UsageDashboardRepo    `json:"repos"`
+	Skills                   []UsageDashboardCount   `json:"skills"`
+	Tools                    []UsageDashboardCount   `json:"tools"`
+}
+
+// UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.
+// DataSince is the first UTC day with retained usage, or empty when no usage
+// has been recorded yet.
+type UsageDashboardResp struct {
+	DataSince string              `json:"dataSince,omitempty"`
+	Days      []UsageDashboardDay `json:"days"`
+}
+
 // GitCommit describes one commit ahead of a repository's original tracking branch.
 type GitCommit struct {
 	SHA          string   `json:"sha"`

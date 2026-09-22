@@ -5,13 +5,18 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
 type quotaUpdateWriter struct {
@@ -133,6 +138,58 @@ func TestUsageHandlersBuildResp(t *testing.T) {
 	}
 }
 
+func TestUsageHandlersHandleGetDashboard(t *testing.T) {
+	t.Parallel()
+
+	s := newTestRouter(t, nil)
+	at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
+	s.usageHandlers.rollup.Observe(usagedb.TaskMeta{
+		TaskID:  ksid.NewID(),
+		Harness: "claude",
+		Repos:   []string{"caic", "sdk"},
+	}, &usagedb.Event{
+		At:           at,
+		Model:        "claude-opus",
+		CostUSD:      0.12,
+		TurnBoundary: true,
+		Delta: usagedb.Delta{
+			TokenBuckets: usagedb.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheRead: 30, Output: 40, Reasoning: 5},
+			Turns:        1,
+			SkillReads:   map[string]int{"review": 2},
+		},
+	})
+
+	h := s.buildAPIHandler()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/usage/dashboard", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var got v1.UsageDashboardResp
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.DataSince != "2026-02-05" || len(got.Days) != 1 {
+		t.Fatalf("dashboard = %#v, want one day since 2026-02-05", got)
+	}
+	day := got.Days[0]
+	if day.Tokens.Input != 10 || day.Tokens.CacheWrite1h != 20 || day.Tokens.CacheRead != 30 || day.Tokens.Output != 40 {
+		t.Errorf("tokens = %#v", day.Tokens)
+	}
+	if day.CostUSD != 0.12 || day.Turns != 1 {
+		t.Errorf("totals = cost %v, turns %d", day.CostUSD, day.Turns)
+	}
+	if len(day.Models) != 1 || day.Models[0].Model != "claude-opus" || len(day.Harnesses) != 1 || day.Harnesses[0].Harness != "claude" {
+		t.Errorf("breakdowns = models %#v, harnesses %#v", day.Models, day.Harnesses)
+	}
+	if len(day.Repos) != 2 || day.Repos[0].Repo != "caic" || day.Repos[1].Repo != "sdk" {
+		t.Errorf("repos = %#v", day.Repos)
+	}
+	if len(day.Skills) != 1 || day.Skills[0] != (v1.UsageDashboardCount{Name: "review", Count: 2}) {
+		t.Errorf("skills = %#v", day.Skills)
+	}
+}
+
 func BenchmarkUsageHandlersHandleEvents(b *testing.B) {
 	s := newTestRouter(b, nil)
 	s.usageHandlers.fetchers = []usage.ProviderFetcher{&staticUsageFetcher{quota: usage.ProviderQuota{
@@ -152,6 +209,26 @@ func BenchmarkUsageHandlersHandleEvents(b *testing.B) {
 		s.usageHandlers.handleEvents(writer, httptest.NewRequestWithContext(ctx, "GET", "/usage/events", nil))
 		if writer.eventsWritten() != 1 {
 			b.Fatalf("usage events = %d, want 1", writer.eventsWritten())
+		}
+	}
+}
+
+func BenchmarkUsageHandlersHandleGetDashboard(b *testing.B) {
+	s := newTestRouter(b, nil)
+	s.usageHandlers.rollup.Observe(usagedb.TaskMeta{TaskID: ksid.NewID(), Harness: "claude", Repos: []string{"caic"}}, &usagedb.Event{
+		At:           time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC),
+		Model:        "claude-opus",
+		TurnBoundary: true,
+		Delta:        usagedb.Delta{TokenBuckets: usagedb.TokenBuckets{Input: 100, Output: 50}, Turns: 1},
+	})
+	h := s.buildAPIHandler()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/usage/dashboard", nil))
+		if w.Code != http.StatusOK {
+			b.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 	}
 }

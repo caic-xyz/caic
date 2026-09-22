@@ -278,6 +278,10 @@ public final class ApiClient {
     public func getUsage() async throws -> UsageResp {
         try await request("GET", path: "/api/caic/v1/usage")
     }
+    /// Returns daily cross-task usage rollups for the usage dashboard.
+    public func getUsageDashboard() async throws -> UsageDashboardResp {
+        try await request("GET", path: "/api/caic/v1/usage/dashboard")
+    }
     /// Fetches a URL and returns its text content.
     public func webFetch(req: WebFetchReq) async throws -> WebFetchResp {
         try await request("POST", path: "/api/caic/v1/web/fetch", body: try encoder.encode(req))

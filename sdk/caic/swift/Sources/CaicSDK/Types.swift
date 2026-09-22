@@ -1883,6 +1883,76 @@ public struct UsageResp: Codable {
     public let local: LocalUsage
 }
 
+/// UsageDashboardTokens separates usage totals by their prompt-cache bucket.
+/// Input, cache writes, and cache reads are disjoint; their sum is the full
+/// prompt context consumed by the model.
+public struct UsageDashboardTokens: Codable {
+    public let inputTokens: Int
+    public let cacheWrite5mTokens: Int
+    public let cacheWrite1hTokens: Int
+    public let cacheReadTokens: Int
+    public let outputTokens: Int
+    public let reasoningTokens: Int
+}
+
+/// UsageDashboardModel is one model's totals within a UTC day.
+public struct UsageDashboardModel: Codable {
+    public let model: String
+    public let tokens: UsageDashboardTokens
+    public let turns: Int
+    public let costUSD: Double
+    public let contextWindow: Int
+}
+
+/// UsageDashboardHarness is one coding harness's totals within a UTC day.
+public struct UsageDashboardHarness: Codable {
+    public let harness: String
+    public let tokens: UsageDashboardTokens
+    public let turns: Int
+    public let costUSD: Double
+}
+
+/// UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+/// Tasks is the number of distinct tasks that touched the repository.
+public struct UsageDashboardRepo: Codable {
+    public let repo: String
+    public let tasks: Int
+}
+
+/// UsageDashboardCount is a named counter such as a skill read or tool call.
+public struct UsageDashboardCount: Codable {
+    public let name: String
+    public let count: Int
+}
+
+/// UsageDashboardDay is the complete daily usage snapshot from the durable
+/// cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
+public struct UsageDashboardDay: Codable {
+    public let day: String
+    public let tokens: UsageDashboardTokens
+    public let turns: Int
+    public let erroredTurns: Int
+    public let apiMs: Int
+    public let wallMs: Int
+    public let compactions: Int
+    public let subagentSpawns: Int
+    public let subagentSpawnsBackground: Int
+    public let costUSD: Double
+    public let models: [UsageDashboardModel]
+    public let harnesses: [UsageDashboardHarness]
+    public let repos: [UsageDashboardRepo]
+    public let skills: [UsageDashboardCount]
+    public let tools: [UsageDashboardCount]
+}
+
+/// UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.
+/// DataSince is the first UTC day with retained usage, or empty when no usage
+/// has been recorded yet.
+public struct UsageDashboardResp: Codable {
+    public let dataSince: String?
+    public let days: [UsageDashboardDay]
+}
+
 /// WebFetchReq is the request body for POST /api/caic/v1/web/fetch.
 public struct WebFetchReq: Codable {
     public let url: String

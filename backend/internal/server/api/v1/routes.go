@@ -411,6 +411,13 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[UsageResp](),
 	},
 	{
+		Name:   "getUsageDashboard",
+		Doc:    "Returns daily cross-task usage rollups for the usage dashboard.",
+		Method: "GET",
+		Path:   "/api/caic/v1/usage/dashboard",
+		Resp:   reflect.TypeFor[UsageDashboardResp](),
+	},
+	{
 		Name:   "webFetch",
 		Doc:    "Fetches a URL and returns its text content.",
 		Method: "POST",

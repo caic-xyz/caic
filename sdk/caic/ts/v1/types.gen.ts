@@ -1749,6 +1749,84 @@ export interface UsageResp {
   local: LocalUsage;
 }
 
+/**
+ * UsageDashboardTokens separates usage totals by their prompt-cache bucket.
+ * Input, cache writes, and cache reads are disjoint; their sum is the full
+ * prompt context consumed by the model.
+ */
+export interface UsageDashboardTokens {
+  inputTokens: number /* int64 */;
+  cacheWrite5mTokens: number /* int64 */;
+  cacheWrite1hTokens: number /* int64 */;
+  cacheReadTokens: number /* int64 */;
+  outputTokens: number /* int64 */;
+  reasoningTokens: number /* int64 */;
+}
+
+/** UsageDashboardModel is one model's totals within a UTC day. */
+export interface UsageDashboardModel {
+  model: string;
+  tokens: UsageDashboardTokens;
+  turns: number /* int */;
+  costUSD: number /* float64 */;
+  contextWindow: number /* int */;
+}
+
+/** UsageDashboardHarness is one coding harness's totals within a UTC day. */
+export interface UsageDashboardHarness {
+  harness: string;
+  tokens: UsageDashboardTokens;
+  turns: number /* int */;
+  costUSD: number /* float64 */;
+}
+
+/**
+ * UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+ * Tasks is the number of distinct tasks that touched the repository.
+ */
+export interface UsageDashboardRepo {
+  repo: string;
+  tasks: number /* int */;
+}
+
+/** UsageDashboardCount is a named counter such as a skill read or tool call. */
+export interface UsageDashboardCount {
+  name: string;
+  count: number /* int */;
+}
+
+/**
+ * UsageDashboardDay is the complete daily usage snapshot from the durable
+ * cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
+ */
+export interface UsageDashboardDay {
+  day: string;
+  tokens: UsageDashboardTokens;
+  turns: number /* int */;
+  erroredTurns: number /* int */;
+  apiMs: number /* int64 */;
+  wallMs: number /* int64 */;
+  compactions: number /* int */;
+  subagentSpawns: number /* int */;
+  subagentSpawnsBackground: number /* int */;
+  costUSD: number /* float64 */;
+  models: UsageDashboardModel[];
+  harnesses: UsageDashboardHarness[];
+  repos: UsageDashboardRepo[];
+  skills: UsageDashboardCount[];
+  tools: UsageDashboardCount[];
+}
+
+/**
+ * UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.
+ * DataSince is the first UTC day with retained usage, or empty when no usage
+ * has been recorded yet.
+ */
+export interface UsageDashboardResp {
+  dataSince?: string;
+  days: UsageDashboardDay[];
+}
+
 /** WebFetchReq is the request body for POST /api/caic/v1/web/fetch. */
 export interface WebFetchReq {
   url: string;

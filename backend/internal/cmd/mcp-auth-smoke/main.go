@@ -31,6 +31,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -190,6 +191,10 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}
+	usageRollup, err := usagedb.New(usagedb.Config{Log: stateLog, Dir: filepath.Join(stateDir, "usagedb")})
+	if err != nil {
+		return "", "", nil, fmt.Errorf("usage rollup: %w", err)
+	}
 	prefs, err := preferences.Open(filepath.Join(stateDir, "preferences.json"))
 	if err != nil {
 		return "", "", nil, err
@@ -218,6 +223,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		Warnings:      server.NewWarningStore(taskMgr),
 		CacheSizes:    server.NewCacheSizeStore(slog.New(slog.NewTextHandler(os.Stderr, nil))),
 		Metrics:       metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		UsageRollup:   usageRollup,
 		AuthStore:     store,
 		SessionSecret: secret,
 	})
@@ -238,6 +244,9 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		cancel()
 		if err := <-done; err != nil {
 			slog.WarnContext(ctx, "mcp auth smoke server shutdown", "err", err)
+		}
+		if err := usageRollup.Close(); err != nil {
+			slog.WarnContext(ctx, "mcp auth smoke usage rollup shutdown", "err", err)
 		}
 	}
 	return "http://" + ln.Addr().String(), session, shutdown, nil

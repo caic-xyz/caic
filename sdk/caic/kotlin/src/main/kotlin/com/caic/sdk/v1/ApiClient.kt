@@ -171,6 +171,8 @@ class ApiClient(
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID")
     /** Returns current usage quota statistics. */
     suspend fun getUsage(): UsageResp = request("GET", "/api/caic/v1/usage")
+    /** Returns daily cross-task usage rollups for the usage dashboard. */
+    suspend fun getUsageDashboard(): UsageDashboardResp = request("GET", "/api/caic/v1/usage/dashboard")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
 

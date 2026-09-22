@@ -30,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/metrics"
@@ -117,6 +118,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	if d.Metrics == nil {
 		return nil, errors.New("metrics store is required")
 	}
+	if d.UsageRollup == nil {
+		return nil, errors.New("usage rollup is required")
+	}
 	log = log.With("cmp", "server")
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	voiceMetadata := voice.metadata()
@@ -202,7 +206,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			warnings:   d.Warnings,
 			taskSvc:    svc,
 		},
-		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
+		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, rollup: d.UsageRollup, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
 		voiceHandlers:    voice,
 		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,
@@ -574,6 +578,7 @@ type Dependencies struct {
 	GoogleOAuth                *oauthclient.ProviderConfig
 	HostState                  *auth.HostState
 	UsageFetchers              []usage.ProviderFetcher
+	UsageRollup                *usagedb.Store
 	VoiceBridge                *voicertc.Bridge
 	VoiceGateway               VoiceGatewayConfig
 	ForgeMgr                   *forgemgr.Manager

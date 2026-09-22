@@ -506,6 +506,7 @@ func minimalRouter(t *testing.T) *testRouter {
 		Warnings:    NewWarningStore(taskMgr),
 		CacheSizes:  NewCacheSizeStore(testLogger()),
 		Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		UsageRollup: newTestUsageRollup(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

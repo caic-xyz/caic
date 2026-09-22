@@ -50,5 +50,6 @@ export const {
   globalTaskEvents,
   globalUsageEvents,
   getUsage,
+  getUsageDashboard,
   webFetch,
 } = api;

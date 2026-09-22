@@ -86,6 +86,7 @@ Type notation: `JSONValue` means any valid JSON value.
 |--------|------|-------------|---------|----------|
 | GET | `/api/caic/v1/usage/events` | Streams usage quota updates via SSE. |  | `UsageResp` SSE |
 | GET | `/api/caic/v1/usage` | Returns current usage quota statistics. |  | `UsageResp` |
+| GET | `/api/caic/v1/usage/dashboard` | Returns daily cross-task usage rollups for the usage dashboard. |  | `UsageDashboardResp` |
 
 ## Web
 
@@ -1892,6 +1893,97 @@ UsageResp is the response for GET /api/caic/v1/usage.
 |-------|------|-------------|----------|
 | `providers` | `ProviderQuota[]` |  |  |
 | `local` | `LocalUsage` |  | yes |
+
+### UsageDashboardTokens
+
+UsageDashboardTokens separates usage totals by their prompt-cache bucket.
+Input, cache writes, and cache reads are disjoint; their sum is the full
+prompt context consumed by the model.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `inputTokens` | `int64` |  | yes |
+| `cacheWrite5mTokens` | `int64` |  | yes |
+| `cacheWrite1hTokens` | `int64` |  | yes |
+| `cacheReadTokens` | `int64` |  | yes |
+| `outputTokens` | `int64` |  | yes |
+| `reasoningTokens` | `int64` |  | yes |
+
+### UsageDashboardModel
+
+UsageDashboardModel is one model's totals within a UTC day.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `model` | `string` |  | yes |
+| `tokens` | `UsageDashboardTokens` |  | yes |
+| `turns` | `int` |  | yes |
+| `costUSD` | `float64` |  | yes |
+| `contextWindow` | `int` |  | yes |
+
+### UsageDashboardHarness
+
+UsageDashboardHarness is one coding harness's totals within a UTC day.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `harness` | `string` |  | yes |
+| `tokens` | `UsageDashboardTokens` |  | yes |
+| `turns` | `int` |  | yes |
+| `costUSD` | `float64` |  | yes |
+
+### UsageDashboardRepo
+
+UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+Tasks is the number of distinct tasks that touched the repository.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repo` | `string` |  | yes |
+| `tasks` | `int` |  | yes |
+
+### UsageDashboardCount
+
+UsageDashboardCount is a named counter such as a skill read or tool call.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `count` | `int` |  | yes |
+
+### UsageDashboardDay
+
+UsageDashboardDay is the complete daily usage snapshot from the durable
+cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `day` | `string` |  | yes |
+| `tokens` | `UsageDashboardTokens` |  | yes |
+| `turns` | `int` |  | yes |
+| `erroredTurns` | `int` |  | yes |
+| `apiMs` | `int64` |  | yes |
+| `wallMs` | `int64` |  | yes |
+| `compactions` | `int` |  | yes |
+| `subagentSpawns` | `int` |  | yes |
+| `subagentSpawnsBackground` | `int` |  | yes |
+| `costUSD` | `float64` |  | yes |
+| `models` | `UsageDashboardModel[]` |  | yes |
+| `harnesses` | `UsageDashboardHarness[]` |  | yes |
+| `repos` | `UsageDashboardRepo[]` |  | yes |
+| `skills` | `UsageDashboardCount[]` |  | yes |
+| `tools` | `UsageDashboardCount[]` |  | yes |
+
+### UsageDashboardResp
+
+UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.
+DataSince is the first UTC day with retained usage, or empty when no usage
+has been recorded yet.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `dataSince` | `string` |  |  |
+| `days` | `UsageDashboardDay[]` |  | yes |
 
 ### WebFetchReq
 

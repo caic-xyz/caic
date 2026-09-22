@@ -44,6 +44,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/gomode"
 	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/metrics"
@@ -189,6 +190,19 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
+func newTestUsageRollup(t testing.TB) *usagedb.Store {
+	rollup, err := usagedb.New(usagedb.Config{Log: testLogger(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("usagedb.New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := rollup.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return rollup
+}
+
 func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -212,6 +226,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 		Warnings:     NewWarningStore(taskMgr),
 		CacheSizes:   NewCacheSizeStore(testLogger()),
 		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		UsageRollup:  newTestUsageRollup(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -245,6 +260,7 @@ func newTestRouterWithAuthHost(t testing.TB, authStore *auth.Store, refreshToken
 		Warnings:                   NewWarningStore(taskMgr),
 		CacheSizes:                 NewCacheSizeStore(testLogger()),
 		Metrics:                    metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		UsageRollup:                newTestUsageRollup(t),
 		AuthStore:                  authStore,
 		OAuthPrivateKeyPEM:         testMCPOAuthSigningKeyPEM(t),
 		OAuthIssuer:                "https://caic.example.com",
@@ -285,6 +301,7 @@ func TestNew(t *testing.T) {
 			Warnings:    NewWarningStore(taskMgr),
 			CacheSizes:  NewCacheSizeStore(testLogger()),
 			Metrics:     metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+			UsageRollup: newTestUsageRollup(t),
 		}
 	}
 
@@ -576,6 +593,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 		Warnings:     NewWarningStore(taskMgr),
 		CacheSizes:   NewCacheSizeStore(testLogger()),
 		Metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		UsageRollup:  newTestUsageRollup(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

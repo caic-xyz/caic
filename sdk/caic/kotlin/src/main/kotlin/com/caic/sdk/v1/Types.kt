@@ -2497,6 +2497,82 @@ data class LocalUsage(val windows: List<LocalWindow>)
 @Serializable
 data class UsageResp(val providers: List<ProviderQuota>? = null, val local: LocalUsage)
 
+/**
+ * UsageDashboardTokens separates usage totals by their prompt-cache bucket.
+ * Input, cache writes, and cache reads are disjoint; their sum is the full
+ * prompt context consumed by the model.
+ */
+@Serializable
+data class UsageDashboardTokens(
+    val inputTokens: Long,
+    val cacheWrite5mTokens: Long,
+    val cacheWrite1hTokens: Long,
+    val cacheReadTokens: Long,
+    val outputTokens: Long,
+    val reasoningTokens: Long,
+)
+
+/** UsageDashboardModel is one model's totals within a UTC day. */
+@Serializable
+data class UsageDashboardModel(
+    val model: String,
+    val tokens: UsageDashboardTokens,
+    val turns: Int,
+    @SerialName("costUSD") val costUSD: Double,
+    val contextWindow: Int,
+)
+
+/** UsageDashboardHarness is one coding harness's totals within a UTC day. */
+@Serializable
+data class UsageDashboardHarness(
+    val harness: String,
+    val tokens: UsageDashboardTokens,
+    val turns: Int,
+    @SerialName("costUSD") val costUSD: Double,
+)
+
+/**
+ * UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+ * Tasks is the number of distinct tasks that touched the repository.
+ */
+@Serializable
+data class UsageDashboardRepo(val repo: String, val tasks: Int)
+
+/** UsageDashboardCount is a named counter such as a skill read or tool call. */
+@Serializable
+data class UsageDashboardCount(val name: String, val count: Int)
+
+/**
+ * UsageDashboardDay is the complete daily usage snapshot from the durable
+ * cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
+ */
+@Serializable
+data class UsageDashboardDay(
+    val day: String,
+    val tokens: UsageDashboardTokens,
+    val turns: Int,
+    val erroredTurns: Int,
+    val apiMs: Long,
+    val wallMs: Long,
+    val compactions: Int,
+    val subagentSpawns: Int,
+    val subagentSpawnsBackground: Int,
+    @SerialName("costUSD") val costUSD: Double,
+    val models: List<UsageDashboardModel>,
+    val harnesses: List<UsageDashboardHarness>,
+    val repos: List<UsageDashboardRepo>,
+    val skills: List<UsageDashboardCount>,
+    val tools: List<UsageDashboardCount>,
+)
+
+/**
+ * UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.
+ * DataSince is the first UTC day with retained usage, or empty when no usage
+ * has been recorded yet.
+ */
+@Serializable
+data class UsageDashboardResp(val dataSince: String? = null, val days: List<UsageDashboardDay>)
+
 /** WebFetchReq is the request body for POST /api/caic/v1/web/fetch. */
 @Serializable
 data class WebFetchReq(val url: String)

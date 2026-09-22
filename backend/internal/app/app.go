@@ -327,6 +327,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		GoogleOAuth:                googleOAuth,
 		HostState:                  hostState,
 		UsageFetchers:              fetchers,
+		UsageRollup:                usageRollup,
 		VoiceBridge:                voiceBridge,
 		VoiceGateway:               cfg.Voice.Gateway,
 		ForgeMgr:                   forgeManager,

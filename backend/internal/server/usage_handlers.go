@@ -18,11 +18,13 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
 type usageHandlers struct {
 	log          *slog.Logger
 	taskMgr      *taskmgr.Manager
+	rollup       *usagedb.Store
 	fetchers     []usage.ProviderFetcher
 	quotaTracker *usage.Tracker
 }
@@ -76,6 +78,17 @@ func (h *usageHandlers) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.log.WarnContext(r.Context(), "encode usage response", "err", err)
+	}
+}
+
+// handleGetDashboard returns daily usage from the in-memory rollup snapshot.
+// It intentionally never reads task logs: the rollup is the one cross-task
+// aggregation surface.
+func (h *usageHandlers) handleGetDashboard(w http.ResponseWriter, r *http.Request) {
+	resp := apiconv.UsageDashboard(h.rollup.Days())
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.log.WarnContext(r.Context(), "encode usage dashboard response", "err", err)
 	}
 }
 
@@ -135,6 +148,7 @@ func localUsage(mgr *taskmgr.Manager, now time.Time) v1.LocalUsage {
 func (h *usageHandlers) routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /usage", h.handleGetUsage)
+	m.HandleFunc("GET /usage/dashboard", h.handleGetDashboard)
 	m.HandleFunc("GET /usage/events", h.handleEvents)
 	return m
 }

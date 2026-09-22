@@ -33,7 +33,8 @@ Plan-level constraints:
 - **Depends on:** usage-dashboard-api
 - **Scope:** `frontend/src` (new route in `routes.tsx`, page component,
   chart components reusing `StatsCharts` patterns), e2e coverage, and a
-  day-range selector, provider quota panel, and data-since indicator.
+  day-range selector and data-since indicator. Provider quota snapshots are
+  intentionally excluded from this dashboard.
 - **Preserve:** per-task `/task/:id/stats` stays as-is; styling follows
   `lint_frontend_styles` token rules; the dashboard is reachable without
   touching Settings.

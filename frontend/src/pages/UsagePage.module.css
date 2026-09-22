@@ -1,0 +1,194 @@
+/* Styles for the cross-task usage dashboard. */
+
+.page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.25rem 0 2rem;
+  overflow: auto;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.header p,
+.panel p,
+.meta,
+.empty,
+.noRows {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.header p,
+.panel p {
+  margin: 0.25rem 0 0;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.controlLabel {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.controls select {
+  min-height: 2rem;
+  padding: 0.25rem 0.45rem;
+  font: inherit;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.meta,
+.error,
+.empty {
+  margin: 0.75rem 0;
+}
+
+.error {
+  font-size: 0.85rem;
+  color: var(--color-error);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.metrics div,
+.panel {
+  padding: 0.75rem;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+}
+
+.metrics span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.metrics strong {
+  display: block;
+  margin-top: 0.1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lowerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.panel {
+  min-width: 0;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+
+.tableWrap {
+  margin-top: 0.65rem;
+  overflow-x: auto;
+}
+
+.tableWrap:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
+.table {
+  width: 100%;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.35rem;
+  text-align: right;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.table thead th {
+  color: var(--color-text-muted);
+}
+
+.table th:first-child,
+.table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.countList {
+  padding: 0;
+  margin: 0.65rem 0 0;
+  list-style: none;
+}
+
+.countList li {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.countList li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.countList strong {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (width <= 700px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lowerGrid {
+    grid-template-columns: 1fr;
+  }
+}
