@@ -350,8 +350,10 @@ func TestMCPHandlers(t *testing.T) {
 			"one or two short sentences",
 			"Never ask a follow-up or confirmation",
 			"Do not volunteer ideas, next steps, related actions, or offers",
-			"Notify the user only when an agent enters the waiting or asking state",
+			"Notify the user only when an agent enters the waiting, asking, failed, or crashed state",
 			"Do not notify on any other state transition",
+			"call task_get_detail and state its Error exactly",
+			"never call it an unknown error or invent a cause",
 		} {
 			if !strings.Contains(instructions, want) {
 				t.Errorf("instructions missing %q: %q", want, instructions)
