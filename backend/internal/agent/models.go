@@ -1,4 +1,4 @@
-// Model list sorting: blacklist filtering, then latest version per family deduplication.
+// Model list sorting: blacklist filtering, then variant-aware latest-version deduplication.
 
 package agent
 
@@ -34,7 +34,7 @@ var modelBlacklist = []string{
 	"openrouter/upstage/",
 }
 
-var modelVersionRegex = regexp.MustCompile(`(\D+)([0-9.]+)`)
+var modelVersionRegex = regexp.MustCompile(`^(\D+)(\d+(?:\.\d+)*)(.*)$`)
 
 // modelEntry holds the parsed information for a single model during sorting.
 type modelEntry struct {
@@ -45,8 +45,8 @@ type modelEntry struct {
 }
 
 // SortModels returns models with version deduplication: only the latest
-// version per family key is kept. Models matching a modelBlacklist prefix
-// are dropped. Models without parseable versions are preserved as-is.
+// version of each named variant is kept. Models matching a modelBlacklist
+// prefix are dropped. Models without parseable versions are preserved as-is.
 // Output is sorted alphabetically.
 //
 // The input slice is copied first so the caller's backing array is not
@@ -93,9 +93,11 @@ func SortModels(models []string) []string {
 	return out
 }
 
-// parseModelVersion extracts the effective provider, family key, and version
-// number from a model ID. For aggregator paths like "openrouter/x-ai/grok-4",
-// the second segment is treated as the provider.
+// parseModelVersion extracts the effective provider, variant-aware family key,
+// and version number from a model ID. A suffix following the version identifies
+// a distinct model variant, so gpt-5.6-sol and gpt-6-astra do not supersede one
+// another. For aggregator paths like "openrouter/x-ai/grok-4", the second
+// segment is treated as the provider.
 func parseModelVersion(id string) (provider, key string, version float64, ok bool) {
 	provider, name, ok0 := strings.Cut(id, "/")
 	if !ok0 {
@@ -109,13 +111,14 @@ func parseModelVersion(id string) (provider, key string, version float64, ok boo
 	}
 
 	matches := modelVersionRegex.FindStringSubmatch(name)
-	if len(matches) == 3 {
-		modelName := matches[1]
+	if len(matches) == 4 {
+		modelPrefix := matches[1]
 		versionStr := matches[2]
+		variant := matches[3]
 
 		ver, err := strconv.ParseFloat(versionStr, 64)
 		if err == nil && ver > 0 {
-			return provider, provider + "/" + modelName + "*", ver, true
+			return provider, provider + "/" + modelPrefix + "*" + variant, ver, true
 		}
 	}
 	return provider, id, 0, false

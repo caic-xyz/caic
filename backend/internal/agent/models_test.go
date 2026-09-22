@@ -34,6 +34,23 @@ func TestSortModels(t *testing.T) {
 		}
 	})
 
+	t.Run("keeps separately named model variants", func(t *testing.T) {
+		t.Parallel()
+		input := []string{
+			"openai-codex/gpt-5.5-sol",
+			"openai-codex/gpt-5.6-sol",
+			"openai-codex/gpt-6-astra",
+		}
+		got := SortModels(input)
+		want := []string{
+			"openai-codex/gpt-5.6-sol",
+			"openai-codex/gpt-6-astra",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("got  %v\nwant %v", got, want)
+		}
+	})
+
 	t.Run("blacklist", func(t *testing.T) {
 		t.Parallel()
 		input := []string{
@@ -95,14 +112,15 @@ func TestParseModelVersion(t *testing.T) {
 			wantVer  float64
 			wantOK   bool
 		}{
-			{"openai/gpt-5.3-codex", "openai", "openai/gpt-*", 5.3, true},
+			{"openai/gpt-5.3-codex", "openai", "openai/gpt-*-codex", 5.3, true},
 			{"anthropic/claude-opus-4.6", "anthropic", "anthropic/claude-opus-*", 4.6, true},
-			{"google/gemini-3.1-pro-preview", "google", "google/gemini-*", 3.1, true},
+			{"google/gemini-3.1-pro-preview", "google", "google/gemini-*-pro-preview", 3.1, true},
 			{"mistralai/devstral-2512", "mistralai", "mistralai/devstral-*", 2512, true},
 			{"mistralai/devstral-medium", "mistralai", "mistralai/devstral-medium", 0, false},
 			{"noprefix", "", "noprefix", 0, false},
 			{"openrouter/x-ai/grok-4.3", "x-ai", "x-ai/grok-*", 4.3, true},
 			{"openrouter/anthropic/claude-opus-4.6", "anthropic", "anthropic/claude-opus-*", 4.6, true},
+			{"openai-codex/gpt-5.6-sol", "openai-codex", "openai-codex/gpt-*-sol", 5.6, true},
 		}
 		for _, tt := range tests {
 			prov, key, ver, ok := parseModelVersion(tt.id)
