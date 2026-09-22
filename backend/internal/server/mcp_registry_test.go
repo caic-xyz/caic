@@ -574,7 +574,7 @@ func TestMCPResultBounds(t *testing.T) {
 		tk.SetTitle(strings.Repeat("€", maxMCPTaskTitle))
 		insertTestTask(s, id.String(), tk)
 		registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
-		keys := []mcpResourceKey{{URI: "caic://tasks/" + id.String(), Kind: mcpResourceTask, Value: id.String()}}
+		keys := []mcpResourceKey{{URI: "caic://tasks/" + id.String(), Kind: mcpResourceTask, TaskID: id}}
 		var yielded bool
 		for resource, err := range registry.resourceDescriptors(t.Context(), keys) {
 			yielded = true

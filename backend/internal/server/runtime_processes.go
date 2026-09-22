@@ -18,10 +18,10 @@ import (
 
 // runtimeProcessHandlers handles task runtime process routes.
 type runtimeProcessHandlers struct {
-	log         *slog.Logger
-	taskMgr     *taskmgr.Manager
-	runtimes    *runtime.Router
-	authEnabled bool
+	log       *slog.Logger
+	taskMgr   *taskmgr.Manager
+	runtimes  *runtime.Router
+	authStore *auth.Store
 }
 
 // HandleGetProcesses returns the list of running processes inside a task runtime instance.
@@ -85,19 +85,7 @@ func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskm
 }
 
 func (h *runtimeProcessHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
-	id := r.PathValue("id")
-	entry, ok := h.taskMgr.GetEntry(id)
-	if !ok {
-		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
-	}
-	if h.authEnabled {
-		if u, ok := auth.UserFromContext(r.Context()); ok {
-			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
-				return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}
-			}
-		}
-	}
-	return entry, nil
+	return taskEntryFromRequest(r, h.taskMgr, h.authStore)
 }
 
 // routes returns the handler for task runtime process inspection and signaling.

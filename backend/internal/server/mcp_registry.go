@@ -259,10 +259,14 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		}
 		return result, err
 	case strings.HasPrefix(uri, "caic://tasks/"):
-		id := strings.TrimPrefix(uri, "caic://tasks/")
+		rawID := strings.TrimPrefix(uri, "caic://tasks/")
+		id, err := ksid.Parse(rawID)
+		if err != nil {
+			return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", rawID)
+		}
 		entry, ok := m.visibleTaskEntry(ctx, id)
 		if !ok {
-			return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", id)
+			return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", rawID)
 		}
 		task, err := taskDTO(ctx, entry, m.taskSvc.taskMgr, m.taskSvc.checkouts, m.taskSvc.authStore)
 		if err != nil {
@@ -776,8 +780,6 @@ func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskGetDe
 	var t v1.Task
 	if number != 0 {
 		t, err = m.taskByNumber(ctx, number)
-	} else if _, taskScoped := taskMCPTaskID(ctx); taskScoped {
-		t, err = m.globalTaskByID(ctx, id)
 	} else {
 		t, err = m.taskByID(ctx, id)
 	}
@@ -1192,22 +1194,12 @@ func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *taskmgr
 	if num < 1 || num > len(keys) {
 		return 0, nil, false
 	}
-	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID.String())
+	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID)
 	return num, entry, ok
 }
 
 func (m *mcpRegistry) taskByID(ctx context.Context, id ksid.ID) (v1.Task, error) {
-	entry, ok := m.visibleTaskEntry(ctx, id.String())
-	if !ok {
-		return v1.Task{}, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
-	}
-	return m.taskDTO(ctx, entry)
-}
-
-// globalTaskByID resolves the task-scoped task_get_detail exception that
-// permits stable IDs for all tasks, rather than only visible child tasks.
-func (m *mcpRegistry) globalTaskByID(ctx context.Context, id ksid.ID) (v1.Task, error) {
-	entry, ok := m.taskSvc.taskMgr.GetEntry(id.String())
+	entry, ok := m.inspectableTaskEntry(ctx, id)
 	if !ok {
 		return v1.Task{}, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
 	}
@@ -1240,7 +1232,7 @@ func (m *mcpRegistry) taskScopedEntryByNumber(ctx context.Context, num int, allo
 	if num > len(keys) {
 		return num, nil, false
 	}
-	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID.String())
+	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID)
 	return num, entry, ok
 }
 
@@ -1328,8 +1320,7 @@ func (m *mcpRegistry) resourceKeys(ctx context.Context) ([]mcpResourceKey, error
 	if mcpHasScope(ctx, mcpScopeTasksRead) || taskScoped {
 		taskKeys, _ := m.taskKeys(ctx)
 		for _, taskKey := range taskKeys {
-			taskID := taskKey.ID.String()
-			keys = append(keys, mcpResourceKey{URI: "caic://tasks/" + taskID, Kind: mcpResourceTask, Value: taskID})
+			keys = append(keys, mcpResourceKey{URI: "caic://tasks/" + taskKey.ID.String(), Kind: mcpResourceTask, TaskID: taskKey.ID})
 		}
 	}
 	slices.SortFunc(keys, func(a, b mcpResourceKey) int { return strings.Compare(a.URI, b.URI) })
@@ -1352,7 +1343,7 @@ func (m *mcpRegistry) resourceDescriptors(ctx context.Context, keys []mcpResourc
 			case mcpResourceRepo:
 				resource = mcp.ResourceDescriptor{URI: key.URI, Name: "repo " + key.Value, Title: key.Value, MimeType: "application/json"}
 			case mcpResourceTask:
-				entry, ok := m.visibleTaskEntry(ctx, key.Value)
+				entry, ok := m.visibleTaskEntry(ctx, key.TaskID)
 				if !ok {
 					yield(mcp.ResourceDescriptor{}, errors.New("resource list changed while paging; restart without a cursor"))
 					return
@@ -1515,9 +1506,10 @@ const (
 )
 
 type mcpResourceKey struct {
-	URI   string
-	Value string
-	Kind  mcpResourceKind
+	URI    string
+	Value  string
+	TaskID ksid.ID
+	Kind   mcpResourceKind
 }
 
 func paginateMCPResourceKeys(keys []mcpResourceKey, cursor string) (page []mcpResourceKey, next string, err error) {
@@ -1729,38 +1721,36 @@ func (m *mcpRegistry) resourceJSON(ctx context.Context, uri string, value any) (
 	return result, err
 }
 
-// visibleTaskEntry resolves a task only when it is visible in the MCP context.
-func (m *mcpRegistry) visibleTaskEntry(ctx context.Context, id string) (*taskmgr.Entry, bool) {
-	entry, ok := m.taskSvc.taskMgr.GetEntry(id)
+// visibleTaskEntry resolves a task only when ordinary task access permits it.
+func (m *mcpRegistry) visibleTaskEntry(ctx context.Context, id ksid.ID) (*taskmgr.Entry, bool) {
+	entry, ok := m.taskSvc.taskMgr.GetEntry(id.String())
 	if !ok {
 		return nil, false
 	}
-	if !m.taskVisibleToMCP(ctx, entry.Task()) {
+	if !taskAccessFromContext(ctx, m.taskSvc.authStore).canAccess(entry.Task()) {
 		return nil, false
 	}
 	return entry, true
 }
 
-// taskVisibleToMCP applies the task visibility policy shared by task lists and
-// visible task lookups. Task-scoped clients currently see direct children only;
-// changing this method can deliberately extend that relation to descendants.
-func (m *mcpRegistry) taskVisibleToMCP(ctx context.Context, t *taskpkg.Task) bool {
-	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
-	if taskScoped && t.ParentTaskID != delegatingTaskID {
-		return false
+// inspectableTaskEntry resolves a task when its stable ID can be inspected.
+func (m *mcpRegistry) inspectableTaskEntry(ctx context.Context, id ksid.ID) (*taskmgr.Entry, bool) {
+	entry, ok := m.taskSvc.taskMgr.GetEntry(id.String())
+	if !ok {
+		return nil, false
 	}
-	if m.taskSvc.authStore == nil {
-		return true
+	if !taskAccessFromContext(ctx, m.taskSvc.authStore).canInspect(entry.Task()) {
+		return nil, false
 	}
-	user, ok := auth.UserFromContext(ctx)
-	return !ok || t.OwnerID == "" || t.OwnerID == user.ID
+	return entry, true
 }
 
 func (m *mcpRegistry) taskKeys(ctx context.Context) (keys []mcpTaskKey, revision string) {
+	access := taskAccessFromContext(ctx, m.taskSvc.authStore)
 	keys = make([]mcpTaskKey, 0)
 	for _, entry := range m.taskSvc.taskMgr.Entries() {
 		task := entry.Task()
-		if !m.taskVisibleToMCP(ctx, task) {
+		if !access.canAccess(task) {
 			continue
 		}
 		state, err := apiconv.TaskState(task.GetState())
@@ -1796,7 +1786,7 @@ func (m *mcpRegistry) taskKeys(ctx context.Context) (keys []mcpTaskKey, revision
 func (m *mcpRegistry) taskSummaries(ctx context.Context, keys []mcpTaskKey, start int, revision string) ([]mcpTaskSummary, error) {
 	summaries := make([]mcpTaskSummary, len(keys))
 	for i, key := range keys {
-		entry, ok := m.taskSvc.taskMgr.GetEntry(key.ID.String())
+		entry, ok := m.visibleTaskEntry(ctx, key.ID)
 		if !ok {
 			return nil, errors.New("task ordering changed while listing")
 		}
@@ -1966,9 +1956,13 @@ func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, b
 }
 
 func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string, bool) {
-	if after, ok := strings.CutPrefix(uri, "caic://tasks/"); ok {
+	if rawID, ok := strings.CutPrefix(uri, "caic://tasks/"); ok {
+		id, err := ksid.Parse(rawID)
+		if err != nil {
+			return "task not found", false
+		}
 		if _, taskScoped := taskMCPTaskID(ctx); taskScoped {
-			if _, ok := m.visibleTaskEntry(ctx, after); !ok {
+			if _, ok := m.visibleTaskEntry(ctx, id); !ok {
 				return "task not found", false
 			}
 			return "allow", true
@@ -1976,7 +1970,7 @@ func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string
 		if !mcpHasScope(ctx, mcpScopeTasksRead) {
 			return "missing required MCP scope: " + mcpScopeTasksRead, false
 		}
-		if _, ok := m.visibleTaskEntry(ctx, after); !ok {
+		if _, ok := m.visibleTaskEntry(ctx, id); !ok {
 			return "task not found", false
 		}
 		return "allow", true
@@ -2073,8 +2067,6 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 
 func authorizeToolScope(ctx context.Context, name string) (string, bool) {
 	if _, ok := taskMCPTaskID(ctx); ok {
-		// TODO(task-mcp): Define task-to-task access policy. task_get_detail accepts
-		// global task IDs while task listing, resources, and controls stay child-scoped.
 		switch name {
 		case "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":
 			return "allow", true

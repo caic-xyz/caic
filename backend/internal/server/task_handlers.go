@@ -736,12 +736,8 @@ func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager, authStore *
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
-	if authStore != nil {
-		if u, ok := auth.UserFromContext(r.Context()); ok {
-			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
-				return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}
-			}
-		}
+	if !taskAccessFromContext(r.Context(), authStore).canAccess(entry.Task()) {
+		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}
 	}
 	return entry, nil
 }

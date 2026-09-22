@@ -168,10 +168,10 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		},
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
-			log:         log.With("handler", "runtime-processes"),
-			taskMgr:     d.TaskMgr,
-			runtimes:    d.Runtimes,
-			authEnabled: d.AuthStore != nil,
+			log:       log.With("handler", "runtime-processes"),
+			taskMgr:   d.TaskMgr,
+			runtimes:  d.Runtimes,
+			authStore: d.AuthStore,
 		},
 		serverHandlers: &serverHandlers{
 			log:                log.With("handler", "server"),

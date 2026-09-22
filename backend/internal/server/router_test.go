@@ -1442,10 +1442,9 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
-			log:         testLogger(),
-			taskMgr:     s.taskMgr,
-			runtimes:    newTestRuntime(t, backend),
-			authEnabled: false,
+			log:      testLogger(),
+			taskMgr:  s.taskMgr,
+			runtimes: newTestRuntime(t, backend),
 		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
@@ -1472,10 +1471,9 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(s, "t1", tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
-			log:         testLogger(),
-			taskMgr:     s.taskMgr,
-			runtimes:    newTestRuntime(t, backend),
-			authEnabled: false,
+			log:      testLogger(),
+			taskMgr:  s.taskMgr,
+			runtimes: newTestRuntime(t, backend),
 		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)
