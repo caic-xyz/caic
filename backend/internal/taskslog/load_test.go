@@ -28,9 +28,9 @@ func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
-		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return claudecode.New().NewWire().ParseMessage, nil
-		})
+		}))
 	}
 }
 
@@ -817,7 +817,7 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 		t.Fatalf("loaded tasks = %d, want 1", len(tasks))
 	}
 	var native [][]byte
-	if err := tasks[0].LoadMessagesWithResolver(func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+	if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
 		if h != harness.Claude {
 			return nil, fmt.Errorf("harness = %q, want %q", h, harness.Claude)
 		}
@@ -825,7 +825,7 @@ func TestV3DirectionalNativeLoad(t *testing.T) {
 			native = append(native, bytes.Clone(data))
 			return nil, nil
 		}, nil
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	if len(native) != 2 || string(native[0]) != input || string(native[1]) != output {
@@ -925,12 +925,13 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls := 0
-		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func([]byte) ([]agent.Message, error) {
 				calls++
 				return []agent.Message{&agent.TextMessage{Text: "message"}}, nil
 			}, nil
-		})
+		}))
+
 		for _, err := range tasks[0].StreamMessages(t.Context()) {
 			if err != nil {
 				t.Fatal(err)
@@ -996,9 +997,10 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		lt := tasks[0]
-		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
+		}))
+
 		var replayed []string
 		for parsed, err := range lt.StreamMessages(t.Context()) {
 			if err != nil {
@@ -1103,7 +1105,7 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		badParses := 0
-		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
@@ -1124,7 +1126,7 @@ func TestLoadedTask(t *testing.T) {
 					return nil, nil
 				}
 			}, nil
-		})
+		}))
 
 		var got []string
 		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
@@ -1176,7 +1178,7 @@ func TestLoadedTask(t *testing.T) {
 		if len(tasks) != 1 {
 			t.Fatalf("loaded tasks = %d, want 1", len(tasks))
 		}
-		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
@@ -1194,7 +1196,7 @@ func TestLoadedTask(t *testing.T) {
 					return nil, nil
 				}
 			}, nil
-		})
+		}))
 
 		var got []string
 		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
@@ -1236,7 +1238,7 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		badParses := 0
-		tasks[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		tasks[0].SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func(line []byte) ([]agent.Message, error) {
 				var record struct {
 					Kind string `json:"kind"`
@@ -1254,7 +1256,7 @@ func TestLoadedTask(t *testing.T) {
 				}
 				return nil, nil
 			}, nil
-		})
+		}))
 
 		var got string
 		for parsed, err := range tasks[0].BackwardMessages(t.Context()) {
@@ -1292,9 +1294,10 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 					return claudecode.New().NewWire().ParseMessage, nil
-				})
+				}))
+
 				var gotErr error
 				for _, err := range lt.StreamMessages(t.Context()) {
 					gotErr = errors.Join(gotErr, err)
@@ -1307,9 +1310,10 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, meta, message, mismatch)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 					return claudecode.New().NewWire().ParseMessage, nil
-				})
+				}))
+
 				var gotErr error
 				var messages int
 				for msg, err := range lt.StreamMessages(t.Context()) {
@@ -1329,9 +1333,10 @@ func TestLoadedTask(t *testing.T) {
 				t.Parallel()
 				path := writePhysicalTestLog(t, compressed, "", "  ", meta, message)
 				lt := &LoadedTask{path: path, Harness: harness.Claude}
-				lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+				lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 					return claudecode.New().NewWire().ParseMessage, nil
-				})
+				}))
+
 				var messages int
 				for msg, err := range lt.StreamMessages(t.Context()) {
 					if err != nil {
@@ -1372,9 +1377,10 @@ func TestLoadedTask(t *testing.T) {
 		native := `{"t":"agent","ts":1.000,"msg":{"kind":"empty"}}`
 		path := writePhysicalTestLog(t, false, meta, native, native)
 		loaded := &LoadedTask{path: path}
-		err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
+		}))
+
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1410,9 +1416,10 @@ func TestLoadedTask(t *testing.T) {
 			native,
 		)
 		loaded := &LoadedTask{path: path}
-		err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+		err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 			return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-		})
+		}))
+
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1464,9 +1471,10 @@ func TestLoadedTask(t *testing.T) {
 		t.Run("NoPath", func(t *testing.T) {
 			t.Parallel()
 			lt := &LoadedTask{}
-			lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				return claudecode.New().NewWire().ParseMessage, nil
-			})
+			}))
+
 			if err := lt.LoadMessages(); err != nil {
 				t.Fatal(err)
 			}
@@ -1542,7 +1550,7 @@ func TestExportDiscussionReadsPlainAndCompressedLogs(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			t.Parallel()
 			path := writePhysicalTestLog(t, compressed, meta, `{"type":"text","text":"visible"}`)
-			markdown, err := ExportDiscussion(path, func(got harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			markdown, err := ExportDiscussion(path, newTestWireResolver(func(got harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				if got != harness.Claude {
 					t.Fatalf("resolver harness = %q, want claude", got)
 				}
@@ -1555,7 +1563,8 @@ func TestExportDiscussionReadsPlainAndCompressedLogs(t *testing.T) {
 					}
 					return []agent.Message{&agent.TextMessage{Text: raw.Text}}, nil
 				}, nil
-			})
+			}))
+
 			if err != nil {
 				t.Fatal(err)
 			}

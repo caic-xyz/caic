@@ -9,6 +9,7 @@ package opencode_test
 import (
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -16,9 +17,7 @@ import (
 
 func TestExportDiscussionGolden(t *testing.T) {
 	t.Parallel()
-	agenttest.RunExportDiscussionGolden(t, func(path string, resolver agenttest.NativeParserResolver) (string, error) {
-		return taskslog.ExportDiscussion(path, taskslog.NativeParserResolver(resolver))
-	}, func() agenttest.Parser {
-		return opencode.New("", nil).NewWire().ParseMessage
-	})
+	agenttest.RunExportDiscussionGolden(t, func(path string, backends agent.Backends) (string, error) {
+		return taskslog.ExportDiscussion(path, backends)
+	}, opencode.New("", nil))
 }

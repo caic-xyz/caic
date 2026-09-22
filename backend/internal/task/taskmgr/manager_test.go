@@ -1251,7 +1251,7 @@ func TestNew(t *testing.T) {
 			Log:                 slog.New(slog.DiscardHandler),
 			LogStore:            taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")),
 			Runtimes:            router,
-			Backends:            map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}},
+			Backends:            map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}},
 			HarnessEnv:          map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 			Checkouts:           repo.NewRegistry(),
 			Rollup:              task.DiscardRollup{},
@@ -1425,8 +1425,8 @@ func TestManager(t *testing.T) {
 			replacementCalls++
 			return codex.New("", nil).NewWire()
 		}}
-		if _, err := m.resolveNativeParser(harness.Claude); err != nil {
-			t.Fatalf("resolveNativeParser: %v", err)
+		if _, err := m.ResolveWire(harness.Claude); err != nil {
+			t.Fatalf("ResolveWire: %v", err)
 		}
 		if firstCalls != 1 || replacementCalls != 0 {
 			t.Fatalf("wire construction calls = first %d replacement %d, want 1/0", firstCalls, replacementCalls)
@@ -2041,7 +2041,7 @@ func TestManager(t *testing.T) {
 		// newManagerWithRepo returns a Manager with one repo checkout that has a
 		// fake backend for harness "fake".
 		newManagerWithRepo := func(t *testing.T) *Manager {
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "my/repo", &repo.Checkout{Dir: "/tmp/my-repo"})
 			return m
 		}
@@ -2203,7 +2203,7 @@ func TestManager(t *testing.T) {
 		// newForkManager returns a Manager with a source task that has a
 		// instance, plus an checkout with a fake backend.
 		newForkManager := func(t *testing.T) (*Manager, *Entry) {
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "my/repo", &repo.Checkout{Dir: "/tmp/my-repo"})
 			src := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "src"}, "fake", "")
 			src.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1", GitRoot: "/tmp/my-repo"}}
@@ -3663,7 +3663,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_images_unsupported", func(t *testing.T) {
 			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/tmp/repo"})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "fake", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/a"}}
@@ -3778,16 +3778,16 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_backend", func(t *testing.T) {
 			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
-			if _, err := m.resolveNativeParser("claude"); err != nil {
-				t.Fatalf("resolveNativeParser: %v", err)
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"claude": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
+			if _, err := m.ResolveWire("claude"); err != nil {
+				t.Fatalf("ResolveWire: %v", err)
 			}
 		})
 		t.Run("missing_backend", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			if _, err := m.resolveNativeParser("pi"); err == nil || !strings.Contains(err.Error(), "unknown harness") {
-				t.Fatalf("resolveNativeParser error = %v, want unknown-harness error", err)
+			if _, err := m.ResolveWire("pi"); err == nil || !strings.Contains(err.Error(), "unknown harness") {
+				t.Fatalf("ResolveWire error = %v, want unknown-harness error", err)
 			}
 		})
 	})
@@ -3812,7 +3812,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unsupported_model", func(t *testing.T) {
 			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/tmp/repo"})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -3830,7 +3830,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_unknown_extra_repo", func(t *testing.T) {
 			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/tmp/repo"})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -3861,7 +3861,7 @@ func TestManager(t *testing.T) {
 			return e
 		}
 
-		defaultBackends := map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}
+		defaultBackends := map[harness.Name]agent.Backend{"fake": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}
 
 		t.Run("error_unknown_harness", func(t *testing.T) {
 			t.Parallel()
@@ -3890,8 +3890,8 @@ func TestManager(t *testing.T) {
 		t.Run("error_model_with_new_harness", func(t *testing.T) {
 			t.Parallel()
 			backends := map[harness.Name]agent.Backend{
-				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
-				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}, WireFactory: claudecode.New().NewWire},
+				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
+				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}},
 			}
 			e := forkSetup(t, "fake", backends)
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
@@ -3906,8 +3906,8 @@ func TestManager(t *testing.T) {
 		t.Run("error_inherited_model_with_new_harness", func(t *testing.T) {
 			t.Parallel()
 			backends := map[harness.Name]agent.Backend{
-				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
-				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}, WireFactory: claudecode.New().NewWire},
+				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
+				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m2"}}}},
 			}
 			e := forkSetup(t, "fake", backends)
 			e.Task().RequestedModel = "m1"
@@ -3923,8 +3923,8 @@ func TestManager(t *testing.T) {
 		t.Run("new_harness_preserves_inherited_model", func(t *testing.T) {
 			t.Parallel()
 			backends := map[harness.Name]agent.Backend{
-				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
-				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire},
+				"fake":  &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
+				"fake2": &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}},
 			}
 			e := forkSetup(t, "fake", backends)
 			e.Task().RequestedModel = "m1"
@@ -4052,7 +4052,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
 				"md-caic-caic-5\x00caic.harness": string(harness.Claude),
 			}}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 			registerCheckout(t, m.Checkouts, "caic-xyz/md", &repo.Checkout{Dir: "/home/user/src/caic-xyz/md"})
 
@@ -4172,7 +4172,7 @@ func TestManager(t *testing.T) {
 				"repo-only-match\x00caic.id":      taskID.String(),
 				"repo-only-match\x00caic.harness": string(harness.Claude),
 			}}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			registerCheckout(t, m.Checkouts, "repo/a", &repo.Checkout{Dir: "/home/user/src/repo/a"})
 
 			_, err := m.ImportInstances(t.Context(), []runtime.Instance{{
@@ -4286,7 +4286,7 @@ func TestManager(t *testing.T) {
 				"md-agent-no-repo\x00caic.id":      taskID.String(),
 				"md-agent-no-repo\x00caic.harness": string(harness.Claude),
 			}}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 
 			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "exited"}}, []*taskslog.LoadedTask{{
 				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "test",
@@ -4987,7 +4987,7 @@ func TestManager(t *testing.T) {
 				"dead-relay-tail\x00caic.harness": string(harness.Claude),
 			}}
 			runtimeBackend := &runtimetest.FakeBackend{}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -5038,7 +5038,7 @@ func TestManager(t *testing.T) {
 				"stale-tail\x00caic.harness": string(harness.Claude),
 			}}
 			runtimeBackend := &runtimetest.FakeBackend{}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
@@ -5804,9 +5804,7 @@ func TestLastResultText(t *testing.T) {
 
 func TestNeedsTitleRegen(t *testing.T) {
 	t.Parallel()
-	resolver := func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-		return nil, errors.New("unexpected load")
-	}
+	resolver := agent.Backends{}
 	t.Run("valid_no_log", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")

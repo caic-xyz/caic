@@ -52,11 +52,11 @@ func stableBackwardRecord(record agent.ParsedRecord, parseErr error) ([]agent.Ti
 // earlier result, or the first result preceded in reverse order by newer native
 // records, is the boundary immediately before it.
 func findBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHistorySpool, windowEnd int64) (start int64, more bool, err error) {
-	native, err := lt.resolver(spool.authority.Harness)
+	wire, err := lt.resolver.ResolveWire(spool.authority.Harness)
 	if err != nil {
 		return 0, false, err
 	}
-	parser, err := agent.NewLogRecordParser(spool.authority.Version, native)
+	parser, err := agent.NewLogRecordParser(spool.authority.Version, wire.ParseMessage)
 	if err != nil {
 		return 0, false, err
 	}
@@ -103,11 +103,11 @@ func findBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHist
 }
 
 func parseBackwardWindow(lt *LoadedTask, ctx context.Context, spool *backwardHistorySpool, start, end int64) ([]agent.TimedMessage, error) {
-	native, err := lt.resolver(spool.authority.Harness)
+	wire, err := lt.resolver.ResolveWire(spool.authority.Harness)
 	if err != nil {
 		return nil, err
 	}
-	parser, err := agent.NewLogRecordParser(spool.authority.Version, native)
+	parser, err := agent.NewLogRecordParser(spool.authority.Version, wire.ParseMessage)
 	if err != nil {
 		return nil, err
 	}

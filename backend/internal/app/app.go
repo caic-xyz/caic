@@ -417,10 +417,10 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		appLog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
 	}
 	backgroundTasks := []backgroundTask{}
-	// Task history loads in the background. It is best-effort: it never fails
-	// the server group, only logs its outcome and reports it to the task-list
-	// stream (status event). A pass killed mid-load loses nothing because the
-	// registry is in-memory and a restart rebuilds it.
+	// Task history loads and usage-rollup backfill run in the background. Both
+	// are best-effort: neither delays server readiness or fails the server group.
+	// A killed history pass only loses in-memory registration; a killed backfill
+	// leaves its done sentinel absent and retries missing atomic day files.
 	backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
 		// A real failure is logged and reported to the task-list stream; an
 		// interruption from a shutdown is only logged because the stream is
@@ -434,6 +434,13 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			taskMgr.CompleteSettledLoad(err)
 		} else {
 			taskMgr.CompleteSettledLoad(nil)
+		}
+		if err := usageRollup.Backfill(ctx, logStore.UsageRows(ctx, taskMgr)); err != nil {
+			if ctx.Err() != nil {
+				appLog.InfoContext(ctx, "usage rollup backfill interrupted by shutdown", "err", err)
+			} else {
+				appLog.ErrorContext(ctx, "usage rollup backfill failed", "err", err)
+			}
 		}
 		return nil
 	})

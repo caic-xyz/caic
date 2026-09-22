@@ -66,6 +66,7 @@ graph TD
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent --> pkg_internal_mcp
   pkg_internal_agent --> pkg_internal_runtime
+  pkg_internal_agent -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent
@@ -219,6 +220,7 @@ graph TD
   pkg_internal_taskslog --> pkg_internal_agent
   pkg_internal_taskslog --> pkg_internal_agent_harness
   pkg_internal_taskslog --> pkg_internal_runtime
+  pkg_internal_taskslog --> pkg_internal_usagedb
   pkg_internal_taskslog -.-> pkg_internal_agent_agenttest
   pkg_internal_taskslog -.-> pkg_internal_agent_claudecode
   pkg_internal_taskslog -.-> pkg_internal_agent_codex
@@ -243,11 +245,13 @@ graph TD
   pkg_internal_runtime["internal/runtime"]
   pkg_internal_runtime_runtimetest["internal/runtime/runtimetest"]
   pkg_internal_taskslog["internal/taskslog"]
+  pkg_internal_usagedb["internal/usagedb"]
 
   pkg_internal_agent --> pkg_internal_agent_harness
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent --> pkg_internal_mcp
   pkg_internal_agent --> pkg_internal_runtime
+  pkg_internal_agent -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent
@@ -284,6 +288,7 @@ graph TD
   pkg_internal_taskslog --> pkg_internal_agent
   pkg_internal_taskslog --> pkg_internal_agent_harness
   pkg_internal_taskslog --> pkg_internal_runtime
+  pkg_internal_taskslog --> pkg_internal_usagedb
   pkg_internal_taskslog -.-> pkg_internal_agent_agenttest
   pkg_internal_taskslog -.-> pkg_internal_agent_claudecode
   pkg_internal_taskslog -.-> pkg_internal_agent_codex
@@ -374,6 +379,7 @@ graph TD
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent --> pkg_internal_mcp
   pkg_internal_agent --> pkg_internal_runtime
+  pkg_internal_agent -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent
@@ -557,6 +563,7 @@ graph TD
   pkg_internal_taskslog --> pkg_internal_agent
   pkg_internal_taskslog --> pkg_internal_agent_harness
   pkg_internal_taskslog --> pkg_internal_runtime
+  pkg_internal_taskslog --> pkg_internal_usagedb
   pkg_internal_taskslog -.-> pkg_internal_agent_agenttest
   pkg_internal_taskslog -.-> pkg_internal_agent_claudecode
   pkg_internal_taskslog -.-> pkg_internal_agent_codex
@@ -570,7 +577,7 @@ graph TD
 | `cmd/caic`                      | `internal/app`, `internal/auth`, `internal/autoupdate`, `internal/forge/github`, `internal/server`                                                                                                                                                                                                                                                                                                                                                                                                                                               | None                                                                                                                                                                  |
 | `cmd/voice-gateway`             | `internal/httplog`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | None                                                                                                                                                                  |
 | `frontend`                      | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                  |
-| `internal/agent`                | `internal/agent/harness`, `internal/agent/relay`, `internal/mcp`, `internal/runtime`                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                  |
+| `internal/agent`                | `internal/agent/harness`, `internal/agent/relay`, `internal/mcp`, `internal/runtime`                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `internal/agent/agenttest`                                                                                                                                            |
 | `internal/agent/agenttest`      | `internal/agent`, `internal/agent/harness`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | None                                                                                                                                                                  |
 | `internal/agent/backends`       | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`                                                                                                                                                                                                                                                                                                                                                                                                  | None                                                                                                                                                                  |
 | `internal/agent/claudecode`     | `internal/agent`, `internal/agent/harness`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `internal/agent/agenttest`, `internal/taskslog`                                                                                                                       |
@@ -611,7 +618,7 @@ graph TD
 | `internal/smoketest`            | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/taskslog`, `internal/usage`                                                                                                                                                                                                                                                                                                                                                                                                         | None                                                                                                                                                                  |
 | `internal/task`                 | `internal/agent`, `internal/agent/harness`, `internal/forge`, `internal/mcp`, `internal/repo`, `internal/runtime`, `internal/taskslog`, `internal/usage`, `internal/usagedb`                                                                                                                                                                                                                                                                                                                                                                     | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/logtest`, `internal/runtime/runtimetest`                                                           |
 | `internal/task/taskmgr`         | `internal/agent`, `internal/agent/harness`, `internal/mcp`, `internal/repo`, `internal/runtime`, `internal/task`, `internal/taskslog`, `internal/usage`                                                                                                                                                                                                                                                                                                                                                                                          | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/mcp/mcptest`, `internal/runtime/mdruntime`, `internal/runtime/runtimetest` |
-| `internal/taskslog`             | `internal/agent`, `internal/agent/harness`, `internal/runtime`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`                                                                                       |
+| `internal/taskslog`             | `internal/agent`, `internal/agent/harness`, `internal/runtime`, `internal/usagedb`                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `internal/agent/agenttest`, `internal/agent/claudecode`, `internal/agent/codex`                                                                                       |
 | `internal/usage`                | `internal/agent`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | None                                                                                                                                                                  |
 | `internal/usagedb`              | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                  |
 

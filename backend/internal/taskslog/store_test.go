@@ -721,9 +721,9 @@ func TestStore(t *testing.T) {
 			if closeErr := file.Close(); writeErr != nil || closeErr != nil {
 				t.Fatalf("append task log = %v, %v", writeErr, closeErr)
 			}
-			if err := tasks[0].LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			if err := tasks[0].LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				return claudecode.New().NewWire().ParseMessage, nil
-			}); err != nil {
+			})); err != nil {
 				t.Fatal(err)
 			}
 			if len(tasks[0].Timeline) != 1 {
@@ -762,9 +762,9 @@ func TestStore(t *testing.T) {
 					if _, err := loadLogHeader(testLogger(), path, true); err != nil {
 						t.Fatalf("loadLogHeader: %v", err)
 					}
-					if _, err := loadSemanticLog(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if _, err := loadSemanticLog(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 						return claudecode.New().NewWire().ParseMessage, nil
-					}); err != nil {
+					})); err != nil {
 						t.Fatalf("loadLogFile: %v", err)
 					}
 				})
@@ -792,9 +792,9 @@ func TestStore(t *testing.T) {
 						if _, err := loadLogHeader(testLogger(), path, true); err == nil || !strings.Contains(err.Error(), want) {
 							t.Fatalf("loadLogHeader error = %v, want %s", err, want)
 						}
-						if _, err := loadSemanticLog(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						if _, err := loadSemanticLog(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 							return claudecode.New().NewWire().ParseMessage, nil
-						}); err == nil || !strings.Contains(err.Error(), want) {
+						})); err == nil || !strings.Contains(err.Error(), want) {
 							t.Fatalf("loadLogFile error = %v, want %s", err, want)
 						}
 					})
@@ -892,7 +892,7 @@ func TestStore(t *testing.T) {
 							t.Fatalf("inventory messages = %#v, want nil for lazy semantic loading", loaded.Timeline)
 						}
 						calls := 0
-						if err := loaded.LoadMessagesWithResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						if err := loaded.LoadMessagesWithResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 							return func(raw []byte) ([]agent.Message, error) {
 								calls++
 								if !json.Valid(raw) {
@@ -900,7 +900,7 @@ func TestStore(t *testing.T) {
 								}
 								return []agent.Message{&agent.TextMessage{Text: "conversation"}}, nil
 							}, nil
-						}); err != nil {
+						})); err != nil {
 							t.Fatal(err)
 						}
 						if calls != 1 || len(loaded.Timeline) != 1 {
@@ -1403,12 +1403,13 @@ func TestStore(t *testing.T) {
 				}
 				return []agent.Message{&agent.TextMessage{Text: "native session record"}}, nil
 			}
-			lt, err := loadSemanticSessionMetadata(path, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			lt, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				if h != harness.Claude {
 					t.Fatalf("resolver harness = %q, want claude", h)
 				}
 				return parseNativeSession, nil
-			})
+			}))
+
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1428,12 +1429,13 @@ func TestStore(t *testing.T) {
 			caicInit := `{"t":"caic_init","session_id":"wrong-init","model":"wrong-model","version":"wrong-version"}`
 			path := writePhysicalTestLog(t, false, meta, caicSession, caicInit)
 
-			_, err := loadSemanticSessionMetadata(path, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			_, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				if h != harness.Claude {
 					t.Fatalf("resolver harness = %q, want claude", h)
 				}
 				return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-			})
+			}))
+
 			if err == nil || !strings.Contains(err.Error(), "unknown top-level t") {
 				t.Fatalf("v2 caic_session alias error = %v, want strict unknown-token rejection", err)
 			}
@@ -1484,9 +1486,10 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			lt := tasks[0]
-			lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				return codex.New("", nil).NewWire().ParseMessage, nil
-			})
+			}))
+
 			if lt.SessionID != "thread-old" {
 				t.Fatalf("SessionID = %q after authority scan, want thread-old", lt.SessionID)
 			}
@@ -1514,27 +1517,28 @@ func TestStore(t *testing.T) {
 				t.Run(format+" missing header", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, session)
-					if _, err := loadSemanticSessionMetadata(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if _, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-					}); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
+					})); err == nil || !strings.Contains(err.Error(), "invalid first log header") {
 						t.Fatalf("error = %v, want invalid first header", err)
 					}
 				})
 				t.Run(format+" mixed authority after metadata", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, meta, session, mismatch)
-					if _, err := loadSemanticSessionMetadata(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if _, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-					}); err == nil || !strings.Contains(err.Error(), "wrong t discriminator") {
+					})); err == nil || !strings.Contains(err.Error(), "wrong t discriminator") {
 						t.Fatalf("error = %v, want wrong t discriminator", err)
 					}
 				})
 				t.Run(format+" leading empty lines", func(t *testing.T) {
 					t.Parallel()
 					path := writePhysicalTestLog(t, compressed, "", "  ", meta, session)
-					lt, err := loadSemanticSessionMetadata(path, func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					lt, err := loadSemanticSessionMetadata(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 						return func([]byte) ([]agent.Message, error) { return nil, nil }, nil
-					})
+					}))
+
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1560,9 +1564,10 @@ func TestStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			lt := tasks[0]
-			lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+			lt.SetWireResolver(newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 				return codex.New("", nil).NewWire().ParseMessage, nil
-			})
+			}))
+
 			if err := lt.LoadSessionMetadata(); err != nil {
 				t.Fatal(err)
 			}

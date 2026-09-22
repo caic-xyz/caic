@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -95,9 +94,9 @@ type RuntimeConfig struct {
 
 // AgentConfig configures coding-agent process environments.
 type AgentConfig struct {
-	HarnessEnv map[string][]string            // per-harness KEY=VALUE env vars for runtime instances
-	CoreEnv    map[string]string              // server-level KEY=VALUE env vars from [core.env]
-	Backends   map[harness.Name]agent.Backend // optional agent backend override for smoke/e2e tests
+	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars for runtime instances
+	CoreEnv    map[string]string   // server-level KEY=VALUE env vars from [core.env]
+	Backends   agent.Backends      // optional agent backend override for smoke/e2e tests
 }
 
 // LLMConfig configures title generation and commit-description LLM calls.

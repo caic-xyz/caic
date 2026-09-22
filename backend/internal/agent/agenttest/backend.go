@@ -11,6 +11,25 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
+// Wire is a configurable agent.WireFormat test double.
+//
+// Its zero value ignores prompts and parses no messages. Set Parse to model
+// the normalized messages a test needs from one native log line.
+type Wire struct {
+	Parse func([]byte) ([]agent.Message, error)
+}
+
+// WritePrompt implements agent.WireFormat.
+func (*Wire) WritePrompt(io.Writer, agent.Prompt, agent.LogSink) error { return nil }
+
+// ParseMessage implements agent.WireFormat.
+func (w *Wire) ParseMessage(line []byte) ([]agent.Message, error) {
+	if w.Parse == nil {
+		return nil, nil
+	}
+	return w.Parse(line)
+}
+
 // FakeBackend is a configurable agent.Backend for tests. The zero value is
 // usable: Start and AttachRelay return an error so a stray launch fails loudly,
 // and the metadata methods report benign defaults. Set the exported fields to
@@ -23,8 +42,9 @@ type FakeBackend struct {
 	Images          bool
 	Compact         bool
 	// WireFactory, when set, backs NewWire. Set it (e.g. to a harness's real
-	// parser) for tests that replay stored wire output; the default is a no-op
-	// wire, since agenttest cannot import a specific harness without a cycle.
+	// parser) for tests that replay stored wire output; the default is a fresh
+	// no-op Wire, since agenttest cannot import a specific harness without a
+	// cycle.
 	WireFactory func() agent.WireFormat
 }
 
@@ -72,17 +92,8 @@ func (f *FakeBackend) NewWire() agent.WireFormat {
 	if f.WireFactory != nil {
 		return f.WireFactory()
 	}
-	return noopWire{}
+	return &Wire{}
 }
 
 // Ensure the fake satisfies the interface at compile time.
 var _ agent.Backend = (*FakeBackend)(nil)
-
-// noopWire is an agent.WireFormat that writes nothing and parses to no messages.
-type noopWire struct{}
-
-// WritePrompt implements agent.WireFormat.
-func (noopWire) WritePrompt(io.Writer, agent.Prompt, agent.LogSink) error { return nil }
-
-// ParseMessage implements agent.WireFormat.
-func (noopWire) ParseMessage([]byte) ([]agent.Message, error) { return nil, nil }

@@ -49,9 +49,8 @@ func BenchmarkTaskAdoption(b *testing.B) {
 			b.Fatalf("Store.LoadForTaskIDs returned %d tasks, want 1", len(logs))
 		}
 		lt := logs[0]
-		lt.SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return claudecode.New().NewWire().ParseMessage, nil
-		})
+		lt.SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
+
 		if lt.SessionID == "" || lt.AgentVersion == "" {
 			if err := lt.LoadSessionMetadata(); err != nil {
 				b.Fatal(err)

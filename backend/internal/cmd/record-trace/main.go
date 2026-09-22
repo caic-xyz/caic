@@ -640,12 +640,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, relayDir string, local b
 
 	// Generate the golden markdown file.
 	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
-	md, err := taskslog.ExportDiscussion(outputPath, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-		if h != b.Harness() {
-			return nil, fmt.Errorf("golden log harness %q does not match recorder harness %q", h, b.Harness())
-		}
-		return b.NewWire().ParseMessage, nil
-	})
+	md, err := taskslog.ExportDiscussion(outputPath, agent.Backends{b.Harness(): b})
 	if err != nil {
 		return fmt.Errorf("export discussion: %w", err)
 	}

@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 
@@ -60,6 +61,21 @@ type Backend interface {
 	// NewWire creates a fresh WireFormat for this backend. Each call returns
 	// independent state; suitable for use outside the normal relay transport.
 	NewWire() WireFormat
+}
+
+// Backends maps each configured harness to its agent backend.
+//
+// ResolveWire returns an independent wire format for one harness, suitable for
+// stateful task-log reconstruction.
+type Backends map[harness.Name]Backend
+
+// ResolveWire constructs a fresh wire format for h.
+func (b Backends) ResolveWire(h harness.Name) (WireFormat, error) {
+	backend := b[h]
+	if backend == nil {
+		return nil, fmt.Errorf("unknown harness %q", h)
+	}
+	return backend.NewWire(), nil
 }
 
 // Model describes the configuration choices supported by one model.

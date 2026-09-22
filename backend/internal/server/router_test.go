@@ -551,7 +551,7 @@ func newCheckoutConstructionTestServer(t *testing.T, root string) checkoutConstr
 	harnessEnv := map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
 	runtimeRouter := newTestRuntime(t, backend)
-	backends := map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}}
+	backends := map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}}
 	cacheDir := t.TempDir()
 	logDir := filepath.Join(cacheDir, "tasks")
 	checkoutRegistry := repo.NewRegistry()
@@ -1031,7 +1031,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Parallel()
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -1118,7 +1118,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -1164,7 +1164,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
@@ -1207,7 +1207,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
@@ -1282,7 +1282,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("TaskInfo", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
@@ -1336,7 +1336,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude","model":"m1","effort":"high"}`)
@@ -1368,7 +1368,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("StaleSavedRuntimeUsesDefault", func(t *testing.T) {
 		t.Parallel()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.RuntimeName = "ghost"
 		}); err != nil {
@@ -1564,7 +1564,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1627,7 +1627,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1667,7 +1667,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		settleLogs(t, logDir)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1715,7 +1715,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1772,7 +1772,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1829,7 +1829,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1877,7 +1877,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	t.Run("EmptyDir", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1918,7 +1918,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		lines = append(lines, trailer)
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1984,7 +1984,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			}
 		}
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -2039,7 +2039,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -2075,7 +2075,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
-		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -2378,9 +2378,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if len(logs) != 1 {
 			t.Fatalf("logs len = %d, want 1", len(logs))
 		}
-		logs[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return claudecode.New().NewWire().ParseMessage, nil
-		})
+		logs[0].SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
 
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.SeedTimeline([]agent.Message{
@@ -2476,9 +2474,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if len(logs) != 1 {
 			t.Fatalf("logs len = %d, want 1", len(logs))
 		}
-		logs[0].SetNativeParserResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
-			return claudecode.New().NewWire().ParseMessage, nil
-		})
+		logs[0].SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
 
 		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
 		tk.Repos = []taskslog.RepoMount{{Name: "r", Branch: "caic-0"}}

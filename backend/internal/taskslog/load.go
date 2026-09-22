@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
@@ -44,9 +45,11 @@ type logAuthority struct {
 	Harness harness.Name
 }
 
-// NativeParserResolver resolves a fresh native message parser for a validated
-// task-log harness. It must not retain or share parser state between scans.
-type NativeParserResolver func(harness.Name) (func([]byte) ([]agent.Message, error), error)
+// WireResolver resolves a fresh native wire format for a validated task-log
+// harness. It must not retain or share parser state between scans.
+type WireResolver interface {
+	ResolveWire(h harness.Name) (agent.WireFormat, error)
+}
 
 // semanticRecord maps one physical record to its parsed messages and optional
 // harness-native identity.
@@ -890,12 +893,12 @@ type LoadedTask struct {
 	RelayRecords      []agent.RelayRecordBoundary `json:"-"`
 	RelayGeneration   string                      `json:"-"`
 
-	path           string               // Absolute path for lazy message loading via LoadMessages.
-	resolver       NativeParserResolver // Fresh parser factory supplied by the task owner.
-	messagesLoaded bool                 // A completed semantic scan may validly produce no messages.
+	path           string       // Absolute path for lazy message loading via LoadMessages.
+	resolver       WireResolver // Fresh wire factory supplied by the task owner.
+	messagesLoaded bool         // A completed semantic scan may validly produce no messages.
 }
 
-func loadSemanticTask(path string, resolver NativeParserResolver) (*LoadedTask, error) {
+func loadSemanticTask(path string, resolver WireResolver) (*LoadedTask, error) {
 	log, err := loadSemanticLog(path, resolver)
 	if err != nil {
 		return nil, err
@@ -903,16 +906,16 @@ func loadSemanticTask(path string, resolver NativeParserResolver) (*LoadedTask, 
 	return semanticLoadedTask(log), nil
 }
 
-func loadSemanticSessionMetadata(path string, resolver NativeParserResolver) (loaded *LoadedTask, retErr error) {
+func loadSemanticSessionMetadata(path string, resolver WireResolver) (loaded *LoadedTask, retErr error) {
 	if resolver == nil {
-		return nil, errors.New("native parser resolver is nil")
+		return nil, errors.New("wire resolver is nil")
 	}
 	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		native, err := resolver(scanner.authority.Harness)
+		wire, err := resolver.ResolveWire(scanner.authority.Harness)
 		if err != nil {
-			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
 		}
@@ -1084,8 +1087,8 @@ func (lt *LoadedTask) LogPath() string {
 }
 
 // LoadMessagesWithResolver lazily loads full conversation messages with a
-// fresh parser derived from the log header.
-func (lt *LoadedTask) LoadMessagesWithResolver(resolver NativeParserResolver) error {
+// fresh wire derived from the log header.
+func (lt *LoadedTask) LoadMessagesWithResolver(resolver WireResolver) error {
 	if lt.messagesLoaded || lt.Timeline != nil || lt.path == "" {
 		return nil
 	}
@@ -1097,9 +1100,9 @@ func (lt *LoadedTask) LoadMessagesWithResolver(resolver NativeParserResolver) er
 	return nil
 }
 
-// LoadSessionMetadataWithResolver loads session metadata with a fresh parser
+// LoadSessionMetadataWithResolver loads session metadata with a fresh wire
 // derived from the log header.
-func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResolver) error {
+func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver WireResolver) error {
 	if lt.path == "" || (lt.SessionID != "" && lt.AgentVersion != "") {
 		return nil
 	}
@@ -1111,9 +1114,9 @@ func (lt *LoadedTask) LoadSessionMetadataWithResolver(resolver NativeParserResol
 	return nil
 }
 
-// SetNativeParserResolver installs the task-owned fresh native parser factory.
-// The factory is called only after a scan has validated its physical header.
-func (lt *LoadedTask) SetNativeParserResolver(resolver NativeParserResolver) {
+// SetWireResolver installs the task-owned fresh native wire factory. The
+// factory is called only after a scan has validated its physical header.
+func (lt *LoadedTask) SetWireResolver(resolver WireResolver) {
 	lt.resolver = resolver
 }
 
@@ -1154,11 +1157,11 @@ func (lt *LoadedTask) StreamMessages(ctx context.Context) iter.Seq2[agent.TimedM
 			return
 		}
 		err := scanPhysicalLog(lt.path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-			native, err := lt.resolver(scanner.authority.Harness)
+			wire, err := lt.resolver.ResolveWire(scanner.authority.Harness)
 			if err != nil {
 				return err
 			}
-			parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+			parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
 			if err != nil {
 				return err
 			}
@@ -1220,12 +1223,12 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 
 		windowEnd := spool.end
 		for windowEnd > spool.headerEnd {
-			native, err := lt.resolver(spool.authority.Harness)
+			wire, err := lt.resolver.ResolveWire(spool.authority.Harness)
 			if err != nil {
 				yield(agent.TimedMessage{}, err)
 				return
 			}
-			parser, err := agent.NewLogRecordParser(spool.authority.Version, native)
+			parser, err := agent.NewLogRecordParser(spool.authority.Version, wire.ParseMessage)
 			if err != nil {
 				yield(agent.TimedMessage{}, err)
 				return
@@ -1286,6 +1289,16 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 	}
 }
 
+// UsageRows streams this task's durable usage by producer day and model.
+//
+// Costs and quota snapshots require live task state, so reconstruction leaves
+// both absent. Skill reads were not reliably captured before the rollup
+// release and are likewise excluded. Legacy v1 and task-ID-less logs yield no
+// rows. A non-nil error is yielded at most once and terminates the sequence.
+func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[usagedb.UsageRow, error] {
+	return taskUsageRows(lt, ctx)
+}
+
 func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	if src == nil {
 		return
@@ -1306,16 +1319,16 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 
 // loadSemanticLog parses one complete task log with a fresh parser selected
 // by its metadata header.
-func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticLog, retErr error) {
+func loadSemanticLog(path string, resolver WireResolver) (out *semanticLog, retErr error) {
 	if resolver == nil {
-		return nil, errors.New("native parser resolver is nil")
+		return nil, errors.New("wire resolver is nil")
 	}
 	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
-		native, err := resolver(scanner.authority.Harness)
+		wire, err := resolver.ResolveWire(scanner.authority.Harness)
 		if err != nil {
-			return fmt.Errorf("resolve native parser for harness %q: %w", scanner.authority.Harness, err)
+			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, native)
+		parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
 		}
@@ -1378,7 +1391,7 @@ func loadSemanticLog(path string, resolver NativeParserResolver) (out *semanticL
 
 // ExportDiscussion loads one physical task log with its header-authorized native
 // parser and renders the resulting task data as markdown.
-func ExportDiscussion(path string, resolver NativeParserResolver) (string, error) {
+func ExportDiscussion(path string, resolver WireResolver) (string, error) {
 	log, err := loadSemanticLog(path, resolver)
 	if err != nil {
 		return "", err
@@ -1662,6 +1675,59 @@ func logPaths(log *slog.Logger, logDir string, taskIDs map[string]struct{}, comp
 		}
 		paths = append(paths, filepath.Join(logDir, e.Name()))
 	}
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// logPathsReadOnly lists every retained task log of one storage form without
+// reaping header caches or otherwise changing the task-log directory. Plain
+// sources take precedence over compressed siblings so interrupted settlement
+// has the same authority rule as the normal startup scans.
+func logPathsReadOnly(logDir string, compressed bool) ([]string, error) {
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	plainBases := make(map[string]struct{})
+	for _, e := range entries {
+		if !e.IsDir() && IsLogName(e.Name()) && !isLogCompressed(e.Name()) {
+			plainBases[trimLogExt(e.Name())] = struct{}{}
+		}
+	}
+	paths := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !IsLogName(e.Name()) || isLogCompressed(e.Name()) != compressed {
+			continue
+		}
+		if compressed {
+			if _, ok := plainBases[trimLogExt(e.Name())]; ok {
+				continue
+			}
+		}
+		paths = append(paths, filepath.Join(logDir, e.Name()))
+	}
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// readOnlyLogPaths lists every retained log without modifying the task-log
+// directory. Plain sources take precedence over compressed siblings, and the
+// combined lexical order keeps streaming consumers deterministic.
+func readOnlyLogPaths(logDir string) ([]string, error) {
+	plain, err := logPathsReadOnly(logDir, false)
+	if err != nil {
+		return nil, err
+	}
+	settled, err := logPathsReadOnly(logDir, true)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(plain)+len(settled))
+	paths = append(paths, plain...)
+	paths = append(paths, settled...)
 	slices.Sort(paths)
 	return paths, nil
 }

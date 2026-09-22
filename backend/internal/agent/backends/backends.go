@@ -11,8 +11,8 @@ import (
 )
 
 // Default returns the standard caic agent backend set.
-func Default(cacheDir string, harnessEnv map[string][]string) map[harness.Name]agent.Backend {
-	return map[harness.Name]agent.Backend{
+func Default(cacheDir string, harnessEnv map[string][]string) agent.Backends {
+	return agent.Backends{
 		harness.Claude:   claudecode.New(),
 		harness.Codex:    codex.New(cacheDir, harnessEnv[string(harness.Codex)]),
 		harness.OpenCode: opencode.New(cacheDir, harnessEnv[string(harness.OpenCode)]),

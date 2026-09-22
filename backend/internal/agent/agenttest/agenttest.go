@@ -1,4 +1,4 @@
-// Package agenttest provides shared test helpers for agent harness golden-file tests.
+// Package agenttest provides shared test helpers and doubles for agent packages.
 package agenttest
 
 import (
@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
 // Parser parses one harness log line into normalized agent messages.
@@ -47,18 +46,13 @@ func ParseJSONL(t testing.TB, path string, parser Parser) []agent.Message {
 	return out
 }
 
-// NativeParserResolver resolves a harness-native parser after task-log header
-// validation. Its shape lets external harness tests inject taskslog.ExportDiscussion
-// without importing task into this shared test-helper package.
-type NativeParserResolver func(harness.Name) (func([]byte) ([]agent.Message, error), error)
-
 // DiscussionExporter loads and renders one physical task log.
-type DiscussionExporter func(string, NativeParserResolver) (string, error)
+type DiscussionExporter func(string, agent.Backends) (string, error)
 
 // RunExportDiscussionGolden runs golden-file tests for task-owned physical
 // export loading against all .jsonl files in testdata/. newParser typically
 // returns b.NewWire().ParseMessage from the harness backend.
-func RunExportDiscussionGolden(t *testing.T, export DiscussionExporter, newParser func() Parser) {
+func RunExportDiscussionGolden(t *testing.T, export DiscussionExporter, backend agent.Backend) {
 	files, err := filepath.Glob("testdata/*.jsonl")
 	if err != nil {
 		t.Fatal(err)
@@ -71,9 +65,7 @@ func RunExportDiscussionGolden(t *testing.T, export DiscussionExporter, newParse
 		base := strings.TrimSuffix(filepath.Base(f), ".jsonl")
 		t.Run(base, func(t *testing.T) {
 			t.Parallel()
-			got, err := export(f, func(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-				return newParser(), nil
-			})
+			got, err := export(f, agent.Backends{backend.Harness(): backend})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,15 +1,14 @@
 // Package usagedb owns the append-only daily usage rollup over coding-agent task activity.
 //
 // Storage is one JSONL file of delta rows per UTC day, with in-memory
-// aggregates for dashboard reads and per-task watermarks for lossless
-// restart resume. Task logs stay the per-task record of truth; this package
-// is the only cross-task aggregation surface and never scans them on the
-// read path.
+// aggregates for dashboard reads and per-task watermarks for lossless restart
+// resume. Task logs stay the per-task record of truth; this package is the
+// only cross-task aggregation surface. A one-time background backfill can
+// publish neutral historical rows into missing day files, but dashboard reads
+// never scan task logs.
 //
-// The package is deliberately decoupled from the agent message vocabulary:
-// callers translate harness records into Event/QuotaChange values (the task
-// package owns that translation), so this store depends only on its own
-// schema.
+// Callers translate source records into Event, QuotaChange, or UsageRow values
+// before passing them here, keeping this package independent of those sources.
 package usagedb
 
 import (
@@ -102,6 +101,10 @@ type Delta struct {
 	ContextWindow    int            `json:"context_window,omitzero"`
 	CostUSD          float64        `json:"cost_usd,omitzero"`
 }
+
+// Add merges o into d: counters sum, maps merge, and context window keeps its
+// maximum.
+func (d *Delta) Add(o *Delta) { d.fold(o) }
 
 // fold merges one delta into the accumulator: counters sum, maps merge, and
 // the context window keeps its maximum.

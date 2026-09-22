@@ -24,9 +24,9 @@ const isFakeMode = true
 
 const visualFixturesEnv = "CAIC_E2E_VISUALS"
 
-func fakeAgentBackends(visualFixtures bool) map[harness.Name]agent.Backend {
+func fakeAgentBackends(visualFixtures bool) agent.Backends {
 	claude := smoketest.NewFakeBackend()
-	backends := map[harness.Name]agent.Backend{harness.Claude: claude}
+	backends := agent.Backends{harness.Claude: claude}
 	if visualFixtures {
 		return backends
 	}

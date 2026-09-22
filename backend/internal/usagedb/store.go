@@ -1,4 +1,4 @@
-// Store is the usage rollup sink: append-only daily JSONL files, in-memory aggregates, restart watermarks, and purge discard.
+// Store is the usage rollup sink: append-only daily JSONL files, aggregates, resume watermarks, purge discard, and one-pass backfill.
 //
 // It implements the task.RollupSink ingestion contract. Task folds call
 // Observe under their own task mutex, and the store serializes all file and
@@ -7,9 +7,11 @@
 package usagedb
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
 	"os"
@@ -40,6 +42,7 @@ type Store struct {
 	log *slog.Logger
 	dir string
 
+	backfillMu sync.Mutex // serializes one-pass retained-log reconstruction
 	mu         sync.Mutex
 	files      map[string]*os.File      // day -> open append handle
 	days       map[string]*dayAggregate // day -> aggregates over flushed rows
@@ -204,6 +207,61 @@ func (s *Store) Days() []DayRollup {
 	return out
 }
 
+// Backfill streams neutral usage rows into missing daily files once.
+// It creates only missing day files, so a completed or interrupted pass cannot
+// duplicate an append-only rollup. rows is iterated only after checking the
+// done sentinel, so callers can defer expensive source-specific loading and
+// parsing. Staging happens outside the writer lock. Before publishing a staged
+// day, it flushes matching live pending buckets so their later turn-boundary
+// flush cannot repeat records already found by the historical scan.
+func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[UsageRow, error]) error {
+	s.backfillMu.Lock()
+	defer s.backfillMu.Unlock()
+
+	done, err := s.backfillIsDone()
+	if err != nil {
+		return err
+	}
+	if done {
+		return nil
+	}
+	if rows == nil {
+		return errors.New("usage backfill row source is required")
+	}
+	staging := newBackfillStaging(s.dir)
+	defer staging.cleanup()
+	for row, err := range rows {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if row.Day == "" {
+			return errors.New("usage backfill row day is required")
+		}
+		if err := staging.append(&row); err != nil {
+			return err
+		}
+	}
+	if err := staging.close(); err != nil {
+		return err
+	}
+	days := staging.daysSorted()
+	for _, day := range days {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.createBackfillDay(day, staging.days[day]); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.markBackfillDone()
+}
+
 // recover rebuilds aggregates and resume bookkeeping from the existing day
 // files. Row-level corruption (a truncated trailing line) is tolerated:
 // malformed lines are skipped with a warning.
@@ -268,7 +326,11 @@ func (s *Store) recover() {
 // applyUsageRow folds one flushed usage row into the per-day aggregates. The
 // caller holds s.mu.
 func (s *Store) applyUsageRow(row *UsageRow) {
-	day := s.dayAggregate(row.Day)
+	foldUsageRow(s.dayAggregate(row.Day), row)
+}
+
+// foldUsageRow adds row to one day's aggregate.
+func foldUsageRow(day *dayAggregate, row *UsageRow) {
 	day.fold(&row.Delta)
 	if row.TaskID != "" {
 		for _, repo := range row.Repos {
@@ -304,14 +366,18 @@ func (s *Store) recoverRowState(row *UsageRow) {
 func (s *Store) dayAggregate(day string) *dayAggregate {
 	d := s.days[day]
 	if d == nil {
-		d = &dayAggregate{
-			models:    make(map[string]*bucket),
-			harnesses: make(map[string]*bucket),
-			repos:     make(map[string]map[string]struct{}),
-		}
+		d = newDayAggregate()
 		s.days[day] = d
 	}
 	return d
+}
+
+func newDayAggregate() *dayAggregate {
+	return &dayAggregate{
+		models:    make(map[string]*bucket),
+		harnesses: make(map[string]*bucket),
+		repos:     make(map[string]map[string]struct{}),
+	}
 }
 
 // recordQuotaLocked writes a quota row when the window's observed state
@@ -416,30 +482,78 @@ func (s *Store) flushTaskLocked(id string) {
 	}
 }
 
-// appendRowLocked appends one row to the day file, opening the file on
-// demand. Write errors are logged and returned, never fatal: the caller
-// keeps the delta pending so aggregates only ever reflect rows on disk. The
-// caller holds s.mu.
+// appendRowLocked appends one row to the day file, atomically creating a
+// missing day with its first complete line. Write errors are logged and
+// returned, never fatal: the caller keeps the delta pending so aggregates only
+// ever reflect rows on disk. The caller holds s.mu.
 func (s *Store) appendRowLocked(day string, row any) error {
+	data, err := json.Marshal(row)
+	if err != nil {
+		s.log.Warn("encode usage rollup row", "err", err)
+		return err
+	}
+	data = append(data, '\n')
 	f, ok := s.files[day]
 	if !ok {
-		var err error
-		f, err = os.OpenFile(filepath.Join(s.dir, day+".jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is derived from the store directory and a validated day key.
+		target := filepath.Join(s.dir, day+".jsonl")
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			if err := writeFirstRowLocked(s.dir, target, data); err != nil {
+				s.log.Warn("create usage rollup day file", "day", day, "err", err)
+				return err
+			}
+			// The first row is durable after the atomic rename. Reopening the
+			// append handle is an optimization; a failure here must not make the
+			// caller retry and duplicate that committed row.
+			f, err = os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is derived from the store directory and a validated day key.
+			if err != nil {
+				s.log.Warn("open usage rollup day file after create", "day", day, "err", err)
+				return nil
+			}
+			s.files[day] = f
+			return nil
+		} else if err != nil {
+			s.log.Warn("stat usage rollup day file", "day", day, "err", err)
+			return err
+		}
+		f, err = os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is derived from the store directory and a validated day key.
 		if err != nil {
 			s.log.Warn("open usage rollup day file", "day", day, "err", err)
 			return err
 		}
 		s.files[day] = f
 	}
-	data, err := json.Marshal(row)
-	if err != nil {
-		s.log.Warn("encode usage rollup row", "err", err)
-		return err
-	}
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	if _, err := f.Write(data); err != nil {
 		s.log.Warn("append usage rollup row", "day", day, "err", err)
 		return err
 	}
+	return nil
+}
+
+// writeFirstRowLocked atomically creates target with its first complete JSONL
+// row. The caller holds s.mu.
+func writeFirstRowLocked(dir, target string, data []byte) error {
+	f, err := os.CreateTemp(dir, ".usage-first-row-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create usage rollup staging file: %w", err)
+	}
+	path := f.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write usage rollup staging file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close usage rollup staging file: %w", err)
+	}
+	if err := os.Rename(path, target); err != nil {
+		return fmt.Errorf("publish first usage rollup row: %w", err)
+	}
+	cleanup = false
 	return nil
 }
 
@@ -508,6 +622,112 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 	return out
 }
 
+// backfillIsDone checks the durable one-pass completion marker.
+func (s *Store) backfillIsDone() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false, os.ErrClosed
+	}
+	_, err := os.Stat(filepath.Join(s.dir, backfillSentinel))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat usage backfill sentinel: %w", err)
+}
+
+// createBackfillDay atomically publishes a complete staged day through the
+// store's writer mutex. Streaming, JSON encoding, and staging happen before
+// taking that lock, so they never delay live task dispatch.
+func (s *Store) createBackfillDay(day string, staged *backfillDay) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return os.ErrClosed
+	}
+	target := filepath.Join(s.dir, day+".jsonl")
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat usage rollup day %s: %w", day, err)
+	}
+	if err := s.flushBackfillPendingDayLocked(day); err != nil {
+		return err
+	}
+	// A matching pending bucket creates the day through normal append-only
+	// ingestion. The staged history may contain the same record, so discard it
+	// rather than duplicate the live row.
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat usage rollup day %s: %w", day, err)
+	}
+	if err := os.Rename(staged.path, target); err != nil {
+		return fmt.Errorf("publish usage backfill day %s: %w", day, err)
+	}
+	staged.path = ""
+	s.days[day] = staged.aggregate
+	for id, at := range staged.watermarks {
+		if at.After(s.watermarks[id]) {
+			s.watermarks[id] = at
+		}
+	}
+	for id, cost := range staged.costs {
+		s.flushedCost[id] += cost
+	}
+	return nil
+}
+
+// flushBackfillPendingDayLocked flushes every task with a pending bucket for
+// day. Full-task flushing preserves the usual newest-model cost attribution.
+// The caller holds s.mu.
+func (s *Store) flushBackfillPendingDayLocked(day string) error {
+	for id, p := range s.pending {
+		if !p.hasDay(day) {
+			continue
+		}
+		s.flushTaskLocked(id)
+		if p.hasDay(day) {
+			return fmt.Errorf("flush pending usage before backfill day %s: task %s retains target-day buckets", day, id)
+		}
+	}
+	return nil
+}
+
+// markBackfillDone atomically records successful completion after every
+// missing day has been published.
+func (s *Store) markBackfillDone() error {
+	path, err := writeBackfillSentinelTemp(s.dir)
+	if err != nil {
+		return err
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.Remove(path)
+		}
+	}()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return os.ErrClosed
+	}
+	target := filepath.Join(s.dir, backfillSentinel)
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat usage backfill sentinel: %w", err)
+	}
+	if err := os.Rename(path, target); err != nil {
+		return fmt.Errorf("publish usage backfill sentinel: %w", err)
+	}
+	published = true
+	return nil
+}
+
 // taskPending holds one task's unflushed deltas. It persists for the task's
 // lifetime so cost bookkeeping survives flushes.
 type taskPending struct {
@@ -536,6 +756,16 @@ func (p *taskPending) fold(e *Event, synthetic bool) {
 	}
 	b.fold(&e.Delta)
 	p.costUSD = e.CostUSD
+}
+
+// hasDay reports whether p retains an unflushed bucket for day.
+func (p *taskPending) hasDay(day string) bool {
+	for key := range p.buckets {
+		if key.day == day {
+			return true
+		}
+	}
+	return false
 }
 
 // bucketKey groups pending deltas by producer-time day and attribution model.

@@ -55,7 +55,7 @@ var mutatingTools = map[string]struct{}{
 // dispatch, cleanup, restart, reconnect, revive, and fork operations.
 type AgentRuntime struct {
 	// Immutable.
-	Backends         map[harness.Name]agent.Backend
+	Backends         agent.Backends
 	LogStore         *taskslog.Store
 	LogPath          *taskslog.Path
 	Runtimes         *runtime.Router

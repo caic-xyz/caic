@@ -80,7 +80,7 @@ type Config struct {
 	LogStore *taskslog.Store
 	// Runtimes validates runtime selection and dispatches task runtime operations.
 	Runtimes            *runtime.Router
-	Backends            map[harness.Name]agent.Backend
+	Backends            agent.Backends
 	HarnessEnv          map[string][]string
 	RuntimeMetadata     runtime.Metadata
 	RuntimeStartTimeout time.Duration
@@ -105,9 +105,10 @@ type TaskMCPScoper interface {
 // stats streaming.
 type Manager struct {
 	// Immutable.
+	agent.Backends
+
 	Runtimes     *runtime.Router
 	QuotaTracker *quotausage.Tracker
-	Backends     map[harness.Name]agent.Backend
 	Checkouts    *repo.Registry
 
 	log                 *slog.Logger
@@ -659,7 +660,7 @@ func containerPathMatchesRepo(containerPath string, checkout *repo.Checkout) boo
 }
 
 // needsTitleRegen reports whether an imported task needs an LLM title regeneration.
-func needsTitleRegen(t *task.Task, lt *taskslog.LoadedTask, resolver taskslog.NativeParserResolver) bool {
+func needsTitleRegen(t *task.Task, lt *taskslog.LoadedTask, resolver taskslog.WireResolver) bool {
 	if lt == nil || lt.Title == "" {
 		return true
 	}
@@ -860,7 +861,7 @@ func (m *Manager) HistorySource(entry *Entry) (*taskslog.LoadedTask, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load task history source: %w", err)
 	}
-	loaded.SetNativeParserResolver(m.resolveNativeParser)
+	loaded.SetWireResolver(m)
 	entry.SetLoadedTask(loaded)
 	return loaded, nil
 }
@@ -963,7 +964,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 				continue
 			}
 		}
-		lt.SetNativeParserResolver(m.resolveNativeParser)
+		lt.SetWireResolver(m)
 		rt := m.Runtimes.Runtimes[0].Name()
 		if lt.RuntimeName != "" {
 			rt = lt.RuntimeName
@@ -1796,7 +1797,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	if !ok || backend == nil {
 		return nil, fmt.Errorf("unknown harness %q for imported task %s", lt.Harness, taskID)
 	}
-	lt.SetNativeParserResolver(m.resolveNativeParser)
+	lt.SetWireResolver(m)
 	// Check relay liveness.
 	var relayAlive bool
 	var relayTimeline agent.ParsedTimeline
@@ -1834,7 +1835,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		stateUpdatedAt = time.Now().UTC()
 	}
 	if lt.SessionID == "" || lt.AgentVersion == "" {
-		if err := lt.LoadSessionMetadataWithResolver(m.resolveNativeParser); err != nil {
+		if err := lt.LoadSessionMetadataWithResolver(m); err != nil {
 			m.log.WarnContext(ctx, "load session metadata failed", "repo", relPath, "br", branch, "err", err)
 		}
 	}
@@ -1946,7 +1947,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// so the UI does not collapse to the bounded relay tail after a server
 	// restart. Fail closed: malformed persistent history must not attach a live
 	// task with untrusted state.
-	if err := lt.LoadMessagesWithResolver(m.resolveNativeParser); err != nil {
+	if err := lt.LoadMessagesWithResolver(m); err != nil {
 		return nil, fmt.Errorf("load messages for imported task %s: %w", taskID, err)
 	}
 	if len(relayTimeline.Messages) > 0 || len(relayTimeline.RelayRecords) > 0 {
@@ -2105,7 +2106,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
 	// Only regenerate title if a new turn was completed.
-	if needsTitleRegen(t, lt, m.resolveNativeParser) {
+	if needsTitleRegen(t, lt, m) {
 		entry.Lifecycle.generateTitle()
 	}
 
@@ -2138,16 +2139,6 @@ func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, err
 		return value, nil
 	}
 	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
-}
-
-// resolveNativeParser constructs one fresh native parser for a validated task
-// log harness.
-func (m *Manager) resolveNativeParser(h harness.Name) (func([]byte) ([]agent.Message, error), error) {
-	backend := m.Backends[h]
-	if backend == nil {
-		return nil, fmt.Errorf("unknown harness %q", h)
-	}
-	return backend.NewWire().ParseMessage, nil
 }
 
 // logRelayMessageMerger owns the import-time overlap rules for disk-log

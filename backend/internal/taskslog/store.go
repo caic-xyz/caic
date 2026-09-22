@@ -6,9 +6,11 @@
 package taskslog
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,6 +22,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
 // SettledRetention bounds how far back a task log's mtime can be and still
@@ -107,6 +110,21 @@ func (s *Store) LoadSettled() ([]*LoadedTask, error) {
 		paths = capSettledPaths(s.log, paths, s.maxSettledPerRepo)
 	}
 	return loadLogsFromPaths(s.log, paths, false, true)
+}
+
+// LoadAllReadOnly loads every retained plain or compressed task log without
+// modifying the task-log directory. Plain sources win over compressed siblings
+// left by interrupted settlement. It is intended for background consumers
+// that need complete retained history rather than the bounded startup view.
+func (s *Store) LoadAllReadOnly() ([]*LoadedTask, error) {
+	paths, err := readOnlyLogPaths(s.LogDir)
+	if err != nil {
+		return nil, err
+	}
+	// A path that vanishes or becomes unreadable after ReadDir is unresolved
+	// historical input, not a harmless omission: callers must retry instead of
+	// treating the one-pass scan as complete and writing their sentinel.
+	return loadLogsFromPaths(s.log, paths, true, false)
 }
 
 // LoadForTaskIDs loads metadata for plain logs whose parsed filename task ID
@@ -336,6 +354,15 @@ func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
 		return err
 	}
 	return s.compressTerminalLogs(logs, exclude)
+}
+
+// UsageRows streams reconstructed rows from every retained task log.
+//
+// Loading and parsing begin only when the sequence is iterated. resolver
+// supplies a fresh native wire for each physical log's validated harness.
+// A non-nil error is yielded at most once and terminates the sequence.
+func (s *Store) UsageRows(ctx context.Context, resolver WireResolver) iter.Seq2[usagedb.UsageRow, error] {
+	return storeUsageRows(s, ctx, resolver)
 }
 
 func (s *Store) compressTerminalLogs(logs []*LoadedTask, exclude map[string]struct{}) error {

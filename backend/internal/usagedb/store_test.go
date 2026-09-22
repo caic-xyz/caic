@@ -282,6 +282,48 @@ func TestObserve(t *testing.T) {
 		}
 	})
 
+	t.Run("first live-row write failure leaves day absent for backfill retry", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		s := newTestStore(t, dir)
+		meta := testMeta(ksid.NewID())
+		at := atUTC(5, 10, 0, 0)
+		s.Observe(meta, &Event{At: at, Model: "m", Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		//nolint:gosec // t.TempDir needs execute permission for this controlled directory test.
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			//nolint:gosec // t.TempDir needs execute permission for cleanup.
+			_ = os.Chmod(dir, 0o700)
+		})
+		s.mu.Lock()
+		s.flushTaskLocked(meta.TaskID.String())
+		s.mu.Unlock()
+		//nolint:gosec // t.TempDir needs execute permission for this controlled directory test.
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		day := "2026-02-05"
+		if _, err := os.Stat(filepath.Join(dir, day+".jsonl")); !os.IsNotExist(err) {
+			t.Fatalf("failed first append left day file: %v", err)
+		}
+		if len(s.pending[meta.TaskID.String()].buckets) != 1 {
+			t.Fatal("failed first append did not retain the pending bucket")
+		}
+		row := UsageRow{Kind: rowKindUsage, Day: day, Ts: NewTime(at), TaskID: meta.TaskID.String(), Model: "m", Output: 10}
+		if err := s.Backfill(t.Context(), func(yield func(UsageRow, error) bool) { yield(row, nil) }); err != nil {
+			t.Fatal(err)
+		}
+		rows := readRows(t, dir, day)
+		if len(rows) != 1 || rows[0].Output != 10 {
+			t.Errorf("rows after retry = %+v, want one live row", rows)
+		}
+		if _, err := os.Stat(filepath.Join(dir, backfillSentinel)); err != nil {
+			t.Errorf("backfill sentinel after retry: %v", err)
+		}
+	})
+
 	t.Run("quota dedupe survives restart", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
