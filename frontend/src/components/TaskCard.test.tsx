@@ -111,6 +111,40 @@ describe("TaskCard", () => {
     expect(screen.getByText("−3")).toBeInTheDocument();
   });
 
+  it("matches partial compact states to their repository names", () => {
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          repos: [
+            { name: "primary", branch: "caic-1" },
+            { name: "secondary", branch: "caic-2" },
+          ],
+          diffStat: [{ path: "secondary/main.go", linesAdded: 5, linesDeleted: 1, oldSize: -1, newSize: -1 }],
+          repoStates: [
+            {
+              name: "secondary",
+              branch: "caic-2",
+              ahead: 3,
+              behind: 2,
+              changedFiles: 1,
+              linesAdded: 5,
+              linesDeleted: 1,
+              uncommittedFiles: 0,
+              conflicts: 0,
+            },
+          ],
+        })}
+      />
+    ));
+
+    const rows = screen.getAllByTestId("task-card-repo-state");
+    expect(rows[0]).toHaveTextContent("primary · caic-1");
+    expect(rows[1]).toHaveTextContent("secondary · caic-2");
+    expect(screen.getByRole("img")).toHaveAccessibleName(
+      "1 changed file, 5 additions, 1 deletion, 3 commits ahead of upstream, 2 commits behind upstream",
+    );
+  });
+
   it("updates the repository state when the task stream pushes new values", async () => {
     const [repoStates, setRepoStates] = createSignal<TaskCardProps["repoStates"]>([
       {

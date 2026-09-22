@@ -131,23 +131,31 @@ export default function TaskCard(props: TaskCardProps) {
   const [menuActionPending, setMenuActionPending] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
+  const hasRepositoryRuntime = () => Boolean(props.runtime?.id) && props.state !== "purged";
   let cardRef: HTMLDivElement | undefined;
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
   let contextMenuRef: HTMLDivElement | undefined;
 
-  const repositoryState = (repoIndex: number) => {
+  const repositoryState = (repo: TaskRepo) => {
     // Without a runtime there is no Git state to push; purged tasks keep none.
-    if (!props.runtime?.id || props.state === "purged") {
-      return repoIndex === 0 ? diffStatState(props.diffStat) : undefined;
+    if (!hasRepositoryRuntime()) {
+      return undefined;
     }
-    return repoStates()[repoIndex] ?? (repoIndex === 0 ? diffStatState(props.diffStat) : undefined);
+    return repoStates().find((state) => state.name === repo.name);
   };
   const repoStateRows = () =>
-    (props.repos ?? []).map((repo, index) => ({
-      name: repo.name,
-      branch: repositoryState(index)?.branch || repo.branch,
-      state: repositoryState(index),
-    }));
+    (props.repos ?? []).map((repo, index) => {
+      const state =
+        repositoryState(repo) ??
+        ((!hasRepositoryRuntime() || repoStates().length === 0) && index === 0
+          ? diffStatState(props.diffStat)
+          : undefined);
+      return {
+        name: repo.name,
+        branch: state?.branch || repo.branch,
+        state,
+      };
+    });
   const hasMultipleRepos = () => (props.repos?.length ?? 0) > 1;
   const repoStateText = (repo: { name: string; branch: string }) =>
     hasMultipleRepos() ? [repo.name, repo.branch].filter(Boolean).join(" · ") : repo.branch || repo.name;
