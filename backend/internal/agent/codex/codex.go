@@ -87,7 +87,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		relayArgs = append(relayArgs, "--caic-mcp")
 		codexArgs = append(codexArgs,
 			"-c", `mcp_servers.caic.command="python3"`,
-			"-c", `mcp_servers.caic.args=["`+agent.RelayScriptPath+`","caic-mcp"]`,
+			// ssh reconstructs the remote command through a shell. Keep the TOML
+			// string delimiters as literal characters for the Codex CLI to parse.
+			"-c", `mcp_servers.caic.args=[\"`+agent.RelayScriptPath+`\",\"caic-mcp\"]`,
 		)
 	}
 	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, codexArgs)
