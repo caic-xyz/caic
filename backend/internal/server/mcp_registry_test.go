@@ -239,8 +239,18 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		if !ok || !strings.Contains(detailOutput.Result, output.Tasks[0].Title) {
 			t.Fatalf("task detail = %#v, want listed child %q", detail.Structured, output.Tasks[0].Title)
 		}
-		if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks/" + firstChildID.String()}}); err != nil {
+		sources, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks/" + firstChildID.String()}})
+		if err != nil {
 			t.Fatalf("child subscription error: %v", err)
+		}
+		sources.taskResourceIDs = append(sources.taskResourceIDs, unrelatedID)
+		update := sources.taskUpdate(ctx, registry)
+		wantUpdateURIs := []string{"caic://tasks/" + firstChildID.String()}
+		if !reflect.DeepEqual(update.ResourceURIs, wantUpdateURIs) {
+			t.Fatalf("task subscription update URIs = %#v, want %#v", update.ResourceURIs, wantUpdateURIs)
+		}
+		if !update.ResourcesListChanged {
+			t.Fatal("task subscription update did not report inaccessible task resource removal")
 		}
 		if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks/" + unrelatedID.String()}}); err == nil {
 			t.Fatal("unrelated task subscription succeeded")

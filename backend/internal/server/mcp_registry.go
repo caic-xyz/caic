@@ -260,7 +260,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		return result, err
 	case strings.HasPrefix(uri, "caic://tasks/"):
 		rawID := strings.TrimPrefix(uri, "caic://tasks/")
-		id, err := ksid.Parse(rawID)
+		id, err := mcpTaskResourceID(uri)
 		if err != nil {
 			return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", rawID)
 		}
@@ -299,7 +299,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 		for {
 			if pendingTaskUpdate {
 				pendingTaskUpdate = false
-				if !yield(sources.taskUpdate(), nil) {
+				if !yield(sources.taskUpdate(ctx, m), nil) {
 					return
 				}
 				continue
@@ -314,7 +314,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				previousVersion := sources.taskVersion
 				sources.taskVersion, taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 				pendingTaskUpdate = sources.taskVersion > previousVersion+1
-				if !yield(sources.taskUpdate(), nil) {
+				if !yield(sources.taskUpdate(ctx, m), nil) {
 					return
 				}
 			case <-repoC:
@@ -420,18 +420,22 @@ func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.Subscr
 		hasFilter = true
 		switch {
 		case strings.HasPrefix(uri, "caic://tasks/"):
+			id, err := mcpTaskResourceID(uri)
+			if err != nil {
+				return subscriptionSources{}, mcp.ErrInvalidParams("task not found")
+			}
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
-			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
+			sources.taskResourceIDs = append(sources.taskResourceIDs, id)
 		case strings.HasPrefix(uri, "caic://repos/"):
 			sources.repoC = m.serverConfig.checkouts.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
 		case uri == "gomode://items":
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
-			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
+			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
 		case uri == "gomode://notifications":
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
-			sources.taskResourceURIs = append(sources.taskResourceURIs, uri)
+			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
 			sources.usagePolling = true
 			sources.usageResourceURIs = append(sources.usageResourceURIs, uri)
 		default:
@@ -1956,8 +1960,8 @@ func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, b
 }
 
 func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string, bool) {
-	if rawID, ok := strings.CutPrefix(uri, "caic://tasks/"); ok {
-		id, err := ksid.Parse(rawID)
+	if _, ok := strings.CutPrefix(uri, "caic://tasks/"); ok {
+		id, err := mcpTaskResourceID(uri)
 		if err != nil {
 			return "task not found", false
 		}
@@ -1983,6 +1987,14 @@ func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string
 		return "missing required MCP scope: " + required, false
 	}
 	return "allow", true
+}
+
+func mcpTaskResourceID(uri string) (ksid.ID, error) {
+	rawID, ok := strings.CutPrefix(uri, "caic://tasks/")
+	if !ok {
+		return 0, errors.New("not a task resource")
+	}
+	return ksid.Parse(rawID)
 }
 
 type mcpTaskNumberArgs struct {
@@ -2121,13 +2133,23 @@ type subscriptionSources struct {
 	usagePolling bool
 
 	resourcesListChanged bool
-	taskResourceURIs     []string
+	taskResourceIDs      []ksid.ID
+	taskUpdateURIs       []string
 	repoResourceURIs     []string
 	usageResourceURIs    []string
 }
 
-func (s *subscriptionSources) taskUpdate() mcp.ResourceUpdate {
-	return mcp.ResourceUpdate{ResourcesListChanged: s.resourcesListChanged, ResourceURIs: s.taskResourceURIs}
+func (s *subscriptionSources) taskUpdate(ctx context.Context, registry *mcpRegistry) mcp.ResourceUpdate {
+	uris := append([]string(nil), s.taskUpdateURIs...)
+	resourcesListChanged := s.resourcesListChanged
+	for _, id := range s.taskResourceIDs {
+		if _, ok := registry.visibleTaskEntry(ctx, id); ok {
+			uris = append(uris, "caic://tasks/"+id.String())
+		} else {
+			resourcesListChanged = true
+		}
+	}
+	return mcp.ResourceUpdate{ResourcesListChanged: resourcesListChanged, ResourceURIs: uris}
 }
 
 func (s *subscriptionSources) repoUpdate() mcp.ResourceUpdate {
