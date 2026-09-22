@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -70,6 +71,43 @@ func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
 	}
 	if !strings.Contains(output.Result, "Anthropic: 5h: 88% remaining") {
 		t.Fatalf("get_usage result = %q, want remaining quota", output.Result)
+	}
+}
+
+func TestTaskIDDecode(t *testing.T) {
+	t.Parallel()
+
+	stableID := ksid.NewID()
+	for _, test := range []struct {
+		name       string
+		ref        taskID
+		max        int
+		wantID     ksid.ID
+		wantNumber int
+		wantErr    bool
+	}{
+		{name: "task number", ref: "2", max: 2, wantNumber: 2},
+		{name: "stable ID", ref: taskID(stableID.String()), max: 2, wantID: stableID},
+		{name: "out of range number", ref: "3", max: 2, wantErr: true},
+		{name: "invalid reference", ref: "not a task", max: 2, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotID, gotNumber, err := test.ref.Decode(test.max)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("Decode() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Decode() error: %v", err)
+			}
+			if gotID != test.wantID || gotNumber != test.wantNumber {
+				t.Fatalf("Decode() = (%q, %d), want (%q, %d)", gotID, gotNumber, test.wantID, test.wantNumber)
+			}
+		})
 	}
 }
 
@@ -193,6 +231,20 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("task-scoped task IDs = %#v, want %#v", got, want)
 		}
+		detail := registry.handleTaskGetDetail(ctx, mcpTaskGetDetailArgs{Task: taskID(strconv.Itoa(output.Tasks[0].TaskNumber))})
+		if detail.IsError {
+			t.Fatalf("task detail = %#v, want listed child detail", detail.Structured)
+		}
+		detailOutput, ok := detail.Structured.(mcp.TextOutput)
+		if !ok || !strings.Contains(detailOutput.Result, output.Tasks[0].Title) {
+			t.Fatalf("task detail = %#v, want listed child %q", detail.Structured, output.Tasks[0].Title)
+		}
+		if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks/" + firstChildID.String()}}); err != nil {
+			t.Fatalf("child subscription error: %v", err)
+		}
+		if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"caic://tasks/" + unrelatedID.String()}}); err == nil {
+			t.Fatal("unrelated task subscription succeeded")
+		}
 	})
 
 	t.Run("task scoped controls resolve children and its own fork source", func(t *testing.T) {
@@ -227,6 +279,38 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		}
 		if _, _, ok := registry.taskScopedEntryByNumber(ctx, 2, false); ok {
 			t.Fatal("task-scoped control resolved an unrelated task")
+		}
+	})
+
+	t.Run("task scoped detail resolves an unrelated task from the global task list", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		registry := &mcpRegistry{
+			taskSvc: testTaskHandlers(s).taskSvc,
+			metrics: metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
+		}
+		callerID := ksid.NewID()
+		caller := mustNewTask(t, callerID, agent.Prompt{Text: "caller"}, harness.Codex)
+		insertTestTask(s, callerID.String(), caller)
+		targetID := ksid.NewID()
+		target := mustNewTask(t, targetID, agent.Prompt{Text: "unrelated"}, harness.Claude)
+		target.ParentTaskID = ksid.NewID()
+		insertTestTask(s, targetID.String(), target)
+
+		result, err := registry.ForTask(callerID).CallTool(t.Context(), "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q}`, targetID.String())))
+		if err != nil {
+			t.Fatalf("CallTool() error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("CallTool() result = %#v, want unrelated task detail", result.Structured)
+		}
+		output, ok := result.Structured.(mcp.TextOutput)
+		if !ok {
+			t.Fatalf("CallTool() result type = %T, want mcp.TextOutput", result.Structured)
+		}
+		if !strings.Contains(output.Result, "unrelated") {
+			t.Fatalf("task detail = %q, want unrelated task", output.Result)
 		}
 	})
 }
@@ -981,13 +1065,19 @@ func TestCaicToolRegistryToolErrorCodes(t *testing.T) {
 	t.Run("invalid task number", func(t *testing.T) {
 		t.Parallel()
 
-		result := c.handleTaskGetDetail(t.Context(), mcpTaskNumberArgs{TaskNumber: -1})
+		result := c.handleTaskGetDetail(t.Context(), mcpTaskGetDetailArgs{Task: taskID("-1")})
+		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
+	})
+	t.Run("invalid task reference", func(t *testing.T) {
+		t.Parallel()
+
+		result := c.handleTaskGetDetail(t.Context(), mcpTaskGetDetailArgs{Task: taskID("!")})
 		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 	})
 	t.Run("missing task", func(t *testing.T) {
 		t.Parallel()
 
-		result := c.handleTaskGetDetail(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		result := c.handleTaskGetDetail(t.Context(), mcpTaskGetDetailArgs{Task: taskID(ksid.NewID().String())})
 		assertMCPToolErrorCode(t, result, api.CodeNotFound)
 	})
 	t.Run("unclassified failure", func(t *testing.T) {
@@ -1365,7 +1455,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		assertMCPToolVisibility(t, tools, "task_push_branch_to_remote", true)
 	})
 
-	t.Run("task scoped client exposes bounded child controls", func(t *testing.T) {
+	t.Run("task scoped client exposes child controls and task detail", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_schema", func(t *testing.T) {
 			t.Parallel()
@@ -1375,20 +1465,22 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Tools() error: %v", err)
 			}
-			if len(tools) != 5 {
-				t.Fatalf("Tools() = %#v, want five task-scoped tools", tools)
+			if len(tools) != 6 {
+				t.Fatalf("Tools() = %#v, want six task-scoped tools", tools)
 			}
 			assertMCPToolVisibility(t, tools, "task_create", true)
 			assertMCPToolVisibility(t, tools, "tasks_list", true)
 			assertMCPToolVisibility(t, tools, "task_fork", true)
 			assertMCPToolVisibility(t, tools, "task_stop", true)
 			assertMCPToolVisibility(t, tools, "task_purge", true)
-			assertMCPToolVisibility(t, tools, "task_get_detail", false)
-			var create mcp.ToolDescriptor
+			assertMCPToolVisibility(t, tools, "task_get_detail", true)
+			var create, detail mcp.ToolDescriptor
 			for _, tool := range tools {
 				if tool.Name == "task_create" {
 					create = tool
-					break
+				}
+				if tool.Name == "task_get_detail" {
+					detail = tool
 				}
 			}
 			schema, err := json.Marshal(create.InputSchema)
@@ -1403,6 +1495,27 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			}
 			if len(decoded.Properties) != 1 || decoded.Properties["prompt"] == nil {
 				t.Fatalf("delegated input schema = %s, want prompt only", schema)
+			}
+			detailSchema, err := json.Marshal(detail.InputSchema)
+			if err != nil {
+				t.Fatalf("marshal detail schema: %v", err)
+			}
+			var detailDecoded struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if err := json.Unmarshal(detailSchema, &detailDecoded); err != nil {
+				t.Fatalf("decode detail schema: %v", err)
+			}
+			var taskReference struct {
+				OneOf []struct {
+					Type string `json:"type"`
+				} `json:"oneOf"`
+			}
+			if err := json.Unmarshal(detailDecoded.Properties["task"], &taskReference); err != nil {
+				t.Fatalf("decode task reference schema: %v", err)
+			}
+			if len(detailDecoded.Properties) != 1 || len(taskReference.OneOf) != 2 || taskReference.OneOf[0].Type != "integer" || taskReference.OneOf[1].Type != "string" {
+				t.Fatalf("task detail schema = %s, want one task integer-or-string reference", detailSchema)
 			}
 		})
 		t.Run("error_extra_task_properties", func(t *testing.T) {
@@ -1419,7 +1532,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		})
 	})
 
-	t.Run("task scoped client can manage its children", func(t *testing.T) {
+	t.Run("task scoped client can manage its children and inspect all tasks", func(t *testing.T) {
 		t.Parallel()
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: ksid.NewID(), Remote: true})
 		registry := &mcpRegistry{}
@@ -1432,7 +1545,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		assertMCPToolVisibility(t, tools, "task_fork", true)
 		assertMCPToolVisibility(t, tools, "task_stop", true)
 		assertMCPToolVisibility(t, tools, "task_purge", true)
-		assertMCPToolVisibility(t, tools, "task_get_detail", false)
+		assertMCPToolVisibility(t, tools, "task_get_detail", true)
 		assertMCPToolVisibility(t, tools, "repos_list", false)
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()

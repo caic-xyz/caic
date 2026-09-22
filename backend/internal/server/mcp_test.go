@@ -913,8 +913,8 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("toolParamHeaderMismatch", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
-		w, resp := postMCP(t, s.mcpHandlers.protocol, "tools/call", "task_get_detail", body)
+		body := mcpRequestJSON("tools/call", `"name":"task_fork","arguments":{"task_number":1,"prompt":"fork"}`)
+		w, resp := postMCP(t, s.mcpHandlers.protocol, "tools/call", "task_fork", body)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
@@ -926,12 +926,11 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("toolExecutionErrorOmitsStructuredContent", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
+		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task":1}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
 		req.Header.Set("Mcp-Name", "task_get_detail")
-		req.Header.Set("Mcp-Param-Task-Number", "1")
 		w := httptest.NewRecorder()
 		s.mcpHandlers.protocol.HandleMCP(w, req)
 		if w.Code != http.StatusOK {

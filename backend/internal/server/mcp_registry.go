@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -220,7 +221,7 @@ func (m *mcpRegistry) Resources(ctx context.Context) iter.Seq2[mcp.ResourceDescr
 }
 
 func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
-	if authResult, ok := authorizeResource(ctx, uri); !ok {
+	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
@@ -259,7 +260,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		return result, err
 	case strings.HasPrefix(uri, "caic://tasks/"):
 		id := strings.TrimPrefix(uri, "caic://tasks/")
-		entry, ok := m.taskResourceEntry(ctx, id)
+		entry, ok := m.visibleTaskEntry(ctx, id)
 		if !ok {
 			return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", id)
 		}
@@ -384,7 +385,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List current coding tasks in stable active-first order. A response-size limit may return fewer tasks than limit; pass nextCursor as cursor until it is absent.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details by task number from tasks_list, or by stable task ID.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", m.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's changes to GitHub. Push to task branch (default) or squash-push to main.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
@@ -409,7 +410,7 @@ func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.Subscr
 	var sources subscriptionSources
 	hasFilter := false
 	for _, uri := range filter.ResourceSubscriptions {
-		if decision, ok := authorizeResource(ctx, uri); !ok {
+		if decision, ok := m.authorizeResource(ctx, uri); !ok {
 			return subscriptionSources{}, mcp.ErrInvalidParams("%s", decision)
 		}
 		hasFilter = true
@@ -766,20 +767,29 @@ func (m *mcpRegistry) firstHarness(ctx context.Context) (v1.Harness, error) {
 	return (*harnesses)[0].Name, nil
 }
 
-type mcpTaskNumberArgs struct {
-	TaskNumber int `json:"task_number" jsonschema_description:"The task number, e.g. 1 for task #1"`
-}
-
-func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	if args.TaskNumber < 1 {
-		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task_number must be a positive integer"})
+func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskGetDetailArgs) mcp.ToolResult[mcp.TextOutput] {
+	keys, _ := m.taskKeys(ctx)
+	id, number, err := args.Task.Decode(len(keys))
+	if err != nil {
+		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()})
 	}
-	t, ok := m.taskByNumber(ctx, args.TaskNumber)
-	if !ok {
-		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"})
+	var t v1.Task
+	if number != 0 {
+		t, err = m.taskByNumber(ctx, number)
+	} else if _, taskScoped := taskMCPTaskID(ctx); taskScoped {
+		t, err = m.globalTaskByID(ctx, id)
+	} else {
+		t, err = m.taskByID(ctx, id)
+	}
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
+	}
+	title := fmt.Sprintf("## Task #%d: %s", number, taskTitle(&t))
+	if number == 0 {
+		title = fmt.Sprintf("## Task %s: %s", t.ID, taskTitle(&t))
 	}
 	lines := []string{
-		fmt.Sprintf("## Task #%d: %s", args.TaskNumber, taskTitle(&t)),
+		title,
 		"",
 		fmt.Sprintf("State: %s  Elapsed: %s  Cost: %s", t.State, formatElapsed(time.Duration(t.Duration*float64(time.Second))), formatCost(t.CostUSD)),
 	}
@@ -1169,24 +1179,47 @@ func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, 
 	return mcp.TextToolResult(fmt.Sprintf(format, num))
 }
 
-func (m *mcpRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, bool) {
-	taskList := m.taskSvc.taskListSnapshot(ctx)
-	if num < 1 || num > len(taskList) {
-		return v1.Task{}, false
+func (m *mcpRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, error) {
+	_, entry, ok := m.entryByNumber(ctx, num)
+	if !ok {
+		return v1.Task{}, taskNumberError(num)
 	}
-	return taskList[num-1], true
+	return m.taskDTO(ctx, entry)
 }
 
 func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *taskmgr.Entry, bool) {
-	if num == 0 {
+	keys, _ := m.taskKeys(ctx)
+	if num < 1 || num > len(keys) {
 		return 0, nil, false
 	}
-	t, ok := m.taskByNumber(ctx, num)
-	if !ok {
-		return num, nil, false
-	}
-	entry, ok := m.taskSvc.taskMgr.GetEntry(t.ID.String())
+	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID.String())
 	return num, entry, ok
+}
+
+func (m *mcpRegistry) taskByID(ctx context.Context, id ksid.ID) (v1.Task, error) {
+	entry, ok := m.visibleTaskEntry(ctx, id.String())
+	if !ok {
+		return v1.Task{}, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
+	}
+	return m.taskDTO(ctx, entry)
+}
+
+// globalTaskByID resolves the task-scoped task_get_detail exception that
+// permits stable IDs for all tasks, rather than only visible child tasks.
+func (m *mcpRegistry) globalTaskByID(ctx context.Context, id ksid.ID) (v1.Task, error) {
+	entry, ok := m.taskSvc.taskMgr.GetEntry(id.String())
+	if !ok {
+		return v1.Task{}, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
+	}
+	return m.taskDTO(ctx, entry)
+}
+
+func (m *mcpRegistry) taskDTO(ctx context.Context, entry *taskmgr.Entry) (v1.Task, error) {
+	t, err := taskDTO(ctx, entry, m.taskSvc.taskMgr, m.taskSvc.checkouts, m.taskSvc.authStore)
+	if err != nil {
+		return v1.Task{}, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
+	}
+	return t, nil
 }
 
 // taskScopedEntryByNumber resolves task numbers from a task-scoped list and
@@ -1207,7 +1240,7 @@ func (m *mcpRegistry) taskScopedEntryByNumber(ctx context.Context, num int, allo
 	if num > len(keys) {
 		return num, nil, false
 	}
-	entry, ok := m.taskSvc.taskMgr.GetEntry(keys[num-1].ID.String())
+	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID.String())
 	return num, entry, ok
 }
 
@@ -1279,7 +1312,7 @@ func (m *mcpRegistry) resourceKeys(ctx context.Context) ([]mcpResourceKey, error
 	keys := make([]mcpResourceKey, 0, len(staticResources))
 	for i := range staticResources {
 		resource := &staticResources[i]
-		if _, ok := authorizeResource(ctx, resource.URI); ok {
+		if _, ok := m.authorizeResource(ctx, resource.URI); ok {
 			keys = append(keys, mcpResourceKey{URI: resource.URI, Kind: mcpResourceStatic, Value: resource.Name})
 		}
 	}
@@ -1291,7 +1324,8 @@ func (m *mcpRegistry) resourceKeys(ctx context.Context) ([]mcpResourceKey, error
 			keys = append(keys, mcpResourceKey{URI: "caic://repos/" + url.PathEscape(checkout.RelPath), Kind: mcpResourceRepo, Value: checkout.RelPath})
 		}
 	}
-	if mcpHasScope(ctx, mcpScopeTasksRead) {
+	_, taskScoped := taskMCPTaskID(ctx)
+	if mcpHasScope(ctx, mcpScopeTasksRead) || taskScoped {
 		taskKeys, _ := m.taskKeys(ctx)
 		for _, taskKey := range taskKeys {
 			taskID := taskKey.ID.String()
@@ -1318,7 +1352,7 @@ func (m *mcpRegistry) resourceDescriptors(ctx context.Context, keys []mcpResourc
 			case mcpResourceRepo:
 				resource = mcp.ResourceDescriptor{URI: key.URI, Name: "repo " + key.Value, Title: key.Value, MimeType: "application/json"}
 			case mcpResourceTask:
-				entry, ok := m.taskResourceEntry(ctx, key.Value)
+				entry, ok := m.visibleTaskEntry(ctx, key.Value)
 				if !ok {
 					yield(mcp.ResourceDescriptor{}, errors.New("resource list changed while paging; restart without a cursor"))
 					return
@@ -1695,36 +1729,38 @@ func (m *mcpRegistry) resourceJSON(ctx context.Context, uri string, value any) (
 	return result, err
 }
 
-func (m *mcpRegistry) taskResourceEntry(ctx context.Context, id string) (*taskmgr.Entry, bool) {
+// visibleTaskEntry resolves a task only when it is visible in the MCP context.
+func (m *mcpRegistry) visibleTaskEntry(ctx context.Context, id string) (*taskmgr.Entry, bool) {
 	entry, ok := m.taskSvc.taskMgr.GetEntry(id)
 	if !ok {
 		return nil, false
 	}
+	if !m.taskVisibleToMCP(ctx, entry.Task()) {
+		return nil, false
+	}
+	return entry, true
+}
+
+// taskVisibleToMCP applies the task visibility policy shared by task lists and
+// visible task lookups. Task-scoped clients currently see direct children only;
+// changing this method can deliberately extend that relation to descendants.
+func (m *mcpRegistry) taskVisibleToMCP(ctx context.Context, t *taskpkg.Task) bool {
+	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
+	if taskScoped && t.ParentTaskID != delegatingTaskID {
+		return false
+	}
 	if m.taskSvc.authStore == nil {
-		return entry, true
+		return true
 	}
 	user, ok := auth.UserFromContext(ctx)
-	if !ok || entry.Task().OwnerID == "" || entry.Task().OwnerID == user.ID {
-		return entry, true
-	}
-	return nil, false
+	return !ok || t.OwnerID == "" || t.OwnerID == user.ID
 }
 
 func (m *mcpRegistry) taskKeys(ctx context.Context) (keys []mcpTaskKey, revision string) {
-	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
-	var ownerID string
-	if m.taskSvc.authStore != nil {
-		if user, ok := auth.UserFromContext(ctx); ok {
-			ownerID = user.ID
-		}
-	}
 	keys = make([]mcpTaskKey, 0)
 	for _, entry := range m.taskSvc.taskMgr.Entries() {
 		task := entry.Task()
-		if taskScoped && task.ParentTaskID != delegatingTaskID {
-			continue
-		}
-		if ownerID != "" && task.OwnerID != "" && task.OwnerID != ownerID {
+		if !m.taskVisibleToMCP(ctx, task) {
 			continue
 		}
 		state, err := apiconv.TaskState(task.GetState())
@@ -1929,6 +1965,74 @@ func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, b
 	return "allow", true
 }
 
+func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string, bool) {
+	if after, ok := strings.CutPrefix(uri, "caic://tasks/"); ok {
+		if _, taskScoped := taskMCPTaskID(ctx); taskScoped {
+			if _, ok := m.visibleTaskEntry(ctx, after); !ok {
+				return "task not found", false
+			}
+			return "allow", true
+		}
+		if !mcpHasScope(ctx, mcpScopeTasksRead) {
+			return "missing required MCP scope: " + mcpScopeTasksRead, false
+		}
+		if _, ok := m.visibleTaskEntry(ctx, after); !ok {
+			return "task not found", false
+		}
+		return "allow", true
+	}
+	required := mcpScopeRead
+	if uri == "gomode://items" || uri == "gomode://notifications" {
+		required = mcpScopeTasksRead
+	}
+	if !mcpHasScope(ctx, required) {
+		return "missing required MCP scope: " + required, false
+	}
+	return "allow", true
+}
+
+type mcpTaskNumberArgs struct {
+	TaskNumber int `json:"task_number" jsonschema_description:"The task number, e.g. 1 for task #1"`
+}
+
+type mcpTaskGetDetailArgs struct {
+	Task taskID `json:"task" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number from tasks_list or stable task ID"`
+}
+
+// taskID accepts an MCP task number or a stable task ID.
+type taskID string
+
+// UnmarshalJSON decodes taskID from either its numeric task-number or string ID representation.
+func (id *taskID) UnmarshalJSON(data []byte) error {
+	var number int
+	if err := json.Unmarshal(data, &number); err == nil {
+		*id = taskID(strconv.Itoa(number))
+		return nil
+	}
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return errors.New("task must be a task number or stable task ID")
+	}
+	*id = taskID(raw)
+	return nil
+}
+
+// Decode resolves taskID as a task number up to maxTaskNumber or a stable ID.
+func (id taskID) Decode(maxTaskNumber int) (ksid.ID, int, error) {
+	raw := string(id)
+	if number, err := strconv.Atoi(raw); err == nil {
+		if number < 1 || number > maxTaskNumber {
+			return 0, 0, fmt.Errorf("task number %d is outside 1 through %d", number, maxTaskNumber)
+		}
+		return 0, number, nil
+	}
+	parsed, err := ksid.Parse(raw)
+	if err != nil {
+		return 0, 0, errors.New("task must be a task number or stable task ID")
+	}
+	return parsed, 0, nil
+}
+
 // scopedMCPRegistry binds a server-owned task principal to an MCP registry.
 // Agent session contexts do not carry an MCP principal, and a container must
 // not supply its own task identity. This wrapper therefore makes the registry
@@ -1969,11 +2073,13 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 
 func authorizeToolScope(ctx context.Context, name string) (string, bool) {
 	if _, ok := taskMCPTaskID(ctx); ok {
+		// TODO(task-mcp): Define task-to-task access policy. task_get_detail accepts
+		// global task IDs while task listing, resources, and controls stay child-scoped.
 		switch name {
-		case "task_create", "tasks_list", "task_fork", "task_stop", "task_purge":
+		case "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":
 			return "allow", true
 		}
-		return "task-scoped MCP only permits task_create, tasks_list, task_fork, task_stop, and task_purge", false
+		return "task-scoped MCP only permits task_create, tasks_list, task_get_detail, task_fork, task_stop, and task_purge", false
 	}
 	required := requiredScopeForTool(name)
 	if required == "" {
@@ -1981,17 +2087,6 @@ func authorizeToolScope(ctx context.Context, name string) (string, bool) {
 			return "MCP tool is missing a scope policy", false
 		}
 		return "allow", true
-	}
-	if !mcpHasScope(ctx, required) {
-		return "missing required MCP scope: " + required, false
-	}
-	return "allow", true
-}
-
-func authorizeResource(ctx context.Context, uri string) (string, bool) {
-	required := mcpScopeRead
-	if strings.HasPrefix(uri, "caic://tasks/") || uri == "gomode://items" || uri == "gomode://notifications" {
-		required = mcpScopeTasksRead
 	}
 	if !mcpHasScope(ctx, required) {
 		return "missing required MCP scope: " + required, false
