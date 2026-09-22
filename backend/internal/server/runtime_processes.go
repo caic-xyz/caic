@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -18,10 +17,9 @@ import (
 
 // runtimeProcessHandlers handles task runtime process routes.
 type runtimeProcessHandlers struct {
-	log       *slog.Logger
-	taskMgr   *taskmgr.Manager
-	runtimes  *runtime.Router
-	authStore *auth.Store
+	log      *slog.Logger
+	taskMgr  *taskmgr.Manager
+	runtimes *runtime.Router
 }
 
 // HandleGetProcesses returns the list of running processes inside a task runtime instance.
@@ -85,7 +83,7 @@ func (h *runtimeProcessHandlers) signalProcess(ctx context.Context, entry *taskm
 }
 
 func (h *runtimeProcessHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
-	return taskEntryFromRequest(r, h.taskMgr, h.authStore)
+	return taskEntryFromRequest(r, h.taskMgr)
 }
 
 // routes returns the handler for task runtime process inspection and signaling.

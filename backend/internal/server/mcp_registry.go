@@ -1731,7 +1731,7 @@ func (m *mcpRegistry) visibleTaskEntry(ctx context.Context, id ksid.ID) (*taskmg
 	if !ok {
 		return nil, false
 	}
-	if !taskAccessFromContext(ctx, m.taskSvc.authStore).canAccess(entry.Task()) {
+	if !taskAccessFromContext(ctx).canAccess(entry.Task()) {
 		return nil, false
 	}
 	return entry, true
@@ -1743,14 +1743,14 @@ func (m *mcpRegistry) inspectableTaskEntry(ctx context.Context, id ksid.ID) (*ta
 	if !ok {
 		return nil, false
 	}
-	if !taskAccessFromContext(ctx, m.taskSvc.authStore).canInspect(entry.Task()) {
+	if !taskAccessFromContext(ctx).canInspect(entry.Task()) {
 		return nil, false
 	}
 	return entry, true
 }
 
 func (m *mcpRegistry) taskKeys(ctx context.Context) (keys []mcpTaskKey, revision string) {
-	access := taskAccessFromContext(ctx, m.taskSvc.authStore)
+	access := taskAccessFromContext(ctx)
 	keys = make([]mcpTaskKey, 0)
 	for _, entry := range m.taskSvc.taskMgr.Entries() {
 		task := entry.Task()

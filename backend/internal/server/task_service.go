@@ -104,7 +104,7 @@ type taskStateReplay struct {
 // critical section as the DTO's state, so a replayed state is never newer than
 // the DTO reported alongside it. A nil cursors map skips the history.
 func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64) (tasks []v1.Task, replays map[string]taskStateReplay) {
-	access := taskAccessFromContext(ctx, s.authStore)
+	access := taskAccessFromContext(ctx)
 	if cursors != nil {
 		replays = make(map[string]taskStateReplay)
 	}

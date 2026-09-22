@@ -168,10 +168,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		},
 		goModeHandler: goModeHandler,
 		runtimeProcesses: &runtimeProcessHandlers{
-			log:       log.With("handler", "runtime-processes"),
-			taskMgr:   d.TaskMgr,
-			runtimes:  d.Runtimes,
-			authStore: d.AuthStore,
+			log:      log.With("handler", "runtime-processes"),
+			taskMgr:  d.TaskMgr,
+			runtimes: d.Runtimes,
 		},
 		serverHandlers: &serverHandlers{
 			log:                log.With("handler", "server"),
@@ -200,7 +199,6 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			repoStatus: d.RepoStatus,
 			forgeMgr:   d.ForgeMgr,
 			ciSvc:      d.CIService,
-			authStore:  d.AuthStore,
 			warnings:   d.Warnings,
 			taskSvc:    svc,
 		},

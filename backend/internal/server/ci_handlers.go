@@ -47,7 +47,7 @@ type ciHandlers struct {
 // The jobID is a required query parameter; the caller knows it from the
 // task's ciChecks field. The log is capped at ~8 KB (tail).
 func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
-	entry, err := taskEntryFromRequest(r, h.taskMgr, h.authStore)
+	entry, err := taskEntryFromRequest(r, h.taskMgr)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return

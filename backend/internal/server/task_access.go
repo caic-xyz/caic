@@ -17,12 +17,10 @@ type taskAccess struct {
 	delegatingTaskID ksid.ID
 }
 
-func taskAccessFromContext(ctx context.Context, authStore *auth.Store) taskAccess {
+func taskAccessFromContext(ctx context.Context) taskAccess {
 	access := taskAccess{}
-	if authStore != nil {
-		if user, ok := auth.UserFromContext(ctx); ok {
-			access.userID = user.ID
-		}
+	if user, ok := auth.UserFromContext(ctx); ok {
+		access.userID = user.ID
 	}
 	access.delegatingTaskID, _ = taskMCPTaskID(ctx)
 	return access

@@ -20,7 +20,6 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -45,7 +44,6 @@ type taskHandlers struct {
 	repoStatus *ci.RepoStatusStore
 	forgeMgr   *forgemgr.Manager
 	ciSvc      *ci.Service
-	authStore  *auth.Store
 	taskSvc    *taskService
 
 	warnings *WarningStore
@@ -722,21 +720,21 @@ func (h *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request
 }
 
 // getTask looks up a task by the {id} path parameter.
-// When auth is enabled, returns 403 if the task belongs to a different user.
+// It returns 403 when the caller cannot access the task.
 // It implements taskEntryResolver for route wrappers that require task lookup.
 func (h *taskHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
-	return taskEntryFromRequest(r, h.taskMgr, h.authStore)
+	return taskEntryFromRequest(r, h.taskMgr)
 }
 
 // taskEntryFromRequest looks up a task by the {id} path parameter.
-// When auth is enabled, returns 403 if the task belongs to a different user.
-func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager, authStore *auth.Store) (*taskmgr.Entry, error) {
+// It returns 403 when the caller cannot access the task.
+func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager) (*taskmgr.Entry, error) {
 	id := r.PathValue("id")
 	entry, ok := taskMgr.GetEntry(id)
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
-	if !taskAccessFromContext(r.Context(), authStore).canAccess(entry.Task()) {
+	if !taskAccessFromContext(r.Context()).canAccess(entry.Task()) {
 		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "task" + " access denied"}
 	}
 	return entry, nil
