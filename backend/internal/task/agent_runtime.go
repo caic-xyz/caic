@@ -956,13 +956,14 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	return errors.Join(reviveErr, r.compressLog(log, t, &res))
 }
 
-// finishStartupFailure records a startup error in the task log so the failure
-// survives a server restart.
+// finishStartupFailure removes a started instance and records the startup
+// error in the task log so the failure survives a server restart.
 func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log agent.LogSink, startupErr error) error {
 	failure := &agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}
 	writeErr := log.AppendMessage(failure)
 	t.SetState(taskslog.StateFailed)
 	t.addMessage(ctx, failure, false)
+	purgeErr := r.purgeFailedStartupInstance(ctx, t)
 
 	res := taskslog.Result{State: taskslog.StateFailed, Err: startupErr}
 	if failure, ok := errors.AsType[*StartupError](startupErr); ok {
@@ -971,9 +972,31 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 	}
 	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if writeErr != nil || trailerErr != nil {
-		return errors.Join(startupErr, writeErr, trailerErr, log.Close())
+		return errors.Join(startupErr, purgeErr, writeErr, trailerErr, log.Close())
 	}
-	return errors.Join(startupErr, r.compressLog(log, t, &res))
+	return errors.Join(startupErr, purgeErr, r.compressLog(log, t, &res))
+}
+
+// purgeFailedStartupInstance removes an instance created for a task that
+// failed before its first agent session could start.
+func (r *AgentRuntime) purgeFailedStartupInstance(ctx context.Context, t *Task) error {
+	id := t.RuntimeInstanceID()
+	if id == "" {
+		return nil
+	}
+	timeout := time.Minute
+	if r.Checkout != nil {
+		timeout = r.Checkout.GitTimeout
+	}
+	tlog := r.Log.With("instance", id)
+	tlog.InfoContext(ctx, "startup failed; purging instance")
+	purgeCtx, purgeCancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	err := r.Runtimes.Purge(purgeCtx, id)
+	purgeCancel()
+	if err != nil {
+		tlog.WarnContext(ctx, "purge failed startup instance", "err", err)
+	}
+	return err
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs

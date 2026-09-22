@@ -87,6 +87,16 @@ func (*reviveFailureRuntime) Revive(context.Context, runtime.ID) error {
 	return errors.New("runtime revive failed")
 }
 
+type startupFailingBackend struct {
+	*agenttest.FakeBackend
+
+	err error
+}
+
+func (b *startupFailingBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {
+	return nil, b.err
+}
+
 type testRuntimeSystem struct {
 	testRuntimeBackend
 	runtimetest.FakeInfo
@@ -422,6 +432,34 @@ func TestRunner(t *testing.T) {
 
 	t.Run("Start", func(t *testing.T) {
 		t.Parallel()
+		t.Run("CleansUpInstanceWhenSessionStartupFails", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name string
+				err  error
+			}{
+				{name: "relay", err: errors.New("relay startup failed")},
+				{name: "harness", err: errors.New("harness startup failed")},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					runtimeBackend := &runtimetest.FakeBackend{}
+					r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, map[harness.Name]agent.Backend{
+						"test": &startupFailingBackend{FakeBackend: &agenttest.FakeBackend{}, err: tc.err},
+					}, t.TempDir())
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
+					tk.StartedAt = time.Now().UTC()
+
+					if _, err := r.Start(t.Context(), tk, ""); !errors.Is(err, tc.err) {
+						t.Fatalf("Start error = %v, want %v", err, tc.err)
+					}
+					instanceID := runtime.NewID(runtimeBackend.Name(), "fake-container")
+					if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusPurged {
+						t.Errorf("runtime status = %s, want purged", got)
+					}
+				})
+			}
+		})
 		t.Run("PassesModelAndEffort", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
