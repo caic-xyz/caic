@@ -865,7 +865,7 @@ type LoadedTask struct {
 	OwnerID           string                      `json:"owner_id"`
 	ForkedFromTaskID  string                      `json:"forked_from_task_id"`
 	ParentTaskID      string                      `json:"parent_task_id"`
-	CaicMCPEnabled    bool                        `json:"caic_mcp_enabled"`
+	CaicMCP           bool                        `json:"caic_mcp"`
 	ForgeOwner        string                      `json:"forge_owner"`
 	ForgeRepo         string                      `json:"forge_repo"`
 	ForgePR           int                         `json:"forge_pr"` // PR number created during the task; 0 if none.
@@ -992,7 +992,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		OwnerID:           meta.OwnerID,
 		ForkedFromTaskID:  meta.ForkedFromTaskID,
 		ParentTaskID:      meta.ParentTaskID,
-		CaicMCPEnabled:    meta.CaicMCPEnabled,
+		CaicMCP:           meta.CaicMCP,
 		Tailscale:         meta.Tailscale,
 		USB:               meta.USB,
 		Display:           meta.Display,

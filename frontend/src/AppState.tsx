@@ -119,6 +119,7 @@ function createAppStore() {
   const [sudoEnabled, setSudoEnabled] = createSignal(false);
   const [gitHubTokenAvailable, setGitHubTokenAvailable] = createSignal(false);
   const [gitHubTokenEnabled, setGitHubTokenEnabled] = createSignal(false);
+  const [caicMCP, setCaicMCP] = createSignal(true);
   const [mcpOAuthAvailable, setMCPOAuthAvailable] = createSignal(false);
   const [voiceGatewayAvailable, setVoiceGatewayAvailable] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
@@ -1117,6 +1118,7 @@ function createAppStore() {
       const disp = displayEnabled();
       const sudo = sudoEnabled();
       const ght = gitHubTokenEnabled();
+      const mcp = caicMCP();
       const harness = selectedHarness();
       const runtimeName = selectedRuntimeName();
       const repoSpecs =
@@ -1141,6 +1143,7 @@ function createAppStore() {
         ...(disp ? { display: true } : {}),
         ...(sudo ? { sudo: true } : {}),
         ...(ght ? { gitHubToken: true } : {}),
+        ...(mcp ? { caicMCP: true } : {}),
       });
       setPrefModel(harness, model);
       setPrefEffort(harness, model, effort);
@@ -1332,6 +1335,8 @@ function createAppStore() {
     gitHubTokenAvailable,
     gitHubTokenEnabled,
     setGitHubTokenEnabled,
+    caicMCP,
+    setCaicMCP,
     voiceGatewayAvailable,
     // sidebar + actions
     sidebarOpen,

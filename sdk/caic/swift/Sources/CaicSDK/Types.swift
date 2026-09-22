@@ -1047,7 +1047,7 @@ public struct Task: Codable {
     public let owner: String?
     public let forkedFromTaskID: String?
     public let parentTaskID: String?
-    public let caicMCPEnabled: Bool?
+    public let caicMCP: Bool?
     /// Per-task harness/agent metadata.
     public let harness: Harness
     public let requestedModel: String?
@@ -1117,7 +1117,7 @@ public struct TaskInfoRecorded: Codable {
     public let state: TaskState
     public let forkedFromTaskID: String?
     public let parentTaskID: String?
-    public let caicMCPEnabled: Bool?
+    public let caicMCP: Bool?
     public let startedAt: ISOTimestamp?
     public let stateUpdatedAt: ISOTimestamp?
     public let harness: Harness
@@ -1196,7 +1196,7 @@ public struct CreateTaskReq: Codable {
     public let sudo: Bool?
     public let gitHubToken: Bool?
     /// Enables task-scoped CAIC MCP delegation.
-    public let caicMCPEnabled: Bool?
+    public let caicMCP: Bool?
 }
 
 /// EventInit is emitted once at the start of a session. It includes a Harness

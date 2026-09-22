@@ -289,7 +289,7 @@ func (s *taskService) getTaskInfo(ctx context.Context, entry *taskmgr.Entry, _ *
 			State:                    state,
 			ForkedFromTaskID:         t.ForkedFromTaskID,
 			ParentTaskID:             t.ParentTaskID,
-			CaicMCPEnabled:           t.CaicMCPEnabled,
+			CaicMCP:                  t.CaicMCP,
 			StartedAt:                t.StartedAt,
 			StateUpdatedAt:           snap.StateUpdatedAt,
 			Harness:                  harnessName,
@@ -454,7 +454,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	if sourceID, ok := taskMCPTaskID(ctx); ok {
 		return s.createDelegatedTask(ctx, sourceID.String(), req)
 	}
-	if req.CaicMCPEnabled && !s.taskMgr.TaskMCPAvailable() {
+	if req.CaicMCP && !s.taskMgr.TaskMCPAvailable() {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP is unavailable"}
 	}
 	var ownerID string
@@ -497,7 +497,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		Display:             req.Display,
 		Sudo:                req.Sudo,
 		GitHubToken:         req.GitHubToken,
-		CaicMCPEnabled:      req.CaicMCPEnabled,
+		CaicMCP:             req.CaicMCP,
 		RuntimeName:         runtimeName,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		BaseImage:           prefs.Settings.BaseImage,
@@ -565,7 +565,7 @@ func (s *taskService) createDelegatedTask(ctx context.Context, sourceID string, 
 	if req.InitialPrompt.Text == "" || len(req.InitialPrompt.Images) > 0 {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task requires a text prompt"}
 	}
-	if len(req.Repos) != 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || req.RuntimeName != "" || req.Tailscale || req.USB || req.Display || req.Sudo || req.GitHubToken || req.CaicMCPEnabled {
+	if len(req.Repos) != 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || req.RuntimeName != "" || req.Tailscale || req.USB || req.Display || req.Sudo || req.GitHubToken || req.CaicMCP {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task may only set initialPrompt"}
 	}
 	sourceEntry, ok := s.taskMgr.GetEntry(sourceID)
@@ -573,7 +573,7 @@ func (s *taskService) createDelegatedTask(ctx context.Context, sourceID string, 
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "delegating task not found"}
 	}
 	source := sourceEntry.Task()
-	if !source.CaicMCPEnabled || !taskMCPStateActive(source.GetState()) {
+	if !source.CaicMCP || !taskMCPStateActive(source.GetState()) {
 		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "delegating task is not active"}
 	}
 	githubToken := source.GitHubTokenEnabled()
@@ -812,7 +812,7 @@ func (s *taskService) forkDelegatedTask(ctx context.Context, delegatingTaskID ks
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "delegating task not found"}
 	}
 	delegatingTask := delegatingEntry.Task()
-	if !delegatingTask.CaicMCPEnabled || !taskMCPStateActive(delegatingTask.GetState()) {
+	if !delegatingTask.CaicMCP || !taskMCPStateActive(delegatingTask.GetState()) {
 		return nil, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "delegating task is not active"}
 	}
 	source := sourceEntry.Task()

@@ -1055,6 +1055,39 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
+	t.Run("WithCaicMCP", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}})
+		if err := s.taskMgr.Start(s.TaskMCPScoper); err != nil {
+			t.Fatal(err)
+		}
+		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
+		handler := handle(testTaskHandlers(s).taskSvc.createTask)
+
+		body := strings.NewReader(`{"initialPrompt":{"text":"delegate the review"},"repos":[{"name":"myrepo"}],"harness":"claude","caicMCP":true}`)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", body)
+		w := httptest.NewRecorder()
+		handler(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		var resp v1.Task
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if !resp.CaicMCP {
+			t.Fatal("response CaicMCP = false, want true")
+		}
+		entry, ok := s.taskMgr.GetEntry(resp.ID.String())
+		if !ok {
+			t.Fatal("created task not found")
+		}
+		if !entry.Task().CaicMCP {
+			t.Fatal("created task CaicMCP = false, want true")
+		}
+	})
+
 	t.Run("MissingRepo", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)

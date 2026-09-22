@@ -126,7 +126,7 @@ type Task struct {
 	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
 	ForkedFromTaskID  ksid.ID              // Parent task ID when created by fork; zero otherwise.
 	ParentTaskID      ksid.ID              // Delegating task ID for a child task; zero for root tasks and ordinary forks.
-	CaicMCPEnabled    bool                 // Enables task-scoped CAIC MCP delegation.
+	CaicMCP           bool                 // Enables task-scoped CAIC MCP delegation.
 	Pricer            usage.ModelPricer    // Quota-provider per-model pricing for cost reporting; set by the task manager before the task runs. Nil keeps harness-reported totals only.
 	Rollup            RollupSink           // Cross-task usage rollup sink; NewTask defaults to DiscardRollup, the task manager replaces it with the wired store.
 	Provider          genai.Provider
@@ -370,7 +370,7 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 		OwnerID:           t.OwnerID,
 		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
 		ParentTaskID:      parentTaskID,
-		CaicMCPEnabled:    t.CaicMCPEnabled,
+		CaicMCP:           t.CaicMCP,
 		Tailscale:         t.Tailscale,
 		USB:               t.USB,
 		Display:           t.Display,
@@ -2015,7 +2015,7 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 		OwnerID:           t.OwnerID,
 		ForkedFromTaskID:  t.ForkedFromTaskID.String(),
 		ParentTaskID:      parentTaskID,
-		CaicMCPEnabled:    t.CaicMCPEnabled,
+		CaicMCP:           t.CaicMCP,
 		ForgeOwner:        snapshot.ForgeOwner,
 		ForgeRepo:         snapshot.ForgeRepo,
 		ForgePR:           snapshot.ForgePR,

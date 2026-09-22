@@ -66,6 +66,26 @@ describe("TaskInfo", () => {
     expect(queryByText("read-write")).not.toBeInTheDocument();
   });
 
+  it("shows whether CAIC MCP delegation was enabled", async () => {
+    getTaskInfoMock.mockResolvedValueOnce({
+      id: "task-1",
+      recorded: {
+        state: "running",
+        harness: "claude",
+        caicMCP: true,
+        capabilities: {},
+        runtime: { id: "md-test" },
+      },
+    });
+
+    const { findByText } = renderWithRouter(() => (
+      <TaskInfo taskId="task-1" repo="repo" branch="branch" taskPath="/task/task-1" />
+    ));
+
+    expect(await findByText("CAIC MCP delegation")).toBeInTheDocument();
+    expect(await findByText("yes")).toBeInTheDocument();
+  });
+
   it("shows the clickable fork origin", async () => {
     getTaskInfoMock.mockResolvedValueOnce({
       id: "3BVLTPC1U000",

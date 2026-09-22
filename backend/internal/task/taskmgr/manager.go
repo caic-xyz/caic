@@ -252,7 +252,7 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 // NewEntry creates an unregistered entry with its immutable lifecycle.
 func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 	var taskMCP mcp.Registry
-	if t.CaicMCPEnabled {
+	if t.CaicMCP {
 		taskMCP = m.taskMCPScoper.ForTask(t.ID)
 	}
 	e := &Entry{
@@ -420,7 +420,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	if !ok {
 		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 	}
-	if p.CaicMCPEnabled && !m.TaskMCPAvailable() {
+	if p.CaicMCP && !m.TaskMCPAvailable() {
 		return "", badRequestf("task-scoped MCP is unavailable")
 	}
 
@@ -457,7 +457,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	t.Sudo = p.Sudo
 	t.OwnerID = p.OwnerID
 	t.Provider = m.provider
-	t.CaicMCPEnabled = p.CaicMCPEnabled
+	t.CaicMCP = p.CaicMCP
 	t.ForgeIssue = p.ForgeIssue
 	if p.ForgeOwner != "" {
 		// Set forge owner/repo so ListPendingBotTasks can resolve the commenter.
@@ -1005,7 +1005,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		t.OwnerID = lt.OwnerID
 		t.ForkedFromTaskID = forkedFromTaskID
 		t.ParentTaskID = parentTaskID
-		t.CaicMCPEnabled = lt.CaicMCPEnabled
+		t.CaicMCP = lt.CaicMCP
 		t.Tailscale = lt.Tailscale
 		t.USB = lt.USB
 		t.Display = lt.Display
@@ -1912,7 +1912,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	t.OwnerID = lt.OwnerID
 	t.ForkedFromTaskID = forkedFromTaskID
 	t.ParentTaskID = parentTaskID
-	t.CaicMCPEnabled = lt.CaicMCPEnabled
+	t.CaicMCP = lt.CaicMCP
 	t.Tailscale = c.Tailscale
 	t.TailscaleFQDN = c.TailscaleFQDN
 	t.USB = c.USB

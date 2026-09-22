@@ -1240,7 +1240,7 @@ export interface Task {
   owner?: string;
   forkedFromTaskID?: string;
   parentTaskID?: string;
-  caicMCPEnabled?: boolean;
+  caicMCP?: boolean;
   /** Per-task harness/agent metadata. */
   harness: Harness;
   requestedModel?: string;
@@ -1312,7 +1312,7 @@ export interface TaskInfoRecorded {
   state: TaskState;
   forkedFromTaskID?: string;
   parentTaskID?: string;
-  caicMCPEnabled?: boolean;
+  caicMCP?: boolean;
   startedAt?: ISOTimestamp;
   stateUpdatedAt?: ISOTimestamp;
   harness: Harness;
@@ -1391,7 +1391,7 @@ export interface CreateTaskReq {
   sudo?: boolean;
   gitHubToken?: boolean;
   /** Enables task-scoped CAIC MCP delegation. */
-  caicMCPEnabled?: boolean;
+  caicMCP?: boolean;
 }
 
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */

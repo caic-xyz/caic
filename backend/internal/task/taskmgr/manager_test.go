@@ -1298,7 +1298,7 @@ func TestManager(t *testing.T) {
 			}
 
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			tk.CaicMCPEnabled = true
+			tk.CaicMCP = true
 			entry := m.NewEntry(tk, nil)
 			if _, ok := entry.Lifecycle.agentRuntime.MCPRegistry.(mcptest.FakeRegistry); !ok {
 				t.Errorf("entry MCP registry = %T, want mcptest.FakeRegistry", entry.Lifecycle.agentRuntime.MCPRegistry)
@@ -2248,7 +2248,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_delegated_fork_sets_parent_without_propagating_delegation", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
-			src.Task().CaicMCPEnabled = true
+			src.Task().CaicMCP = true
 			id, err := src.Lifecycle.ForkDelegated(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "child"}})
 			if err != nil {
 				t.Fatalf("ForkDelegated: %v", err)
@@ -2262,7 +2262,7 @@ func TestManager(t *testing.T) {
 			if child.ParentTaskID != src.Task().ID {
 				t.Errorf("ParentTaskID = %s, want %s", child.ParentTaskID, src.Task().ID)
 			}
-			if child.CaicMCPEnabled {
+			if child.CaicMCP {
 				t.Error("delegated child inherited delegation capability")
 			}
 		})

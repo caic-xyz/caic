@@ -654,7 +654,7 @@ func TestStore(t *testing.T) {
 				ForkedFromTaskID: "3BL0EKDTO000",
 				ParentTaskID:     "3BL0EKDTO001",
 				OwnerID:          "user-1",
-				CaicMCPEnabled:   true,
+				CaicMCP:          true,
 			}))
 
 			tasks, err := NewStore(testLogger(), filepath.Dir(path)).LoadUnsettled()
@@ -670,8 +670,8 @@ func TestStore(t *testing.T) {
 			if tasks[0].ParentTaskID != "3BL0EKDTO001" {
 				t.Fatalf("ParentTaskID = %q, want 3BL0EKDTO001", tasks[0].ParentTaskID)
 			}
-			if tasks[0].OwnerID != "user-1" || !tasks[0].CaicMCPEnabled {
-				t.Fatalf("CAIC MCP metadata = owner %q, enabled %v", tasks[0].OwnerID, tasks[0].CaicMCPEnabled)
+			if tasks[0].OwnerID != "user-1" || !tasks[0].CaicMCP {
+				t.Fatalf("CAIC MCP metadata = owner %q, enabled %v", tasks[0].OwnerID, tasks[0].CaicMCP)
 			}
 		})
 

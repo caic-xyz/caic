@@ -329,6 +329,7 @@ export default function TaskInfo(props: Props) {
                   <Field label="Display" value={boolText(data.recorded.capabilities.display)} />
                   <Field label="Sudo" value={boolText(data.recorded.capabilities.sudo)} />
                   <Field label="GitHub token injected" value={boolText(data.recorded.capabilities.gitHubToken)} />
+                  <Field label="CAIC MCP delegation" value={boolText(data.recorded.caicMCP)} />
                 </div>
               </Section>
 

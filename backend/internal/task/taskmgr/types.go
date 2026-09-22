@@ -32,7 +32,7 @@ type CreateParams struct {
 	MaxCPUs           int                  // max CPU cores; 0 means use the default
 	CacheMounts       []runtime.CacheMount // resolved build cache mounts
 	Mounts            []runtime.Mount      // resolved runtime bind mounts
-	CaicMCPEnabled    bool                 // grant this task its task-scoped CAIC MCP capability
+	CaicMCP           bool                 // grant this task its task-scoped CAIC MCP capability
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to checkout.Start. The caller resolves it (preferring

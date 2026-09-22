@@ -5,6 +5,7 @@ import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
+import AccountTreeIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
 
 import { voiceConnected, getVoiceTaskNumber, setVoiceConnected, setVoiceTaskNumberMap } from "../gomode/VoiceState";
 import { useHostMode } from "../gomode/HostMode";
@@ -147,6 +148,9 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onChange={s.setGitHubTokenEnabled}
         >
           <TokenIcon width="1.2em" height="1.2em" />
+        </ToggleChip>
+        <ToggleChip checked={s.caicMCP()} title="Enable CAIC MCP delegation for this task" onChange={s.setCaicMCP}>
+          <AccountTreeIcon width="1.2em" height="1.2em" />
         </ToggleChip>
         <PromptInput
           value={s.prompt()}

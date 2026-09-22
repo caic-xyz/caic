@@ -916,7 +916,7 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 }
 
 func (r *AgentRuntime) configureTaskMCP(t *Task, opts *agent.Options) error {
-	if !t.CaicMCPEnabled {
+	if !t.CaicMCP {
 		return nil
 	}
 	if r.MCPRegistry == nil {

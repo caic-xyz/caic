@@ -1100,8 +1100,8 @@ type MetaMessage struct {
 	ForgeIssue        int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
 	OwnerID           string           `json:"owner_id,omitempty"`    // Human authorization principal; distinct from task lineage.
 	ForkedFromTaskID  string           `json:"forked_from_task_id,omitempty"`
-	ParentTaskID      string           `json:"parent_task_id,omitempty"`   // Delegating task identity; empty for roots and ordinary forks.
-	CaicMCPEnabled    bool             `json:"caic_mcp_enabled,omitempty"` // Enables task-scoped CAIC MCP delegation.
+	ParentTaskID      string           `json:"parent_task_id,omitempty"` // Delegating task identity; empty for roots and ordinary forks.
+	CaicMCP           bool             `json:"caic_mcp,omitempty"`       // Enables task-scoped CAIC MCP delegation.
 	Tailscale         bool             `json:"tailscale,omitempty"`
 	USB               bool             `json:"usb,omitempty"`
 	Display           bool             `json:"display,omitempty"`

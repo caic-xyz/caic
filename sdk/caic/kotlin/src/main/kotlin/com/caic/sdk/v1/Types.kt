@@ -1600,7 +1600,7 @@ data class Task(
     val owner: String? = null,
     @SerialName("forkedFromTaskID") val forkedFromTaskID: String? = null,
     @SerialName("parentTaskID") val parentTaskID: String? = null,
-    @SerialName("caicMCPEnabled") val caicMCPEnabled: Boolean? = null,
+    @SerialName("caicMCP") val caicMCP: Boolean? = null,
     /** Per-task harness/agent metadata. */
     val harness: Harness,
     val requestedModel: String? = null,
@@ -1676,7 +1676,7 @@ data class TaskInfoRecorded(
     val state: TaskState,
     @SerialName("forkedFromTaskID") val forkedFromTaskID: String? = null,
     @SerialName("parentTaskID") val parentTaskID: String? = null,
-    @SerialName("caicMCPEnabled") val caicMCPEnabled: Boolean? = null,
+    @SerialName("caicMCP") val caicMCP: Boolean? = null,
     val startedAt: Instant? = null,
     val stateUpdatedAt: Instant? = null,
     val harness: Harness,
@@ -1755,7 +1755,7 @@ data class CreateTaskReq(
     val sudo: Boolean? = null,
     val gitHubToken: Boolean? = null,
     /** Enables task-scoped CAIC MCP delegation. */
-    @SerialName("caicMCPEnabled") val caicMCPEnabled: Boolean? = null,
+    @SerialName("caicMCP") val caicMCP: Boolean? = null,
 )
 
 /**

@@ -2347,6 +2347,29 @@ describe("App repo chips: No repository", () => {
     const call = vi.mocked(api.createTask).mock.calls[0][0];
     expect(call.repos).toBeUndefined();
   });
+
+  it("enables CAIC MCP delegation by default", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.type(screen.getByTestId("prompt-input"), "review the change");
+    await user.click(screen.getByTestId("submit-task"));
+
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBe(true);
+  });
+
+  it("omits the CAIC MCP delegation grant when disabled", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.type(screen.getByTestId("prompt-input"), "delegate the review");
+    await user.click(screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" }));
+    await user.click(screen.getByTestId("submit-task"));
+
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBeUndefined();
+  });
 });
 
 describe("App repo chip ordering", () => {
