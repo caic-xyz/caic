@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -145,6 +146,13 @@ func Task(in *TaskInput) (v1.Task, error) {
 		out.Result = result.AgentResult
 		if result.Err != nil {
 			out.Error = result.Err.Error()
+		}
+		if result.StartupFailure != nil {
+			failureHarness, err := Harness(harness.Name(result.StartupFailure.Harness))
+			if err != nil {
+				return v1.Task{}, fmt.Errorf("task %s startup failure harness: %w", t.ID, err)
+			}
+			out.StartupFailure = &v1.TaskStartupFailure{Harness: failureHarness, Phase: result.StartupFailure.Phase, Cause: result.StartupFailure.Cause}
 		}
 	} else {
 		out.DiffStat = DiffStat(snap.DiffStat)

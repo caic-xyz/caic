@@ -978,6 +978,13 @@ public struct GitRepositoryState: Codable {
     public let operation: GitOperation?
 }
 
+/// TaskStartupFailure identifies the failed startup phase and original agent diagnostic.
+public struct TaskStartupFailure: Codable {
+    public let harness: Harness
+    public let phase: String
+    public let cause: String
+}
+
 /// RuntimeInstance holds per-task runtime metadata.
 public struct RuntimeInstance: Codable {
     /// Runtime instance ID.
@@ -1035,6 +1042,7 @@ public struct Task: Codable {
     /// Model context window limit (tokens).
     public let contextWindowLimit: Int
     public let error: String?
+    public let startupFailure: TaskStartupFailure?
     public let result: String?
     public let forgeOwner: String?
     public let forgeRepo: String?

@@ -1171,6 +1171,13 @@ export interface GitRepositoryState {
   operation?: GitOperation;
 }
 
+/** TaskStartupFailure identifies the failed startup phase and original agent diagnostic. */
+export interface TaskStartupFailure {
+  harness: Harness;
+  phase: string;
+  cause: string;
+}
+
 /** RuntimeInstance holds per-task runtime metadata. */
 export interface RuntimeInstance {
   /** Runtime instance ID. */
@@ -1228,6 +1235,7 @@ export interface Task {
   /** Model context window limit (tokens). */
   contextWindowLimit: number /* int */;
   error?: string;
+  startupFailure?: TaskStartupFailure;
   result?: string;
   forgeOwner?: string;
   forgeRepo?: string;

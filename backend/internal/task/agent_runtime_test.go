@@ -471,11 +471,17 @@ func TestRunner(t *testing.T) {
 			if len(logs[0].Timeline) != 2 {
 				t.Fatalf("loaded %d messages, want setup log and failure", len(logs[0].Timeline))
 			}
-			for i, want := range []string{"md setup output", "Task startup failed: runtime launch failed"} {
+			for i, want := range []string{"md setup output", "Task startup failed: claude startup failed during runtime setup: runtime launch failed"} {
 				log, ok := logs[0].Timeline[i].Message.(*agent.LogMessage)
 				if !ok || log.Line != want {
 					t.Fatalf("message[%d] = %#v, want log %q", i, logs[0].Timeline[i], want)
 				}
+			}
+			if logs[0].LastTrailer == nil {
+				t.Fatal("result trailer is missing")
+			}
+			if got := logs[0].LastTrailer.StartupFailure; got == nil || got.Harness != "claude" || got.Phase != "runtime setup" || got.Cause != "runtime launch failed" {
+				t.Fatalf("startup failure = %#v, want claude runtime setup diagnostic", got)
 			}
 		})
 

@@ -317,6 +317,7 @@ type Task struct {
 	StoppedDiskUsedBytes               int64                `json:"stoppedDiskUsedBytes"`      // Final writable-layer size retained by a stopped task, or -1 when unavailable.
 	ContextWindowLimit                 int                  `json:"contextWindowLimit"`        // Model context window limit (tokens).
 	Error                              string               `json:"error,omitempty"`
+	StartupFailure                     *TaskStartupFailure  `json:"startupFailure,omitempty"`
 	Result                             string               `json:"result,omitempty"`
 	ForgeOwner                         string               `json:"forgeOwner,omitempty"`
 	ForgeRepo                          string               `json:"forgeRepo,omitempty"`
@@ -345,6 +346,13 @@ type Task struct {
 	RateLimit       TaskRateLimit   `json:"rateLimit,omitzero"` // Current quota block resolved by the backend.
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
+}
+
+// TaskStartupFailure identifies the failed startup phase and original agent diagnostic.
+type TaskStartupFailure struct {
+	Harness Harness `json:"harness"`
+	Phase   string  `json:"phase"`
+	Cause   string  `json:"cause"`
 }
 
 // TaskRateLimit is the current quota block resolved by the backend for one task.

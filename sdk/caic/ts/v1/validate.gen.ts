@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -530,6 +530,15 @@ export function validateGitRepositoryState(raw: ValidatorInput): GitRepositorySt
   };
 }
 
+export function validateTaskStartupFailure(raw: ValidatorInput): TaskStartupFailure {
+  const obj = asObject(raw, "TaskStartupFailure");
+  return {
+    harness: (asString(obj["harness"], "TaskStartupFailure.harness") as Harness),
+    phase: asString(obj["phase"], "TaskStartupFailure.phase"),
+    cause: asString(obj["cause"], "TaskStartupFailure.cause"),
+  };
+}
+
 export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
   const obj = asObject(raw, "ForgeCheck");
   return {
@@ -595,6 +604,7 @@ export function validateTask(raw: ValidatorInput): Task {
     stoppedDiskUsedBytes: asNumber(obj["stoppedDiskUsedBytes"], "Task.stoppedDiskUsedBytes"),
     contextWindowLimit: asNumber(obj["contextWindowLimit"], "Task.contextWindowLimit"),
     error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "Task.error")),
+    startupFailure: (obj["startupFailure"] === undefined || obj["startupFailure"] === null ? undefined : validateTaskStartupFailure(obj["startupFailure"])),
     result: (obj["result"] === undefined || obj["result"] === null ? undefined : asString(obj["result"], "Task.result")),
     forgeOwner: (obj["forgeOwner"] === undefined || obj["forgeOwner"] === null ? undefined : asString(obj["forgeOwner"], "Task.forgeOwner")),
     forgeRepo: (obj["forgeRepo"] === undefined || obj["forgeRepo"] === null ? undefined : asString(obj["forgeRepo"], "Task.forgeRepo")),

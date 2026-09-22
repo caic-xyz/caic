@@ -843,6 +843,16 @@ GitRepositoryState summarizes the compact Git state of one task repository.
 | `conflicts` | `int` |  | yes |
 | `operation` | `GitOperation` |  |  |
 
+### TaskStartupFailure
+
+TaskStartupFailure identifies the failed startup phase and original agent diagnostic.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `harness` | `Harness` |  | yes |
+| `phase` | `string` |  | yes |
+| `cause` | `string` |  | yes |
+
 ### RuntimeInstance
 
 RuntimeInstance holds per-task runtime metadata.
@@ -897,6 +907,7 @@ Task is the JSON representation sent to the frontend.
 | `stoppedDiskUsedBytes` | `int64` | Final writable-layer size retained by a stopped task, or -1 when unavailable. | yes |
 | `contextWindowLimit` | `int` | Model context window limit (tokens). | yes |
 | `error` | `string` |  |  |
+| `startupFailure` | `TaskStartupFailure` |  |  |
 | `result` | `string` |  |  |
 | `forgeOwner` | `string` |  |  |
 | `forgeRepo` | `string` |  |  |

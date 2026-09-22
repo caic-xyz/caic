@@ -237,8 +237,9 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	// filename and persist output from its first line.
 	log, err := r.openLog(t)
 	if err != nil {
-		t.recordStartupFailure(ctx, err)
-		return nil, err
+		startupErr := &StartupError{Harness: t.Harness, Phase: "task log setup", Err: err}
+		t.recordStartupFailure(ctx, startupErr)
+		return nil, startupErr
 	}
 
 	tStart := time.Now()
@@ -253,7 +254,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	sr, err := r.setup(ctx, t, metadata, resolvedGitHubToken, log)
 	region.End()
 	if err != nil {
-		return nil, r.finishStartupFailure(ctx, t, log, err)
+		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "runtime setup", Err: err})
 	}
 	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtimes.VNCPort(ctx, sr.InstanceID))
 	r.recordCommitBaseline(ctx, t, log, sr.InstanceID)
@@ -291,7 +292,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		close(msgCh)
 		<-dispatchDone
-		return nil, r.finishStartupFailure(ctx, t, log, err)
+		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "task-scoped MCP setup", Err: err})
 	}
 	session, err := r.Backends[t.Harness].Start(ctx, opts)
 	region.End()
@@ -299,7 +300,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 		close(msgCh)
 		<-dispatchDone
 		tlog.Error("session start failed", "err", err)
-		return nil, r.finishStartupFailure(ctx, t, log, err)
+		return nil, r.finishStartupFailure(ctx, t, log, &StartupError{Harness: t.Harness, Phase: "agent startup", Err: err})
 	}
 
 	// Store handle so SendInput can reach it.
@@ -964,6 +965,10 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 	t.addMessage(ctx, failure, false)
 
 	res := taskslog.Result{State: taskslog.StateFailed, Err: startupErr}
+	if failure, ok := errors.AsType[*StartupError](startupErr); ok {
+		details := failure.Details()
+		res.StartupFailure = &details
+	}
 	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if writeErr != nil || trailerErr != nil {
 		return errors.Join(startupErr, writeErr, trailerErr, log.Close())
@@ -1326,6 +1331,27 @@ func (r *AgentRuntime) runtimeDir(t *Task) string {
 		return "/home/user"
 	}
 	return "/home/user/src/" + filepath.Base(r.Checkout.Dir)
+}
+
+// StartupError identifies a task startup failure without discarding its cause.
+// It is persisted in the task result and exposed to clients as structured data.
+type StartupError struct {
+	Harness harness.Name
+	Phase   string
+	Err     error
+}
+
+// Error implements error.
+func (e *StartupError) Error() string {
+	return fmt.Sprintf("%s startup failed during %s: %v", e.Harness, e.Phase, e.Err)
+}
+
+// Unwrap returns the underlying startup diagnostic.
+func (e *StartupError) Unwrap() error { return e.Err }
+
+// Details returns the durable client-facing startup diagnostic.
+func (e *StartupError) Details() agent.StartupFailure {
+	return agent.StartupFailure{Harness: string(e.Harness), Phase: e.Phase, Cause: e.Err.Error()}
 }
 
 type replaceSessionMode int

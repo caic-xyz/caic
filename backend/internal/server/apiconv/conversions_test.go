@@ -510,6 +510,30 @@ func TestTask(t *testing.T) {
 			t.Fatalf("old stopped disk = %v, want -1", old.StoppedDiskUsedBytes)
 		}
 	})
+	t.Run("IncludesStartupFailure", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"})
+		tk.SetState(taskslog.StateFailed)
+
+		got, err := Task(&TaskInput{
+			Task:     tk,
+			Snapshot: tk.Snapshot(),
+			Result: &taskslog.Result{
+				State: taskslog.StateFailed,
+				StartupFailure: &agent.StartupFailure{
+					Harness: "claude",
+					Phase:   "agent startup",
+					Cause:   "handshake rejected configuration",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.StartupFailure == nil || got.StartupFailure.Harness != v1.HarnessClaude || got.StartupFailure.Phase != "agent startup" || got.StartupFailure.Cause != "handshake rejected configuration" {
+			t.Fatalf("StartupFailure = %#v", got.StartupFailure)
+		}
+	})
 }
 
 func TestProcessInfos(t *testing.T) {

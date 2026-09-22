@@ -1528,6 +1528,14 @@ data class GitRepositoryState(
     val operation: GitOperation? = null,
 )
 
+/** TaskStartupFailure identifies the failed startup phase and original agent diagnostic. */
+@Serializable
+data class TaskStartupFailure(
+    val harness: Harness,
+    val phase: String,
+    val cause: String,
+)
+
 /** RuntimeInstance holds per-task runtime metadata. */
 @Serializable
 data class RuntimeInstance(
@@ -1588,6 +1596,7 @@ data class Task(
     /** Model context window limit (tokens). */
     val contextWindowLimit: Int,
     val error: String? = null,
+    val startupFailure: TaskStartupFailure? = null,
     val result: String? = null,
     val forgeOwner: String? = null,
     val forgeRepo: String? = null,

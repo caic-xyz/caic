@@ -261,7 +261,7 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 		}
 	case logControlResult:
 		switch field {
-		case "agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "state", "title":
+		case "agent_result", "cache_creation_input_tokens", "cache_read_input_tokens", "cost_usd", "diff_stat", "disk_used_bytes", "duration", "error", "input_tokens", "num_turns", "output_tokens", "reasoning_output_tokens", "startup_failure", "state", "title":
 			return true
 		}
 	case logControlTurnCommitSnapshot:

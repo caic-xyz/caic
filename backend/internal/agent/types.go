@@ -1260,13 +1260,21 @@ type MetaResultMessage struct {
 	DiffStat                 DiffStat `json:"diff_stat,omitzero"`
 	// TODO(2026-10-01): Make DiskUsedBytes an int64 value using -1 for
 	// unavailable measurements after legacy result records have aged out.
-	DiskUsedBytes *int64 `json:"disk_used_bytes,omitempty"`
-	Error         string `json:"error,omitempty"`
-	AgentResult   string `json:"agent_result,omitempty"`
+	DiskUsedBytes  *int64          `json:"disk_used_bytes,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	AgentResult    string          `json:"agent_result,omitempty"`
+	StartupFailure *StartupFailure `json:"startup_failure,omitempty"`
 }
 
 // Type implements Message.
 func (m *MetaResultMessage) Type() string { return messageTypeResult }
+
+// StartupFailure identifies the failed task-start phase and original agent diagnostic.
+type StartupFailure struct {
+	Harness string `json:"harness"`
+	Phase   string `json:"phase"`
+	Cause   string `json:"cause"`
+}
 
 // MetaPRMessage is written to the JSONL log when a PR is created so that the
 // PR number can be restored on server restart.

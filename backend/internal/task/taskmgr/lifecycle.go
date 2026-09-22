@@ -261,7 +261,12 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 	t := r.entry.Task()
 	h, err := r.agentRuntime.Start(ctx, t, resolvedGitHubToken)
 	if err != nil {
-		r.entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "start task")})
+		result := &taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "start task")}
+		if startupErr, ok := errors.AsType[*task.StartupError](err); ok {
+			details := startupErr.Details()
+			result.StartupFailure = &details
+		}
+		r.entry.Finish(result)
 		r.manager.NotifyTaskChange()
 		return err
 	}

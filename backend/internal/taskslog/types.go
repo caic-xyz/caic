@@ -84,13 +84,14 @@ type Result struct {
 	DiffStat agent.DiffStat `json:"diff_stat"`
 	// DiskUsedBytes is the final measured writable-layer size. Nil means the
 	// runtime could not provide a measurement.
-	DiskUsedBytes *int64        `json:"disk_used_bytes,omitempty"`
-	CostUSD       float64       `json:"cost_usd"`
-	Duration      time.Duration `json:"duration"`
-	NumTurns      int           `json:"num_turns"`
-	Usage         agent.Usage   `json:"usage"`
-	AgentResult   string        `json:"agent_result"`
-	Err           error         `json:"-"`
+	DiskUsedBytes  *int64                `json:"disk_used_bytes,omitempty"`
+	CostUSD        float64               `json:"cost_usd"`
+	Duration       time.Duration         `json:"duration"`
+	NumTurns       int                   `json:"num_turns"`
+	Usage          agent.Usage           `json:"usage"`
+	AgentResult    string                `json:"agent_result"`
+	StartupFailure *agent.StartupFailure `json:"startup_failure,omitempty"`
+	Err            error                 `json:"-"`
 }
 
 // MarshalJSON preserves Result's error text in rebuildable task metadata.

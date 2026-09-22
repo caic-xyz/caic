@@ -835,9 +835,10 @@ func applyMetaResult(lt *LoadedTask, mr *agent.MetaResultMessage) {
 			CacheReadInputTokens:     mr.CacheReadInputTokens,
 			ReasoningOutputTokens:    mr.ReasoningOutputTokens,
 		},
-		DiffStat:      mr.DiffStat,
-		DiskUsedBytes: mr.DiskUsedBytes,
-		AgentResult:   mr.AgentResult,
+		DiffStat:       mr.DiffStat,
+		DiskUsedBytes:  mr.DiskUsedBytes,
+		AgentResult:    mr.AgentResult,
+		StartupFailure: mr.StartupFailure,
 	}
 	if len(mr.DiffStat) > 0 {
 		lt.DiffCreated = true
