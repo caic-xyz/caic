@@ -73,14 +73,14 @@ func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.S
 					return
 				}
 				if result.err != nil {
-					yield(usagedb.UsageRow{}, fmt.Errorf("load task log %s: %w", paths[start+i], result.err))
-					return
+					s.log.WarnContext(ctx, "skip unreadable task log during usage backfill", "path", paths[start+i], "err", result.err)
+					continue
 				}
 				result.task.SetWireResolver(resolver)
 				for row, err := range result.task.UsageRows(ctx) {
 					if err != nil {
-						yield(usagedb.UsageRow{}, fmt.Errorf("scan task log %s: %w", result.task.LogPath(), err))
-						return
+						s.log.WarnContext(ctx, "skip unreadable task log during usage backfill", "path", result.task.LogPath(), "err", err)
+						break
 					}
 					if !yield(row, nil) {
 						return
@@ -99,7 +99,7 @@ func usageLogPaths(ctx context.Context, s *Store) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ordered := make([]usageLogPath, len(paths))
+	ordered := make([]usageLogPath, 0, len(paths))
 	for start := 0; start < len(paths); start += maxParallelLogHeaderLoads {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -116,9 +116,10 @@ func usageLogPaths(ctx context.Context, s *Store) ([]string, error) {
 				return nil, err
 			}
 			if result.err != nil {
-				return nil, fmt.Errorf("load task log %s: %w", paths[start+i], result.err)
+				s.log.WarnContext(ctx, "skip unreadable task log during usage backfill", "path", paths[start+i], "err", result.err)
+				continue
 			}
-			ordered[start+i] = usageLogPath{path: paths[start+i], startedAt: result.startedAt}
+			ordered = append(ordered, usageLogPath{path: paths[start+i], startedAt: result.startedAt})
 		}
 	}
 	slices.SortFunc(ordered, func(a, b usageLogPath) int {
@@ -127,8 +128,9 @@ func usageLogPaths(ctx context.Context, s *Store) ([]string, error) {
 		}
 		return strings.Compare(a.path, b.path)
 	})
-	for i := range ordered {
-		paths[i] = ordered[i].path
+	paths = paths[:0]
+	for _, path := range ordered {
+		paths = append(paths, path.path)
 	}
 	return paths, nil
 }

@@ -361,7 +361,8 @@ func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
 //
 // Loading and parsing begin only when the sequence is iterated. resolver
 // supplies a fresh native wire for each physical log's validated harness.
-// A non-nil error is yielded at most once and terminates the sequence.
+// Per-log read or parse failures are logged and skipped; a non-nil error is
+// yielded only for source-wide failures and terminates the sequence.
 func (s *Store) UsageRows(ctx context.Context, resolver WireResolver) iter.Seq2[usagedb.UsageRow, error] {
 	return storeUsageRows(s, ctx, resolver)
 }

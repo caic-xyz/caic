@@ -49,20 +49,25 @@ func TestStoreUsageRows(t *testing.T) {
 		}
 	})
 
-	t.Run("unresolved task logs leave the sentinel absent", func(t *testing.T) {
+	t.Run("skips unreadable logs and backfills valid history", func(t *testing.T) {
 		t.Parallel()
 		usageDir, logStore, rollup := newUsageStores(t)
 		if err := os.MkdirAll(logStore.LogDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
+		writeUsageLog(t, logStore.LogDir, "valid", agent.LogVersionV2, usageAt(5), usageAt(5))
 		if err := os.WriteFile(filepath.Join(logStore.LogDir, "broken.jsonl"), []byte("not json\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err == nil {
-			t.Error("Backfill unexpectedly accepted an unresolved log")
+		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+			t.Fatal(err)
 		}
-		if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); !os.IsNotExist(err) {
-			t.Errorf("unresolved log wrote sentinel: %v", err)
+		days := rollup.Days()
+		if len(days) != 1 || days[0].Day != "2026-02-05" || days[0].Tokens.Output != 7 {
+			t.Errorf("days = %+v", days)
+		}
+		if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); err != nil {
+			t.Fatalf("backfill sentinel: %v", err)
 		}
 	})
 
