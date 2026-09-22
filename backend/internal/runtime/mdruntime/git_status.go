@@ -53,14 +53,17 @@ func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`printf '\0` + gitWorktreeStatMarker + `\0'`
 }
 
-// gitStatusHeader returns the status porcelain, upstream comparison, and
-// operation detection shared by the full and compact status commands.
-func gitStatusHeader(repo, comparison string) string {
+// gitStatusHeader returns the status porcelain, tracking-upstream comparison,
+// and operation detection shared by the full and compact status commands. A
+// configured task base is used only when the checked-out branch has no usable
+// tracking upstream, so the task card and diff agree with git status.
+func gitStatusHeader(repo, configuredComparison string) string {
 	return "cd " + shellQuote(repo) + ` && export GIT_OPTIONAL_LOCKS=0 LC_ALL=C && ` +
 		`git status --porcelain=v2 --branch -z --untracked-files=all && ` +
 		`upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true) && ` +
-		`comparison=` + shellQuote(comparison) + ` && ` +
-		`if ! git rev-parse --verify --quiet "$comparison^{commit}" >/dev/null; then comparison=$upstream; fi && ` +
+		`comparison=$upstream && fallback=` + shellQuote(configuredComparison) + ` && ` +
+		`if ! git rev-parse --verify --quiet "$comparison^{commit}" >/dev/null; then comparison=$fallback; fi && ` +
+		`if ! git rev-parse --verify --quiet "$comparison^{commit}" >/dev/null; then comparison=; fi && ` +
 		`if [ -n "$comparison" ]; then ` +
 		`divergence=$(git rev-list --left-right --count "$comparison...HEAD") && ` +
 		`printf '` + gitComparisonMarker + `%s\0` + gitDivergenceMarker + `%s\0' "$comparison" "$divergence"; ` +

@@ -292,6 +292,37 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("uses tracking upstream instead of configured base", func(t *testing.T) {
+		t.Parallel()
+		dir := initStatusRepo(t)
+		runTestGit(t, dir, "checkout", "-b", "usage-base")
+		if err := os.WriteFile(filepath.Join(dir, "usage.txt"), []byte("usage base\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "usage.txt")
+		runTestGit(t, dir, "commit", "-m", "usage base")
+		runTestGit(t, dir, "update-ref", "refs/remotes/origin/usage", "HEAD")
+		runTestGit(t, dir, "checkout", "-b", "caic-42", "origin/main")
+		runTestGit(t, dir, "branch", "--set-upstream-to=origin/main", "caic-42")
+		if err := os.WriteFile(filepath.Join(dir, "task.txt"), []byte("task change\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runTestGit(t, dir, "add", "task.txt")
+		runTestGit(t, dir, "commit", "-m", "task change")
+
+		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "usage")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := parseCompactGitStatus(string(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Upstream != "origin/main" || status.Ahead != 1 || status.Behind != 0 {
+			t.Errorf("branch status = %+v, want origin/main +1 -0", status)
+		}
+	})
+
 	t.Run("unresolvable comparison reports counts without a branch stat", func(t *testing.T) {
 		t.Parallel()
 		dir := initStatusRepo(t)
@@ -448,10 +479,10 @@ func TestGitStatusCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if status.Branch != "main" || status.Upstream != "origin/main" || status.Ahead != 1 || status.Behind != 0 {
+		if status.Branch != "main" || status.Upstream != "host/caic-42" || status.Ahead != 0 || status.Behind != 0 {
 			t.Errorf("branch status = %+v", status)
 		}
-		if len(status.Commits) != 1 || status.Commits[0].Subject != "one ahead" || status.Commits[0].AuthoredDate == "" || status.Commits[0].Decorations != "HEAD -> main, host/caic-42" || len(status.Commits[0].Stat) != 1 || status.Commits[0].Stat[0] != (runtime.GitFileStat{Path: "committed.txt", LinesAdded: 1}) {
+		if len(status.Commits) != 0 {
 			t.Errorf("commits = %+v", status.Commits)
 		}
 		if len(status.Uncommitted) != 3 {
@@ -461,7 +492,6 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Errorf("uncommitted stats = %+v", status.Uncommitted)
 		}
 		wantDiffStat := []runtime.GitFileStat{
-			{Path: "committed.txt", LinesAdded: 1},
 			{Path: "staged.txt", LinesAdded: 1},
 			{Path: "tracked.txt", LinesAdded: 1, LinesDeleted: 1},
 			{Path: "untracked.txt", LinesAdded: 1},
