@@ -466,6 +466,9 @@ func TestBackend(t *testing.T) {
 		if src.forkOpts.Sudo {
 			t.Error("Fork Sudo = true, want explicit disabled value")
 		}
+		if !slices.Equal(src.forkOpts.ExtraRunArgs, []string{"--pids-limit", "4096"}) {
+			t.Errorf("Fork ExtraRunArgs = %v, want PID limit", src.forkOpts.ExtraRunArgs)
+		}
 	})
 
 	t.Run("Fork extraEnv", func(t *testing.T) {
@@ -562,6 +565,9 @@ func TestBackend(t *testing.T) {
 		}
 		if opts.MaxCPUs <= 0 {
 			t.Errorf("MaxCPUs = %d, want positive default", opts.MaxCPUs)
+		}
+		if !slices.Equal(opts.ExtraRunArgs, []string{"--pids-limit", "4096"}) {
+			t.Errorf("ExtraRunArgs = %v, want PID limit", opts.ExtraRunArgs)
 		}
 		if len(opts.Caches) != 1 || opts.Caches[0].Name != "npm" {
 			t.Errorf("Caches = %+v, want npm passthrough", opts.Caches)

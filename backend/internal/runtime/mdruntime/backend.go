@@ -24,6 +24,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
+// Limit all threads and processes in a caic container, leaving room for builds
+// and browsers while bounding runaway process creation.
+//
+// TODO: Probably move to md.
+const containerPIDsLimit = "4096"
+
 // mdClient is the subset of *md.Client that Backend needs. Production wraps a
 // *md.Client (mdClientAdapter); tests supply a fake. Container and Get return
 // mdContainer so the whole launch→connect→fork flow can be exercised without
@@ -661,9 +667,10 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		// container's ~/.env is rewritten from scratch, so the target harness's
 		// config env (e.g. its API keys) must be re-injected here. opts.ExtraEnv
 		// stays last so caller-set vars (e.g. GITHUB_TOKEN) win on conflict.
-		ExtraEnv: append(b.baseExtraEnv(opts.Harness), opts.ExtraEnv...),
-		Mounts:   mounts,
-		MaxCPUs:  maxCPUsOrDefault(opts.MaxCPUs),
+		ExtraEnv:     append(b.baseExtraEnv(opts.Harness), opts.ExtraEnv...),
+		Mounts:       mounts,
+		MaxCPUs:      maxCPUsOrDefault(opts.MaxCPUs),
+		ExtraRunArgs: []string{"--pids-limit", containerPIDsLimit},
 	}
 	stdout, stderr := b.logWriters(ctx, opts.LogWriter, "fork")
 	b.log.DebugContext(ctx, "calling fork", "source", name)
@@ -994,17 +1001,18 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	}
 	extraEnv = append(extraEnv, opts.ExtraEnv...)
 	return &md.StartOpts{
-		BaseImage: image,
-		Platform:  opts.ContainerPlatform,
-		Caches:    toMDCacheMounts(opts.Caches),
-		Labels:    metadataLabels(opts.Metadata),
-		USB:       opts.USB,
-		Tailscale: opts.Tailscale,
-		Display:   opts.Display,
-		Sudo:      opts.Sudo,
-		ExtraEnv:  extraEnv,
-		Mounts:    mounts,
-		MaxCPUs:   maxCPUsOrDefault(opts.MaxCPUs),
+		BaseImage:    image,
+		Platform:     opts.ContainerPlatform,
+		Caches:       toMDCacheMounts(opts.Caches),
+		Labels:       metadataLabels(opts.Metadata),
+		USB:          opts.USB,
+		Tailscale:    opts.Tailscale,
+		Display:      opts.Display,
+		Sudo:         opts.Sudo,
+		ExtraEnv:     extraEnv,
+		Mounts:       mounts,
+		MaxCPUs:      maxCPUsOrDefault(opts.MaxCPUs),
+		ExtraRunArgs: []string{"--pids-limit", containerPIDsLimit},
 	}, nil
 }
 
