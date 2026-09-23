@@ -330,7 +330,7 @@ func TestNewBridge(t *testing.T) {
 	cfg := &voicegateway.Config{Backend: voicegateway.BackendGeminiLive}
 	t.Run("NewBridge", func(t *testing.T) {
 		t.Parallel()
-		b, err := NewBridge(t.Context(), cfg, "test-key", 0)
+		b, err := NewBridge(t.Context(), cfg, "test-key", 0, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -339,7 +339,7 @@ func TestNewBridge(t *testing.T) {
 
 	t.Run("PeerConnection", func(t *testing.T) {
 		t.Parallel()
-		b, err := NewBridge(t.Context(), cfg, "test-key", 0)
+		b, err := NewBridge(t.Context(), cfg, "test-key", 0, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -529,7 +529,7 @@ func TestBackendConnector(t *testing.T) {
 	t.Run("NewBridgeWithBackend", func(t *testing.T) {
 		t.Parallel()
 		backend := &fakeBackendConnector{}
-		b, err := newBridgeWithBackend(t.Context(), backend, 0)
+		b, err := newBridgeWithBackend(t.Context(), backend, 0, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -542,7 +542,7 @@ func TestBackendConnector(t *testing.T) {
 	t.Run("NewBridgeWithBackendBindsUDPAndDefersAPI", func(t *testing.T) {
 		t.Parallel()
 		backend := &fakeBackendConnector{}
-		b, err := newBridgeWithBackend(t.Context(), backend, 0)
+		b, err := newBridgeWithBackend(t.Context(), backend, 0, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -580,7 +580,12 @@ func TestBackendConnector(t *testing.T) {
 
 	t.Run("SessionSink", func(t *testing.T) {
 		t.Parallel()
-		sess := &session{id: "test-session", cancel: func() {}}
+		activityLog, err := openActivityLog(t.TempDir(), "test-session")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = activityLog.close() })
+		sess := &session{id: "test-session", activityLog: activityLog, cancel: func() {}}
 		backend := &fakeBackendConnector{}
 		backendSession, err := backend.connect(t.Context(), sess.id, sess)
 		if err != nil {

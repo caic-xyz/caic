@@ -97,7 +97,7 @@ type voiceRTCMessage struct {
 }
 
 func newVoiceRTCTestSession(ctx context.Context, t *testing.T, backend backendConnector) *voiceRTCTestSession {
-	bridge, err := newBridgeWithBackend(ctx, backend, 0)
+	bridge, err := newBridgeWithBackend(ctx, backend, 0, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

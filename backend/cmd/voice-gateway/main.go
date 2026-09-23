@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -61,7 +62,11 @@ func mainImpl(args []string) error {
 	if cfg.Backend == voicegateway.BackendGeminiLive && geminiAPIKey == "" {
 		log.WarnContext(ctx, "voice media disabled", "reason", "GEMINI_API_KEY is not configured")
 	} else {
-		bridge, err = voicertc.NewBridge(ctx, &cfg, geminiAPIKey, cfg.Server.WebRTCUDPPort)
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return fmt.Errorf("get user cache dir: %w", err)
+		}
+		bridge, err = voicertc.NewBridge(ctx, &cfg, geminiAPIKey, cfg.Server.WebRTCUDPPort, filepath.Join(cacheDir, "voice-gateway"))
 		if err != nil {
 			return err
 		}

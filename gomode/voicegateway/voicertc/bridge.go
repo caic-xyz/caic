@@ -51,11 +51,12 @@ const (
 
 // Bridge manages active WebRTC voice sessions for a single configured backend.
 type Bridge struct {
-	backend  backendConnector
-	udpMux   ice.UDPMux
-	voiceNet *ipv4Net
-	hostIP   net.IP
-	udpPort  int
+	backend        backendConnector
+	activityLogDir string
+	udpMux         ice.UDPMux
+	voiceNet       *ipv4Net
+	hostIP         net.IP
+	udpPort        int
 
 	setupMu             sync.Mutex
 	api                 *webrtc.API
@@ -72,12 +73,15 @@ type Bridge struct {
 //
 // A gateway instance serves exactly the backend named in cfg. geminiAPIKey is
 // only consumed by the Gemini Live backend.
-func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string, udpPort int) (*Bridge, error) {
+func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string, udpPort int, activityLogDir string) (*Bridge, error) {
+	if activityLogDir == "" {
+		return nil, errors.New("voice activity log directory is required")
+	}
 	backend, err := backendForConfig(ctx, cfg, geminiAPIKey)
 	if err != nil {
 		return nil, err
 	}
-	b, err := newBridgeWithBackend(ctx, backend, udpPort)
+	b, err := newBridgeWithBackend(ctx, backend, udpPort, activityLogDir)
 	if err != nil {
 		if cerr := backend.Close(); cerr != nil {
 			slog.WarnContext(ctx, "voicertc: close backend", "err", cerr)
@@ -91,7 +95,7 @@ func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey strin
 	return b, nil
 }
 
-func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int) (*Bridge, error) {
+func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int, activityLogDir string) (*Bridge, error) {
 	if backend == nil {
 		return nil, errors.New("voice backend is required")
 	}
@@ -117,6 +121,7 @@ func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort
 	slog.InfoContext(ctx, "voicertc: listening", "udpPort", addr.Port, "hostIP", hostIP)
 	return &Bridge{
 		backend:             backend,
+		activityLogDir:      activityLogDir,
 		udpMux:              mux,
 		voiceNet:            voiceNet,
 		hostIP:              append(net.IP(nil), hostIP...),
@@ -158,6 +163,20 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		dataChannelState:    voicev1.VoiceRTCDataChannelStateNew,
 		cancel:              cancel,
 	}
+	activityLog, err := openActivityLog(b.activityLogDir, sess.id)
+	if err != nil {
+		_ = pc.Close()
+		cancel()
+		return "", "", err
+	}
+	sess.activityLog = activityLog
+	registered := false
+	defer func() {
+		if !registered {
+			sess.cancel()
+			sess.close()
+		}
+	}()
 
 	// Set up RTP audio track (server → client).
 	audioTrack, trackErr := webrtc.NewTrackLocalStaticSample(
@@ -165,13 +184,9 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		"audio", "assistant-voice",
 	)
 	if trackErr != nil {
-		_ = pc.Close()
-		cancel()
 		return "", "", fmt.Errorf("create audio track: %w", trackErr)
 	}
 	if _, trackErr = pc.AddTrack(audioTrack); trackErr != nil {
-		_ = pc.Close()
-		cancel()
 		return "", "", fmt.Errorf("add audio track: %w", trackErr)
 	}
 	sess.audioTrack = audioTrack
@@ -241,6 +256,11 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			if backendSession == nil {
 				return
 			}
+			if err := sess.activityLog.record(activityLogSourceClient, msg.Data); err != nil {
+				slog.ErrorContext(sessionCtx, "voicertc: activity log write failed", "session", sess.id, "err", err)
+				sess.sendError("Failed to record voice activity: " + err.Error())
+				return
+			}
 			err := backendSession.acceptClientMessage(sessionCtx, msg.Data)
 			if err != nil {
 				if errors.Is(err, errSessionClosed) {
@@ -286,32 +306,24 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		Type: webrtc.SDPTypeOffer,
 		SDP:  sdpOffer,
 	}); err != nil {
-		_ = pc.Close()
-		cancel()
 		return "", "", fmt.Errorf("set remote description: %w", err)
 	}
 
 	// Create answer.
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		_ = pc.Close()
-		cancel()
 		return "", "", fmt.Errorf("create answer: %w", err)
 	}
 
 	// Gather ICE candidates (block until complete for non-trickle ICE).
 	gatherDone := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
-		_ = pc.Close()
-		cancel()
 		return "", "", fmt.Errorf("set local description: %w", err)
 	}
 
 	select {
 	case <-gatherDone:
 	case <-ctx.Done():
-		_ = pc.Close()
-		cancel()
 		return "", "", ctx.Err()
 	}
 
@@ -342,10 +354,9 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 
 	localDesc := pc.LocalDescription()
 	if localDesc == nil {
-		_ = pc.Close()
-		cancel()
 		return "", "", errors.New("no local description after ICE gathering")
 	}
+	registered = true
 	return b.rewriteMappedCandidatePort(localDesc.SDP), sess.id, nil
 }
 
@@ -509,6 +520,8 @@ func backendForConfig(ctx context.Context, cfg *voicegateway.Config, geminiAPIKe
 type session struct {
 	id string
 
+	activityLog *activityLog
+
 	mu                   sync.Mutex
 	pc                   *webrtc.PeerConnection
 	dc                   *webrtc.DataChannel
@@ -624,6 +637,9 @@ func (s *session) backendReady(ctx context.Context) {
 }
 
 func (s *session) sendGatewayMessage(_ context.Context, data []byte) error {
+	if err := s.activityLog.record(activityLogSourceGateway, data); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	dc := s.dc
 	s.mu.Unlock()
@@ -974,6 +990,11 @@ func (s *session) close() {
 	}
 	if pc != nil {
 		_ = pc.Close()
+	}
+	if s.activityLog != nil {
+		if err := s.activityLog.close(); err != nil {
+			slog.Warn("voicertc: close activity log", "session", s.id, "err", err)
+		}
 	}
 }
 

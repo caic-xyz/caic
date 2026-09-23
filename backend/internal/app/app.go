@@ -230,7 +230,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		case voiceCfg.Backend == voicegateway.BackendGeminiLive && key == "":
 			appLog.InfoContext(ctx, "voice bridge disabled: GEMINI_API_KEY not set")
 		default:
-			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, key, port)
+			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, key, port, filepath.Join(cfg.Dirs.CacheDir, "voice-gateway"))
 			if err != nil {
 				return nil, fmt.Errorf("voice bridge: %w", err)
 			}
