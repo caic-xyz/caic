@@ -1,4 +1,4 @@
-// Store is the usage rollup sink: append-only daily JSONL files, aggregates, resume watermarks, purge discard, and one-pass backfill.
+// Store is the usage rollup sink: daily JSONL files, aggregates, resume watermarks, purge discard, and historical backfill.
 //
 // It implements the task.RollupSink ingestion contract. Task folds call
 // Observe under their own task mutex, and the store serializes all file and
@@ -47,15 +47,16 @@ type Store struct {
 	files      map[string]*os.File      // day -> open append handle
 	days       map[string]*dayAggregate // day -> aggregates over flushed rows
 	watermarks map[string]time.Time     // task id -> newest producer time covered by flushed rows
-	// flushedCost and the task's pending.costInFlight always sum to the
-	// newest accounted cost snapshot: flushedCost alone is only the movement
-	// confirmed written to disk.
-	flushedCost map[string]float64
-	pending     map[string]*taskPending // task id -> unflushed deltas
-	lastQuota   map[quotaKey]quotaSeen  // provider window -> last written quota state
-	closed      bool
-	stopFlush   chan struct{}
-	flushDone   chan struct{}
+	// flushedCost is the durable reported-or-estimated cost baseline.
+	// pending.costInFlight is the movement assigned to unflushed buckets;
+	// a later live snapshot reconciles any estimate in that baseline.
+	flushedCost       map[string]float64
+	reportedCostTasks map[string]struct{}     // tasks with a recorded non-estimated cost row
+	pending           map[string]*taskPending // task id -> unflushed deltas
+	lastQuota         map[quotaKey]quotaSeen  // provider window -> last written quota state
+	closed            bool
+	stopFlush         chan struct{}
+	flushDone         chan struct{}
 }
 
 // New opens the rollup store: it recovers aggregates and watermarks from any
@@ -71,16 +72,17 @@ func New(cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("create usage rollup directory: %w", err)
 	}
 	s := &Store{
-		log:         cfg.Log,
-		dir:         cfg.Dir,
-		files:       make(map[string]*os.File),
-		days:        make(map[string]*dayAggregate),
-		watermarks:  make(map[string]time.Time),
-		flushedCost: make(map[string]float64),
-		pending:     make(map[string]*taskPending),
-		lastQuota:   make(map[quotaKey]quotaSeen),
-		stopFlush:   make(chan struct{}),
-		flushDone:   make(chan struct{}),
+		log:               cfg.Log,
+		dir:               cfg.Dir,
+		files:             make(map[string]*os.File),
+		days:              make(map[string]*dayAggregate),
+		watermarks:        make(map[string]time.Time),
+		flushedCost:       make(map[string]float64),
+		reportedCostTasks: make(map[string]struct{}),
+		pending:           make(map[string]*taskPending),
+		lastQuota:         make(map[quotaKey]quotaSeen),
+		stopFlush:         make(chan struct{}),
+		flushDone:         make(chan struct{}),
 	}
 	s.recover()
 	go s.flushLoop()
@@ -137,9 +139,9 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 
 // Discard drops a purged task's unflushed usage and resume bookkeeping.
 //
-// Flushed rows remain immutable in their daily files and in-memory
-// aggregates. Callers must stop forwarding the task's events before calling
-// Discard; the task package enforces that boundary when a purge begins.
+// Flushed rows remain in daily files and aggregates; missing-cost backfill may
+// later add an estimate to one. Callers must stop forwarding the task's events
+// before calling Discard; the task package enforces that boundary.
 func (s *Store) Discard(meta TaskMeta) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -262,6 +264,36 @@ func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[UsageRow, error]) e
 	return s.markBackfillDone()
 }
 
+// BackfillMissingCosts fills zero-cost usage rows using current model prices.
+// It leaves reported costs intact and marks estimates so a later live cost
+// snapshot can reconcile them. Each changed day is replaced atomically under
+// the writer lock; repeating the pass changes no priced row. The estimator
+// runs under that lock and must not perform I/O. The row passed to it is
+// read-only and valid only for the duration of the call. Rechecking on every
+// startup lets a newly published model price fill rows a prior pass could not
+// price.
+func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*UsageRow) (float64, bool)) error {
+	if estimate == nil {
+		return errors.New("usage cost estimator is required")
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return fmt.Errorf("scan usage rollup days for missing cost: %w", err)
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() || !dayFileRe.MatchString(entry.Name()) {
+			continue
+		}
+		if err := backfillDayCosts(s, entry.Name(), estimate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // recover rebuilds aggregates and resume bookkeeping from the existing day
 // files. Row-level corruption (a truncated trailing line) is tolerated:
 // malformed lines are skipped with a warning.
@@ -371,6 +403,9 @@ func (s *Store) recoverRowState(row *UsageRow) {
 		}
 	}
 	s.flushedCost[row.TaskID] += row.CostUSD
+	if row.CostUSD != 0 && !row.CostEstimated {
+		s.reportedCostTasks[row.TaskID] = struct{}{}
+	}
 }
 
 func (s *Store) dayAggregate(day string) *dayAggregate {
@@ -477,6 +512,9 @@ func (s *Store) flushTaskLocked(id string) {
 			continue
 		}
 		s.applyUsageRow(&row)
+		if row.CostUSD != 0 {
+			s.reportedCostTasks[id] = struct{}{}
+		}
 		if key == costKey {
 			s.flushedCost[id] += p.costInFlight
 			p.costInFlight = 0
@@ -691,6 +729,9 @@ func (s *Store) createBackfillDay(day string, staged *backfillDay) error {
 	}
 	for id, cost := range staged.costs {
 		s.flushedCost[id] += cost
+	}
+	for id := range staged.reportedCosts {
+		s.reportedCostTasks[id] = struct{}{}
 	}
 	return nil
 }

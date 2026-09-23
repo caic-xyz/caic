@@ -1,4 +1,4 @@
-// Provider setup for usage, title generation, and forge OAuth tokens.
+// Provider setup for usage, historical cost estimates, titles, and forge OAuth tokens.
 
 package app
 
@@ -7,15 +7,19 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
 
 // usageFetchers returns cfg.UsageFetchers when non-nil (fake/e2e), otherwise
@@ -25,6 +29,31 @@ func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []
 		return cfg.UsageFetchers
 	}
 	return detectProviders(ctx, log, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv)
+}
+
+// estimateUsageRowCost selects today's API-equivalent model price for a
+// historical row. Claude and Codex report unprefixed IDs; the other harnesses
+// carry the billing provider in their model IDs.
+func estimateUsageRowCost(pricer usage.ModelPricer, row *usagedb.UsageRow, at time.Time) (float64, bool) {
+	var provider agent.QuotaProvider
+	var known bool
+	switch harness.Name(row.Harness) {
+	case harness.Claude:
+		provider, known = agent.QuotaProviderAnthropic, true
+	case harness.Codex:
+		provider, known = agent.QuotaProviderCodex, true
+	case harness.OpenCode, harness.Pi:
+		known = true
+		// Their model IDs carry the billing provider.
+	}
+	if !known {
+		return 0, false
+	}
+	price, ok := pricer.ModelPrice(provider, row.Model, at)
+	if !ok {
+		return 0, false
+	}
+	return price.CostBuckets(row.Input, row.CacheWrite5m, row.CacheWrite1h, row.CacheRead, row.Output), true
 }
 
 func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {

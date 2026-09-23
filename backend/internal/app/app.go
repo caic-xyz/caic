@@ -443,6 +443,16 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 				appLog.ErrorContext(ctx, "usage rollup backfill failed", "err", err)
 			}
 		}
+		// Use today's published API-equivalent rates for historical rows with
+		// tokens but no cost. This pricer has no live fetchers, so estimating a
+		// day cannot block the rollup writer on a provider request.
+		currentPrices := usage.NewPricer(nil)
+		pricingAt := time.Now().UTC()
+		if err := usageRollup.BackfillMissingCosts(ctx, func(row *usagedb.UsageRow) (float64, bool) {
+			return estimateUsageRowCost(currentPrices, row, pricingAt)
+		}); err != nil && ctx.Err() == nil {
+			appLog.ErrorContext(ctx, "usage rollup cost backfill failed", "err", err)
+		}
 		return nil
 	})
 	importWiring := &importedTaskWiring{

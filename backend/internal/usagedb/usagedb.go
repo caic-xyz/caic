@@ -1,11 +1,11 @@
-// Package usagedb owns the append-only daily usage rollup over coding-agent task activity.
+// Package usagedb owns the daily usage rollup over coding-agent task activity.
 //
 // Storage is one JSONL file of delta rows per UTC day, with in-memory
 // aggregates for dashboard reads and per-task watermarks for lossless restart
 // resume. Task logs stay the per-task record of truth; this package is the
 // only cross-task aggregation surface. A one-time background backfill can
-// publish neutral historical rows into missing day files, but dashboard reads
-// never scan task logs.
+// publish neutral historical rows into missing day files, and a cost pass can
+// fill missing amounts in existing files. Dashboard reads never scan task logs.
 //
 // Callers translate source records into Event, QuotaChange, or UsageRow values
 // before passing them here, keeping this package independent of those sources.
@@ -165,18 +165,21 @@ type QuotaChange struct {
 // not snapshots; the dashboard sums them.
 //
 // CostUSD is the task's priced-cost movement since its previous row,
-// attributed to the delta's newest model. It respects the task pricing
-// rules because the task's own live total is the single source of truth.
+// attributed to the delta's newest model. Historical rows without a reported
+// amount can hold an estimate instead, marked by CostEstimated.
+// CostEstimated marks a missing historical cost filled from current published
+// token prices. A later live cumulative snapshot may correct that estimate.
 type UsageRow struct {
 	Delta
 
-	Kind    string   `json:"kind"` // always "usage"
-	Day     string   `json:"day"`  // UTC day; matches the file the row lives in
-	Ts      Time     `json:"ts"`   // Newest producer time covered by this delta.
-	TaskID  string   `json:"task_id"`
-	Harness string   `json:"harness,omitempty"`
-	Repos   []string `json:"repos,omitzero"`
-	Model   string   `json:"model,omitempty"`
+	Kind          string   `json:"kind"` // always "usage"
+	Day           string   `json:"day"`  // UTC day; matches the file the row lives in
+	Ts            Time     `json:"ts"`   // Newest producer time covered by this delta.
+	TaskID        string   `json:"task_id"`
+	Harness       string   `json:"harness,omitempty"`
+	Repos         []string `json:"repos,omitzero"`
+	Model         string   `json:"model,omitempty"`
+	CostEstimated bool     `json:"cost_estimated,omitempty"`
 }
 
 // QuotaRow records one provider quota-window status change. Rows are written

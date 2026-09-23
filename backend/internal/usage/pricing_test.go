@@ -31,6 +31,18 @@ func TestModelPriceCost(t *testing.T) {
 			t.Errorf("Cost = %v, want %v", got, want)
 		}
 	})
+	t.Run("OneHourCacheWrite", func(t *testing.T) {
+		t.Parallel()
+		p := ModelPrice{InputPerMTok: 4, CacheWritePerMTok: 5, CacheWrite1hPerMTok: 8, CachedInputPerMTok: 0.2, OutputPerMTok: 20}
+		got := p.CostBuckets(1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000)
+		if want := 37.2; got != want {
+			t.Errorf("CostBuckets = %v, want %v", got, want)
+		}
+		usage := agent.Usage{CacheCreationInputTokens: 1_000_000, CacheTTLSeconds: 3600}
+		if got := p.Cost(usage); got != 8 {
+			t.Errorf("Cost with one-hour cache = %v, want 8", got)
+		}
+	})
 }
 
 func TestModelPricingPrice(t *testing.T) {
@@ -210,6 +222,31 @@ func TestPricerModelPrice(t *testing.T) {
 		}
 		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0}); got != want {
 			t.Errorf("daybreak blue price = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("NewModelPrices", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		at := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+		for _, tc := range []struct {
+			provider agent.QuotaProvider
+			model    string
+			want     ModelPrice
+		}{
+			{agent.QuotaProviderAnthropic, "claude-opus-5-5", ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CacheWrite1hPerMTok: 8, OutputPerMTok: 20}},
+			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, OutputPerMTok: 50}},
+			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.5}},
+			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, OutputPerMTok: 10}},
+		} {
+			got, ok := p.ModelPrice(tc.provider, tc.model, at)
+			if !ok || got != tc.want {
+				t.Errorf("%s price = %+v/%v, want %+v", tc.model, got, ok, tc.want)
+			}
+		}
+		for _, model := range []string{"openrouter/anthropic/claude-opus-5-5", "openrouter/openai/gpt-6-sol"} {
+			if _, ok := p.ModelPrice("", model, at); !ok {
+				t.Errorf("%s fallback price unavailable", model)
+			}
 		}
 	})
 	t.Run("AnthropicApiEquivalent", func(t *testing.T) {

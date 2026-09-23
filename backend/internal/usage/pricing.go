@@ -17,17 +17,25 @@ const pricingDateLayout = "2006-01-02"
 // do not surcharge cache writes leave CacheWritePerMTok zero, which bills
 // cache-creation tokens at the input price.
 type ModelPrice struct {
-	InputPerMTok       float64 // Non-cached input (cache miss).
-	CachedInputPerMTok float64 // Cache read (cache hit).
-	CacheWritePerMTok  float64 // Cache creation; 0 = same as input.
-	OutputPerMTok      float64
+	InputPerMTok        float64 // Non-cached input (cache miss).
+	CachedInputPerMTok  float64 // Cache read (cache hit).
+	CacheWritePerMTok   float64 // Cache creation; 0 = same as input.
+	CacheWrite1hPerMTok float64 // One-hour cache creation; 0 = same as CacheWritePerMTok.
+	OutputPerMTok       float64
 }
 
 // staticModelPrice prices model under a harness model-provider prefix, or ""
 // when the prefix is not a known pricing provider.
 func staticModelPrice(provider, model string, at time.Time) (ModelPrice, bool) {
 	var table map[string]ModelPricing
+	if provider == "openai" {
+		return lookupModelPricing(openAIModelPricing, model, at)
+	}
 	switch agent.QuotaProviderForModel(provider + "/x") {
+	case agent.QuotaProviderAnthropic:
+		table = anthropicModelPricing
+	case agent.QuotaProviderCodex:
+		table = openAIModelPricing
 	case agent.QuotaProviderZai:
 		table = zaiModelPricing
 	case agent.QuotaProviderDeepSeek:
@@ -59,14 +67,29 @@ func lookupModelPricing(table map[string]ModelPricing, model string, at time.Tim
 
 // Cost returns the USD cost of one usage report at p.
 func (p ModelPrice) Cost(u agent.Usage) float64 {
+	write5m, write1h := int64(u.CacheCreationInputTokens), int64(0)
+	if u.CacheTTLSeconds >= 3600 {
+		write5m, write1h = 0, write5m
+	}
+	return p.CostBuckets(int64(u.InputTokens), write5m, write1h, int64(u.CacheReadInputTokens), int64(u.OutputTokens))
+}
+
+// CostBuckets prices disjoint token buckets, including one-hour cache writes
+// when the source records their TTL separately.
+func (p ModelPrice) CostBuckets(input, cacheWrite5m, cacheWrite1h, cacheRead, output int64) float64 {
 	write := p.CacheWritePerMTok
 	if write == 0 {
 		write = p.InputPerMTok
 	}
-	return (float64(u.InputTokens)*p.InputPerMTok +
-		float64(u.CacheCreationInputTokens)*write +
-		float64(u.CacheReadInputTokens)*p.CachedInputPerMTok +
-		float64(u.OutputTokens)*p.OutputPerMTok) / 1_000_000
+	write1h := p.CacheWrite1hPerMTok
+	if write1h == 0 {
+		write1h = write
+	}
+	return (float64(input)*p.InputPerMTok +
+		float64(cacheWrite5m)*write +
+		float64(cacheWrite1h)*write1h +
+		float64(cacheRead)*p.CachedInputPerMTok +
+		float64(output)*p.OutputPerMTok) / 1_000_000
 }
 
 // PeakWindow is a daily UTC time range in which a peak price tier applies.
@@ -288,8 +311,8 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 	default:
 		// Direct OpenAI API models ("openai/...") are not a quota provider
 		// but bill at OpenAI's published rates.
-		if provider == "" && prefix == "openai" {
-			return lookupModelPricing(openAIModelPricing, model, at)
+		if provider == "" {
+			return staticModelPrice(prefix, model, at)
 		}
 		return ModelPrice{}, false
 	}
@@ -383,14 +406,17 @@ var deepSeekFlashTiers = ModelPricing{
 // (https://developers.openai.com/api/docs/pricing, retrieved 2026-09) for
 // models Codex can run, priced at API-equivalent rates: Codex subscriptions
 // are not billed per token. OpenAI bills cached input at a discount and cache
-// writes at the input price. Long-context pricing (2x for the GPT-5.6 family
-// beyond its threshold) is not encoded; short-context prices are used.
+// writes at the published write rate. Long-context pricing is not encoded;
+// short-context prices are used.
 var openAIModelPricing = map[string]ModelPricing{
 	"gpt-5.3-codex": {{Price: ModelPrice{InputPerMTok: 1.75, CachedInputPerMTok: 0.175, OutputPerMTok: 14.0}}},
 	"gpt-5.6-cyber": openAICyberTiers,
 	"gpt-5.6-luna":  {{Price: ModelPrice{InputPerMTok: 0.20, CachedInputPerMTok: 0.02, CacheWritePerMTok: 0.25, OutputPerMTok: 1.20}}},
 	"gpt-5.6-sol":   openAISolTiers,
 	"gpt-5.6-terra": {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0}}},
+	"gpt-6-astra":   {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
+	"gpt-6-luna":    {{Price: ModelPrice{InputPerMTok: 0.10, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.50}}},
+	"gpt-6-sol":     {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 10.0}}},
 	// OpenAI re-points its Daybreak aliases at the latest flagship models as
 	// the program rotates; when it does, update the referenced entry.
 	"gpt-daybreak-blue-latest": openAISolTiers,
@@ -410,7 +436,8 @@ var (
 // priced at API-equivalent rates: Claude Code subscriptions are not billed
 // per token, and Claude Code's own reported total stays authoritative for
 // the claudecode provider. Cache writes bill at 1.25x input (5m) and cache
-// reads at 0.1x input; the 1h cache write variant is not encoded.
+// reads at the model's published cache-read rate. Historical estimates use
+// the one-hour write rate where one is published.
 var anthropicModelPricing = map[string]ModelPricing{
 	"claude-fable-5":    {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
 	"claude-fable-5-1":  {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 0.25, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
@@ -422,6 +449,7 @@ var anthropicModelPricing = map[string]ModelPricing{
 	"claude-opus-4-7":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
 	"claude-opus-4-8":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
 	"claude-opus-5":     {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
+	"claude-opus-5-5":   {{Price: ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 5.0, CacheWrite1hPerMTok: 8.0, OutputPerMTok: 20.0}}},
 	"claude-sonnet-4-5": {{Price: ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}}},
 	"claude-sonnet-4-6": {{Price: ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}}},
 	"claude-sonnet-5":   {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 10.0}}},
