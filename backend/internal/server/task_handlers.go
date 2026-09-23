@@ -27,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/caic-xyz/caic/backend/internal/sse"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -69,16 +70,12 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
 	stream := taskEventStream{
-		ctx:        r.Context(),
-		w:          w,
-		flusher:    flusher,
-		controller: http.NewResponseController(w),
-		resume:     taskEventResume{lastEventID: r.Header.Get("Last-Event-ID")},
+		ctx:     r.Context(),
+		w:       w,
+		flusher: flusher,
+		writer:  sse.New(w),
+		resume:  taskEventResume{lastEventID: r.Header.Get("Last-Event-ID")},
 	}
 	if err := stream.beginWrite(); err != nil {
 		log.WarnContext(r.Context(), "set initial task SSE write deadline", "err", err)
@@ -375,8 +372,8 @@ func shouldReplayHistoryFromDisk(state taskslog.State, lt *taskslog.LoadedTask) 
 // history pass state (loading flag and error). It is the only event that can
 // carry the status variant, so the initial state and every transition go
 // through it.
-func emitSettledStatusEvent(ctx context.Context, w http.ResponseWriter, controller *http.ResponseController, loading bool, errStr string) error {
-	return emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{
+func emitSettledStatusEvent(stream *sse.Stream, loading bool, errStr string) error {
+	return emitTaskListEvent(stream, &v1.TaskListEvent{
 		Kind:   "status",
 		Status: &v1.TaskListSettledStatus{Loading: loading, Error: errStr},
 	})
@@ -388,13 +385,8 @@ func emitSettledStatusEvent(ctx context.Context, w http.ResponseWriter, controll
 // server-handled mutation fires the changed channel, and falls back to a
 // 2-second ticker to catch checkout-internal state transitions.
 func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
-	controller := http.NewResponseController(w)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	if err := controller.Flush(); err != nil {
+	stream := sse.New(w)
+	if err := stream.Flush(); err != nil {
 		if errors.Is(err, http.ErrNotSupported) {
 			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "streaming not supported"})
 			return
@@ -455,15 +447,15 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// client's connection indicator and empty-list handling are correct on
 			// the first paint. The snapshot is a different union variant and cannot
 			// carry the status payload, so it arrives as its own event.
-			if err := emitSettledStatusEvent(ctx, w, controller, settledLoading, settledError); err != nil {
+			if err := emitSettledStatusEvent(stream, settledLoading, settledError); err != nil {
 				h.log.WarnContext(ctx, "marshal settled status", "err", err)
 				return
 			}
-			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
 				h.log.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
-			if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
 				h.log.WarnContext(ctx, "marshal repos snapshot", "err", err)
 				return
 			}
@@ -489,7 +481,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			if settledLoading != prevSettledLoading || settledError != prevSettledError {
 				prevSettledLoading = settledLoading
 				prevSettledError = settledError
-				if err := emitSettledStatusEvent(ctx, w, controller, settledLoading, settledError); err != nil {
+				if err := emitSettledStatusEvent(stream, settledLoading, settledError); err != nil {
 					h.log.WarnContext(ctx, "marshal settled status", "err", err)
 					return
 				}
@@ -513,7 +505,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 						// state, so advance the replay cursor past the retained
 						// history instead of resending it.
 						prevStateSeq[id] = replay.seq
-						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
+						if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
 							h.log.WarnContext(ctx, "marshal task upsert", "task", id, "err", err)
 							return
 						}
@@ -533,7 +525,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 							h.log.WarnContext(ctx, "marshal task state patch", "task", id, "err", err)
 							continue
 						}
-						if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+						if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
 							h.log.WarnContext(ctx, "marshal task patch", "task", id, "err", err)
 							return
 						}
@@ -553,7 +545,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 							continue
 						}
 					}
-					if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+					if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
 						h.log.WarnContext(ctx, "marshal task patch", "task", id, "err", err)
 						return
 					}
@@ -562,7 +554,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit deletes for removed tasks.
 			for id := range prevByID {
 				if _, ok := currentIDs[id]; !ok {
-					if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
+					if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
 						h.log.WarnContext(ctx, "marshal task delete", "task", id, "err", err)
 						return
 					}
@@ -572,7 +564,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			}
 			// Emit any new warnings.
 			for _, warn := range newWarnings {
-				if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
+				if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
 					h.log.WarnContext(ctx, "marshal warning", "err", err)
 					return
 				}
@@ -582,7 +574,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			// Emit repos update when default-branch CI status has changed.
 			if !bytes.Equal(reposJSON, prevReposJSON) {
 				prevReposJSON = reposJSON
-				if err := emitTaskListEvent(ctx, w, controller, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
+				if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "repos", Repos: *repoList}); err != nil {
 					h.log.WarnContext(ctx, "marshal repos update", "err", err)
 					return
 				}
@@ -790,7 +782,7 @@ type taskEventStream struct {
 	ctx          context.Context
 	w            http.ResponseWriter
 	flusher      http.Flusher
-	controller   *http.ResponseController
+	writer       *sse.Stream
 	tracker      *apiconv.ToolTimingTracker
 	resume       taskEventResume
 	nextMessage  uint64
@@ -802,26 +794,15 @@ type taskEventStream struct {
 // its TCP connection remains open; without a deadline the stream goroutine
 // would block forever and never let EventSource reconnect from its cursor.
 func (s *taskEventStream) beginWrite() error {
-	if err := s.controller.SetWriteDeadline(time.Now().Add(taskEventWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		return fmt.Errorf("set task SSE write deadline: %w", err)
-	}
-	return nil
+	return s.writer.BeginWrite()
 }
 
 func (s *taskEventStream) clearWriteDeadline() error {
-	if err := s.controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		return fmt.Errorf("clear task SSE write deadline: %w", err)
-	}
-	return nil
+	return s.writer.ClearWriteDeadline()
 }
 
 func (s *taskEventStream) flush() error {
-	flushErr := s.controller.Flush()
-	deadlineErr := s.clearWriteDeadline()
-	if flushErr != nil {
-		return errors.Join(fmt.Errorf("flush task SSE stream: %w", flushErr), deadlineErr)
-	}
-	return deadlineErr
+	return s.writer.Flush()
 }
 
 func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at time.Time, suppress bool) error {
@@ -886,8 +867,6 @@ func (s *taskEventStream) writeReady() error {
 	}
 	return nil
 }
-
-const taskEventWriteTimeout = 5 * time.Second
 
 type taskEventSource string
 

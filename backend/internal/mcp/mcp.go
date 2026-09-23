@@ -20,6 +20,8 @@ import (
 	"strings"
 
 	"github.com/invopop/jsonschema"
+
+	"github.com/caic-xyz/caic/backend/internal/sse"
 )
 
 const (
@@ -423,20 +425,17 @@ func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter,
 	if p.Notifications.ResourcesListChanged {
 		lastResources = h.subscriptionResourcesHash(ctx)
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
+	out := sse.New(stream)
 	w.WriteHeader(http.StatusOK)
-	if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
+	if err := writeMCPNotification(out, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsAcknowledged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &p.Notifications}}); err != nil {
 		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
 		return nil
 	}
-	lastResourceContents, ok := h.writeInitialSubscriptionState(ctx, stream, subID, p.Notifications, initialReads)
+	lastResourceContents, ok := h.writeInitialSubscriptionState(ctx, out, subID, p.Notifications, initialReads)
 	if !ok {
 		return nil
 	}
-	h.streamSubscriptionNotifications(ctx, stream, subID, p.Notifications, changes, lastResources, lastResourceContents)
+	h.streamSubscriptionNotifications(ctx, out, subID, p.Notifications, changes, lastResources, lastResourceContents)
 	return nil
 }
 
@@ -479,10 +478,10 @@ func (h *Handler) readInitialSubscriptionState(ctx context.Context, filter Subsc
 // returned baselines seed the change loop, so a genuine first post-subscribe
 // change still deduplicates correctly and produces exactly one update. Returns
 // false if a write fails so the caller skips the change loop.
-func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, reads map[string]subscriptionInitialRead) (map[string]string, bool) {
+func (h *Handler) writeInitialSubscriptionState(ctx context.Context, stream *sse.Stream, subID string, filter SubscriptionFilter, reads map[string]subscriptionInitialRead) (map[string]string, bool) {
 	baselines := make(map[string]string, len(filter.ResourceSubscriptions))
 	if filter.ResourcesListChanged {
-		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+		if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
 			slog.WarnContext(ctx, "write mcp initial resources list notification", "err", err)
 			return baselines, false
 		}
@@ -492,11 +491,11 @@ func (h *Handler) writeInitialSubscriptionState(ctx context.Context, w subscript
 		baselines[uri] = read.baseline
 		if read.readErr != nil {
 			slog.WarnContext(ctx, "read mcp subscription initial state", "uri", uri, "err", read.readErr)
-		} else if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsInitialState, Params: SubscriptionsInitialStateParams{Meta: mcpSubscriptionMeta(subID), URI: uri, Contents: read.contents}}); err != nil {
+		} else if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodSubscriptionsInitialState, Params: SubscriptionsInitialStateParams{Meta: mcpSubscriptionMeta(subID), URI: uri, Contents: read.contents}}); err != nil {
 			slog.WarnContext(ctx, "write mcp initial subscription state notification", "err", err)
 			return baselines, false
 		}
-		if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+		if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
 			slog.WarnContext(ctx, "write mcp initial resource update notification", "err", err)
 			return baselines, false
 		}
@@ -509,14 +508,14 @@ type subscriptionStreamWriter interface {
 	http.Flusher
 }
 
-func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscriptionStreamWriter, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error], lastResources string, lastResourceContents map[string]string) {
+func (h *Handler) streamSubscriptionNotifications(ctx context.Context, stream *sse.Stream, subID string, filter SubscriptionFilter, changes iter.Seq2[ResourceUpdate, error], lastResources string, lastResourceContents map[string]string) {
 	for update, err := range changes {
 		if err != nil {
 			slog.WarnContext(ctx, "mcp resource update stream stopped", "err", err)
 			return
 		}
 		if update.KeepAlive {
-			if err := writeSSEKeepAlive(w); err != nil {
+			if err := stream.KeepAlive(); err != nil {
 				slog.WarnContext(ctx, "write mcp subscription heartbeat", "err", err)
 				return
 			}
@@ -525,7 +524,7 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscri
 		if update.ResourcesListChanged && filter.ResourcesListChanged {
 			resources := h.subscriptionResourcesHash(ctx)
 			if resources != lastResources {
-				if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+				if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesListChanged, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
 					slog.WarnContext(ctx, "write mcp resources notification", "err", err)
 					return
 				}
@@ -540,7 +539,7 @@ func (h *Handler) streamSubscriptionNotifications(ctx context.Context, w subscri
 			if content == lastResourceContents[uri] {
 				continue
 			}
-			if err := writeMCPNotification(w, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+			if err := writeMCPNotification(stream, JSONRPCNotification{JSONRPC: jsonRPCVersion, Method: NotificationMethodResourcesUpdated, Params: SubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
 				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
 				return
 			}
@@ -617,24 +616,12 @@ func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSO
 	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
 }
 
-func writeSSEKeepAlive(w subscriptionStreamWriter) error {
-	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
-		return err
-	}
-	w.Flush()
-	return nil
-}
-
-func writeMCPNotification(w subscriptionStreamWriter, msg JSONRPCNotification) error {
+func writeMCPNotification(stream *sse.Stream, msg JSONRPCNotification) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-		return err
-	}
-	w.Flush()
-	return nil
+	return stream.Data(data)
 }
 
 func stableJSON(v any) string {

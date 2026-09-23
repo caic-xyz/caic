@@ -5,7 +5,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/caic-xyz/caic/backend/internal/sse"
 )
 
 func TestGenericConvertInitHasHarness(t *testing.T) {
@@ -438,9 +438,9 @@ func TestTaskEventStreamResume(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
 		stream := taskEventStream{
-			w:          w,
-			controller: http.NewResponseController(w),
-			tracker:    apiconv.NewToolTimingTracker(harness.Claude, nil),
+			w:       w,
+			writer:  sse.New(w),
+			tracker: apiconv.NewToolTimingTracker(harness.Claude, nil),
 			resume: taskEventResume{
 				timelineID: "timeline",
 				source:     taskEventSourceMemory,
@@ -462,9 +462,9 @@ func TestTaskEventStreamResume(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
 		stream := taskEventStream{
-			w:          w,
-			controller: http.NewResponseController(w),
-			tracker:    apiconv.NewToolTimingTracker(harness.Claude, nil),
+			w:       w,
+			writer:  sse.New(w),
+			tracker: apiconv.NewToolTimingTracker(harness.Claude, nil),
 			resume: taskEventResume{
 				timelineID: "timeline",
 				source:     taskEventSourceMemory,

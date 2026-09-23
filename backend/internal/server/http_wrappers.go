@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/sse"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	voiceapi "github.com/caic-xyz/caic/gomode/voicegateway/api"
 )
@@ -285,29 +286,15 @@ func taskStatePatch(id string, state v1.TaskState, at time.Time) (map[string]jso
 // A task-list connection owns its change catch-up loop, so each delivery is
 // bounded and failures end the stream. EventSource then reconnects for a new
 // authoritative snapshot rather than leaving that loop blocked indefinitely.
-func emitTaskListEvent(ctx context.Context, w http.ResponseWriter, controller *http.ResponseController, ev *v1.TaskListEvent) (err error) {
+func emitTaskListEvent(stream *sse.Stream, ev *v1.TaskListEvent) error {
 	data, err := json.Marshal(ev)
 	if err != nil {
 		return err
 	}
-
-	if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		if !errors.Is(err, http.ErrNotSupported) {
-			return fmt.Errorf("write task-list event: %w", err)
-		}
-		httpLogger(ctx).WarnContext(ctx, "task-list event write deadline unsupported")
-	} else {
-		defer func() {
-			if resetErr := controller.SetWriteDeadline(time.Time{}); resetErr != nil {
-				err = errors.Join(err, fmt.Errorf("write task-list event: %w", resetErr))
-			}
-		}()
-	}
-
-	if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", data); err != nil {
+	if err := stream.Writef("event: message\ndata: %s\n\n", data); err != nil {
 		return fmt.Errorf("write task-list event: %w", err)
 	}
-	if err := controller.Flush(); err != nil {
+	if err := stream.Flush(); err != nil {
 		return fmt.Errorf("write task-list event: %w", err)
 	}
 	return nil

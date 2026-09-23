@@ -16,6 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/sse"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
@@ -136,7 +137,7 @@ func TestEmitTaskListEvent(t *testing.T) {
 		before := time.Now()
 		errs := make(chan error, 1)
 		go func() {
-			errs <- emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
+			errs <- emitTaskListEvent(sse.New(w), &v1.TaskListEvent{Kind: "snapshot"})
 		}()
 
 		var deadline time.Time
@@ -181,7 +182,7 @@ func TestEmitTaskListEvent(t *testing.T) {
 			writeErr:         want,
 		}
 
-		err := emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
+		err := emitTaskListEvent(sse.New(w), &v1.TaskListEvent{Kind: "snapshot"})
 		if !errors.Is(err, want) {
 			t.Fatalf("emitTaskListEvent error = %v, want %v", err, want)
 		}
@@ -201,7 +202,7 @@ func TestEmitTaskListEvent(t *testing.T) {
 			flushErr:         want,
 		}
 
-		err := emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"})
+		err := emitTaskListEvent(sse.New(w), &v1.TaskListEvent{Kind: "snapshot"})
 		if !errors.Is(err, want) {
 			t.Errorf("emitTaskListEvent error = %v, want %v", err, want)
 		}
@@ -217,7 +218,7 @@ func TestEmitTaskListEvent(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
 
-		if err := emitTaskListEvent(testHTTPContext(t), w, http.NewResponseController(w), &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
+		if err := emitTaskListEvent(sse.New(w), &v1.TaskListEvent{Kind: "snapshot"}); err != nil {
 			t.Fatalf("emitTaskListEvent error = %v, want nil", err)
 		}
 		if got := w.Body.String(); got == "" {
@@ -238,8 +239,8 @@ func TestTaskEventStreamWriteDeadline(t *testing.T) {
 		writeStarted: make(chan struct{}, 1),
 	}
 	stream := taskEventStream{
-		w:          w,
-		controller: http.NewResponseController(w),
+		w:      w,
+		writer: sse.New(w),
 	}
 	errs := make(chan error, 1)
 	go func() {

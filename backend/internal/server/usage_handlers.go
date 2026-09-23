@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/caic-xyz/caic/backend/internal/sse"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
@@ -33,17 +33,11 @@ type usageHandlers struct {
 // immediately and ticks every CacheTTL for provider cache refreshes. Each
 // message is a single UsageResp JSON object.
 func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	stream := sse.New(w)
+	if err := stream.Flush(); err != nil {
 		writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "streaming not supported"})
 		return
 	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	flusher.Flush()
 
 	ticker := time.NewTicker(usage.CacheTTL)
 	defer ticker.Stop()
@@ -58,8 +52,14 @@ func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 		data, err := json.Marshal(resp)
 		if err == nil && !bytes.Equal(data, prev) {
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
-			flusher.Flush()
+			if err := stream.Writef("event: message\ndata: %s\n\n", data); err != nil {
+				h.log.WarnContext(r.Context(), "write usage SSE event", "err", err)
+				return
+			}
+			if err := stream.Flush(); err != nil {
+				h.log.WarnContext(r.Context(), "flush usage SSE event", "err", err)
+				return
+			}
 			prev = data
 		}
 
