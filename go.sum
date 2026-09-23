@@ -4,8 +4,8 @@ github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPn
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.6.1 h1:I0phFv0PlbLHnM7TZAVjZ2MJ2/eWRTDyuO7GLR98IEs=
 github.com/buger/jsonparser v1.6.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
-github.com/caic-xyz/md v0.18.1 h1:0FUE7/QFwvpqDzYh8YGObLw0iF73paHL94ZCqMGDeaw=
-github.com/caic-xyz/md v0.18.1/go.mod h1:TRYSQ/495tRZ1dx5/xv53LchtqLG8yh6GvkqAHP2EFE=
+github.com/caic-xyz/md v0.18.2 h1:N7MiUUzh5VNPDauzeNRKGky0N1zlu/Y/dlGEYZc6IFM=
+github.com/caic-xyz/md v0.18.2/go.mod h1:ATbFjRrdM6xiaDacu90GNB9dorXFXG4818rqYH0NDFU=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx59Ho=
