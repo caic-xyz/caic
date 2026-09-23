@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +31,8 @@ import (
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/oauth"
 )
+
+var mcpSkillToolNameRE = regexp.MustCompile("`([a-z][a-z0-9_]*_[a-z0-9_]+)`")
 
 func mcpRequestJSON(method, paramsFields string) string {
 	if paramsFields == "{}" || paramsFields == "" {
@@ -458,6 +461,24 @@ func TestMCPHandlers(t *testing.T) {
 		digest := sha256.Sum256([]byte(resource.Contents[0].Text))
 		if manifest[0].Digest != "sha256:"+hex.EncodeToString(digest[:]) {
 			t.Errorf("skill digest = %q, want sha256 of resources/read content", manifest[0].Digest)
+		}
+
+		tools, err := registry.Tools(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		availableTools := make(map[string]struct{}, len(tools))
+		for _, tool := range tools {
+			availableTools[tool.Name] = struct{}{}
+		}
+		referencedTools := mcpSkillToolNameRE.FindAllStringSubmatch(mcpTasksSkillMarkdown, -1)
+		if len(referencedTools) == 0 {
+			t.Fatal("MCP task skill does not reference any tools")
+		}
+		for _, match := range referencedTools {
+			if _, ok := availableTools[match[1]]; !ok {
+				t.Errorf("MCP task skill references unavailable tool %q", match[1])
+			}
 		}
 
 		_, resp = postMCP(t, s.mcpHandlers.protocol, "skills/get", "", mcpRequestJSON("skills/get", `"uri":"skill://missing/SKILL.md"`))
