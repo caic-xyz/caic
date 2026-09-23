@@ -221,7 +221,7 @@ func (c *conn) SendCompact(instructions string) error {
 }
 
 func (c *conn) ReadMessages(r io.Reader, msgCh chan<- TimedMessage) error {
-	return defaultReadMessages(c.ctx, c.logger, r, func(m TimedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage, c.handleMCP)
+	return DefaultReadMessages(c.ctx, c.logger, r, func(m TimedMessage) { msgCh <- m }, c.log, c.version, c.wire.ParseMessage, c.handleMCP)
 }
 
 func (c *conn) SendStop(ctx context.Context) {
@@ -877,11 +877,8 @@ func messageIsNil(msg Message) bool {
 
 // DefaultReadMessages reads physical relay records, persists each
 // exactly once, and forwards the parser's original TimedMessage wrappers.
-func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage), sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error)) error {
-	return defaultReadMessages(ctx, log, r, dispatch, sink, version, parseNative, nil)
-}
-
-func defaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage), sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error), handleMCP func(MCPRequest) error) error {
+// DefaultReadMessages reads agent messages and optionally services task-scoped MCP requests.
+func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dispatch func(TimedMessage), sink LogSink, version LogVersion, parseNative func([]byte) ([]Message, error), handleMCP func(MCPRequest) error) error {
 	if log == nil {
 		return errors.New("logger is required")
 	}

@@ -98,43 +98,78 @@ def _write_claude_code_caic_mcp_config() -> None:
 
 
 def _write_pi_caic_mcp_extension() -> None:
-    """Write Pi's local tool extension for the task MCP relay bridge."""
+    """Write Pi's dynamic task-MCP tool extension for the relay bridge."""
     source = (
         """import crypto from "node:crypto";
 import net from "node:net";
-import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "typebox";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const socketPath = __CAIC_MCP_SOCKET_PATH__;
-type MCPResult = {result?: {content: unknown[]; structuredContent?: unknown}; error?: string};
-function createChild(prompt: string): Promise<MCPResult> {
+type MCPResponse<T> = {result?: T; error?: string};
+type MCPTool = {name: string; title?: string; description?: string; inputSchema: Record<string, unknown>};
+type MCPToolsList = {tools: MCPTool[]};
+type MCPToolResult = {content: unknown[]; structuredContent?: unknown};
+
+function request<T>(method: "tools/list" | "tools/call", fields: Record<string, unknown> = {}): Promise<T> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(socketPath);
     let data = "";
-    socket.setTimeout(60000, () => socket.destroy(new Error("timed out creating child task")));
+    socket.setTimeout(60000, () => socket.destroy(new Error(`timed out waiting for ${method}`)));
     socket.on("connect", () => {
-      const request = {id: crypto.randomUUID(), method: "tools/call", name: "task_create", arguments: {prompt}};
-      socket.write(JSON.stringify(request) + "\\n");
+      socket.write(JSON.stringify({id: crypto.randomUUID(), method, ...fields}) + "\\n");
     });
     socket.on("data", chunk => {
       data += chunk;
-      if (data.includes("\\n")) { socket.end(); resolve(JSON.parse(data)); }
+      const newline = data.indexOf("\\n");
+      if (newline < 0) return;
+      socket.end();
+      try {
+        const response = JSON.parse(data.slice(0, newline)) as MCPResponse<T>;
+        if (response.error) throw new Error(response.error);
+        if (response.result === undefined) throw new Error(`missing ${method} result`);
+        resolve(response.result);
+      } catch (error) {
+        reject(error);
+      }
     });
     socket.on("error", reject);
   });
 }
+
+function validateTools(tools: MCPTool[], pi: ExtensionAPI): void {
+  const names = new Set(pi.getAllTools().map(tool => tool.name));
+  for (const tool of tools) {
+    if (!tool.name || !tool.inputSchema || typeof tool.inputSchema !== "object") {
+      throw new Error("task MCP returned an invalid tool descriptor");
+    }
+    if (names.has(tool.name)) throw new Error(`task MCP tool conflicts with existing tool: ${tool.name}`);
+    names.add(tool.name);
+  }
+}
+
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
-    name: "task_create", label: "Create child task",
-    description: "Create a child CAIC task from this task's current snapshot.",
-    parameters: Type.Object({prompt: Type.String({minLength: 1})}), executionMode: "sequential",
-    async execute(_id, params) {
-      const result = await createChild(params.prompt);
-      return {
-        content: result.result?.content || [{type: "text", text: result.error || "child task creation failed"}],
-        details: result.result?.structuredContent,
-      };
-    },
+  let registered = false;
+  pi.on("before_agent_start", async () => {
+    if (registered) return;
+    const {tools} = await request<MCPToolsList>("tools/list");
+    if (!Array.isArray(tools)) throw new Error("task MCP returned invalid tools/list result");
+    validateTools(tools, pi);
+    for (const tool of tools) {
+      pi.registerTool({
+        name: tool.name,
+        label: tool.title || tool.name,
+        description: tool.description || tool.name,
+        promptSnippet: tool.description || tool.name,
+        parameters: Type.Unsafe(tool.inputSchema as never),
+        executionMode: "sequential",
+        async execute(_id, params) {
+          const result = await request<MCPToolResult>("tools/call", {name: tool.name, arguments: params});
+          return {content: result.content, details: result.structuredContent};
+        },
+      });
+    }
+    registered = true;
   });
 }
 """

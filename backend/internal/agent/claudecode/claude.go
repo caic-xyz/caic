@@ -65,7 +65,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
 	var relayArgs []string
 	if opts.MCP != nil {
-		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath, "--allowedTools", "mcp__caic__task_create")
+		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath)
 		relayArgs = append(relayArgs, "--caic-mcp")
 	}
 	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, args)

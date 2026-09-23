@@ -222,7 +222,7 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m TimedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); parseErr != nil {
+			if parseErr := DefaultReadMessages(t.Context(), testLogger(), stdoutR, func(m TimedMessage) { msgCh <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); parseErr != nil {
 				s.err = parseErr
 			}
 		}()
@@ -614,7 +614,7 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 				messages = append(messages, parsed.Message)
 			}, DiscardLogSink{Version: version}, version, func([]byte) ([]Message, error) {
 				return nil, nil
-			})
+			}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -673,7 +673,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -699,7 +699,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		ch := make(chan Message, 16)
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(m TimedMessage) { ch <- m.Message }, DiscardLogSink{Version: LogVersionV1}, LogVersionV1, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 		close(ch)
@@ -728,7 +728,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n") + "\n"
 
 		buf := &testLogSink{Version: LogVersionV1}
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(TimedMessage) {}, buf, LogVersionV1, testParseFn); err != nil {
+		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(TimedMessage) {}, buf, LogVersionV1, testParseFn, nil); err != nil {
 			t.Fatal(err)
 		}
 
@@ -774,7 +774,7 @@ func TestReadMessages(t *testing.T) {
 			got = append(got, msg)
 		}, &testLogSink{Version: LogVersionV2}, LogVersionV2, func([]byte) ([]Message, error) {
 			return []Message{&TextMessage{}}, nil
-		})
+		}, nil)
 		if err == nil || log.Len() != 0 || len(got) != 0 {
 			t.Fatalf("err=%v persisted=%d dispatched=%d", err, log.Len(), len(got))
 		}

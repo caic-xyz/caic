@@ -333,24 +333,6 @@ func newPiConn(ctx context.Context, logger *slog.Logger, stdin io.WriteCloser, l
 func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) error {
 	return agent.DefaultReadMessages(c.ctx, c.logger, r, func(parsed agent.TimedMessage) {
 		m := parsed.Message
-		if request, ok := m.(*agent.MCPRequestMessage); ok {
-			var result any
-			var err error
-			if c.mcp == nil {
-				err = errors.New("task-scoped MCP is unavailable")
-			} else {
-				rawResult, callErr := c.mcp.CallTool(c.ctx, request.Name, request.Arguments)
-				if callErr != nil {
-					err = callErr
-				} else {
-					result, err = agent.MCPToolResultResponse(rawResult)
-				}
-			}
-			if responseErr := agent.RespondMCP(c.Conn, request.ID, result, err); responseErr != nil {
-				c.logger.ErrorContext(c.ctx, "respond task-scoped MCP", "err", responseErr)
-			}
-			return
-		}
 		// Intercept extension UI requests.
 		if raw, ok := m.(*agent.RawMessage); ok && strings.HasPrefix(raw.MessageType, "response:") {
 			return
@@ -362,7 +344,12 @@ func (c *piConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage) erro
 			return
 		}
 		msgCh <- parsed
-	}, c.log, c.version, c.wire.ParseMessage)
+	}, c.log, c.version, c.wire.ParseMessage, c.handleMCP)
+}
+
+func (c *piConn) handleMCP(req agent.MCPRequest) error {
+	result, err := agent.MCPRequestResult(c.ctx, c.mcp, req)
+	return agent.RespondMCP(c.Conn, req.ID, result, err)
 }
 
 // handleExtensionUI auto-responds to an extension UI request. For confirm

@@ -1517,7 +1517,7 @@ func testRunnerSessions(t *testing.T) {
 				opts.MsgCh <- parsed
 			}, agent.DiscardLogSink{Version: agent.LogVersionV1}, agent.LogVersionV1, func([]byte) ([]agent.Message, error) {
 				return []agent.Message{&agent.TextMessage{Text: "v1"}}, nil
-			})
+			}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

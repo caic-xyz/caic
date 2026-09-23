@@ -23,10 +23,15 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 const piSSHHelperEnv = "GO_WANT_PI_SSH_HELPER"
+
+type memoryWriteCloser struct{ bytes.Buffer }
+
+func (*memoryWriteCloser) Close() error { return nil }
 
 func init() {
 	if os.Getenv(piSSHHelperEnv) != "1" {
@@ -205,6 +210,46 @@ func TestWaitForResponse(t *testing.T) {
 			t.Fatalf("persisted record = %q", log.String())
 		}
 	})
+}
+
+func TestPiConnTaskMCP(t *testing.T) {
+	t.Parallel()
+
+	stdin := &memoryWriteCloser{}
+	conn := newPiConn(
+		t.Context(),
+		slog.New(slog.DiscardHandler),
+		stdin,
+		agent.DiscardLogSink{Version: agent.LogVersionV2},
+		&piWireFormat{},
+		&agent.Options{MCP: mcptest.FakeRegistry{}},
+	)
+	input := `{"t":"mcp_request","id":"tools-1","method":"tools/list"}` + "\n"
+	if err := conn.ReadMessages(strings.NewReader(input), make(chan agent.TimedMessage)); err != nil {
+		t.Fatal(err)
+	}
+
+	var response struct {
+		Type   string `json:"t"`
+		ID     string `json:"id"`
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdin.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != "mcp_response" || response.ID != "tools-1" {
+		t.Fatalf("response = %+v, want mcp_response for tools-1", response)
+	}
+	if len(response.Result.Tools) != 1 {
+		t.Fatalf("tools = %+v, want one tool", response.Result.Tools)
+	}
+	if got, want := response.Result.Tools[0].Name, "echo"; got != want {
+		t.Errorf("tool = %q, want %q", got, want)
+	}
 }
 
 func TestReapPiProcessExit(t *testing.T) {

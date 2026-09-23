@@ -309,7 +309,9 @@ def test_harness_caic_mcp_integrations() -> None:
         assert os.stat(config_path).st_mode & 0o777 == 0o600
         with open(extension_path, encoding="utf-8") as extension_file:
             extension = extension_file.read()
-        assert 'name: "task_create"' in extension
+        assert 'method: "tools/list"' in extension
+        assert "for (const tool of tools)" in extension
+        assert 'name: "task_create"' not in extension
         assert "socketPath" in extension
         assert os.stat(extension_path).st_mode & 0o777 == 0o600
         with open(opencode_path, encoding="utf-8") as opencode_file:
