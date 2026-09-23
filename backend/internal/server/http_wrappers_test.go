@@ -1,4 +1,4 @@
-// Tests for generic HTTP handler wrappers, including error mapping.
+// Tests HTTP handler wrappers and bounded SSE response writes.
 
 package server
 
@@ -224,6 +224,56 @@ func TestEmitTaskListEvent(t *testing.T) {
 			t.Error("event body is empty")
 		}
 	})
+}
+
+func TestTaskEventStreamWriteDeadline(t *testing.T) {
+	t.Parallel()
+	server, client := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	t.Cleanup(func() { _ = client.Close() })
+	w := &pipeResponseWriter{
+		conn:         server,
+		header:       make(http.Header),
+		deadlineSet:  make(chan time.Time, 1),
+		writeStarted: make(chan struct{}, 1),
+	}
+	stream := taskEventStream{
+		w:          w,
+		controller: http.NewResponseController(w),
+	}
+	errs := make(chan error, 1)
+	go func() {
+		errs <- stream.writeReady()
+	}()
+
+	select {
+	case <-w.deadlineSet:
+	case <-time.After(time.Second):
+		t.Fatal("task SSE stream did not set a write deadline")
+	}
+	select {
+	case <-w.writeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("task SSE stream did not begin writing to the pipe")
+	}
+	if err := server.SetWriteDeadline(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errs:
+		if !strings.Contains(err.Error(), "write SSE ready event") {
+			t.Errorf("writeReady error = %v, want write context", err)
+		}
+		netErr, ok := errors.AsType[net.Error](err)
+		if !ok || !netErr.Timeout() {
+			t.Errorf("writeReady error = %v, want timeout", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked task SSE write did not return promptly")
+	}
+	if len(w.deadlines) != 2 || !w.deadlines[1].IsZero() {
+		t.Errorf("deadlines = %v, want set then clear", w.deadlines)
+	}
 }
 
 func TestToDTO(t *testing.T) {

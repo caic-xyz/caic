@@ -5,6 +5,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -437,8 +438,9 @@ func TestTaskEventStreamResume(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
 		stream := taskEventStream{
-			w:       w,
-			tracker: apiconv.NewToolTimingTracker(harness.Claude, nil),
+			w:          w,
+			controller: http.NewResponseController(w),
+			tracker:    apiconv.NewToolTimingTracker(harness.Claude, nil),
 			resume: taskEventResume{
 				timelineID: "timeline",
 				source:     taskEventSourceMemory,
@@ -458,9 +460,11 @@ func TestTaskEventStreamResume(t *testing.T) {
 	})
 	t.Run("RejectsInvalidEventIndex", func(t *testing.T) {
 		t.Parallel()
+		w := httptest.NewRecorder()
 		stream := taskEventStream{
-			w:       httptest.NewRecorder(),
-			tracker: apiconv.NewToolTimingTracker(harness.Claude, nil),
+			w:          w,
+			controller: http.NewResponseController(w),
+			tracker:    apiconv.NewToolTimingTracker(harness.Claude, nil),
 			resume: taskEventResume{
 				timelineID: "timeline",
 				source:     taskEventSourceMemory,

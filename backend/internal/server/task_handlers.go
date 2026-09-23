@@ -80,11 +80,16 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 		controller: http.NewResponseController(w),
 		resume:     taskEventResume{lastEventID: r.Header.Get("Last-Event-ID")},
 	}
+	if err := stream.beginWrite(); err != nil {
+		log.WarnContext(r.Context(), "set initial task SSE write deadline", "err", err)
+		return
+	}
 	if _, err := fmt.Fprint(w, "retry: 500\n\n"); err != nil {
+		_ = stream.clearWriteDeadline()
 		log.WarnContext(r.Context(), "write SSE retry interval", "err", err)
 		return
 	}
-	if err := stream.controller.Flush(); err != nil {
+	if err := stream.flush(); err != nil {
 		log.WarnContext(r.Context(), "start SSE stream", "err", err)
 		return
 	}
@@ -121,7 +126,7 @@ func (h *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) 
 			log.WarnContext(r.Context(), "write terminal SSE ready", "err", err)
 			return
 		}
-		if err := stream.controller.Flush(); err != nil {
+		if err := stream.flush(); err != nil {
 			log.WarnContext(r.Context(), "flush terminal SSE stream", "err", err)
 		}
 		return
@@ -196,7 +201,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	if err := stream.writeReady(); err != nil {
 		return err
 	}
-	if err := stream.controller.Flush(); err != nil {
+	if err := stream.flush(); err != nil {
 		return fmt.Errorf("flush task SSE stream: %w", err)
 	}
 
@@ -234,7 +239,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			if err := stream.writeMessage(msg.Message, sequence, at, false); err != nil {
 				return err
 			}
-			if err := stream.controller.Flush(); err != nil {
+			if err := stream.flush(); err != nil {
 				return fmt.Errorf("flush task SSE stream: %w", err)
 			}
 		case cs, ok := <-statsCh:
@@ -246,7 +251,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			if err := stream.writeStats([]runtime.Stats{cs}); err != nil {
 				return err
 			}
-			if err := stream.controller.Flush(); err != nil {
+			if err := stream.flush(); err != nil {
 				return fmt.Errorf("flush task SSE stream: %w", err)
 			}
 		}
@@ -335,7 +340,7 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 			return err
 		}
 		if stream.writtenBytes-lastFlushBytes >= historyFlushBytes {
-			if err := stream.controller.Flush(); err != nil {
+			if err := stream.flush(); err != nil {
 				return fmt.Errorf("flush task history SSE stream: %w", err)
 			}
 			lastFlushBytes = stream.writtenBytes
@@ -793,6 +798,32 @@ type taskEventStream struct {
 	idBuffer     []byte
 }
 
+// beginWrite bounds writes to a task SSE client. A client can disappear while
+// its TCP connection remains open; without a deadline the stream goroutine
+// would block forever and never let EventSource reconnect from its cursor.
+func (s *taskEventStream) beginWrite() error {
+	if err := s.controller.SetWriteDeadline(time.Now().Add(taskEventWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return fmt.Errorf("set task SSE write deadline: %w", err)
+	}
+	return nil
+}
+
+func (s *taskEventStream) clearWriteDeadline() error {
+	if err := s.controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return fmt.Errorf("clear task SSE write deadline: %w", err)
+	}
+	return nil
+}
+
+func (s *taskEventStream) flush() error {
+	flushErr := s.controller.Flush()
+	deadlineErr := s.clearWriteDeadline()
+	if flushErr != nil {
+		return errors.Join(fmt.Errorf("flush task SSE stream: %w", flushErr), deadlineErr)
+	}
+	return deadlineErr
+}
+
 func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at time.Time, suppress bool) error {
 	s.nextMessage = sequence
 	events := s.tracker.ConvertMessage(msg, at)
@@ -829,6 +860,9 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error 
 	if err != nil {
 		return fmt.Errorf("marshal SSE event: %w", err)
 	}
+	if err := s.beginWrite(); err != nil {
+		return err
+	}
 	var n int
 	if id.message == 0 {
 		n, err = fmt.Fprintf(s.w, "event: message\ndata: %s\n\n", data)
@@ -837,18 +871,23 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error 
 		n, err = fmt.Fprintf(s.w, "id: %s\nevent: message\ndata: %s\n\n", s.idBuffer, data)
 	}
 	if err != nil {
-		return fmt.Errorf("write SSE event: %w", err)
+		return errors.Join(fmt.Errorf("write SSE event: %w", err), s.clearWriteDeadline())
 	}
 	s.writtenBytes += n
 	return nil
 }
 
 func (s *taskEventStream) writeReady() error {
+	if err := s.beginWrite(); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprint(s.w, "event: ready\ndata: {}\n\n"); err != nil {
-		return fmt.Errorf("write SSE ready event: %w", err)
+		return errors.Join(fmt.Errorf("write SSE ready event: %w", err), s.clearWriteDeadline())
 	}
 	return nil
 }
+
+const taskEventWriteTimeout = 5 * time.Second
 
 type taskEventSource string
 
