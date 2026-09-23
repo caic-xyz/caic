@@ -418,6 +418,7 @@ function createAppStore() {
   const quotaRecoveryTracker = new QuotaRecoveryTracker();
   const notifyQuotaRecoveries = (currentTasks: Task[]) => {
     for (const task of quotaRecoveryTracker.update(currentTasks)) {
+      if (taskIdFromPath(location.pathname) === task.id) continue;
       notifications.notify(task.id, `${task.title} quota is available`, `caic-event-${task.id}`, {
         enabled: hostMode.browserNotificationsEnabled(),
       });
@@ -427,7 +428,7 @@ function createAppStore() {
     const needsInput = task.state === "waiting" || task.state === "asking" || task.state === "has_plan";
     const prevState = prevStates.get(task.id);
     const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
-    if (needsInput && prevState === "running") {
+    if (needsInput && prevState === "running" && taskIdFromPath(location.pathname) !== task.id) {
       notifications.notify(task.id, `${task.title} is ready`, `caic-waiting-${task.id}`, {
         enabled: hostMode.browserNotificationsEnabled(),
       });

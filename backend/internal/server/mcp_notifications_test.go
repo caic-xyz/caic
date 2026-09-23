@@ -74,6 +74,36 @@ func TestNotificationFeed(t *testing.T) {
 		}
 	})
 
+	t.Run("ReadyTransitions", func(t *testing.T) {
+		t.Parallel()
+		for _, state := range []v1.TaskState{v1.TaskStateWaiting, v1.TaskStateAsking, v1.TaskStateHasPlan} {
+			feed := newNotificationFeed()
+			task := v1.Task{ID: ksid.NewID(), Title: "Review plan", State: v1.TaskStateRunning}
+			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 0 {
+				t.Fatalf("initial notifications = %#v", got)
+			}
+			task.State = state
+			got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+			if len(got) != 1 || got[0].Title != "Task ready" || got[0].Body != "Review plan needs attention." {
+				t.Fatalf("ready notification for %s = %#v", state, got)
+			}
+			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 1 {
+				t.Fatalf("duplicate ready notification for %s = %#v", state, got)
+			}
+			task.State = v1.TaskStateRunning
+			feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+			task.State = state
+			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 2 {
+				t.Fatalf("second ready transition for %s = %#v", state, got)
+			}
+			feed.notifications(t.Context(), nil, v1.UsageResp{})
+			// A task absent from the previous snapshot has no transition to replay.
+			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 2 {
+				t.Fatalf("reappearing task for %s = %#v", state, got)
+			}
+		}
+	})
+
 	feed := newNotificationFeed()
 	task := v1.Task{
 		ID:      ksid.NewID(),

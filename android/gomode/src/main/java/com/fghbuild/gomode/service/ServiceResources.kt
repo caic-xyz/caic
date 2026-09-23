@@ -83,6 +83,46 @@ data class ServiceMonitoringSnapshot(
     }
 }
 
+// A bounded chronological update for an already-connected voice session.
+fun serviceItemVoiceChanges(
+    previous: ServiceMonitoringSnapshot,
+    current: ServiceMonitoringSnapshot,
+): String? {
+    val prior = previous.items.associateBy { it.id }
+    val lines = mutableListOf<String>()
+    var omitted = 0
+    var chars = 0
+    for (item in current.items) {
+        val old = prior[item.id]
+        if (old != null && old.state == item.state && old.needsAttention == item.needsAttention &&
+            old.title == item.title && old.reference == item.reference
+        ) {
+            continue
+        }
+        val reference =
+            item.reference
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { "$it: " }
+                .orEmpty()
+        val state =
+            item.state
+                .takeIf { it.isNotEmpty() }
+                ?.let { " ($it)" }
+                .orEmpty()
+        val attention = if (item.needsAttention) ", needs attention" else ""
+        val line = "- $reference${item.title}$state$attention"
+        if (lines.size < MAX_INITIAL_SERVICE_ITEMS && chars + line.length + 80 <= MAX_INITIAL_SERVICE_CONTEXT_CHARS) {
+            lines += line
+            chars += line.length + 1
+        } else {
+            omitted++
+        }
+    }
+    if (lines.isEmpty() && omitted == 0) return null
+    val suffix = if (omitted > 0) "\n- … more service updates omitted." else ""
+    return "Service item updates:\n${lines.joinToString("\n")}$suffix"
+}
+
 data class ServiceItemSummary(
     val id: String,
     val reference: String? = null,

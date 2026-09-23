@@ -7,14 +7,14 @@ interface NotificationOptions {
 /** Request notification permission if not already granted. */
 function requestNotificationPermission(options: NotificationOptions): void {
   if (!options.enabled) return;
-  if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
+  if ("Notification" in window && window.Notification.permission === "default") {
+    window.Notification.requestPermission();
   }
 }
 
 /** Returns true when we're allowed to send notifications. */
 function canNotify(options: NotificationOptions): boolean {
-  return options.enabled && "Notification" in window && Notification.permission === "granted";
+  return options.enabled && "Notification" in window && window.Notification.permission === "granted";
 }
 
 const activeNotifications = new Map<string, Notification>();
@@ -33,7 +33,7 @@ function setVoiceActive(active: boolean): void {
 function notify(id: string, title: string, tag: string, options: NotificationOptions): void {
   if (!canNotify(options) || document.visibilityState === "visible" || voiceActive) return;
   dismissNotification(id);
-  const n = new Notification(title, { tag });
+  const n = new window.Notification(title, { tag });
   activeNotifications.set(id, n);
   n.onclose = () => {
     if (activeNotifications.get(id) === n) activeNotifications.delete(id);

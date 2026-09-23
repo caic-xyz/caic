@@ -125,11 +125,12 @@ the new `session.setup`; conversation recovery context must not duplicate an
 older service snapshot. A missing item resource produces an empty baseline,
 not product-specific fallback behavior in the shell.
 
-Planned client-delta work will cache the latest snapshot for comparison, reset
-that baseline when the session or service identity changes, and derive bounded
-chronological changes from later snapshots rather than repeatedly appending
-complete state. Browser and Android will share transition fixtures and buffer
-delivery around speech.
+Clients seed their voice session from the current service snapshot and deliver
+bounded changes from later snapshots, rather than appending complete state
+repeatedly. Android compares generic service-item changes and resets its
+baseline when the voice session or service identity changes. The caic browser
+frontend derives its own product-specific task updates outside Go Mode. Both
+voice transports buffer updates while the model is speaking.
 
 ## Service Notifications
 

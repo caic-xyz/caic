@@ -446,6 +446,27 @@ describe("App task-list SSE recovery", () => {
     taskDiffCache.evictTask("prefetched");
   });
 
+  it("does not alert for a ready task already open in the detail pane", async () => {
+    renderApp("/task/@selected+work");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "selected", state: "running" })] });
+    dispatchSSE({
+      kind: "upsert",
+      upsert: makeTask({ id: "selected", state: "waiting", rateLimit: { blocked: true } }),
+    });
+    dispatchSSE({
+      kind: "upsert",
+      upsert: makeTask({ id: "selected", state: "waiting", rateLimit: { blocked: false } }),
+    });
+    expect(notifications.notify).not.toHaveBeenCalled();
+
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "other", state: "running" })] });
+    dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "other", state: "waiting" }) });
+    expect(notifications.notify).toHaveBeenCalledWith("other", "do something is ready", "caic-waiting-other", {
+      enabled: true,
+    });
+  });
+
   it("uses fetched tasks for derived notification and quota recovery bookkeeping", async () => {
     const blockedTask = makeTask({
       id: "recovered",

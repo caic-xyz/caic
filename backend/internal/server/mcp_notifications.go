@@ -21,16 +21,25 @@ type serviceNotification struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
+type observedTaskState struct {
+	state v1.TaskState
+	seen  uint64
+}
+
 type notificationFeed struct {
 	mu sync.Mutex
 
 	blockedTaskIDs map[string]map[string]struct{}
+	states         map[string]map[string]observedTaskState
+	generations    map[string]uint64
 	events         map[string][]serviceNotification
 }
 
 func newNotificationFeed() *notificationFeed {
 	return &notificationFeed{
 		blockedTaskIDs: make(map[string]map[string]struct{}),
+		states:         make(map[string]map[string]observedTaskState),
+		generations:    make(map[string]uint64),
 		events:         make(map[string][]serviceNotification),
 	}
 }
@@ -49,9 +58,27 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	previouslyBlocked := f.blockedTaskIDs[owner]
+	previousStates := f.states[owner]
+	if previousStates == nil {
+		previousStates = make(map[string]observedTaskState, len(tasks))
+		f.states[owner] = previousStates
+	}
+	generation := f.generations[owner] + 1
+	f.generations[owner] = generation
 	for i := range tasks {
 		task := &tasks[i]
 		id := task.ID.String()
+		old := previousStates[id]
+		previousStates[id] = observedTaskState{state: task.State, seen: generation}
+		if old.state == v1.TaskStateRunning && (task.State == v1.TaskStateWaiting || task.State == v1.TaskStateAsking || task.State == v1.TaskStateHasPlan) {
+			f.events[owner] = append(f.events[owner], serviceNotification{
+				ID:         "ready-" + id + "-" + now.Format(time.RFC3339Nano),
+				Title:      "Task ready",
+				Body:       task.Title + " needs attention.",
+				OccurredAt: now,
+				ExpiresAt:  now.Add(24 * time.Hour),
+			})
+		}
 		if task.State != v1.TaskStateWaiting || !wasBlocked(previouslyBlocked, id) || isBlocked(blockedTaskIDs, id) {
 			continue
 		}
@@ -62,6 +89,11 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 			OccurredAt: now,
 			ExpiresAt:  now.Add(24 * time.Hour),
 		})
+	}
+	for id, observation := range previousStates {
+		if observation.seen != generation {
+			delete(previousStates, id)
+		}
 	}
 	f.blockedTaskIDs[owner] = blockedTaskIDs
 	f.events[owner] = recentNotifications(f.events[owner], now)

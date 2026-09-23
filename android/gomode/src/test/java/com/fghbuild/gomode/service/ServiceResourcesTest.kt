@@ -58,6 +58,25 @@ class ServiceResourcesTest {
         assertTrue(snapshot.voiceContext.contains("4 more items omitted. Call tasks_list and follow nextCursor."))
     }
 
+    @Test
+    fun `voice updates report changed items without replaying unchanged baseline`() {
+        val baseline = ServiceMonitoringSnapshot(listOf(ServiceItemSummary("1", "Item #1", "Build", "active", false)))
+        assertNull(serviceItemVoiceChanges(baseline, baseline))
+
+        val changed =
+            ServiceMonitoringSnapshot(
+                listOf(
+                    ServiceItemSummary("1", "Item #1", "Build", "waiting", true),
+                    ServiceItemSummary("2", "Item #2", "Review", "active", false),
+                ),
+            )
+        assertEquals(
+            "Service item updates:\n- Item #1: Build (waiting), needs attention\n- Item #2: Review (active)",
+            serviceItemVoiceChanges(baseline, changed),
+        )
+        assertNull(serviceItemVoiceChanges(changed, changed))
+    }
+
     private fun itemsReadResult(text: String) =
         ResourcesReadResult(
             resultType = ResultType.Complete,

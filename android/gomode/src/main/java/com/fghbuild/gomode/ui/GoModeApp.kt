@@ -46,11 +46,13 @@ import com.fghbuild.gomode.data.SettingsRepository
 import com.fghbuild.gomode.data.SettingsState
 import com.fghbuild.gomode.halo.HaloController
 import com.fghbuild.gomode.service.ServiceMonitor
+import com.fghbuild.gomode.service.ServiceMonitoringSnapshot
 import com.fghbuild.gomode.service.ServiceNotification
 import com.fghbuild.gomode.service.ServiceNotificationPublisher
 import com.fghbuild.gomode.service.ServiceSettingsClient
 import com.fghbuild.gomode.service.ServiceSettingsException
 import com.fghbuild.gomode.service.compatibilityError
+import com.fghbuild.gomode.service.serviceItemVoiceChanges
 import com.fghbuild.gomode.ui.halo.HaloScreen
 import com.fghbuild.gomode.ui.settings.SettingsScreen
 import com.fghbuild.gomode.ui.web.WebShellLoadState
@@ -148,6 +150,18 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         onDispose { serviceMonitor.stop() }
     }
     val serviceMonitorState by serviceMonitor.state.collectAsStateWithLifecycle()
+    var voiceItemBaseline by remember(activeURL) { mutableStateOf<ServiceMonitoringSnapshot?>(null) }
+    LaunchedEffect(activeURL, voiceState.connected, serviceMonitorState.snapshot) {
+        if (!voiceState.connected) {
+            voiceItemBaseline = null
+            return@LaunchedEffect
+        }
+        val snapshot = serviceMonitorState.snapshot ?: return@LaunchedEffect
+        voiceItemBaseline?.let { previous ->
+            serviceItemVoiceChanges(previous, snapshot)?.let(voiceSession::injectText)
+        }
+        voiceItemBaseline = snapshot
+    }
     var onMicGranted by remember { mutableStateOf<(() -> Unit)?>(null) }
     val micPermissionLauncher =
         rememberLauncherForActivityResult(

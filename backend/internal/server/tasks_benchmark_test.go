@@ -18,6 +18,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	capipi "github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -272,7 +273,7 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *test
 		b.Fatal(err)
 	}
 
-	s := newTestRouter(b, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
+	s := newTestRouter(b, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}, WireFactory: claudecode.New().NewWire}})
 	if err := loadPurgedTasksForTest(s, logDir); err != nil {
 		b.Fatal(err)
 	}
