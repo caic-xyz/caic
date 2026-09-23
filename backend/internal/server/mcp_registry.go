@@ -1,4 +1,4 @@
-// MCP tool registry, schemas, resource catalog, subscription invalidation, and keepalives.
+// MCP tool and Skills registries, schemas, resource catalog, subscription invalidation, and keepalives.
 
 package server
 
@@ -123,6 +123,7 @@ type mcpRegistry struct {
 	notifications *notificationFeed
 	audit         *auditStore
 	metrics       metrics.Recorder
+	skills        []mcp.Skill
 }
 
 func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
@@ -131,6 +132,34 @@ func (m *mcpRegistry) Instructions(ctx context.Context) (string, error) {
 		out += "\n\n" + defaults
 	}
 	return out, nil
+}
+
+// ListSkills returns the complete static MCP Skills catalog in one page.
+func (m *mcpRegistry) ListSkills(_ context.Context, cursor string) (mcp.SkillsListResult, error) {
+	if cursor != "" {
+		return mcp.SkillsListResult{}, mcp.ErrInvalidParams("invalid cursor")
+	}
+	return mcp.SkillsListResult{
+		ResultType: mcp.ResultTypeComplete,
+		Skills:     m.skills,
+		TTLMS:      mcp.DefaultTTLMS,
+		CacheScope: mcp.CacheScopePublic,
+	}, nil
+}
+
+// GetSkill returns a static MCP Skill by its SKILL.md URI.
+func (m *mcpRegistry) GetSkill(_ context.Context, uri string) (mcp.SkillsGetResult, error) {
+	for _, skill := range m.skills {
+		if skill.URI == uri {
+			return mcp.SkillsGetResult{
+				ResultType: mcp.ResultTypeComplete,
+				Skill:      skill,
+				TTLMS:      mcp.DefaultTTLMS,
+				CacheScope: mcp.CacheScopePublic,
+			}, nil
+		}
+	}
+	return mcp.SkillsGetResult{}, mcp.ErrInvalidParams("unknown skill: %s", uri)
 }
 
 func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
@@ -226,6 +255,8 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
 	switch {
+	case m.hasSkill(uri):
+		return m.skillResource(uri), nil
 	case uri == "caic://usage":
 		usage := m.usage.buildResp(ctx)
 		return m.resourceJSON(ctx, uri, usage)
@@ -1366,6 +1397,28 @@ func (m *mcpRegistry) resourceDescriptors(ctx context.Context, keys []mcpResourc
 	}
 }
 
+func (m *mcpRegistry) hasSkill(uri string) bool {
+	for _, skill := range m.skills {
+		if skill.URI == uri {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *mcpRegistry) skillResource(uri string) mcp.ResourcesReadResult {
+	return mcp.ResourcesReadResult{
+		ResultType: mcp.ResultTypeComplete,
+		Contents: []mcp.ResourceContent{{
+			URI:      uri,
+			MimeType: "text/markdown",
+			Text:     mcpTasksSkillMarkdown,
+		}},
+		TTLMS:      mcp.DefaultTTLMS,
+		CacheScope: mcp.CacheScopePublic,
+	}
+}
+
 func mcpStaticResources() []mcp.ResourceDescriptor {
 	return []mcp.ResourceDescriptor{
 		{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
@@ -1961,6 +2014,9 @@ func (m *mcpRegistry) authorizeTool(ctx context.Context, name string) (string, b
 }
 
 func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string, bool) {
+	if m.hasSkill(uri) {
+		return "allow", true
+	}
 	if _, ok := strings.CutPrefix(uri, "caic://tasks/"); ok {
 		id, err := mcpTaskResourceID(uri)
 		if err != nil {
@@ -2064,6 +2120,22 @@ func (r scopedMCPRegistry) CallTool(ctx context.Context, name string, args json.
 
 func (r scopedMCPRegistry) ListResources(ctx context.Context, cursor string) (mcp.ResourcesListResult, error) {
 	return r.Registry.ListResources(r.scopedContext(ctx), cursor)
+}
+
+func (r scopedMCPRegistry) ListSkills(ctx context.Context, cursor string) (mcp.SkillsListResult, error) {
+	registry, ok := r.Registry.(mcp.SkillsRegistry)
+	if !ok {
+		return mcp.SkillsListResult{}, errors.New("MCP Skills extension is unavailable")
+	}
+	return registry.ListSkills(r.scopedContext(ctx), cursor)
+}
+
+func (r scopedMCPRegistry) GetSkill(ctx context.Context, uri string) (mcp.SkillsGetResult, error) {
+	registry, ok := r.Registry.(mcp.SkillsRegistry)
+	if !ok {
+		return mcp.SkillsGetResult{}, errors.New("MCP Skills extension is unavailable")
+	}
+	return registry.GetSkill(r.scopedContext(ctx), uri)
 }
 
 func (r scopedMCPRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {

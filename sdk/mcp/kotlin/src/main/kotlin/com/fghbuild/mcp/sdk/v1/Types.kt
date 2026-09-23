@@ -120,6 +120,14 @@ sealed interface Method {
         override val value = "resources/templates/list"
     }
     @Serializable
+    data object SkillsGet : Method {
+        override val value = "skills/get"
+    }
+    @Serializable
+    data object SkillsList : Method {
+        override val value = "skills/list"
+    }
+    @Serializable
     data object SubscriptionsListen : Method {
         override val value = "subscriptions/listen"
     }
@@ -139,6 +147,8 @@ object MethodSerializer : KSerializer<Method> {
             "resources/list" -> Method.ResourcesList
             "resources/read" -> Method.ResourcesRead
             "resources/templates/list" -> Method.ResourceTemplatesList
+            "skills/get" -> Method.SkillsGet
+            "skills/list" -> Method.SkillsList
             "subscriptions/listen" -> Method.SubscriptionsListen
             else -> Method.Other(v)
         }

@@ -37,6 +37,8 @@ export type Method =
   | "resources/list"
   | "resources/read"
   | "resources/templates/list"
+  | "skills/get"
+  | "skills/list"
   | "subscriptions/listen";
 /**
  * Supported values.
@@ -47,6 +49,8 @@ export const MethodToolsCall: Method = "tools/call";
 export const MethodResourcesList: Method = "resources/list";
 export const MethodResourcesRead: Method = "resources/read";
 export const MethodResourceTemplatesList: Method = "resources/templates/list";
+export const MethodSkillsGet: Method = "skills/get";
+export const MethodSkillsList: Method = "skills/list";
 export const MethodSubscriptionsListen: Method = "subscriptions/listen";
 
 export type NotificationMethod =

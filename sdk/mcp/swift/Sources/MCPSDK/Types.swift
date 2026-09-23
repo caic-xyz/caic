@@ -93,6 +93,8 @@ public struct Method: Codable, Equatable, Hashable {
     public static let ResourcesList = Method("resources/list")
     public static let ResourcesRead = Method("resources/read")
     public static let ResourceTemplatesList = Method("resources/templates/list")
+    public static let SkillsGet = Method("skills/get")
+    public static let SkillsList = Method("skills/list")
     public static let SubscriptionsListen = Method("subscriptions/listen")
 
     public static func other(_ value: String) -> Method { Method(value) }

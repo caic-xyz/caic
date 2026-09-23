@@ -1,4 +1,4 @@
-// Package mcp implements the Model Context Protocol HTTP endpoint and SDK DTOs.
+// Package mcp implements the Model Context Protocol HTTP endpoint, Skills extension, and SDK DTOs.
 package mcp
 
 import (
@@ -36,6 +36,9 @@ const (
 
 	// DefaultTTLMS is the default cache lifetime returned by MCP list/read methods.
 	DefaultTTLMS = 10_000
+
+	// SkillsExtension identifies the official MCP Skills extension.
+	SkillsExtension = "io.modelcontextprotocol/skills"
 )
 
 // ErrorCode is a JSON-RPC error code used by MCP responses.
@@ -55,6 +58,23 @@ const (
 // Method is an MCP JSON-RPC method name.
 type Method string
 
+// Official MCP extensions are negotiated through the capabilities.extensions map.
+// caic currently implements only Skills:
+//
+//   - MCP Apps (io.modelcontextprotocol/ui):
+//     https://modelcontextprotocol.io/extensions/apps/overview
+//   - MCP Tasks (io.modelcontextprotocol/tasks):
+//     https://modelcontextprotocol.io/extensions/tasks/overview
+//   - OAuth Client Credentials (io.modelcontextprotocol/oauth-client-credentials):
+//     https://modelcontextprotocol.io/extensions/auth/oauth-client-credentials
+//   - Enterprise-Managed Authorization
+//     (io.modelcontextprotocol/enterprise-managed-authorization):
+//     https://modelcontextprotocol.io/extensions/auth/enterprise-managed-authorization
+//   - Skills (io.modelcontextprotocol/skills):
+//     https://modelcontextprotocol.io/extensions/skills/overview
+//
+// See https://modelcontextprotocol.io/extensions/overview for the official catalog.
+
 // MCP method names supported by the handler.
 const (
 	MethodServerDiscover        Method = "server/discover"
@@ -63,6 +83,8 @@ const (
 	MethodResourcesList         Method = "resources/list"
 	MethodResourcesRead         Method = "resources/read"
 	MethodResourceTemplatesList Method = "resources/templates/list"
+	MethodSkillsGet             Method = "skills/get"
+	MethodSkillsList            Method = "skills/list"
 	MethodSubscriptionsListen   Method = "subscriptions/listen"
 )
 
@@ -218,7 +240,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		t := ServerDiscoverResult{
 			ResultType:        ResultTypeComplete,
 			SupportedVersions: []string{ProtocolVersion},
-			Capabilities:      Capabilities{Tools: ToolsCapability{}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
+			Capabilities:      h.capabilities(),
 			ServerInfo:        h.serverInfo(),
 			Instructions:      instructions,
 			TTLMS:             DefaultTTLMS,
@@ -273,6 +295,34 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 			}
 		}
 		return t, nil
+	case MethodSkillsList:
+		var p PaginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		registry, ok := h.Registry.(SkillsRegistry)
+		if !ok {
+			return nil, rpcError(MethodNotFoundCode, "Method not found")
+		}
+		res, err := registry.ListSkills(ctx, p.Cursor)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		return res, nil
+	case MethodSkillsGet:
+		var p SkillsGetParams
+		if err := decodeParams(params, &p); err != nil || p.URI == "" {
+			return nil, rpcError(InvalidParamsCode, "Invalid params")
+		}
+		registry, ok := h.Registry.(SkillsRegistry)
+		if !ok {
+			return nil, rpcError(MethodNotFoundCode, "Method not found")
+		}
+		res, err := registry.GetSkill(ctx, p.URI)
+		if err != nil {
+			return nil, registryError(err)
+		}
+		return res, nil
 	case MethodResourcesList:
 		var p PaginatedRequestParams
 		if err := decodeParams(params, &p); err != nil {
@@ -324,6 +374,14 @@ func (h *Handler) writeResponse(w http.ResponseWriter, status int, resp JSONRPCR
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Warn("write mcp response", "err", err)
 	}
+}
+
+func (h *Handler) capabilities() Capabilities {
+	capabilities := Capabilities{Tools: ToolsCapability{}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}}
+	if _, ok := h.Registry.(SkillsRegistry); ok {
+		capabilities.Extensions = Extensions{SkillsExtension: json.RawMessage(`{}`)}
+	}
+	return capabilities
 }
 
 func (h *Handler) serverInfo() Implementation {
@@ -775,6 +833,12 @@ type Registry interface {
 	Resources(ctx context.Context) iter.Seq2[ResourceDescriptor, error]
 	ReadResource(ctx context.Context, uri string) (ResourcesReadResult, error)
 	SubscribeResourceUpdates(ctx context.Context, filter SubscriptionFilter) (iter.Seq2[ResourceUpdate, error], error)
+}
+
+// SkillsRegistry supplies the optional io.modelcontextprotocol/skills extension.
+type SkillsRegistry interface {
+	ListSkills(ctx context.Context, cursor string) (SkillsListResult, error)
+	GetSkill(ctx context.Context, uri string) (SkillsGetResult, error)
 }
 
 // RawToolResult is the transport-neutral output from a tool handler.
@@ -1276,6 +1340,45 @@ type ResourcesListResult struct {
 	Resources  []ResourceDescriptor `json:"resources"`
 	TTLMS      int                  `json:"ttlMs"`
 	CacheScope CacheScope           `json:"cacheScope"`
+}
+
+// SkillsGetParams identifies a skill by its SKILL.md resource URI.
+type SkillsGetParams struct {
+	Meta RequestMeta `json:"_meta"`
+	URI  string      `json:"uri"`
+}
+
+// SkillResource describes one complete, digest-verified file in a skill.
+type SkillResource struct {
+	URI    string `json:"uri"`
+	Digest string `json:"digest"`
+	Size   int64  `json:"size"`
+}
+
+// Skill describes one Agent Skill served through the MCP Skills extension.
+type Skill struct {
+	URI         string          `json:"uri"`
+	Frontmatter map[string]any  `json:"frontmatter"`
+	Resources   []SkillResource `json:"resources"`
+}
+
+// SkillsListResult is the response payload for skills/list.
+type SkillsListResult struct {
+	Meta       MetaObject `json:"_meta,omitempty"`
+	ResultType ResultType `json:"resultType"`
+	NextCursor string     `json:"nextCursor,omitempty"`
+	Skills     []Skill    `json:"skills"`
+	TTLMS      int        `json:"ttlMs"`
+	CacheScope CacheScope `json:"cacheScope"`
+}
+
+// SkillsGetResult is the response payload for skills/get.
+type SkillsGetResult struct {
+	Meta       MetaObject `json:"_meta,omitempty"`
+	ResultType ResultType `json:"resultType"`
+	Skill      Skill      `json:"skill"`
+	TTLMS      int        `json:"ttlMs"`
+	CacheScope CacheScope `json:"cacheScope"`
 }
 
 // ResourceDescriptor describes a resource the server can read.

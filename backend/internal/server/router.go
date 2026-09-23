@@ -129,6 +129,10 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	if err != nil {
 		return nil, err
 	}
+	mcpSkills, err := loadMCPTaskSkills()
+	if err != nil {
+		return nil, err
+	}
 	webFetch := &webFetchHandlers{}
 	svc := &taskService{
 		ctx:       ctx,
@@ -260,6 +264,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		notifications: newNotificationFeed(),
 		audit:         audit,
 		metrics:       d.Metrics,
+		skills:        mcpSkills,
 	}
 	s.TaskMCPScoper = registry
 	s.mcpHandlers.protocol = &mcp.Handler{

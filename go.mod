@@ -23,6 +23,7 @@ require (
 	github.com/pion/ice/v4 v4.4.2
 	github.com/pion/transport/v4 v4.1.1
 	github.com/pion/webrtc/v4 v4.2.20
+	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/net v0.59.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
@@ -47,7 +48,6 @@ require (
 	github.com/pion/stun/v4 v4.0.0 // indirect
 	github.com/pion/turn/v5 v5.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/time v0.16.0 // indirect

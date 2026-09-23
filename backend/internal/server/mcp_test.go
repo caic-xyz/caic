@@ -5,6 +5,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -298,6 +300,13 @@ func TestMCPHandlers(t *testing.T) {
 		if _, ok := toolsCapability["listChanged"]; ok {
 			t.Fatalf("tools capability = %#v, want no listChanged support", toolsCapability)
 		}
+		extensions, ok := caps["extensions"].(map[string]any)
+		if !ok {
+			t.Fatalf("extensions type = %T", caps["extensions"])
+		}
+		if skillExtension, ok := extensions[mcp.SkillsExtension].(map[string]any); !ok || len(skillExtension) != 0 {
+			t.Fatalf("skills extension = %#v, want empty object", extensions[mcp.SkillsExtension])
+		}
 		instructions, ok := result["instructions"].(string)
 		if !ok {
 			t.Fatalf("instructions type = %T", result["instructions"])
@@ -380,6 +389,80 @@ func TestMCPHandlers(t *testing.T) {
 		}
 		if strings.Contains(instructions, "private task prompt") || strings.Contains(instructions, "[Current tasks at session start]") {
 			t.Fatalf("instructions disclose task snapshot: %q", instructions)
+		}
+	})
+
+	t.Run("skills", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+		}
+		want, err := registry.ListSkills(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, resp := postMCP(t, s.mcpHandlers.protocol, "skills/list", "", mcpRequestJSON("skills/list", `{}`))
+		if resp.Error != nil {
+			t.Fatalf("skills/list error = %#v", resp.Error)
+		}
+		data, err := json.Marshal(resp.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var listed mcp.SkillsListResult
+		if err := json.Unmarshal(data, &listed); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(listed, want) {
+			t.Fatalf("skills/list = %#v, want %#v", listed, want)
+		}
+
+		_, resp = postMCP(t, s.mcpHandlers.protocol, "skills/get", "", mcpRequestJSON("skills/get", `"uri":"`+mcpTasksSkillURI+`"`))
+		if resp.Error != nil {
+			t.Fatalf("skills/get error = %#v", resp.Error)
+		}
+		data, err = json.Marshal(resp.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got mcp.SkillsGetResult
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Skill, want.Skills[0]) {
+			t.Fatalf("skills/get = %#v, want %#v", got.Skill, want.Skills[0])
+		}
+
+		_, resp = postMCP(t, s.mcpHandlers.protocol, "resources/read", mcpTasksSkillURI, mcpRequestJSON("resources/read", `"uri":"`+mcpTasksSkillURI+`"`))
+		if resp.Error != nil {
+			t.Fatalf("resources/read error = %#v", resp.Error)
+		}
+		data, err = json.Marshal(resp.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var resource mcp.ResourcesReadResult
+		if err := json.Unmarshal(data, &resource); err != nil {
+			t.Fatal(err)
+		}
+		if len(resource.Contents) != 1 || resource.Contents[0].Text != mcpTasksSkillMarkdown {
+			t.Fatalf("resources/read = %#v, want embedded skill", resource.Contents)
+		}
+		manifest := listed.Skills[0].Resources
+		if len(manifest) != 1 || manifest[0].Size != int64(len(resource.Contents[0].Text)) {
+			t.Fatalf("skill manifest = %#v, want one resource with size %d", manifest, len(resource.Contents[0].Text))
+		}
+		digest := sha256.Sum256([]byte(resource.Contents[0].Text))
+		if manifest[0].Digest != "sha256:"+hex.EncodeToString(digest[:]) {
+			t.Errorf("skill digest = %q, want sha256 of resources/read content", manifest[0].Digest)
+		}
+
+		_, resp = postMCP(t, s.mcpHandlers.protocol, "skills/get", "", mcpRequestJSON("skills/get", `"uri":"skill://missing/SKILL.md"`))
+		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
+			t.Fatalf("unknown skills/get error = %#v, want invalid params", resp.Error)
 		}
 	})
 

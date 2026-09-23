@@ -54,6 +54,8 @@ Method is an MCP JSON-RPC method name.
 | `resources/list` |  |
 | `resources/read` |  |
 | `resources/templates/list` |  |
+| `skills/get` |  |
+| `skills/list` |  |
 | `subscriptions/listen` |  |
 
 ### NotificationMethod
