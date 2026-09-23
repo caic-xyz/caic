@@ -65,3 +65,5 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     mcp: (req: JSONRPCRequest, headers: Record<string, string> = {}): Promise<JSONRPCResponse> => request<JSONRPCResponse>("POST", "", req, headers),
   };
 }
+
+export type APIClient = ReturnType<typeof createApiClient>;

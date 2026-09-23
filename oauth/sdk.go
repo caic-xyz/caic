@@ -5,7 +5,7 @@ package oauth
 import (
 	"reflect"
 
-	"github.com/caic-xyz/caic/apisdkgen/apispec"
+	"github.com/maruel/apisdkgen/apispec"
 )
 
 // SDKAPI returns the SDK generation specification for OAuth types.

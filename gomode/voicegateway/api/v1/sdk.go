@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/caic-xyz/caic/apisdkgen/apispec"
 	voiceapi "github.com/caic-xyz/caic/gomode/voicegateway/api"
+	"github.com/maruel/apisdkgen/apispec"
 )
 
 // SDKAPI returns the SDK generation specification for the voice gateway API.

@@ -75,11 +75,11 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Lists the authenticated user's connected OAuth clients. */
     listOAuthGrants: (): Promise<OAuthGrantsResp> => request<OAuthGrantsResp>("GET", "/api/caic/v1/oauth/grants"),
     /** Revokes one connected OAuth client grant for the authenticated user. */
-    revokeOAuthGrant: (grantID: string, req: RevokeOAuthGrantReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/oauth/grants/${grantID}/revoke`, req),
+    revokeOAuthGrant: (grantID: string, req: RevokeOAuthGrantReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/oauth/grants/${encodeURIComponent(grantID)}/revoke`, req),
     /** Lists available coding agent harnesses. */
     listHarnesses: (): Promise<HarnessInfo[]> => request<HarnessInfo[]>("GET", "/api/caic/v1/server/harnesses"),
     /** Refreshes one coding agent model inventory, bypassing its cache. */
-    refreshHarness: (harness: string, req: RefreshHarnessReq): Promise<HarnessInfo> => request<HarnessInfo>("POST", `/api/caic/v1/server/harnesses/${harness}/refresh`, req),
+    refreshHarness: (harness: string, req: RefreshHarnessReq): Promise<HarnessInfo> => request<HarnessInfo>("POST", `/api/caic/v1/server/harnesses/${encodeURIComponent(harness)}/refresh`, req),
     /** Lists well-known cache configurations. */
     listCaches: (): Promise<WellKnownCachesResp> => request<WellKnownCachesResp>("GET", "/api/caic/v1/server/caches"),
     /** Returns the latest size snapshot for well-known caches. */
@@ -99,14 +99,14 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Returns all tasks. */
     listTasks: (): Promise<Task[]> => request<Task[]>("GET", "/api/caic/v1/tasks"),
     /** Returns a single task by id (404 if it does not exist). */
-    getTask: (id: string): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${id}`),
+    getTask: (id: string): Promise<Task> => request<Task>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}`),
     /** Returns recorded and observed runtime metadata for a task. */
-    getTaskInfo: (id: string): Promise<TaskInfo> => request<TaskInfo>("GET", `/api/caic/v1/tasks/${id}/info`),
+    getTaskInfo: (id: string): Promise<TaskInfo> => request<TaskInfo>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/info`),
     /** Creates and starts a new coding agent task. */
     createTask: (req: CreateTaskReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req),
     /** Streams raw backend-specific task events via SSE. */
     taskRawEvents: (id: string, handlers: TaskRawEventsHandlers): EventSource => {
-      const es = new EventSource(`/api/caic/v1/tasks/${id}/raw_events`);
+      const es = new EventSource(`/api/caic/v1/tasks/${encodeURIComponent(id)}/raw_events`);
       es.addEventListener("message", (e) => {
         try {
           handlers.onMessage(validateEventMessage(JSON.parse(e.data)));
@@ -118,7 +118,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     },
     /** Streams backend-neutral task events via SSE. */
     taskEvents: (id: string, handlers: TaskEventsHandlers): EventSource => {
-      const es = new EventSource(`/api/caic/v1/tasks/${id}/events`);
+      const es = new EventSource(`/api/caic/v1/tasks/${encodeURIComponent(id)}/events`);
       es.addEventListener("message", (e) => {
         try {
           handlers.onMessage(validateEventMessage(JSON.parse(e.data)));
@@ -143,41 +143,41 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
       return es;
     },
     /** Sends user input to a running task. */
-    sendInput: (id: string, req: InputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/input`, req),
+    sendInput: (id: string, req: InputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/input`, req),
     /** Restarts a completed or errored task with a new prompt. */
-    restartTask: (id: string, req: RestartReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/restart`, req),
+    restartTask: (id: string, req: RestartReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/restart`, req),
     /** Clears context and restarts the agent session without a prompt. */
-    clearContext: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/clear-context`),
+    clearContext: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/clear-context`),
     /** Sends a compact command to reduce the agent's context window usage. */
-    compactContext: (id: string, req: CompactReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/compact`, req),
+    compactContext: (id: string, req: CompactReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/compact`, req),
     /** Requests graceful stop of a running task. */
-    stopTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/stop`),
+    stopTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/stop`),
     /** Stops a task, then deletes its runtime instance after the configured recovery window unless revived. */
-    purgeTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/purge`),
+    purgeTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/purge`),
     /** Reconnects to an orphaned task runtime instance. */
-    reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${id}/revive`),
+    reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/revive`),
     /** Returns the log tail of a failed CI check run. */
-    getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/ci/log/${id}?jobID=${encodeURIComponent(jobID)}`),
+    getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/caic/v1/ci/log/${encodeURIComponent(id)}?jobID=${encodeURIComponent(jobID)}`),
     /** Pushes task changes to the remote repository. */
-    syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${id}/sync`, req),
+    syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/sync`, req),
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
-    forkTask: (id: string, req: ForkTaskReq): Promise<Task> => request<Task>("POST", `/api/caic/v1/tasks/${id}/fork`, req),
+    forkTask: (id: string, req: ForkTaskReq): Promise<Task> => request<Task>("POST", `/api/caic/v1/tasks/${encodeURIComponent(id)}/fork`, req),
     /** Builds an editable handoff prompt for continuing a task in a fresh agent session. */
-    getTaskHandoff: (id: string): Promise<TaskHandoffResp> => request<TaskHandoffResp>("GET", `/api/caic/v1/tasks/${id}/handoff`),
+    getTaskHandoff: (id: string): Promise<TaskHandoffResp> => request<TaskHandoffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/handoff`),
     /** Returns repository status and the unified diff for a task's branch. */
-    getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/caic/v1/tasks/${id}/diff?path=${encodeURIComponent(path)}`),
+    getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff?path=${encodeURIComponent(path)}`),
     /** Returns repository and changed-file metadata without loading patch bodies. */
-    getTaskDiffIndex: (id: string): Promise<TaskDiffIndexResp> => request<TaskDiffIndexResp>("GET", `/api/caic/v1/tasks/${id}/diff/index`),
+    getTaskDiffIndex: (id: string): Promise<TaskDiffIndexResp> => request<TaskDiffIndexResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/index`),
     /** Returns one committed or uncommitted file patch. */
-    getTaskFileDiff: (id: string, repository: string, commit: string, path: string, originalPath: string): Promise<FileDiffResp> => request<FileDiffResp>("GET", `/api/caic/v1/tasks/${id}/diff/file?repository=${encodeURIComponent(repository)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}&originalPath=${encodeURIComponent(originalPath)}`),
+    getTaskFileDiff: (id: string, repository: string, commit: string, path: string, originalPath: string): Promise<FileDiffResp> => request<FileDiffResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/diff/file?repository=${encodeURIComponent(repository)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}&originalPath=${encodeURIComponent(originalPath)}`),
     /** Returns compact Git state for every repository mapped to a task. */
-    getTaskRepoStatus: (id: string): Promise<TaskRepoStatusResp> => request<TaskRepoStatusResp>("GET", `/api/caic/v1/tasks/${id}/repo-status`),
+    getTaskRepoStatus: (id: string): Promise<TaskRepoStatusResp> => request<TaskRepoStatusResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/repo-status`),
     /** Returns the list of running processes inside the task's runtime instance. */
-    getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${id}`),
+    getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${encodeURIComponent(id)}`),
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
-    signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/processes/${id}/${pid}/signal`, req),
+    signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/processes/${encodeURIComponent(id)}/${encodeURIComponent(pid)}/signal`, req),
     /** Returns the full (untruncated) input for a tool call. */
-    getTaskToolInput: (id: string, toolUseID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${id}/tool/${toolUseID}`),
+    getTaskToolInput: (id: string, toolUseID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/tool/${encodeURIComponent(toolUseID)}`),
     /** Streams task list updates for all tasks via SSE. */
     globalTaskEvents: (handlers: GlobalTaskEventsHandlers): EventSource => {
       const es = new EventSource("/api/caic/v1/tasks/events");
@@ -210,3 +210,5 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     webFetch: (req: WebFetchReq): Promise<WebFetchResp> => request<WebFetchResp>("POST", "/api/caic/v1/web/fetch", req),
   };
 }
+
+export type APIClient = ReturnType<typeof createApiClient>;

@@ -10,8 +10,8 @@ import (
 
 	"github.com/maruel/ksid"
 
-	"github.com/caic-xyz/caic/apisdkgen/apispec"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
+	"github.com/maruel/apisdkgen/apispec"
 )
 
 // SDKAPI returns the SDK generation specification for the caic API.

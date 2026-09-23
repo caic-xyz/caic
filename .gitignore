@@ -9,11 +9,11 @@ node_modules/
 /dist/
 /emulator*.log
 /frontend/coverage/
+/go.work
+/go.work.sum
 /package-lock.json
 /test-results/
 /visual-screenshots-failures/
 /tmp/
-go.work
-go.work.sum
 /custom-gcl
 /.custom-gcl.sha

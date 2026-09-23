@@ -38,3 +38,5 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     getSettings: (): Promise<Settings> => request<Settings>("GET", "/.well-known/gomode.json"),
   };
 }
+
+export type APIClient = ReturnType<typeof createApiClient>;

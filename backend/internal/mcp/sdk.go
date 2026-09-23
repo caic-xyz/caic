@@ -8,7 +8,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/caic-xyz/caic/apisdkgen/apispec"
+	"github.com/maruel/apisdkgen/apispec"
 )
 
 // SDKAPI returns the SDK generation specification for the MCP API.

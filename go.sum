@@ -22,6 +22,8 @@ github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR
 github.com/klauspost/compress v1.20.0/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/lmittmann/tint v1.2.0 h1:AogHRHy8HUJUnNJBHJlYa+fR4YY8mko2cnCp67xn9JY=
 github.com/lmittmann/tint v1.2.0/go.mod h1:HIS3gSy7qNwGCj+5oRjAutErFBl4BzdQP6cJZ0NfMwE=
+github.com/maruel/apisdkgen v0.1.0 h1:EejAVdc5WaOImwgIKOjUHTcj3J/js7dhQWGSbOII7xE=
+github.com/maruel/apisdkgen v0.1.0/go.mod h1:jBcMrvWQiXkM7w7vZeRFbVu1fBullU9CBzoWnNIPGsI=
 github.com/maruel/genai v0.8.1 h1:chYtEB1zWwfh66wl7NcUZ7DM/UKYES/2VeKLz+jp8Tc=
 github.com/maruel/genai v0.8.1/go.mod h1:GiZhhtKOJct3g19u+yLevtAcpXnRpgIoIcPv4BL5OKs=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 h1:B96AE27WGCnXjaItfg9i6bnj7iGs//NPBDz6kMgKYto=

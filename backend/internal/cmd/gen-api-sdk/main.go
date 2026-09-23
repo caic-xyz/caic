@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/caic-xyz/caic/apisdkgen"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/gomode"
 	voicev1 "github.com/caic-xyz/caic/gomode/voicegateway/api/v1"
 	"github.com/caic-xyz/caic/oauth"
+	"github.com/maruel/apisdkgen"
 )
 
 func main() {

@@ -37,8 +37,10 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. */
     voiceRTCOffer: (req: VoiceRTCOfferReq, headers: Record<string, string> = {}): Promise<VoiceRTCAnswerResp> => request<VoiceRTCAnswerResp>("POST", "/api/voicegateway/v1/voice/rtc/offer", req, headers),
     /** Returns structured WebRTC connectivity diagnostics for a voice bridge session. */
-    diagnoseVoiceRTC: (sessionID: string, req: VoiceRTCDiagnosticsReq, headers: Record<string, string> = {}): Promise<VoiceRTCDiagnosticsResp> => request<VoiceRTCDiagnosticsResp>("POST", `/api/voicegateway/v1/voice/rtc/${sessionID}/diagnostics`, req, headers),
+    diagnoseVoiceRTC: (sessionID: string, req: VoiceRTCDiagnosticsReq, headers: Record<string, string> = {}): Promise<VoiceRTCDiagnosticsResp> => request<VoiceRTCDiagnosticsResp>("POST", `/api/voicegateway/v1/voice/rtc/${encodeURIComponent(sessionID)}/diagnostics`, req, headers),
     /** Closes a WebRTC voice bridge session. */
-    closeVoiceRTC: (sessionID: string, headers: Record<string, string> = {}): Promise<StatusResp> => request<StatusResp>("POST", `/api/voicegateway/v1/voice/rtc/${sessionID}`, undefined, headers),
+    closeVoiceRTC: (sessionID: string, headers: Record<string, string> = {}): Promise<StatusResp> => request<StatusResp>("POST", `/api/voicegateway/v1/voice/rtc/${encodeURIComponent(sessionID)}`, undefined, headers),
   };
 }
+
+export type APIClient = ReturnType<typeof createApiClient>;

@@ -36,3 +36,5 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
   return {
   };
 }
+
+export type APIClient = ReturnType<typeof createApiClient>;
