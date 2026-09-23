@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -132,8 +133,18 @@ func backfillDayCosts(s *Store, name string, estimate func(*UsageRow) (float64, 
 		return os.ErrClosed
 	}
 	path := filepath.Join(s.dir, name)
-	data, err := os.ReadFile(path) //nolint:gosec // name is a validated day-file directory entry.
+	if strings.HasSuffix(name, compressedDaySuffix) {
+		if _, err := os.Stat(strings.TrimSuffix(path, ".zstd")); err == nil {
+			return nil // the plain copy wins an interrupted compression
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat plain usage day for %s: %w", name, err)
+		}
+	}
+	data, err := readDayFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // a late append restored this compressed day
+		}
 		return fmt.Errorf("read usage rollup day %s for missing cost: %w", name, err)
 	}
 	lines := bytes.Split(data, []byte{'\n'})
@@ -180,14 +191,18 @@ func backfillDayCosts(s *Store, name string, estimate func(*UsageRow) (float64, 
 	}
 	stagedPath := staged.Name()
 	defer func() { _ = os.Remove(stagedPath) }()
-	if _, err := staged.Write(bytes.Join(lines, []byte{'\n'})); err != nil {
+	if err := writeDayBytes(staged, path, bytes.Join(lines, []byte{'\n'})); err != nil {
 		_ = staged.Close()
 		return fmt.Errorf("write usage cost staging file for %s: %w", name, err)
+	}
+	if err := staged.Sync(); err != nil {
+		_ = staged.Close()
+		return fmt.Errorf("sync usage cost staging file for %s: %w", name, err)
 	}
 	if err := staged.Close(); err != nil {
 		return fmt.Errorf("close usage cost staging file for %s: %w", name, err)
 	}
-	day := name[:len(name)-len(".jsonl")]
+	day := strings.TrimSuffix(strings.TrimSuffix(name, ".zstd"), ".jsonl")
 	if f := s.files[day]; f != nil {
 		delete(s.files, day)
 		if err := f.Close(); err != nil {

@@ -1,8 +1,8 @@
 // Package usagedb owns the daily usage rollup over coding-agent task activity.
 //
-// Storage is one JSONL file of delta rows per UTC day, with in-memory
-// aggregates for dashboard reads and per-task watermarks for lossless restart
-// resume. Task logs stay the per-task record of truth; this package is the
+// Storage is one plain or zstd-compressed JSONL file of delta rows per UTC day,
+// with in-memory aggregates for dashboard reads and per-task watermarks for
+// lossless restart resume. Task logs stay the per-task record of truth; this package is the
 // only cross-task aggregation surface. A one-time background backfill can
 // publish neutral historical rows into missing day files, and a cost pass can
 // fill missing amounts in existing files. Dashboard reads never scan task logs.

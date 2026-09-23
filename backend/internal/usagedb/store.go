@@ -1,4 +1,4 @@
-// Store is the usage rollup sink: daily JSONL files, aggregates, resume watermarks, purge discard, and historical backfill.
+// Store is the usage rollup sink: daily JSONL files, old-day compression, aggregates, resume watermarks, purge discard, and historical backfill.
 //
 // It implements the task.RollupSink ingestion contract. Task folds call
 // Observe under their own task mutex, and the store serializes all file and
@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"maps"
@@ -21,10 +22,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-// dayFileRe matches a rollup day file name.
-var dayFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.jsonl$`)
+// dayFileRe matches plain and compressed rollup day file names.
+var dayFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.jsonl(?:\.zstd)?$`)
 
 // Config holds the store's dependencies.
 type Config struct {
@@ -57,10 +60,11 @@ type Store struct {
 	closed            bool
 	stopFlush         chan struct{}
 	flushDone         chan struct{}
+	compressionDone   chan struct{}
 }
 
 // New opens the rollup store: it recovers aggregates and watermarks from any
-// existing day files and starts the background flush ticker.
+// existing plain or compressed day files and starts background maintenance.
 func New(cfg Config) (*Store, error) {
 	if cfg.Log == nil {
 		return nil, errors.New("usage rollup logger is required")
@@ -83,9 +87,11 @@ func New(cfg Config) (*Store, error) {
 		lastQuota:         make(map[quotaKey]quotaSeen),
 		stopFlush:         make(chan struct{}),
 		flushDone:         make(chan struct{}),
+		compressionDone:   make(chan struct{}),
 	}
 	s.recover()
 	go s.flushLoop()
+	go s.compressionLoop()
 	return s, nil
 }
 
@@ -183,6 +189,7 @@ func (s *Store) Close() error {
 	s.files = make(map[string]*os.File)
 	s.mu.Unlock()
 	<-s.flushDone
+	<-s.compressionDone
 	var errs []error
 	for day, f := range files {
 		if err := f.Close(); err != nil {
@@ -273,6 +280,8 @@ func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[UsageRow, error]) e
 // startup lets a newly published model price fill rows a prior pass could not
 // price.
 func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*UsageRow) (float64, bool)) error {
+	s.backfillMu.Lock()
+	defer s.backfillMu.Unlock()
 	if estimate == nil {
 		return errors.New("usage cost estimator is required")
 	}
@@ -295,7 +304,8 @@ func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*UsageRo
 }
 
 // recover rebuilds aggregates and resume bookkeeping from the existing day
-// files. Row-level corruption (a truncated trailing line) is tolerated:
+// files. A plain copy wins if compression stopped after publishing its zstd
+// copy but before removing the plain file. Row-level corruption is tolerated:
 // malformed lines are skipped with a warning.
 func (s *Store) recover() {
 	entries, err := os.ReadDir(s.dir)
@@ -308,7 +318,16 @@ func (s *Store) recover() {
 		if e.IsDir() || !dayFileRe.MatchString(name) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(s.dir, name)) //nolint:gosec // name is a directory entry validated against dayFileRe.
+		if strings.HasSuffix(name, compressedDaySuffix) {
+			plain := strings.TrimSuffix(name, ".zstd")
+			if _, err := os.Stat(filepath.Join(s.dir, plain)); err == nil {
+				continue // the plain copy wins an interrupted compression
+			} else if !os.IsNotExist(err) {
+				s.log.Warn("stat plain usage rollup day", "file", plain, "err", err)
+				continue
+			}
+		}
+		data, err := readDayFile(filepath.Join(s.dir, name))
 		if err != nil {
 			s.log.Warn("read usage rollup day file", "file", name, "err", err)
 			continue
@@ -546,20 +565,30 @@ func (s *Store) appendRowLocked(day string, row any) error {
 	if !ok {
 		target := filepath.Join(s.dir, day+".jsonl")
 		if _, err := os.Stat(target); os.IsNotExist(err) {
-			if err := writeFirstRowLocked(s.dir, target, data); err != nil {
-				s.log.Warn("create usage rollup day file", "day", day, "err", err)
-				return err
-			}
-			// The first row is durable after the atomic rename. Reopening the
-			// append handle is an optimization; a failure here must not make the
-			// caller retry and duplicate that committed row.
-			f, err = os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is derived from the store directory and a validated day key.
-			if err != nil {
-				s.log.Warn("open usage rollup day file after create", "day", day, "err", err)
+			if _, compressedErr := os.Stat(target + ".zstd"); compressedErr == nil {
+				if err := s.restoreDayFile(target); err != nil {
+					s.log.Warn("restore compressed usage day for late append", "day", day, "err", err)
+					return err
+				}
+			} else if !os.IsNotExist(compressedErr) {
+				s.log.Warn("stat compressed usage rollup day", "day", day, "err", compressedErr)
+				return compressedErr
+			} else {
+				if err := writeFirstRowLocked(s.dir, target, data); err != nil {
+					s.log.Warn("create usage rollup day file", "day", day, "err", err)
+					return err
+				}
+				// The first row is durable after the atomic rename. Reopening the
+				// append handle is an optimization; a failure here must not make the
+				// caller retry and duplicate that committed row.
+				f, err = os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is derived from the store directory and a validated day key.
+				if err != nil {
+					s.log.Warn("open usage rollup day file after create", "day", day, "err", err)
+					return nil
+				}
+				s.files[day] = f
 				return nil
 			}
-			s.files[day] = f
-			return nil
 		} else if err != nil {
 			s.log.Warn("stat usage rollup day file", "day", day, "err", err)
 			return err
@@ -618,6 +647,32 @@ func (s *Store) flushLoop() {
 			return
 		case <-ticker.C:
 			s.flushAll()
+		}
+	}
+}
+
+// compressionLoop handles daily maintenance without delaying periodic flushes.
+func (s *Store) compressionLoop() {
+	defer close(s.compressionDone)
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+	lastCompressionDay := ""
+	for {
+		select {
+		case <-s.stopFlush:
+			return
+		case <-ticker.C:
+			now := time.Now().UTC()
+			if day := now.Format(dayFormat); day != lastCompressionDay {
+				ran, err := s.tryCompressOldDays(now)
+				if !ran {
+					continue // a backfill owns the directory; retry next tick
+				}
+				if err != nil && !errors.Is(err, os.ErrClosed) {
+					s.log.Warn("compress old usage days", "err", err)
+				}
+				lastCompressionDay = day
+			}
 		}
 	}
 }
@@ -701,10 +756,10 @@ func (s *Store) createBackfillDay(day string, staged *backfillDay) error {
 		return os.ErrClosed
 	}
 	target := filepath.Join(s.dir, day+".jsonl")
-	if _, err := os.Stat(target); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
+	if exists, err := dayFileExists(target); err != nil {
 		return fmt.Errorf("stat usage rollup day %s: %w", day, err)
+	} else if exists {
+		return nil
 	}
 	if err := s.flushBackfillPendingDayLocked(day); err != nil {
 		return err
@@ -712,10 +767,10 @@ func (s *Store) createBackfillDay(day string, staged *backfillDay) error {
 	// A matching pending bucket creates the day through normal append-only
 	// ingestion. The staged history may contain the same record, so discard it
 	// rather than duplicate the live row.
-	if _, err := os.Stat(target); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
+	if exists, err := dayFileExists(target); err != nil {
 		return fmt.Errorf("stat usage rollup day %s: %w", day, err)
+	} else if exists {
+		return nil
 	}
 	if err := os.Rename(staged.path, target); err != nil {
 		return fmt.Errorf("publish usage backfill day %s: %w", day, err)
@@ -734,6 +789,17 @@ func (s *Store) createBackfillDay(day string, staged *backfillDay) error {
 		s.reportedCostTasks[id] = struct{}{}
 	}
 	return nil
+}
+
+func dayFileExists(plain string) (bool, error) {
+	for _, path := range []string{plain, plain + ".zstd"} {
+		if _, err := os.Stat(path); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // flushBackfillPendingDayLocked flushes every task with a pending bucket for
@@ -780,6 +846,133 @@ func (s *Store) markBackfillDone() error {
 		return fmt.Errorf("publish usage backfill sentinel: %w", err)
 	}
 	published = true
+	return nil
+}
+
+// compressOldDays seals plain days older than the grace window. A late append
+// during compression leaves the plain file for a later pass; when both forms
+// remain after an interruption, the plain file is authoritative.
+func (s *Store) tryCompressOldDays(now time.Time) (bool, error) {
+	if !s.backfillMu.TryLock() {
+		return false, nil
+	}
+	defer s.backfillMu.Unlock()
+	return true, s.compressOldDaysLocked(now)
+}
+
+func (s *Store) compressOldDaysLocked(now time.Time) error {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return fmt.Errorf("scan usage days for compression: %w", err)
+	}
+	cutoff := now.UTC().AddDate(0, 0, -compressionGraceDays).Format(dayFormat)
+	var errs []error
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".jsonl") || !dayFileRe.MatchString(name) {
+			continue
+		}
+		day := strings.TrimSuffix(name, ".jsonl")
+		if day >= cutoff {
+			continue
+		}
+		if err := s.compressOldDay(day, filepath.Join(s.dir, name)); err != nil {
+			if errors.Is(err, os.ErrClosed) {
+				return err
+			}
+			errs = append(errs, fmt.Errorf("compress usage day %s: %w", day, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// compressOldDay holds the writer lock only for source checks and publication.
+func (s *Store) compressOldDay(day, path string) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return os.ErrClosed
+	}
+	before, err := os.Stat(path)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	stagedPath, err := writeCompressedDay(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(stagedPath) }()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return os.ErrClosed
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return nil // a late append changed the source during compression
+	}
+	if f := s.files[day]; f != nil {
+		delete(s.files, day)
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("close usage day %s before compression: %w", day, err)
+		}
+	}
+	if err := os.Rename(stagedPath, path+".zstd"); err != nil {
+		return err
+	}
+	if err := syncDayDir(path); err != nil {
+		return fmt.Errorf("sync compressed usage day before removing plain copy: %w", err)
+	}
+	return os.Remove(path)
+}
+
+// restoreDayFile publishes a complete plain copy before removing the
+// compressed copy. An interrupted restore therefore always has one complete
+// authoritative file.
+func (s *Store) restoreDayFile(path string) error {
+	compressed := path + ".zstd"
+	in, err := os.Open(compressed) //nolint:gosec // day path inside the configured rollup directory.
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := in.Close(); err != nil {
+			s.log.Warn("close compressed usage day after restore", "file", compressed, "err", err)
+		}
+	}()
+	dec, err := zstd.NewReader(in)
+	if err != nil {
+		return err
+	}
+	defer dec.Close()
+	staged, err := os.CreateTemp(s.dir, ".usage-plain-*.tmp")
+	if err != nil {
+		return err
+	}
+	stagedPath := staged.Name()
+	defer func() { _ = os.Remove(stagedPath) }()
+	if _, err := io.Copy(staged, dec); err != nil {
+		return errors.Join(err, staged.Close())
+	}
+	if err := staged.Sync(); err != nil {
+		return errors.Join(err, staged.Close())
+	}
+	if err := staged.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(stagedPath, path); err != nil {
+		return err
+	}
+	if err := syncDayDir(path); err != nil {
+		return fmt.Errorf("sync restored usage day before removing compressed copy: %w", err)
+	}
+	if err := os.Remove(compressed); err != nil {
+		s.log.Warn("remove restored compressed usage day", "file", compressed, "err", err)
+	}
 	return nil
 }
 

@@ -10,12 +10,53 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maruel/ksid"
 )
 
 func TestBackfillMissingCosts(t *testing.T) {
 	t.Parallel()
+	t.Run("prices compressed day without unpacking it", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		s := newTestStore(t, dir)
+		at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
+		s.Observe(testMeta(ksid.NewID()), &Event{At: at, Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
+		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "2026-02-05.jsonl")); !os.IsNotExist(err) {
+			t.Fatalf("compressed day became plain: %v", err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		reopened := newTestStore(t, dir)
+		if got := reopened.Days()[0].CostUSD; got != 0.25 {
+			t.Errorf("recovered estimated cost = %v, want 0.25", got)
+		}
+	})
+	t.Run("late restore replaces compressed candidate", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		s := newTestStore(t, dir)
+		at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
+		meta := testMeta(ksid.NewID())
+		s.Observe(meta, &Event{At: at, Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
+		s.Observe(meta, &Event{At: at.Add(time.Hour), Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
+		if err := backfillDayCosts(s, "2026-02-05.jsonl.zstd", func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+			t.Fatalf("vanished compressed candidate: %v", err)
+		}
+		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.Days()[0].CostUSD; got != 0.5 {
+			t.Errorf("plain replacement estimated cost = %v, want 0.5", got)
+		}
+	})
 	t.Run("reconciles estimated and reported costs", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
