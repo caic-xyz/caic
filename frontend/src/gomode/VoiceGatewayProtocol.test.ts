@@ -21,8 +21,8 @@ describe("voice gateway generated protocol DTOs", () => {
       voice: { name: "Kore", language: "en" },
       tools: [
         {
-          name: "tasks_list",
-          description: "List tasks",
+          name: "items_list",
+          description: "List items",
           parameters: { type: "object", properties: {} },
         },
       ],
@@ -30,7 +30,7 @@ describe("voice gateway generated protocol DTOs", () => {
     };
 
     expect(JSON.stringify(msg)).toBe(
-      '{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"tasks_list","description":"List tasks","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt"}}',
+      '{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"items_list","description":"List items","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt"}}',
     );
   });
 

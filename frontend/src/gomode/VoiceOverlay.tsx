@@ -1,30 +1,22 @@
 // Voice overlay component: persistent bottom panel with mic button and voice controls.
 
-import { createEffect, createSignal, For, Show, untrack, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import MicIcon from "@material-symbols/svg-400/outlined/mic.svg?solid";
 import MicOffIcon from "@material-symbols/svg-400/outlined/mic_off.svg?solid";
 import CallEndIcon from "@material-symbols/svg-400/outlined/call_end.svg?solid";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 
-import type { Task } from "@sdk/types.gen";
-import { buildTaskCIContext, buildTaskCreatedContext, buildTaskStateContext } from "../voiceTaskContext";
-
 import { voiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
 import { notifications } from "./notifications";
-import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
 import styles from "./VoiceOverlay.module.css";
-
-interface Props {
-  tasks: () => Task[];
-}
 
 /** Bar transition durations (ms): center reacts fastest, outer bars lag. */
 const BAR_DURATIONS = [80, 40, 120];
 const BAR_MIN_H = 3;
 const BAR_MAX_H = 20;
 
-export default function VoiceOverlay(props: Props) {
+export default function VoiceOverlay() {
   const session = voiceSession;
 
   let panelRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
@@ -35,59 +27,6 @@ export default function VoiceOverlay(props: Props) {
     });
     if (panelRef) observer.observe(panelRef);
     onCleanup(() => observer.disconnect());
-  });
-
-  // Previous task states and CI statuses for detecting transitions.
-  let prevStates = new Map<string, string>();
-  let prevCIStatuses = new Map<string, string | undefined>();
-
-  // Voice task synchronization contract (keep aligned with Android's
-  // ServiceMonitor + GoModeApp): seed the current items when a session starts
-  // without replaying them as changes, then deliver newly visible items and
-  // meaningful state changes to the active model session. Both transports also
-  // buffer updates while the model is speaking.
-  //
-  // This browser path emits caic-specific deltas because it owns Task DTOs and
-  // task numbering. Android rereads the host-neutral gomode://items snapshot.
-  // The payload shape differs, but the observable lifecycle must stay aligned.
-
-  // Detect connected→true transition and build snapshot.
-  let wasConnected = false;
-  createEffect(() => {
-    const connected = session.state.connected;
-    setVoiceConnected(connected);
-    if (connected && !wasConnected) {
-      const tasks = untrack(() => props.tasks());
-      setVoiceTaskNumberMap(session.taskNumberMap);
-      prevStates = new Map(tasks.map((t) => [t.id, t.state]));
-      prevCIStatuses = new Map(tasks.map((t) => [t.id, t.ciStatus]));
-    }
-    wasConnected = connected;
-  });
-
-  // Track task changes and inject notifications while connected.
-  createEffect(() => {
-    const currentTasks = props.tasks();
-    session.taskNumberMap.update(currentTasks);
-    if (session.state.connected) {
-      setVoiceTaskNumberMap(session.taskNumberMap);
-      for (const task of currentTasks) {
-        const prev = prevStates.get(task.id);
-        const taskNumber = session.taskNumberMap.toNumber(task.id);
-        if (prev === undefined && taskNumber !== undefined) {
-          session.injectText(buildTaskCreatedContext(task, taskNumber));
-        } else if (prev !== task.state && taskNumber !== undefined) {
-          const notification = buildTaskStateContext(task, taskNumber);
-          if (notification !== null) session.injectText(notification);
-        }
-        const prevCI = prevCIStatuses.get(task.id);
-        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
-          session.injectText(buildTaskCIContext(task, taskNumber));
-        }
-      }
-    }
-    prevStates = new Map(currentTasks.map((t) => [t.id, t.state]));
-    prevCIStatuses = new Map(currentTasks.map((t) => [t.id, t.ciStatus]));
   });
 
   // Suppress browser notifications while voice is connected.

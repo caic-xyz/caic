@@ -12,21 +12,21 @@ describe("initialServiceContext", () => {
         items: [
           {
             id: "1",
-            reference: "Task #3",
+            reference: "Item #3",
             title: "Review plan",
-            state: "has_plan",
+            state: "pending",
             needsAttention: true,
           },
         ],
-        moreItemsHint: "Call tasks_list and follow nextCursor until absent.",
+        moreItemsHint: "Call items_list and follow nextCursor until absent.",
         omittedCount: 4,
       }),
     );
 
     expect(context).toBe(
       "Current service items:\n" +
-        "- Task #3: Review plan (has_plan, needs attention)\n" +
-        "- … 4 more items omitted. Call tasks_list and follow nextCursor until absent.",
+        "- Item #3: Review plan (pending, needs attention)\n" +
+        "- … 4 more items omitted. Call items_list and follow nextCursor until absent.",
     );
   });
 

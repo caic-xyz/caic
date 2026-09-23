@@ -7,7 +7,7 @@ import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import AccountTreeIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
 
-import { voiceConnected, getVoiceTaskNumber, setVoiceConnected, setVoiceTaskNumberMap } from "../gomode/VoiceState";
+import { voiceConnected, getVoiceTaskNumber, setVoiceConnected, setVoiceTaskNumberMap } from "../voiceTaskState";
 import { useHostMode } from "../gomode/HostMode";
 import { TaskNumberMap } from "../TaskNumberMap";
 

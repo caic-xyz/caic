@@ -13,6 +13,5 @@ Keep the native bridge capability-oriented and versioned. It may expose shell
 state such as a connected voice session, but must not proxy normal product APIs
 or expose product-specific task data.
 
-Existing caic task assumptions in `VoiceSession.ts` are legacy coupling; do
-not extend them. Extract them to product-owned code when its generic voice
-transport is separated.
+Caic task-number synchronization and live task voice updates live in the
+product-owned frontend root, not the generic voice transport.

@@ -1,4 +1,4 @@
-// Browser notification helpers for alerting when agents need attention.
+// Generic browser notification permission, delivery, dismissal, and voice suppression.
 
 interface NotificationOptions {
   enabled: boolean;
@@ -30,22 +30,13 @@ function setVoiceActive(active: boolean): void {
  * Show a browser notification that an agent is waiting for input.
  * Only fires if the page is not currently visible (user tabbed away).
  */
-function notifyWaiting(taskId: string, taskName: string, options: NotificationOptions): void {
-  showNotification(taskId, `${taskName} is ready`, `caic-waiting-${taskId}`, options);
-}
-
-/** Show a service-supplied notification title for a task. */
-function notifyServiceEvent(taskId: string, title: string, options: NotificationOptions): void {
-  showNotification(taskId, title, `caic-event-${taskId}`, options);
-}
-
-function showNotification(taskId: string, title: string, tag: string, options: NotificationOptions): void {
+function notify(id: string, title: string, tag: string, options: NotificationOptions): void {
   if (!canNotify(options) || document.visibilityState === "visible" || voiceActive) return;
-  dismissNotification(taskId);
+  dismissNotification(id);
   const n = new Notification(title, { tag });
-  activeNotifications.set(taskId, n);
+  activeNotifications.set(id, n);
   n.onclose = () => {
-    if (activeNotifications.get(taskId) === n) activeNotifications.delete(taskId);
+    if (activeNotifications.get(id) === n) activeNotifications.delete(id);
   };
   n.onclick = () => {
     window.focus();
@@ -54,22 +45,20 @@ function showNotification(taskId: string, title: string, tag: string, options: N
 }
 
 /**
- * Dismiss a pending notification for the given task, if any.
- * Call when the task state changes away from waiting/asking/has_plan.
+ * Dismiss a pending notification by its service-supplied identity.
  */
-function dismissNotification(taskId: string): void {
-  const n = activeNotifications.get(taskId);
+function dismissNotification(id: string): void {
+  const n = activeNotifications.get(id);
   if (n) {
     n.close();
-    activeNotifications.delete(taskId);
+    activeNotifications.delete(id);
   }
 }
 
 /** Notification operations as one object so tests can spy on them. */
 export const notifications = {
   requestNotificationPermission,
-  notifyWaiting,
-  notifyServiceEvent,
+  notify,
   dismissNotification,
   setVoiceActive,
 };

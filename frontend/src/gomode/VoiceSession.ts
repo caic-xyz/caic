@@ -28,7 +28,6 @@ import {
   MessageKindTranscriptDelta,
 } from "@voicegateway-sdk/types.gen";
 
-import { TaskNumberMap } from "../TaskNumberMap";
 import { mcpClient, type McpToolDescriptor } from "./McpClient";
 import { GO_MODE_ITEMS_RESOURCE_URI, initialServiceContext } from "./ServiceItems";
 
@@ -113,8 +112,6 @@ export class VoiceSession {
   readonly state: VoiceState;
   /** Public store updater (also the seam tests use to arrange session state). */
   readonly setState: (fn: (s: VoiceState) => VoiceState) => void;
-
-  readonly taskNumberMap = new TaskNumberMap();
 
   private _pc: RTCPeerConnection | null = null;
   private _dc: RTCDataChannel | null = null;

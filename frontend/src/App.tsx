@@ -1,8 +1,8 @@
-// Application shell: top-level chrome, dialogs, diagnostic error boundary, Go Mode browser shell, and routed panes.
+// Application shell: top-level chrome, dialogs, diagnostic error boundary, browser voice integration, and routed panes.
 
 import { createEffect, createMemo, createSignal, ErrorBoundary, Show, type JSX } from "solid-js";
 
-import GoModeBrowserShell from "./gomode/BrowserShell";
+import BrowserVoiceShell from "./BrowserVoiceShell";
 import { HostModeProvider, useHostMode } from "./gomode/HostMode";
 
 import { currentErrorReport } from "./errorReport";
@@ -159,7 +159,7 @@ function Shell(props: { children?: JSX.Element }) {
           onOpenChange={setShortcutsOpen}
           voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}
         />
-        <GoModeBrowserShell />
+        <BrowserVoiceShell />
         <Toasts />
       </div>
     </Show>

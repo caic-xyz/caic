@@ -146,8 +146,7 @@ function spySeams(): void {
     vi.spyOn(api, name);
   }
   vi.spyOn(notifications, "requestNotificationPermission");
-  vi.spyOn(notifications, "notifyWaiting");
-  vi.spyOn(notifications, "notifyServiceEvent");
+  vi.spyOn(notifications, "notify");
   vi.spyOn(notifications, "dismissNotification");
 }
 
@@ -487,12 +486,22 @@ describe("App task-list SSE recovery", () => {
     });
 
     await waitFor(() => {
-      expect(notifications.notifyServiceEvent).toHaveBeenCalledWith("recovered", "do something quota is available", {
-        enabled: true,
-      });
-      expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "do something", {
-        enabled: true,
-      });
+      expect(notifications.notify).toHaveBeenCalledWith(
+        "recovered",
+        "do something quota is available",
+        "caic-event-recovered",
+        {
+          enabled: true,
+        },
+      );
+      expect(notifications.notify).toHaveBeenCalledWith(
+        "recovered",
+        "do something is ready",
+        "caic-waiting-recovered",
+        {
+          enabled: true,
+        },
+      );
     });
   });
 
@@ -530,12 +539,18 @@ describe("App task-list SSE recovery", () => {
 
     await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
     expect(api.getTask).toHaveBeenCalledOnce();
-    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", {
-      enabled: true,
-    });
-    expect(notifications.notifyServiceEvent).toHaveBeenCalledWith(
+    expect(notifications.notify).toHaveBeenCalledWith(
+      "recovered",
+      "authoritative task is ready",
+      "caic-waiting-recovered",
+      {
+        enabled: true,
+      },
+    );
+    expect(notifications.notify).toHaveBeenCalledWith(
       "recovered",
       "authoritative task quota is available",
+      "caic-event-recovered",
       { enabled: true },
     );
   });
@@ -581,9 +596,14 @@ describe("App task-list SSE recovery", () => {
     });
 
     await waitFor(() => expect(document.querySelector("[data-task-id='recovered']")).toHaveTextContent("waiting"));
-    expect(notifications.notifyWaiting).toHaveBeenCalledWith("recovered", "authoritative task", {
-      enabled: true,
-    });
+    expect(notifications.notify).toHaveBeenCalledWith(
+      "recovered",
+      "authoritative task is ready",
+      "caic-waiting-recovered",
+      {
+        enabled: true,
+      },
+    );
 
     recoveryFetch.resolve(makeTask({ id: "recovered", state: "running" }));
     await Promise.resolve();
@@ -1134,9 +1154,14 @@ describe("App repo chips: No repository", () => {
     dispatchSSE({ kind: "upsert", upsert: recoveredTask });
 
     await waitFor(() => {
-      expect(notifications.notifyServiceEvent).toHaveBeenCalledWith("task1", "do something quota is available", {
-        enabled: true,
-      });
+      expect(notifications.notify).toHaveBeenCalledWith(
+        "task1",
+        "do something quota is available",
+        "caic-event-task1",
+        {
+          enabled: true,
+        },
+      );
     });
   });
 

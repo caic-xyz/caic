@@ -181,12 +181,12 @@ describe("VoiceSession", () => {
   it("keeps hang_up local to voice and rejects MCP name conflicts", async () => {
     const tools = voiceToolDeclarations([
       {
-        name: "tasks_list",
-        description: "List tasks",
+        name: "items_list",
+        description: "List items",
         inputSchema: { type: "object", properties: {} },
       },
     ]);
-    expect(tools.map((tool) => tool.name)).toEqual(["hang_up", "tasks_list"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["hang_up", "items_list"]);
 
     expect(() =>
       voiceToolDeclarations([
@@ -222,7 +222,7 @@ describe("VoiceSession", () => {
 
   it("includes the current bounded service items in session setup", async () => {
     mcpMocks.mcpReadAdvertisedTextResource.mockResolvedValue(
-      '{"items":[{"id":"1","reference":"Task #1","title":"Build feature","state":"running","needsAttention":false}]}',
+      '{"items":[{"id":"1","reference":"Item #1","title":"Build feature","state":"running","needsAttention":false}]}',
     );
     const session = new VoiceSession();
 
@@ -234,7 +234,7 @@ describe("VoiceSession", () => {
       kind: "session.setup",
       context: {
         systemInstruction: "instructions",
-        text: "Current service items:\n- Task #1: Build feature (running)",
+        text: "Current service items:\n- Item #1: Build feature (running)",
       },
     });
   });
