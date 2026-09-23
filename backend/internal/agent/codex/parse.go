@@ -444,11 +444,14 @@ func parseItemStarted(msg *codex.JSONRPCMessage, raw json.RawMessage, typ codex.
 		if err != nil {
 			return nil, fmt.Errorf("marshal Bash input: %w", err)
 		}
-		return []agent.Message{&agent.ToolUseMessage{
+		// Codex has no read tool and no Skill tool: it opens a skill by
+		// shelling out, often bundling several reads into one command.
+		use := &agent.ToolUseMessage{
 			ToolUseID: item.ID,
 			Name:      "Bash",
 			Input:     input,
-		}}, nil
+		}
+		return append([]agent.Message{use}, agent.InferredSkillReadsFromCommand(item.Command, item.ID)...), nil
 
 	case codex.ItemTypeFileChange:
 		var item codex.FileChangeItem
@@ -567,6 +570,12 @@ func parseItemCompleted(msg *codex.JSONRPCMessage, raw json.RawMessage, typ code
 			return nil, fmt.Errorf("item/completed commandExecution: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
+		if item.ExitCode != nil && *item.ExitCode != 0 || item.Status == codex.CommandExecutionStatusFailed || item.Status == codex.CommandExecutionStatusDeclined {
+			m.Error = "command execution failed"
+			if item.ExitCode != nil && *item.ExitCode != 0 {
+				m.Error = fmt.Sprintf("command exited with status %d", *item.ExitCode)
+			}
+		}
 		if item.Duration != nil {
 			m.DurationMs = item.Duration.AsDuration().Milliseconds()
 		}

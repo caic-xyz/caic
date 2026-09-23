@@ -207,6 +207,15 @@ type SkillReadMessage struct {
 	ToolUseID string `json:"id"`
 	Skill     string `json:"skill"`
 	Args      string `json:"args,omitempty"`
+	// SourceToolUseID links an inferred read to the file-opening tool's
+	// outcome. It is separate from ToolUseID, which suppresses Claude's
+	// reported Skill tool result in the timeline.
+	SourceToolUseID string `json:"source_tool_use_id,omitempty"`
+	// Inferred marks a read recovered from the path a tool opened rather than
+	// reported by the harness. An inferred read accompanies its tool call
+	// instead of replacing it, so it carries no tool use ID and never
+	// suppresses a tool result.
+	Inferred bool `json:"inferred,omitempty"`
 }
 
 // Type implements Message.

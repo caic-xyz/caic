@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,6 +47,51 @@ func TestStoreUsageRows(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(usageDir, ".backfill.done")); err != nil {
 			t.Fatalf("backfill sentinel: %v", err)
+		}
+	})
+
+	t.Run("counts reconstructed skill reads by name", func(t *testing.T) {
+		t.Parallel()
+		_, logStore, rollup := newUsageStores(t)
+		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
+			usageSkillUse("sk_1", `{"skill":"go-code-quality"}`),
+			usageSkillUse("sk_2", `{"skill":"go-code-quality"}`),
+			usageSkillUse("sk_3", `{"skill":"review"}`),
+			// A Skill block naming no skill is machinery, not a read.
+			usageSkillUse("sk_4", `{}`),
+		)
+		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+			t.Fatal(err)
+		}
+		days := rollup.Days()
+		if len(days) != 1 {
+			t.Fatalf("days = %+v", days)
+		}
+		// The leaderboard counts tasks, so the repeated read folds into one.
+		want := map[string]int{"go-code-quality": 1, "review": 1}
+		if !maps.Equal(days[0].Skills, want) {
+			t.Errorf("Skills = %v, want %v", days[0].Skills, want)
+		}
+		if len(days[0].Tools) != 0 {
+			t.Errorf("Tools = %v, want none", days[0].Tools)
+		}
+	})
+
+	t.Run("reconstructed inferred reads require successful result", func(t *testing.T) {
+		t.Parallel()
+		_, logStore, rollup := newUsageStores(t)
+		writeUsageLog(t, logStore.LogDir, ksid.NewID().String(), agent.LogVersionV3, usageAt(5), usageAt(5),
+			`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"failed","name":"Read","input":{"file_path":"/home/user/.agents/skills/review/SKILL.md"}}],"usage":{}}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"failed","is_error":true,"content":"missing file"}]}}`,
+			`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"ok","name":"Read","input":{"file_path":"/home/user/.agents/skills/go-code-quality/SKILL.md"}}],"usage":{}}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ok","content":"loaded"}]}}`,
+		)
+		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+			t.Fatal(err)
+		}
+		days := rollup.Days()
+		if len(days) != 1 || days[0].Skills["review"] != 0 || days[0].Skills["go-code-quality"] != 1 {
+			t.Errorf("confirmed skill reads = %+v", days)
 		}
 	})
 
@@ -127,7 +173,15 @@ func usageAt(day int) time.Time {
 	return time.Date(2026, time.February, day, 10, 0, 0, 0, time.UTC)
 }
 
-func writeUsageLog(t *testing.T, dir, id string, version agent.LogVersion, at, startedAt time.Time) {
+// usageSkillUse renders one native Claude assistant record whose sole content
+// block invokes the Skill tool with input.
+func usageSkillUse(id, input string) string {
+	return fmt.Sprintf(`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":%q,"name":"Skill","input":%s}],"usage":{}}}`, id, input)
+}
+
+// writeUsageLog writes one retained task log. Each extra record is a native
+// harness message stamped at and emitted before the trailing result.
+func writeUsageLog(t *testing.T, dir, id string, version agent.LogVersion, at, startedAt time.Time, extra ...string) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -159,13 +213,15 @@ func writeUsageLog(t *testing.T, dir, id string, version agent.LogVersion, at, s
 	data := make([]byte, 0, len(header)+128)
 	data = append(data, header...)
 	data = append(data, '\n')
-	native := `{"type":"result","duration_api_ms":3,"duration_ms":7,"num_turns":1,"usage":{"output_tokens":7}}`
-	if version == agent.LogVersionV1 {
-		data = append(data, native...)
-	} else {
-		data = append(data, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
+	records := append(slices.Clone(extra), `{"type":"result","duration_api_ms":3,"duration_ms":7,"num_turns":1,"usage":{"output_tokens":7}}`)
+	for _, native := range records {
+		if version == agent.LogVersionV1 {
+			data = append(data, native...)
+		} else {
+			data = append(data, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
+		}
+		data = append(data, '\n')
 	}
-	data = append(data, '\n')
 	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}

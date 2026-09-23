@@ -174,24 +174,18 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 		for i, repo := range lt.Repos {
 			repos[i] = repo.Name
 		}
-		for timed, err := range lt.StreamMessages(ctx) {
-			if err != nil {
-				yield(usagedb.UsageRow{}, err)
-				return
-			}
-			if timed.ProducerTime.IsZero() {
-				continue
-			}
+		var skillReads agent.SkillReadTracker
+		add := func(confirmed agent.Message, at time.Time) {
 			// Claude records carry per-call model attribution. Codex, Pi, and
 			// OpenCode logs only preserve a reliable session-level model.
 			if lt.Harness == harness.Claude {
-				model = usageClaudeModel(model, timed.Message)
+				model = usageClaudeModel(model, confirmed)
 			}
-			delta, ok := usageDelta(timed.Message, lt.Harness)
+			delta, ok := usageDelta(confirmed, lt.Harness)
 			if !ok {
-				continue
+				return
 			}
-			day := timed.ProducerTime.UTC().Format(usageDayFormat)
+			day := at.UTC().Format(usageDayFormat)
 			k := key{day: day, model: model}
 			row := buckets[k]
 			if row == nil {
@@ -206,8 +200,24 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 				buckets[k] = row
 			}
 			row.Add(&delta)
-			if ts := usagedb.NewTime(timed.ProducerTime); ts > row.Ts {
+			if ts := usagedb.NewTime(at); ts > row.Ts {
 				row.Ts = ts
+			}
+		}
+		for timed, err := range lt.StreamMessages(ctx) {
+			if err != nil {
+				yield(usagedb.UsageRow{}, err)
+				return
+			}
+			if timed.ProducerTime.IsZero() {
+				continue
+			}
+			count, reads := skillReads.Confirm(timed.Message)
+			if count {
+				add(timed.Message, timed.ProducerTime)
+			}
+			for _, read := range reads {
+				add(read, timed.ProducerTime)
 			}
 		}
 		keys := make([]key, 0, len(buckets))
@@ -247,7 +257,7 @@ func usageClaudeModel(current string, m agent.Message) string {
 }
 
 // usageDelta mirrors the durable, non-priced part of live rollup
-// translation. Skill reads remain empty by design; see LoadedTask.UsageRows.
+// translation; see LoadedTask.UsageRows for the fields it cannot reconstruct.
 func usageDelta(m agent.Message, h harness.Name) (usagedb.Delta, bool) {
 	var d usagedb.Delta
 	switch m := m.(type) {
@@ -272,6 +282,11 @@ func usageDelta(m agent.Message, h harness.Name) (usagedb.Delta, bool) {
 			return usagedb.Delta{}, false
 		}
 		d.Compactions = 1
+	case *agent.SkillReadMessage:
+		if m.Skill == "" {
+			return usagedb.Delta{}, false
+		}
+		d.SkillReads = map[string]int{m.Skill: 1}
 	case *agent.ToolUseMessage:
 		d.ToolCalls = map[string]int{m.Name: 1}
 	case *agent.NativeSubagentMessage:

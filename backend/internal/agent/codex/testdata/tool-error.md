@@ -23,6 +23,8 @@ I’m checking whether `nonexistent_file.txt` exists in the workspace and, if no
 /bin/bash -lc "rg --files /workspace | rg '("'^|/)nonexistent_file'"\\.txt"'$'"'"
 ```
 
+⚠️ Tool error: command exited with status 1
+
 ## Assistant
 
 `nonexistent_file.txt` is not present in `/workspace`, so I can’t read it.

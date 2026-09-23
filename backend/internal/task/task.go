@@ -172,6 +172,7 @@ type Task struct {
 	timeline              []agent.TimedMessage
 	nativeSubagents       agent.NativeSubagentTimeline    // harness-native subagent cards folded from timeline
 	backgroundCommands    agent.BackgroundCommandTimeline // harness-native detached shell cards folded from timeline
+	skillReads            agent.SkillReadTracker
 
 	subs              []*sub          // active sequenced message subscribers
 	rateLimitSubs     []*rateLimitSub // active lossless quota subscribers
@@ -2104,16 +2105,25 @@ func (t *Task) activeModel() string {
 // observeRollupLocked forwards one agent message to the task's usage rollup
 // sink, which is never nil. The caller holds t.mu.
 func (t *Task) observeRollupLocked(m agent.Message, at time.Time, replayed bool) {
+	count, reads := t.skillReads.Confirm(m)
+	if count {
+		t.observeRollupMessageLocked(m, at, replayed)
+	}
+	for _, read := range reads {
+		t.observeRollupMessageLocked(read, at, replayed)
+	}
+}
+
+func (t *Task) observeRollupMessageLocked(m agent.Message, at time.Time, replayed bool) {
 	if q, ok := m.(*agent.RateLimitMessage); ok {
 		c := quotaChange(q, at)
 		t.Rollup.ObserveQuota(&c)
 		return
 	}
 	e, ok := rollupEvent(m, at, replayed, t.rollupModelLocked(m), t.liveCostUSD, t.Harness)
-	if !ok {
-		return
+	if ok {
+		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}
-	t.Rollup.Observe(t.rollupMetaLocked(), &e)
 }
 
 // rollupMetaLocked snapshots the task identity for the rollup. The caller

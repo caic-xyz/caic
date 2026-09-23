@@ -226,13 +226,17 @@ func parseToolCallUpdate(u *opencode.ToolCallUpdateUpdate) []agent.Message {
 		var msgs []agent.Message
 		// Emit a ToolUseMessage with the real input when available.
 		if len(u.RawInput) > 2 {
+			name := normalizeToolName(u.Title, u.Kind)
 			use := &agent.ToolUseMessage{
 				ToolUseID: u.ToolCallID,
-				Name:      normalizeToolName(u.Title, u.Kind),
+				Name:      name,
 				Input:     u.RawInput,
 			}
 			addEditInputView(use)
 			msgs = append(msgs, use)
+			// The arguments arrive only here, so this is the one place a
+			// skill read can be recovered without counting it twice.
+			msgs = append(msgs, inferredSkillReads(name, u.RawInput, u.ToolCallID)...)
 		}
 		// Also emit output delta if content is available.
 		if delta := extractToolOutputDelta(u); delta != "" {
@@ -245,6 +249,31 @@ func parseToolCallUpdate(u *opencode.ToolCallUpdateUpdate) []agent.Message {
 	default:
 		return nil
 	}
+}
+
+// inferredSkillReads reports the skills an OpenCode tool call opens as files.
+// OpenCode has no Skill tool; it scans ~/.claude, ~/.agents, and its own
+// config directories, then the model opens the file it wants.
+func inferredSkillReads(name string, input json.RawMessage, sourceID string) []agent.Message {
+	switch name {
+	case "Read":
+		var in struct {
+			FilePath string `json:"filePath"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return nil
+		}
+		return agent.InferredSkillReadFromPath(in.FilePath, sourceID)
+	case "Bash":
+		var in struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return nil
+		}
+		return agent.InferredSkillReadsFromCommand(in.Command, sourceID)
+	}
+	return nil
 }
 
 func addEditInputView(use *agent.ToolUseMessage) {

@@ -118,6 +118,19 @@ Key rules from the official docs:
 - Haiku does not support Tool Search (`tool_reference` blocks). If tool search
   auto-enables (MCP tools >10% context), Haiku cannot discover deferred tools.
 
+## Skill Reads
+
+The `Skill` tool reports a load directly. Its `{"skill": "<name>", "args":
+"..."}` input becomes a `SkillReadMessage` carrying the tool use ID, and the
+wire layer suppresses the paired tool result, so neither appears in the
+transcript. A block naming no skill still yields a message, so the wire layer
+can track the ID; it drops the read itself.
+
+The model can also open a skill as an ordinary file. `parse.go` infers a read
+from `Read` (`file_path`) and `Bash` (`command`). Those tool calls stay in the
+timeline, and their inferred read carries no tool use ID so it suppresses
+nothing.
+
 ## Not Yet Exposed
 
 `control_request` subtypes Claude Code accepts that caic does not send. caic

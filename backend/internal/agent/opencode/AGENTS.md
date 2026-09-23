@@ -127,6 +127,30 @@ leave `agent.Usage.CacheTTLSeconds` unknown for OpenCode, even when the selected
 adapter normally emits a five-minute marker; a gateway or compatible endpoint
 may alter or reject that request.
 
+## Skill Reads
+
+OpenCode has no Skill tool. `parse.go` infers a read from the `read` tool's
+`filePath` and the `shell` tool's `command`. The first `tool_call` carries an
+empty `rawInput`, and the arguments arrive on an `in_progress` update. OpenCode
+can repeat that update with the same input; the wire parser emits the read once
+per tool-call ID and clears its state when the call completes.
+
+OpenCode scans more roots than the other harnesses. It reads `~/.claude` and
+`~/.agents` like Claude Code, then its own config directories:
+`~/.config/opencode`, `~/.opencode`, and any `.opencode` between the working
+directory and the worktree root. It globs `{skill,skills}/**/SKILL.md`, so the
+directory name is singular or plural and a skill nests; the directory holding
+`SKILL.md` names it. The authoritative list is
+`packages/opencode/src/skill/index.ts` with
+`packages/opencode/src/config/paths.ts`.
+
+Two roots stay out of reach. The `skills.paths` config names arbitrary
+directories and `skills.urls` downloads into OpenCode's cache; a path rule
+cannot know either.
+
+`available_commands_update` lists skills as commands. It advertises what is
+available, not what was loaded.
+
 ## Not Yet Exposed
 
 ACP methods caic does not send. caic loads a session with `session/load` for

@@ -142,6 +142,43 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("ToolCallUpdateInProgressInfersSkillRead", func(t *testing.T) {
+		t.Parallel()
+		// OpenCode has no Skill tool. Its read tool names the file in
+		// filePath, and the arguments arrive only on the in-progress update.
+		input := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "session/update",
+			"params": map[string]any{
+				"sessionId": "ses_1",
+				"update": map[string]any{
+					"sessionUpdate": "tool_call_update",
+					"toolCallId":    "call_2",
+					"status":        "in_progress",
+					"title":         "read",
+					"rawInput":      map[string]any{"filePath": "/home/user/.config/opencode/skill/customize-opencode/SKILL.md"},
+				},
+			},
+		})
+		msgs, _, err := parseMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
+			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		read, ok := msgs[1].(*agent.SkillReadMessage)
+		if !ok {
+			t.Fatalf("msgs[1] = %T, want *agent.SkillReadMessage", msgs[1])
+		}
+		if read.Skill != "customize-opencode" || !read.Inferred || read.ToolUseID != "" {
+			t.Errorf("SkillReadMessage = %+v", read)
+		}
+	})
+
 	t.Run("ToolCallUpdateFailed", func(t *testing.T) {
 		t.Parallel()
 		input := mustJSON(t, map[string]any{
@@ -609,6 +646,34 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("MessageType = %q", rm.MessageType)
 		}
 	})
+}
+
+func TestWireFormatSkillReadOncePerToolCall(t *testing.T) {
+	t.Parallel()
+	w := &wireFormat{}
+	line := mustJSON(t, map[string]any{
+		"jsonrpc": "2.0", "method": "session/update",
+		"params": map[string]any{"sessionId": "ses_1", "update": map[string]any{
+			"sessionUpdate": "tool_call_update", "toolCallId": "call_1",
+			"title": "bash", "kind": "execute", "status": "in_progress",
+			"rawInput": map[string]any{"command": "cat ~/.agents/skills/code-quality/SKILL.md"},
+		}},
+	})
+	reads := 0
+	for range 3 {
+		msgs, err := w.ParseMessage(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, msg := range msgs {
+			if _, ok := msg.(*agent.SkillReadMessage); ok {
+				reads++
+			}
+		}
+	}
+	if reads != 1 {
+		t.Errorf("skill reads = %d, want 1", reads)
+	}
 }
 
 func TestNormalizeToolName(t *testing.T) {

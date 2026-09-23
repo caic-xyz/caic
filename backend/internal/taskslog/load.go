@@ -1293,9 +1293,8 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 // UsageRows streams this task's durable usage by producer day and model.
 //
 // Costs and quota snapshots require live task state, so reconstruction leaves
-// both absent. Skill reads were not reliably captured before the rollup
-// release and are likewise excluded. Legacy v1 and task-ID-less logs yield no
-// rows. A non-nil error is yielded at most once and terminates the sequence.
+// both absent. Legacy v1 and task-ID-less logs yield no rows. A non-nil error
+// is yielded at most once and terminates the sequence.
 func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[usagedb.UsageRow, error] {
 	return taskUsageRows(lt, ctx)
 }

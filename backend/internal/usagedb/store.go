@@ -339,6 +339,16 @@ func foldUsageRow(day *dayAggregate, row *UsageRow) {
 			}
 			day.repos[repo][row.TaskID] = struct{}{}
 		}
+		// A skill counts once per task. Codex re-reads a skill every turn
+		// where Claude Code loads it once, and one task appends a row per
+		// turn boundary, so summing reads would rank the harness, not the
+		// skill.
+		for skill := range row.SkillReads {
+			if day.skills[skill] == nil {
+				day.skills[skill] = make(map[string]struct{})
+			}
+			day.skills[skill][row.TaskID] = struct{}{}
+		}
 	}
 	if row.Model != "" {
 		day.modelBucket(row.Model).fold(&row.Delta)
@@ -377,6 +387,7 @@ func newDayAggregate() *dayAggregate {
 		models:    make(map[string]*bucket),
 		harnesses: make(map[string]*bucket),
 		repos:     make(map[string]map[string]struct{}),
+		skills:    make(map[string]map[string]struct{}),
 	}
 }
 
@@ -602,7 +613,7 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 		Models:                   make(map[string]ModelRollup, len(d.models)),
 		Harnesses:                make(map[string]HarnessRollup, len(d.harnesses)),
 		Repos:                    make(map[string]int, len(d.repos)),
-		Skills:                   cloneCounts(d.SkillReads),
+		Skills:                   make(map[string]int, len(d.skills)),
 		Tools:                    cloneCounts(d.ToolCalls),
 	}
 	for model, b := range d.models {
@@ -618,6 +629,9 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 	}
 	for repo, tasks := range d.repos {
 		out.Repos[repo] = len(tasks)
+	}
+	for skill, tasks := range d.skills {
+		out.Skills[skill] = len(tasks)
 	}
 	return out
 }
@@ -791,6 +805,7 @@ type dayAggregate struct {
 	models    map[string]*bucket
 	harnesses map[string]*bucket
 	repos     map[string]map[string]struct{} // repo -> distinct task ids
+	skills    map[string]map[string]struct{} // skill -> distinct task ids
 }
 
 func (a *dayAggregate) modelBucket(model string) *bucket {

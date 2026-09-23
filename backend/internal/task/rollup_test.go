@@ -49,6 +49,28 @@ type rollupObserve struct {
 func TestTaskRollupForwarding(t *testing.T) {
 	t.Parallel()
 
+	t.Run("inferred skills require successful tool result", func(t *testing.T) {
+		t.Parallel()
+		sink := &rollupSpy{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "model", "")
+		tk.Rollup = sink
+		for _, id := range []string{"failed", "ok"} {
+			tk.addMessage(t.Context(), &agent.SkillReadMessage{Skill: "review", Inferred: true, SourceToolUseID: id}, false)
+			errText := ""
+			if id == "failed" {
+				errText = "file missing"
+			}
+			tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: id, Error: errText}, false)
+		}
+		reads := 0
+		for _, observed := range sink.Observes {
+			reads += observed.Event.Delta.SkillReads["review"]
+		}
+		if reads != 1 {
+			t.Errorf("confirmed skill reads = %d, want 1", reads)
+		}
+	})
+
 	t.Run("live", func(t *testing.T) {
 		t.Parallel()
 		sink := &rollupSpy{}

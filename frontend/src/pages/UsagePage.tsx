@@ -118,7 +118,7 @@ export default function UsagePage() {
                 <strong>{formatCost(summary().costUSD)}</strong>
               </div>
               <div>
-                <span>Skill reads</span>
+                <span>Skill task-days</span>
                 <strong>{summary().skills.reduce((total, skill) => total + skill.count, 0)}</strong>
               </div>
             </section>
@@ -145,8 +145,8 @@ export default function UsagePage() {
               </section>
               <section class={styles.panel}>
                 <h2>Skills</h2>
-                <p>Read counts over the selected range.</p>
-                <CountList entries={summary().skills} empty="No skill reads." />
+                <p>Task-days over the selected range.</p>
+                <CountList entries={summary().skills} empty="No skill use." />
               </section>
             </div>
           </Show>

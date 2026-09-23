@@ -365,7 +365,31 @@ func parseToolExecStart(line []byte) ([]agent.Message, *pi.ToolExecStartEvent, e
 		return []agent.Message{agent.NewWidgetMessage(ev.ToolCallID, input)}, &ev, nil
 	}
 	use := newToolUseMessage(ev.ToolCallID, ev.ToolName, name, input)
-	return []agent.Message{use}, &ev, nil
+	return append([]agent.Message{use}, inferredSkillReads(name, input, ev.ToolCallID)...), &ev, nil
+}
+
+// inferredSkillReads reports the skills a Pi tool call opens as files. Pi has
+// no Skill tool: it reads the path with its read tool, or opens it in a shell.
+func inferredSkillReads(name string, input json.RawMessage, sourceID string) []agent.Message {
+	switch name {
+	case "Read":
+		var in struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return nil
+		}
+		return agent.InferredSkillReadFromPath(in.Path, sourceID)
+	case "Bash":
+		var in struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return nil
+		}
+		return agent.InferredSkillReadsFromCommand(in.Command, sourceID)
+	}
+	return nil
 }
 
 // parseToolExecUpdate converts a tool_execution_update event to a streaming

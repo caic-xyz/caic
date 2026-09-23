@@ -207,6 +207,14 @@ short writes yield the first expiry of 300 seconds. A cache write without
 - **Turn counting**: `handleTurnEnd` increments `numTurns`; `handleAgentEnd`
   reads and resets it for each `ResultMessage`.
 
+## Skill Reads
+
+Pi has no Skill tool. `parse.go` infers a read from the `read` tool's `path`
+and the `bash` tool's `command`.
+
+`CommandSourceSkill` marks a slash command's origin in the command catalog. It
+advertises what is available, not what was loaded.
+
 ## Not Yet Exposed
 
 RPC commands caic does not send. caic already uses `set_model`,

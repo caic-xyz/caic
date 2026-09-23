@@ -180,14 +180,15 @@ type wireFormat struct {
 	sessionID       string // Set during handshake; read-only after.
 	supportsImage   bool   // Set during handshake; read-only after.
 
-	mu            sync.Mutex
-	nextID        int64
-	promptReqID   int64 // JSON-RPC ID of the current session/prompt request.
-	totalUsage    agent.Usage
-	textAccum     strings.Builder // Accumulated text from agent_message_chunk.
-	thinkAccum    strings.Builder // Accumulated text from agent_thought_chunk.
-	textOverflow  bool
-	thinkOverflow bool
+	mu             sync.Mutex
+	nextID         int64
+	promptReqID    int64 // JSON-RPC ID of the current session/prompt request.
+	totalUsage     agent.Usage
+	skillReadCalls map[string]struct{} // active tool calls whose skill read was emitted
+	textAccum      strings.Builder     // Accumulated text from agent_message_chunk.
+	thinkAccum     strings.Builder     // Accumulated text from agent_thought_chunk.
+	textOverflow   bool
+	thinkOverflow  bool
 }
 
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
@@ -296,6 +297,33 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	msgs, toolCall, err := parseMessage(line)
 	if err != nil {
 		return nil, err
+	}
+	if toolCall != nil && toolCall.ToolCallID != "" {
+		w.mu.Lock()
+		switch toolCall.Status {
+		case opencode.StatusInProgress:
+			if _, seen := w.skillReadCalls[toolCall.ToolCallID]; seen {
+				msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
+					_, ok := m.(*agent.SkillReadMessage)
+					return ok
+				})
+			} else {
+				for _, m := range msgs {
+					if _, ok := m.(*agent.SkillReadMessage); ok {
+						if w.skillReadCalls == nil {
+							w.skillReadCalls = make(map[string]struct{})
+						}
+						w.skillReadCalls[toolCall.ToolCallID] = struct{}{}
+						break
+					}
+				}
+			}
+		case opencode.StatusCompleted, opencode.StatusFailed:
+			delete(w.skillReadCalls, toolCall.ToolCallID)
+		case opencode.StatusPending:
+			// The initial announcement has no input to classify.
+		}
+		w.mu.Unlock()
 	}
 	native, err := w.nativeSubagents.parse(toolCall)
 	if err != nil {
@@ -411,6 +439,7 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 		msgs = append(msgs, &agent.TextMessage{Text: w.textAccum.String()})
 	}
 	w.resetAccumulatedOutputLocked()
+	clear(w.skillReadCalls)
 	w.mu.Unlock()
 	msgs = append(msgs, rm)
 	return msgs, nil

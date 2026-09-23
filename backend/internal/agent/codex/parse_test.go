@@ -192,6 +192,38 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("Input[cwd] = %q, want %q", toolInput["cwd"], "/repo")
 		}
 	})
+	t.Run("ItemStartedCommandExecutionInfersSkillReads", func(t *testing.T) {
+		t.Parallel()
+		// Observed shape: Codex has no Skill tool, so it opens a skill with
+		// sed and bundles several reads into one command.
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_2","type":"commandExecution","command":"sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md && sed -n '1,220p' /home/user/.agents/skills/go-code-quality/SKILL.md","cwd":"/repo","status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, _, err := parseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 3 {
+			t.Fatalf("msgs = %d, want 3", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
+			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		want := []string{"code-quality", "go-code-quality"}
+		for i, m := range msgs[1:] {
+			read, ok := m.(*agent.SkillReadMessage)
+			if !ok {
+				t.Fatalf("msgs[%d] = %T, want *agent.SkillReadMessage", i+1, m)
+			}
+			if read.Skill != want[i] {
+				t.Errorf("Skill = %q, want %q", read.Skill, want[i])
+			}
+			if !read.Inferred {
+				t.Error("a recovered read must be marked inferred")
+			}
+			if read.ToolUseID != "" {
+				t.Errorf("ToolUseID = %q, want empty so the tool result survives", read.ToolUseID)
+			}
+		}
+	})
 	t.Run("ItemCompletedCommandExecution", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"durationMs":150.5,"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`

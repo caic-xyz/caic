@@ -421,6 +421,23 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("error = %q, want empty", tr.Error)
 		}
 	})
+	t.Run("MultipleInlineToolResults", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"first","type":"tool_result","content":"loaded"},{"tool_use_id":"second","type":"tool_result","content":"loaded"}]}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("got %d messages, want 2", len(msgs))
+		}
+		for i, id := range []string{"first", "second"} {
+			result, ok := msgs[i].(*agent.ToolResultMessage)
+			if !ok || result.ToolUseID != id {
+				t.Errorf("result %d = %#v, want %s", i, msgs[i], id)
+			}
+		}
+	})
 	t.Run("InlineToolResultError", func(t *testing.T) {
 		t.Parallel()
 		line := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_err","type":"tool_result","is_error":true,"content":[{"type":"text","text":"tool failed"}]}]},"parent_tool_use_id":null}`
@@ -1073,6 +1090,48 @@ func TestParseMessage(t *testing.T) {
 		}
 		if read.ToolUseID != "sk_1" || read.Skill != "widget-plugin:widget" || read.Args != "chart" {
 			t.Errorf("SkillReadMessage = %+v", read)
+		}
+	})
+	t.Run("ReadingASkillFileInfersASkillRead", func(t *testing.T) {
+		t.Parallel()
+		// The Skill tool announces its own load. A model that opens the file
+		// instead still puts the skill in context.
+		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/home/user/.agents/skills/go-code-quality/SKILL.md"}}],"usage":{}}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var use *agent.ToolUseMessage
+		var read *agent.SkillReadMessage
+		for _, m := range msgs {
+			switch m := m.(type) {
+			case *agent.ToolUseMessage:
+				use = m
+			case *agent.SkillReadMessage:
+				read = m
+			}
+		}
+		if use == nil {
+			t.Fatal("the Read tool call must still surface")
+		}
+		if read == nil {
+			t.Fatal("reading a SKILL.md should infer a skill read")
+		}
+		if read.Skill != "go-code-quality" || !read.Inferred || read.ToolUseID != "" {
+			t.Errorf("SkillReadMessage = %+v", read)
+		}
+	})
+	t.Run("ReadingAnUnrelatedFileInfersNothing", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"backend/internal/server/skills/tasks/SKILL.md"}}],"usage":{}}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range msgs {
+			if _, ok := m.(*agent.SkillReadMessage); ok {
+				t.Error("a repository source file is not an installed skill")
+			}
 		}
 	})
 	t.Run("SkillToolUseWithoutSkillNameYieldsPlaceholder", func(t *testing.T) {

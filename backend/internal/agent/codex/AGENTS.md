@@ -130,6 +130,24 @@ explicit applied-policy or duration field.
 - **Opt-out capabilities**: handshake disables verbose notifications caic doesn't need
   (e.g., `turn/diff/updated`, `turn/plan/updated`).
 
+## Skill Reads
+
+Codex has neither a Skill tool nor a read tool. It opens a skill by shelling
+out, so `parse.go` infers a read from the `commandExecution` item's `command`:
+
+```
+sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md
+```
+
+One command often loads several skills. Codex also re-reads a skill on every
+turn, 4.8 times per skill per task across the retained task-log cache and 50
+times in the worst one, which is why the day aggregate counts tasks rather than
+reads.
+
+`skills/changed` carries empty params and only invalidates the catalog.
+`TurnInputTypeSkill` is a client-to-Codex input type, and caic sends plain text
+prompts. Neither proves a load.
+
 ## Not Yet Exposed
 
 JSON-RPC requests the app-server accepts that caic does not send. caic already

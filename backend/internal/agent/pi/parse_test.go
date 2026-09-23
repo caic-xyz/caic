@@ -925,6 +925,29 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("reading a skill file infers a skill read", func(t *testing.T) {
+		t.Parallel()
+		// Observed shape: Pi has no Skill tool and reads the path directly.
+		line := []byte(`{"type":"tool_execution_start","toolCallId":"c9","toolName":"read","args":{"path":"/home/user/.agents/skills/go-code-quality/SKILL.md","offset":1,"limit":2000}}`)
+		msgs, err := parseMessage(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("got %d messages, want 2", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
+			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		read, ok := msgs[1].(*agent.SkillReadMessage)
+		if !ok {
+			t.Fatalf("msgs[1] = %T, want *agent.SkillReadMessage", msgs[1])
+		}
+		if read.Skill != "go-code-quality" || !read.Inferred || read.ToolUseID != "" {
+			t.Errorf("SkillReadMessage = %+v", read)
+		}
+	})
+
 	t.Run("known lifecycle events preserve raw", func(t *testing.T) {
 		t.Parallel()
 		for _, typ := range []string{

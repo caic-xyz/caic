@@ -224,6 +224,6 @@ type DayRollup struct {
 	Models                   map[string]ModelRollup
 	Harnesses                map[string]HarnessRollup
 	Repos                    map[string]int // distinct tasks that touched the repo that day
-	Skills                   map[string]int
+	Skills                   map[string]int // distinct tasks that read the skill that day
 	Tools                    map[string]int
 }

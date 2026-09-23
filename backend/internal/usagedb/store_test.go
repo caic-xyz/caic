@@ -421,6 +421,36 @@ func TestDays(t *testing.T) {
 		}
 	})
 
+	t.Run("skill leaderboard counts tasks, not reads", func(t *testing.T) {
+		t.Parallel()
+		// Codex re-reads a skill every turn where Claude Code loads it once,
+		// and each turn boundary appends its own row.
+		s := newTestStore(t, t.TempDir())
+		meta := testMeta(ksid.NewID())
+		for range 5 {
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: Delta{
+				SkillReads: map[string]int{"code-quality": 3},
+			}})
+			s.flushTaskLocked(meta.TaskID.String())
+		}
+		other := testMeta(ksid.NewID())
+		s.Observe(other, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: Delta{
+			SkillReads: map[string]int{"code-quality": 1, "review": 1},
+		}})
+		s.flushTaskLocked(other.TaskID.String())
+
+		days := s.Days()
+		if len(days) != 1 {
+			t.Fatalf("days = %+v", days)
+		}
+		if got := days[0].Skills["code-quality"]; got != 2 {
+			t.Errorf("Skills[code-quality] = %d, want 2 distinct tasks", got)
+		}
+		if got := days[0].Skills["review"]; got != 1 {
+			t.Errorf("Skills[review] = %d, want 1", got)
+		}
+	})
+
 	t.Run("truncated tail", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

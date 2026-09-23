@@ -185,7 +185,8 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 	if len(day.Repos) != 2 || day.Repos[0].Repo != "caic" || day.Repos[1].Repo != "sdk" {
 		t.Errorf("repos = %#v", day.Repos)
 	}
-	if len(day.Skills) != 1 || day.Skills[0] != (v1.UsageDashboardCount{Name: "review", Count: 2}) {
+	// The skill leaderboard counts tasks, so the task's two reads fold to one.
+	if len(day.Skills) != 1 || day.Skills[0] != (v1.UsageDashboardCount{Name: "review", Count: 1}) {
 		t.Errorf("skills = %#v", day.Skills)
 	}
 }

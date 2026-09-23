@@ -456,7 +456,32 @@ func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error
 		Input:     inputRaw,
 	}
 	addEditInputView(use)
-	return []agent.Message{use}, nil
+	return append([]agent.Message{use}, inferredSkillReads(b.Name, inputRaw, b.ID)...), nil
+}
+
+// inferredSkillReads reports the skills a Claude tool call opens as files. The
+// Skill tool announces its own load, so only the file-facing tools need it: a
+// model that reads a SKILL.md directly still puts the skill in context.
+func inferredSkillReads(name string, input json.RawMessage, sourceID string) []agent.Message {
+	switch name {
+	case "Read":
+		var in struct {
+			FilePath string `json:"file_path"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return nil
+		}
+		return agent.InferredSkillReadFromPath(in.FilePath, sourceID)
+	case "Bash":
+		var in struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return nil
+		}
+		return agent.InferredSkillReadsFromCommand(in.Command, sourceID)
+	}
+	return nil
 }
 
 // skillInput is the Skill tool's input schema.
@@ -606,11 +631,15 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
 	// Check for inline tool_result blocks (MCP tools).
+	var results []agent.Message
 	for i := range blockMsg.Content {
 		b := &blockMsg.Content[i]
 		if b.Type == "tool_result" && b.ToolUseID != "" {
-			return []agent.Message{toolResultFromBlock(b)}
+			results = append(results, toolResultFromBlock(b))
 		}
+	}
+	if len(results) > 0 {
+		return results
 	}
 	// Regular user input with text/image blocks.
 	ui := &agent.UserInputMessage{}
@@ -643,6 +672,7 @@ func toolResultFromBlock(b *claudecode.OutputUserContentBlock) *agent.ToolResult
 				return m
 			}
 		}
+		m.Error = "tool execution failed"
 	}
 	return m
 }
@@ -664,6 +694,7 @@ func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultM
 				return m
 			}
 		}
+		m.Error = "tool execution failed"
 	}
 	return m
 }
