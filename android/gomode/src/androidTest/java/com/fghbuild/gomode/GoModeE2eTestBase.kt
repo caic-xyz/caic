@@ -1,6 +1,7 @@
 // Shared instrumented helpers for Go Mode hosted WebView e2e coverage.
 package com.fghbuild.gomode
 
+import android.Manifest
 import android.webkit.WebView
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -8,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.rule.GrantPermissionRule
 import androidx.test.uiautomator.UiDevice
 import org.junit.Rule
 import org.junit.rules.TestRule
@@ -35,6 +37,10 @@ abstract class GoModeE2eTestBase {
         }
 
     @get:Rule(order = 1)
+    val notificationPermissionRule: GrantPermissionRule =
+        GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
+
+    @get:Rule(order = 2)
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     protected val baseUrl: String by lazy {

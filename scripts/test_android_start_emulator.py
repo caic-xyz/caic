@@ -8,6 +8,13 @@ from unittest.mock import patch
 import android_start_emulator
 
 
+class EmulatorConfigurationTest(unittest.TestCase):
+    def test_disables_unused_modem_simulator(self) -> None:
+        args = android_start_emulator.EMULATOR_ARGS
+        feature_index = args.index("-feature")
+        self.assertEqual("-ModemSimulator", args[feature_index + 1])
+
+
 class RunningAVDSerialTest(unittest.TestCase):
     @patch("android_start_emulator.subprocess.run")
     def test_returns_matching_running_avd_serial(self, run: unittest.mock.Mock) -> None:

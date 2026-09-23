@@ -28,6 +28,10 @@ EMULATOR_ARGS = [
     "420",
     "-no-boot-anim",
     "-no-snapstorage",
+    # The test shell has no telephony flows. Emulator 37's internal modem can
+    # fail to connect to ::1 here, repeatedly ANRing com.android.phone.
+    "-feature",
+    "-ModemSimulator",
     "-timezone",
     "UTC",
     "-wipe-data",
