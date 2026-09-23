@@ -2198,12 +2198,14 @@ func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agen
 		relayGeneration := relayTimeline.RelayRecords[0].Generation
 		if relayGeneration != "" && relayGeneration != m.logGeneration {
 			first := relayTimeline.RelayRecords[0]
-			if first.RelayEnd != int64(first.ByteEnd) {
+			if first.RelayEnd == int64(first.ByteEnd) {
+				m.recordOverlap = true
+				return append(slices.Clone(m.logEntries), m.comparableRelayTimeline(relayEntries)...)
+			}
+			if m.logGeneration != "" {
 				m.err = errors.New("new relay generation has a truncated snapshot")
 				return slices.Clone(m.logEntries)
 			}
-			m.recordOverlap = true
-			return append(slices.Clone(m.logEntries), m.comparableRelayTimeline(relayEntries)...)
 		}
 	}
 	if merged, ok := m.mergeByRelayPosition(relayTimeline); ok {
@@ -2329,9 +2331,9 @@ func (m *logRelayMessageMerger) mergeByRelayFingerprint(relayTimeline agent.Pars
 		return m.finishPhysicalMerge(relayTimeline, matchEnd)
 	}
 	if matches == 0 {
-		m.err = errors.New("unmarked v2 relay history has no exact physical overlap")
+		m.err = errors.New("unmarked relay history has no exact physical overlap")
 	} else {
-		m.err = errors.New("unmarked v2 relay history has ambiguous repeated physical overlap")
+		m.err = errors.New("unmarked relay history has ambiguous repeated physical overlap")
 	}
 	return nil, false
 }

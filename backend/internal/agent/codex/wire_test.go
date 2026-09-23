@@ -296,23 +296,37 @@ func TestHandshake(t *testing.T) {
 	})
 	t.Run("v3_persists_every_handshake_input", func(t *testing.T) {
 		t.Parallel()
+		const generation = `{"t":"relay_generation","generation":"generation-1"}` + "\n"
 		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
 {"id":2,"result":{"data":[{"id":"gpt-5.4"}],"nextCursor":null}}
 {"id":3,"result":{"thread":{"id":"thread_1","cliVersion":"0.133.0"}}}
 `
 		var stdin bytes.Buffer
 		log := &agenttest.LogSink{Version: agent.LogVersionV3}
-		if _, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log}); err != nil {
+		if _, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(generation+v2Records(responses))), &agent.Options{Dir: "/repo", Model: "gpt-5.4", Log: log}); err != nil {
 			t.Fatal(err)
 		}
 		lines := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte{'\n'})
-		if len(lines) != 4 {
-			t.Fatalf("persisted inputs = %d, want initialize, initialized, model/list, thread/start:\n%s", len(lines), log.String())
+		if len(lines) != 8 {
+			t.Fatalf("persisted handshake records = %d, want 4 inputs, generation, and 3 responses:\n%s", len(lines), log.String())
 		}
+		inputs := 0
+		agentRecords := 0
+		generations := 0
 		for _, line := range lines {
-			if !bytes.HasPrefix(line, []byte(`{"t":"input","ts":`)) {
-				t.Fatalf("handshake record = %s, want v3 input envelope", line)
+			switch {
+			case bytes.HasPrefix(line, []byte(`{"t":"input","ts":`)):
+				inputs++
+			case bytes.HasPrefix(line, []byte(`{"t":"agent","ts":`)):
+				agentRecords++
+			case bytes.Equal(line, bytes.TrimSpace([]byte(generation))):
+				generations++
+			default:
+				t.Fatalf("unexpected handshake record: %s", line)
 			}
+		}
+		if inputs != 4 || agentRecords != 3 || generations != 1 {
+			t.Fatalf("persisted handshake records = inputs:%d agent:%d generations:%d", inputs, agentRecords, generations)
 		}
 	})
 }

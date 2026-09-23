@@ -409,6 +409,58 @@ func BenchmarkMergeLogAndRelayTimeline(b *testing.B) {
 	}
 }
 
+func BenchmarkMergeUnmarkedLogAndSeededRelayTimeline(b *testing.B) {
+	const logCount = 4_000
+	const overlap = 1_000
+	logEntries := make([]agent.TimedMessage, logCount)
+	logRecords := make([]agent.RelayRecordBoundary, logCount)
+	for i := range logEntries {
+		text := fmt.Sprintf("message-%d", i)
+		logEntries[i] = agent.TimedMessage{Message: &agent.TextMessage{Text: text}}
+		logRecords[i] = agent.RelayRecordBoundary{
+			RelayEnd:    int64(i + 1),
+			MessageEnd:  i + 1,
+			Fingerprint: sha256.Sum256([]byte(text)),
+		}
+	}
+	relayEntries := make([]agent.TimedMessage, overlap+1)
+	relayRecords := make([]agent.RelayRecordBoundary, overlap+1)
+	for i := range overlap {
+		text := fmt.Sprintf("message-%d", logCount-overlap+i)
+		relayEntries[i] = agent.TimedMessage{Message: &agent.TextMessage{Text: text}}
+		relayRecords[i] = agent.RelayRecordBoundary{
+			Generation:  "seeded",
+			RelayEnd:    int64(logCount - overlap + i + 1),
+			MessageEnd:  i + 1,
+			ByteEnd:     i + 1,
+			Fingerprint: sha256.Sum256([]byte(text)),
+		}
+	}
+	relayEntries[overlap] = agent.TimedMessage{Message: &agent.TextMessage{Text: "new-message"}}
+	relayRecords[overlap] = agent.RelayRecordBoundary{
+		Generation:  "seeded",
+		RelayEnd:    logCount + 1,
+		MessageEnd:  overlap + 1,
+		ByteEnd:     overlap + 1,
+		Fingerprint: sha256.Sum256([]byte("new-message")),
+	}
+	relayTimeline := agent.ParsedTimeline{
+		Messages:     relayEntries,
+		RelayRecords: relayRecords,
+		Encoded:      make([]byte, overlap+1),
+	}
+	b.ReportAllocs()
+
+	for b.Loop() {
+		logTimeline := agent.ParsedTimeline{Messages: logEntries, RelayRecords: logRecords}
+		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
+		merger.strictRelay = true
+		if got := merger.merge(relayTimeline); merger.err != nil || len(got) != logCount+1 {
+			b.Fatalf("merged %d entries with error %v, want %d", len(got), merger.err, logCount+1)
+		}
+	}
+}
+
 func BenchmarkUnionRuntimeIDs(b *testing.B) {
 	for _, n := range []int{1, 5, 20} {
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
@@ -801,6 +853,50 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 			})
 		}
 	})
+	t.Run("valid_unmarked_v3_uses_fingerprint_overlap_with_seeded_generation", func(t *testing.T) {
+		t.Parallel()
+		fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
+		logTimeline := agent.ParsedTimeline{
+			Messages: relayParsed(
+				&agent.TextMessage{Text: "before"},
+				&agent.TextMessage{Text: "overlap"},
+			),
+			RelayRecords: []agent.RelayRecordBoundary{
+				{RelayEnd: 30, MessageEnd: 1, Fingerprint: fingerprint("before")},
+				{RelayEnd: 40, MessageEnd: 2, Fingerprint: fingerprint("overlap")},
+			},
+		}
+		relayTimeline := agent.ParsedTimeline{
+			Messages: relayParsed(
+				&agent.TextMessage{Text: "before"},
+				&agent.TextMessage{Text: "overlap"},
+				&agent.TextMessage{Text: "after"},
+			),
+			RelayRecords: []agent.RelayRecordBoundary{
+				{Generation: "seeded", RelayEnd: 30, MessageEnd: 1, ByteEnd: 7, Fingerprint: fingerprint("before")},
+				{Generation: "seeded", RelayEnd: 40, MessageEnd: 2, ByteEnd: 15, Fingerprint: fingerprint("overlap")},
+				{Generation: "seeded", RelayEnd: 46, MessageEnd: 3, ByteEnd: 21, Fingerprint: fingerprint("after")},
+			},
+			Encoded: []byte("before\noverlap\nafter\n"),
+		}
+
+		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
+		merger.strictRelay = true
+		merged := merger.merge(relayTimeline)
+		if merger.err != nil {
+			t.Fatalf("merge: %v", merger.err)
+		}
+		messages := make([]agent.Message, len(merged))
+		for i, entry := range merged {
+			messages[i] = entry.Message
+		}
+		if got, want := textMessages(messages), []string{"before", "overlap", "after"}; !slices.Equal(got, want) {
+			t.Fatalf("merged texts = %#v, want %#v", got, want)
+		}
+		if got, want := string(merger.relayAppend(relayTimeline)), "after\n"; got != want {
+			t.Fatalf("relay append = %q, want %q", got, want)
+		}
+	})
 	t.Run("valid_unmarked_prior_discontinuity_uses_exact_endpoint", func(t *testing.T) {
 		t.Parallel()
 		fingerprint := func(value string) [32]byte { return sha256.Sum256([]byte(value)) }
@@ -891,10 +987,10 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 				&agent.TextMessage{Text: "D"},
 			),
 			RelayRecords: []agent.RelayRecordBoundary{
-				{RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint("A")},
-				{RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint("B")},
-				{RelayEnd: 30, MessageEnd: 3, Fingerprint: fingerprint("C")},
-				{RelayEnd: 40, MessageEnd: 4, Fingerprint: fingerprint("D")},
+				{Generation: "seeded", RelayEnd: 10, MessageEnd: 1, Fingerprint: fingerprint("A")},
+				{Generation: "seeded", RelayEnd: 20, MessageEnd: 2, Fingerprint: fingerprint("B")},
+				{Generation: "seeded", RelayEnd: 30, MessageEnd: 3, Fingerprint: fingerprint("C")},
+				{Generation: "seeded", RelayEnd: 40, MessageEnd: 4, Fingerprint: fingerprint("D")},
 			},
 		}
 		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)

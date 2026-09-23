@@ -461,7 +461,11 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	defer cancel()
 
 	w := &wireFormat{nativeSubagents: nativeSubagents{tasks: make(map[string]agent.NativeSubagent), taskTools: make(map[string]struct{})}}
-	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), agent.DiscardLogSink{Version: opts.Log.LogVersion()})
+	relayLog := agent.LogSink(agent.DiscardLogSink{Version: opts.Log.LogVersion()})
+	if opts.Log.LogVersion() == agent.LogVersionV3 {
+		relayLog = opts.Log
+	}
+	records, err := agent.NewRelayRecordReader(stdout, opts.Log.LogVersion(), relayLog)
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct relay reader: %w", err)
 	}

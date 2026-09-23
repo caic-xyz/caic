@@ -94,13 +94,14 @@ func TestHandshake(t *testing.T) {
 		t.Parallel()
 
 		const selectedModel = "openai/gpt-5"
+		const generation = `{"t":"relay_generation","generation":"generation-1"}` + "\n"
 		var stdin bytes.Buffer
-		stdout := bufio.NewReader(strings.NewReader(v2Records(strings.Join([]string{
+		stdout := bufio.NewReader(strings.NewReader(generation + v2Records(strings.Join([]string{
 			`{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"promptCapabilities":{"image":true}}}}`,
 			`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[{"id":"model","type":"select","currentValue":"anthropic/claude-sonnet-4","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":3,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
 			`{"jsonrpc":"2.0","id":4,"result":{"configOptions":[{"id":"model","type":"select","currentValue":"openai/gpt-5","options":[{"value":"anthropic/claude-sonnet-4"},{"value":"openai/gpt-5"}]},{"id":"effort","type":"select","currentValue":"high","options":[{"value":"low"},{"value":"high"}]},{"id":"mode","type":"select","currentValue":"build","options":[{"value":"build"},{"value":"plan"}]}]}}`,
-		}, "\n") + "\n")))
+		}, "\n")+"\n")))
 
 		log := &agenttest.LogSink{Version: agent.LogVersionV3}
 		hs, _, err := handshake(t.Context(), &stdin, stdout, &agent.Options{Dir: "/workspace", Model: selectedModel, Effort: "high", Log: log})
@@ -138,13 +139,26 @@ func TestHandshake(t *testing.T) {
 			t.Fatalf("effort params = %#v", effortParams)
 		}
 		persisted := bytes.Split(bytes.TrimSpace(log.Bytes()), []byte{'\n'})
-		if len(persisted) != 4 {
-			t.Fatalf("persisted inputs = %d, want initialize, session/new, model, effort:\n%s", len(persisted), log.String())
+		if len(persisted) != 9 {
+			t.Fatalf("persisted handshake records = %d, want 4 inputs, generation, and 4 responses:\n%s", len(persisted), log.String())
 		}
+		inputs := 0
+		agentRecords := 0
+		generations := 0
 		for _, record := range persisted {
-			if !bytes.HasPrefix(record, []byte(`{"t":"input","ts":`)) {
-				t.Fatalf("handshake record = %s, want v3 input envelope", record)
+			switch {
+			case bytes.HasPrefix(record, []byte(`{"t":"input","ts":`)):
+				inputs++
+			case bytes.HasPrefix(record, []byte(`{"t":"agent","ts":`)):
+				agentRecords++
+			case bytes.Equal(record, bytes.TrimSpace([]byte(generation))):
+				generations++
+			default:
+				t.Fatalf("unexpected handshake record: %s", record)
 			}
+		}
+		if inputs != 4 || agentRecords != 4 || generations != 1 {
+			t.Fatalf("persisted handshake records = inputs:%d agent:%d generations:%d", inputs, agentRecords, generations)
 		}
 	})
 
