@@ -114,7 +114,7 @@ function Shell(props: { children?: JSX.Element }) {
 
   return (
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
-      <div class={styles.app}>
+      <div class={styles.app} data-testid="app-shell">
         <header class={styles.navbar}>
           <h1 class={styles.title}>
             <button

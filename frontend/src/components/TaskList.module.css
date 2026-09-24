@@ -176,8 +176,14 @@
 /* Mobile: <=768px */
 @media (width <= 768px) {
   .list {
+    /* The app shell owns scrolling on mobile. Letting the list grow to its full
+       content height instead of scrolling internally gives the task cards the
+       viewport and lets the header scroll out of the way. */
     flex: 1;
     width: 100%;
+    overflow: visible;
+    scrollbar-gutter: auto;
+    mask-image: none;
   }
 
   .narrow {

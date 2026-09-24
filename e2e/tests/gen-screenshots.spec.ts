@@ -395,7 +395,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  // Screenshot 9: Scrolled task list — bottom alpha fade cues more cards.
+  // Screenshot 9: Scrolled task list — the desktop list fades at the bottom,
+  // while mobile scrolls the app shell so the header leaves room for cards.
   const scrollTaskIds: string[] = [];
   for (let i = 1; i <= 8; i++) {
     const id = await createTaskAPI(api, `Scroll gradient demo task ${String(i).padStart(2, "0")}`);
@@ -433,14 +434,19 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  // Mobile never nests scrolling inside the task list: the app shell scrolls so
+  // the header can scroll away and the cards use the viewport.
   const mobileTaskList = page.getByTestId("task-list");
-  await expect.poll(async () => mobileTaskList.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
-  await mobileTaskList.evaluate((el) => {
+  await expect.poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el).overflowY)).toBe("visible");
+  const mobileAppShell = page.getByTestId("app-shell");
+  await expect.poll(async () => mobileAppShell.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
+  await mobileAppShell.evaluate((el) => {
     el.scrollTop = Math.min(280, el.scrollHeight - el.clientHeight);
-    el.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
-  await expect.poll(async () => mobileTaskList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  await expect.poll(async () => mobileTaskList.evaluate((el) => getComputedStyle(el, "::before").opacity)).toBe("1");
+  await expect.poll(async () => mobileAppShell.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect
+    .poll(async () => mobileAppShell.locator(":scope > header").evaluate((el) => el.getBoundingClientRect().bottom))
+    .toBeLessThanOrEqual(0);
   await captureScreenshot(page, "mobile", "task-list-scrolled-mobile.png");
 
   // Screenshot 10: Native subagents — inline lifecycle cards anchored to the
