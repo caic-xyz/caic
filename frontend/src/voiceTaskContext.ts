@@ -2,11 +2,6 @@
 
 import type { Task } from "@sdk/types.gen";
 
-export function buildTaskCreatedContext(task: Task, taskNumber: number): string {
-  const shortName = task.title || task.id;
-  return `[Task #${taskNumber} created (${shortName}) — ${task.state}]`;
-}
-
 export function buildTaskCIContext(task: Task, taskNumber: number): string {
   const shortName = task.title || task.id;
   const pr = task.forgePR ? ` PR #${task.forgePR}` : "";

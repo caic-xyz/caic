@@ -9,7 +9,7 @@ import { useHostMode } from "./gomode/HostMode";
 import VoiceOverlay from "./gomode/VoiceOverlay";
 import { voiceSession } from "./gomode/VoiceSession";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./voiceTaskState";
-import { buildTaskCIContext, buildTaskCreatedContext, buildTaskStateContext } from "./voiceTaskContext";
+import { buildTaskCIContext, buildTaskStateContext } from "./voiceTaskContext";
 
 /** Browser-owned shell features that Android Go Mode owns natively in host mode. */
 export default function BrowserVoiceShell() {
@@ -51,9 +51,7 @@ export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]> }) {
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
         const taskNumber = numberMap.toNumber(task.id);
-        if (prev === undefined && taskNumber !== undefined) {
-          voiceSession.injectText(buildTaskCreatedContext(task, taskNumber));
-        } else if (prev !== task.state && taskNumber !== undefined) {
+        if (prev !== undefined && prev !== task.state && taskNumber !== undefined) {
           const notification = buildTaskStateContext(task, taskNumber);
           if (notification !== null) voiceSession.injectText(notification);
         }

@@ -22,7 +22,7 @@ function task(id: string, title: string): Task {
 }
 
 describe("VoiceTaskUpdates", () => {
-  it("seeds existing tasks and injects newly created tasks while connected", async () => {
+  it("seeds existing tasks and numbers new tasks without injecting creation feedback", async () => {
     voiceSession.setState((s) => ({ ...s, connected: true }));
     const [tasks, setTasks] = createSignal([task("a-task", "Existing work")]);
     const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
@@ -30,7 +30,8 @@ describe("VoiceTaskUpdates", () => {
     expect(getVoiceTaskNumber("a-task")).toBe(1);
 
     setTasks((current) => [...current, task("b-task", "New work")]);
-    await waitFor(() => expect(injectTextMock).toHaveBeenCalledWith("[Task #2 created (New work) — running]"));
+    await waitFor(() => expect(getVoiceTaskNumber("b-task")).toBe(2));
+    expect(injectTextMock).not.toHaveBeenCalled();
     expect(getVoiceTaskNumber("b-task")).toBe(2);
     view.unmount();
     expect(getVoiceTaskNumber("b-task")).toBeUndefined();
