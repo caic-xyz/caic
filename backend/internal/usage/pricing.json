@@ -1,0 +1,650 @@
+{
+  "providers": [
+    {
+      "provider": "anthropic",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "retrieved": "2026-09",
+      "models": [
+        {
+          "id": "claude-fable-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 10.0,
+                "cached_input_per_mtok": 1.0,
+                "cache_write_per_mtok": 12.5,
+                "output_per_mtok": 50.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-fable-5-1",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 10.0,
+                "cached_input_per_mtok": 0.25,
+                "cache_write_per_mtok": 12.5,
+                "output_per_mtok": 50.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.0,
+                "cached_input_per_mtok": 0.1,
+                "cache_write_per_mtok": 1.25,
+                "output_per_mtok": 5.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-mythos-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 10.0,
+                "cached_input_per_mtok": 1.0,
+                "cache_write_per_mtok": 12.5,
+                "output_per_mtok": 50.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-mythos-5-1",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 10.0,
+                "cached_input_per_mtok": 0.25,
+                "cache_write_per_mtok": 12.5,
+                "output_per_mtok": 50.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-4-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 5.0,
+                "cached_input_per_mtok": 0.5,
+                "cache_write_per_mtok": 6.25,
+                "output_per_mtok": 25.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-4-6",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 5.0,
+                "cached_input_per_mtok": 0.5,
+                "cache_write_per_mtok": 6.25,
+                "output_per_mtok": 25.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-4-7",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 5.0,
+                "cached_input_per_mtok": 0.5,
+                "cache_write_per_mtok": 6.25,
+                "output_per_mtok": 25.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-4-8",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 5.0,
+                "cached_input_per_mtok": 0.5,
+                "cache_write_per_mtok": 6.25,
+                "output_per_mtok": 25.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 5.0,
+                "cached_input_per_mtok": 0.5,
+                "cache_write_per_mtok": 6.25,
+                "output_per_mtok": 25.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-opus-5-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 4.0,
+                "cached_input_per_mtok": 0.2,
+                "cache_write_per_mtok": 5.0,
+                "cache_write_1h_per_mtok": 8.0,
+                "output_per_mtok": 20.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-sonnet-4-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 3.0,
+                "cached_input_per_mtok": 0.3,
+                "cache_write_per_mtok": 3.75,
+                "output_per_mtok": 15.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 3.0,
+                "cached_input_per_mtok": 0.3,
+                "cache_write_per_mtok": 3.75,
+                "output_per_mtok": 15.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "claude-sonnet-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.0,
+                "cached_input_per_mtok": 0.2,
+                "cache_write_per_mtok": 2.5,
+                "output_per_mtok": 10.0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "source": "https://api-docs.deepseek.com/quick_start/pricing",
+      "retrieved": "2026-09",
+      "holidays": [
+        "2026-01-01",
+        "2026-01-02",
+        "2026-01-03",
+        "2026-02-15",
+        "2026-02-16",
+        "2026-02-17",
+        "2026-02-18",
+        "2026-02-19",
+        "2026-02-20",
+        "2026-02-21",
+        "2026-02-22",
+        "2026-02-23",
+        "2026-04-04",
+        "2026-04-05",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-02",
+        "2026-05-03",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-06-19",
+        "2026-06-20",
+        "2026-06-21",
+        "2026-09-25",
+        "2026-09-26",
+        "2026-09-27",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-03",
+        "2026-10-04",
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07"
+      ],
+      "windows": {
+        "peak": [
+          {
+            "days": ["mon", "tue", "wed", "thu", "fri"],
+            "start": "01:00",
+            "end": "04:00"
+          },
+          {
+            "days": ["mon", "tue", "wed", "thu", "fri"],
+            "start": "06:00",
+            "end": "10:00"
+          }
+        ]
+      },
+      "models": [
+        {
+          "id": "deepseek-flash",
+          "tiers": [
+            {
+              "windows": "peak",
+              "price": {
+                "input_per_mtok": 0.3,
+                "cached_input_per_mtok": 0.006,
+                "output_per_mtok": 1.2
+              }
+            },
+            {
+              "price": {
+                "input_per_mtok": 0.15,
+                "cached_input_per_mtok": 0.003,
+                "output_per_mtok": 0.6
+              }
+            }
+          ]
+        },
+        {
+          "id": "deepseek-v4-flash",
+          "alias": "deepseek-flash"
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "alias": "deepseek-flash"
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "tiers": [
+            {
+              "windows": "peak",
+              "price": {
+                "input_per_mtok": 1.32,
+                "cached_input_per_mtok": 0.044,
+                "output_per_mtok": 3.96
+              }
+            },
+            {
+              "price": {
+                "input_per_mtok": 0.66,
+                "cached_input_per_mtok": 0.022,
+                "output_per_mtok": 1.98
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "provider": "openai",
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "retrieved": "2026-09",
+      "models": [
+        {
+          "id": "gpt-5.3-codex",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.75,
+                "cached_input_per_mtok": 0.175,
+                "output_per_mtok": 14.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-5.6-cyber",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 12.5,
+                "cached_input_per_mtok": 1.25,
+                "cache_write_per_mtok": 15.625,
+                "output_per_mtok": 75.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.2,
+                "cached_input_per_mtok": 0.02,
+                "cache_write_per_mtok": 0.25,
+                "output_per_mtok": 1.2
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 4.0,
+                "cached_input_per_mtok": 0.4,
+                "cache_write_per_mtok": 5.0,
+                "output_per_mtok": 20.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.0,
+                "cached_input_per_mtok": 0.2,
+                "cache_write_per_mtok": 2.5,
+                "output_per_mtok": 12.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-6-astra",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 10.0,
+                "cached_input_per_mtok": 1.0,
+                "cache_write_per_mtok": 12.5,
+                "output_per_mtok": 50.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-6-luna",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.1,
+                "cached_input_per_mtok": 0.01,
+                "cache_write_per_mtok": 0.125,
+                "output_per_mtok": 0.5
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-6-sol",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.0,
+                "cached_input_per_mtok": 0.2,
+                "cache_write_per_mtok": 2.5,
+                "output_per_mtok": 10.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-daybreak-blue-latest",
+          "alias": "gpt-5.6-sol"
+        },
+        {
+          "id": "gpt-daybreak-red-latest",
+          "alias": "gpt-5.6-cyber"
+        }
+      ]
+    },
+    {
+      "provider": "zai",
+      "source": "https://docs.z.ai/guides/overview/pricing",
+      "retrieved": "2026-09",
+      "models": [
+        {
+          "id": "glm-5.3-flash",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.15,
+                "cached_input_per_mtok": 0.03,
+                "output_per_mtok": 0.5
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-5.3-flashx",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.37,
+                "cached_input_per_mtok": 0.075,
+                "output_per_mtok": 1.25
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-5.3",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.4,
+                "cached_input_per_mtok": 0.26,
+                "output_per_mtok": 4.4
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-5.2",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.4,
+                "cached_input_per_mtok": 0.26,
+                "output_per_mtok": 4.4
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-5.1",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.4,
+                "cached_input_per_mtok": 0.26,
+                "output_per_mtok": 4.4
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.0,
+                "cached_input_per_mtok": 0.2,
+                "output_per_mtok": 3.2
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.7",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.6,
+                "cached_input_per_mtok": 0.11,
+                "output_per_mtok": 2.2
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.7-flashx",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.07,
+                "cached_input_per_mtok": 0.01,
+                "output_per_mtok": 0.4
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.7-flash",
+          "tiers": [{ "price": {} }]
+        },
+        {
+          "id": "glm-4.6",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.6,
+                "cached_input_per_mtok": 0.11,
+                "output_per_mtok": 2.2
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.5",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.6,
+                "cached_input_per_mtok": 0.11,
+                "output_per_mtok": 2.2
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.5-x",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.2,
+                "cached_input_per_mtok": 0.45,
+                "output_per_mtok": 8.9
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.5-air",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.2,
+                "cached_input_per_mtok": 0.03,
+                "output_per_mtok": 1.1
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.5-airx",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.1,
+                "cached_input_per_mtok": 0.22,
+                "output_per_mtok": 4.5
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.5-flash",
+          "tiers": [{ "price": {} }]
+        },
+        {
+          "id": "glm-4-32b-0414-128k",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.1,
+                "cached_input_per_mtok": 0.1,
+                "output_per_mtok": 0.1
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.6v",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.3,
+                "cached_input_per_mtok": 0.05,
+                "output_per_mtok": 0.9
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.6v-flashx",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.04,
+                "cached_input_per_mtok": 0.004,
+                "output_per_mtok": 0.4
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-4.6v-flash",
+          "tiers": [{ "price": {} }]
+        },
+        {
+          "id": "glm-4.5v",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.6,
+                "cached_input_per_mtok": 0.11,
+                "output_per_mtok": 1.8
+              }
+            }
+          ]
+        },
+        {
+          "id": "glm-ocr",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 0.03,
+                "output_per_mtok": 0.03
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

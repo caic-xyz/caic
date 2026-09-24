@@ -5,6 +5,7 @@ package usage
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -362,6 +363,122 @@ func TestPricingPhaseFor(t *testing.T) {
 		phase, _ := PricingPhaseFor(agent.QuotaProviderDeepSeek, time.Date(2026, 9, 25, 2, 0, 0, 0, time.UTC))
 		if phase != PricingPhaseOffPeak {
 			t.Errorf("phase = %q, want off-peak on a holiday", phase)
+		}
+	})
+}
+
+func TestParsePricingJSON(t *testing.T) {
+	t.Parallel()
+
+	// provider builds a one-provider document from extra provider fields.
+	provider := func(fields string) string {
+		return `{"providers":[{"provider":"p","source":"https://example.test","retrieved":"2026-09",` + fields + `}]}`
+	}
+	const model = `{"id":"m","tiers":[{"price":{"input_per_mtok":1}}]}`
+
+	t.Run("Valid", func(t *testing.T) {
+		t.Parallel()
+		tables, err := parsePricingJSON(pricingJSON)
+		if err != nil {
+			t.Fatalf("parsePricingJSON(pricingJSON) = %v", err)
+		}
+		for _, name := range []string{"anthropic", "openai", "zai", "deepseek"} {
+			if len(tables.providers[name]) == 0 {
+				t.Errorf("provider %q has no models", name)
+			}
+		}
+		if got := len(tables.peakWindows["deepseek"]); got != 2 {
+			t.Errorf("deepseek peak windows = %d, want 2", got)
+		}
+		// An alias resolves to its target's schedule.
+		tiers, ok := tables.providers["deepseek"]["deepseek-v4-flash"]
+		if !ok {
+			t.Fatal("deepseek-v4-flash is not priced")
+		}
+		if want := tables.providers["deepseek"]["deepseek-flash"]; !slices.EqualFunc(tiers, want, func(a, b PriceTier) bool { return a.Price == b.Price }) {
+			t.Errorf("deepseek-v4-flash tiers = %+v, want deepseek-flash %+v", tiers, want)
+		}
+	})
+
+	t.Run("Errors", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name string
+			data string
+		}{
+			{"InvalidJSON", `{`},
+			{"NoProviders", `{}`},
+			{"UnknownField", provider(`"models":[` + model + `],"typo":1`)},
+			{"DuplicateProvider", `{"providers":[{"provider":"p","source":"s","retrieved":"r","models":[` + model + `]},{"provider":"p","source":"s","retrieved":"r","models":[` + model + `]}]}`},
+			{"EmptyProviderName", `{"providers":[{"source":"s","retrieved":"r","models":[` + model + `]}]}`},
+			{"MissingSource", `{"providers":[{"provider":"p","retrieved":"2026-09","models":[` + model + `]}]}`},
+			{"BadHoliday", provider(`"holidays":["2026-1-1"],"models":[` + model + `]`)},
+			{"BadWeekday", provider(`"windows":{"peak":[{"days":["monday"],"start":"01:00","end":"02:00"}]},"models":[` + model + `]`)},
+			{"BadStart", provider(`"windows":{"peak":[{"start":"01:60","end":"02:00"}]},"models":[` + model + `]`)},
+			{"BadEnd", provider(`"windows":{"peak":[{"start":"01:00","end":""}]},"models":[` + model + `]`)},
+			{"EmptyWindowGroup", provider(`"windows":{"peak":[]},"models":[` + model + `]`)},
+			{"NoModels", provider(`"models":[]`)},
+			{"EmptyModelID", provider(`"models":[{"tiers":[{"price":{}}]}]`)},
+			{"DuplicateModel", provider(`"models":[` + model + `,` + model + `]`)},
+			{"AliasAndTiers", provider(`"models":[` + model + `,{"id":"n","alias":"m","tiers":[{"price":{}}]}]`)},
+			{"NeitherAliasNorTiers", provider(`"models":[{"id":"m"}]`)},
+			{"UnpricedAlias", provider(`"models":[` + model + `,{"id":"n","alias":"missing"}]`)},
+			{"UnknownWindowGroup", provider(`"models":[{"id":"m","tiers":[{"windows":"peak","price":{}}]}]`)},
+			{"MissingPrice", provider(`"models":[{"id":"m","tiers":[{}]}]`)},
+			{"NegativePrice", provider(`"models":[{"id":"m","tiers":[{"price":{"input_per_mtok":-1}}]}]`)},
+			{"BadEffectiveFrom", provider(`"models":[{"id":"m","tiers":[{"effective_from":"2026-9-1","price":{}}]}]`)},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if tables, err := parsePricingJSON([]byte(tc.data)); err == nil {
+					t.Errorf("parsePricingJSON(%s) = %+v, want error", tc.name, tables)
+				}
+			})
+		}
+	})
+}
+
+func TestModelPriceValidate(t *testing.T) {
+	t.Parallel()
+	t.Run("Valid", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name string
+			p    ModelPrice
+		}{
+			{"Priced", ModelPrice{InputPerMTok: 1, CachedInputPerMTok: 0.1, CacheWritePerMTok: 1.25, CacheWrite1hPerMTok: 2.5, OutputPerMTok: 5}},
+			// A free model prices every field at zero.
+			{"Free", ModelPrice{}},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if err := tc.p.Validate(); err != nil {
+					t.Errorf("Validate() = %v, want nil", err)
+				}
+			})
+		}
+	})
+	t.Run("Errors", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name string
+			p    ModelPrice
+		}{
+			{"Input", ModelPrice{InputPerMTok: -1}},
+			{"CachedInput", ModelPrice{CachedInputPerMTok: -0.01}},
+			{"CacheWrite", ModelPrice{CacheWritePerMTok: -0.01}},
+			{"CacheWrite1h", ModelPrice{CacheWrite1hPerMTok: -0.01}},
+			{"Output", ModelPrice{OutputPerMTok: -1}},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if err := tc.p.Validate(); err == nil {
+					t.Error("Validate() = nil, want error")
+				}
+			})
 		}
 	})
 }

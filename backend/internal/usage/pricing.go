@@ -3,6 +3,12 @@
 package usage
 
 import (
+	"bytes"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -17,52 +23,31 @@ const pricingDateLayout = "2006-01-02"
 // do not surcharge cache writes leave CacheWritePerMTok zero, which bills
 // cache-creation tokens at the input price.
 type ModelPrice struct {
-	InputPerMTok        float64 // Non-cached input (cache miss).
-	CachedInputPerMTok  float64 // Cache read (cache hit).
-	CacheWritePerMTok   float64 // Cache creation; 0 = same as input.
-	CacheWrite1hPerMTok float64 // One-hour cache creation; 0 = same as CacheWritePerMTok.
-	OutputPerMTok       float64
+	InputPerMTok        float64 `json:"input_per_mtok"`                    // Non-cached input (cache miss).
+	CachedInputPerMTok  float64 `json:"cached_input_per_mtok"`             // Cache read (cache hit).
+	CacheWritePerMTok   float64 `json:"cache_write_per_mtok,omitempty"`    // Cache creation; 0 = same as input.
+	CacheWrite1hPerMTok float64 `json:"cache_write_1h_per_mtok,omitempty"` // One-hour cache creation; 0 = same as CacheWritePerMTok.
+	OutputPerMTok       float64 `json:"output_per_mtok"`
 }
 
 // staticModelPrice prices model under a harness model-provider prefix, or ""
 // when the prefix is not a known pricing provider.
 func staticModelPrice(provider, model string, at time.Time) (ModelPrice, bool) {
-	var table map[string]ModelPricing
 	if provider == "openai" {
-		return lookupModelPricing(openAIModelPricing, model, at)
+		return pricing.providers["openai"].lookup(model, at)
 	}
 	switch agent.QuotaProviderForModel(provider + "/x") {
 	case agent.QuotaProviderAnthropic:
-		table = anthropicModelPricing
+		return pricing.providers["anthropic"].lookup(model, at)
 	case agent.QuotaProviderCodex:
-		table = openAIModelPricing
+		return pricing.providers["openai"].lookup(model, at)
 	case agent.QuotaProviderZai:
-		table = zaiModelPricing
+		return pricing.providers["zai"].lookup(model, at)
 	case agent.QuotaProviderDeepSeek:
-		table = deepSeekModelPricing
+		return pricing.providers["deepseek"].lookup(model, at)
 	default:
 		return ModelPrice{}, false
 	}
-	return lookupModelPricing(table, model, at)
-}
-
-// lookupModelPricing resolves model in a provider table, matching the exact
-// model ID or the longest table key that prefixes it on a "-" boundary
-// (table key "glm-5" matches "glm-5-turbo" but not "glm-5v-turbo").
-func lookupModelPricing(table map[string]ModelPricing, model string, at time.Time) (ModelPrice, bool) {
-	if pricing, ok := table[model]; ok {
-		return pricing.Price(at)
-	}
-	best := ""
-	for key := range table {
-		if len(key) > len(best) && strings.HasPrefix(model, key+"-") {
-			best = key
-		}
-	}
-	if best == "" {
-		return ModelPrice{}, false
-	}
-	return table[best].Price(at)
 }
 
 // Cost returns the USD cost of one usage report at p.
@@ -90,6 +75,50 @@ func (p ModelPrice) CostBuckets(input, cacheWrite5m, cacheWrite1h, cacheRead, ou
 		float64(cacheWrite1h)*write1h +
 		float64(cacheRead)*p.CachedInputPerMTok +
 		float64(output)*p.OutputPerMTok) / 1_000_000
+}
+
+// Validate reports whether every price field is non-negative, which every
+// provider's published prices are.
+func (p ModelPrice) Validate() error {
+	fields := []struct {
+		name  string
+		value float64
+	}{
+		{"input_per_mtok", p.InputPerMTok},
+		{"cached_input_per_mtok", p.CachedInputPerMTok},
+		{"cache_write_per_mtok", p.CacheWritePerMTok},
+		{"cache_write_1h_per_mtok", p.CacheWrite1hPerMTok},
+		{"output_per_mtok", p.OutputPerMTok},
+	}
+	for _, f := range fields {
+		if f.value < 0 {
+			return fmt.Errorf("%s is negative: %v", f.name, f.value)
+		}
+	}
+	return nil
+}
+
+// modelPriceTable maps the model IDs of one provider to their price
+// schedules.
+type modelPriceTable map[string]ModelPricing
+
+// lookup resolves model in the table, matching the exact model ID or the
+// longest table key that prefixes it on a "-" boundary (table key "glm-5"
+// matches "glm-5-turbo" but not "glm-5v-turbo").
+func (t modelPriceTable) lookup(model string, at time.Time) (ModelPrice, bool) {
+	if pricing, ok := t[model]; ok {
+		return pricing.Price(at)
+	}
+	best := ""
+	for key := range t {
+		if len(key) > len(best) && strings.HasPrefix(model, key+"-") {
+			best = key
+		}
+	}
+	if best == "" {
+		return ModelPrice{}, false
+	}
+	return t[best].Price(at)
 }
 
 // PeakWindow is a daily UTC time range in which a peak price tier applies.
@@ -170,12 +199,22 @@ func PricingPhaseFor(provider agent.QuotaProvider, at time.Time) (PricingPhase, 
 	if provider != agent.QuotaProviderDeepSeek {
 		return "", time.Time{}
 	}
-	for _, w := range deepSeekPeakWindows {
+	// DeepSeek's peak hours are 01:00-04:00 and 06:00-10:00 UTC Monday through
+	// Friday. All other hours are off-peak at half the peak rate, including
+	// weekends and Chinese public holidays.
+	//
+	// The holiday schedule is announced each preceding November, so add the
+	// following year before it begins; a year without an entry falls back to
+	// the weekday rule, so an unpublished year reports peak hours on
+	// holidays.
+	// TODO(2026-11): Add the 2027 Chinese public holidays when the State
+	// Council announces the schedule.
+	for _, w := range pricing.peakWindows["deepseek"] {
 		if _, end, ok := w.windowAt(at); ok {
 			return PricingPhasePeak, end
 		}
 	}
-	for _, w := range deepSeekPeakWindows {
+	for _, w := range pricing.peakWindows["deepseek"] {
 		if start, _, ok := w.windowAt(at.Add(PricingPhaseSoonWindow)); ok {
 			return PricingPhasePeakSoon, start
 		}
@@ -289,9 +328,13 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 	}
 	switch provider {
 	case agent.QuotaProviderZai:
-		return lookupModelPricing(zaiModelPricing, model, at)
+		// Z.ai bills cache creation at the input price and cache reads at the
+		// cached-input price; its "cached input storage" fee is currently free.
+		return pricing.providers["zai"].lookup(model, at)
 	case agent.QuotaProviderDeepSeek:
-		return lookupModelPricing(deepSeekModelPricing, model, at)
+		// DeepSeek bills cache reads at the cache-hit price and uncached input
+		// (including cache writes) at the cache-miss price.
+		return pricing.providers["deepseek"].lookup(model, at)
 	case agent.QuotaProviderOpenRouter:
 		// Live OpenRouter pricing is unavailable (no fetcher configured, or
 		// the fetch failed): fall back to the upstream provider's published
@@ -305,9 +348,16 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 		}
 		return staticModelPrice(upstream, model, at)
 	case agent.QuotaProviderAnthropic:
-		return lookupModelPricing(anthropicModelPricing, model, at)
+		// API-equivalent prices: Claude Code subscriptions are not billed per
+		// token, and Claude Code's own reported total stays authoritative for
+		// the claudecode provider. Cache writes bill at 1.25x input (5m) and
+		// cache reads at the model's published cache-read rate; historical
+		// estimates use the one-hour write rate where one is published.
+		return pricing.providers["anthropic"].lookup(model, at)
 	case agent.QuotaProviderCodex:
-		return lookupModelPricing(openAIModelPricing, model, at)
+		// API-equivalent prices: Codex subscriptions are not billed per token.
+		// Long-context pricing is not encoded; short-context prices are used.
+		return pricing.providers["openai"].lookup(model, at)
 	default:
 		// Direct OpenAI API models ("openai/...") are not a quota provider
 		// but bill at OpenAI's published rates.
@@ -318,139 +368,315 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 	}
 }
 
-// zaiModelPricing holds Z.ai's published per-million-token USD prices
-// (https://docs.z.ai/guides/overview/pricing, retrieved 2026-09). Z.ai bills
-// cache creation at the input price and cache reads at the cached-input
-// price; its "cached input storage" fee is currently free.
-var zaiModelPricing = map[string]ModelPricing{
-	"glm-5.3-flash":       {{Price: ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}}},
-	"glm-5.3-flashx":      {{Price: ModelPrice{InputPerMTok: 0.37, CachedInputPerMTok: 0.075, OutputPerMTok: 1.25}}},
-	"glm-5.3":             {{Price: ModelPrice{InputPerMTok: 1.4, CachedInputPerMTok: 0.26, OutputPerMTok: 4.4}}},
-	"glm-5.2":             {{Price: ModelPrice{InputPerMTok: 1.4, CachedInputPerMTok: 0.26, OutputPerMTok: 4.4}}},
-	"glm-5.1":             {{Price: ModelPrice{InputPerMTok: 1.4, CachedInputPerMTok: 0.26, OutputPerMTok: 4.4}}},
-	"glm-5":               {{Price: ModelPrice{InputPerMTok: 1.0, CachedInputPerMTok: 0.2, OutputPerMTok: 3.2}}},
-	"glm-4.7":             {{Price: ModelPrice{InputPerMTok: 0.6, CachedInputPerMTok: 0.11, OutputPerMTok: 2.2}}},
-	"glm-4.7-flashx":      {{Price: ModelPrice{InputPerMTok: 0.07, CachedInputPerMTok: 0.01, OutputPerMTok: 0.4}}},
-	"glm-4.7-flash":       {{Price: ModelPrice{}}},
-	"glm-4.6":             {{Price: ModelPrice{InputPerMTok: 0.6, CachedInputPerMTok: 0.11, OutputPerMTok: 2.2}}},
-	"glm-4.5":             {{Price: ModelPrice{InputPerMTok: 0.6, CachedInputPerMTok: 0.11, OutputPerMTok: 2.2}}},
-	"glm-4.5-x":           {{Price: ModelPrice{InputPerMTok: 2.2, CachedInputPerMTok: 0.45, OutputPerMTok: 8.9}}},
-	"glm-4.5-air":         {{Price: ModelPrice{InputPerMTok: 0.2, CachedInputPerMTok: 0.03, OutputPerMTok: 1.1}}},
-	"glm-4.5-airx":        {{Price: ModelPrice{InputPerMTok: 1.1, CachedInputPerMTok: 0.22, OutputPerMTok: 4.5}}},
-	"glm-4.5-flash":       {{Price: ModelPrice{}}},
-	"glm-4-32b-0414-128k": {{Price: ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.1, OutputPerMTok: 0.1}}},
-	"glm-4.6v":            {{Price: ModelPrice{InputPerMTok: 0.3, CachedInputPerMTok: 0.05, OutputPerMTok: 0.9}}},
-	"glm-4.6v-flashx":     {{Price: ModelPrice{InputPerMTok: 0.04, CachedInputPerMTok: 0.004, OutputPerMTok: 0.4}}},
-	"glm-4.6v-flash":      {{Price: ModelPrice{}}},
-	"glm-4.5v":            {{Price: ModelPrice{InputPerMTok: 0.6, CachedInputPerMTok: 0.11, OutputPerMTok: 1.8}}},
-	"glm-ocr":             {{Price: ModelPrice{InputPerMTok: 0.03, OutputPerMTok: 0.03}}},
+// pricingJSON embeds the provider price schedules, keeping the numbers,
+// provider names, sources, and retrieval dates in pricing.json so a
+// mechanical updater can rewrite them without editing Go code. See that file
+// for the schema.
+//
+//go:embed pricing.json
+var pricingJSON []byte
+
+// pricing is the decoded pricing.json content.
+var pricing = mustLoadPricing()
+
+// pricingTables is the decoded pricing.json content: one model schedule map
+// per provider name, plus every provider's peak windows in order for
+// pricing-phase reporting.
+type pricingTables struct {
+	providers   map[string]modelPriceTable
+	peakWindows map[string][]PeakWindow
 }
 
-// deepSeekHolidays holds Chinese public holidays (State Council days off
-// work) that DeepSeek excludes from peak pricing. The schedule is announced
-// each preceding November, so add the following year before it begins.
-// Years without an entry fall back to the weekday rule, so an unpublished
-// year reports peak hours on holidays.
-var deepSeekHolidays = []string{
-	// 2026: New Year (Jan 1-3), Spring Festival (Feb 15-23), Qingming
-	// (Apr 4-6), Labor Day (May 1-5), Dragon Boat (Jun 19-21), Mid-Autumn
-	// (Sep 25-27), National Day (Oct 1-7).
-	"2026-01-01", "2026-01-02", "2026-01-03",
-	"2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19",
-	"2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23",
-	"2026-04-04", "2026-04-05", "2026-04-06",
-	"2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05",
-	"2026-06-19", "2026-06-20", "2026-06-21",
-	"2026-09-25", "2026-09-26", "2026-09-27",
-	"2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05",
-	"2026-10-06", "2026-10-07",
+// pricingFile mirrors the pricing.json document.
+type pricingFile struct {
+	Providers []pricingProvider `json:"providers"`
 }
 
-// TODO(2026-11): Add the 2027 Chinese public holidays when the State Council
-// announces the schedule.
-
-// deepSeekPeakWindows holds DeepSeek's peak hours: 01:00-04:00 and 06:00-10:00
-// UTC Monday through Friday. All other hours are off-peak at half the peak
-// rate, including weekends and Chinese public holidays.
-var deepSeekPeakWindows = []PeakWindow{
-	{Days: workdays, Holidays: deepSeekHolidays, Start: "01:00", End: "04:00"},
-	{Days: workdays, Holidays: deepSeekHolidays, Start: "06:00", End: "10:00"},
+// Validate reports whether the document holds at least one provider, each
+// named once and valid.
+func (f *pricingFile) Validate() error {
+	if len(f.Providers) == 0 {
+		return errors.New("no providers")
+	}
+	seen := make(map[string]struct{}, len(f.Providers))
+	for i := range f.Providers {
+		p := &f.Providers[i]
+		if p.Provider == "" {
+			return errors.New("provider name is empty")
+		}
+		if _, ok := seen[p.Provider]; ok {
+			return fmt.Errorf("provider %q is listed twice", p.Provider)
+		}
+		seen[p.Provider] = struct{}{}
+		if err := p.Validate(); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Provider, err)
+		}
+	}
+	return nil
 }
 
-var workdays = []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}
-
-// deepSeekModelPricing holds DeepSeek's published per-million-token USD
-// prices (https://api-docs.deepseek.com/quick_start/pricing, retrieved
-// 2026-09). DeepSeek bills cache reads at the cache-hit price and uncached
-// input (including cache writes) at the cache-miss price.
-var deepSeekModelPricing = map[string]ModelPricing{
-	// deepSeekFlashTiers prices the DeepSeek-V4.1-Flash model and the retired
-	// legacy names that DeepSeek still serves and bills at the same price.
-	"deepseek-flash":               deepSeekFlashTiers,
-	"deepseek-v4-flash":            deepSeekFlashTiers,
-	"deepseek-v4-flash-vision-exp": deepSeekFlashTiers,
-	"deepseek-v4-pro": {
-		{PeakWindows: deepSeekPeakWindows, Price: ModelPrice{InputPerMTok: 1.32, CachedInputPerMTok: 0.044, OutputPerMTok: 3.96}},
-		{Price: ModelPrice{InputPerMTok: 0.66, CachedInputPerMTok: 0.022, OutputPerMTok: 1.98}},
-	},
+// pricingProvider mirrors one provider entry of pricing.json.
+type pricingProvider struct {
+	Provider  string                     `json:"provider"`
+	Source    string                     `json:"source"`
+	Retrieved string                     `json:"retrieved"`
+	Holidays  []string                   `json:"holidays"`
+	Windows   map[string][]pricingWindow `json:"windows"`
+	Models    []pricingModel             `json:"models"`
 }
 
-// deepSeekFlashTiers holds the peak and off-peak tiers shared by the
-// DeepSeek-V4.1-Flash model and its legacy names.
-var deepSeekFlashTiers = ModelPricing{
-	{PeakWindows: deepSeekPeakWindows, Price: ModelPrice{InputPerMTok: 0.30, CachedInputPerMTok: 0.006, OutputPerMTok: 1.20}},
-	{Price: ModelPrice{InputPerMTok: 0.15, CachedInputPerMTok: 0.003, OutputPerMTok: 0.60}},
+// Validate reports whether the entry is complete: it records its source and
+// retrieval date, its windows and models are non-empty and valid, and no
+// model is named twice.
+func (p *pricingProvider) Validate() error {
+	if p.Source == "" || p.Retrieved == "" {
+		return errors.New("source and retrieved are required")
+	}
+	for _, holiday := range p.Holidays {
+		if _, err := time.Parse(pricingDateLayout, holiday); err != nil {
+			return fmt.Errorf("holiday %q: %w", holiday, err)
+		}
+	}
+	for name, group := range p.Windows {
+		if len(group) == 0 {
+			return fmt.Errorf("window group %q is empty", name)
+		}
+		for _, w := range group {
+			if err := w.Validate(); err != nil {
+				return fmt.Errorf("window group %q: %w", name, err)
+			}
+		}
+	}
+	if len(p.Models) == 0 {
+		return errors.New("no models")
+	}
+	seen := make(map[string]struct{}, len(p.Models))
+	for _, m := range p.Models {
+		if err := m.Validate(); err != nil {
+			return err
+		}
+		if _, ok := seen[m.ID]; ok {
+			return fmt.Errorf("model %q is listed twice", m.ID)
+		}
+		seen[m.ID] = struct{}{}
+	}
+	return nil
 }
 
-// openAIModelPricing holds OpenAI's published per-million-token USD prices
-// (https://developers.openai.com/api/docs/pricing, retrieved 2026-09) for
-// models Codex can run, priced at API-equivalent rates: Codex subscriptions
-// are not billed per token. OpenAI bills cached input at a discount and cache
-// writes at the published write rate. Long-context pricing is not encoded;
-// short-context prices are used.
-var openAIModelPricing = map[string]ModelPricing{
-	"gpt-5.3-codex": {{Price: ModelPrice{InputPerMTok: 1.75, CachedInputPerMTok: 0.175, OutputPerMTok: 14.0}}},
-	"gpt-5.6-cyber": openAICyberTiers,
-	"gpt-5.6-luna":  {{Price: ModelPrice{InputPerMTok: 0.20, CachedInputPerMTok: 0.02, CacheWritePerMTok: 0.25, OutputPerMTok: 1.20}}},
-	"gpt-5.6-sol":   openAISolTiers,
-	"gpt-5.6-terra": {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0}}},
-	"gpt-6-astra":   {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
-	"gpt-6-luna":    {{Price: ModelPrice{InputPerMTok: 0.10, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.50}}},
-	"gpt-6-sol":     {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 10.0}}},
-	// OpenAI re-points its Daybreak aliases at the latest flagship models as
-	// the program rotates; when it does, update the referenced entry.
-	"gpt-daybreak-blue-latest": openAISolTiers,
-	"gpt-daybreak-red-latest":  openAICyberTiers,
+// build resolves the entry, which Validate must have accepted, into its model
+// schedules and window groups.
+func (p *pricingProvider) build() (providerPricing, error) {
+	windows := make(map[string][]PeakWindow, len(p.Windows))
+	for name, group := range p.Windows {
+		built := make([]PeakWindow, 0, len(group))
+		for _, w := range group {
+			pw, err := w.toPeakWindow(p.Holidays)
+			if err != nil {
+				return providerPricing{}, fmt.Errorf("window group %q: %w", name, err)
+			}
+			built = append(built, pw)
+		}
+		windows[name] = built
+	}
+	models := make(modelPriceTable, len(p.Models))
+	for _, m := range p.Models {
+		if m.Alias != "" {
+			continue
+		}
+		tiers := make(ModelPricing, 0, len(m.Tiers))
+		for _, tier := range m.Tiers {
+			bt, err := tier.toPriceTier(windows)
+			if err != nil {
+				return providerPricing{}, fmt.Errorf("model %q: %w", m.ID, err)
+			}
+			tiers = append(tiers, bt)
+		}
+		models[m.ID] = tiers
+	}
+	for _, m := range p.Models {
+		if m.Alias == "" {
+			continue
+		}
+		tiers, ok := models[m.Alias]
+		if !ok {
+			return providerPricing{}, fmt.Errorf("model %q aliases unpriced model %q", m.ID, m.Alias)
+		}
+		models[m.ID] = tiers
+	}
+	return providerPricing{models: models, windows: windows}, nil
 }
 
-// openAISolTiers and openAICyberTiers hold the prices shared by the GPT-5.6
-// flagships and the Daybreak aliases that point at them.
-var (
-	openAISolTiers   = ModelPricing{{Price: ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0}}}
-	openAICyberTiers = ModelPricing{{Price: ModelPrice{InputPerMTok: 12.50, CachedInputPerMTok: 1.25, CacheWritePerMTok: 15.625, OutputPerMTok: 75.0}}}
-)
+// pricingModel mirrors one model entry: either tiers, or an alias of another
+// priced model in the same provider.
+type pricingModel struct {
+	ID    string        `json:"id"`
+	Alias string        `json:"alias"`
+	Tiers []pricingTier `json:"tiers"`
+}
 
-// anthropicModelPricing holds Anthropic's published per-million-token USD
-// prices (https://platform.claude.com/docs/en/about-claude/pricing,
-// retrieved 2026-09) for models Pi can run through the anthropic provider,
-// priced at API-equivalent rates: Claude Code subscriptions are not billed
-// per token, and Claude Code's own reported total stays authoritative for
-// the claudecode provider. Cache writes bill at 1.25x input (5m) and cache
-// reads at the model's published cache-read rate. Historical estimates use
-// the one-hour write rate where one is published.
-var anthropicModelPricing = map[string]ModelPricing{
-	"claude-fable-5":    {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
-	"claude-fable-5-1":  {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 0.25, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
-	"claude-haiku-4-5":  {{Price: ModelPrice{InputPerMTok: 1.0, CachedInputPerMTok: 0.10, CacheWritePerMTok: 1.25, OutputPerMTok: 5.0}}},
-	"claude-mythos-5":   {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 1.0, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
-	"claude-mythos-5-1": {{Price: ModelPrice{InputPerMTok: 10.0, CachedInputPerMTok: 0.25, CacheWritePerMTok: 12.50, OutputPerMTok: 50.0}}},
-	"claude-opus-4-5":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
-	"claude-opus-4-6":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
-	"claude-opus-4-7":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
-	"claude-opus-4-8":   {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
-	"claude-opus-5":     {{Price: ModelPrice{InputPerMTok: 5.0, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 25.0}}},
-	"claude-opus-5-5":   {{Price: ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 5.0, CacheWrite1hPerMTok: 8.0, OutputPerMTok: 20.0}}},
-	"claude-sonnet-4-5": {{Price: ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}}},
-	"claude-sonnet-4-6": {{Price: ModelPrice{InputPerMTok: 3.0, CachedInputPerMTok: 0.30, CacheWritePerMTok: 3.75, OutputPerMTok: 15.0}}},
-	"claude-sonnet-5":   {{Price: ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 10.0}}},
+// Validate reports whether the entry prices tiers or aliases another priced
+// model, without doing both or neither.
+func (m pricingModel) Validate() error {
+	if m.ID == "" {
+		return errors.New("model ID is empty")
+	}
+	if m.Alias != "" {
+		if len(m.Tiers) > 0 {
+			return fmt.Errorf("model %q has both alias and tiers", m.ID)
+		}
+		return nil
+	}
+	if len(m.Tiers) == 0 {
+		return fmt.Errorf("model %q has neither alias nor tiers", m.ID)
+	}
+	for _, tier := range m.Tiers {
+		if err := tier.Validate(); err != nil {
+			return fmt.Errorf("model %q: %w", m.ID, err)
+		}
+	}
+	return nil
+}
+
+// pricingTier mirrors one price tier. Windows names a window group of the
+// model's provider, and Price is nil when the entry omits it.
+type pricingTier struct {
+	EffectiveFrom string      `json:"effective_from"`
+	Windows       string      `json:"windows"`
+	Price         *ModelPrice `json:"price"`
+}
+
+// Validate reports whether the tier carries a price and a parsable effective
+// date.
+func (t pricingTier) Validate() error {
+	if t.Price == nil {
+		return errors.New("price is required")
+	}
+	if err := t.Price.Validate(); err != nil {
+		return err
+	}
+	if t.EffectiveFrom != "" {
+		if _, err := time.Parse(pricingDateLayout, t.EffectiveFrom); err != nil {
+			return fmt.Errorf("effective_from %q: %w", t.EffectiveFrom, err)
+		}
+	}
+	return nil
+}
+
+// toPriceTier converts the tier, resolving its window group.
+func (t pricingTier) toPriceTier(windows map[string][]PeakWindow) (PriceTier, error) {
+	var peaks []PeakWindow
+	if t.Windows != "" {
+		var ok bool
+		peaks, ok = windows[t.Windows]
+		if !ok {
+			return PriceTier{}, fmt.Errorf("unknown window group %q", t.Windows)
+		}
+	}
+	return PriceTier{EffectiveFrom: t.EffectiveFrom, PeakWindows: peaks, Price: *t.Price}, nil
+}
+
+// pricingWindow mirrors one daily UTC range of a window group.
+type pricingWindow struct {
+	Days  []string `json:"days"`
+	Start string   `json:"start"`
+	End   string   `json:"end"`
+}
+
+// Validate reports whether the window names parsable weekdays and clock
+// times.
+func (w pricingWindow) Validate() error {
+	if _, err := parseWeekdays(w.Days); err != nil {
+		return err
+	}
+	if _, ok := parseClock(w.Start); !ok {
+		return fmt.Errorf("start %q: want HH:MM", w.Start)
+	}
+	if _, ok := parseClock(w.End); !ok {
+		return fmt.Errorf("end %q: want HH:MM", w.End)
+	}
+	return nil
+}
+
+// toPeakWindow converts the entry, applying the provider's holidays.
+func (w pricingWindow) toPeakWindow(holidays []string) (PeakWindow, error) {
+	days, err := parseWeekdays(w.Days)
+	if err != nil {
+		return PeakWindow{}, err
+	}
+	return PeakWindow{Days: days, Holidays: holidays, Start: w.Start, End: w.End}, nil
+}
+
+// mustLoadPricing decodes the embedded schedules, panicking on failure: the
+// data ships in the binary and unit tests validate it, so a decode failure is
+// a build defect rather than a recoverable runtime condition.
+func mustLoadPricing() pricingTables {
+	tables, err := parsePricingJSON(pricingJSON)
+	if err != nil {
+		panic(fmt.Sprintf("pricing.json: %v", err))
+	}
+	return tables
+}
+
+// parsePricingJSON decodes and validates a pricing.json document.
+func parsePricingJSON(data []byte) (pricingTables, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var file pricingFile
+	if err := dec.Decode(&file); err != nil {
+		return pricingTables{}, err
+	}
+	if err := file.Validate(); err != nil {
+		return pricingTables{}, err
+	}
+	tables := pricingTables{
+		providers:   make(map[string]modelPriceTable, len(file.Providers)),
+		peakWindows: make(map[string][]PeakWindow, len(file.Providers)),
+	}
+	for i := range file.Providers {
+		p := &file.Providers[i]
+		built, err := p.build()
+		if err != nil {
+			return pricingTables{}, fmt.Errorf("provider %q: %w", p.Provider, err)
+		}
+		tables.providers[p.Provider] = built.models
+		for _, name := range slices.Sorted(maps.Keys(built.windows)) {
+			tables.peakWindows[p.Provider] = append(tables.peakWindows[p.Provider], built.windows[name]...)
+		}
+	}
+	return tables, nil
+}
+
+// providerPricing is one provider's validated model schedules and window
+// groups.
+type providerPricing struct {
+	models  modelPriceTable
+	windows map[string][]PeakWindow
+}
+
+// parseWeekdays converts pricing.json weekday abbreviations; an empty list
+// means every day.
+func parseWeekdays(names []string) ([]time.Weekday, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	days := make([]time.Weekday, 0, len(names))
+	for _, name := range names {
+		day, ok := weekdayNames[strings.ToLower(name)]
+		if !ok {
+			return nil, fmt.Errorf("weekday %q: want sun, mon, tue, wed, thu, fri or sat", name)
+		}
+		days = append(days, day)
+	}
+	return days, nil
+}
+
+// weekdayNames maps pricing.json weekday abbreviations to time.Weekday.
+var weekdayNames = map[string]time.Weekday{
+	"sun": time.Sunday,
+	"mon": time.Monday,
+	"tue": time.Tuesday,
+	"wed": time.Wednesday,
+	"thu": time.Thursday,
+	"fri": time.Friday,
+	"sat": time.Saturday,
 }
