@@ -345,11 +345,11 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 	stoppedID := ksid.NewID()
 	stopped := mustNewTask(t, stoppedID, agent.Prompt{Text: "stopped"}, harness.Claude)
 	stopped.SetState(taskslog.StateStopped)
-	insertTestTask(s, stoppedID.String(), stopped)
+	insertTestTask(s, stoppedID, stopped)
 	runningID := ksid.NewID()
 	running := mustNewTask(t, runningID, agent.Prompt{Text: "running"}, harness.Codex)
 	running.SetState(taskslog.StateRunning)
-	insertTestTask(s, runningID.String(), running)
+	insertTestTask(s, runningID, running)
 	registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
 
 	first := registry.handleTasksList(t.Context(), mcpTaskListArgs{Limit: 1})
@@ -396,18 +396,18 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		firstChildID := ksid.NewID()
 		firstChild := mustNewTask(t, firstChildID, agent.Prompt{Text: "first child"}, harness.Claude)
 		firstChild.ParentTaskID = parentID
-		insertTestTask(s, firstChildID.String(), firstChild)
+		insertTestTask(s, firstChildID, firstChild)
 		secondChildID := ksid.NewID()
 		secondChild := mustNewTask(t, secondChildID, agent.Prompt{Text: "second child"}, harness.Codex)
 		secondChild.ParentTaskID = parentID
-		insertTestTask(s, secondChildID.String(), secondChild)
+		insertTestTask(s, secondChildID, secondChild)
 		unrelatedID := ksid.NewID()
 		unrelated := mustNewTask(t, unrelatedID, agent.Prompt{Text: "unrelated"}, harness.Claude)
-		insertTestTask(s, unrelatedID.String(), unrelated)
+		insertTestTask(s, unrelatedID, unrelated)
 		grandchildID := ksid.NewID()
 		grandchild := mustNewTask(t, grandchildID, agent.Prompt{Text: "grandchild"}, harness.Codex)
 		grandchild.ParentTaskID = firstChildID
-		insertTestTask(s, grandchildID.String(), grandchild)
+		insertTestTask(s, grandchildID, grandchild)
 
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
 		result := registry.handleTasksList(ctx, mcpTaskListArgs{})
@@ -459,16 +459,16 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		parentID := ksid.NewID()
 		parent := mustNewTask(t, parentID, agent.Prompt{Text: "parent"}, harness.Claude)
 		parent.SetState(taskslog.StateWaiting)
-		insertTestTask(s, parentID.String(), parent)
+		insertTestTask(s, parentID, parent)
 		childID := ksid.NewID()
 		child := mustNewTask(t, childID, agent.Prompt{Text: "child"}, harness.Codex)
 		child.ParentTaskID = parentID
 		child.SetState(taskslog.StateWaiting)
-		insertTestTask(s, childID.String(), child)
+		insertTestTask(s, childID, child)
 		unrelatedID := ksid.NewID()
 		unrelated := mustNewTask(t, unrelatedID, agent.Prompt{Text: "unrelated"}, harness.Claude)
 		unrelated.SetState(taskslog.StateWaiting)
-		insertTestTask(s, unrelatedID.String(), unrelated)
+		insertTestTask(s, unrelatedID, unrelated)
 
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
 		_, self, err := registry.entryByTaskRef(ctx, taskID("0"), true)
@@ -505,11 +505,11 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		}
 		callerID := ksid.NewID()
 		caller := mustNewTask(t, callerID, agent.Prompt{Text: "caller"}, harness.Codex)
-		insertTestTask(s, callerID.String(), caller)
+		insertTestTask(s, callerID, caller)
 		targetID := ksid.NewID()
 		target := mustNewTask(t, targetID, agent.Prompt{Text: "unrelated"}, harness.Claude)
 		target.ParentTaskID = ksid.NewID()
-		insertTestTask(s, targetID.String(), target)
+		insertTestTask(s, targetID, target)
 
 		result, err := registry.ForTask(callerID).CallTool(t.Context(), "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q}`, targetID.String())))
 		if err != nil {
@@ -785,7 +785,7 @@ func TestMCPResultBounds(t *testing.T) {
 		id := ksid.NewID()
 		tk := mustNewTask(t, id, agent.Prompt{Text: "task"}, harness.Claude)
 		tk.SetTitle(strings.Repeat("€", maxMCPTaskTitle))
-		insertTestTask(s, id.String(), tk)
+		insertTestTask(s, id, tk)
 		registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
 		keys := []mcpResourceKey{{URI: "caic://tasks/" + id.String(), Kind: mcpResourceTask, TaskID: id}}
 		var yielded bool
@@ -1355,7 +1355,7 @@ func TestCaicToolRegistryHandleTaskForkSelectionErrors(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
 			tk.SetState(taskslog.StateWaiting)
-			insertTestTask(s, tk.ID.String(), tk)
+			insertTestTask(s, tk.ID, tk)
 			c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
 			result := c.handleTaskFork(t.Context(), tt.args)
@@ -1384,7 +1384,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeRecovery(t *testing.T
 	tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
 	tk.SetState(taskslog.StateWaiting)
-	insertTestTask(s, tk.ID.String(), tk)
+	insertTestTask(s, tk.ID, tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"})
 	if !result.IsError {
@@ -1411,7 +1411,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestRecoveryForRetiredSourceMod
 	tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
 	tk.SetState(taskslog.StateWaiting)
-	insertTestTask(s, tk.ID.String(), tk)
+	insertTestTask(s, tk.ID, tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"})
 	if !result.IsError {
@@ -1438,7 +1438,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeModelRecovery(t *test
 	tk.Repos = []taskslog.RepoMount{{Name: "myrepo", Branch: "main"}}
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "source"), runtime.ConnectionTarget{}, "", "", 0)
 	tk.SetState(taskslog.StateWaiting)
-	insertTestTask(s, tk.ID.String(), tk)
+	insertTestTask(s, tk.ID, tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"})
 	if !result.IsError {

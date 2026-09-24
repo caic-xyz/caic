@@ -125,7 +125,7 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	return m
 }
 
-func awaitTaskCleanup(t *testing.T, m *Manager, id string) {
+func awaitTaskCleanup(t *testing.T, m *Manager, id ksid.ID) {
 	t.Cleanup(func() {
 		e, ok := m.GetEntry(id)
 		if !ok {
@@ -1440,7 +1440,7 @@ func TestManager(t *testing.T) {
 			QuotaWindow:   "five_hour",
 			Utilization:   1,
 		}})
-		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
 		_, live, unsubscribe := tk.Subscribe(m.serverCtx)
 		t.Cleanup(unsubscribe)
 		_, rateLimitLive, _ := tk.SubscribeRateLimits(m.serverCtx)
@@ -1479,7 +1479,7 @@ func TestManager(t *testing.T) {
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(taskslog.StateRunning)
 		entry := m.NewEntry(tk, nil)
-		m.Insert(tk.ID.String(), entry)
+		m.Insert(tk.ID, entry)
 		if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 			t.Fatalf("Stop() = %v", err)
 		}
@@ -1550,7 +1550,7 @@ func TestManager(t *testing.T) {
 				Utilization:   0.91,
 			},
 		})
-		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		quotas := m.QuotaTracker.Merge(nil, now)
 		if len(quotas) != 1 || len(quotas[0].RateLimits) != 2 {
@@ -1600,8 +1600,8 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
-			got, ok := m.GetEntry(tk.ID.String())
+			m.Insert(tk.ID, e)
+			got, ok := m.GetEntry(tk.ID)
 			if !ok || got != e {
 				t.Fatal("GetEntry did not return inserted entry")
 			}
@@ -1612,7 +1612,7 @@ func TestManager(t *testing.T) {
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			_, ok := m.GetEntry("nonexistent")
+			_, ok := m.GetEntry(ksid.NewID())
 			if ok {
 				t.Error("GetEntry should return false for nonexistent task")
 			}
@@ -1635,7 +1635,7 @@ func TestManager(t *testing.T) {
 			t.Fatal("new entry is already done")
 		default:
 		}
-		m.Insert(tk.ID.String(), e)
+		m.Insert(tk.ID, e)
 		if got, want := e.Lifecycle, e.Lifecycle; got != want {
 			t.Fatal("Lifecycle allocated a new coordinator")
 		}
@@ -1648,16 +1648,16 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
-		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
 		done := make(chan struct{})
 		go func() {
-			m.Range(func(_ string, _ *Entry) bool {
+			m.Range(func(_ ksid.ID, _ *Entry) bool {
 				_, _ = m.Checkouts.Checkout("repo")
 				return true
 			})
 			registerCheckout(t, m.Checkouts, "repo", &repo.Checkout{})
 			for range m.Checkouts.Checkouts() {
-				_, _ = m.GetEntry(tk.ID.String())
+				_, _ = m.GetEntry(tk.ID)
 			}
 			close(done)
 		}()
@@ -1674,10 +1674,10 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for range 5 {
-				m.Insert(ksid.NewID().String(), m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""), nil))
+				m.Insert(ksid.NewID(), m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""), nil))
 			}
 			var count int
-			m.Range(func(id string, e *Entry) bool {
+			m.Range(func(id ksid.ID, e *Entry) bool {
 				count++
 				return true
 			})
@@ -1689,10 +1689,10 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			for range 5 {
-				m.Insert(ksid.NewID().String(), m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""), nil))
+				m.Insert(ksid.NewID(), m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""), nil))
 			}
 			var count int
-			m.Range(func(id string, e *Entry) bool {
+			m.Range(func(id ksid.ID, e *Entry) bool {
 				count++
 				return false
 			})
@@ -1707,7 +1707,7 @@ func TestManager(t *testing.T) {
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
 		for range 5 {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 		}
 		var count int
 		for id, entry := range m.Entries() {
@@ -1727,7 +1727,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			oldCh := m.Changed()
-			m.Insert(ksid.NewID().String(), m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""), nil))
+			m.Insert(ksid.NewID(), m.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""), nil))
 			select {
 			case <-oldCh:
 			case <-time.After(time.Second):
@@ -1777,7 +1777,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 42)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksByPR("acme", "magic", 42)
 			if len(found) != 1 {
 				t.Fatalf("FindTasksByPR returned %d entries, want 1", len(found))
@@ -1792,7 +1792,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 42)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksByPR("other", "repo", 42)
 			if len(found) != 0 {
 				t.Errorf("FindTasksByPR returned %d entries for wrong owner, want 0", len(found))
@@ -1808,7 +1808,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksMatchingBranch("acme", "magic", "caic-1")
 			if len(found) != 1 {
 				t.Fatalf("FindTasksMatchingBranch returned %d entries, want 1", len(found))
@@ -1820,7 +1820,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksMatchingBranch("acme", "magic", "caic-2")
 			if len(found) != 0 {
 				t.Errorf("FindTasksMatchingBranch returned %d entries for wrong branch, want 0", len(found))
@@ -1838,7 +1838,7 @@ func TestManager(t *testing.T) {
 			tk.SetPR("acme", "magic", 0)
 			e := m.NewEntry(tk, nil)
 			e.SetMonitorBranch("caic-1")
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			found := m.FindTasksMonitoringBranch("acme", "magic")
 			if len(found) != 1 {
 				t.Fatalf("FindTasksMonitoringBranch returned %d entries, want 1", len(found))
@@ -1850,7 +1850,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "my/repo", Branch: "caic-1"}}
 			tk.SetPR("acme", "magic", 0)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			found := m.FindTasksMonitoringBranch("acme", "magic")
 			if len(found) != 0 {
 				t.Errorf("FindTasksMonitoringBranch returned %d entries without monitor branch, want 0", len(found))
@@ -1868,7 +1868,7 @@ func TestManager(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/a"}}
 			tk.SetPR("acme", "magic", 0)
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 1 {
 				t.Fatalf("ListPendingBotTasks returned %d tasks, want 1", len(pending))
@@ -1882,7 +1882,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 0 {
 				t.Errorf("ListPendingBotTasks returned %d tasks without ForgeIssue, want 0", len(pending))
@@ -1895,7 +1895,7 @@ func TestManager(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 				tk.ForgeIssue = 1
 				tk.SetState(st)
-				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.Insert(tk.ID, m.NewEntry(tk, nil))
 			}
 			pending := m.ListPendingBotTasks()
 			if len(pending) != 0 {
@@ -2018,8 +2018,8 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.SetState(taskslog.StateStopped)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
-			state, result, err := m.WatchTaskCompletion(t.Context(), tk.ID.String())
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
+			state, result, err := m.WatchTaskCompletion(t.Context(), tk.ID)
 			if err != nil {
 				t.Fatalf("WatchTaskCompletion error: %v", err)
 			}
@@ -2033,7 +2033,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_not_found", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			_, _, err := m.WatchTaskCompletion(t.Context(), "nonexistent")
+			_, _, err := m.WatchTaskCompletion(t.Context(), ksid.NewID())
 			if err == nil {
 				t.Fatal("expected error for nonexistent task")
 			}
@@ -2047,13 +2047,13 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			go func() {
 				time.Sleep(50 * time.Millisecond)
 				tk.SetState(taskslog.StateStopped)
 				m.NotifyTaskChange()
 			}()
-			state, _, err := m.WatchTaskCompletion(t.Context(), tk.ID.String())
+			state, _, err := m.WatchTaskCompletion(t.Context(), tk.ID)
 			if err != nil {
 				t.Fatalf("WatchTaskCompletion error: %v", err)
 			}
@@ -2066,10 +2066,10 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			_, _, err := m.WatchTaskCompletion(ctx, tk.ID.String())
+			_, _, err := m.WatchTaskCompletion(ctx, tk.ID)
 			if err == nil {
 				t.Fatal("expected error for cancelled context")
 			}
@@ -2116,7 +2116,7 @@ func TestManager(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 				tk.SetState(c.state)
 				e := m.NewEntry(tk, nil)
-				m.Insert(tk.ID.String(), e)
+				m.Insert(tk.ID, e)
 				err := c.call(m, e)
 				if err == nil {
 					t.Fatalf("expected *Error with Kind %v, got nil", c.want)
@@ -2308,7 +2308,7 @@ func TestManager(t *testing.T) {
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(src, nil)
-			m.Insert(src.ID.String(), e)
+			m.Insert(src.ID, e)
 			return m, e
 		}
 		t.Run("valid_resolved_overrides_and_max_cpus", func(t *testing.T) {
@@ -2368,7 +2368,7 @@ func TestManager(t *testing.T) {
 			for range maxDelegatedTasksPerParent {
 				child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, "", "")
 				child.ParentTaskID = src.Task().ID
-				m.Insert(child.ID.String(), m.NewEntry(child, nil))
+				m.Insert(child.ID, m.NewEntry(child, nil))
 			}
 			_, err := src.Lifecycle.ForkDelegated(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "one too many"}})
 			if err == nil || !strings.Contains(err.Error(), "10 non-purged child tasks") {
@@ -2384,8 +2384,8 @@ func TestManager(t *testing.T) {
 			child.ParentTaskID = parent.ID
 			child.SetState(taskslog.StateWaiting)
 			parentEntry := m.NewEntry(parent, nil)
-			m.Insert(parent.ID.String(), parentEntry)
-			m.Insert(child.ID.String(), m.NewEntry(child, nil))
+			m.Insert(parent.ID, parentEntry)
+			m.Insert(child.ID, m.NewEntry(child, nil))
 
 			if err := parentEntry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
@@ -2403,8 +2403,8 @@ func TestManager(t *testing.T) {
 			child.ParentTaskID = parent.ID
 			child.SetState(taskslog.StateWaiting)
 			parentEntry := m.NewEntry(parent, nil)
-			m.Insert(parent.ID.String(), parentEntry)
-			m.Insert(child.ID.String(), m.NewEntry(child, nil))
+			m.Insert(parent.ID, parentEntry)
+			m.Insert(child.ID, m.NewEntry(child, nil))
 
 			if err := parentEntry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -2520,7 +2520,7 @@ func TestManager(t *testing.T) {
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(src, nil)
-			m.Insert(src.ID.String(), e)
+			m.Insert(src.ID, e)
 			_, err := e.Lifecycle.Fork(t.Context(), &ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
@@ -2539,7 +2539,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Restart(t.Context(), agent.Prompt{})
 			te, ok := errors.AsType[*Error](err)
 			if !ok {
@@ -2555,7 +2555,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateStopped)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Restart(t.Context(), agent.Prompt{Text: "go"})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -2575,7 +2575,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
 			if err == nil {
 				t.Fatal("expected error from SendInput with no session")
@@ -2628,7 +2628,7 @@ func TestManager(t *testing.T) {
 			}
 			e := m.NewEntry(tk, nil)
 			e.LogPath.Set(path)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 
 			if err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "A"}); err != nil {
 				t.Fatal(err)
@@ -2683,7 +2683,7 @@ func TestManager(t *testing.T) {
 			tk.AttachSession(&task.SessionHandle{Session: s})
 
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err = e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go"})
 			if err == nil {
 				t.Fatal("expected delivery error")
@@ -2715,14 +2715,14 @@ func TestManager(t *testing.T) {
 			var wg sync.WaitGroup
 			for range 10 {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-				id := tk.ID.String()
+				id := tk.ID
 				wg.Go(func() {
 					m.Insert(id, m.NewEntry(tk, nil))
 				})
 			}
 			for range 5 {
 				wg.Go(func() {
-					m.Range(func(id string, e *Entry) bool { return true })
+					m.Range(func(id ksid.ID, e *Entry) bool { return true })
 				})
 			}
 			wg.Wait()
@@ -2750,7 +2750,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateStopped)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.ClearContext()
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -2763,7 +2763,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.ClearContext()
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindInternal {
@@ -2779,7 +2779,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Compact(t.Context(), "shorten")
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -2863,7 +2863,7 @@ func TestManager(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/x", Branch: "caic-1"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-dead"))
 			if got := tk.GetState(); got != taskslog.StateStopped {
 				t.Errorf("state = %v, want StateStopped", got)
@@ -2875,7 +2875,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-purged"), runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
 			tk.SetState(taskslog.StatePurged)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-purged"))
 			if got := tk.GetState(); got != taskslog.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
@@ -2890,7 +2890,7 @@ func TestManager(t *testing.T) {
 			// event handled here. Acting on it would flap the task to Stopped
 			// mid-purge and race the cleanup goroutine.
 			tk.SetState(taskslog.StatePurging)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-purging"))
 			if got := tk.GetState(); got != taskslog.StatePurging {
 				t.Errorf("state = %v (should stay Purging)", got)
@@ -2902,7 +2902,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopping"), runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
 			tk.SetState(taskslog.StateStopping)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-stopping"))
 			if got := tk.GetState(); got != taskslog.StateStopping {
 				t.Errorf("state = %v (should stay Stopping)", got)
@@ -2914,7 +2914,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-stopped"), runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-stopped"))
 			if got := tk.GetState(); got != taskslog.StateStopped {
 				t.Errorf("state = %v (should stay Stopped)", got)
@@ -2926,7 +2926,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-alive"), runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			m.handleRuntimeInstanceExit(t.Context(), runtime.NewID("test-runtime", "ctr-other"))
 			if got := tk.GetState(); got != taskslog.StateRunning {
 				t.Errorf("state = %v (should stay Running)", got)
@@ -2940,7 +2940,7 @@ func TestManager(t *testing.T) {
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			if _, err := m.HistorySource(e); !errors.Is(err, taskslog.ErrNoLog) {
 				t.Fatalf("HistorySource error = %v, want ErrNoLog", err)
 			}
@@ -3118,7 +3118,7 @@ func TestManager(t *testing.T) {
 			if m.Len() != 1 {
 				t.Fatalf("Len() = %d, want 1", m.Len())
 			}
-			e, ok := m.GetEntry(id.String())
+			e, ok := m.GetEntry(id)
 			if !ok {
 				t.Fatal("entry not found for expected ID")
 			}
@@ -3173,7 +3173,7 @@ func TestManager(t *testing.T) {
 			if err := m.LoadPurgedTasks(all); err != nil {
 				t.Fatalf("LoadPurgedTasks: %v", err)
 			}
-			e, ok := m.GetEntry(id.String())
+			e, ok := m.GetEntry(id)
 			if !ok {
 				t.Fatal("entry not found")
 			}
@@ -3220,7 +3220,7 @@ func TestManager(t *testing.T) {
 			if err := m.LoadPurgedTasks(logs); err != nil {
 				t.Fatalf("LoadPurgedTasks: %v", err)
 			}
-			e, ok := m.GetEntry(id.String())
+			e, ok := m.GetEntry(id)
 			if !ok {
 				t.Fatal("entry not found")
 			}
@@ -3250,7 +3250,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadPurgedTasks: %v", err)
 			}
-			e, _ := m.GetEntry(id.String())
+			e, _ := m.GetEntry(id)
 			if got := e.Task().GetState(); got != taskslog.StateFailed {
 				t.Errorf("state = %v, want StateFailed (running→failed)", got)
 			}
@@ -3269,7 +3269,7 @@ func TestManager(t *testing.T) {
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
-			e, _ := m.GetEntry(id.String())
+			e, _ := m.GetEntry(id)
 			if got := e.Task().Title(); got != "this is the prompt" {
 				t.Errorf("Title = %q, want prompt fallback", got)
 			}
@@ -3287,7 +3287,7 @@ func TestManager(t *testing.T) {
 				},
 			}
 			_ = m.LoadPurgedTasks(all)
-			e, _ := m.GetEntry(id.String())
+			e, _ := m.GetEntry(id)
 			if got := e.Result().State; got != taskslog.StateFailed {
 				t.Errorf("Result.State = %v, want StateFailed (fallback)", got)
 			}
@@ -3317,7 +3317,7 @@ func TestManager(t *testing.T) {
 			active := mustNewTask(t, activeID, agent.Prompt{Text: "active"}, "", "")
 			active.Repos = []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-live"}}
 			active.SetTitle("active")
-			m.Insert(activeID.String(), m.NewEntry(active, nil))
+			m.Insert(activeID, m.NewEntry(active, nil))
 			duplicateBranchID := ksid.NewID()
 			keptID := ksid.NewID()
 			all := []*taskslog.LoadedTask{
@@ -3349,14 +3349,14 @@ func TestManager(t *testing.T) {
 			if got := m.Len(); got != 2 {
 				t.Fatalf("Len() = %d, want active + kept", got)
 			}
-			if _, ok := m.GetEntry(duplicateBranchID.String()); ok {
+			if _, ok := m.GetEntry(duplicateBranchID); ok {
 				t.Fatal("duplicate branch task was loaded")
 			}
-			activeEntry, _ := m.GetEntry(activeID.String())
+			activeEntry, _ := m.GetEntry(activeID)
 			if got := activeEntry.Task().Title(); got != "active" {
 				t.Errorf("active title = %q, want active", got)
 			}
-			if _, ok := m.GetEntry(keptID.String()); !ok {
+			if _, ok := m.GetEntry(keptID); !ok {
 				t.Fatal("kept task was not loaded")
 			}
 		})
@@ -3369,7 +3369,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StatePending)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -3382,7 +3382,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StatePurging)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -3395,7 +3395,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateProvisioning)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -3408,7 +3408,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateRunning)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			_, err := e.Lifecycle.Sync(t.Context(), SyncTargetDefault, true)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
@@ -3434,7 +3434,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Purge(t.Context(), time.Hour); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3459,7 +3459,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3484,7 +3484,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateCrashed)
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Purge(t.Context(), 20*time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3504,7 +3504,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateStopped)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Purge(t.Context(), -time.Millisecond)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
@@ -3517,7 +3517,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StatePurged)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Purge(t.Context(), time.Millisecond)
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -3533,7 +3533,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(taskslog.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			entry.Finish(&taskslog.Result{State: taskslog.StateCrashed, Err: errors.New("agent crashed")})
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Purge(t.Context(), time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3569,7 +3569,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
@@ -3621,7 +3621,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateStopped)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Stop(t.Context())
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -3637,7 +3637,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
@@ -3665,7 +3665,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetState(taskslog.StateRunning)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.Revive()
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindConflict {
@@ -3681,7 +3681,7 @@ func TestManager(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateCrashed)
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
@@ -3722,7 +3722,7 @@ func TestManager(t *testing.T) {
 			}
 			entry := m.NewEntry(tk, nil)
 			entry.LogPath.Set(path)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			firstChanged := m.Changed()
 			if err := entry.Lifecycle.Revive(); err != nil {
@@ -3765,7 +3765,7 @@ func TestManager(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/a"}}
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), e)
+			m.Insert(tk.ID, e)
 			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go", Images: []agent.ImageData{{}}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
@@ -3801,7 +3801,7 @@ func TestManager(t *testing.T) {
 			runtimeBackend := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			entry.Lifecycle.watchSession(h)
 
@@ -3850,7 +3850,7 @@ func TestManager(t *testing.T) {
 			tk.AttachSession(h)
 			m := newTestManager(t, Config{ServerCtx: serverCtx, Runtimes: newTestRuntime(t, runtimeBackend, nil)})
 			entry := m.NewEntry(tk, nil)
-			m.Insert(tk.ID.String(), entry)
+			m.Insert(tk.ID, entry)
 
 			entry.Lifecycle.watchSession(h)
 			cancelServer()
@@ -3953,7 +3953,7 @@ func TestManager(t *testing.T) {
 			src.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "md-agent-src"), runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(src, nil)
-			m.Insert(src.ID.String(), e)
+			m.Insert(src.ID, e)
 			return e
 		}
 
@@ -5317,7 +5317,7 @@ func TestManager(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(taskslog.StateRunning)
-		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		go m.watchStats(ctx)
 		select {
@@ -5364,7 +5364,7 @@ func TestManager(t *testing.T) {
 		tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(taskslog.StateRunning)
 		tk.PushStats(&runtime.Stats{CPUPerc: 2.5, DiskUsed: -1})
-		m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 		go m.watchDiskUsage(ctx)
 		select {
@@ -5435,7 +5435,7 @@ func TestManager(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-import"), runtime.ConnectionTarget{SSHHost: "ctr-import"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 			if _, err := m.ImportInstances(t.Context(), []runtime.Instance{}, nil); err != nil {
 				t.Fatal(err)
 			}
@@ -5466,7 +5466,7 @@ func TestManager(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/x", Branch: "caic-1"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+			m.Insert(tk.ID, m.NewEntry(tk, nil))
 
 			ctx, cancel := context.WithCancel(t.Context())
 			t.Cleanup(cancel)
@@ -5502,7 +5502,7 @@ func TestManager(t *testing.T) {
 					instanceID := runtime.NewID("test-runtime", runtime.InstanceID("ctr-"+tt.name))
 					tk.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{SSHHost: string(instanceID)}, "", "", 0)
 					tk.SetState(tt.initial)
-					m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+					m.Insert(tk.ID, m.NewEntry(tk, nil))
 					m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: instanceID, Kind: tt.kind})
 					if got := tk.GetState(); got != tt.want {
 						t.Fatalf("state = %v, want %v", got, tt.want)
@@ -5515,7 +5515,7 @@ func TestManager(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-oom"), runtime.ConnectionTarget{SSHHost: "ctr-oom"}, "", "", 0)
 				tk.SetState(taskslog.StateRunning)
-				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.Insert(tk.ID, m.NewEntry(tk, nil))
 				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-oom"), Kind: runtime.EventOOM})
 				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-oom"), Kind: runtime.EventDie})
 				if got := tk.GetState(); got != taskslog.StateCrashed {
@@ -5528,7 +5528,7 @@ func TestManager(t *testing.T) {
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 				tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-unknown"), runtime.ConnectionTarget{SSHHost: "ctr-unknown"}, "", "", 0)
 				tk.SetState(taskslog.StateRunning)
-				m.Insert(tk.ID.String(), m.NewEntry(tk, nil))
+				m.Insert(tk.ID, m.NewEntry(tk, nil))
 				m.handleRuntimeEvent(t.Context(), runtime.Event{InstanceID: runtime.NewID("test-runtime", "ctr-unknown"), Kind: "unknown"})
 				if got := tk.GetState(); got != taskslog.StateRunning {
 					t.Fatalf("state = %v, want StateRunning", got)
@@ -5577,7 +5577,7 @@ func TestLoadUnsettledTasks(t *testing.T) {
 		}}); err != nil {
 			t.Fatalf("LoadUnsettledTasks: %v", err)
 		}
-		e, ok := m.GetEntry(id.String())
+		e, ok := m.GetEntry(id)
 		if !ok {
 			t.Fatal("entry not found")
 		}
@@ -5600,7 +5600,7 @@ func TestLoadUnsettledTasks(t *testing.T) {
 		}}); err != nil {
 			t.Fatalf("LoadUnsettledTasks: %v", err)
 		}
-		e, ok := m.GetEntry(id.String())
+		e, ok := m.GetEntry(id)
 		if !ok {
 			t.Fatal("entry not found")
 		}
@@ -5686,7 +5686,7 @@ func TestAllocateBranchesAdoptsAvailableLocalBranch(t *testing.T) {
 	allocate := func(base string) *task.Task {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 		tk.Repos = []taskslog.RepoMount{{Name: "repo", BaseBranch: base, GitRoot: dir}}
-		m.insertEntry(tk.ID.String(), m.NewEntry(tk, nil))
+		m.insertEntry(tk.ID, m.NewEntry(tk, nil))
 		if err := m.allocateBranches(t.Context(), tk, tk.ReposSnapshot(), 1, true); err != nil {
 			t.Fatal(err)
 		}

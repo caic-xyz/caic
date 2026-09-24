@@ -93,11 +93,11 @@ func TestRunSettledHistory(t *testing.T) {
 	cutoffAgo := 2 * taskslog.SettledRetention
 	// Task IDs are ksids: the loader only registers a parsed ID (insertLoadedTasks
 	// randomises unparseable ones), and the filename base must equal the ID.
-	idAlpha, idBeta, idGamma, idDelta := ksid.NewID().String(), ksid.NewID().String(), ksid.NewID().String(), ksid.NewID().String()
-	recentTerminal := writeSettledHistoryLog(t, dir, idAlpha+".jsonl", "purged", now.Add(-time.Hour))
-	running := writeSettledHistoryLog(t, dir, idBeta+".jsonl", "", now.Add(-time.Hour))
-	staleTerminal := writeSettledHistoryLog(t, dir, idGamma+".jsonl", "purged", now.Add(-cutoffAgo))
-	staleCompressed := writeSettledHistoryLog(t, dir, idDelta+".jsonl", "purged", now.Add(-cutoffAgo))
+	idAlpha, idBeta, idGamma, idDelta := ksid.NewID(), ksid.NewID(), ksid.NewID(), ksid.NewID()
+	recentTerminal := writeSettledHistoryLog(t, dir, idAlpha.String()+".jsonl", "purged", now.Add(-time.Hour))
+	running := writeSettledHistoryLog(t, dir, idBeta.String()+".jsonl", "", now.Add(-time.Hour))
+	staleTerminal := writeSettledHistoryLog(t, dir, idGamma.String()+".jsonl", "purged", now.Add(-cutoffAgo))
+	staleCompressed := writeSettledHistoryLog(t, dir, idDelta.String()+".jsonl", "purged", now.Add(-cutoffAgo))
 	if _, err := logStore.Compress(staleCompressed, nil, taskslog.StatePurged); err != nil {
 		t.Fatal(err)
 	}

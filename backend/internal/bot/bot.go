@@ -13,6 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/maruel/ksid"
 )
 
 // RepoInfo is the forge identity of a managed repository, returned by Client.ResolveRepo.
@@ -56,7 +57,7 @@ type CommentEvent struct {
 // PendingBotTask describes a non-terminal task with a forge issue callback.
 // Used by ResumePendingComments to re-attach watchers after restart.
 type PendingBotTask struct {
-	TaskID      string
+	TaskID      ksid.ID
 	ForgeOwner  string
 	ForgeRepo   string
 	IssueNumber int
@@ -69,10 +70,10 @@ type Client interface {
 	// Returns nil if the forge name does not match any managed repo.
 	ResolveRepo(forgeFullName string) *RepoInfo
 	// CreateTask creates a new task and returns its ID.
-	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error)
 	// WatchTaskCompletion blocks until the task reaches a terminal state,
 	// then returns the final state name and agent result text.
-	WatchTaskCompletion(ctx context.Context, taskID string) (state string, result string, err error)
+	WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (state string, result string, err error)
 	// ListPendingBotTasks returns non-terminal tasks that have a ForgeIssue set.
 	ListPendingBotTasks() []PendingBotTask
 	// ResolveCommenter returns a forge.Commenter for the given forge owner, or nil.
@@ -188,7 +189,7 @@ func (b *Bot) dispatch(ctx context.Context, repo *RepoInfo, prompt string, comme
 }
 
 // watchAndComment blocks until the task completes, then posts a comment.
-func (b *Bot) watchAndComment(taskID string, commenter forge.Commenter, owner, repo string, issueNumber int) {
+func (b *Bot) watchAndComment(taskID ksid.ID, commenter forge.Commenter, owner, repo string, issueNumber int) {
 	state, result, err := b.client.WatchTaskCompletion(b.ctx, taskID)
 	if err != nil {
 		b.log.WarnContext(b.ctx, "watch task failed", "id", taskID, "err", err)

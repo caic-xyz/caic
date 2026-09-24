@@ -29,6 +29,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
+	"github.com/maruel/ksid"
 )
 
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
@@ -47,8 +48,8 @@ func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) for
 	return b.forgeMgr.ForgeForInfo(ctx, &repo.Repository{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
 }
 
-func (b *testCIBackend) CreateTask(context.Context, task.CreateRequest) (string, error) {
-	return "", nil
+func (b *testCIBackend) CreateTask(context.Context, task.CreateRequest) (ksid.ID, error) {
+	return 0, nil
 }
 
 func (b *testCIBackend) GetCheckout(relPath string) (*repo.Checkout, bool) {

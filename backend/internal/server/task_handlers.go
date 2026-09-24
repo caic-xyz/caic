@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -726,7 +727,10 @@ func (h *taskHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
 // taskEntryFromRequest looks up a task by the {id} path parameter.
 // It returns 403 when the caller cannot access the task.
 func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager) (*taskmgr.Entry, error) {
-	id := r.PathValue("id")
+	id, err := ksid.Parse(r.PathValue("id"))
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
+	}
 	entry, ok := taskMgr.GetEntry(id)
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}

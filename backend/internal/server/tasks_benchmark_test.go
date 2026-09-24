@@ -37,7 +37,7 @@ func BenchmarkTaskListSnapshot(b *testing.B) {
 		if i%2 == 0 {
 			task.SetState(taskslog.StateStopped)
 		}
-		insertTestTask(s, id.String(), task)
+		insertTestTask(s, id, task)
 	}
 
 	taskSvc := testTaskHandlers(s).taskSvc
@@ -58,16 +58,16 @@ func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
 		if i%2 == 0 {
 			task.SetState(taskslog.StateStopped)
 		}
-		insertTestTask(s, id.String(), task)
+		insertTestTask(s, id, task)
 	}
 
 	taskSvc := testTaskHandlers(s).taskSvc
 	// Seed every cursor to the current sequence so the benchmark measures the
 	// steady state where no task has pending transitions to replay.
 	cursors := map[string]uint64{}
-	s.taskMgr.Range(func(id string, e *taskmgr.Entry) bool {
+	s.taskMgr.Range(func(id ksid.ID, e *taskmgr.Entry) bool {
 		_, seq, _ := e.Task().SnapshotWithStateHistory(0)
-		cursors[id] = seq
+		cursors[id.String()] = seq
 		return true
 	})
 	b.ReportAllocs()
@@ -99,7 +99,7 @@ func BenchmarkMCPTaskListPage(b *testing.B) {
 	for range 100 {
 		id := ksid.NewID()
 		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
-		insertTestTask(s, id.String(), task)
+		insertTestTask(s, id, task)
 	}
 	registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
 	b.ReportAllocs()
@@ -146,8 +146,8 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for range b.N {
-			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-			req.SetPathValue("id", taskID)
+			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+			req.SetPathValue("id", taskID.String())
 			w := httptest.NewRecorder()
 
 			testTaskHandlers(s).handleTaskEvents(w, req)
@@ -178,8 +178,8 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for range b.N {
-			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-			req.SetPathValue("id", taskID)
+			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+			req.SetPathValue("id", taskID.String())
 			req.Header.Set("Last-Event-ID", lastEventID)
 			w := httptest.NewRecorder()
 
@@ -202,8 +202,8 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for range b.N {
-			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-			req.SetPathValue("id", taskID)
+			req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+			req.SetPathValue("id", taskID.String())
 			w := httptest.NewRecorder()
 
 			testTaskHandlers(s).handleTaskEvents(w, req)
@@ -218,12 +218,12 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 	})
 }
 
-func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *testRouter) {
+func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *testRouter) {
 	logDir := b.TempDir()
-	taskID := ksid.NewID().String()
+	taskID := ksid.NewID()
 	finalText := "final compact response " + strings.Repeat("x", 42<<10)
 
-	path := filepath.Join(logDir, taskID+".jsonl")
+	path := filepath.Join(logDir, taskID.String()+".jsonl")
 	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		b.Fatal(err)
@@ -280,12 +280,12 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (string, *test
 	return taskID, s
 }
 
-func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (string, *testRouter) {
+func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *testRouter) {
 	logDir := b.TempDir()
-	taskID := ksid.NewID().String()
+	taskID := ksid.NewID()
 	finalText := "final compact response " + strings.Repeat("x", 42<<10)
 
-	path := filepath.Join(logDir, taskID+".jsonl")
+	path := filepath.Join(logDir, taskID.String()+".jsonl")
 	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		b.Fatal(err)

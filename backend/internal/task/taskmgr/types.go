@@ -88,7 +88,7 @@ type ForkRepo struct {
 
 // BotPendingTask is returned by ListPendingBotTasks.
 type BotPendingTask struct {
-	TaskID      string
+	TaskID      ksid.ID
 	ForgeOwner  string
 	ForgeRepo   string
 	IssueNumber int

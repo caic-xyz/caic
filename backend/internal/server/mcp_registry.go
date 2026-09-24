@@ -1355,7 +1355,7 @@ func (m *mcpRegistry) entryByTaskRef(ctx context.Context, ref taskID, allowSelf 
 	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
 	if number, err := parseTaskNumber(raw); err == nil {
 		if number == 0 && allowSelf && taskScoped {
-			entry, ok := m.taskSvc.taskMgr.GetEntry(delegatingTaskID.String())
+			entry, ok := m.taskSvc.taskMgr.GetEntry(delegatingTaskID)
 			if !ok {
 				return 0, nil, taskNotFoundError()
 			}
@@ -1908,7 +1908,7 @@ func (m *mcpRegistry) resourceJSON(ctx context.Context, uri string, value any) (
 
 // visibleTaskEntry resolves a task only when ordinary task access permits it.
 func (m *mcpRegistry) visibleTaskEntry(ctx context.Context, id ksid.ID) (*taskmgr.Entry, bool) {
-	entry, ok := m.taskSvc.taskMgr.GetEntry(id.String())
+	entry, ok := m.taskSvc.taskMgr.GetEntry(id)
 	if !ok {
 		return nil, false
 	}
@@ -1920,7 +1920,7 @@ func (m *mcpRegistry) visibleTaskEntry(ctx context.Context, id ksid.ID) (*taskmg
 
 // inspectableTaskEntry resolves a task when its stable ID can be inspected.
 func (m *mcpRegistry) inspectableTaskEntry(ctx context.Context, id ksid.ID) (*taskmgr.Entry, bool) {
-	entry, ok := m.taskSvc.taskMgr.GetEntry(id.String())
+	entry, ok := m.taskSvc.taskMgr.GetEntry(id)
 	if !ok {
 		return nil, false
 	}

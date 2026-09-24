@@ -281,20 +281,20 @@ func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error
 // Fork creates a new task from this task's retained runtime instance.
 //
 // p must be non-nil.
-func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
+func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	source := r.entry.Task()
 	state := source.GetState()
 	switch state {
 	case taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateStopped, taskslog.StateCrashed:
 	default:
-		return "", conflict("task must be active, stopped, or crashed to fork")
+		return 0, conflict("task must be active, stopped, or crashed to fork")
 	}
 	if source.RuntimeInstanceID() == "" {
-		return "", conflict("task has no instance")
+		return 0, conflict("task has no instance")
 	}
 	sourceRepos := source.ReposSnapshot()
 	if len(sourceRepos) == 0 {
-		return "", badRequestf("cannot fork a no-repo task")
+		return 0, badRequestf("cannot fork a no-repo task")
 	}
 
 	forkHarness := source.Harness
@@ -302,20 +302,20 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	forkEffort := source.RequestedEffort
 	sourceBackend, sourceHarnessAvailable := r.manager.Backends[forkHarness]
 	if p.Harness == "" && !sourceHarnessAvailable {
-		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(source.Harness)}
+		return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(source.Harness)}
 	}
 	if p.Harness != "" {
 		forkHarness = p.Harness
 		backend, ok := r.manager.Backends[forkHarness]
 		if !ok {
-			return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
+			return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 		}
 		if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-			return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
+			return 0, &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
 		}
 		if p.Model == "" {
 			if forkModel != "" && !slices.Contains(backend.ModelInventory().IDs(), forkModel) {
-				return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + forkModel}
+				return 0, &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + forkModel}
 			}
 		} else {
 			forkModel = p.Model
@@ -323,7 +323,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 		}
 	} else if p.Model != "" {
 		if !slices.Contains(sourceBackend.ModelInventory().IDs(), p.Model) {
-			return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(source.Harness) + ": " + p.Model}
+			return 0, &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(source.Harness) + ": " + p.Model}
 		}
 		forkModel = p.Model
 		forkEffort = p.Effort
@@ -336,11 +336,11 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	var extraMounts []taskslog.RepoMount
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
-			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
+			return 0, badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
 		}
 		checkout, ok := r.manager.Checkouts.Checkout(rs.Name)
 		if !ok {
-			return "", &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
+			return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
 		}
 		extraMounts = append(extraMounts, taskslog.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: checkout.Dir, ContainerPath: r.manager.containerPathForRepo(rs.Name)})
 	}
@@ -350,7 +350,7 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	mounts = append(mounts, extraMounts...)
 	t, err := r.manager.newTask(p.Prompt, forkHarness, forkModel, forkEffort, source.BaseImage, source.ContainerPlatform, "")
 	if err != nil {
-		return "", badRequestf("%v", err)
+		return 0, badRequestf("%v", err)
 	}
 	t.Repos = mounts
 	t.RuntimeName = source.RuntimeName
@@ -375,10 +375,10 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 	if p.parentTaskID != 0 {
 		// TODO: Replace this temporary per-parent cap with configurable, time-based delegation quotas.
 		if err := r.manager.insertDelegatedEntry(forkEntry); err != nil {
-			return "", err
+			return 0, err
 		}
 	} else {
-		r.manager.insertEntry(t.ID.String(), forkEntry)
+		r.manager.insertEntry(t.ID, forkEntry)
 	}
 	forkEntry.Lifecycle.generateTitle()
 
@@ -411,18 +411,18 @@ func (r *Lifecycle) Fork(ctx context.Context, p *ForkParams) (string, error) {
 		r.manager.NotifyTaskChange()
 		forkEntry.Lifecycle.watchSession(h)
 	})
-	return t.ID.String(), nil
+	return t.ID, nil
 }
 
 // ForkDelegated creates a child from this task's server-owned runtime snapshot.
 // The source task is recorded as the child's parent; callers cannot choose it.
-func (r *Lifecycle) ForkDelegated(ctx context.Context, p *ForkParams) (string, error) {
+func (r *Lifecycle) ForkDelegated(ctx context.Context, p *ForkParams) (ksid.ID, error) {
 	return r.ForkDelegatedFor(ctx, r.entry.Task().ID, p)
 }
 
 // ForkDelegatedFor creates a child from this task's runtime snapshot for a
 // server-authorized delegating task.
-func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, p *ForkParams) (string, error) {
+func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, p *ForkParams) (ksid.ID, error) {
 	p.parentTaskID = parentTaskID
 	return r.Fork(ctx, p)
 }

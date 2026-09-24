@@ -14,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/maruel/ksid"
 )
 
 // GitHubAppClient provides forge operations scoped to a GitHub App installation.
@@ -48,7 +49,7 @@ type Backend interface {
 	ForgeForInfo(ctx context.Context, info *RepoInfo) forge.Forge
 
 	// Tasks.
-	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error)
 	GetCheckout(relPath string) (*repo.Checkout, bool)
 	RuntimeRouter() *runtime.Router
 	SetTaskMonitorBranch(entry TaskEntry, branch string)

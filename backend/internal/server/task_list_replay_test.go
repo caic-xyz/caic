@@ -24,7 +24,7 @@ func TestTaskListEventsReplayTransitions(t *testing.T) {
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 	tk.SetState(taskslog.StateWaiting)
-	insertTestTask(s, tk.ID.String(), tk)
+	insertTestTask(s, tk.ID, tk)
 
 	r := connectTaskListStream(t, s)
 	for range 3 {
@@ -66,7 +66,7 @@ func TestTaskListEventsReplayPurgeTransitions(t *testing.T) {
 	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 	tk.SetState(taskslog.StateWaiting)
 	registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
-	insertTestTask(s, tk.ID.String(), tk)
+	insertTestTask(s, tk.ID, tk)
 
 	r := connectTaskListStream(t, s)
 	for range 3 {

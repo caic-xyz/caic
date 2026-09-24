@@ -108,7 +108,7 @@ func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors ma
 	if cursors != nil {
 		replays = make(map[string]taskStateReplay)
 	}
-	s.taskMgr.Range(func(_ string, e *taskmgr.Entry) bool {
+	s.taskMgr.Range(func(_ ksid.ID, e *taskmgr.Entry) bool {
 		if !access.canAccess(e.Task()) {
 			return true
 		}
@@ -452,7 +452,7 @@ func taskInfoTailscaleURL(s *task.Snapshot) string {
 
 func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Task, error) {
 	if sourceID, ok := taskMCPTaskID(ctx); ok {
-		return s.createDelegatedTask(ctx, sourceID.String(), req)
+		return s.createDelegatedTask(ctx, sourceID, req)
 	}
 	if req.CaicMCP && !s.taskMgr.TaskMCPAvailable() {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task-scoped MCP is unavailable"}
@@ -561,7 +561,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 
 // createDelegatedTask reconciles a task-scoped MCP principal into server-owned
 // parent and source settings. The client can provide only the child prompt.
-func (s *taskService) createDelegatedTask(ctx context.Context, sourceID string, req *v1.CreateTaskReq) (*v1.Task, error) {
+func (s *taskService) createDelegatedTask(ctx context.Context, sourceID ksid.ID, req *v1.CreateTaskReq) (*v1.Task, error) {
 	if req.InitialPrompt.Text == "" || len(req.InitialPrompt.Images) > 0 {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task requires a text prompt"}
 	}
@@ -807,7 +807,7 @@ func (s *taskService) forkDelegatedTask(ctx context.Context, delegatingTaskID ks
 	if req.Prompt.Text == "" || len(req.Prompt.Images) > 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || len(req.ExtraRepos) != 0 || req.Tailscale != nil || req.USB != nil || req.Display != nil || req.Sudo != nil || req.GitHubToken != nil {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task fork may only set prompt"}
 	}
-	delegatingEntry, ok := s.taskMgr.GetEntry(delegatingTaskID.String())
+	delegatingEntry, ok := s.taskMgr.GetEntry(delegatingTaskID)
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "delegating task not found"}
 	}

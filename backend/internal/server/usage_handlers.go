@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/maruel/ksid"
 )
 
 type usageHandlers struct {
@@ -127,7 +128,7 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 // localUsage resolves manager-backed task usage before converting it to an API DTO.
 func localUsage(mgr *taskmgr.Manager, now time.Time) v1.LocalUsage {
 	inputs := make([]apiconv.LocalUsageInput, 0)
-	mgr.Range(func(_ string, e *taskmgr.Entry) bool {
+	mgr.Range(func(_ ksid.ID, e *taskmgr.Entry) bool {
 		t := e.Task()
 		input := apiconv.LocalUsageInput{StartedAt: t.StartedAt}
 		if result := e.Result(); result != nil {

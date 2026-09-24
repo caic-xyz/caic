@@ -15,10 +15,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/maruel/ksid"
 )
 
 type ciTaskCreator interface {
-	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error)
 }
 
 // ciAdapter adapts caic stores and managers to ci.Backend.
@@ -56,7 +57,7 @@ func (a *ciAdapter) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.F
 }
 
 // CreateTask creates an automated task for CI auto-fix.
-func (a *ciAdapter) CreateTask(ctx context.Context, req task.CreateRequest) (string, error) {
+func (a *ciAdapter) CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error) {
 	return a.taskCreator.CreateTask(ctx, req)
 }
 
@@ -91,7 +92,7 @@ func (a *ciAdapter) RepoInfoFor(relPath string) ci.RepoInfo {
 // ListActiveRepos returns repos with forge info that have active (non-terminal) tasks.
 func (a *ciAdapter) ListActiveRepos() []ci.RepoInfo {
 	active := make(map[string]struct{})
-	a.taskMgr.Range(func(_ string, e *taskmgr.Entry) bool {
+	a.taskMgr.Range(func(_ ksid.ID, e *taskmgr.Entry) bool {
 		if e.Result() != nil {
 			return true
 		}

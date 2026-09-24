@@ -140,7 +140,7 @@ type Manager struct {
 
 	// Guarded by mu.
 	mu            sync.Mutex
-	tasks         map[string]*Entry
+	tasks         map[ksid.ID]*Entry
 	changed       chan struct{} // closed on mutation, replaced under mu
 	changeVersion uint64        // incremented with changed under mu
 
@@ -198,7 +198,7 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		rollup:              cfg.Rollup,
 		Checkouts:           cfg.Checkouts,
 		relay:               agentRelayReader{},
-		tasks:               make(map[string]*Entry),
+		tasks:               make(map[ksid.ID]*Entry),
 		changed:             make(chan struct{}),
 	}
 	return m, nil
@@ -210,7 +210,7 @@ func (m *Manager) Close() error {
 	m.quotaWatchClosed = true
 	m.cancelServerCtx()
 	m.quotaWatchMu.Unlock()
-	m.Range(func(_ string, e *Entry) bool {
+	m.Range(func(_ ksid.ID, e *Entry) bool {
 		if e.Lifecycle != nil {
 			_ = e.Lifecycle.Close()
 		}
@@ -287,7 +287,7 @@ func (m *Manager) NewEntry(t *task.Task, lt *taskslog.LoadedTask) *Entry {
 // Insert registers a pre-built entry. Production task creation goes through
 // Create/Fork; Insert is retained for tests (in internal/tasks and
 // internal/server) that seed the registry without a real checkout.
-func (m *Manager) Insert(id string, entry *Entry) {
+func (m *Manager) Insert(id ksid.ID, entry *Entry) {
 	m.insertEntry(id, entry)
 }
 
@@ -295,10 +295,10 @@ func (m *Manager) Insert(id string, entry *Entry) {
 // m.mu and invokes fn unlocked, so fn may safely call back into the Manager
 // (e.g. Checkout). The entry set is a point-in-time snapshot; Entry pointers are
 // stable and carry their own locking. Stops iteration if fn returns false.
-func (m *Manager) Range(fn func(id string, e *Entry) bool) {
+func (m *Manager) Range(fn func(id ksid.ID, e *Entry) bool) {
 	m.mu.Lock()
 	type kv struct {
-		id string
+		id ksid.ID
 		e  *Entry
 	}
 	snap := make([]kv, 0, len(m.tasks))
@@ -394,12 +394,12 @@ func (m *Manager) RegisteredLogPaths() map[string]struct{} {
 }
 
 // Create handles the HTTP task creation path.
-func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
+func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
 	// Resolve primary checkout.
 	if len(p.Repos) > 0 {
 		_, ok := m.Checkouts.Checkout(p.Repos[0].Name)
 		if !ok {
-			return "", &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown repo: " + p.Repos[0].Name}
+			return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown repo: " + p.Repos[0].Name}
 		}
 	}
 
@@ -407,29 +407,29 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	// allocated later, in one pass, by allocateBranches).
 	for _, rs := range p.Repos[min(1, len(p.Repos)):] {
 		if _, ok := m.Checkouts.Checkout(rs.Name); !ok {
-			return "", &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
+			return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownRepository, Msg: "unknown extra repo: " + rs.Name}
 		}
 	}
 
 	runtimeName, err := resolveRuntimeName(m.Runtimes, p.RuntimeName)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 
 	backend, ok := m.Backends[p.Harness]
 	if !ok {
-		return "", &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
+		return 0, &Error{Kind: KindBadRequest, Code: CodeUnknownHarness, Msg: "unknown harness: " + string(p.Harness)}
 	}
 	if p.CaicMCP && !m.TaskMCPAvailable() {
-		return "", badRequestf("task-scoped MCP is unavailable")
+		return 0, badRequestf("task-scoped MCP is unavailable")
 	}
 
 	if p.Model != "" && !slices.Contains(backend.ModelInventory().IDs(), p.Model) {
-		return "", &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
+		return 0, &Error{Kind: KindBadRequest, Code: CodeUnsupportedModel, Msg: "unsupported model for " + string(p.Harness) + ": " + p.Model}
 	}
 
 	if len(p.Prompt.Images) > 0 && !backend.SupportsImages() {
-		return "", badRequestf("%s does not support images", string(p.Harness))
+		return 0, badRequestf("%s does not support images", string(p.Harness))
 	}
 
 	// Build RepoMount slice. ContainerPath follows the fixed "~/src/<name>"
@@ -443,7 +443,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 	t, err := m.newTask(p.Prompt, p.Harness, p.Model, p.Effort, p.BaseImage, p.ContainerPlatform, "")
 	if err != nil {
-		return "", badRequestf("%v", err)
+		return 0, badRequestf("%v", err)
 	}
 	t.Repos = mounts
 	t.RuntimeName = runtimeName
@@ -465,7 +465,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	}
 	entry := m.NewEntry(t, nil)
 
-	m.insertEntry(t.ID.String(), entry)
+	m.insertEntry(t.ID, entry)
 	entry.Lifecycle.generateTitle()
 
 	// Run setup under the lifecycle context.
@@ -484,11 +484,11 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 			return
 		}
 	})
-	return t.ID.String(), nil
+	return t.ID, nil
 }
 
 // GetEntry returns the entry for taskID.
-func (m *Manager) GetEntry(taskID string) (*Entry, bool) {
+func (m *Manager) GetEntry(taskID ksid.ID) (*Entry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.tasks[taskID]
@@ -499,7 +499,7 @@ func (m *Manager) GetEntry(taskID string) (*Entry, bool) {
 //
 // The iteration order is unspecified. The sequence owns a shallow snapshot,
 // so callers do not hold the manager lock while yielding entries.
-func (m *Manager) Entries() iter.Seq2[string, *Entry] {
+func (m *Manager) Entries() iter.Seq2[ksid.ID, *Entry] {
 	m.mu.Lock()
 	tasks := maps.Clone(m.tasks)
 	m.mu.Unlock()
@@ -559,8 +559,8 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 	resolvedTaskIDs, rejected, validationErr := m.resolveImportTaskIDs(ctx, instances)
 
 	// Map repo+branch loaded from purged task logs to their ID.
-	branchIDs := make(map[string][]string)
-	m.Range(func(id string, e *Entry) bool {
+	branchIDs := make(map[string][]ksid.ID)
+	m.Range(func(id ksid.ID, e *Entry) bool {
 		if p := e.Task().Primary(); p != nil && p.Branch != "" {
 			key := p.Name + "\x00" + p.Branch
 			branchIDs[key] = append(branchIDs[key], id)
@@ -775,7 +775,7 @@ func (m *Manager) ListPendingBotTasks() []BotPendingTask {
 }
 
 // WatchTaskCompletion blocks until the task reaches a terminal state.
-func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID string) (state, result string, err error) {
+func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (state, result string, err error) {
 	entry, ok := m.GetEntry(taskID)
 	if !ok {
 		return "", "", notFoundf("task %s not found", taskID)
@@ -955,7 +955,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 			}
 		}
 		if parsedID {
-			if _, exists := m.tasks[taskID.String()]; exists {
+			if _, exists := m.tasks[taskID]; exists {
 				continue
 			}
 		}
@@ -1028,7 +1028,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		}
 		entry := m.NewEntry(t, lt)
 		entry.Finish(lt.LastTrailer)
-		m.tasks[t.ID.String()] = entry
+		m.tasks[t.ID] = entry
 		loaded++
 	}
 	return loaded, nil
@@ -1610,7 +1610,7 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 }
 
 // insertEntry adds an entry under m.mu and signals the change.
-func (m *Manager) insertEntry(id string, entry *Entry) {
+func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
 	m.mu.Lock()
 	m.tasks[id] = entry
 	m.taskChangedLocked()
@@ -1634,7 +1634,7 @@ func (m *Manager) insertDelegatedEntry(entry *Entry) error {
 		m.mu.Unlock()
 		return conflict(fmt.Sprintf("delegating task already has %d non-purged child tasks", maxDelegatedTasksPerParent))
 	}
-	m.tasks[t.ID.String()] = entry
+	m.tasks[t.ID] = entry
 	m.taskChangedLocked()
 	m.mu.Unlock()
 	m.watchRateLimitEvents(t)
@@ -1711,7 +1711,7 @@ func applyLoadedSessionMetadata(t *task.Task, lt *taskslog.LoadedTask) {
 }
 
 // importInstance investigates a single runtime instance and registers it as a task.
-func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]string, allLogs []*taskslog.LoadedTask) (*Entry, error) {
+func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c *runtime.Instance, branch, taskIDVal string, metadataResolved bool, branchIDs map[string][]ksid.ID, allLogs []*taskslog.LoadedTask) (*Entry, error) {
 	ctx, importTask := trace.NewTask(ctx, "import-instance")
 	defer importTask.End()
 	relPath := ""
@@ -2096,7 +2096,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			delete(m.tasks, oldID)
 		}
 	}
-	m.tasks[t.ID.String()] = entry
+	m.tasks[t.ID] = entry
 	m.taskChangedLocked()
 	m.mu.Unlock()
 	m.watchRateLimitEvents(t)

@@ -511,23 +511,21 @@ func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt, h harness.Name) 
 	return tk
 }
 
-// insertTestTask registers a task in the test server's manager and returns the
-// entry. It registers the entry under the supplied path id as well as the
-// task's own ID string, so handlers that re-resolve via the Manager by
-// entry.Task().ID.String() find the same entry (in production the two always
-// coincide because Insert keys on t.ID.String()).
-func insertTestTask(s *testRouter, id string, tk *task.Task) {
+// insertTestTask registers a task in the test server's manager, keyed by the
+// task's own ID (and by the supplied path id when a test addresses it
+// differently).
+func insertTestTask(s *testRouter, id ksid.ID, tk *task.Task) {
 	e := s.taskMgr.NewEntry(tk, nil)
 	s.taskMgr.Insert(id, e)
-	if taskID := tk.ID.String(); taskID != id {
-		s.taskMgr.Insert(taskID, e)
+	if tk.ID != id {
+		s.taskMgr.Insert(tk.ID, e)
 	}
 }
 
 // testEntries returns a snapshot of every registered task entry (test-only).
 func testEntries(s *testRouter) []*taskmgr.Entry {
 	var out []*taskmgr.Entry
-	s.taskMgr.Range(func(_ string, e *taskmgr.Entry) bool {
+	s.taskMgr.Range(func(_ ksid.ID, e *taskmgr.Entry) bool {
 		out = append(out, e)
 		return true
 	})
@@ -812,11 +810,12 @@ func TestHandleTaskInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			s := newTestRouter(t, nil)
-			insertTestTask(s, "t1", mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, ""))
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+			insertTestTask(s, tk.ID, tk)
 
 			body := strings.NewReader(tt.bodyJSON)
 			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/input", body)
-			req.SetPathValue("id", "t1")
+			req.SetPathValue("id", tk.ID.String())
 			w := httptest.NewRecorder()
 			handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.sendInput)(w, req)
 			if w.Code != tt.wantStatus {
@@ -835,11 +834,11 @@ func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus
 	s := newTestRouter(t, nil)
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 	tk.SetState(state)
-	insertTestTask(s, "t1", tk)
+	insertTestTask(s, tk.ID, tk)
 
 	body := strings.NewReader(bodyJSON)
 	req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/restart", body)
-	req.SetPathValue("id", "t1")
+	req.SetPathValue("id", tk.ID.String())
 	w := httptest.NewRecorder()
 	handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.restartTask)(w, req)
 	if w.Code != wantStatus {
@@ -880,7 +879,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
-		entry, ok := s.taskMgr.GetEntry(restoredID.String())
+		entry, ok := s.taskMgr.GetEntry(restoredID)
 		if !ok {
 			t.Fatal("loaded task entry not found")
 		}
@@ -919,7 +918,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 			&agent.TextMessage{Text: "live result"},
 		})
 		entry := s.taskMgr.NewEntry(tk, nil)
-		s.taskMgr.Insert(tk.ID.String(), entry)
+		s.taskMgr.Insert(tk.ID, entry)
 
 		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
 		if err != nil {
@@ -943,7 +942,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "no log"}, harness.Claude)
 		loaded := &taskslog.LoadedTask{State: taskslog.StatePurged, LastTrailer: &taskslog.Result{State: taskslog.StatePurged}}
 		entry := s.taskMgr.NewEntry(tk, loaded)
-		s.taskMgr.Insert(tk.ID.String(), entry)
+		s.taskMgr.Insert(tk.ID, entry)
 
 		_, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
 		apiErr, ok := errors.AsType[*api.Error](err)
@@ -979,10 +978,10 @@ func TestHandlePurge(t *testing.T) {
 		s := newTestRouter(t, nil)
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 		// StatePending is the zero value, but set explicitly for clarity.
-		insertTestTask(s, "t1", tk)
+		insertTestTask(s, tk.ID, tk)
 
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
-		req.SetPathValue("id", "t1")
+		req.SetPathValue("id", tk.ID.String())
 		w := httptest.NewRecorder()
 		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
 		if w.Code != http.StatusConflict {
@@ -1001,10 +1000,10 @@ func TestHandlePurge(t *testing.T) {
 		tk.SetState(taskslog.StateWaiting)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
-		insertTestTask(s, "t1", tk)
+		insertTestTask(s, tk.ID, tk)
 
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
-		req.SetPathValue("id", "t1")
+		req.SetPathValue("id", tk.ID.String())
 		w := httptest.NewRecorder()
 		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
 		if w.Code != http.StatusOK {
@@ -1028,7 +1027,7 @@ func TestHandlePurge(t *testing.T) {
 		tk.SetState(taskslog.StateRunning)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
-		insertTestTask(s, "t1", tk)
+		insertTestTask(s, tk.ID, tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
 		// where BaseContext is cancelled before the handler completes.
@@ -1036,7 +1035,7 @@ func TestHandlePurge(t *testing.T) {
 		cancel()
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req = req.WithContext(ctx)
-		req.SetPathValue("id", "t1")
+		req.SetPathValue("id", tk.ID.String())
 		w := httptest.NewRecorder()
 		handleWithTask(testTaskHandlers(s), testTaskHandlers(s).taskSvc.purgeTask)(w, req)
 		if w.Code != http.StatusOK {
@@ -1097,7 +1096,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if !resp.CaicMCP {
 			t.Fatal("response CaicMCP = false, want true")
 		}
-		entry, ok := s.taskMgr.GetEntry(resp.ID.String())
+		entry, ok := s.taskMgr.GetEntry(resp.ID)
 		if !ok {
 			t.Fatal("created task not found")
 		}
@@ -1244,7 +1243,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 
 		// Verify the task uses the image from preferences.
-		entry, _ := s.taskMgr.GetEntry(resp.ID.String())
+		entry, _ := s.taskMgr.GetEntry(resp.ID)
 		if entry == nil {
 			t.Fatal("task not found")
 		}
@@ -1286,7 +1285,7 @@ func TestHandleCreateTask(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
-		entry, _ := s.taskMgr.GetEntry(resp.ID.String())
+		entry, _ := s.taskMgr.GetEntry(resp.ID)
 		if entry == nil {
 			t.Fatal("task not found")
 		}
@@ -1490,7 +1489,7 @@ func TestSignalProcess(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
-		insertTestTask(s, "t1", tk)
+		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			log:      testLogger(),
@@ -1500,7 +1499,7 @@ func TestSignalProcess(t *testing.T) {
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/processes/t1/123/signal", body)
-		req.SetPathValue("id", "t1")
+		req.SetPathValue("id", tk.ID.String())
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
 		processes.HandleSignalProcess(w, req)
@@ -1519,7 +1518,7 @@ func TestSignalProcess(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
-		insertTestTask(s, "t1", tk)
+		insertTestTask(s, tk.ID, tk)
 		backend := &runtimetest.FakeBackend{}
 		processes := &runtimeProcessHandlers{
 			log:      testLogger(),
@@ -1529,7 +1528,7 @@ func TestSignalProcess(t *testing.T) {
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/processes/t1/123/signal", body)
-		req.SetPathValue("id", "t1")
+		req.SetPathValue("id", tk.ID.String())
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
 		processes.HandleSignalProcess(w, req)
@@ -1912,8 +1911,8 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Verify that branchIDs scoped by repo does not lose either entry.
 		// This mirrors the branchIDs construction in adoptContainers.
-		branchIDs := make(map[string][]string)
-		s.taskMgr.Range(func(id string, e *taskmgr.Entry) bool {
+		branchIDs := make(map[string][]ksid.ID)
+		s.taskMgr.Range(func(id ksid.ID, e *taskmgr.Entry) bool {
 			if p := e.Task().Primary(); p != nil && p.Branch != "" {
 				key := p.Name + "\x00" + p.Branch
 				branchIDs[key] = append(branchIDs[key], id)
@@ -2193,8 +2192,8 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if len(entries) != 1 {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
-		var taskID string
-		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool {
+		var taskID ksid.ID
+		s.taskMgr.Range(func(id ksid.ID, _ *taskmgr.Entry) bool {
 			taskID = id
 			return false
 		})
@@ -2203,8 +2202,8 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// replay instead of waiting for the request context deadline.
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		t.Cleanup(cancel)
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-		req.SetPathValue("id", taskID)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
 		if err := ctx.Err(); err != nil {
@@ -2235,8 +2234,8 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Errorf("task SSE body is missing stable event IDs:\n%s", body)
 		}
 
-		resumeReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-		resumeReq.SetPathValue("id", taskID)
+		resumeReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		resumeReq.SetPathValue("id", taskID.String())
 		resumeReq.Header.Set("Last-Event-ID", id2)
 		resumeWriter := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(resumeWriter, resumeReq)
@@ -2248,8 +2247,8 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Errorf("resumed task SSE omitted unseen history or ready marker:\n%s", resumedBody)
 		}
 
-		staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-		staleReq.SetPathValue("id", taskID)
+		staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		staleReq.SetPathValue("id", taskID.String())
 		staleReq.Header.Set("Last-Event-ID", taskEventID{timeline: entry.Task().TimelineID(), source: taskEventSourceDisk, message: 99}.String())
 		staleWriter := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(staleWriter, staleReq)
@@ -2273,13 +2272,13 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
-		var taskID string
-		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool {
+		var taskID ksid.ID
+		s.taskMgr.Range(func(id ksid.ID, _ *taskmgr.Entry) bool {
 			taskID = id
 			return false
 		})
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
-		req.SetPathValue("id", taskID)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
 		body := w.Body.String()
@@ -2308,7 +2307,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
 		entry := s.taskMgr.NewEntry(tk, nil)
 		entry.LogPath.Set(path)
-		s.taskMgr.Insert(taskID.String(), entry)
+		s.taskMgr.Insert(taskID, entry)
 
 		stoppedReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		stoppedReq.SetPathValue("id", taskID.String())
@@ -2362,7 +2361,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire}})
 		entry := s.taskMgr.NewEntry(tk, nil)
 		entry.LogPath.Set(path)
-		s.taskMgr.Insert(taskID.String(), entry)
+		s.taskMgr.Insert(taskID, entry)
 
 		recorder := httptest.NewRecorder()
 		w := &reviveDuringStoppedScanWriter{ResponseRecorder: recorder, revive: func() {
@@ -2390,7 +2389,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.SetState(taskslog.StateFailed)
 
 		s := newTestRouter(t, nil)
-		insertTestTask(s, taskID.String(), tk)
+		insertTestTask(s, taskID, tk)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
@@ -2441,7 +2440,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.SetState(taskslog.StateRunning)
 
 		s := newTestRouter(t, nil)
-		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
+		s.taskMgr.Insert(taskID, s.taskMgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
@@ -2532,7 +2531,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		tk.SeedTimeline([]agent.Message{&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done"}})
 		tk.SetState(taskslog.StateStopped)
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
-		s.taskMgr.Insert(taskID.String(), s.taskMgr.NewEntry(tk, logs[0]))
+		s.taskMgr.Insert(taskID, s.taskMgr.NewEntry(tk, logs[0]))
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
@@ -2599,16 +2598,16 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if len(entries) != 1 {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
-		var taskID string
-		s.taskMgr.Range(func(id string, _ *taskmgr.Entry) bool {
+		var taskID ksid.ID
+		s.taskMgr.Range(func(id ksid.ID, _ *taskmgr.Entry) bool {
 			taskID = id
 			return false
 		})
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
-		req.SetPathValue("id", taskID)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody).WithContext(ctx)
+		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
 
@@ -2664,7 +2663,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 
 		s := newTestRouter(t, nil)
-		insertTestTask(s, taskID.String(), tk)
+		insertTestTask(s, taskID, tk)
 
 		w := &gatedSSEWriter{
 			ResponseRecorder: httptest.NewRecorder(),

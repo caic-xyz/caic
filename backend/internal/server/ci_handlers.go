@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/maruel/genai"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -29,7 +30,7 @@ import (
 // forge, bot task, and agent-session operations without retaining a back-reference
 // to Router.
 type taskCreator interface {
-	CreateTask(ctx context.Context, req task.CreateRequest) (string, error)
+	CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error)
 }
 
 type ciHandlers struct {
@@ -152,11 +153,11 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	taskIDStr, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: checkout.RelPath, Prompt: summary, OwnerID: ownerID})
+	taskID, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: checkout.RelPath, Prompt: summary, OwnerID: ownerID})
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
-	entry, ok := h.taskMgr.GetEntry(taskIDStr)
+	entry, ok := h.taskMgr.GetEntry(taskID)
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "created task not found"}
 	}
@@ -171,7 +172,11 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 // It fetches CI logs via the forge using the task's existing CI checks,
 // builds a rich prompt using ci.FailureSummary, and sends it as input to the task.
 func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
-	entry, ok := h.taskMgr.GetEntry(req.TaskID)
+	taskID, err := ksid.Parse(req.TaskID)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
+	}
+	entry, ok := h.taskMgr.GetEntry(taskID)
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}

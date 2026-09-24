@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/maruel/ksid"
 )
 
 // botClient adapts task and forge stores to bot.Client.
@@ -64,9 +65,9 @@ func (c *botClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 }
 
 // CreateTask creates and starts a task for bot-driven automation.
-func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (string, error) {
+func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (ksid.ID, error) {
 	if _, ok := c.taskMgr.Checkouts.Checkout(req.Repo); !ok {
-		return "", fmt.Errorf("checkout not found for repo %s", req.Repo)
+		return 0, fmt.Errorf("checkout not found for repo %s", req.Repo)
 	}
 	backends := c.taskMgr.Backends
 	// Pick harness: prefer Claude if available, otherwise the
@@ -79,7 +80,7 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (str
 		selectedHarness = avail[0]
 	}
 	if selectedHarness == "" {
-		return "", fmt.Errorf("no backend available for repo %s", req.Repo)
+		return 0, fmt.Errorf("no backend available for repo %s", req.Repo)
 	}
 
 	// Resolve the forge owner/repo so ListPendingBotTasks can resolve the
@@ -109,14 +110,14 @@ func (c *botClient) CreateTask(ctx context.Context, req task.CreateRequest) (str
 		ForgeRepo:           repoResolved,
 	})
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	c.log.InfoContext(ctx, "bot task created", "task", id, "checkout", req.Repo, "harness", selectedHarness)
 	return id, nil
 }
 
 // WatchTaskCompletion blocks until a task reaches a terminal state.
-func (c *botClient) WatchTaskCompletion(ctx context.Context, taskID string) (state, result string, err error) {
+func (c *botClient) WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (state, result string, err error) {
 	return c.taskMgr.WatchTaskCompletion(ctx, taskID)
 }
 

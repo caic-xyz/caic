@@ -96,8 +96,8 @@ func TestCIHandlers(t *testing.T) {
 
 			s := newTestRouter(t, nil)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
-			insertTestTask(s, "t1", task)
-			_, err := s.ciHandlers.fixPR(t.Context(), &v1.BotFixPRReq{TaskID: "t1"})
+			insertTestTask(s, task.ID, task)
+			_, err := s.ciHandlers.fixPR(t.Context(), &v1.BotFixPRReq{TaskID: task.ID.String()})
 			apiErr, ok := errors.AsType[*api.Error](err)
 			if !ok {
 				t.Fatalf("error = %v, want API error", err)
@@ -117,10 +117,10 @@ func TestCIHandlers(t *testing.T) {
 			s := newTestRouter(t, nil)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 			task.Repos = []taskslog.RepoMount{{Name: "local"}}
-			insertTestTask(s, "t1", task)
+			insertTestTask(s, task.ID, task)
 			w := httptest.NewRecorder()
 			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1", nil)
-			r.SetPathValue("id", "t1")
+			r.SetPathValue("id", task.ID.String())
 			s.ciHandlers.handleGetCILog(w, r)
 
 			if w.Code != http.StatusConflict {
@@ -144,10 +144,10 @@ func TestCIHandlers(t *testing.T) {
 			registerRouterCheckout(t, s.checkouts, "project", checkout)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 			task.Repos = []taskslog.RepoMount{{Name: "project"}}
-			insertTestTask(s, "t1", task)
+			insertTestTask(s, task.ID, task)
 			w := httptest.NewRecorder()
 			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1", nil)
-			r.SetPathValue("id", "t1")
+			r.SetPathValue("id", task.ID.String())
 			s.ciHandlers.handleGetCILog(w, r)
 
 			if w.Code != http.StatusConflict {
@@ -174,10 +174,10 @@ func TestCIHandlers(t *testing.T) {
 			registerRouterCheckout(t, s.checkouts, "project", checkout)
 			task := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 			task.Repos = []taskslog.RepoMount{{Name: "project"}}
-			insertTestTask(s, "t1", task)
+			insertTestTask(s, task.ID, task)
 			w := httptest.NewRecorder()
 			r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/ci/log/t1?jobID=1", nil)
-			r.SetPathValue("id", "t1")
+			r.SetPathValue("id", task.ID.String())
 			s.ciHandlers.handleGetCILog(w, r)
 
 			if w.Code != http.StatusNotFound {

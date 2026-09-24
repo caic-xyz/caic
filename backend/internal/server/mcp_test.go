@@ -50,11 +50,11 @@ func TestTaskListSnapshotOrdersActiveTasksFirst(t *testing.T) {
 	inactiveID := ksid.NewID()
 	inactive := mustNewTask(t, inactiveID, agent.Prompt{Text: "inactive"}, harness.Claude)
 	inactive.SetState(taskslog.StateStopped)
-	insertTestTask(s, inactiveID.String(), inactive)
+	insertTestTask(s, inactiveID, inactive)
 
 	activeID := ksid.NewID()
 	active := mustNewTask(t, activeID, agent.Prompt{Text: "active"}, harness.Claude)
-	insertTestTask(s, activeID.String(), active)
+	insertTestTask(s, activeID, active)
 
 	tasks := testTaskHandlers(s).taskSvc.taskListSnapshot(t.Context())
 	if len(tasks) != 2 {
@@ -75,18 +75,18 @@ func TestMCPEndpointTaskAccessContract(t *testing.T) {
 	ownedID := ksid.NewID()
 	owned := mustNewTask(t, ownedID, agent.Prompt{Text: "owned task"}, harness.Claude)
 	owned.OwnerID = owner.ID
-	insertTestTask(s, ownedID.String(), owned)
+	insertTestTask(s, ownedID, owned)
 	delegatingID := ksid.NewID()
 	delegating := mustNewTask(t, delegatingID, agent.Prompt{Text: "delegating task"}, harness.Claude)
-	insertTestTask(s, delegatingID.String(), delegating)
+	insertTestTask(s, delegatingID, delegating)
 	childID := ksid.NewID()
 	child := mustNewTask(t, childID, agent.Prompt{Text: "child task"}, harness.Claude)
 	child.ParentTaskID = delegatingID
-	insertTestTask(s, childID.String(), child)
+	insertTestTask(s, childID, child)
 	foreignID := ksid.NewID()
 	foreign := mustNewTask(t, foreignID, agent.Prompt{Text: "foreign task"}, harness.Claude)
 	foreign.OwnerID = "other"
-	insertTestTask(s, foreignID.String(), foreign)
+	insertTestTask(s, foreignID, foreign)
 
 	post := func(t *testing.T, ctx context.Context, method, name, params string) string {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON(method, params)))
@@ -324,7 +324,7 @@ func TestMCPHandlers(t *testing.T) {
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
 		tk := mustNewTask(t, id, agent.Prompt{Text: "ship voice prompt"}, harness.Claude)
-		insertTestTask(s, id.String(), tk)
+		insertTestTask(s, id, tk)
 		_, resp := postMCP(t, s.mcpHandlers.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
 		if resp.Error != nil {
 			t.Fatalf("error = %#v", resp.Error)
@@ -379,7 +379,7 @@ func TestMCPHandlers(t *testing.T) {
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
 		tk := mustNewTask(t, id, agent.Prompt{Text: "private task prompt"}, harness.Claude)
-		insertTestTask(s, id.String(), tk)
+		insertTestTask(s, id, tk)
 		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 		if !ok {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
@@ -795,7 +795,7 @@ func TestMCPHandlers(t *testing.T) {
 		seeded := make([]string, 0, count)
 		for range count {
 			id := ksid.NewID()
-			insertTestTask(s, id.String(), mustNewTask(t, id, agent.Prompt{Text: "subscription initial state item"}, harness.Claude))
+			insertTestTask(s, id, mustNewTask(t, id, agent.Prompt{Text: "subscription initial state item"}, harness.Claude))
 			seeded = append(seeded, id.String())
 		}
 		ctx, cancel := context.WithCancel(t.Context())
@@ -903,11 +903,11 @@ func TestMCPHandlers(t *testing.T) {
 		mineID := ksid.NewID()
 		mine := mustNewTask(t, mineID, agent.Prompt{Text: "subscription initial state item owned"}, harness.Claude)
 		mine.OwnerID = user.ID
-		insertTestTask(s, mineID.String(), mine)
+		insertTestTask(s, mineID, mine)
 		otherID := ksid.NewID()
 		other := mustNewTask(t, otherID, agent.Prompt{Text: "subscription initial state item foreign"}, harness.Claude)
 		other.OwnerID = "other-owner"
-		insertTestTask(s, otherID.String(), other)
+		insertTestTask(s, otherID, other)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		ctx = auth.NewContext(ctx, &user)
@@ -1019,7 +1019,7 @@ func TestMCPHandlers(t *testing.T) {
 		s := newTestRouter(t, nil)
 		id := ksid.NewID()
 		tk := mustNewTask(t, id, agent.Prompt{Text: "subscription state changes"}, harness.Claude)
-		insertTestTask(s, id.String(), tk)
+		insertTestTask(s, id, tk)
 		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 		if !ok {
 			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
@@ -1078,7 +1078,7 @@ func TestMCPHandlers(t *testing.T) {
 		tk := mustNewTask(t, id, agent.Prompt{Text: "test"}, harness.Claude)
 		tk.SetTitle("Fix tests")
 		tk.SetState(taskslog.StateWaiting)
-		insertTestTask(s, id.String(), tk)
+		insertTestTask(s, id, tk)
 
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)
 		body = strings.Replace(body, `"io.modelcontextprotocol/clientCapabilities":{}`, `"io.modelcontextprotocol/clientCapabilities":{},"example.com/clientTrace":"trace-1"`, 1)

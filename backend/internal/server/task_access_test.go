@@ -87,11 +87,11 @@ func TestTaskAccessTransportMatrix(t *testing.T) {
 	mineID := ksid.NewID()
 	mine := mustNewTask(t, mineID, agent.Prompt{Text: "owned task"}, harness.Claude)
 	mine.OwnerID = owner.ID
-	insertTestTask(s, mineID.String(), mine)
+	insertTestTask(s, mineID, mine)
 	foreignID := ksid.NewID()
 	foreign := mustNewTask(t, foreignID, agent.Prompt{Text: "foreign task"}, harness.Claude)
 	foreign.OwnerID = "other"
-	insertTestTask(s, foreignID.String(), foreign)
+	insertTestTask(s, foreignID, foreign)
 
 	registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
 	if !ok {

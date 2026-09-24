@@ -43,7 +43,7 @@ func (b *diffRuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repositor
 
 const diffTestCommit = "0123456789abcdef0123456789abcdef01234567"
 
-func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend) {
+func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid.ID) {
 	backend := &diffRuntimeBackend{FakeBackend: &runtimetest.FakeBackend{
 		RepositoryStatusValue: runtime.RepositoryStatus{
 			Branch:   "caic-1",
@@ -64,8 +64,8 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend) {
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
 	tk.Repos = []taskslog.RepoMount{{Name: "repo", Branch: "caic-1", ContainerPath: "/workspace/repo"}}
 	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
-	insertTestTask(s, "t1", tk)
-	return s, backend
+	insertTestTask(s, tk.ID, tk)
+	return s, backend, tk.ID
 }
 
 func TestTaskDiffHandlers(t *testing.T) {
@@ -74,9 +74,9 @@ func TestTaskDiffHandlers(t *testing.T) {
 	t.Run("index omits patch reads", func(t *testing.T) {
 		t.Parallel()
 
-		s, backend := newTaskDiffTestRouter(t)
+		s, backend, taskID := newTaskDiffTestRouter(t)
 		w := httptest.NewRecorder()
-		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/diff/index", nil)
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+"/diff/index", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
@@ -97,9 +97,9 @@ func TestTaskDiffHandlers(t *testing.T) {
 	t.Run("committed patch forwards selector", func(t *testing.T) {
 		t.Parallel()
 
-		s, backend := newTaskDiffTestRouter(t)
+		s, backend, taskID := newTaskDiffTestRouter(t)
 		w := httptest.NewRecorder()
-		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/diff/file?repository=0&commit="+diffTestCommit+"&path=committed.go&originalPath=", nil)
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+"/diff/file?repository=0&commit="+diffTestCommit+"&path=committed.go&originalPath=", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, r)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
@@ -120,9 +120,9 @@ func TestTaskDiffHandlers(t *testing.T) {
 	t.Run("uncommitted patch forwards selector", func(t *testing.T) {
 		t.Parallel()
 
-		s, backend := newTaskDiffTestRouter(t)
+		s, backend, taskID := newTaskDiffTestRouter(t)
 		w := httptest.NewRecorder()
-		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/diff/file?repository=0&commit=&path=renamed.go&originalPath=old.go", nil)
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+"/diff/file?repository=0&commit=&path=renamed.go&originalPath=old.go", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, r)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
@@ -143,9 +143,9 @@ func TestTaskDiffHandlers(t *testing.T) {
 	t.Run("combined endpoint remains compatible", func(t *testing.T) {
 		t.Parallel()
 
-		s, backend := newTaskDiffTestRouter(t)
+		s, backend, taskID := newTaskDiffTestRouter(t)
 		w := httptest.NewRecorder()
-		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/diff?path=", nil)
+		r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+"/diff?path=", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
@@ -166,14 +166,14 @@ func TestTaskDiffHandlers(t *testing.T) {
 	t.Run("rejects invalid selectors", func(t *testing.T) {
 		t.Parallel()
 
-		s, backend := newTaskDiffTestRouter(t)
+		s, backend, taskID := newTaskDiffTestRouter(t)
 		h := testTaskHandlers(s).routes()
 		urls := []string{
-			"/tasks/t1/diff/file?repository=bad&commit=&path=file.go&originalPath=",
-			"/tasks/t1/diff/file?repository=-1&commit=&path=file.go&originalPath=",
-			"/tasks/t1/diff/file?repository=0&commit=&path=&originalPath=",
-			"/tasks/t1/diff/file?repository=0&commit=main&path=file.go&originalPath=",
-			"/tasks/t1/diff/file?repository=1&commit=&path=file.go&originalPath=",
+			"/tasks/" + taskID.String() + "/diff/file?repository=bad&commit=&path=file.go&originalPath=",
+			"/tasks/" + taskID.String() + "/diff/file?repository=-1&commit=&path=file.go&originalPath=",
+			"/tasks/" + taskID.String() + "/diff/file?repository=0&commit=&path=&originalPath=",
+			"/tasks/" + taskID.String() + "/diff/file?repository=0&commit=main&path=file.go&originalPath=",
+			"/tasks/" + taskID.String() + "/diff/file?repository=1&commit=&path=file.go&originalPath=",
 		}
 		for _, rawURL := range urls {
 			w := httptest.NewRecorder()
@@ -193,10 +193,11 @@ func TestTaskHandlersVNCWithoutDisplay(t *testing.T) {
 	t.Parallel()
 
 	s := newTestRouter(t, nil)
-	insertTestTask(s, "t1", mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, ""))
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+	insertTestTask(s, tk.ID, tk)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/vnc/ws", nil)
-	r.SetPathValue("id", "t1")
+	r.SetPathValue("id", tk.ID.String())
 	s.taskHandlers.handleVNCWebSocket(w, r)
 
 	if w.Code != http.StatusConflict {
@@ -217,9 +218,9 @@ func TestTaskHandlersHandoff(t *testing.T) {
 		&agent.UserInputMessage{Text: "finish the feature"},
 		&agent.TextMessage{Text: "The API remains to be connected."},
 	})
-	insertTestTask(s, "t1", tk)
+	insertTestTask(s, tk.ID, tk)
 	w := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/handoff", nil)
+	r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+tk.ID.String()+"/handoff", nil)
 	s.taskHandlers.routes().ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
