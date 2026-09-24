@@ -1,0 +1,50 @@
+/* Styles for a chart's collapsed text alternative table. */
+
+.details {
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+}
+
+.details summary {
+  width: fit-content;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.wrap {
+  max-height: 12rem;
+  margin-top: 0.3rem;
+  overflow: auto;
+}
+
+.wrap:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: -2px;
+}
+
+.table {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.2rem 0.45rem 0.2rem 0;
+  text-align: right;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  font-size: 0.64rem;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-elevated);
+}
+
+.table th:first-child,
+.table td:first-child {
+  text-align: left;
+}

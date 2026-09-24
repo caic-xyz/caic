@@ -247,15 +247,18 @@ android-e2e: android-setup-emulator
 screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
 	@pnpm --silent build
 	@python3 scripts/android_start_emulator.py --auto-reuse
-	@python3 scripts/visual_screenshots.py check
+	@python3 scripts/visual_screenshots.py check --rebuilt
 
 # Platform-specific variants. Check compares against the tracked baselines, which
 # encode the development container's font stack, so it is a maintainer check.
 # Generate only renders, which is what CI runs so a stale generator cannot rot
-# silently without pretending the baselines are portable.
+# silently without pretending the baselines are portable. The renderer refuses
+# to compare a bundle that predates uncommitted frontend inputs, so it would
+# otherwise catch a bare script invocation that forgot to build; these targets
+# build immediately above and declare that with --rebuilt.
 screenshots-check-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py check --platform frontend
+	@python3 scripts/visual_screenshots.py check --platform frontend --rebuilt
 
 # The Android variant renders the committed frontend bundle the app hosts, so it
 # needs no pnpm or SDK step.
@@ -265,7 +268,7 @@ screenshots-check-android: android-setup-emulator
 
 screenshots-generate-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py generate --platform frontend
+	@python3 scripts/visual_screenshots.py generate --platform frontend --rebuilt
 
 screenshots-generate-android: android-setup-emulator
 	@python3 scripts/android_start_emulator.py --auto-reuse
@@ -274,7 +277,7 @@ screenshots-generate-android: android-setup-emulator
 screenshots-update: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
 	@pnpm --silent build
 	@python3 scripts/android_start_emulator.py --auto-reuse
-	@python3 scripts/visual_screenshots.py update
+	@python3 scripts/visual_screenshots.py update --rebuilt
 
 upgrade:
 	@go get -u ./... && go mod tidy

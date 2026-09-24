@@ -1,0 +1,17 @@
+/* Styles for the shared Observable Plot host that owns each chart figure. */
+
+.chart {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.chart :global(figure) {
+  margin: 0;
+}
+
+.chart :global(.caic-plot-swatches) {
+  gap: 0.2rem 0.65rem;
+  margin-bottom: 0.15rem;
+  font-size: 0.66rem;
+  color: var(--color-text-muted);
+}

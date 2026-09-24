@@ -30,6 +30,7 @@ export function formatDuration(seconds: number): string {
 }
 
 export function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 B";
   const units = ["B", "KiB", "MiB", "GiB"];
   let value = bytes;
   let unit = 0;
@@ -37,7 +38,9 @@ export function formatBytes(bytes: number): string {
     value /= 1024;
     unit++;
   }
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+  // Sub-10 amounts keep one decimal so a trickle of bytes stays readable; larger
+  // amounts round to whole units.
+  return `${value < 10 ? value.toFixed(1) : value.toFixed(0)} ${units[unit]}`;
 }
 
 export function formatTime(timestamp: string): string {

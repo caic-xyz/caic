@@ -93,6 +93,9 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	fc := smoketest.NewRuntimeBackend(fvnc.Port())
 	cfg.Runtime.System = fc
 	visualFixtures := os.Getenv(visualFixturesEnv) == "1"
+	// Resource statistics stream only for behaviour tests: the documentation
+	// screenshots compare two renders and need a stable glyph.
+	fc.StreamStats = !visualFixtures
 	cfg.Agent.Backends = fakeAgentBackends(visualFixtures)
 
 	// If a trace file is specified, copy it to the tasks log directory so it

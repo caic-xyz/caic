@@ -1,15 +1,13 @@
-// Tests for compact task token totals and detailed per-invocation usage statistics.
+// Tests for the task statistics glyph that links from a task header.
 
 import { afterEach, describe, it } from "node:test";
-import { render, within } from "@solidjs/testing-library";
+import { render } from "@solidjs/testing-library";
 import { MemoryRouter, Route } from "@solidjs/router";
-import userEvent from "@testing-library/user-event";
 import { expect, vi } from "@tests/expect";
 
 import type { EventStats } from "@sdk/types.gen";
 
-import type { TurnTiming } from "../timing";
-import { StatsContent, type TaskUsageSummary } from "./StatsDetail";
+import type { TaskUsageSummary } from "./StatsDetail";
 import StatsIcon from "./StatsIcon";
 
 const usage: TaskUsageSummary = {
@@ -19,31 +17,6 @@ const usage: TaskUsageSummary = {
   inputTokens: 1_000,
   outputTokens: 500,
 };
-
-const turns: TurnTiming[] = [
-  {
-    event: { kind: "result", ts: 2_000 },
-    result: {
-      subtype: "success",
-      isError: false,
-      result: "done",
-      totalCostUSD: 0.125,
-      duration: 5,
-      durationAPI: 4,
-      numTurns: 1,
-      usage: {
-        inputTokens: 1_000,
-        outputTokens: 500,
-        cacheCreationInputTokens: 2_000,
-        cacheReadInputTokens: 7_000,
-        reasoningOutputTokens: 200,
-        reportedModel: "test-model",
-      },
-    },
-    changeStat: null,
-    waitMs: 3_000,
-  },
-];
 
 const stats: EventStats[] = [
   {
@@ -58,46 +31,102 @@ const stats: EventStats[] = [
     blockWrite: 0,
     diskUsed: -1,
   },
-  {
-    ts: 2_000,
-    cpuPerc: 140.25,
-    memUsed: 2_048,
-    memLimit: 4_096,
-    memPerc: 50,
-    netRx: 2_048,
-    netTx: 1_024,
-    blockRead: 0,
-    blockWrite: 0,
-    diskUsed: 1_048_576,
-  },
-  {
-    ts: 3_000,
-    cpuPerc: 50,
-    memUsed: 3_072,
-    memLimit: 4_096,
-    memPerc: 75,
-    netRx: 3_072,
-    netTx: 1_024,
-    blockRead: 0,
-    blockWrite: 0,
-    diskUsed: -1,
-  },
 ];
 
 afterEach(() => vi.restoreAllMocks());
 
+function renderIcon(history: EventStats[]) {
+  return render(() => (
+    <MemoryRouter>
+      <Route path="*" component={() => <StatsIcon href="/task/@task/stats" stats={history} usage={usage} />} />
+    </MemoryRouter>
+  ));
+}
+
+// The glyph draws four bars in order: CPU, memory, network, disk.
+function barHeights(history: EventStats[]): (string | null | undefined)[] {
+  const { getByRole } = renderIcon(history);
+  const bars = getByRole("link", { name: "Task statistics" }).querySelectorAll("rect");
+  return Array.from(bars, (bar) => bar.getAttribute("height"));
+}
+
+function barClasses(history: EventStats[]): string[] {
+  const { getByRole } = renderIcon(history);
+  const bars = getByRole("link", { name: "Task statistics" }).querySelectorAll("rect");
+  return Array.from(bars, (bar) => bar.getAttribute("class") ?? "");
+}
+
 describe("StatsIcon", () => {
   it("surfaces task token volume and cost before opening details", () => {
-    const { getByRole } = render(() => (
-      <MemoryRouter>
-        <Route path="*" component={() => <StatsIcon href="/task/@task/stats" stats={[]} usage={usage} />} />
-      </MemoryRouter>
-    ));
+    const { getByRole } = renderIcon([]);
 
     const trigger = getByRole("link", { name: "Task statistics" });
     expect(trigger).toHaveAttribute("href", "/task/@task/stats");
     expect(trigger).toHaveTextContent("11kt");
     expect(trigger).toHaveTextContent("$0.13");
+  });
+
+  it("states the sampled resource figures for assistive technology", () => {
+    const { getByRole } = renderIcon([
+      { ...stats[0], cpuPerc: 50, memPerc: 75, netRx: 3_072, netTx: 1_024, diskUsed: -1 },
+    ]);
+
+    const trigger = getByRole("link", { name: "Task statistics" });
+    expect(trigger).toHaveTextContent("50.0% CPU");
+    expect(trigger).toHaveTextContent("75.0% memory");
+    expect(trigger).toHaveTextContent("4.0 KiB transferred");
+    expect(trigger).toHaveTextContent("unavailable disk used");
+  });
+
+  it("scales every bar against its own fixed ceiling", () => {
+    const [{ ...sample }] = stats;
+    const heights = barHeights([
+      {
+        ...sample,
+        cpuPerc: 90,
+        memPerc: 40,
+        netRx: 850_000_000,
+        netTx: 0,
+        diskUsed: 5_000_000_000,
+      },
+    ]);
+
+    // Eight pixels per full bar: 90% CPU, 40% memory, 85% of the 1 GB transfer
+    // ceiling, and half of the 10 GB disk ceiling.
+    expect(heights).toEqual(["7", "3", "7", "4"]);
+  });
+
+  it("keeps a bar's height and color on the same scale", () => {
+    const [{ ...sample }] = stats;
+    const at = (diskUsed: number) => {
+      const history = [{ ...sample, diskUsed }];
+      return { classes: barClasses(history), heights: barHeights(history) };
+    };
+
+    // Disk turns amber at half of its 10 GB ceiling and red at 85% of it, which
+    // are the same fractions that decide the bar's height.
+    const below = at(4_000_000_000);
+    expect(below.heights[3]).toBe("3");
+    expect(below.classes[3]).toContain("Success");
+    const warning = at(5_000_000_000);
+    expect(warning.heights[3]).toBe("4");
+    expect(warning.classes[3]).toContain("Warning");
+    const danger = at(8_500_000_000);
+    expect(danger.heights[3]).toBe("7");
+    expect(danger.classes[3]).toContain("Danger");
+  });
+
+  it("keeps bar heights stable as a task's history grows", () => {
+    const [{ ...sample }] = stats;
+    const latest = { ...sample, cpuPerc: 50, memPerc: 50, netRx: 100_000_000, netTx: 0, diskUsed: 1_000_000_000 };
+    const small = barHeights([latest]);
+
+    // A larger historical peak must not shrink the current reading: the bar
+    // measures the sample against a fixed ceiling, not against the maximum the
+    // task happens to have reached.
+    const withEarlierPeak = barHeights([{ ...latest, ts: 500, netRx: 900_000_000, diskUsed: 9_000_000_000 }, latest]);
+
+    expect(withEarlierPeak).toEqual(small);
   });
 
   it("renders a day-scale resource history without spreading it into Math.max", () => {
@@ -111,149 +140,6 @@ describe("StatsIcon", () => {
       ts: i,
     }));
 
-    expect(() =>
-      render(() => (
-        <MemoryRouter>
-          <Route path="*" component={() => <StatsIcon href="/task/@task/stats" stats={longHistory} usage={usage} />} />
-        </MemoryRouter>
-      )),
-    ).not.toThrow();
-  });
-
-  it("separates token categories and reports cache efficiency", async () => {
-    const events = [
-      {
-        kind: "toolUse",
-        ts: 1_000,
-        toolUse: { toolUseID: "tool-1", name: "Bash", input: {} },
-      },
-      {
-        kind: "toolResult",
-        ts: 2_000,
-        toolResult: { toolUseID: "tool-1", duration: 1 },
-      },
-    ] as const;
-    const { findByTestId, getByTestId } = render(() => (
-      <StatsContent events={events} stats={[]} turns={turns} usage={usage} />
-    ));
-
-    const summary = getByTestId("task-usage-summary");
-    expect(summary).toHaveTextContent("New input1.0kt");
-    expect(summary).toHaveTextContent("Cache write2.0kt");
-    expect(summary).toHaveTextContent("Cache read7.0kt");
-    expect(summary).toHaveTextContent("Output500t");
-    expect(summary).toHaveTextContent("Thinking200t");
-    expect(summary).toHaveTextContent("Cache hit 70%");
-
-    expect(await findByTestId("turn-token-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
-    expect(await findByTestId("tool-time-chart", undefined, { timeout: 5_000 })).toBeInTheDocument();
-  });
-
-  it("keeps double-digit turns in chronological chart order without Plot warnings", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const manyTurns = Array.from({ length: 12 }, () => turns[0]);
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={[]} turns={manyTurns} usage={usage} />);
-    const chart = await findByTestId("turn-token-chart");
-    const labels = Array.from(
-      chart.querySelectorAll('[aria-label="x-axis tick label"] text'),
-      (label) => label.textContent,
-    );
-    expect(labels).toEqual(Array.from({ length: 12 }, (_, i) => String(i + 1)));
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it("shows aligned resource history and network throughput", async () => {
-    const user = userEvent.setup();
-    const { findByLabelText, findByTestId } = render(() => (
-      <StatsContent events={[]} stats={stats} turns={[]} usage={usage} />
-    ));
-    const resources = await findByTestId("resource-charts");
-    expect(resources).toHaveTextContent("CPU50.0% · max 140.25%");
-    expect(resources).toHaveTextContent("Memory3.0 KB / 4.0 KB");
-    expect(resources).toHaveTextContent("NetworkRX 3.0 KB · TX 1.0 KB");
-    expect(resources).toHaveTextContent("DiskUnavailable");
-    expect(resources).toHaveTextContent("3 samples");
-    const cpuChart = await findByLabelText("CPU utilization over time");
-    expect(cpuChart).toBeInTheDocument();
-    const cpuDots = Array.from(cpuChart.querySelectorAll("circle"));
-    expect(cpuDots.every((dot) => Number(dot.getAttribute("cy")) >= Number(dot.getAttribute("r")))).toBe(true);
-    const cpuScaleLabels = Array.from(
-      cpuChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
-      (label) => label.textContent,
-    );
-    expect(cpuScaleLabels).toEqual(["0%", "141%"]);
-    expect(await findByLabelText("Memory utilization over time")).toBeInTheDocument();
-    const rxChart = await findByLabelText("Network receive throughput over time");
-    const txChart = await findByLabelText("Network transmit throughput over time");
-    expect(resources).toHaveTextContent("RX/s1.0 KB/s");
-    expect(resources).toHaveTextContent("TX/s0 B/s");
-    expect(resources).not.toHaveTextContent("network chart shows throughput");
-    expect(
-      Array.from(rxChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
-    ).toEqual(["0 B/s", "2.0 KB/s"]);
-    expect(
-      Array.from(txChart.querySelectorAll('[aria-label="y-axis tick label"] text'), (label) => label.textContent),
-    ).toEqual(["0 B/s", "1.0 KB/s"]);
-    expect(rxChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "end");
-    expect(txChart.querySelector('[aria-label="y-axis tick label"]')).toHaveAttribute("text-anchor", "start");
-    expect(await findByLabelText("Writable disk usage over time")).toBeInTheDocument();
-    const titles = Array.from(resources.querySelectorAll("title"), (title) => title.textContent ?? "");
-    expect(titles.some((title) => title.includes("RX 2.0 KB/s"))).toBe(true);
-    expect(titles.some((title) => title.includes("TX 1.0 KB/s"))).toBe(true);
-    const summary = within(resources).getByText("Exact samples (3)");
-    await user.click(summary);
-    const scroller = within(resources).getByRole("region", {
-      name: "Exact resource samples",
-    });
-    expect(scroller).toHaveAttribute("tabindex", "0");
-    scroller.focus();
-    expect(scroller).toHaveFocus();
-    const table = within(resources).getByRole("table");
-    expect(table).toHaveTextContent("CPU");
-    expect(table).toHaveTextContent("RX/s");
-    expect(table).toHaveTextContent("2.0 KB/s (2048 B/s)");
-    expect(table).toHaveTextContent("1.0 MB (1048576 B)");
-  });
-
-  it("preserves irregular exact sample values in the accessible table", async () => {
-    const user = userEvent.setup();
-    const irregularStats: EventStats[] = [
-      {
-        ...stats[0],
-        ts: 1_234,
-        cpuPerc: 12.34567,
-        memPerc: 23.45678,
-        netRx: 100,
-        netTx: 200,
-      },
-      {
-        ...stats[1],
-        ts: 3_234,
-        cpuPerc: 87.65432,
-        memPerc: 76.54321,
-        netRx: 1_601,
-        netTx: 201,
-        diskUsed: 1_537,
-      },
-    ];
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={irregularStats} turns={[]} usage={usage} />);
-    const resources = await findByTestId("resource-charts");
-    await user.click(within(resources).getByText("Exact samples (2)"));
-    const table = within(resources).getByRole("table");
-    expect(table).toHaveTextContent("1970-01-01T00:00:03.234Z");
-    expect(table).toHaveTextContent("87.65432%");
-    expect(table).toHaveTextContent("76.54321%");
-    expect(table).toHaveTextContent("751 B/s (750.5 B/s)");
-    expect(table).toHaveTextContent("0.5 B/s (0.5 B/s)");
-    expect(table).toHaveTextContent("1.5 KB (1537 B)");
-  });
-
-  it("does not infer network throughput from one sample", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { findByTestId } = render(() => <StatsContent events={[]} stats={[stats[0]]} turns={[]} usage={usage} />);
-    const resources = await findByTestId("resource-charts");
-    expect(resources).toHaveTextContent("Waiting for another sample");
-    expect(resources).toHaveTextContent("No disk history available");
-    expect(warn).not.toHaveBeenCalled();
+    expect(() => renderIcon(longHistory)).not.toThrow();
   });
 });

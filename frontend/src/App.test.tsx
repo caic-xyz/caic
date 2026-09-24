@@ -52,7 +52,9 @@ function deferred<T>() {
 }
 
 // Stub EventSource to prevent real SSE connections.
-// FakeEventSource captures message listeners so tests can push SSE events.
+// FakeEventSource captures message listeners so tests can push SSE events, and
+// unregisters them on close so a superseded subscription cannot keep receiving
+// events: the application closes its stream on cleanup and on every reconnect.
 type MessageListener = (e: { data: string }) => void;
 type OpenListener = () => void;
 const fakeESListeners: MessageListener[] = [];
@@ -60,32 +62,66 @@ const fakeUsageESListeners: MessageListener[] = [];
 const fakeESOpenListeners: OpenListener[] = [];
 
 class FakeEventSource {
+  /** Undo callbacks for this instance's live listeners. */
+  private readonly registered: Array<() => void> = [];
+
+  constructor(
+    private readonly messages: MessageListener[] = fakeESListeners,
+    private readonly opens: OpenListener[] = fakeESOpenListeners,
+  ) {}
+
   addEventListener = vi.fn((type: string, handler: MessageListener | OpenListener) => {
-    if (type === "message") fakeESListeners.push(handler as MessageListener);
-    if (type === "open") fakeESOpenListeners.push(handler as OpenListener);
+    if (type === "message") this.register(this.messages, handler as MessageListener);
+    if (type === "open") this.register(this.opens, handler as OpenListener);
   });
-  close = vi.fn();
+
+  close = vi.fn(() => {
+    for (const unregister of this.registered.splice(0)) unregister();
+  });
+
   onerror: ((e: Event) => void) | null = null;
+
+  /** Add one handler and remember how to remove it again. */
+  private register<T>(list: T[], handler: T): void {
+    list.push(handler);
+    this.registered.push(() => {
+      const index = list.indexOf(handler);
+      if (index >= 0) list.splice(index, 1);
+    });
+  }
 }
 
 vi.stubGlobal("EventSource", FakeEventSource);
 
+/** Task-event subscriptions the application opened since the last render. */
+let taskEventSubscriptions = 0;
+
+/** Fail loudly when an event is pushed to a stream no live subscription receives. */
+function requireLiveSubscription(listeners: unknown[], caller: string): void {
+  if (listeners.length === 0) {
+    throw new Error(`${caller} has no live subscription; await waitForTaskEventsSubscription() first.`);
+  }
+}
+
 function dispatchSSE(data: unknown) {
+  requireLiveSubscription(fakeESListeners, "dispatchSSE");
   const payload = { data: JSON.stringify(data) };
   fakeESListeners.forEach((fn) => fn(payload));
 }
 
 function dispatchUsageSSE(data: unknown) {
+  requireLiveSubscription(fakeUsageESListeners, "dispatchUsageSSE");
   const payload = { data: JSON.stringify(data) };
   fakeUsageESListeners.forEach((fn) => fn(payload));
 }
 
 function dispatchOpen() {
+  requireLiveSubscription(fakeESOpenListeners, "dispatchOpen");
   fakeESOpenListeners.forEach((fn) => fn());
 }
 
 async function waitForTaskEventsSubscription() {
-  await waitFor(() => expect(fakeESListeners.length).toBeGreaterThan(0));
+  await waitFor(() => expect(taskEventSubscriptions).toBeGreaterThan(0));
 }
 
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
@@ -156,6 +192,7 @@ fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
 
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
+  taskEventSubscriptions = 0;
   const history = createMemoryHistory();
   history.set({ value: initial });
   const utils = render(() => (
@@ -206,11 +243,12 @@ beforeEach(() => {
     const es = new FakeEventSource();
     // Mirror the real client: parse the SSE payload before invoking the handler.
     es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
+    taskEventSubscriptions += 1;
     return es;
   }) as unknown as typeof api.globalTaskEvents);
   vi.mocked(api.globalUsageEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
-    const es = new FakeEventSource();
-    fakeUsageESListeners.push((e) => handlers.onMessage(JSON.parse(e.data)));
+    const es = new FakeEventSource(fakeUsageESListeners);
+    es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
     return es;
   }) as unknown as typeof api.globalUsageEvents);
   vi.mocked(api.taskEvents).mockImplementation((() => new FakeEventSource()) as unknown as typeof api.taskEvents);
@@ -1711,13 +1749,12 @@ describe("App repo chips: No repository", () => {
     expect(within(sizeRow).getByText("12 KiB")).toBeInTheDocument();
     expect(within(sizeRow).getAllByText("4.0 KiB").length).toBe(4);
 
-    // A gauge has no total or percentiles, so those cells stay blank instead of
-    // reporting the sum of its samples.
+    // A gauge has no total, spread, or percentiles, so those cells stay blank
+    // instead of reporting the sum of its samples.
     const gaugeRow = within(table).getByRole("rowheader", { name: "container.instances" }).closest("tr");
     if (!gaugeRow) throw new Error("container.instances row is missing");
-    expect(within(gaugeRow).getAllByText("—").length).toBe(4);
-    expect(within(gaugeRow).getByText("5")).toBeInTheDocument();
-    expect(within(gaugeRow).getByText("4")).toBeInTheDocument();
+    const gaugeCells = Array.from(gaugeRow.querySelectorAll("td"), (cell) => cell.textContent);
+    expect(gaugeCells).toEqual(["gauge", "ok", "—", "2", "—", "—", "—", "—", "5", "4"]);
     expect(within(gaugeRow).queryByText("9")).toBeNull();
   });
 
@@ -2540,5 +2577,25 @@ describe("App repo chip ordering", () => {
     if (allLabelIdx >= 0) {
       expect(newOptionIdx).toBeLessThan(allLabelIdx);
     }
+  });
+});
+
+describe("SSE test harness", () => {
+  it("stops delivering events to a closed subscription", () => {
+    const received: string[] = [];
+    const first = new FakeEventSource();
+    first.addEventListener("message", () => received.push("first"));
+    const second = new FakeEventSource();
+    second.addEventListener("message", () => received.push("second"));
+
+    first.close();
+    dispatchSSE({ kind: "upsert" });
+
+    expect(received).toEqual(["second"]);
+    second.close();
+  });
+
+  it("reports a dispatch no live subscription can receive", () => {
+    expect(() => dispatchSSE({ kind: "upsert" })).toThrow(/no live subscription/);
   });
 });

@@ -1,0 +1,42 @@
+/* Styles for the measurement spread strip. */
+
+.empty {
+  color: var(--color-text-faint);
+}
+
+/* The track spans zero to the series maximum; the span covers the middle half
+   of the distribution and the median marker sits on the median. */
+.strip {
+  position: relative;
+  display: block;
+  width: 4rem;
+  height: 0.5rem;
+  background: var(--color-border-light);
+  border-radius: 999px;
+}
+
+.span {
+  --p50-share: 0;
+  --p95-share: 0;
+
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--p50-share) * 100%);
+  width: calc((var(--p95-share) - var(--p50-share)) * 100%);
+  background: var(--color-primary);
+  border-radius: 999px;
+}
+
+.median {
+  --p50-share: 0;
+
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: calc(var(--p50-share) * 100%);
+  width: 2px;
+  background: var(--color-text-secondary);
+  border-radius: 1px;
+  transform: translateX(-1px);
+}

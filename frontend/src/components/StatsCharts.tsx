@@ -1,20 +1,25 @@
 // Compact task charts for resource history, token composition, and cumulative tool time.
 
 import * as Plot from "@observablehq/plot";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 
 import type { EventStats } from "@sdk/types.gen";
 
-import { formatTokens } from "../formatting";
+import { formatBytes, formatTokens } from "../formatting";
 import { deriveNetworkRates, type ToolTimingSummary } from "../taskStats";
 import type { TurnTiming } from "../timing";
 import { formatTimingDuration } from "../timing";
+import ChartDataTable from "./ChartDataTable";
+import { ToggleChip } from "./FormControls";
+import PlotHost from "./PlotHost";
 import styles from "./StatsCharts.module.css";
 
 interface TokenDatum {
   turn: string;
   category: string;
-  tokens: number;
+  count: number;
+  share: number;
+  value: number;
 }
 
 interface ResourceDatum {
@@ -34,14 +39,10 @@ interface ResourceChartOptions {
 
 const tokenCategories = ["New input", "Cache write", "Cache read", "Output"];
 const maxResourceSamples = 120;
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.max(0, Math.min(Math.floor(Math.log2(bytes) / 10), units.length - 1));
-  const value = bytes / Math.pow(1024, i);
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
-}
+// Half the width of the longest pointer readout ("RX 1.0 KB/s"). The readout is
+// centered on the focused sample, so it parks this far inside the frame rather
+// than being clipped by the viewport at the edges of the sampled range.
+const readoutHalfWidth = 34;
 
 function formatSampleTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
@@ -53,6 +54,14 @@ function formatSampleTime(ts: number): string {
 
 function formatThroughput(bytesPerSecond: number): string {
   return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function formatShare(share: number): string {
+  return `${(share * 100).toFixed(1)}%`;
+}
+
+function formatShareTick(share: number): string {
+  return `${Math.round(share * 100)}%`;
 }
 
 function throughputScaleMax(data: readonly ResourceDatum[]): number {
@@ -74,41 +83,53 @@ function formatExactSampleTime(ts: number): string {
   return new Date(ts).toISOString();
 }
 
-function PlotHost(props: { label: string; draw: (width: number) => Element }) {
-  const [width, setWidth] = createSignal(390);
-  let host: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
-
-  onMount(() => {
-    if (!host) return;
-    const resize = () => setWidth(Math.max(280, Math.floor(host?.getBoundingClientRect().width ?? 390)));
-    resize();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
-    observer?.observe(host);
-    window.addEventListener("resize", resize);
-    onCleanup(() => {
-      observer?.disconnect();
-      window.removeEventListener("resize", resize);
-    });
-  });
-
-  createEffect(() => {
-    const plot = props.draw(width());
-    plot.setAttribute("aria-label", props.label);
-    host?.replaceChildren(plot);
-  });
-
-  return <div class={styles.chart} ref={host} />;
-}
-
-function tokenData(turns: readonly TurnTiming[]): TokenDatum[] {
+function tokenData(turns: readonly TurnTiming[], asShare: boolean): TokenDatum[] {
   return turns.flatMap((turn, i) => {
     const usage = turn.result.usage;
-    return [
-      { turn: String(i + 1), category: "New input", tokens: usage.inputTokens },
-      { turn: String(i + 1), category: "Cache write", tokens: usage.cacheCreationInputTokens },
-      { turn: String(i + 1), category: "Cache read", tokens: usage.cacheReadInputTokens },
-      { turn: String(i + 1), category: "Output", tokens: usage.outputTokens },
+    const counts: readonly (readonly [string, number])[] = [
+      ["New input", usage.inputTokens],
+      ["Cache write", usage.cacheCreationInputTokens],
+      ["Cache read", usage.cacheReadInputTokens],
+      ["Output", usage.outputTokens],
     ];
+    const total = counts.reduce((sum, [, count]) => sum + count, 0);
+    return counts.map(([category, count]) => {
+      const share = total > 0 ? count / total : 0;
+      return { category, count, share, turn: String(i + 1), value: asShare ? share : count };
+    });
+  });
+}
+
+// Cache reads usually outweigh the other categories by an order of magnitude, so
+// the absolute stack flattens them into the baseline; the share view keeps the
+// composition between them readable.
+function drawTokenChart(turns: readonly TurnTiming[], width: number, asShare: boolean): Element {
+  const data = tokenData(turns, asShare);
+  return Plot.plot({
+    width,
+    height: 180,
+    marginLeft: 48,
+    marginBottom: 32,
+    className: "caic-plot",
+    style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
+    x: { type: "band", label: "Turn", padding: 0.25, domain: turns.map((_, i) => String(i + 1)) },
+    y: asShare
+      ? { label: null, grid: true, domain: [0, 1], ticks: [0, 0.5, 1], tickFormat: formatShareTick }
+      : { label: "Tokens", grid: true, tickFormat: formatTokens },
+    color: {
+      domain: tokenCategories,
+      range: ["var(--color-warning-border)", "var(--color-primary)", "var(--color-success)", "var(--color-plan)"],
+      legend: true,
+    },
+    marks: [
+      Plot.barY(data, {
+        x: "turn",
+        y: "value",
+        fill: "category",
+        title: (d: TokenDatum) => `Turn ${d.turn} · ${d.category}: ${formatTokens(d.count)} (${formatShare(d.share)})`,
+      }),
+      Plot.ruleY([0]),
+    ],
   });
 }
 
@@ -116,15 +137,23 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
   const domain = data.length > 0 ? [data[0].ts, data[data.length - 1].ts] : undefined;
   const available = data.filter((sample): sample is ResourceDatum & { value: number } => sample.value !== null);
   const showAxis = options.axisAnchor !== null && options.axisFormat !== null && options.maxValue !== null;
+  const marginLeft = showAxis && options.axisAnchor === "left" ? 40 : 3;
+  const marginRight = showAxis && options.axisAnchor === "right" ? 40 : 3;
+  const span = domain ? domain[1] - domain[0] : 0;
+  const readoutInset = span > 0 ? (readoutHalfWidth / (width - marginLeft - marginRight)) * span : 0;
+  const readoutTs = (sample: ResourceDatum) =>
+    Math.min(Math.max(sample.ts, (domain?.[0] ?? sample.ts) + readoutInset), (domain?.[1] ?? sample.ts) - readoutInset);
+  // The crosshair follows the pointer in one dimension along the sampled range;
+  // px and py stay bound to the sample so every pointer mark focuses the same one.
+  const focus = Plot.pointerX({ px: "ts", py: "value" });
   return Plot.plot({
     width,
     height: options.height,
     margin: 3,
     marginBottom: showAxis ? 8 : 3,
-    marginLeft: showAxis && options.axisAnchor === "left" ? 40 : 3,
-    marginRight: showAxis && options.axisAnchor === "right" ? 40 : 3,
+    marginLeft,
+    marginRight,
     marginTop: showAxis ? 8 : 3,
-    ariaLabel: `${options.label} over time`,
     className: "caic-plot",
     style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
     x: { axis: null, domain },
@@ -144,12 +173,20 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
         : { axis: null, domain: [0, options.maxValue], zero: true },
     marks: [
       Plot.lineY(data, { x: "ts", y: "value", stroke: options.color, strokeWidth: 1.5 }),
-      Plot.dot(available, {
-        x: "ts",
-        y: "value",
-        fill: options.color,
-        r: 1.8,
-        title: (d: ResourceDatum & { value: number }) => `${formatSampleTime(d.ts)} · ${options.formatValue(d.value)}`,
+      Plot.dot(available, { x: "ts", y: "value", fill: options.color, r: 1.8 }),
+      Plot.ruleX(data, { ...focus, x: "ts", stroke: options.color, strokeOpacity: 0.45 }),
+      // Samples with no measurement (disk before it reports, throughput before a
+      // second sample) have no readout to show, so they leave the rule alone.
+      Plot.text(data, {
+        ...focus,
+        x: readoutTs,
+        frameAnchor: "top",
+        dy: 2,
+        textAnchor: "middle",
+        fill: "var(--color-text-secondary)",
+        stroke: "var(--color-bg-surface)",
+        strokeWidth: 3,
+        text: (sample: ResourceDatum) => (sample.value === null ? null : options.formatValue(sample.value)),
       }),
     ],
   });
@@ -176,6 +213,18 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
   const networkRates = createMemo(() => deriveNetworkRates(props.stats));
   const rx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.rxBytesPerSecond }));
   const tx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.txBytesPerSecond }));
+  const exactSampleRows = () =>
+    props.stats
+      .map((sample, index) => ({ rate: networkRates()[index], sample }))
+      .reverse()
+      .map(({ rate, sample }) => [
+        formatExactSampleTime(sample.ts),
+        `${String(sample.cpuPerc)}%`,
+        `${String(sample.memPerc)}%`,
+        rate.rxBytesPerSecond === null ? "—" : formatExactBytes(rate.rxBytesPerSecond, true),
+        rate.txBytesPerSecond === null ? "—" : formatExactBytes(rate.txBytesPerSecond, true),
+        sample.diskUsed < 0 ? "—" : formatExactBytes(sample.diskUsed, false),
+      ]);
 
   return (
     <div class={styles.resourceGrid} data-testid="resource-charts">
@@ -313,74 +362,15 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
         </Show>
       </div>
       <div class={styles.resourceRange}>{timeRange()}</div>
-      <details class={styles.sampleDetails}>
-        <summary>Exact samples ({props.stats.length})</summary>
-        <div
-          aria-label="Exact resource samples"
-          class={styles.sampleTableWrap}
-          role="region"
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- overflow region must be keyboard-scrollable
-          tabIndex={0}
-        >
-          <table class={styles.sampleTable}>
-            <thead>
-              <tr>
-                <th scope="col">Time</th>
-                <th scope="col">CPU</th>
-                <th scope="col">Memory</th>
-                <th scope="col">RX/s</th>
-                <th scope="col">TX/s</th>
-                <th scope="col">Disk</th>
-              </tr>
-            </thead>
-            <tbody>
-              <For each={props.stats.map((sample, index) => ({ sample, rate: networkRates()[index] })).reverse()}>
-                {({ sample, rate }) => (
-                  <tr>
-                    <td>{formatExactSampleTime(sample.ts)}</td>
-                    <td>{String(sample.cpuPerc)}%</td>
-                    <td>{String(sample.memPerc)}%</td>
-                    <td>{rate.rxBytesPerSecond === null ? "—" : formatExactBytes(rate.rxBytesPerSecond, true)}</td>
-                    <td>{rate.txBytesPerSecond === null ? "—" : formatExactBytes(rate.txBytesPerSecond, true)}</td>
-                    <td>{sample.diskUsed < 0 ? "—" : formatExactBytes(sample.diskUsed, false)}</td>
-                  </tr>
-                )}
-              </For>
-            </tbody>
-          </table>
-        </div>
-      </details>
+      <ChartDataTable
+        caption="Exact samples"
+        class={styles.sampleDetails}
+        columns={["Time", "CPU", "Memory", "RX/s", "TX/s", "Disk"]}
+        regionLabel="Exact resource samples"
+        rows={exactSampleRows()}
+      />
     </div>
   );
-}
-
-function drawTokenChart(turns: readonly TurnTiming[], width: number): Element {
-  const data = tokenData(turns);
-  return Plot.plot({
-    width,
-    height: 180,
-    marginLeft: 48,
-    marginBottom: 32,
-    ariaLabel: "Token volume by turn",
-    className: "caic-plot",
-    style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
-    x: { type: "band", label: "Turn", padding: 0.25, domain: turns.map((_, i) => String(i + 1)) },
-    y: { label: "Tokens", grid: true, tickFormat: formatTokens },
-    color: {
-      domain: tokenCategories,
-      range: ["var(--color-warning-border)", "var(--color-primary)", "var(--color-success)", "var(--color-plan)"],
-      legend: true,
-    },
-    marks: [
-      Plot.barY(data, {
-        x: "turn",
-        y: "tokens",
-        fill: "category",
-        title: (d: TokenDatum) => `Turn ${d.turn} · ${d.category}: ${formatTokens(d.tokens)}`,
-      }),
-      Plot.ruleY([0]),
-    ],
-  });
 }
 
 function drawToolChart(tools: readonly ToolTimingSummary[], width: number): Element {
@@ -390,7 +380,6 @@ function drawToolChart(tools: readonly ToolTimingSummary[], width: number): Elem
     height,
     marginLeft: Math.min(150, Math.max(62, Math.max(...tools.map((tool) => tool.name.length)) * 7)),
     marginBottom: 28,
-    ariaLabel: "Cumulative tool time by tool kind",
     className: "caic-plot",
     style: { background: "transparent", color: "var(--color-text-secondary)", fontSize: "10px" },
     x: { label: "Cumulative time", grid: true, tickFormat: formatTimingDuration },
@@ -427,6 +416,26 @@ export default function StatsCharts(props: {
     const next = props.turns;
     return next.length === previous.length && next.at(-1)?.event === previous.at(-1)?.event ? previous : next;
   }, []);
+  const [tokenShare, setTokenShare] = createSignal(false);
+  const tokenLabel = () => (tokenShare() ? "Token share by turn" : "Token volume by turn");
+  const tokenDescription = () =>
+    tokenShare()
+      ? "Each bar is one completed turn normalized to its own total, so the ratio between cache reads and the other categories stays visible."
+      : "Each bar is one completed turn's tokens, stacked by category; cache reads usually dominate the total.";
+  const tokenRows = () =>
+    turns().map((turn, index) => {
+      const usage = turn.result.usage;
+      const total =
+        usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
+      return [
+        `Turn ${index + 1}`,
+        formatTokens(usage.inputTokens),
+        formatTokens(usage.cacheCreationInputTokens),
+        formatTokens(usage.cacheReadInputTokens),
+        formatTokens(usage.outputTokens),
+        formatTokens(total),
+      ];
+    });
 
   return (
     <>
@@ -435,15 +444,44 @@ export default function StatsCharts(props: {
       </Show>
       <Show when={turns().length > 0}>
         <div class={styles.figure} data-testid="turn-token-chart">
-          <div class={styles.title}>Tokens by turn</div>
-          <PlotHost label="Token volume by turn" draw={(width) => drawTokenChart(turns(), width)} />
+          <div class={styles.figureHeader}>
+            <div class={styles.title}>Tokens by turn</div>
+            <ToggleChip
+              checked={tokenShare()}
+              title="Show each turn as a share of its own tokens"
+              onChange={setTokenShare}
+            >
+              Share of turn
+            </ToggleChip>
+          </div>
+          <PlotHost
+            label={tokenLabel()}
+            description={tokenDescription()}
+            draw={(width) => drawTokenChart(turns(), width, tokenShare())}
+          />
+          <ChartDataTable
+            caption="Turn tokens"
+            columns={["Turn", "New input", "Cache write", "Cache read", "Output", "Total"]}
+            regionLabel="Token counts by turn"
+            rows={tokenRows()}
+          />
         </div>
       </Show>
       <Show when={props.tools.length > 0}>
         <div class={styles.figure} data-testid="tool-time-chart">
           <div class={styles.title}>Tool time by kind</div>
-          <PlotHost label="Cumulative tool time by tool kind" draw={(width) => drawToolChart(props.tools, width)} />
+          <PlotHost
+            label="Cumulative tool time by tool kind"
+            description="Completed calls; concurrent durations may overlap."
+            draw={(width) => drawToolChart(props.tools, width)}
+          />
           <div class={styles.note}>Completed calls; concurrent durations may overlap.</div>
+          <ChartDataTable
+            caption="Tool timings"
+            columns={["Tool", "Calls", "Time"]}
+            regionLabel="Cumulative tool time by kind"
+            rows={props.tools.map((tool) => [tool.name, String(tool.calls), formatTimingDuration(tool.durationMs)])}
+          />
         </div>
       </Show>
     </>

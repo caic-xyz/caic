@@ -47,6 +47,11 @@ func InitHarnessCache(cacheDir string) error {
 // RuntimeBackend implements runtime.System with no-op operations and canned
 // process data.
 type RuntimeBackend struct {
+	// StreamStats makes WatchStats stream a paced resource history. The
+	// documentation screenshots render the same server twice and compare the
+	// results, so they leave it off to keep the statistics glyph stable.
+	StreamStats bool
+
 	vncPort int // non-zero when a fake VNC server is running.
 
 	mu    sync.Mutex
@@ -248,9 +253,64 @@ func (*RuntimeBackend) Inspect(_ context.Context, id runtime.ID) (*runtime.Insta
 	return &runtime.InstanceInspect{Runtime: "fake", ID: id, State: "running", OS: "linux", CPUArchitecture: stdruntime.GOARCH}, nil
 }
 
+// statsSampleInterval paces the fake resource history. The server stamps each
+// sample on arrival, so pacing is what turns the cumulative byte counters into
+// meaningful per-second throughput.
+const statsSampleInterval = 150 * time.Millisecond
+
+// fakeStatsHistory is the deterministic resource history a watched instance
+// streams. The first sample reports a distinct CPU reading and every later one
+// reports the same value, so a browser test can assert a readout that survives
+// a stream restart: the manager resubscribes whenever any task changes state,
+// which restarts this sequence.
+func fakeStatsHistory() []runtime.Stats {
+	const (
+		count     = 12
+		memLimit  = 4 << 30
+		memStart  = 512 << 20
+		memStep   = 64 << 20
+		diskStart = 1 << 30
+		diskStep  = 32 << 20
+	)
+	history := make([]runtime.Stats, 0, count)
+	for i := range count {
+		cpu := 50.0
+		if i == 0 {
+			cpu = 10
+		}
+		memUsed := uint64(memStart + i*memStep)
+		history = append(history, runtime.Stats{
+			CPUPerc:  cpu,
+			MemUsed:  memUsed,
+			MemLimit: memLimit,
+			MemPerc:  float64(memUsed) / float64(memLimit) * 100,
+			NetRx:    uint64(i) * (64 << 10),
+			NetTx:    uint64(i) * (16 << 10),
+			DiskUsed: int64(diskStart + i*diskStep),
+		})
+	}
+	return history
+}
+
 // WatchStats implements runtime.Monitor.
-func (*RuntimeBackend) WatchStats(ctx context.Context, _ []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
-	return func(func(runtime.StatsSample, error) bool) {
+func (b *RuntimeBackend) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
+	return func(yield func(runtime.StatsSample, error) bool) {
+		if b.StreamStats {
+			ticker := time.NewTicker(statsSampleInterval)
+			defer ticker.Stop()
+			for _, stats := range fakeStatsHistory() {
+				for _, id := range ids {
+					if !yield(runtime.StatsSample{InstanceID: id, Stats: stats}, nil) {
+						return
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}
 		<-ctx.Done()
 	}, nil
 }

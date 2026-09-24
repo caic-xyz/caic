@@ -6,6 +6,7 @@ import type { MetricSeries, MetricsResp } from "@sdk/types.gen";
 
 import { api } from "../api";
 import Button from "../components/Button";
+import MetricDistribution from "../components/MetricDistribution";
 import { Layout } from "../components/Layout";
 import { formatBytes, formatDuration } from "../formatting";
 import styles from "./MetricsPage.module.css";
@@ -94,7 +95,8 @@ export default function MetricsPage() {
           <p class={styles.metricsDescription}>
             Measurements of server operations and resources. A histogram is read through its percentiles, a counter
             through its total, and a gauge through its current value and observed range. Percentiles and totals cover
-            the most recent retained measurements per series.
+            the most recent retained measurements per series, and the spread column marks each histogram's median and
+            95th percentile on a zero-based scale that ends at its observed maximum.
           </p>
           <Show when={meta()}>
             <p class={styles.metricsMeta}>{meta()}</p>
@@ -115,6 +117,7 @@ export default function MetricsPage() {
                     <th scope="col">Attributes</th>
                     <th scope="col">Count</th>
                     <th scope="col">Total</th>
+                    <th scope="col">Spread</th>
                     <th scope="col">p50</th>
                     <th scope="col">p95</th>
                     <th scope="col">Max</th>
@@ -131,6 +134,15 @@ export default function MetricsPage() {
                         <td>{formatAttrs(metric.attrs)}</td>
                         <td>{metric.count}</td>
                         <td>{formatStat(metric, "sum")}</td>
+                        <td class={styles.spreadCell}>
+                          <MetricDistribution
+                            percentiles={hasStat(metric.kind, "p95")}
+                            format={(value) => formatAmount(value, metric.unit)}
+                            p50={metric.p50}
+                            p95={metric.p95}
+                            max={metric.max}
+                          />
+                        </td>
                         <td>{formatStat(metric, "p50")}</td>
                         <td>{formatStat(metric, "p95")}</td>
                         <td>{formatStat(metric, "max")}</td>

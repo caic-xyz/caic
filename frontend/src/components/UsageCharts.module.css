@@ -20,17 +20,14 @@
   color: var(--color-text-secondary);
 }
 
-.chart {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.chart :global(figure) {
-  margin: 0;
-}
-
 @media (width <= 700px) {
   .grid {
     grid-template-columns: 1fr;
   }
+}
+
+.note {
+  margin: 0.4rem 0 0;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
 }

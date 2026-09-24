@@ -9,6 +9,16 @@ describe("formatBytes", () => {
   it("formats resident memory using binary units", () => {
     expect(formatBytes(2_097_152)).toBe("2.0 MiB");
   });
+
+  it("keeps a fractional byte visible until an amount reaches ten", () => {
+    expect(formatBytes(0.5)).toBe("0.5 B");
+    expect(formatBytes(750.5)).toBe("751 B");
+    expect(formatBytes(1_537)).toBe("1.5 KiB");
+  });
+
+  it("reports an absent amount without a decimal", () => {
+    expect(formatBytes(0)).toBe("0 B");
+  });
 });
 
 describe("formatElapsed", () => {

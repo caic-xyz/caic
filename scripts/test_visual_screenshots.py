@@ -105,6 +105,7 @@ class GenerateModeTest(unittest.TestCase):
                     "parse_args": lambda: argparse.Namespace(
                         mode="generate",
                         platform="frontend",
+                        rebuilt=True,
                     ),
                 },
             ),
@@ -125,12 +126,61 @@ class GenerateModeTest(unittest.TestCase):
                     "parse_args": lambda: argparse.Namespace(
                         mode="check",
                         platform="frontend",
+                        rebuilt=True,
                     ),
                 },
             ),
         ):
             self.assertEqual(visual_screenshots.main(), 1)
         self.assertIn("ffmpeg is required", stderr.getvalue())
+
+
+class FrontendBundleFreshnessTest(unittest.TestCase):
+    """A comparison is only meaningful against a bundle built from the tree.
+
+    The renderer serves the built bundle, so comparing while the sources are
+    ahead of it would report on code nobody is looking at.
+    """
+
+    def test_unchanged_sources_are_accepted(self):
+        self.assertIsNone(visual_screenshots.frontend_bundle_staleness([], []))
+
+    def test_a_rebuilt_bundle_is_accepted(self):
+        self.assertIsNone(
+            visual_screenshots.frontend_bundle_staleness(
+                ["frontend/src/App.tsx"],
+                ["backend/frontend/dist/assets/index.js.br"],
+            ),
+        )
+
+    def test_dirty_sources_with_a_clean_bundle_are_reported(self):
+        problem = visual_screenshots.frontend_bundle_staleness(["frontend/src/App.tsx"], [])
+        self.assertIsNotNone(problem)
+        self.assertIn("frontend/src/App.tsx", problem)
+
+    def test_main_refuses_a_stale_bundle_before_rendering(self):
+        stderr = StringIO()
+
+        def changed(paths):
+            return ["frontend/src/App.tsx"] if paths == visual_screenshots.FRONTEND_BUILD_INPUTS else []
+
+        with (
+            redirect_stderr(stderr),
+            mock.patch.object(visual_screenshots, "changed_paths", side_effect=changed),
+            mock.patch.object(visual_screenshots.shutil, "which", return_value="/usr/bin/ffmpeg"),
+            mock.patch.dict(
+                visual_screenshots.__dict__,
+                {
+                    "parse_args": lambda: argparse.Namespace(
+                        mode="check",
+                        platform="frontend",
+                        rebuilt=False,
+                    ),
+                },
+            ),
+        ):
+            self.assertEqual(visual_screenshots.main(), 1)
+        self.assertIn("Refusing to render frontend screenshots", stderr.getvalue())
 
 
 class ScreenshotTreeTest(unittest.TestCase):

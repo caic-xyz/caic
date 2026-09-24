@@ -24,6 +24,9 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await expect(page.getByRole("columnheader", { name: "Cache hit" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Tools" })).toBeVisible();
   await expect(page.getByTestId("usage-charts")).toBeVisible();
+  // The rollup holds the current day, which is still accumulating, so the trend
+  // states that its last point is provisional.
+  await expect(page.getByTestId("usage-charts")).toContainText("still accumulating");
   await page.getByLabel("Usage date range").selectOption("all");
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
