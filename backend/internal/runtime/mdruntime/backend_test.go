@@ -621,3 +621,30 @@ func TestCommandOutputError(t *testing.T) {
 		}
 	})
 }
+
+// sshCommandContainer returns a real local command from SSHCommand so tests can
+// exercise commandOutput without a container. The command reports on stdout and
+// emits a diagnostic on stderr, mirroring a container shell that prints a
+// startup error such as a malformed ~/.env.
+type sshCommandContainer struct {
+	fakeMDContainer
+}
+
+func (*sshCommandContainer) SSHCommand([]string, string) []string {
+	return []string{"sh", "-c", "printf 'report\\n'; printf 'diagnostic\\n' >&2"}
+}
+
+func TestCommandOutput(t *testing.T) {
+	t.Parallel()
+	b := newTestBackend(nil)
+	res, err := b.commandOutput(t.Context(), &sshCommandContainer{name: "md-caic-1"}, "ignored")
+	if err != nil {
+		t.Fatalf("commandOutput() error = %v", err)
+	}
+	if got, want := string(res.Stdout), "report\n"; got != want {
+		t.Errorf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := string(res.Stderr), "diagnostic\n"; got != want {
+		t.Errorf("Stderr = %q, want %q", got, want)
+	}
+}

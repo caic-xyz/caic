@@ -476,11 +476,11 @@ func (b *Backend) CommitDiffStat(ctx context.Context, id runtime.ID, repoIdx int
 	if err != nil {
 		return "", err
 	}
-	out, err := b.commandOutput(ctx, ct, cmd)
+	res, err := b.commandOutput(ctx, ct, cmd)
 	if err != nil {
-		return "", commandOutputError("git commit diff stat", ct, err, out)
+		return "", commandOutputError("git commit diff stat", ct, err, res.Stderr)
 	}
-	return string(out), nil
+	return string(res.Stdout), nil
 }
 
 // FileDiff implements runtime.Repository.
@@ -501,11 +501,11 @@ func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, comm
 	if err != nil {
 		return "", err
 	}
-	out, err := b.commandOutput(ctx, ct, cmd)
+	res, err := b.commandOutput(ctx, ct, cmd)
 	if err != nil {
-		return "", commandOutputError("git file diff", ct, err, out)
+		return "", commandOutputError("git file diff", ct, err, res.Stderr)
 	}
-	return string(out), nil
+	return string(res.Stdout), nil
 }
 
 // RepositoryStatus implements runtime.Repository.
@@ -723,11 +723,11 @@ func (b *Backend) Processes(ctx context.Context, id runtime.ID) ([]runtime.Proce
 	if err != nil {
 		return nil, err
 	}
-	out, err := b.commandOutput(ctx, ct, processCommand)
+	res, err := b.commandOutput(ctx, ct, processCommand)
 	if err != nil {
-		return nil, fmt.Errorf("ps in container %s: %w (output: %s)", ct.Name(), err, out)
+		return nil, fmt.Errorf("ps in container %s: %w (output: %s)", ct.Name(), err, res.Stderr)
 	}
-	return parseProcessOutput(string(out))
+	return parseProcessOutput(string(res.Stdout))
 }
 
 // Signal sends a signal to a process inside the runtime instance.
@@ -744,9 +744,9 @@ func (b *Backend) Signal(ctx context.Context, id runtime.ID, pid int, sig string
 	if err != nil {
 		return err
 	}
-	out, err := b.commandOutput(ctx, ct, command)
+	res, err := b.commandOutput(ctx, ct, command)
 	if err != nil {
-		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, ct.Name(), err, out)
+		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, ct.Name(), err, res.Stderr)
 	}
 	return nil
 }
@@ -872,11 +872,24 @@ func (b *Backend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (
 	return out, nil
 }
 
-func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command string) ([]byte, error) {
+// commandResult is the separated output of one command run in a container.
+// Reports are parsed from Stdout alone: container shell startup can write
+// diagnostics to Stderr (a malformed ~/.env, for example), and merging the
+// streams would turn that diagnostic into a bogus parse failure.
+type commandResult struct {
+	Stdout []byte
+	Stderr []byte
+}
+
+func (b *Backend) commandOutput(ctx context.Context, ct mdContainer, command string) (commandResult, error) {
 	sshArgs := ct.SSHCommand(nil, command)
 	b.log.DebugContext(ctx, "ssh", "cmd", sshArgs)
 	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and command are derived from the md container.
-	return cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return commandResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, err
 }
 
 // commandOutputError describes a failed container Git command. Git reports
@@ -913,11 +926,11 @@ func (b *Backend) repositoryStatusFromProbe(
 		return runtime.RepositoryStatus{}, fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	out, err := b.commandOutput(ctx, ct, command(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
+	res, err := b.commandOutput(ctx, ct, command(repo.ContainerPath, repo.DefaultRemote, repo.DefaultBranch))
 	if err != nil {
-		return runtime.RepositoryStatus{}, commandOutputError("git status", ct, err, out)
+		return runtime.RepositoryStatus{}, commandOutputError("git status", ct, err, res.Stderr)
 	}
-	status, err := parse(string(out))
+	status, err := parse(string(res.Stdout))
 	if err != nil {
 		return runtime.RepositoryStatus{}, fmt.Errorf("parse git status in container %s: %w", ct.Name(), err)
 	}
