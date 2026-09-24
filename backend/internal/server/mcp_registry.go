@@ -446,6 +446,35 @@ func annotateTool(spec mcp.ToolSpec, annotations mcp.ToolAnnotations) mcp.ToolSp
 	return spec
 }
 
+// validateToolSchemas fails when any advertised tool schema is structurally
+// invalid, so a malformed catalog is caught at startup instead of on the
+// request path. It covers the static catalog plus the delegated schemas that
+// only task-scoped callers receive.
+func (m *mcpRegistry) validateToolSchemas() error {
+	specs := m.specs()
+	type namedSchema struct {
+		name   string
+		schema *jsonschema.Schema
+	}
+	schemas := make([]namedSchema, 0, 2*len(specs)+2)
+	for _, spec := range specs {
+		schemas = append(schemas,
+			namedSchema{spec.Name + " input", spec.InputSchema},
+			namedSchema{spec.Name + " output", spec.OutputSchema},
+		)
+	}
+	schemas = append(schemas,
+		namedSchema{"task_create (delegated) input", buildDelegatedTaskCreateSchema()},
+		namedSchema{"task_fork (delegated) input", buildDelegatedTaskForkSchema()},
+	)
+	for _, entry := range schemas {
+		if err := mcp.ValidateToolSchema(entry.schema); err != nil {
+			return fmt.Errorf("MCP tool %s schema: %w", entry.name, err)
+		}
+	}
+	return nil
+}
+
 func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.SubscriptionFilter) (subscriptionSources, error) {
 	var sources subscriptionSources
 	hasFilter := false
@@ -929,7 +958,7 @@ func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskGetDe
 }
 
 type mcpTaskSendMessageArgs struct {
-	TaskNumber int    `json:"task_number" jsonschema_description:"The task number, e.g. 1 for task #1"`
+	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string"                    jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
 	Message    string `json:"message"     jsonschema_description:"The message to send to the agent"`
 }
 
@@ -938,7 +967,7 @@ func (m *mcpRegistry) handleTaskSendMessage(ctx context.Context, args mcpTaskSen
 }
 
 type mcpTaskAnswerQuestionArgs struct {
-	TaskNumber int    `json:"task_number" jsonschema_description:"The task number, e.g. 1 for task #1"`
+	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string"                      jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
 	Answer     string `json:"answer"      jsonschema_description:"The answer to the agent's question"`
 }
 
@@ -947,15 +976,15 @@ func (m *mcpRegistry) handleTaskAnswerQuestion(ctx context.Context, args mcpTask
 }
 
 type mcpTaskPushBranchArgs struct {
-	TaskNumber int    `json:"task_number"      jsonschema_description:"The task number, e.g. 1 for task #1"`
+	TaskNumber taskID `json:"task_number"      jsonschema:"oneof_type=integer;string"                      jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
 	Force      bool   `json:"force,omitempty"  jsonschema_description:"Force sync even with safety issues"`
-	Target     string `json:"target,omitempty" jsonschema:"enum=branch,enum=default,enum=main,enum=master"  jsonschema_description:"Where to push: branch (default) or main"`
+	Target     string `json:"target,omitempty" jsonschema:"enum=branch,enum=default,enum=main,enum=master" jsonschema_description:"Where to push: branch (default) or main"`
 }
 
 func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcpTaskPushBranchArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
 	targetRaw := args.Target
 	if targetRaw == "main" || targetRaw == "master" {
@@ -988,11 +1017,11 @@ func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcp
 }
 
 func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.taskScopedEntryByNumber(ctx, args.TaskNumber, false)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
-	_, err := m.taskSvc.stopTask(ctx, entry, &api.EmptyReq{})
+	_, err = m.taskSvc.stopTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1000,11 +1029,11 @@ func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs
 }
 
 func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.taskScopedEntryByNumber(ctx, args.TaskNumber, false)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
-	_, err := m.taskSvc.purgeTask(ctx, entry, &api.EmptyReq{})
+	_, err = m.taskSvc.purgeTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1012,11 +1041,11 @@ func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArg
 }
 
 func (m *mcpRegistry) handleTaskRevive(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
-	_, err := m.taskSvc.reviveTask(ctx, entry, &api.EmptyReq{})
+	_, err = m.taskSvc.reviveTask(ctx, entry, &api.EmptyReq{})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1029,7 +1058,7 @@ type mcpTaskForkOutput struct {
 }
 
 type mcpTaskForkArgs struct {
-	TaskNumber int    `json:"task_number"       jsonschema_description:"The task number to fork, e.g. 1 for task #1"`
+	TaskNumber taskID `json:"task_number"       jsonschema:"oneof_type=integer;string"                                                jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID to fork"`
 	Prompt     string `json:"prompt"            jsonschema_description:"The initial prompt for the forked task"`
 	Harness    string `json:"harness,omitempty" jsonschema_description:"Override harness (optional, inherits from source if omitted)"`
 	Model      string `json:"model,omitempty"   jsonschema_description:"Model override (optional, inherits from source if omitted)"`
@@ -1098,19 +1127,19 @@ func (m *mcpRegistry) forkWithoutModelValid(source *taskpkg.Task, harnessOverrid
 }
 
 func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
-	num, entry, ok := m.taskScopedEntryByNumber(ctx, args.TaskNumber, true)
-	if !ok {
-		return domainToolError[mcpTaskForkOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, true)
+	if err != nil {
+		return domainToolError[mcpTaskForkOutput](err)
 	}
 	if args.Prompt == "" {
 		return domainToolError[mcpTaskForkOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: prompt"})
 	}
 	var harness v1.Harness
 	if args.Harness != "" {
-		var err error
-		harness, err = apiconv.ParseHarness(args.Harness)
-		if err != nil {
-			return m.taskForkToolError(args, entry.Task(), &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
+		var conversionErr error
+		harness, conversionErr = apiconv.ParseHarness(args.Harness)
+		if conversionErr != nil {
+			return m.taskForkToolError(args, entry.Task(), &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: conversionErr.Error()})
 		}
 	}
 	req := &v1.ForkTaskReq{Prompt: v1.Prompt{Text: args.Prompt}, Harness: harness, Model: args.Model}
@@ -1177,9 +1206,9 @@ func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs
 }
 
 func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
 	var message agent.Message
 	var historyErr error
@@ -1234,15 +1263,15 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNu
 }
 
 type mcpTaskFixPRArgs struct {
-	TaskNumber int `json:"task_number" jsonschema_description:"The task number whose PR CI should be fixed"`
+	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number or stable task ID whose PR CI should be fixed"`
 }
 
 func (m *mcpRegistry) handleTaskFixPR(ctx context.Context, args mcpTaskFixPRArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
-	_, err := m.ci.fixPR(ctx, &v1.BotFixPRReq{TaskID: entry.Task().ID.String()})
+	_, err = m.ci.fixPR(ctx, &v1.BotFixPRReq{TaskID: entry.Task().ID.String()})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1274,19 +1303,19 @@ func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) 
 }
 
 type mcpTaskInputArgs struct {
-	TaskNumber int
+	TaskNumber taskID
 	Message    string
 }
 
 func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, field, format string) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, ok := m.entryByNumber(ctx, args.TaskNumber)
-	if !ok {
-		return domainToolError[mcp.TextOutput](taskNumberError(args.TaskNumber))
+	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+	if err != nil {
+		return domainToolError[mcp.TextOutput](err)
 	}
 	if args.Message == "" {
 		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: " + field})
 	}
-	_, err := m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
+	_, err = m.taskSvc.sendInput(ctx, entry, &v1.InputReq{Prompt: v1.Prompt{Text: args.Message}})
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1294,20 +1323,11 @@ func (m *mcpRegistry) sendTaskInput(ctx context.Context, args mcpTaskInputArgs, 
 }
 
 func (m *mcpRegistry) taskByNumber(ctx context.Context, num int) (v1.Task, error) {
-	_, entry, ok := m.entryByNumber(ctx, num)
-	if !ok {
-		return v1.Task{}, taskNumberError(num)
+	_, entry, err := m.entryByTaskRef(ctx, taskID(strconv.Itoa(num)), false)
+	if err != nil {
+		return v1.Task{}, err
 	}
 	return m.taskDTO(ctx, entry)
-}
-
-func (m *mcpRegistry) entryByNumber(ctx context.Context, num int) (int, *taskmgr.Entry, bool) {
-	keys, _ := m.taskKeys(ctx)
-	if num < 1 || num > len(keys) {
-		return 0, nil, false
-	}
-	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID)
-	return num, entry, ok
 }
 
 func (m *mcpRegistry) taskByID(ctx context.Context, id ksid.ID) (v1.Task, error) {
@@ -1326,33 +1346,55 @@ func (m *mcpRegistry) taskDTO(ctx context.Context, entry *taskmgr.Entry) (v1.Tas
 	return t, nil
 }
 
-// taskScopedEntryByNumber resolves task numbers from a task-scoped list and
-// may additionally resolve 0 to the calling task.
-func (m *mcpRegistry) taskScopedEntryByNumber(ctx context.Context, num int, allowSelf bool) (int, *taskmgr.Entry, bool) {
-	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
-	if !taskScoped {
-		return m.entryByNumber(ctx, num)
-	}
-	if num == 0 && allowSelf {
-		entry, ok := m.taskSvc.taskMgr.GetEntry(delegatingTaskID.String())
-		return num, entry, ok
-	}
-	if num < 1 {
-		return num, nil, false
-	}
+// entryByTaskRef resolves a task reference — a number, a "#N" string, or a
+// stable task ID — to its current list position and entry. When allowSelf is
+// set in a task-scoped session, a zero reference resolves to the calling task.
+func (m *mcpRegistry) entryByTaskRef(ctx context.Context, ref taskID, allowSelf bool) (int, *taskmgr.Entry, error) {
+	raw := strings.TrimSpace(string(ref))
 	keys, _ := m.taskKeys(ctx)
-	if num > len(keys) {
-		return num, nil, false
+	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)
+	if number, err := parseTaskNumber(raw); err == nil {
+		if number == 0 && allowSelf && taskScoped {
+			entry, ok := m.taskSvc.taskMgr.GetEntry(delegatingTaskID.String())
+			if !ok {
+				return 0, nil, taskNotFoundError()
+			}
+			return 0, entry, nil
+		}
+		if number < 1 {
+			return 0, nil, invalidTaskNumberError()
+		}
+		if number > len(keys) {
+			return number, nil, taskNotFoundError()
+		}
+		entry, ok := m.visibleTaskEntry(ctx, keys[number-1].ID)
+		if !ok {
+			return number, nil, taskNotFoundError()
+		}
+		return number, entry, nil
 	}
-	entry, ok := m.visibleTaskEntry(ctx, keys[num-1].ID)
-	return num, entry, ok
+	id, err := ksid.Parse(raw)
+	if err != nil {
+		return 0, nil, invalidTaskNumberError()
+	}
+	entry, ok := m.visibleTaskEntry(ctx, id)
+	if !ok {
+		return 0, nil, taskNotFoundError()
+	}
+	for i := range keys {
+		if keys[i].ID == id {
+			return i + 1, entry, nil
+		}
+	}
+	return 0, entry, nil
 }
 
-func taskNumberError(num int) *api.Error {
-	if num < 1 {
-		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "task_number must be a positive integer"}
-	}
+func taskNotFoundError() *api.Error {
 	return &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
+}
+
+func invalidTaskNumberError() *api.Error {
+	return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: `task_number must be a positive integer, a "#N" reference, or a stable task ID`}
 }
 
 // Static schema builders. Dynamic repos, harnesses, and preferences are read on
@@ -1383,7 +1425,7 @@ func buildDelegatedTaskCreateSchema() *jsonschema.Schema {
 
 func buildTaskForkSchema() *jsonschema.Schema {
 	props := orderedmap.New[string, *jsonschema.Schema]()
-	props.Set("task_number", &jsonschema.Schema{Type: "integer", Description: "The task number to fork, e.g. 1 for task #1"})
+	props.Set("task_number", taskReferenceProperty(`Task number or stable task ID to fork, e.g. 1 or "#1" for task #1`))
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked task"})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Override harness (optional, inherits from source if omitted)"})
 	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional, inherits from source if omitted)"})
@@ -1394,11 +1436,20 @@ func buildTaskForkSchema() *jsonschema.Schema {
 
 func buildDelegatedTaskForkSchema() *jsonschema.Schema {
 	props := orderedmap.New[string, *jsonschema.Schema]()
-	props.Set("task_number", &jsonschema.Schema{Type: "integer", Description: "Use 0 to fork this task, or a child task number returned by tasks_list"})
+	props.Set("task_number", taskReferenceProperty("Use 0 to fork this task, or a child task number returned by tasks_list"))
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked child task"})
 	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
 	mcp.AddHeaderToProperty(schema, "task_number", "Task-Number")
 	return schema
+}
+
+// taskReferenceProperty describes a task reference accepted as a JSON integer
+// or as a string such as "#1" or a stable task ID.
+func taskReferenceProperty(description string) *jsonschema.Schema {
+	return &jsonschema.Schema{
+		OneOf:       []*jsonschema.Schema{{Type: "integer"}, {Type: "string"}},
+		Description: description,
+	}
 }
 
 func buildBotFixCISchema() *jsonschema.Schema {
@@ -2132,14 +2183,26 @@ func mcpTaskResourceID(uri string) (ksid.ID, error) {
 }
 
 type mcpTaskNumberArgs struct {
-	TaskNumber int `json:"task_number" jsonschema_description:"The task number, e.g. 1 for task #1"`
+	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
 }
 
 type mcpTaskGetDetailArgs struct {
-	Task taskID `json:"task" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number from tasks_list or stable task ID"`
+	Task taskID `json:"task" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number from tasks_list (for example 1 or \"#1\") or stable task ID"`
 }
 
-// taskID accepts an MCP task number or a stable task ID.
+var errNotTaskNumber = errors.New("not a task number")
+
+// parseTaskNumber parses an integer task number, allowing a leading '#'.
+func parseTaskNumber(raw string) (int, error) {
+	number, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "#")))
+	if err != nil {
+		return 0, errNotTaskNumber
+	}
+	return number, nil
+}
+
+// taskID accepts an MCP task number (optionally prefixed with '#') or a stable
+// task ID.
 type taskID string
 
 // UnmarshalJSON decodes taskID from either its numeric task-number or string ID representation.
@@ -2160,13 +2223,13 @@ func (id *taskID) UnmarshalJSON(data []byte) error {
 // Decode resolves taskID as a task number up to maxTaskNumber or a stable ID.
 func (id taskID) Decode(maxTaskNumber int) (ksid.ID, int, error) {
 	raw := string(id)
-	if number, err := strconv.Atoi(raw); err == nil {
+	if number, err := parseTaskNumber(raw); err == nil {
 		if number < 1 || number > maxTaskNumber {
 			return 0, 0, fmt.Errorf("task number %d is outside 1 through %d", number, maxTaskNumber)
 		}
 		return 0, number, nil
 	}
-	parsed, err := ksid.Parse(raw)
+	parsed, err := ksid.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, 0, errors.New("task must be a task number or stable task ID")
 	}

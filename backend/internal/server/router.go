@@ -266,6 +266,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		metrics:       d.Metrics,
 		skills:        mcpSkills,
 	}
+	if err := registry.validateToolSchemas(); err != nil {
+		return nil, err
+	}
 	s.TaskMCPScoper = registry
 	s.mcpHandlers.protocol = &mcp.Handler{
 		Registry:   registry,

@@ -647,7 +647,7 @@ func (h *Handler) validateToolParamHeaders(ctx context.Context, header http.Head
 	if schema == nil {
 		return nil
 	}
-	headers, err := mcpHeaderParams(schema)
+	headers, err := HeaderParams(schema)
 	if err != nil {
 		return err
 	}
@@ -1519,7 +1519,14 @@ type HeaderParam struct {
 	Path   []string
 }
 
-func mcpHeaderParams(schema *jsonschema.Schema) ([]HeaderParam, error) {
+// HeaderParams returns the parameter headers mirrored by a tool schema, one per
+// property marked with x-mcp-header.
+//
+// It walks the whole schema, so nested properties, array items, and union
+// branches are included. A malformed marker (wrong type or invalid token) or
+// two properties claiming the same header is an error; ValidateToolSchema
+// surfaces those at startup and in catalog tests.
+func HeaderParams(schema *jsonschema.Schema) ([]HeaderParam, error) {
 	var params []HeaderParam
 	seen := map[string]struct{}{}
 	var walk func(*jsonschema.Schema, []string) error
@@ -1572,13 +1579,108 @@ func mcpHeaderParams(schema *jsonschema.Schema) ([]HeaderParam, error) {
 	return params, walk(schema, nil)
 }
 
+// mcpHeaderCompatibleSchema reports whether a schema property can be mirrored
+// into an Mcp-Param-* HTTP header.
+//
+// Header mirroring carries exactly one value, so a property qualifies when it is
+// a primitive (string, integer, or boolean) or a oneOf/anyOf union whose every
+// branch is primitive. The union case lets one property accept an integer or a
+// string — task_number takes 1, "#1", or a stable task ID — while the decoded
+// body value still matches the header verbatim. Composite properties (objects,
+// arrays, and $refs) are rejected because no single header value represents
+// them.
+//
+// It gates both sides of the feature: AddHeaderToProperty only marks compatible
+// properties, and HeaderParams rejects a schema that marks an incompatible one.
 func mcpHeaderCompatibleSchema(s *jsonschema.Schema) bool {
-	switch s.Type {
+	if mcpPrimitiveSchemaType(s.Type) {
+		return true
+	}
+	// A property that accepts every primitive union branch is still a single
+	// header value; task_number uses this for integer-or-"#N" strings.
+	branches := s.OneOf
+	if len(branches) == 0 {
+		branches = s.AnyOf
+	}
+	if len(branches) == 0 {
+		return false
+	}
+	for _, branch := range branches {
+		if !mcpPrimitiveSchemaType(branch.Type) {
+			return false
+		}
+	}
+	return true
+}
+
+// mcpPrimitiveSchemaType reports whether a JSON schema type is a single
+// header-mirrorable primitive.
+func mcpPrimitiveSchemaType(schemaType string) bool {
+	switch schemaType {
 	case "string", "integer", "boolean":
 		return true
 	default:
 		return false
 	}
+}
+
+// ValidateToolSchema reports whether a tool input or output schema is safe to
+// advertise and serve.
+//
+// It rejects a schema that cannot be encoded for the wire, that requires a
+// property it does not declare, or that mirrors parameter headers in a way the
+// request path rejects (see HeaderParams). Startup and the tool catalog test
+// call it so a malformed catalog fails before a client sees it.
+func ValidateToolSchema(schema *jsonschema.Schema) error {
+	if schema == nil {
+		return errors.New("tool schema is nil")
+	}
+	if _, err := HeaderParams(schema); err != nil {
+		return err
+	}
+	if err := validateSchemaRequired(schema); err != nil {
+		return err
+	}
+	if _, err := json.Marshal(schema); err != nil {
+		return fmt.Errorf("encode schema: %w", err)
+	}
+	return nil
+}
+
+// validateSchemaRequired checks that every required property is declared,
+// recursing into nested properties, array items, and union branches.
+func validateSchemaRequired(schema *jsonschema.Schema) error {
+	if schema == nil {
+		return nil
+	}
+	for _, name := range schema.Required {
+		if schema.Properties == nil {
+			return fmt.Errorf("required property %q is not declared", name)
+		}
+		if _, ok := schema.Properties.Get(name); !ok {
+			return fmt.Errorf("required property %q is not declared", name)
+		}
+	}
+	if schema.Properties != nil {
+		for key, child := range schema.Properties.FromOldest() {
+			if err := validateSchemaRequired(child); err != nil {
+				return fmt.Errorf("property %q: %w", key, err)
+			}
+		}
+	}
+	if schema.Items != nil {
+		if err := validateSchemaRequired(schema.Items); err != nil {
+			return fmt.Errorf("items: %w", err)
+		}
+	}
+	for _, group := range [][]*jsonschema.Schema{schema.OneOf, schema.AnyOf, schema.AllOf} {
+		for _, child := range group {
+			if err := validateSchemaRequired(child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func validMCPHeaderToken(s string) bool {

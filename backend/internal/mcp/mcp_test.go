@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/invopop/jsonschema"
 )
 
 // TestHandlerHandleMCP swaps the process-global slog default to capture
@@ -548,5 +550,66 @@ func TestRequestMetaPreservesExtraFields(t *testing.T) {
 	}
 	if _, ok := metaFields["example.com/nested"].(map[string]any); !ok {
 		t.Fatalf("encoded nested = %#v, want object", metaFields["example.com/nested"])
+	}
+}
+
+func TestValidateToolSchema(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		schema  *jsonschema.Schema
+		wantErr bool
+	}{
+		{name: "nil", schema: nil, wantErr: true},
+		{name: "valid", schema: &jsonschema.Schema{Type: "object"}},
+		{name: "required property missing", schema: &jsonschema.Schema{Type: "object", Required: []string{"prompt"}}, wantErr: true},
+		{name: "duplicate header", schema: &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
+			{Type: "string", Extras: map[string]any{"x-mcp-header": "X"}},
+			{Type: "integer", Extras: map[string]any{"x-mcp-header": "x"}},
+		}}, wantErr: true},
+		{name: "header on object", schema: &jsonschema.Schema{Type: "object", Extras: map[string]any{"x-mcp-header": "X"}}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateToolSchema(test.schema)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("ValidateToolSchema() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateToolSchema() error: %v", err)
+			}
+		})
+	}
+}
+
+func TestMCPHeaderCompatibleSchema(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name   string
+		schema *jsonschema.Schema
+		want   bool
+	}{
+		{name: "string", schema: &jsonschema.Schema{Type: "string"}, want: true},
+		{name: "integer", schema: &jsonschema.Schema{Type: "integer"}, want: true},
+		{name: "boolean", schema: &jsonschema.Schema{Type: "boolean"}, want: true},
+		{name: "object", schema: &jsonschema.Schema{Type: "object"}, want: false},
+		{name: "empty", schema: &jsonschema.Schema{}, want: false},
+		{name: "oneOf primitives", schema: &jsonschema.Schema{OneOf: []*jsonschema.Schema{{Type: "integer"}, {Type: "string"}}}, want: true},
+		{name: "anyOf primitives", schema: &jsonschema.Schema{AnyOf: []*jsonschema.Schema{{Type: "boolean"}, {Type: "string"}}}, want: true},
+		{name: "oneOf with object", schema: &jsonschema.Schema{OneOf: []*jsonschema.Schema{{Type: "integer"}, {Type: "object"}}}, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := mcpHeaderCompatibleSchema(test.schema); got != test.want {
+				t.Fatalf("mcpHeaderCompatibleSchema() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }

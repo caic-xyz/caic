@@ -857,7 +857,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 	t.Run("valid_read_from_log_without_hydrating_task", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		taskID := ksid.NewID()
+		restoredID := ksid.NewID()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "inspect history", Harness: harness.Claude,
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -872,7 +872,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 			"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "history result"}}},
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
-		writeLogFile(t, logDir, taskID.String()+".jsonl", meta, toolUse, lastMessage, trailer)
+		writeLogFile(t, logDir, restoredID.String()+".jsonl", meta, toolUse, lastMessage, trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{
 			harness.Claude: &agenttest.FakeBackend{WireFactory: claudecode.New().NewWire},
@@ -880,7 +880,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
-		entry, ok := s.taskMgr.GetEntry(taskID.String())
+		entry, ok := s.taskMgr.GetEntry(restoredID.String())
 		if !ok {
 			t.Fatal("loaded task entry not found")
 		}
@@ -894,7 +894,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: taskID("1")})
 		if result.IsError {
 			t.Fatalf("agent_last_message error = %#v", result.Structured)
 		}
@@ -930,7 +930,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: taskID("1")})
 		output, ok := result.Structured.(mcp.TextOutput)
 		if result.IsError || !ok || output.Result != "Last message from task #1: live result" {
 			t.Fatalf("agent_last_message = %#v", result.Structured)
@@ -952,7 +952,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: 1})
+		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: taskID("1")})
 		if !result.IsError || !strings.Contains(fmt.Sprint(result.Structured), "history is unavailable") {
 			t.Fatalf("agent_last_message = %#v, want explicit history-unavailable error", result.Structured)
 		}

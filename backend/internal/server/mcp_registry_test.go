@@ -18,6 +18,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/invopop/jsonschema"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -86,8 +87,10 @@ func TestTaskIDDecode(t *testing.T) {
 		wantErr    bool
 	}{
 		{name: "task number", ref: "2", max: 2, wantNumber: 2},
+		{name: "hashtag task number", ref: taskID("#2"), max: 2, wantNumber: 2},
 		{name: "stable ID", ref: taskID(stableID.String()), max: 2, wantID: stableID},
 		{name: "out of range number", ref: "3", max: 2, wantErr: true},
+		{name: "out of range hashtag number", ref: taskID("#3"), max: 2, wantErr: true},
 		{name: "invalid reference", ref: "not a task", max: 2, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -108,6 +111,171 @@ func TestTaskIDDecode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTaskIDUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		raw     string
+		want    taskID
+		wantErr bool
+	}{
+		{name: "integer", raw: "3", want: "3"},
+		{name: "number string", raw: `"3"`, want: "3"},
+		{name: "hashtag string", raw: `"#3"`, want: "#3"},
+		{name: "object", raw: `{}`, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var got taskID
+			err := json.Unmarshal([]byte(test.raw), &got)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("Unmarshal() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Unmarshal() error: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("Unmarshal() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// TestMCPTaskNumberSchema checks that task numbers are advertised as an
+// integer or a "#N" string while staying header-mirrored for voice clients.
+func TestMCPTaskNumberSchema(t *testing.T) {
+	t.Parallel()
+
+	registry := &mcpRegistry{}
+	tools, err := registry.Tools(t.Context())
+	if err != nil {
+		t.Fatalf("Tools() error: %v", err)
+	}
+	for _, tool := range tools {
+		if tool.Name != "task_stop" && tool.Name != "task_fork" {
+			continue
+		}
+		t.Run(tool.Name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := json.Marshal(tool.InputSchema)
+			if err != nil {
+				t.Fatalf("marshal schema: %v", err)
+			}
+			var decoded struct {
+				Properties map[string]struct {
+					OneOf []struct {
+						Type string `json:"type"`
+					} `json:"oneOf"`
+					Header string `json:"x-mcp-header"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("decode schema: %v", err)
+			}
+			property, ok := decoded.Properties["task_number"]
+			if !ok {
+				t.Fatalf("task_number property missing: %s", data)
+			}
+			want := []string{"integer", "string"}
+			got := make([]string, 0, len(property.OneOf))
+			for _, branch := range property.OneOf {
+				got = append(got, branch.Type)
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("task_number schema = %s, want integer-or-string", data)
+			}
+			if property.Header != "Task-Number" {
+				t.Fatalf("task_number header = %q, want Task-Number", property.Header)
+			}
+		})
+	}
+}
+
+// TestMCPToolSchemas validates every advertised schema and guards the parameter
+// header mapping, so a silent AddHeaderToProperty skip fails the build instead
+// of shipping a tool without its Mcp-Param-* header.
+func TestMCPToolSchemas(t *testing.T) {
+	t.Parallel()
+
+	registry := &mcpRegistry{}
+	if err := registry.validateToolSchemas(); err != nil {
+		t.Fatalf("validateToolSchemas() error: %v", err)
+	}
+
+	expectedHeaders := map[string]map[string]string{
+		"task_stop":                  {"task_number": "Task-Number"},
+		"task_purge":                 {"task_number": "Task-Number"},
+		"task_revive":                {"task_number": "Task-Number"},
+		"task_fork":                  {"task_number": "Task-Number"},
+		"task_send_message":          {"task_number": "Task-Number"},
+		"task_answer_question":       {"task_number": "Task-Number"},
+		"task_push_branch_to_remote": {"task_number": "Task-Number"},
+		"task_fix_pr":                {"task_number": "Task-Number"},
+		"agent_last_message":         {"task_number": "Task-Number"},
+		"bot_fix_ci":                 {"repo": "Repo"},
+	}
+	for _, spec := range registry.specs() {
+		t.Run(spec.Name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := schemaHeaders(spec.InputSchema)
+			if err != nil {
+				t.Fatalf("HeaderParams() error: %v", err)
+			}
+			want := expectedHeaders[spec.Name]
+			if len(got) != len(want) {
+				t.Fatalf("headers = %v, want %v", got, want)
+			}
+			for property, header := range want {
+				if got[property] != header {
+					t.Fatalf("header for %q = %q, want %q", property, got[property], header)
+				}
+			}
+		})
+	}
+
+	t.Run("delegated schemas", func(t *testing.T) {
+		t.Parallel()
+
+		if err := mcp.ValidateToolSchema(buildDelegatedTaskCreateSchema()); err != nil {
+			t.Fatalf("task_create delegated schema: %v", err)
+		}
+		if err := mcp.ValidateToolSchema(buildDelegatedTaskForkSchema()); err != nil {
+			t.Fatalf("task_fork delegated schema: %v", err)
+		}
+		got, err := schemaHeaders(buildDelegatedTaskForkSchema())
+		if err != nil {
+			t.Fatalf("HeaderParams() error: %v", err)
+		}
+		if len(got) != 1 || got["task_number"] != "Task-Number" {
+			t.Fatalf("delegated fork headers = %v, want task_number Task-Number", got)
+		}
+	})
+}
+
+// schemaHeaders maps each header-mirrored property name to its Mcp-Param-*
+// header, failing when a header is attached below the top level.
+func schemaHeaders(schema *jsonschema.Schema) (map[string]string, error) {
+	params, err := mcp.HeaderParams(schema)
+	if err != nil {
+		return nil, err
+	}
+	headers := make(map[string]string, len(params))
+	for _, param := range params {
+		if len(param.Path) != 1 {
+			return nil, fmt.Errorf("header %q path = %v, want one property", param.Header, param.Path)
+		}
+		headers[param.Path[0]] = param.Header
+	}
+	return headers, nil
 }
 
 func TestCaicToolRegistryHandleReposList(t *testing.T) {
@@ -303,18 +471,26 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		insertTestTask(s, unrelatedID.String(), unrelated)
 
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
-		_, self, ok := registry.taskScopedEntryByNumber(ctx, 0, true)
-		if !ok || self.Task().ID != parentID {
-			t.Fatalf("self fork source = %#v, %t; want parent", self, ok)
+		_, self, err := registry.entryByTaskRef(ctx, taskID("0"), true)
+		if err != nil || self.Task().ID != parentID {
+			t.Fatalf("self fork source = %#v, %v; want parent", self, err)
 		}
-		_, childEntry, ok := registry.taskScopedEntryByNumber(ctx, 1, false)
-		if !ok || childEntry.Task().ID != childID {
-			t.Fatalf("child control target = %#v, %t; want child", childEntry, ok)
+		_, childEntry, err := registry.entryByTaskRef(ctx, taskID("1"), false)
+		if err != nil || childEntry.Task().ID != childID {
+			t.Fatalf("child control target = %#v, %v; want child", childEntry, err)
 		}
-		if _, _, ok := registry.taskScopedEntryByNumber(ctx, 0, false); ok {
+		_, hashtagEntry, err := registry.entryByTaskRef(ctx, taskID("#1"), false)
+		if err != nil || hashtagEntry.Task().ID != childID {
+			t.Fatalf("hashtag control target = %#v, %v; want child", hashtagEntry, err)
+		}
+		_, stableEntry, err := registry.entryByTaskRef(ctx, taskID(childID.String()), false)
+		if err != nil || stableEntry.Task().ID != childID {
+			t.Fatalf("stable control target = %#v, %v; want child", stableEntry, err)
+		}
+		if _, _, err := registry.entryByTaskRef(ctx, taskID("0"), false); err == nil {
 			t.Fatal("task-scoped stop resolved the calling task")
 		}
-		if _, _, ok := registry.taskScopedEntryByNumber(ctx, 2, false); ok {
+		if _, _, err := registry.entryByTaskRef(ctx, taskID("2"), false); err == nil {
 			t.Fatal("task-scoped control resolved an unrelated task")
 		}
 	})
@@ -1159,13 +1335,13 @@ func TestCaicToolRegistryHandleTaskForkSelectionErrors(t *testing.T) {
 	}{
 		{
 			name:     "unknown override harness",
-			args:     mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "mistyped"},
+			args:     mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"},
 			want:     `unsupported harness "mistyped". Omit harness to inherit the source task's harness, then retry task_fork.`,
 			wantCode: api.CodeUnknownHarness,
 		},
 		{
 			name:     "unsupported override model",
-			args:     mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "claude", Model: "mistyped"},
+			args:     mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "claude", Model: "mistyped"},
 			want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to inherit the source task's model, then retry task_fork.",
 			wantCode: api.CodeUnsupportedModel,
 		},
@@ -1210,7 +1386,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeRecovery(t *testing.T
 	tk.SetState(taskslog.StateWaiting)
 	insertTestTask(s, tk.ID.String(), tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "mistyped", Model: "pi-default"})
+	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"})
 	if !result.IsError {
 		t.Fatal("handleTaskFork() did not return a tool error")
 	}
@@ -1237,7 +1413,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestRecoveryForRetiredSourceMod
 	tk.SetState(taskslog.StateWaiting)
 	insertTestTask(s, tk.ID.String(), tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "mistyped"})
+	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"})
 	if !result.IsError {
 		t.Fatal("handleTaskFork() did not return a tool error")
 	}
@@ -1264,7 +1440,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeModelRecovery(t *test
 	tk.SetState(taskslog.StateWaiting)
 	insertTestTask(s, tk.ID.String(), tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "pi", Model: "mistyped"})
+	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"})
 	if !result.IsError {
 		t.Fatal("handleTaskFork() did not return a tool error")
 	}
