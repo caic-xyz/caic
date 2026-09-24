@@ -18,6 +18,11 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await expect(page.getByLabel("Usage date range")).toHaveValue("30");
   await expect(page.getByText(/Data since/)).toBeVisible();
   await expect(page.getByRole("region", { name: "Usage summary" })).toBeVisible();
+  await expect(page.getByText("Compactions")).toBeVisible();
+  await expect(page.getByText("API time")).toBeVisible();
+  await expect(page.getByText("Turn wall time")).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Cache hit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tools" })).toBeVisible();
   await expect(page.getByTestId("usage-charts")).toBeVisible();
   await page.getByLabel("Usage date range").selectOption("all");
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");

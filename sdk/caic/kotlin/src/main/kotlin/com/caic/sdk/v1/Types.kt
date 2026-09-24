@@ -2551,6 +2551,14 @@ data class UsageDashboardRepo(val repo: String, val tasks: Int)
 @Serializable
 data class UsageDashboardCount(val name: String, val count: Int)
 
+/** UsageDashboardToolTiming measures completed tool calls with known duration. */
+@Serializable
+data class UsageDashboardToolTiming(
+    val name: String,
+    val count: Int,
+    val durationMs: Long,
+)
+
 /**
  * UsageDashboardDay is the complete daily usage snapshot from the durable
  * cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
@@ -2572,6 +2580,7 @@ data class UsageDashboardDay(
     val repos: List<UsageDashboardRepo>,
     val skills: List<UsageDashboardCount>,
     val tools: List<UsageDashboardCount>,
+    val toolTimings: List<UsageDashboardToolTiming>,
 )
 
 /**

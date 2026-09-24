@@ -54,9 +54,10 @@ type Store struct {
 	// pending.costInFlight is the movement assigned to unflushed buckets;
 	// a later live snapshot reconciles any estimate in that baseline.
 	flushedCost       map[string]float64
-	reportedCostTasks map[string]struct{}     // tasks with a recorded non-estimated cost row
-	pending           map[string]*taskPending // task id -> unflushed deltas
-	lastQuota         map[quotaKey]quotaSeen  // provider window -> last written quota state
+	reportedCostTasks map[string]struct{}           // tasks with a recorded non-estimated cost row
+	pending           map[string]*taskPending       // task id -> unflushed deltas
+	toolTimings       map[string]*ToolTimingTracker // task id -> unmatched tool starts
+	lastQuota         map[quotaKey]quotaSeen        // provider window -> last written quota state
 	closed            bool
 	stopFlush         chan struct{}
 	flushDone         chan struct{}
@@ -84,6 +85,7 @@ func New(cfg Config) (*Store, error) {
 		flushedCost:       make(map[string]float64),
 		reportedCostTasks: make(map[string]struct{}),
 		pending:           make(map[string]*taskPending),
+		toolTimings:       make(map[string]*ToolTimingTracker),
 		lastQuota:         make(map[quotaKey]quotaSeen),
 		stopFlush:         make(chan struct{}),
 		flushDone:         make(chan struct{}),
@@ -114,6 +116,27 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 		return
 	}
 	id := meta.TaskID.String()
+	if e.ToolStartID != "" {
+		t := s.toolTimings[id]
+		if t == nil {
+			t = &ToolTimingTracker{}
+			s.toolTimings[id] = t
+		}
+		t.Start(e.ToolStartID, e.ToolName, e.ToolProducerTime)
+	}
+	if e.ToolResultID != "" {
+		if t := s.toolTimings[id]; t != nil {
+			if name, ms, ok := t.Finish(e.ToolResultID, e.ToolProducerTime, e.ToolNativeDurationMs); ok {
+				e.Delta.ToolTimings = map[string]ToolTiming{name: {Count: 1, DurationMs: ms}}
+			}
+			if len(t.pending) == 0 {
+				delete(s.toolTimings, id)
+			}
+		}
+		if e.Delta.ToolTimings == nil {
+			return
+		}
+	}
 	wm := s.watermarks[id]
 	synthetic := e.At.IsZero()
 	if synthetic {
@@ -156,6 +179,7 @@ func (s *Store) Discard(meta TaskMeta) {
 	}
 	id := meta.TaskID.String()
 	delete(s.pending, id)
+	delete(s.toolTimings, id)
 	delete(s.watermarks, id)
 	delete(s.flushedCost, id)
 }
@@ -708,6 +732,7 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 		Repos:                    make(map[string]int, len(d.repos)),
 		Skills:                   make(map[string]int, len(d.skills)),
 		Tools:                    cloneCounts(d.ToolCalls),
+		ToolTimings:              maps.Clone(d.ToolTimings),
 	}
 	for model, b := range d.models {
 		out.Models[model] = ModelRollup{

@@ -155,6 +155,8 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 		Delta: usagedb.Delta{
 			TokenBuckets: usagedb.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheRead: 30, Output: 40, Reasoning: 5},
 			Turns:        1,
+			ToolCalls:    map[string]int{"Read": 2},
+			ToolTimings:  map[string]usagedb.ToolTiming{"Read": {Count: 1, DurationMs: 1250}},
 			SkillReads:   map[string]int{"review": 2},
 		},
 	})
@@ -188,6 +190,9 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 	// The skill leaderboard counts tasks, so the task's two reads fold to one.
 	if len(day.Skills) != 1 || day.Skills[0] != (v1.UsageDashboardCount{Name: "review", Count: 1}) {
 		t.Errorf("skills = %#v", day.Skills)
+	}
+	if len(day.ToolTimings) != 1 || day.ToolTimings[0] != (v1.UsageDashboardToolTiming{Name: "Read", Count: 1, DurationMs: 1250}) {
+		t.Errorf("tool timings = %#v", day.ToolTimings)
 	}
 }
 

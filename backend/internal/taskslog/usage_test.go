@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,34 @@ func TestStoreUsageRows(t *testing.T) {
 		days := rollup.Days()
 		if len(days) != 1 || days[0].Skills["review"] != 0 || days[0].Skills["go-code-quality"] != 1 {
 			t.Errorf("confirmed skill reads = %+v", days)
+		}
+	})
+
+	t.Run("reconstructs measured tool duration from producer timestamps", func(t *testing.T) {
+		t.Parallel()
+		_, logStore, rollup := newUsageStores(t)
+		id := ksid.NewID().String()
+		at := usageAt(5)
+		writeUsageLog(t, logStore.LogDir, id, agent.LogVersionV3, at, at,
+			`{"type":"assistant","message":{"model":"claude-test","content":[{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"/tmp/example"}}],"usage":{}}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"ok"}]}}`,
+		)
+		path := filepath.Join(logStore.LogDir, id+".jsonl")
+		data, err := os.ReadFile(path) //nolint:gosec // test fixture path is built from t.TempDir().
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(data), "\n")
+		lines[2] = strings.Replace(lines[2], fmt.Sprintf(`"ts":%d.000`, at.Unix()), fmt.Sprintf(`"ts":%d.500`, at.Unix()+2), 1)
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil { //nolint:gosec // test fixture path is built from t.TempDir().
+			t.Fatal(err)
+		}
+		if err := rollup.Backfill(t.Context(), logStore.UsageRows(t.Context(), usageResolver())); err != nil {
+			t.Fatal(err)
+		}
+		days := rollup.Days()
+		if len(days) != 1 || days[0].Tools["Read"] != 1 || days[0].ToolTimings["Read"] != (usagedb.ToolTiming{Count: 1, DurationMs: 2500}) {
+			t.Errorf("backfilled tool totals = %+v", days)
 		}
 	})
 

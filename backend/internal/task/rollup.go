@@ -57,7 +57,7 @@ func (DiscardRollup) Close() error { return nil }
 // arrives as the turn-end UsageMessage and its result carries only the last
 // call's usage. Non-token fields (turns, durations, context window) are
 // counted from every record that reports them.
-func rollupEvent(m agent.Message, at time.Time, replayed bool, model string, costUSD float64, h harness.Name) (usagedb.Event, bool) {
+func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model string, costUSD float64, h harness.Name) (usagedb.Event, bool) {
 	e := usagedb.Event{At: at, Replayed: replayed, Model: model, CostUSD: costUSD}
 	switch m := m.(type) {
 	case *agent.UsageMessage:
@@ -91,6 +91,16 @@ func rollupEvent(m agent.Message, at time.Time, replayed bool, model string, cos
 		e.Delta.SkillReads = map[string]int{m.Skill: 1}
 	case *agent.ToolUseMessage:
 		e.Delta.ToolCalls = map[string]int{m.Name: 1}
+		e.ToolStartID = m.ToolUseID
+		e.ToolName = m.Name
+		e.ToolProducerTime = producerAt
+	case *agent.ToolResultMessage:
+		if m.ToolUseID == "" {
+			return e, false
+		}
+		e.ToolResultID = m.ToolUseID
+		e.ToolNativeDurationMs = m.DurationMs
+		e.ToolProducerTime = producerAt
 	case *agent.NativeSubagentMessage:
 		e.Delta.Spawns++
 		if m.Subagent.Background {

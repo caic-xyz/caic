@@ -862,24 +862,32 @@ type UsageDashboardCount struct {
 	Count int    `json:"count"`
 }
 
+// UsageDashboardToolTiming measures completed tool calls with known duration.
+type UsageDashboardToolTiming struct {
+	Name       string `json:"name"`
+	Count      int    `json:"count"`
+	DurationMs int64  `json:"durationMs"`
+}
+
 // UsageDashboardDay is the complete daily usage snapshot from the durable
 // cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
 type UsageDashboardDay struct {
-	Day                      string                  `json:"day"`
-	Tokens                   UsageDashboardTokens    `json:"tokens"`
-	Turns                    int                     `json:"turns"`
-	ErroredTurns             int                     `json:"erroredTurns"`
-	APIMs                    int64                   `json:"apiMs"`
-	WallMs                   int64                   `json:"wallMs"`
-	Compactions              int                     `json:"compactions"`
-	SubagentSpawns           int                     `json:"subagentSpawns"`
-	SubagentSpawnsBackground int                     `json:"subagentSpawnsBackground"`
-	CostUSD                  float64                 `json:"costUSD"`
-	Models                   []UsageDashboardModel   `json:"models"`
-	Harnesses                []UsageDashboardHarness `json:"harnesses"`
-	Repos                    []UsageDashboardRepo    `json:"repos"`
-	Skills                   []UsageDashboardCount   `json:"skills"`
-	Tools                    []UsageDashboardCount   `json:"tools"`
+	Day                      string                     `json:"day"`
+	Tokens                   UsageDashboardTokens       `json:"tokens"`
+	Turns                    int                        `json:"turns"`
+	ErroredTurns             int                        `json:"erroredTurns"`
+	APIMs                    int64                      `json:"apiMs"`
+	WallMs                   int64                      `json:"wallMs"`
+	Compactions              int                        `json:"compactions"`
+	SubagentSpawns           int                        `json:"subagentSpawns"`
+	SubagentSpawnsBackground int                        `json:"subagentSpawnsBackground"`
+	CostUSD                  float64                    `json:"costUSD"`
+	Models                   []UsageDashboardModel      `json:"models"`
+	Harnesses                []UsageDashboardHarness    `json:"harnesses"`
+	Repos                    []UsageDashboardRepo       `json:"repos"`
+	Skills                   []UsageDashboardCount      `json:"skills"`
+	Tools                    []UsageDashboardCount      `json:"tools"`
+	ToolTimings              []UsageDashboardToolTiming `json:"toolTimings"`
 }
 
 // UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.

@@ -29,6 +29,13 @@ function formatDay(day: string | undefined): string {
   return Number.isNaN(value.getTime()) ? day : value.toLocaleDateString();
 }
 
+function formatUsageDuration(ms: number): string {
+  if (ms < 1000) return `${ms.toFixed(1)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`;
+  return `${(ms / 3_600_000).toFixed(1)} h`;
+}
+
 export default function UsagePage() {
   const [dashboard, setDashboard] = createSignal<UsageDashboardResp | null>(null);
   const [range, setRange] = createSignal<UsageRange>("30");
@@ -111,7 +118,7 @@ export default function UsagePage() {
               </div>
               <div>
                 <span>Cache hit rate</span>
-                <strong>{Math.round(cacheHitRate() * 100)}%</strong>
+                <strong>{(cacheHitRate() * 100).toFixed(1)}%</strong>
               </div>
               <div>
                 <span>Reported cost</span>
@@ -120,6 +127,26 @@ export default function UsagePage() {
               <div>
                 <span>Skill task-days</span>
                 <strong>{summary().skills.reduce((total, skill) => total + skill.count, 0)}</strong>
+              </div>
+              <div>
+                <span>Compactions</span>
+                <strong>{summary().compactions}</strong>
+              </div>
+              <div>
+                <span>API time</span>
+                <strong>{formatUsageDuration(summary().apiMs)}</strong>
+              </div>
+              <div>
+                <span>Turn wall time</span>
+                <strong>{formatUsageDuration(summary().wallMs)}</strong>
+              </div>
+              <div>
+                <span>Errored turns</span>
+                <strong>{summary().erroredTurns}</strong>
+              </div>
+              <div>
+                <span>Subagent spawns</span>
+                <strong>{summary().subagentSpawns}</strong>
               </div>
             </section>
 
@@ -135,8 +162,16 @@ export default function UsagePage() {
               </section>
               <section class={styles.panel}>
                 <h2>Harnesses</h2>
-                <p>Tokens, turns, and reported cost over the selected range.</p>
-                <Leaderboard entries={summary().harnesses} showCost />
+                <p>Tokens, turns, reported cost, and cached input over the selected range.</p>
+                <Leaderboard entries={summary().harnesses} showCost showCache />
+              </section>
+              <section class={styles.panel}>
+                <h2>Tools</h2>
+                <p>
+                  Calls count on their start day; timed calls and duration count on completion day. Total time sums
+                  concurrent calls, and average uses measured calls only.
+                </p>
+                <ToolTable entries={summary().tools} />
               </section>
               <section class={styles.panel}>
                 <h2>Repositories</h2>
@@ -156,7 +191,11 @@ export default function UsagePage() {
   );
 }
 
-function Leaderboard(props: { entries: ReturnType<typeof summarizeUsageDays>["models"]; showCost: boolean }) {
+function Leaderboard(props: {
+  entries: ReturnType<typeof summarizeUsageDays>["models"];
+  showCost: boolean;
+  showCache?: boolean;
+}) {
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No usage in this range.</p>}>
       <div
@@ -175,6 +214,9 @@ function Leaderboard(props: { entries: ReturnType<typeof summarizeUsageDays>["mo
               <Show when={props.showCost}>
                 <th scope="col">Cost</th>
               </Show>
+              <Show when={props.showCache}>
+                <th scope="col">Cache hit</th>
+              </Show>
             </tr>
           </thead>
           <tbody>
@@ -187,6 +229,50 @@ function Leaderboard(props: { entries: ReturnType<typeof summarizeUsageDays>["mo
                   <Show when={props.showCost}>
                     <td>{formatCost(entry.costUSD)}</td>
                   </Show>
+                  <Show when={props.showCache}>
+                    <td>{entry.cacheHitRate === undefined ? "—" : `${(entry.cacheHitRate * 100).toFixed(1)}%`}</td>
+                  </Show>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
+      </div>
+    </Show>
+  );
+}
+
+function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tools"] }) {
+  return (
+    <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No tool calls in this range.</p>}>
+      <div
+        class={styles.tableWrap}
+        role="region"
+        aria-label="Tool durations"
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- overflow region must be keyboard-scrollable
+        tabIndex={0}
+      >
+        <table class={styles.table}>
+          <thead>
+            <tr>
+              <th scope="col">Tool</th>
+              <th scope="col">Calls</th>
+              <th scope="col">Timed</th>
+              <th scope="col">Total</th>
+              <th scope="col">Average</th>
+            </tr>
+          </thead>
+          <tbody>
+            <For each={props.entries}>
+              {(entry) => (
+                <tr>
+                  <th scope="row" title={entry.name}>
+                    {entry.name}
+                  </th>
+                  <td>{entry.calls}</td>
+                  <td>{entry.timedCalls}</td>
+                  <td>{entry.timedCalls ? formatUsageDuration(entry.durationMs) : "—"}</td>
+                  <td>{entry.timedCalls ? formatUsageDuration(entry.durationMs / entry.timedCalls) : "—"}</td>
                 </tr>
               )}
             </For>

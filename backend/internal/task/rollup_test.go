@@ -49,6 +49,23 @@ type rollupObserve struct {
 func TestTaskRollupForwarding(t *testing.T) {
 	t.Parallel()
 
+	t.Run("timestamp-less live tool records retain unknown producer time", func(t *testing.T) {
+		t.Parallel()
+		sink := &rollupSpy{}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "model", "")
+		tk.Rollup = sink
+		tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "read-1", Name: "Read"}, false)
+		tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: "read-1"}, false)
+		if len(sink.Observes) != 2 {
+			t.Fatalf("observes = %d, want start and result", len(sink.Observes))
+		}
+		for _, observation := range sink.Observes {
+			if observation.Event.At.IsZero() || !observation.Event.ToolProducerTime.IsZero() {
+				t.Errorf("rollup times = %v / %v, want materialized event time and unknown producer time", observation.Event.At, observation.Event.ToolProducerTime)
+			}
+		}
+	})
+
 	t.Run("inferred skills require successful tool result", func(t *testing.T) {
 		t.Parallel()
 		sink := &rollupSpy{}
@@ -232,7 +249,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 		}
 		var total usagedb.TokenBuckets
 		for _, m := range claude {
-			e, ok := rollupEvent(m, at, false, "claude-opus", 0, harness.Claude)
+			e, ok := rollupEvent(m, at, at, false, "claude-opus", 0, harness.Claude)
 			if !ok {
 				t.Fatalf("%T must translate", m)
 			}
@@ -248,17 +265,17 @@ func TestTaskRollupTranslation(t *testing.T) {
 
 		// Pi's turn total arrives as the turn-end usage; its result carries
 		// only the last call and must not add tokens.
-		e, ok := rollupEvent(&agent.UsageMessage{ReportedModel: "zai/glm-5.3", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}}, at, false, "zai/glm-5.3", 0, harness.Pi)
+		e, ok := rollupEvent(&agent.UsageMessage{ReportedModel: "zai/glm-5.3", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}}, at, at, false, "zai/glm-5.3", 0, harness.Pi)
 		if !ok || e.Delta.Output != 30 {
 			t.Fatalf("pi usage tokens = %+v, ok = %v", e.Delta.TokenBuckets, ok)
 		}
-		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, false, "zai/glm-5.3", 0, harness.Pi)
+		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, at, false, "zai/glm-5.3", 0, harness.Pi)
 		if !ok || e.Delta.TokenBuckets != (usagedb.TokenBuckets{}) {
 			t.Errorf("pi result must carry no tokens, got %+v", e.Delta.TokenBuckets)
 		}
 
 		// OpenCode has no per-call records; its result is the only source.
-		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, false, "m", 0, harness.OpenCode)
+		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, at, false, "m", 0, harness.OpenCode)
 		if e.Delta.TokenBuckets != (usagedb.TokenBuckets{Input: 7, Output: 9}) {
 			t.Errorf("opencode result tokens = %+v", e.Delta.TokenBuckets)
 		}
@@ -280,7 +297,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 				t.Parallel()
 				e, ok := rollupEvent(&agent.UsageMessage{
 					Usage: agent.Usage{InputTokens: 10, CacheCreationInputTokens: 400, CacheReadInputTokens: 900, OutputTokens: 50, CacheTTLSeconds: tc.ttl},
-				}, at, false, "m", 0, harness.Pi)
+				}, at, at, false, "m", 0, harness.Pi)
 				if !ok {
 					t.Fatal("usage message must translate")
 				}
@@ -303,7 +320,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{Background: true}},
 		}
 		for _, m := range interesting {
-			if _, ok := rollupEvent(m, at, false, "m", 0, harness.Claude); !ok {
+			if _, ok := rollupEvent(m, at, at, false, "m", 0, harness.Claude); !ok {
 				t.Errorf("%T must translate", m)
 			}
 		}
@@ -314,7 +331,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.SkillReadMessage{},
 		}
 		for _, m := range skipped {
-			if _, ok := rollupEvent(m, at, false, "m", 0, harness.Claude); ok {
+			if _, ok := rollupEvent(m, at, at, false, "m", 0, harness.Claude); ok {
 				t.Errorf("%T must be skipped", m)
 			}
 		}

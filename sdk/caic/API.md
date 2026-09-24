@@ -1962,6 +1962,16 @@ UsageDashboardCount is a named counter such as a skill read or tool call.
 | `name` | `string` |  | yes |
 | `count` | `int` |  | yes |
 
+### UsageDashboardToolTiming
+
+UsageDashboardToolTiming measures completed tool calls with known duration.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `count` | `int` |  | yes |
+| `durationMs` | `int64` |  | yes |
+
 ### UsageDashboardDay
 
 UsageDashboardDay is the complete daily usage snapshot from the durable
@@ -1984,6 +1994,7 @@ cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
 | `repos` | `UsageDashboardRepo[]` |  | yes |
 | `skills` | `UsageDashboardCount[]` |  | yes |
 | `tools` | `UsageDashboardCount[]` |  | yes |
+| `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
 
 ### UsageDashboardResp
 

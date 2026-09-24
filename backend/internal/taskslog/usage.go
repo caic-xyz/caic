@@ -175,6 +175,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 			repos[i] = repo.Name
 		}
 		var skillReads agent.SkillReadTracker
+		var toolTimings usagedb.ToolTimingTracker
 		add := func(confirmed agent.Message, at time.Time) {
 			// Claude records carry per-call model attribution. Codex, Pi, and
 			// OpenCode logs only preserve a reliable session-level model.
@@ -182,6 +183,15 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 				model = usageClaudeModel(model, confirmed)
 			}
 			delta, ok := usageDelta(confirmed, lt.Harness)
+			switch m := confirmed.(type) {
+			case *agent.ToolUseMessage:
+				toolTimings.Start(m.ToolUseID, m.Name, at)
+			case *agent.ToolResultMessage:
+				if name, ms, measured := toolTimings.Finish(m.ToolUseID, at, m.DurationMs); measured {
+					delta.ToolTimings = map[string]usagedb.ToolTiming{name: {Count: 1, DurationMs: ms}}
+					ok = true
+				}
+			}
 			if !ok {
 				return
 			}

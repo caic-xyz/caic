@@ -61,6 +61,7 @@ function day(value: string, overrides: Partial<UsageDashboardDay> = {}): UsageDa
     skills: [{ name: "review", count: 1 }],
     tools: [],
     ...overrides,
+    toolTimings: overrides.toolTimings ?? [],
   };
 }
 
@@ -78,6 +79,12 @@ describe("summarizeUsageDays", () => {
     const summary = summarizeUsageDays([
       day("2026-01-24"),
       day("2026-01-25", {
+        apiMs: 1250,
+        wallMs: 3000,
+        compactions: 2,
+        erroredTurns: 1,
+        tools: [{ name: "Read", count: 3 }],
+        toolTimings: [{ name: "Read", count: 2, durationMs: 1500 }],
         costUSD: 0.2,
         repos: [{ repo: "caic", tasks: 2 }],
         skills: [{ name: "review", count: 3 }],
@@ -86,10 +93,30 @@ describe("summarizeUsageDays", () => {
 
     expect(summary.totalTokens).toBe(70);
     expect(summary.turns).toBe(2);
+    expect(summary.apiMs).toBe(1250);
+    expect(summary.wallMs).toBe(3000);
+    expect(summary.compactions).toBe(2);
+    expect(summary.erroredTurns).toBe(1);
+    expect(summary.tools).toEqual([{ name: "Read", calls: 3, timedCalls: 2, durationMs: 1500 }]);
     expect(summary.costUSD).toBeCloseTo(0.3);
     expect(summary.repos).toEqual([{ name: "caic", count: 3 }]);
     expect(summary.skills).toEqual([{ name: "review", count: 4 }]);
     expect(summary.models[0]).toMatchObject({ name: "model-a", tokens: 70, turns: 2 });
     expect(usageCacheHitRate(summary.tokens)).toBeCloseTo(2 / 3);
+    expect(summary.harnesses[0].cacheHitRate).toBeCloseTo(2 / 3);
+  });
+
+  it("weights harness cache hit rate by input tokens across days", () => {
+    const first = day("2026-01-24");
+    const second = day("2026-01-25", {
+      harnesses: [
+        {
+          ...first.harnesses[0],
+          tokens: { ...first.harnesses[0].tokens, inputTokens: 70, cacheReadTokens: 0 },
+        },
+      ],
+    });
+    const summary = summarizeUsageDays([first, second]);
+    expect(summary.harnesses[0].cacheHitRate).toBeCloseTo(20 / 100);
   });
 });

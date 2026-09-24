@@ -1933,6 +1933,13 @@ public struct UsageDashboardCount: Codable {
     public let count: Int
 }
 
+/// UsageDashboardToolTiming measures completed tool calls with known duration.
+public struct UsageDashboardToolTiming: Codable {
+    public let name: String
+    public let count: Int
+    public let durationMs: Int
+}
+
 /// UsageDashboardDay is the complete daily usage snapshot from the durable
 /// cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
 public struct UsageDashboardDay: Codable {
@@ -1951,6 +1958,7 @@ public struct UsageDashboardDay: Codable {
     public let repos: [UsageDashboardRepo]
     public let skills: [UsageDashboardCount]
     public let tools: [UsageDashboardCount]
+    public let toolTimings: [UsageDashboardToolTiming]
 }
 
 /// UsageDashboardResp is the response for GET /api/caic/v1/usage/dashboard.

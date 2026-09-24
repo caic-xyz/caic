@@ -40,7 +40,18 @@ func usageDashboardDay(day *usagedb.DayRollup) v1.UsageDashboardDay {
 		Repos:                    usageDashboardRepos(day.Repos),
 		Skills:                   usageDashboardCounts(day.Skills),
 		Tools:                    usageDashboardCounts(day.Tools),
+		ToolTimings:              usageDashboardToolTimings(day.ToolTimings),
 	}
+}
+
+func usageDashboardToolTimings(timings map[string]usagedb.ToolTiming) []v1.UsageDashboardToolTiming {
+	names := sortedNames(timings)
+	out := make([]v1.UsageDashboardToolTiming, len(names))
+	for i, name := range names {
+		timing := timings[name]
+		out[i] = v1.UsageDashboardToolTiming{Name: name, Count: timing.Count, DurationMs: timing.DurationMs}
+	}
+	return out
 }
 
 func usageDashboardTokens(tokens usagedb.TokenBuckets) v1.UsageDashboardTokens {

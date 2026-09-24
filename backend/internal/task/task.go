@@ -996,7 +996,7 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 		// Forward the folded message to the usage rollup with the cost
 		// snapshot reflecting every prior entry, so resumed replays carry the
 		// correct cost delta for the unflushed tail.
-		t.observeRollupLocked(msg, entry.ProducerTime, true)
+		t.observeRollupLocked(msg, entry.ProducerTime, entry.ProducerTime, true)
 	}
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
@@ -1703,7 +1703,8 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 		}
 		return stateChanged, generateTitle
 	}
-	at := parsed.ProducerTime
+	producerAt := parsed.ProducerTime
+	at := producerAt
 	if at.IsZero() {
 		at = time.Now()
 	}
@@ -1866,7 +1867,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	}
 	// Forward the folded message to the usage rollup with the cost snapshot
 	// reflecting every prior fold in this message.
-	t.observeRollupLocked(m, at, false)
+	t.observeRollupLocked(m, at, producerAt, false)
 	// Fan out to subscribers (non-blocking). Skip a non-zero exit message that
 	// follows a cleanly completed turn: it is a spurious termination artifact
 	// (e.g. SIGINT from a user-requested stop) and is already dropped from the
@@ -2104,23 +2105,23 @@ func (t *Task) activeModel() string {
 
 // observeRollupLocked forwards one agent message to the task's usage rollup
 // sink, which is never nil. The caller holds t.mu.
-func (t *Task) observeRollupLocked(m agent.Message, at time.Time, replayed bool) {
+func (t *Task) observeRollupLocked(m agent.Message, at, producerAt time.Time, replayed bool) {
 	count, reads := t.skillReads.Confirm(m)
 	if count {
-		t.observeRollupMessageLocked(m, at, replayed)
+		t.observeRollupMessageLocked(m, at, producerAt, replayed)
 	}
 	for _, read := range reads {
-		t.observeRollupMessageLocked(read, at, replayed)
+		t.observeRollupMessageLocked(read, at, producerAt, replayed)
 	}
 }
 
-func (t *Task) observeRollupMessageLocked(m agent.Message, at time.Time, replayed bool) {
+func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.Time, replayed bool) {
 	if q, ok := m.(*agent.RateLimitMessage); ok {
 		c := quotaChange(q, at)
 		t.Rollup.ObserveQuota(&c)
 		return
 	}
-	e, ok := rollupEvent(m, at, replayed, t.rollupModelLocked(m), t.liveCostUSD, t.Harness)
+	e, ok := rollupEvent(m, at, producerAt, replayed, t.rollupModelLocked(m), t.liveCostUSD, t.Harness)
 	if ok {
 		t.Rollup.Observe(t.rollupMetaLocked(), &e)
 	}

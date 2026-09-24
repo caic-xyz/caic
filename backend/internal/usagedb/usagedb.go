@@ -89,17 +89,18 @@ func (b TokenBuckets) plus(o TokenBuckets) TokenBuckets {
 type Delta struct {
 	TokenBuckets
 
-	Turns            int            `json:"turns,omitzero"`
-	ErroredTurns     int            `json:"errored_turns,omitzero"`
-	APIMs            int64          `json:"api_ms,omitzero"`
-	WallMs           int64          `json:"wall_ms,omitzero"`
-	Compactions      int            `json:"compactions,omitzero"`
-	SkillReads       map[string]int `json:"skill_reads,omitzero"`
-	ToolCalls        map[string]int `json:"tool_calls,omitzero"`
-	Spawns           int            `json:"subagent_spawns,omitzero"`
-	SpawnsBackground int            `json:"subagent_spawns_background,omitzero"`
-	ContextWindow    int            `json:"context_window,omitzero"`
-	CostUSD          float64        `json:"cost_usd,omitzero"`
+	Turns            int                   `json:"turns,omitzero"`
+	ErroredTurns     int                   `json:"errored_turns,omitzero"`
+	APIMs            int64                 `json:"api_ms,omitzero"`
+	WallMs           int64                 `json:"wall_ms,omitzero"`
+	Compactions      int                   `json:"compactions,omitzero"`
+	SkillReads       map[string]int        `json:"skill_reads,omitzero"`
+	ToolCalls        map[string]int        `json:"tool_calls,omitzero"`
+	ToolTimings      map[string]ToolTiming `json:"tool_timings,omitzero"`
+	Spawns           int                   `json:"subagent_spawns,omitzero"`
+	SpawnsBackground int                   `json:"subagent_spawns_background,omitzero"`
+	ContextWindow    int                   `json:"context_window,omitzero"`
+	CostUSD          float64               `json:"cost_usd,omitzero"`
 }
 
 // Add merges o into d: counters sum, maps merge, and context window keeps its
@@ -133,6 +134,22 @@ func (d *Delta) fold(o *Delta) {
 		}
 		d.ToolCalls[name] += n
 	}
+	for name, timing := range o.ToolTimings {
+		if d.ToolTimings == nil {
+			d.ToolTimings = make(map[string]ToolTiming)
+		}
+		current := d.ToolTimings[name]
+		current.Count += timing.Count
+		current.DurationMs += timing.DurationMs
+		d.ToolTimings[name] = current
+	}
+}
+
+// ToolTiming sums completed calls with a measured duration. Calls without a
+// usable native duration or producer-time pair are excluded.
+type ToolTiming struct {
+	Count      int   `json:"count"`
+	DurationMs int64 `json:"duration_ms"`
 }
 
 // Event is one ingest record from a task fold. At is the record's producer
@@ -142,12 +159,17 @@ func (d *Delta) fold(o *Delta) {
 // — the store derives cost movement from consecutive snapshots and never
 // prices itself.
 type Event struct {
-	At           time.Time
-	Replayed     bool
-	Model        string
-	CostUSD      float64
-	TurnBoundary bool // a completed turn; the store flushes on it
-	Delta        Delta
+	At                   time.Time
+	Replayed             bool
+	Model                string
+	CostUSD              float64
+	TurnBoundary         bool   // a completed turn; the store flushes on it
+	ToolStartID          string // tool-use correlation; not persisted in a usage row
+	ToolName             string
+	ToolResultID         string
+	ToolNativeDurationMs int64
+	ToolProducerTime     time.Time // zero when the harness did not timestamp the tool event
+	Delta                Delta
 }
 
 // QuotaChange is one provider quota-window status change observed on a task.
@@ -229,4 +251,5 @@ type DayRollup struct {
 	Repos                    map[string]int // distinct tasks that touched the repo that day
 	Skills                   map[string]int // distinct tasks that read the skill that day
 	Tools                    map[string]int
+	ToolTimings              map[string]ToolTiming
 }

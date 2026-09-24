@@ -9,16 +9,30 @@ export interface UsageLeaderboardEntry {
   tokens: number;
   turns: number;
   costUSD: number;
+  cacheHitRate?: number; // populated for harness entries
+}
+
+export interface UsageToolEntry {
+  name: string;
+  calls: number;
+  timedCalls: number;
+  durationMs: number;
 }
 
 export interface UsageDashboardSummary {
   tokens: UsageDashboardTokens;
   totalTokens: number;
   turns: number;
+  erroredTurns: number;
+  apiMs: number;
+  wallMs: number;
+  compactions: number;
+  subagentSpawns: number;
   costUSD: number;
   skills: UsageDashboardCount[];
   models: UsageLeaderboardEntry[];
   harnesses: UsageLeaderboardEntry[];
+  tools: UsageToolEntry[];
   repos: UsageDashboardCount[];
 }
 
@@ -100,28 +114,66 @@ export function summarizeUsageDays(days: readonly UsageDashboardDay[]): UsageDas
   const repos = new Map<string, number>();
   const models = new Map<string, UsageLeaderboardEntry>();
   const harnesses = new Map<string, UsageLeaderboardEntry>();
+  const harnessTokens = new Map<string, UsageDashboardTokens>();
+  const tools = new Map<string, UsageToolEntry>();
   let turns = 0;
+  let erroredTurns = 0;
+  let apiMs = 0;
+  let wallMs = 0;
+  let compactions = 0;
+  let subagentSpawns = 0;
   let costUSD = 0;
 
   for (const day of days) {
     addTokens(tokens, day.tokens);
     turns += day.turns;
+    erroredTurns += day.erroredTurns;
+    apiMs += day.apiMs;
+    wallMs += day.wallMs;
+    compactions += day.compactions;
+    subagentSpawns += day.subagentSpawns;
     costUSD += day.costUSD;
     for (const skill of day.skills) skills.set(skill.name, (skills.get(skill.name) ?? 0) + skill.count);
     for (const repo of day.repos) repos.set(repo.repo, (repos.get(repo.repo) ?? 0) + repo.tasks);
     for (const model of day.models) addLeaderboard(models, model.model, model.tokens, model.turns, model.costUSD);
-    for (const harness of day.harnesses)
+    for (const harness of day.harnesses) {
       addLeaderboard(harnesses, harness.harness, harness.tokens, harness.turns, harness.costUSD);
+      const combined = harnessTokens.get(harness.harness) ?? emptyTokens();
+      addTokens(combined, harness.tokens);
+      harnessTokens.set(harness.harness, combined);
+    }
+    for (const tool of day.tools) {
+      const entry = tools.get(tool.name) ?? { name: tool.name, calls: 0, timedCalls: 0, durationMs: 0 };
+      entry.calls += tool.count;
+      tools.set(tool.name, entry);
+    }
+    for (const timing of day.toolTimings) {
+      const entry = tools.get(timing.name) ?? { name: timing.name, calls: 0, timedCalls: 0, durationMs: 0 };
+      entry.timedCalls += timing.count;
+      entry.durationMs += timing.durationMs;
+      tools.set(timing.name, entry);
+    }
   }
 
   return {
     tokens,
     totalTokens: tokenTotal(tokens),
     turns,
+    erroredTurns,
+    apiMs,
+    wallMs,
+    compactions,
+    subagentSpawns,
     costUSD,
     skills: counts([...skills].map(([name, count]) => ({ name, count }))),
     models: leaderboard(models),
-    harnesses: leaderboard(harnesses),
+    harnesses: leaderboard(harnesses).map((entry) => ({
+      ...entry,
+      cacheHitRate: usageCacheHitRate(harnessTokens.get(entry.name) ?? emptyTokens()),
+    })),
+    tools: [...tools.values()].sort(
+      (a, b) => b.durationMs - a.durationMs || b.calls - a.calls || a.name.localeCompare(b.name),
+    ),
     repos: counts([...repos].map(([name, count]) => ({ name, count }))),
   };
 }

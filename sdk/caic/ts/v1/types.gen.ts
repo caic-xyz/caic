@@ -1803,6 +1803,13 @@ export interface UsageDashboardCount {
   count: number /* int */;
 }
 
+/** UsageDashboardToolTiming measures completed tool calls with known duration. */
+export interface UsageDashboardToolTiming {
+  name: string;
+  count: number /* int */;
+  durationMs: number /* int64 */;
+}
+
 /**
  * UsageDashboardDay is the complete daily usage snapshot from the durable
  * cross-task rollup. Day is a UTC calendar date in YYYY-MM-DD form.
@@ -1823,6 +1830,7 @@ export interface UsageDashboardDay {
   repos: UsageDashboardRepo[];
   skills: UsageDashboardCount[];
   tools: UsageDashboardCount[];
+  toolTimings: UsageDashboardToolTiming[];
 }
 
 /**
