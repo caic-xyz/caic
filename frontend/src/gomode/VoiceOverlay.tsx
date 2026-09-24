@@ -29,8 +29,16 @@ export default function VoiceOverlay() {
     onCleanup(() => observer.disconnect());
   });
 
-  // Suppress browser notifications while voice is connected.
-  createEffect(() => notifications.setVoiceActive(session.state.connected));
+  // Suppress browser notifications while voice mode is active.
+  createEffect(() =>
+    notifications.setVoiceActive(
+      session.state.connected ||
+        session.state.connectStatus !== null ||
+        session.state.listening ||
+        session.state.speaking,
+    ),
+  );
+  onCleanup(() => notifications.setVoiceActive(false));
 
   // No onCleanup disconnect — the singleton voice session survives component remounts.
   // Only explicit user action or page unload (beforeunload handler) disconnects.

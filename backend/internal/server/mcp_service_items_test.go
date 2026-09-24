@@ -42,7 +42,7 @@ func TestServiceItems(t *testing.T) {
 		}
 	})
 
-	t.Run("uses task ID before a generated title exists", func(t *testing.T) {
+	t.Run("falls back to the task ID title and omits a lone task reference", func(t *testing.T) {
 		t.Parallel()
 		task := v1.Task{ID: ksid.NewID(), State: v1.TaskStateRunning}
 
@@ -50,6 +50,9 @@ func TestServiceItems(t *testing.T) {
 
 		if got := items[0].Title; got != task.ID.String() {
 			t.Fatalf("title = %q, want task ID %q", got, task.ID)
+		}
+		if got := items[0].Reference; got != "" {
+			t.Fatalf("reference = %q, want empty for a lone task", got)
 		}
 	})
 }

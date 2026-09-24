@@ -114,15 +114,6 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val notificationPublisher = remember(context) { ServiceNotificationPublisher(context.applicationContext) }
-    var pendingNotifications by remember { mutableStateOf(emptyList<ServiceNotification>()) }
-    val notificationPermissionLauncher =
-        rememberLauncherForActivityResult(
-            ActivityResultContracts.RequestPermission(),
-        ) { granted ->
-            if (granted) pendingNotifications.forEach(notificationPublisher::publish)
-            pendingNotifications = emptyList()
-        }
     val scope = rememberCoroutineScope()
     val voiceSession =
         remember(settingsRepository) {
@@ -136,6 +127,19 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
         voiceSession.disconnect()
     }
     val voiceState by voiceSession.state.collectAsStateWithLifecycle()
+    val voiceSessionActive =
+        voiceState.connected || voiceState.connectStatus != null ||
+            voiceState.listening || voiceState.speaking
+    val notificationPublisher = remember(context) { ServiceNotificationPublisher(context.applicationContext) }
+    var pendingNotifications by remember { mutableStateOf(emptyList<ServiceNotification>()) }
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            // Voice mode already announced these events; do not post duplicate native alerts.
+            if (granted && !voiceSessionActive) pendingNotifications.forEach(notificationPublisher::publish)
+            pendingNotifications = emptyList()
+        }
     val serviceMonitor =
         remember(scope) {
             ServiceMonitor(scope = scope) { endpointURL, protocolVersion ->
@@ -181,9 +185,6 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
             bootstrapError = (bootstrapState as? ServiceBootstrapState.Error)?.message,
             webLoadState = webLoadState,
         ).takeIf { activeNativeScreen == null && activeURL.isNotBlank() }
-    val voiceSessionActive =
-        voiceState.connected || voiceState.connectStatus != null ||
-            voiceState.listening || voiceState.speaking
     val configuredVoiceAvailable =
         (bootstrapState as? ServiceBootstrapState.Ready)
             ?.settings
@@ -210,7 +211,8 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
 
     LaunchedEffect(serviceMonitorState.notifications) {
         val notifications = serviceMonitorState.notifications
-        if (notifications.isEmpty()) return@LaunchedEffect
+        // Voice mode already announced these events; do not post duplicate native alerts.
+        if (notifications.isEmpty() || voiceSessionActive) return@LaunchedEffect
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         ) {

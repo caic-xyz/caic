@@ -18,8 +18,9 @@ and answer an agent's question with `task_answer_question`.
 
 Create tasks with `task_create`. Confirm the repository and prompt before
 creating one. Omit harness, model, and effort unless the user explicitly asks
-to override the saved defaults. Use `task_fork` to continue a task's workspace
-on a new branch.
+to override the saved defaults. Use `harnesses_list` to see the models and
+effort levels each harness accepts before overriding a default. Use `task_fork`
+to continue a task's workspace on a new branch.
 
 Use `task_stop`, `task_revive`, and `task_purge` only when the user asks to
 change the task lifecycle. Use `task_push_branch_to_remote` only when the user

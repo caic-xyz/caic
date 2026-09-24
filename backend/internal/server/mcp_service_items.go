@@ -12,7 +12,7 @@ import (
 
 type serviceItem struct {
 	ID             string `json:"id"`
-	Reference      string `json:"reference"`
+	Reference      string `json:"reference,omitempty"`
 	Title          string `json:"title"`
 	State          string `json:"state,omitempty"`
 	NeedsAttention bool   `json:"needsAttention"`
@@ -27,13 +27,20 @@ type serviceItemsOutput struct {
 func serviceItems(tasks []v1.Task) []serviceItem {
 	// The host owns ordering, stable references, and attention priority; see
 	// gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
+	// Number tasks only when more than one is visible: a lone task needs no
+	// disambiguating reference in voice context or notifications.
+	numbered := len(tasks) > 1
 	items := make([]serviceItem, len(tasks))
 	for i := range tasks {
 		task := &tasks[i]
 		title, _ := truncateMCPTaskTitle(taskTitle(task))
+		reference := ""
+		if numbered {
+			reference = fmt.Sprintf("Task #%d", i+1)
+		}
 		items[i] = serviceItem{
 			ID:             task.ID.String(),
-			Reference:      fmt.Sprintf("Task #%d", i+1),
+			Reference:      reference,
 			Title:          title,
 			State:          string(task.State),
 			NeedsAttention: taskNeedsAttention(task),

@@ -7,13 +7,15 @@ import userEvent from "@testing-library/user-event";
 
 import VoiceOverlay from "./VoiceOverlay";
 import { voiceSession } from "./VoiceSession";
+import { notifications } from "./notifications";
 
 const connectMock = vi.spyOn(voiceSession, "connect").mockResolvedValue(undefined as never);
 const disconnectMock = vi.spyOn(voiceSession, "disconnect");
+const setVoiceActiveMock = vi.spyOn(notifications, "setVoiceActive");
 
 beforeEach(() => {
   vi.clearAllMocks();
-  voiceSession.setState((s) => ({ ...s, connected: false }));
+  voiceSession.setState((s) => ({ ...s, connected: false, connectStatus: null, listening: false, speaking: false }));
 });
 
 describe("VoiceOverlay connection", () => {
@@ -51,5 +53,30 @@ describe("VoiceOverlay connection", () => {
     await waitFor(() => expect(voiceSession.state.connected).toBe(false));
     expect(disconnectMock).toHaveBeenCalledOnce();
     expect(connectMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("VoiceOverlay notifications", () => {
+  it("suppresses notifications for the whole active voice mode", async () => {
+    render(() => <VoiceOverlay />);
+    await waitFor(() => expect(setVoiceActiveMock).toHaveBeenLastCalledWith(false));
+
+    voiceSession.setState((s) => ({ ...s, connectStatus: "Connecting" }));
+    await waitFor(() => expect(setVoiceActiveMock).toHaveBeenLastCalledWith(true));
+
+    voiceSession.setState((s) => ({ ...s, connectStatus: null, connected: true }));
+    await waitFor(() => expect(setVoiceActiveMock).toHaveBeenLastCalledWith(true));
+
+    voiceSession.setState((s) => ({ ...s, connected: false }));
+    await waitFor(() => expect(setVoiceActiveMock).toHaveBeenLastCalledWith(false));
+  });
+
+  it("clears notification suppression when unmounted", async () => {
+    const view = render(() => <VoiceOverlay />);
+    voiceSession.setState((s) => ({ ...s, connected: true }));
+    await waitFor(() => expect(setVoiceActiveMock).toHaveBeenLastCalledWith(true));
+
+    view.unmount();
+    await waitFor(() => expect(setVoiceActiveMock).toHaveBeenLastCalledWith(false));
   });
 });

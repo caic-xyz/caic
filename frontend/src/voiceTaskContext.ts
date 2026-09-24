@@ -2,27 +2,37 @@
 
 import type { Task } from "@sdk/types.gen";
 
-export function buildTaskCIContext(task: Task, taskNumber: number): string {
+/**
+ * taskLabel names a task for a voice context update.
+ *
+ * The session task number is only included when more than one task is alive;
+ * a lone task needs no disambiguating reference.
+ */
+function taskLabel(task: Task, taskNumber: number, numbered: boolean): string {
   const shortName = task.title || task.id;
-  const pr = task.forgePR ? ` PR #${task.forgePR}` : "";
-  return `[Task #${taskNumber} (${shortName})${pr} — CI: failure]`;
+  return numbered ? `Task #${taskNumber} (${shortName})` : shortName;
 }
 
-export function buildTaskStateContext(task: Task, taskNumber: number): string | null {
-  const shortName = task.title || task.id;
+export function buildTaskCIContext(task: Task, taskNumber: number, numbered: boolean): string {
+  const pr = task.forgePR ? ` PR #${task.forgePR}` : "";
+  return `[${taskLabel(task, taskNumber, numbered)}${pr} — CI: failure]`;
+}
+
+export function buildTaskStateContext(task: Task, taskNumber: number, numbered: boolean): string | null {
+  const label = taskLabel(task, taskNumber, numbered);
   switch (task.state) {
     case "asking":
     case "waiting":
     case "has_plan":
-      return `[Task #${taskNumber} (${shortName}) — ${task.state}]`;
+      return `[${label} — ${task.state}]`;
     case "purged":
-      return task.result ? `[Task #${taskNumber} (${shortName}) — completed: ${task.result}]` : null;
+      return task.result ? `[${label} — completed: ${task.result}]` : null;
     case "stopped":
-      return `[Task #${taskNumber} (${shortName}) — stopped]`;
+      return `[${label} — stopped]`;
     case "crashed":
-      return `[Task #${taskNumber} (${shortName}) — crashed: ${task.error ?? "unknown"}]`;
+      return `[${label} — crashed: ${task.error ?? "unknown"}]`;
     case "failed":
-      return `[Task #${taskNumber} (${shortName}) — failed: ${task.error ?? "unknown"}]`;
+      return `[${label} — failed: ${task.error ?? "unknown"}]`;
     case "pending":
     case "branching":
     case "provisioning":

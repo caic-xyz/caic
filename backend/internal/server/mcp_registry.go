@@ -68,15 +68,19 @@ If the client provides a bounded current-task snapshot at session start, use it 
 
 ## Behavior guidelines
 - Reply only to the current request, in one or two short sentences unless the user explicitly asks for more detail. Speak quickly and omit background, explanations, and summaries that were not requested.
+- When the user asks for specific information, reply with the information without necessarily creating a proper sentence.
 - Never ask a follow-up or confirmation, including "would you like me to…" or "should I also…". Ask one clarifying question only when missing information makes the request impossible or safety-critical; after it is answered, perform the request without asking again.
 - Do not volunteer ideas, next steps, related actions, or offers. Do not comment on tasks or invoke tools until the user asks.
+- Stick to the current task being discussed; only talk about one task at a time.
+- Stick to the language the user first talked in.
 - Notify the user only when an agent enters the waiting, asking, failed, or crashed state. Do not notify on any other state transition. For a failed or crashed task, call task_get_detail. When StartupFailure is present, state its harness, phase, and cause exactly; otherwise state Error exactly. Never call it an unknown error or invent a cause.
 - Be concise. The user is often away from the screen.
 - Summarize task status: state and what the agent is doing. Only mention elapsed time or cost when the user specifically asks.
+- For a status update about all tasks, be extremely concise and focus on the waiting tasks. For a status update about one specific task, be detailed and avoid over-summarizing.
 - When an agent is asking, read the question and options clearly, wait for the verbal answer, then call task_answer_question.
 - When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness from saved preferences; omitted model and effort use the selected harness defaults. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
 - Refer to tasks by title.
-- Free tools: agent_last_message, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
+- Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
 - For safety issues during sync, describe each issue and ask whether to force.`
 
@@ -419,6 +423,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 	return []mcp.ToolSpec{
 		annotateTool(mcp.NewToolSpec("tasks_list", "List tasks", "List current coding tasks in stable active-first order. A response-size limit may return fewer tasks than limit; pass nextCursor as cursor until it is absent.", m.handleTasksList), mcp.ToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
 		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details by task number from tasks_list, or by stable task ID.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
@@ -604,6 +609,38 @@ func (m *mcpRegistry) handleReposList(_ context.Context, args mcpRepoListArgs) m
 	return result
 }
 
+type mcpHarnessModel struct {
+	ID            string   `json:"id"                      jsonschema_description:"Model identifier accepted by the harness"`
+	EffortOptions []string `json:"effortOptions,omitempty" jsonschema_description:"Reasoning effort values the model accepts; absent means the harness default only"`
+}
+
+type mcpHarnessInfo struct {
+	Name   v1.Harness        `json:"name"   jsonschema_description:"Harness identifier accepted by task_create"`
+	Models []mcpHarnessModel `json:"models" jsonschema_description:"Models this harness accepts, in harness order"`
+}
+
+type mcpHarnessListOutput struct {
+	Harnesses []mcpHarnessInfo `json:"harnesses" jsonschema_description:"Available harnesses and their supported models"`
+}
+
+// handleHarnessesList reports every available harness with its model inventory
+// so a client can correct an unsupported model or effort override.
+func (m *mcpRegistry) handleHarnessesList(ctx context.Context, _ struct{}) mcp.ToolResult[mcpHarnessListOutput] {
+	harnesses, err := m.serverConfig.listHarnesses(ctx, nil)
+	if err != nil {
+		return domainToolError[mcpHarnessListOutput](err)
+	}
+	out := make([]mcpHarnessInfo, 0, len(*harnesses))
+	for _, info := range *harnesses {
+		models := make([]mcpHarnessModel, 0, len(info.Models))
+		for _, model := range info.Models {
+			models = append(models, mcpHarnessModel{ID: model.ID, EffortOptions: nonNilSlice(model.EffortOptions)})
+		}
+		out = append(out, mcpHarnessInfo{Name: info.Name, Models: models})
+	}
+	return mcp.TypedToolResult(mcpHarnessListOutput{Harnesses: out})
+}
+
 func domainToolError[T any](err error) mcp.ToolResult[T] {
 	if err == nil {
 		return mcp.ToolResult[T]{}
@@ -612,6 +649,31 @@ func domainToolError[T any](err error) mcp.ToolResult[T] {
 		return mcp.ToolErrorWithMeta[T](apiErr.Error(), mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(apiErr.Code)})
 	}
 	return mcp.ToolErrorWithMeta[T](err.Error(), mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeInternalError)})
+}
+
+// supportedModelHint names the models the harness accepts so a caller that sent
+// an unsupported model override can correct it without another discovery call.
+// It returns an empty string when the harness has no published inventory; the
+// returned sentence has no trailing period so callers can append their own.
+func (m *mcpRegistry) supportedModelHint(apiHarness v1.Harness) string {
+	harnessName, err := apiconv.AgentHarness(apiHarness)
+	if err != nil {
+		return ""
+	}
+	backend, ok := m.serverConfig.taskMgr.Backends[harnessName]
+	if !ok {
+		return ""
+	}
+	ids := backend.ModelInventory().IDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	slices.Sort(ids)
+	const maxHintedModels = 40
+	if len(ids) > maxHintedModels {
+		ids = append(ids[:maxHintedModels:maxHintedModels], "...")
+	}
+	return "Supported models: " + strings.Join(ids, ", ")
 }
 
 // taskCreateToolError adds a recovery step only when the rejected task-create
@@ -637,6 +699,11 @@ func (m *mcpRegistry) taskCreateToolError(ctx context.Context, args mcpTaskCreat
 	case api.CodeUnsupportedModel:
 		if args.Model == "" {
 			return domainToolError[mcpTaskCreatedOutput](err)
+		}
+		if apiHarness, harnessErr := m.resolveTaskCreateHarness(ctx, args.Harness); harnessErr == nil {
+			if hint := m.supportedModelHint(apiHarness); hint != "" {
+				message += ". " + hint
+			}
 		}
 		args.Model = ""
 		message += ". Omit model to use the selected harness's default model, then retry task_create."
@@ -985,6 +1052,15 @@ func (m *mcpRegistry) taskForkToolError(args mcpTaskForkArgs, source *taskpkg.Ta
 	case api.CodeUnsupportedModel:
 		if args.Model == "" || !m.forkWithoutModelValid(source, args.Harness) {
 			return domainToolError[mcpTaskForkOutput](err)
+		}
+		apiHarness := v1.Harness(args.Harness)
+		if apiHarness == "" {
+			if converted, convErr := apiconv.Harness(source.Harness); convErr == nil {
+				apiHarness = converted
+			}
+		}
+		if hint := m.supportedModelHint(apiHarness); hint != "" {
+			message += ". " + hint
 		}
 		message += ". Omit model to inherit the source task's model, then retry task_fork."
 	default:
@@ -1974,6 +2050,7 @@ func formatBalance(currency string, total float64) string {
 
 var mcpToolScopes = map[string]string{
 	"repos_list":                 mcpScopeRead,
+	"harnesses_list":             mcpScopeRead,
 	"tasks_list":                 mcpScopeTasksRead,
 	"task_get_detail":            mcpScopeTasksRead,
 	"agent_last_message":         mcpScopeTasksRead,

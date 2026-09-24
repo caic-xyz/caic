@@ -48,16 +48,17 @@ export function VoiceTaskUpdates(props: { tasks: Accessor<Task[]> }) {
     numberMap.update(currentTasks);
     if (voiceSession.state.connected) {
       setVoiceTaskNumberMap(numberMap);
+      const numbered = currentTasks.length > 1;
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
         const taskNumber = numberMap.toNumber(task.id);
         if (prev !== undefined && prev !== task.state && taskNumber !== undefined) {
-          const notification = buildTaskStateContext(task, taskNumber);
+          const notification = buildTaskStateContext(task, taskNumber, numbered);
           if (notification !== null) voiceSession.injectText(notification);
         }
         const prevCI = prevCIStatuses.get(task.id);
         if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure" && taskNumber !== undefined) {
-          voiceSession.injectText(buildTaskCIContext(task, taskNumber));
+          voiceSession.injectText(buildTaskCIContext(task, taskNumber, numbered));
         }
       }
     }

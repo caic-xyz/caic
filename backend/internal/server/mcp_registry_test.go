@@ -142,6 +142,34 @@ func TestCaicToolRegistryHandleReposList(t *testing.T) {
 	}
 }
 
+func TestCaicToolRegistryHandleHarnessesList(t *testing.T) {
+	t.Parallel()
+
+	s := newMCPTaskCreateTestRouter(t)
+	c := &mcpRegistry{serverConfig: s.serverHandlers}
+
+	result := c.handleHarnessesList(t.Context(), struct{}{})
+	if result.IsError {
+		t.Fatalf("handleHarnessesList() returned tool error: %+v", result.Structured)
+	}
+	output, ok := result.Structured.(mcpHarnessListOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want mcpHarnessListOutput", result.Structured)
+	}
+	if len(output.Harnesses) != 2 {
+		t.Fatalf("harnesses = %+v, want claude and pi", output.Harnesses)
+	}
+	if output.Harnesses[0].Name != v1.HarnessClaude || output.Harnesses[1].Name != v1.HarnessPi {
+		t.Errorf("harness names = %q, %q, want claude, pi", output.Harnesses[0].Name, output.Harnesses[1].Name)
+	}
+	if models := output.Harnesses[0].Models; len(models) != 1 || models[0].ID != "claude-default" {
+		t.Errorf("claude models = %+v, want claude-default", models)
+	}
+	if models := output.Harnesses[1].Models; len(models) != 1 || models[0].ID != "pi-default" {
+		t.Errorf("pi models = %+v, want pi-default", models)
+	}
+}
+
 func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 	t.Parallel()
 
@@ -934,7 +962,7 @@ func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 			{
 				name:     "unsupported model",
 				args:     mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}, Harness: "claude", Model: "mistyped"},
-				want:     "unsupported model for claude: mistyped. Omit model to use the selected harness's default model, then retry task_create.",
+				want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to use the selected harness's default model, then retry task_create.",
 				wantCode: api.CodeUnsupportedModel,
 			},
 			{
@@ -1138,7 +1166,7 @@ func TestCaicToolRegistryHandleTaskForkSelectionErrors(t *testing.T) {
 		{
 			name:     "unsupported override model",
 			args:     mcpTaskForkArgs{TaskNumber: 1, Prompt: "fork", Harness: "claude", Model: "mistyped"},
-			want:     "unsupported model for claude: mistyped. Omit model to inherit the source task's model, then retry task_fork.",
+			want:     "unsupported model for claude: mistyped. Supported models: claude-default. Omit model to inherit the source task's model, then retry task_fork.",
 			wantCode: api.CodeUnsupportedModel,
 		},
 	}
@@ -1439,6 +1467,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			t.Fatalf("Tools() error: %v", err)
 		}
 		assertMCPToolVisibility(t, tools, "repos_list", true)
+		assertMCPToolVisibility(t, tools, "harnesses_list", true)
 		assertMCPToolVisibility(t, tools, "task_create", false)
 		assertMCPToolVisibility(t, tools, "tasks_list", false)
 	})
