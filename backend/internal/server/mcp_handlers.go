@@ -14,9 +14,9 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	"github.com/caic-xyz/caic/oauth/oauthserver"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth/oauthserver"
 )
 
 // mcpHandlers owns the MCP HTTP endpoint: protocol dispatch, rate limiting, and

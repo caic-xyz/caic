@@ -40,11 +40,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/gomode/voicegateway"
-	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/metricsdb"
-	"github.com/caic-xyz/caic/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/voicegateway"
+	"github.com/maruel/gomode/voicegateway/voicertc"
 )
 
 const repoDiscoveryDepth = 3

@@ -3,6 +3,10 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +18,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/gomode/voicegateway"
+	"github.com/maruel/gomode/voicegateway"
 )
 
 // tomlConfig mirrors the TOML file layout at ~/.config/caic/config.toml.
@@ -101,8 +105,11 @@ type tomlOAuth struct {
 }
 
 type tomlVoiceGateway struct {
-	URL    string              `toml:"url"`
-	Config voicegateway.Config `toml:"config"`
+	URL                  string              `toml:"url"`
+	InstanceID           string              `toml:"instance_id"`
+	TokenMode            string              `toml:"token_mode"`
+	SigningPrivateKeyPEM string              `toml:"signing_private_key_pem"`
+	Config               voicegateway.Config `toml:"config"`
 }
 
 // defaultConfig returns a tomlConfig with sensible defaults pre-populated.
@@ -123,7 +130,8 @@ func defaultConfig() tomlConfig {
 			"pi":       {},
 		},
 		VoiceGateway: tomlVoiceGateway{
-			Config: embeddedVoiceGatewayConfigDefaults(),
+			TokenMode: string(server.VoiceTokenModeScoped),
+			Config:    embeddedVoiceGatewayConfigDefaults(),
 		},
 		Debug: tomlDebug{LogLevel: "info"},
 	}
@@ -190,7 +198,7 @@ func resolvePath(path, cfgDir string) string {
 // tomlToServerConfig converts a parsed TOML config into a server.Config.
 // cfgDir is used to resolve relative file paths.
 func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
-	pem, err := resolveFilePath(tc.GitHub.App.PrivateKeyPEM, cfgDir)
+	githubKeyPEM, err := resolveFilePath(tc.GitHub.App.PrivateKeyPEM, cfgDir)
 	if err != nil {
 		return nil, "", "", "", err
 	}
@@ -212,6 +220,35 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 		voiceGatewayMode = server.VoiceGatewayModeExternal
 	} else if geminiAPIKey != "" {
 		voiceGatewayMode = server.VoiceGatewayModeEmbedded
+	}
+	var voiceTokenMode server.VoiceTokenMode
+	switch tc.VoiceGateway.TokenMode {
+	case "", string(server.VoiceTokenModeScoped):
+		voiceTokenMode = server.VoiceTokenModeScoped
+	case string(server.VoiceTokenModeOAuth):
+		voiceTokenMode = server.VoiceTokenModeOAuth
+	default:
+		return nil, "", "", "", fmt.Errorf("voice gateway token_mode must be %q or %q, got %q", server.VoiceTokenModeScoped, server.VoiceTokenModeOAuth, tc.VoiceGateway.TokenMode)
+	}
+	var voiceSigningKey ed25519.PrivateKey
+	if voiceGatewayMode == server.VoiceGatewayModeExternal && tc.VoiceGateway.SigningPrivateKeyPEM != "" {
+		keyPEM, err := resolveFilePath(tc.VoiceGateway.SigningPrivateKeyPEM, cfgDir)
+		if err != nil {
+			return nil, "", "", "", fmt.Errorf("voice gateway signing key: %w", err)
+		}
+		block, _ := pem.Decode(keyPEM)
+		if block == nil {
+			return nil, "", "", "", errors.New("voice gateway signing key: invalid PEM")
+		}
+		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, "", "", "", fmt.Errorf("voice gateway signing key: %w", err)
+		}
+		var ok bool
+		voiceSigningKey, ok = key.(ed25519.PrivateKey)
+		if !ok {
+			return nil, "", "", "", errors.New("voice gateway signing key must be Ed25519")
+		}
 	}
 
 	// Convert per-harness env maps to KEY=VALUE slices.
@@ -246,7 +283,7 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			OAuthAllowedUsers: tc.GitHub.OAuth.AllowedUsers,
 			WebhookSecret:     []byte(tc.GitHub.App.WebhookSecret),
 			AppID:             tc.GitHub.App.ID,
-			AppPrivateKeyPEM:  pem,
+			AppPrivateKeyPEM:  githubKeyPEM,
 			AppAllowedOwners:  tc.GitHub.App.AllowedOwners,
 		},
 		GitLab: server.GitLabConfig{
@@ -268,9 +305,13 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 		},
 		Voice: server.VoiceConfig{
 			Gateway: server.VoiceGatewayConfig{
-				Mode:   voiceGatewayMode,
-				URL:    tc.VoiceGateway.URL,
-				Config: tc.VoiceGateway.Config,
+				Mode:       voiceGatewayMode,
+				URL:        tc.VoiceGateway.URL,
+				Issuer:     tc.Server.ExternalURL,
+				InstanceID: tc.VoiceGateway.InstanceID,
+				TokenMode:  voiceTokenMode,
+				SigningKey: voiceSigningKey,
+				Config:     tc.VoiceGateway.Config,
 			},
 		},
 		Debug: server.DebugConfig{

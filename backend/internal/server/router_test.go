@@ -5,6 +5,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +33,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -45,10 +45,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/gomode"
-	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/caic-xyz/caic/oauth/oauthclient"
+	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	voicev1 "github.com/maruel/gomode/voicegateway/api/v1"
+	"github.com/maruel/gomode/voicegateway/voicertc"
 )
 
 type reviveDuringStoppedScanWriter struct {
@@ -2881,6 +2883,95 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 	})
 }
 
+func TestExternalVoiceToken(t *testing.T) {
+	t.Parallel()
+	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "1", Username: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestOAuthRouter(t, store)
+	s.voiceHandlers.gateway = VoiceGatewayConfig{
+		Mode:       VoiceGatewayModeExternal,
+		URL:        "https://voice.example.com",
+		Issuer:     "https://caic.example.com",
+		InstanceID: "caic-main",
+		SigningKey: key,
+	}
+	settings := newGoModeSettings(s.voiceHandlers.metadata(), true)
+	s.goModeHandler, err = gomode.NewHandler(&settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.buildHandler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "https://caic.example.com/api/caic/v1/voice/token"
+	manifestReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/.well-known/gomode.json", http.NoBody)
+	manifestW := httptest.NewRecorder()
+	h.ServeHTTP(manifestW, manifestReq)
+	if manifestW.Code != http.StatusOK {
+		t.Fatalf("manifest status = %d: %s", manifestW.Code, manifestW.Body.String())
+	}
+	var manifest gomode.Settings
+	if err := json.Unmarshal(manifestW.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.WebShell.VoiceGateway.TokenEndpoint != goModeVoiceTokenEndpoint {
+		t.Fatalf("voice token endpoint = %q", manifest.WebShell.VoiceGateway.TokenEndpoint)
+	}
+
+	t.Run("requires session", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+	})
+
+	t.Run("issues scoped token", func(t *testing.T) {
+		t.Parallel()
+		jwt, err := auth.IssueToken(&user, s.sessionSecret, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody)
+		req.AddCookie(&http.Cookie{Name: "caic_session", Value: jwt, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("Cache-Control = %q", w.Header().Get("Cache-Control"))
+		}
+		var service voicev1.ServiceAuthorization
+		if err := json.Unmarshal(w.Body.Bytes(), &service); err != nil {
+			t.Fatal(err)
+		}
+		if service.Kind != "caic" || service.InstanceID != "caic-main" || service.BaseURL != "https://caic.example.com" {
+			t.Fatalf("service = %+v", service)
+		}
+		claims, err := gomode.VerifyServiceScopedToken(service.Token, ed25519.PublicKey(key[ed25519.SeedSize:]), gomode.ScopedTokenAudience)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claims.Subject != user.ID || claims.ServiceInstanceID != service.InstanceID || claims.BackendOrigin != service.BaseURL {
+			t.Fatalf("claims = %+v", claims)
+		}
+		if len(claims.Capabilities) != 1 || claims.Capabilities[0] != "voice.session" {
+			t.Fatalf("token capabilities = %v", claims.Capabilities)
+		}
+	})
+}
+
 func TestGoModeSettings(t *testing.T) {
 	t.Parallel()
 	voice := v1.VoiceGatewayMetadata{
@@ -2918,6 +3009,9 @@ func TestGoModeSettings(t *testing.T) {
 	embedded := newGoModeSettings(v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeEmbedded}, false)
 	if embedded.WebShell.VoiceGateway.URL != "/" || embedded.WebShell.VoiceGateway.AuthRequired {
 		t.Fatalf("Embedded VoiceGateway = %+v", embedded.WebShell.VoiceGateway)
+	}
+	if embedded.WebShell.VoiceGateway.TokenEndpoint != "" {
+		t.Fatalf("embedded token endpoint = %q", embedded.WebShell.VoiceGateway.TokenEndpoint)
 	}
 	if err := embedded.Validate(); err != nil {
 		t.Fatalf("Embedded Validate() error = %v", err)

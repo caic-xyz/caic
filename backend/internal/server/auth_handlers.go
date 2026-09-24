@@ -15,9 +15,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/oauth"
-	"github.com/caic-xyz/caic/oauth/oauthclient"
-	"github.com/caic-xyz/caic/oauth/oauthserver"
+	"github.com/maruel/gomode/oauth"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthserver"
 )
 
 const (

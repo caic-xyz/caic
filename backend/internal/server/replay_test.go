@@ -14,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
-	"github.com/caic-xyz/caic/backend/internal/sse"
+	"github.com/maruel/gomode/sse"
 )
 
 func TestGenericConvertInitHasHarness(t *testing.T) {

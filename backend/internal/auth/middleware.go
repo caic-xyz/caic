@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/caic-xyz/caic/oauth"
+	"github.com/maruel/gomode/oauth"
 )
 
 type contextKey struct{}

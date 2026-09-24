@@ -25,11 +25,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
-	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/caic-xyz/caic/oauth"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/mcp/mcptest"
+	"github.com/maruel/gomode/oauth"
 )
 
 var mcpSkillToolNameRE = regexp.MustCompile("`([a-z][a-z0-9_]*_[a-z0-9_]+)`")

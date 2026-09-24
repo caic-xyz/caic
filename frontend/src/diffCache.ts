@@ -200,6 +200,16 @@ export class DiffCache {
     }
   }
 
+  /** Discard all account-scoped data and invalidate pending index responses. */
+  clear(): void {
+    for (const entry of this.indexes.values()) {
+      entry.evictionEpoch++;
+      entry.listeners.clear();
+    }
+    this.indexes.clear();
+    this.patches.clear();
+  }
+
   private indexEntry(taskId: string): IndexEntry {
     const cached = this.indexes.get(taskId);
     if (cached) return cached;

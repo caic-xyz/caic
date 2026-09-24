@@ -32,8 +32,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/maruel/gomode/mcp"
 )
 
 // Backend implements agent.Backend for the Pi coding agent.

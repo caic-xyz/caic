@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/maruel/gomode/mcp"
 )
 
 // testWire implements WireFormat for testing.

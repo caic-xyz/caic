@@ -1,4 +1,4 @@
-// Application state store: owns task data, settings, SSE wiring, task actions, and task-scoped cache invalidation.
+// Application state store: owns task data, settings, SSE wiring, task actions, and account-scoped cache cleanup.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
@@ -24,15 +24,15 @@ import type {
   VersionResp,
 } from "@sdk/types.gen";
 
-import { useHostMode } from "./gomode/HostMode";
+import { useHostMode } from "@maruel/gomode/web/HostMode";
 
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
-import { notifications } from "./gomode/notifications";
+import { notifications } from "@maruel/gomode/web/notifications";
 import { QuotaRecoveryTracker } from "./quota";
 import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
-import { evictTaskDiff, invalidateTaskDiff } from "./diffCache";
+import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
@@ -415,10 +415,15 @@ function createAppStore() {
 
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();
+  const notifiedTaskIDs = new Set<string>();
+  onCleanup(() => {
+    for (const id of notifiedTaskIDs) notifications.dismissNotification(id);
+  });
   const quotaRecoveryTracker = new QuotaRecoveryTracker();
   const notifyQuotaRecoveries = (currentTasks: Task[]) => {
     for (const task of quotaRecoveryTracker.update(currentTasks)) {
       if (taskIdFromPath(location.pathname) === task.id) continue;
+      notifiedTaskIDs.add(task.id);
       notifications.notify(task.id, `${task.title} quota is available`, `caic-event-${task.id}`, {
         enabled: hostMode.browserNotificationsEnabled(),
       });
@@ -429,10 +434,12 @@ function createAppStore() {
     const prevState = prevStates.get(task.id);
     const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
     if (needsInput && prevState === "running" && taskIdFromPath(location.pathname) !== task.id) {
+      notifiedTaskIDs.add(task.id);
       notifications.notify(task.id, `${task.title} is ready`, `caic-waiting-${task.id}`, {
         enabled: hostMode.browserNotificationsEnabled(),
       });
     } else if (!needsInput && prevNeedsInput) {
+      notifiedTaskIDs.delete(task.id);
       notifications.dismissNotification(task.id);
     }
   };
@@ -641,7 +648,7 @@ function createAppStore() {
 
   // Subscribe to task list updates via SSE with automatic reconnection.
   // Backoff: 500ms × 1.5 each failure, capped at 30s with ±25% jitter, reset on success.
-  // On 401, stop retrying and clear auth state so the login page shows.
+  // On a confirmed missing session, stop retrying and clear account state.
   // On reconnect, check if the frontend was rebuilt and reload if so.
   // Pauses reconnection when tab is hidden or browser goes offline.
   const [connected, setConnected] = createSignal(true);
@@ -652,19 +659,23 @@ function createAppStore() {
     let usageTimer: ReturnType<typeof setTimeout> | null = null;
     let taskDelay = 500;
     let usageDelay = 500;
+    let active = false;
+    let generation = 0;
 
-    /** Probe whether the server is returning 401. EventSource doesn't expose status codes. */
-    async function checkUnauthorized(): Promise<boolean> {
+    /** Probe whether the session is gone. EventSource doesn't expose status codes. */
+    async function checkUnauthorized(probeGeneration: number): Promise<boolean> {
+      if (!active || generation !== probeGeneration) return true;
       try {
         const res = await fetch("/auth/me", {
           signal: AbortSignal.timeout(5000),
         });
-        if (res.status === 401) {
-          auth.clearUser();
+        if (!active || generation !== probeGeneration) return true;
+        if (res.status === 401 || res.status === 404) {
+          auth.confirmLoggedOut();
           return true;
         }
       } catch {
-        // Network error — not a 401.
+        // Network errors do not confirm that the session is gone.
       }
       return false;
     }
@@ -770,8 +781,9 @@ function createAppStore() {
         taskES = null;
         setConnected(false);
         if (taskTimer !== null) clearTimeout(taskTimer);
-        checkUnauthorized().then((is401) => {
-          if (is401) return; // Stop retrying; effect restarts after re-login.
+        const probeGeneration = generation;
+        checkUnauthorized(probeGeneration).then((loggedOut) => {
+          if (loggedOut || !active || generation !== probeGeneration) return;
           taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
           taskDelay = Math.min(taskDelay * 1.5, 30_000);
         });
@@ -794,8 +806,9 @@ function createAppStore() {
         usageES?.close();
         usageES = null;
         if (usageTimer !== null) clearTimeout(usageTimer);
-        checkUnauthorized().then((is401) => {
-          if (is401) return;
+        const probeGeneration = generation;
+        checkUnauthorized(probeGeneration).then((loggedOut) => {
+          if (loggedOut || !active || generation !== probeGeneration) return;
           usageTimer = setTimeout(connectUsage, jitteredDelay(usageDelay));
           usageDelay = Math.min(usageDelay * 1.5, 30_000);
         });
@@ -842,11 +855,15 @@ function createAppStore() {
 
     createEffect(() => {
       if (!isAuthenticated()) return;
+      active = true;
+      generation++;
       connectAll();
       document.addEventListener("visibilitychange", onVisibilityChange);
       window.addEventListener("online", onOnline);
       window.addEventListener("offline", onOffline);
       onCleanup(() => {
+        active = false;
+        generation++;
         closeAll();
         document.removeEventListener("visibilitychange", onVisibilityChange);
         window.removeEventListener("online", onOnline);
@@ -1449,6 +1466,7 @@ const AppStateContext = createContext<AppStore>();
 
 export function AppStateProvider(props: { children: JSX.Element }) {
   const store = createAppStore();
+  onCleanup(() => taskDiffCache.clear());
   return <AppStateContext.Provider value={store}>{props.children}</AppStateContext.Provider>;
 }
 

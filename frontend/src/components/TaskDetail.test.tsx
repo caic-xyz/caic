@@ -10,7 +10,7 @@ import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
 import TaskDetail from "./TaskDetail";
 import { api } from "../api";
-import { HostModeProvider } from "../gomode/HostMode";
+import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 
 // Spies on the real api singleton replace the former module mocks.
 const taskEventStreamMock = vi.spyOn(api, "taskEvents");

@@ -3,10 +3,11 @@
 import { createEffect, createMemo, createSignal, ErrorBoundary, Show, type JSX } from "solid-js";
 
 import BrowserVoiceShell from "./BrowserVoiceShell";
-import { HostModeProvider, useHostMode } from "./gomode/HostMode";
+import { HostModeProvider, useHostMode } from "@maruel/gomode/web/HostMode";
 
 import { currentErrorReport } from "./errorReport";
 import { AppStateProvider, useAppState } from "./AppState";
+import { useAuth } from "./AuthContext";
 import LoginPage from "./pages/LoginPage";
 import AccountMenu from "./components/AccountMenu";
 import Button from "./components/Button";
@@ -105,6 +106,21 @@ function ConnectionDot(props: { connected: boolean; settledLoading: boolean; set
   );
 }
 
+/** Holds the screen while cookie identity is unresolved and offers a reload. */
+function SessionCheckPage() {
+  return (
+    <div class="login-page">
+      <div class="login-card" role="status">
+        <h1 class="login-title">caic</h1>
+        <p class="login-subtitle">Checking your session…</p>
+        <button type="button" class="login-button" onClick={() => window.location.reload()}>
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Top-level chrome: navbar, modals, overlays, and the routed detail panes. */
 function Shell(props: { children?: JSX.Element }) {
   const s = useAppState();
@@ -113,67 +129,89 @@ function Shell(props: { children?: JSX.Element }) {
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
 
   return (
-    <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
-      <div class={styles.app} data-testid="app-shell">
-        <header class={styles.navbar}>
-          <h1 class={styles.title}>
-            <button
-              class={styles.titleButton}
-              type="button"
-              onClick={() => s.navigate("/")}
-              title="New task"
-              data-testid="new-task-button"
-            >
-              caic
-            </button>
-          </h1>
-          <span class={styles.subtitle}>Coding Agents in Containers</span>
-          <UsageBadges usage={s.usage} now={s.now} />
-          <ConnectionDot
-            connected={s.connected()}
-            settledLoading={s.settledLoading()}
-            settledError={s.settledError()}
+    <Show when={auth.ready() || auth.providers().length === 0} fallback={<SessionCheckPage />}>
+      <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
+        <div class={styles.app} data-testid="app-shell">
+          <header class={styles.navbar}>
+            <h1 class={styles.title}>
+              <button
+                class={styles.titleButton}
+                type="button"
+                onClick={() => s.navigate("/")}
+                title="New task"
+                data-testid="new-task-button"
+              >
+                caic
+              </button>
+            </h1>
+            <span class={styles.subtitle}>Coding Agents in Containers</span>
+            <UsageBadges usage={s.usage} now={s.now} />
+            <ConnectionDot
+              connected={s.connected()}
+              settledLoading={s.settledLoading()}
+              settledError={s.settledError()}
+            />
+            <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
+          </header>
+
+          <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+            {props.children}
+          </ErrorBoundary>
+
+          <Show when={s.cloneOpen()}>
+            <CloneRepoDialog
+              loading={s.cloning()}
+              error={s.cloneError()}
+              onClone={s.submitClone}
+              onClose={() => {
+                s.setCloneOpen(false);
+                s.setCloneError("");
+              }}
+            />
+          </Show>
+
+          <ForkDialog />
+          <KeyboardShortcuts
+            open={shortcutsOpen()}
+            onOpenChange={setShortcutsOpen}
+            voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}
           />
-          <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
-        </header>
-
-        <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
-          {props.children}
-        </ErrorBoundary>
-
-        <Show when={s.cloneOpen()}>
-          <CloneRepoDialog
-            loading={s.cloning()}
-            error={s.cloneError()}
-            onClone={s.submitClone}
-            onClose={() => {
-              s.setCloneOpen(false);
-              s.setCloneError("");
-            }}
-          />
-        </Show>
-
-        <ForkDialog />
-        <KeyboardShortcuts
-          open={shortcutsOpen()}
-          onOpenChange={setShortcutsOpen}
-          voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}
-        />
-        <BrowserVoiceShell />
-        <Toasts />
-      </div>
+          <BrowserVoiceShell />
+          <Toasts />
+        </div>
+      </Show>
     </Show>
   );
 }
 
 /** Router layout for "/": provides the app store and renders the shell around routed panes. */
 export default function App(props: { children?: JSX.Element }) {
+  const auth = useAuth();
+  const accountScope = () => {
+    if (auth.providers().length === 0) return "auth-disabled";
+    if (!auth.ready()) return null;
+    const user = auth.user();
+    return user ? `${user.provider}:${user.id}` : null;
+  };
+
   return (
     <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
       <HostModeProvider>
-        <AppStateProvider>
-          <Shell>{props.children}</Shell>
-        </AppStateProvider>
+        <Show
+          when={accountScope()}
+          keyed
+          fallback={
+            <Show when={auth.ready()} fallback={<SessionCheckPage />}>
+              <LoginPage />
+            </Show>
+          }
+        >
+          {(_scope) => (
+            <AppStateProvider>
+              <Shell>{props.children}</Shell>
+            </AppStateProvider>
+          )}
+        </Show>
       </HostModeProvider>
     </ErrorBoundary>
   );

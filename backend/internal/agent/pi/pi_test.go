@@ -23,8 +23,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/mcp/mcptest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/maruel/gomode/mcp/mcptest"
 )
 
 const piSSHHelperEnv = "GO_WANT_PI_SSH_HELPER"

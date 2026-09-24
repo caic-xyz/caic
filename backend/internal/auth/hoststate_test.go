@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthclient"
 )
 
 // dummyReq returns a request with the given Host and optional X-Forwarded headers.

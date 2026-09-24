@@ -6,11 +6,39 @@ import { render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 
-import { VoiceTaskUpdates } from "./BrowserVoiceShell";
-import { voiceSession } from "./gomode/VoiceSession";
+import { resolveVoiceGateway, VoiceTaskUpdates } from "./BrowserVoiceShell";
+import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { getVoiceTaskNumber } from "./voiceTaskState";
 
 const injectTextMock = vi.spyOn(voiceSession, "injectText");
+
+describe("resolveVoiceGateway", () => {
+  const origin = "https://caic.example.com";
+  const manifest = (url: string, tokenEndpoint?: string) => ({
+    service: "caic",
+    webShell: { voiceGateway: { url, tokenEndpoint } },
+  });
+
+  it("uses embedded mode for same-origin gateway paths and URLs", () => {
+    expect(resolveVoiceGateway(manifest("/voice/"), origin)).toEqual({ url: "/voice/", tokenEndpoint: null });
+    expect(resolveVoiceGateway(manifest("https://caic.example.com/voice/"), origin)).toEqual({
+      url: "https://caic.example.com/voice/",
+      tokenEndpoint: null,
+    });
+  });
+
+  it("requires a same-origin token endpoint for an external gateway", () => {
+    expect(resolveVoiceGateway(manifest("https://voice.example.com", "/api/caic/v1/voice/token"), origin)).toEqual({
+      url: "https://voice.example.com",
+      tokenEndpoint: "https://caic.example.com/api/caic/v1/voice/token",
+    });
+    for (const endpoint of ["//evil.example/token", "/\\\\evil.example/token", "https://evil.example/token"]) {
+      expect(() => resolveVoiceGateway(manifest("https://voice.example.com", endpoint), origin)).toThrow(
+        "same-origin token endpoint",
+      );
+    }
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

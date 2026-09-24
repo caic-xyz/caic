@@ -1,11 +1,11 @@
-// Tests for app-shell task creation, repo selection, and harness preferences.
+// Tests for app-shell task creation, repo selection, account isolation, and harness preferences.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp } from "@sdk/types.gen";
+import type { Config, Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp, UserResp } from "@sdk/types.gen";
 
 // Minimal complete Task, matching what the backend now returns from createTask
 // so the app can seed its store and render the detail view immediately.
@@ -126,10 +126,12 @@ async function waitForTaskEventsSubscription() {
 
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
-import { notifications } from "./gomode/notifications";
+import { notifications } from "@maruel/gomode/web/notifications";
+import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
 import { AuthProvider } from "./AuthContext";
+import { getVoiceTaskNumber } from "./voiceTaskState";
 import { installFetchRouter } from "@tests/fetch-router";
 
 // Spies on the real api singleton and the notifications object replace the former module
@@ -189,6 +191,7 @@ function spySeams(): void {
 // Real AuthProvider fetches server info on mount; serve it through the network seam.
 const fetchRouter = installFetchRouter();
 fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
+fetchRouter.apiGet("/.well-known/gomode.json", () => ({ service: "caic", webShell: { voiceGateway: { url: "/" } } }));
 
 /** Render the full app at an initial route, returning the memory history for assertions. */
 function renderApp(initial = "/") {
@@ -234,6 +237,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   fetchRouter.reset();
   fetchRouter.apiGet("/server-info/config", () => ({ authProviders: [] }));
+  fetchRouter.apiGet("/.well-known/gomode.json", () => ({ service: "caic", webShell: { voiceGateway: { url: "/" } } }));
   fakeESListeners.length = 0;
   fakeUsageESListeners.length = 0;
   fakeESOpenListeners.length = 0;
@@ -318,7 +322,132 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete window.__CAIC_BOOTSTRAP__;
   vi.restoreAllMocks();
+});
+
+it("destroys account A task and repo state before rendering confirmed account B", async () => {
+  window.__CAIC_BOOTSTRAP__ = {
+    authProviders: ["github"],
+    user: { id: "a", provider: "github", username: "account-a" },
+  };
+  const accountBRepos = deferred<Repo[]>();
+  vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockReturnValueOnce(accountBRepos.promise);
+  vi.mocked(api.getConfig).mockResolvedValue({
+    displayName: "caic",
+    tailscaleAvailable: false,
+    usbAvailable: false,
+    displayAvailable: false,
+    sudoAvailable: false,
+    gitHubTokenAvailable: false,
+    mcpOAuthAvailable: false,
+    voiceGateway: { mode: "embedded" },
+  } satisfies Config);
+  vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
+  const checkedIdentity = deferred<UserResp>();
+  vi.spyOn(api, "getMe").mockReturnValue(checkedIdentity.promise);
+  const disconnectVoice = vi.spyOn(voiceSession, "disconnect");
+  const injectVoiceText = vi.spyOn(voiceSession, "injectText");
+
+  renderApp();
+  await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "a-task", title: "Account A task" })] });
+  expect(await screen.findByText("Account A task")).toBeInTheDocument();
+  await screen.findByTestId("voice-overlay");
+  voiceSession.setState((state) => ({ ...state, connected: true }));
+  expect(getVoiceTaskNumber("a-task")).toBe(1);
+  dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "a-task", title: "Account A task", state: "running" }) });
+  dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "a-task", title: "Account A task", state: "waiting" }) });
+  expect(notifications.notify).toHaveBeenCalledWith("a-task", "Account A task is ready", "caic-waiting-a-task", {
+    enabled: true,
+  });
+
+  const user = userEvent.setup();
+  await user.click(screen.getByTitle("account-a"));
+  await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+  expect(screen.getByText("Checking your session…")).toBeInTheDocument();
+  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
+  expect(notifications.dismissNotification).toHaveBeenCalledWith("a-task");
+  expect(disconnectVoice).toHaveBeenCalled();
+  expect(voiceSession.state.connected).toBe(false);
+  expect(getVoiceTaskNumber("a-task")).toBeUndefined();
+
+  checkedIdentity.resolve({ id: "b", provider: "github", username: "account-b" });
+  await waitFor(() => expect(screen.getByTitle("account-b")).toBeInTheDocument());
+  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
+  expect(vi.mocked(api.listRepos)).toHaveBeenCalledTimes(2);
+
+  accountBRepos.resolve([repoB]);
+  await waitFor(() => expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument());
+  await screen.findByTestId("voice-overlay");
+  injectVoiceText.mockClear();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "b-task", title: "Account B task" })] });
+  expect(await screen.findByText("Account B task")).toBeInTheDocument();
+  expect(injectVoiceText).not.toHaveBeenCalled();
+  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
+});
+
+it("removes account data when the event stream discovers /auth/me returned 404", async () => {
+  window.__CAIC_BOOTSTRAP__ = {
+    authProviders: ["github"],
+    user: { id: "a", provider: "github", username: "account-a" },
+  };
+  renderApp();
+  await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "a-task", title: "Account A task" })] });
+  expect(await screen.findByText("Account A task")).toBeInTheDocument();
+
+  const priorFetch = globalThis.fetch;
+  vi.spyOn(globalThis, "fetch").mockImplementation((request, init) => {
+    if (request === "/auth/me") return Promise.resolve(new Response(null, { status: 404 }));
+    return priorFetch(request, init);
+  });
+  const taskStream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource | undefined;
+  if (!taskStream) throw new Error("Task stream did not start");
+  taskStream.onerror?.(new Event("error"));
+
+  await waitFor(() => expect(screen.getByRole("link", { name: "Sign in with GitHub" })).toBeInTheDocument());
+  expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
+});
+
+it("ignores an old account's delayed /auth/me probe after switching accounts", async () => {
+  window.__CAIC_BOOTSTRAP__ = {
+    authProviders: ["github"],
+    user: { id: "a", provider: "github", username: "account-a" },
+  };
+  vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockResolvedValueOnce([repoB]);
+  vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
+  vi.spyOn(api, "getMe").mockResolvedValue({ id: "b", provider: "github", username: "account-b" });
+  const oldProbe = Promise.withResolvers<Response>();
+
+  renderApp();
+  await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
+  await waitForTaskEventsSubscription();
+  const priorFetch = globalThis.fetch;
+  vi.spyOn(globalThis, "fetch").mockImplementation((request, init) => {
+    if (request === "/auth/me") return oldProbe.promise;
+    return priorFetch(request, init);
+  });
+  const taskStream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource | undefined;
+  if (!taskStream) throw new Error("Task stream did not start");
+  taskStream.onerror?.(new Event("error"));
+
+  const user = userEvent.setup();
+  await user.click(screen.getByTitle("account-a"));
+  await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+  await waitFor(() => expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument());
+  oldProbe.resolve(new Response(null, { status: 404 }));
+  await Promise.resolve();
+
+  expect(screen.getByTitle("account-b")).toBeInTheDocument();
+  expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).not.toBeInTheDocument();
 });
 
 describe("App task list loading state", () => {
@@ -1599,7 +1728,7 @@ describe("App repo chips: No repository", () => {
     dispatchOpen();
 
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId("voice-overlay")).toBeInTheDocument();
+    await screen.findByTestId("voice-overlay");
   });
 
   it("keeps browser voice mounted outside Go Mode host mode when the server enables voice", async () => {

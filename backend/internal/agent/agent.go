@@ -58,8 +58,8 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/maruel/gomode/mcp"
 )
 
 // ImageData carries a single base64-encoded image for multi-modal input.

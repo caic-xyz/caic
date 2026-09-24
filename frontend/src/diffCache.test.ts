@@ -37,6 +37,26 @@ describe("DiffCache", () => {
     vi.restoreAllMocks();
   });
 
+  it("drops cached data and ignores a prior account's late index response", async () => {
+    const oldRequest = Promise.withResolvers<TaskDiffIndexResp>();
+    const newRequest = Promise.withResolvers<TaskDiffIndexResp>();
+    const oldIndex = emptyIndex();
+    const newIndex = emptyIndex();
+    loadIndex.mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise);
+
+    const stale = cache.loadIndex("same-task-id");
+    cache.clear();
+    expect(cache.snapshot("same-task-id").data).toBeNull();
+
+    const current = cache.loadIndex("same-task-id");
+    newRequest.resolve(newIndex);
+    await current;
+    oldRequest.resolve(oldIndex);
+    await stale;
+    expect(cache.snapshot("same-task-id").data).toBe(newIndex);
+    expect(loadIndex).toHaveBeenCalledTimes(2);
+  });
+
   it("deduplicates concurrent index requests and reuses prefetched data", async () => {
     let resolve: (data: TaskDiffIndexResp) => void = () => undefined;
     loadIndex.mockReturnValueOnce(

@@ -26,7 +26,7 @@ type serviceItemsOutput struct {
 
 func serviceItems(tasks []v1.Task) []serviceItem {
 	// The host owns ordering, stable references, and attention priority; see
-	// gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
+	// github.com/maruel/gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
 	// Number tasks only when more than one is visible: a lone task needs no
 	// disambiguating reference in voice context or notifications.
 	numbered := len(tasks) > 1

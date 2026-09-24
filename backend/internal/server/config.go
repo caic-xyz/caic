@@ -3,6 +3,7 @@
 package server
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -13,7 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/caic/gomode/voicegateway"
+	"github.com/maruel/gomode/voicegateway"
 )
 
 // Config bundles values read once at startup from config.toml, environment
@@ -54,6 +55,9 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Voice.Validate(); err != nil {
 		return err
+	}
+	if c.Voice.Gateway.Mode == VoiceGatewayModeExternal && !c.Auth.externalURLIsSecure() {
+		return errors.New("server.external_url must use https:// except for loopback development origins")
 	}
 
 	if !c.oauthConfigured() {
@@ -212,7 +216,11 @@ func (c *AuthConfig) normalizeExternalURL() {
 }
 
 func (c *AuthConfig) externalURLIsSecure() bool {
-	u, err := url.Parse(c.ExternalURL)
+	return isSecureURL(c.ExternalURL)
+}
+
+func isSecureURL(value string) bool {
+	u, err := url.Parse(value)
 	if err != nil {
 		return false
 	}
@@ -239,11 +247,27 @@ const (
 	VoiceGatewayModeExternal VoiceGatewayMode = "external"
 )
 
+// VoiceTokenMode selects the token form caic issues for an external gateway.
+type VoiceTokenMode string
+
+// External voice gateway token modes.
+const (
+	// VoiceTokenModeScoped issues the transitional scoped Ed25519 token.
+	VoiceTokenModeScoped VoiceTokenMode = "scoped"
+	// VoiceTokenModeOAuth issues a narrow OAuth 2.0 access token through caic's
+	// authorization server so the gateway can verify it with discovery and JWKS.
+	VoiceTokenModeOAuth VoiceTokenMode = "oauth"
+)
+
 // VoiceGatewayConfig is caic's effective reference to a voice gateway.
 type VoiceGatewayConfig struct {
-	Mode   VoiceGatewayMode
-	URL    string
-	Config voicegateway.Config
+	Mode       VoiceGatewayMode
+	URL        string
+	Issuer     string
+	InstanceID string
+	TokenMode  VoiceTokenMode
+	SigningKey ed25519.PrivateKey
+	Config     voicegateway.Config
 }
 
 // Validate returns an error if the voice gateway configuration is invalid.
@@ -255,7 +279,32 @@ func (c *VoiceGatewayConfig) Validate() error {
 		if c.URL == "" {
 			return errors.New("voice gateway URL is required for external mode")
 		}
-		return validateBaseURL("voice gateway URL", c.URL)
+		if err := validateBaseURL("voice gateway URL", c.URL); err != nil {
+			return err
+		}
+		if !isSecureURL(c.URL) {
+			return errors.New("voice gateway URL must use https:// except for loopback development origins")
+		}
+		if c.Issuer == "" || strings.EqualFold(c.Issuer, "auto") {
+			return errors.New("server.external_url must be a fixed URL for an external voice gateway")
+		}
+		if err := validateBaseURL("server.external_url", c.Issuer); err != nil {
+			return err
+		}
+		if c.InstanceID == "" {
+			return errors.New("voice gateway instance ID is required for external mode")
+		}
+		switch c.TokenMode {
+		case "", VoiceTokenModeScoped:
+			if len(c.SigningKey) != ed25519.PrivateKeySize {
+				return errors.New("voice gateway Ed25519 signing key is required for external mode with scoped tokens")
+			}
+		case VoiceTokenModeOAuth:
+			// The OAuth authorization server owns the signing key.
+		default:
+			return fmt.Errorf("voice gateway token mode must be %q or %q, got %q", VoiceTokenModeScoped, VoiceTokenModeOAuth, c.TokenMode)
+		}
+		return nil
 	case VoiceGatewayModeEmbedded:
 		return c.Config.ValidateEmbedded()
 	default:

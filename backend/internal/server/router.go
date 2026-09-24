@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -23,7 +24,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/httplog"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -31,11 +31,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
-	"github.com/caic-xyz/caic/gomode"
-	"github.com/caic-xyz/caic/gomode/voicegateway/voicertc"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/caic-xyz/caic/oauth/oauthclient"
-	"github.com/caic-xyz/caic/oauth/oauthserver"
+	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/maruel/gomode/voicegateway/voicertc"
 )
 
 // Router is the HTTP router for the caic web UI. It owns HTTP routing,
@@ -123,6 +124,22 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	}
 	log = log.With("cmp", "server")
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
+	if d.VoiceGateway.Mode == VoiceGatewayModeExternal {
+		switch {
+		case d.VoiceGateway.TokenMode == VoiceTokenModeOAuth:
+			if d.AuthStore != nil && d.OAuthIssuer != "" {
+				log.InfoContext(ctx, "external voice gateway issuer", "issuer", d.VoiceGateway.Issuer, "instance", d.VoiceGateway.InstanceID, "token_mode", VoiceTokenModeOAuth, "jwks_uri", d.VoiceGateway.Issuer+"/oauth/jwks")
+			} else {
+				log.WarnContext(ctx, "external voice gateway uses oauth tokens without an OAuth authorization server; configure OAuth login with a fixed external_url")
+			}
+		case len(d.VoiceGateway.SigningKey) == ed25519.PrivateKeySize:
+			publicKey, err := gomode.EncodeServiceSigningPublicKey(ed25519.PublicKey(d.VoiceGateway.SigningKey[ed25519.SeedSize:]))
+			if err != nil {
+				return nil, err
+			}
+			log.InfoContext(ctx, "external voice gateway issuer", "issuer", d.VoiceGateway.Issuer, "instance", d.VoiceGateway.InstanceID, "token_mode", VoiceTokenModeScoped, "public_key", publicKey)
+		}
+	}
 	voiceMetadata := voice.metadata()
 	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
 	goModeHandler, err := gomode.NewHandler(&goModeSettings)
@@ -251,6 +268,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions")
 	}
 	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
+	if s.oauthServer != nil {
+		voice.oauthIssuer = s.oauthServer
+	}
 
 	s.mcpHandlers = &mcpHandlers{
 		rateLimiter: rateLimiter,
@@ -348,6 +368,7 @@ func (r *Router) buildAPIHandler() http.Handler {
 	m("/processes", r.runtimeProcesses.routes())
 	m("/ci", r.ciHandlers.routes())
 	m("/web", r.webFetchHandlers.routes())
+	apiMux.HandleFunc("GET /api/caic/v1/voice/token", r.voiceHandlers.tokenHandler)
 	if r.oauthServer != nil {
 		m("/oauth/grants", oauthGrantRoutes(r.oauthServer))
 	}

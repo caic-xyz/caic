@@ -8,7 +8,7 @@ import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid
 import AccountTreeIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
 
 import { voiceConnected, getVoiceTaskNumber, setVoiceConnected, setVoiceTaskNumberMap } from "../voiceTaskState";
-import { useHostMode } from "../gomode/HostMode";
+import { useHostMode } from "@maruel/gomode/web/HostMode";
 import { TaskNumberMap } from "../TaskNumberMap";
 
 import RepoChipStrip from "./RepoChipStrip";

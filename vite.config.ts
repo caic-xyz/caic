@@ -14,9 +14,7 @@ export default defineConfig({
     // A duplicated solid-js copy breaks reactivity signal identity at runtime.
     dedupe: ["solid-js"],
     alias: {
-      "@mcp-sdk": resolve(import.meta.dirname, "sdk/mcp/ts/v1"),
       "@sdk": resolve(import.meta.dirname, "sdk/caic/ts/v1"),
-      "@voicegateway-sdk": resolve(import.meta.dirname, "sdk/voicegateway/ts/v1"),
     },
   },
   build: {

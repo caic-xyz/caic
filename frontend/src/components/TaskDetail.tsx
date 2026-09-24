@@ -42,8 +42,8 @@ import type {
 } from "@sdk/types.gen";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
-import { useHostMode } from "../gomode/HostMode";
-import { notifications } from "../gomode/notifications";
+import { useHostMode } from "@maruel/gomode/web/HostMode";
+import { notifications } from "@maruel/gomode/web/notifications";
 
 import {
   IncrementalMessageGrouper,

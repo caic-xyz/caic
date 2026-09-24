@@ -12,7 +12,7 @@ import (
 
 	"go.yaml.in/yaml/v4"
 
-	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/maruel/gomode/mcp"
 )
 
 const (

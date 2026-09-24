@@ -26,6 +26,8 @@ github.com/maruel/apisdkgen v0.1.0 h1:EejAVdc5WaOImwgIKOjUHTcj3J/js7dhQWGSbOII7x
 github.com/maruel/apisdkgen v0.1.0/go.mod h1:jBcMrvWQiXkM7w7vZeRFbVu1fBullU9CBzoWnNIPGsI=
 github.com/maruel/genai v0.8.1 h1:chYtEB1zWwfh66wl7NcUZ7DM/UKYES/2VeKLz+jp8Tc=
 github.com/maruel/genai v0.8.1/go.mod h1:GiZhhtKOJct3g19u+yLevtAcpXnRpgIoIcPv4BL5OKs=
+github.com/maruel/gomode v0.0.0-20260924192824-644eb2fe1688 h1:FY4C2Cc8A4KpVMrGhRe+dqa7o6cNOccnJWdMr2RLNao=
+github.com/maruel/gomode v0.0.0-20260924192824-644eb2fe1688/go.mod h1:HWwr2oa78tVU/6owMUZZNdW5EZy9Xe2NJ0aqvc/6f9A=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 h1:B96AE27WGCnXjaItfg9i6bnj7iGs//NPBDz6kMgKYto=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38/go.mod h1:k6iNRgw7GovdcpFDalSZhuveD/oFLUU188FrWXdduXc=
 github.com/maruel/httpjson v0.5.2 h1:uMAyE9ajEZOpwFmpF6HCvuGOMLQ5D/9vVEMYaRYYXuc=

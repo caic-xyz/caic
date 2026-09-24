@@ -36,6 +36,7 @@
     "prepare": "pnpm --silent hooks:install"
   },
   "dependencies": {
+    "@maruel/gomode": "git+https://github.com/maruel/gomode.git#644eb2fe168844966706963d322f41d0190d9146",
     "@material-symbols/svg-400": "0.47.2",
     "@novnc/novnc": "1.7.0",
     "@observablehq/plot": "0.6.17",

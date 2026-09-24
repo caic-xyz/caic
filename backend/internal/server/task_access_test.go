@@ -16,8 +16,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/maruel/gomode/mcp"
 )
 
 func TestTaskAccess(t *testing.T) {

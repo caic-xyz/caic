@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Declare hardware features this library depends on.
-         Permissions (BLUETOOTH_CONNECT, BLUETOOTH_SCAN) are declared
-         by the consuming app, not here. -->
-    <uses-feature
-        android:name="android.hardware.bluetooth_le"
-        android:required="true" />
-</manifest>

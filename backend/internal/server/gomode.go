@@ -4,9 +4,9 @@ package server
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/gomode"
+	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/mcp"
 )
 
 const (
@@ -16,6 +16,7 @@ const (
 	goModeAPIVersion              = 1
 	goModeBridge                  = 1
 	goModeEmbeddedVoiceGatewayURL = "/"
+	goModeVoiceTokenEndpoint      = "/api/caic/v1/voice/token" //nolint:gosec // HTTP route, not a credential.
 )
 
 func newGoModeSettings(voice v1.VoiceGatewayMetadata, authRequired bool) gomode.Settings {
@@ -56,6 +57,7 @@ func newGoModeVoiceGatewaySettings(voice v1.VoiceGatewayMetadata) gomode.VoiceGa
 	case v1.VoiceGatewayModeExternal:
 		settings.URL = voice.URL
 		settings.AuthRequired = voice.AuthRequired
+		settings.TokenEndpoint = goModeVoiceTokenEndpoint
 	}
 	return settings
 }

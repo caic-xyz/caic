@@ -3,10 +3,11 @@
 package server
 
 import (
+	"crypto/ed25519"
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/gomode/voicegateway"
+	"github.com/maruel/gomode/voicegateway"
 )
 
 func TestVoiceGatewayConfig(t *testing.T) {
@@ -25,9 +26,76 @@ func TestVoiceGatewayConfig(t *testing.T) {
 
 	t.Run("Validate external validates URL", func(t *testing.T) {
 		t.Parallel()
-		cfg := VoiceGatewayConfig{Mode: VoiceGatewayModeExternal, URL: "https://voice.example.com"}
+		cfg := VoiceGatewayConfig{
+			Mode:       VoiceGatewayModeExternal,
+			URL:        "https://voice.example.com",
+			Issuer:     "https://caic.example.com",
+			InstanceID: "caic-main",
+			SigningKey: ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)),
+		}
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("Validate external accepts oauth token mode without signing key", func(t *testing.T) {
+		t.Parallel()
+		cfg := VoiceGatewayConfig{
+			Mode:       VoiceGatewayModeExternal,
+			URL:        "https://voice.example.com",
+			Issuer:     "https://caic.example.com",
+			InstanceID: "caic-main",
+			TokenMode:  VoiceTokenModeOAuth,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("Validate external requires signing key for scoped tokens", func(t *testing.T) {
+		t.Parallel()
+		cfg := VoiceGatewayConfig{
+			Mode:       VoiceGatewayModeExternal,
+			URL:        "https://voice.example.com",
+			Issuer:     "https://caic.example.com",
+			InstanceID: "caic-main",
+		}
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "Ed25519 signing key") {
+			t.Fatalf("Validate() error = %v, want signing key requirement", err)
+		}
+	})
+
+	t.Run("Validate external rejects unknown token mode", func(t *testing.T) {
+		t.Parallel()
+		cfg := VoiceGatewayConfig{
+			Mode:       VoiceGatewayModeExternal,
+			URL:        "https://voice.example.com",
+			Issuer:     "https://caic.example.com",
+			InstanceID: "caic-main",
+			TokenMode:  "bogus",
+		}
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "token mode") {
+			t.Fatalf("Validate() error = %v, want token mode error", err)
+		}
+	})
+
+	t.Run("Validate external rejects insecure gateway", func(t *testing.T) {
+		t.Parallel()
+		cfg := VoiceGatewayConfig{
+			Mode:       VoiceGatewayModeExternal,
+			URL:        "http://voice.example.com",
+			Issuer:     "https://caic.example.com",
+			InstanceID: "caic-main",
+			SigningKey: ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)),
+		}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "https://") {
+			t.Fatalf("Validate() error = %v, want HTTPS requirement", err)
+		}
+		cfg.URL = "http://127.0.0.1:2242"
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("loopback gateway rejected: %v", err)
 		}
 	})
 

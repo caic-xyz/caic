@@ -26,7 +26,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
 	repodomain "github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -36,7 +35,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/caic-xyz/caic/oauth"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth"
 )
 
 const caicVoiceSystemInstruction = `You are a voice assistant for caic, a system for managing AI coding agents.
@@ -253,6 +253,14 @@ func (m *mcpRegistry) Resources(ctx context.Context) iter.Seq2[mcp.ResourceDescr
 	return m.resourceDescriptors(ctx, keys)
 }
 
+// ResourceTemplates returns caic's parameterized repository and task resources.
+func (m *mcpRegistry) ResourceTemplates(context.Context) ([]mcp.ResourceTemplateDescriptor, error) {
+	return []mcp.ResourceTemplateDescriptor{
+		{Name: "repo", Title: "Repository", URITemplate: "caic://repos/{path}", Description: "Managed repository detail by path", MimeType: "application/json"},
+		{Name: "task", Title: "Task", URITemplate: "caic://tasks/{id}", Description: "Coding task detail by task ID", MimeType: "application/json"},
+	}, nil
+}
+
 func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
 	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
 		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
@@ -406,7 +414,7 @@ func (m *mcpRegistry) voiceSessionDefaults(ctx context.Context) string {
 // should become asynchronous (Gemini behavior NON_BLOCKING) so the assistant
 // can keep talking while it runs. Switching an individual tool needs a mode
 // hint carried from this catalog through ToolDeclaration to the adapter; see
-// gomode/voicegateway/voicertc/AGENTS.md.
+// github.com/maruel/gomode/voicegateway/voicertc/AGENTS.md.
 func (m *mcpRegistry) specs() []mcp.ToolSpec {
 	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
 	createSpec.InputSchema = buildTaskCreateSchema()
@@ -2262,6 +2270,14 @@ func (r scopedMCPRegistry) ListResources(ctx context.Context, cursor string) (mc
 	return r.Registry.ListResources(r.scopedContext(ctx), cursor)
 }
 
+func (r scopedMCPRegistry) ResourceTemplates(ctx context.Context) ([]mcp.ResourceTemplateDescriptor, error) {
+	registry, ok := r.Registry.(mcp.ResourceTemplatesRegistry)
+	if !ok {
+		return nil, errors.New("MCP resource templates are unavailable")
+	}
+	return registry.ResourceTemplates(r.scopedContext(ctx))
+}
+
 func (r scopedMCPRegistry) ListSkills(ctx context.Context, cursor string) (mcp.SkillsListResult, error) {
 	registry, ok := r.Registry.(mcp.SkillsRegistry)
 	if !ok {
@@ -2283,7 +2299,11 @@ func (r scopedMCPRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 }
 
 func (r scopedMCPRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {
-	return r.Registry.SubscribeResourceUpdates(r.scopedContext(ctx), filter)
+	registry, ok := r.Registry.(mcp.SubscriptionRegistry)
+	if !ok {
+		return nil, errors.New("MCP resource subscriptions are unavailable")
+	}
+	return registry.SubscribeResourceUpdates(r.scopedContext(ctx), filter)
 }
 
 func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {

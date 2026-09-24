@@ -3,6 +3,9 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -364,6 +367,36 @@ func TestGeoDBOrDefault(t *testing.T) {
 
 func TestTomlToServerConfig(t *testing.T) {
 	t.Parallel()
+	t.Run("external voice signing key", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+		raw, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "voice.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: raw}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tc := &tomlConfig{
+			Server: tomlServer{ExternalURL: "https://caic.example.com"},
+			VoiceGateway: tomlVoiceGateway{
+				URL:                  "https://voice.example.com",
+				InstanceID:           "caic-main",
+				SigningPrivateKeyPEM: "voice.pem",
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !key.Equal(cfg.Voice.Gateway.SigningKey) || cfg.Voice.Gateway.InstanceID != "caic-main" {
+			t.Fatal("voice signing key or instance ID was not loaded")
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("reads config values", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

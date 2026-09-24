@@ -75,6 +75,22 @@
 [voice-gateway]
 # Standalone voice gateway URL.
 #url = ""  # e.g. "https://voice.example.com"
+# External mode also requires a fixed server.external_url and an instance ID.
+#token_mode = "scoped"  # "scoped" (default) or "oauth"
+#
+# "scoped" issues the transitional Ed25519 token and needs a PKCS#8 key.
+# Generate one with:
+# openssl genpkey -algorithm Ed25519 -out ~/.config/caic/voice-signing-key.pem
+# The startup log prints its public key for the gateway's [[trusted_issuers]]
+# entry (service = "caic", issuer = server.external_url).
+#signing_private_key_pem = ""  # e.g. "voice-signing-key.pem"
+#
+# "oauth" issues a narrow OAuth 2.0 access token (aud=voice-gateway,
+# scope=voice.session) signed by caic's OAuth authorization server. No Ed25519
+# key is needed. Configure the gateway's [[trusted_issuers]] entry with
+# oauth = true for the same service and issuer; it discovers the key set at
+# server.external_url/.well-known/oauth-authorization-server.
+#instance_id = ""  # e.g. "caic-main"
 
 # Embedded gateway runtime config, used only when caic hosts the gateway
 # in-process. Same shape as contrib/voice-gateway-config.toml.

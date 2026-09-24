@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/mcp"
+	"github.com/maruel/gomode/mcp"
 )
 
 const (

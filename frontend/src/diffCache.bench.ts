@@ -1,4 +1,4 @@
-// Benchmarks shared task-diff cache request coalescing across navigation and live refresh bursts.
+// Benchmarks shared task-diff cache request coalescing and account cleanup.
 
 import { bench } from "@tests/bench";
 
@@ -38,6 +38,32 @@ bench(
     if (loads !== 3) {
       throw new Error(`expected 3 index loads, received ${loads}`);
     }
+  },
+  { time: 1_000, warmupTime: 200 },
+);
+
+bench(
+  "clears account-scoped task diffs",
+  async () => {
+    const cache = new DiffCache({
+      freshnessMs: 1_500,
+      indexLimit: 64,
+      patchLimit: 64,
+      loadIndex: async () => index,
+      maxPatchCharacters: 1_000_000,
+      loadPatch: async () => ({ diff: "patch" }),
+    });
+    await Promise.all(
+      Array.from({ length: 32 }, (_, task) => {
+        const taskId = `task-${task}`;
+        return Promise.all([
+          cache.loadIndex(taskId),
+          cache.loadPatch({ taskId, repository: "0", commit: "", path: "file.go", originalPath: "" }),
+        ]);
+      }),
+    );
+    cache.clear();
+    if (cache.snapshot("task-0").data !== null) throw new Error("account cache was not cleared");
   },
   { time: 1_000, warmupTime: 200 },
 );

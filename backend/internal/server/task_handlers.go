@@ -28,10 +28,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
-	"github.com/caic-xyz/caic/backend/internal/sse"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/maruel/gomode/sse"
 )
 
 // taskHandlers owns task HTTP protocol concerns.

@@ -1,7 +1,7 @@
-# Build, verify, test, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
+# Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-dev playwright-browser refresh-generated test test-e2e test-smoke test-smoke-voice tools upgrade verify android-sdk android-check android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator screenshots-check screenshots-check-frontend screenshots-check-android screenshots-generate-frontend screenshots-generate-android screenshots-update
+.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-dev playwright-browser refresh-generated test test-e2e test-smoke tools upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
 
 # Tool versions. The tools target installs a tool that is missing or at another version, so
 # these are the only places the versions are written down.
@@ -23,18 +23,6 @@ tools:
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
-ANDROID_GRADLE=cd android && ./gradlew --no-daemon --quiet
-# Kotlin is formatted and checked only when the branch changes it: a Gradle
-# invocation costs about a minute regardless of how few files changed, and this
-# keeps verify and fix cheap in the common case.
-KOTLIN_BASE?=$(shell git merge-base HEAD @{u} 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
-KOTLIN_FILES = git diff --name-only "$(KOTLIN_BASE)" -- "*.kt" "*.kts"; git ls-files --others --exclude-standard -- "*.kt" "*.kts"
-ANDROID_BUILD_TASKS=:gomode:assembleDebug :halo-sdk:assembleDebug :caic-sdk:assemble :gomode-sdk:assemble :mcp-sdk:assemble :voicegateway-sdk:assemble
-ANDROID_TEST_BUILD_TASKS=:gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest
-ANDROID_TEST_TASKS=:gomode:testDebugUnitTest :caic-sdk:test :gomode-sdk:test :mcp-sdk:test :voicegateway-sdk:test
-ANDROID_COVERAGE_REPORT_TASKS=:gomode:createDebugUnitTestCoverageReport :halo-sdk:createDebugUnitTestCoverageReport
-ANDROID_COVERAGE_TASKS=$(ANDROID_TEST_TASKS) $(ANDROID_COVERAGE_REPORT_TASKS)
-ANDROID_LINT_TASKS=:gomode:detekt :halo-sdk:detekt :gomode:ktlintCheck :halo-sdk:ktlintCheck :gomode:lint :halo-sdk:lint
 
 # Static checks for verify, grouped into independent lanes run concurrently by
 # scripts/run-concurrently.sh. Each is read-only; fix applies their autofixes.
@@ -59,7 +47,6 @@ VERIFY_ESLINT = pnpm --silent lint:check
 VERIFY_PY = ruff format --check --quiet . && ruff check --quiet .
 VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || { out=$$(shfmt -l $$files); [ -z "$$out" ] || { echo "Shell files need shfmt:" >&2; echo "$$out" >&2; exit 1; }; }
 VERIFY_MISC = python3 scripts/lint_binaries.py && python3 scripts/update_agents_file_index.py --check && python3 scripts/update_backend_architecture.py --check
-VERIFY_KOTLIN = changed=$$($(KOTLIN_FILES)); if [ -n "$$changed" ]; then $(ANDROID_GRADLE) :gomode:ktlintCheck :halo-sdk:ktlintCheck; fi
 
 help:
 	@echo 'caic - Manage multiple coding agents'
@@ -77,17 +64,8 @@ help:
 	@printf '  %-34s - %s\n' 'make fake-dev' 'Run the server with fake backend (no containers)'
 	@printf '  %-34s - %s\n' 'make frontend-dev' 'Run frontend dev server (http://localhost:5173)'
 	@printf '  %-34s - %s\n' 'make refresh-generated' 'Regenerate API SDKs, AGENTS indexes, and backend architecture docs'
-	@printf '  %-34s - %s\n' 'make android-check' 'Run Android lint, build, unit tests, and coverage'
-	@printf '  %-34s - %s\n' 'make android-e2e' 'Start the emulator and run Android E2E tests'
-	@printf '  %-34s - %s\n' 'make android-push-gomode' 'Build, install, and start GoMode APK on connected device'
-	@printf '  %-34s - %s\n' 'make android-start-emulator' 'Set up and start the headless Android emulator'
-	@printf '  %-34s - %s\n' 'make android-stop-emulator' 'Stop the running Android emulator'
-	@printf '  %-34s - %s\n' 'make android-sdk' 'Install required Android SDK packages'
-	@printf '  %-34s - %s\n' 'make screenshots-check' 'Verify deterministic frontend and Android screenshots'
-	@printf '  %-34s - %s\n' 'make screenshots-check-frontend' 'Verify only the frontend screenshots (no emulator)'
-	@printf '  %-34s - %s\n' 'make screenshots-check-android' 'Verify only the Android screenshots (needs the emulator)'
+	@printf '  %-34s - %s\n' 'make screenshots-check' 'Verify deterministic frontend screenshots'
 	@printf '  %-34s - %s\n' 'make screenshots-generate-frontend' 'Render the frontend screenshots without comparing'
-	@printf '  %-34s - %s\n' 'make screenshots-generate-android' 'Render the Android screenshots without comparing'
 	@printf '  %-34s - %s\n' 'make screenshots-update' 'Explicitly update deterministic screenshot baselines'
 	@printf '  %-34s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
 	@printf '  %-34s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
@@ -126,7 +104,7 @@ build: frontend-build
 # The one static gate. Runs every check-only lane concurrently; the read-only
 # counterpart of fix and the pre-push gate. Independent of test.
 verify: tools custom-gcl $(FRONTEND_STAMP)
-	@./scripts/run-concurrently.sh go,buildtags,js,ts,eslint,python,shell,misc,kotlin '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)' '$(VERIFY_KOTLIN)'
+	@./scripts/run-concurrently.sh go,buildtags,js,ts,eslint,python,shell,misc '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
 
 # Apply every autofix, then refresh the generated file index and architecture
 # diagram. Order matters: the stylelint fixer runs last because its
@@ -144,7 +122,6 @@ fix: tools custom-gcl $(FRONTEND_STAMP)
 	@pnpm --silent lint:style:fix
 	@./scripts/update_agents_file_index.py
 	@./scripts/update_backend_architecture.py
-	@changed=$$($(KOTLIN_FILES)); if [ -n "$$changed" ]; then $(ANDROID_GRADLE) :gomode:ktlintFormat :halo-sdk:ktlintFormat; fi
 
 check-agent-logs:
 	@go run ./backend/internal/cmd/check-agent-logs
@@ -180,11 +157,6 @@ test-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
 test-smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
 
-# Slow: sends live audio through a local WebRTC loopback and needs the voice
-# gateway's audio setup.
-test-smoke-voice:
-	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./gomode/voicegateway/voicertc/
-
 coverage: $(FRONTEND_STAMP)
 	@go test -coverprofile=coverage.out ./...
 	@echo ""
@@ -207,46 +179,11 @@ frontend-dev: $(FRONTEND_STAMP)
 playwright-browser: $(FRONTEND_STAMP)
 	@pnpm --silent exec playwright install chromium
 
-android-sdk:
-	@python3 scripts/android_sdk.py check
-
-# Slow: every Gradle invocation here runs detekt, ktlint, builds, and tests
-# with coverage, minutes in total; CI runs it on every PR.
-android-check: android-sdk
-	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS) $(ANDROID_COVERAGE_TASKS)
-
-android-setup-emulator:
-	@python3 scripts/android_sdk.py setup-emulator
-
-android-start-emulator: android-setup-emulator
-	@python3 scripts/android_start_emulator.py
-
-android-stop-emulator:
-	@echo "Stopping emulator..."
-	@(command -v adb >/dev/null 2>&1 && adb emu kill) || pkill -f emulator || true
-
-android-push-gomode: android-check
-	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
-	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
-	for d in $$devices; do \
-		(echo "Pushing to $$d..." && \
-		 adb -s $$d install -r android/gomode/build/outputs/apk/debug/gomode-debug.apk && \
-		 adb -s $$d shell am start -n com.fghbuild.gomode/.MainActivity && \
-		 echo "Done: $$d") & \
-	done; \
-	wait
-
-# Slow: starts (or reuses) the emulator and runs the behavioral Android suite.
-android-e2e: android-setup-emulator
-	@python3 scripts/android_start_emulator.py --reuse-connected-device
-	@python3 scripts/android_e2e.py
-
-# Slow, maintainer-only: renders frontend and Android visuals twice and
+# Slow, maintainer-only: renders frontend visuals twice and
 # compares decoded pixels against tracked baselines that encode the
 # development container's font stack.
-screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
+screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/android_start_emulator.py --auto-reuse
 	@python3 scripts/visual_screenshots.py check --rebuilt
 
 # Platform-specific variants. Check compares against the tracked baselines, which
@@ -256,30 +193,14 @@ screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser android-se
 # to compare a bundle that predates uncommitted frontend inputs, so it would
 # otherwise catch a bare script invocation that forgot to build; these targets
 # build immediately above and declare that with --rebuilt.
-screenshots-check-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
-	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py check --platform frontend --rebuilt
-
-# The Android variant renders the committed frontend bundle the app hosts, so it
-# needs no pnpm or SDK step.
-screenshots-check-android: android-setup-emulator
-	@python3 scripts/android_start_emulator.py --auto-reuse
-	@python3 scripts/visual_screenshots.py check --platform android
-
 screenshots-generate-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py generate --platform frontend --rebuilt
+	@python3 scripts/visual_screenshots.py generate --rebuilt
 
-screenshots-generate-android: android-setup-emulator
-	@python3 scripts/android_start_emulator.py --auto-reuse
-	@python3 scripts/visual_screenshots.py generate --platform android
-
-screenshots-update: $(FRONTEND_STAMP) generate-sdks playwright-browser android-setup-emulator
+screenshots-update: $(FRONTEND_STAMP) generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/android_start_emulator.py --auto-reuse
 	@python3 scripts/visual_screenshots.py update --rebuilt
 
 upgrade:
 	@go get -u ./... && go mod tidy
 	@pnpm --silent update --latest
-	@cd android && ./gradlew --no-daemon dependencyUpdates -Drevision=release

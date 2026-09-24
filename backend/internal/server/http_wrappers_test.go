@@ -16,8 +16,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/sse"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/maruel/gomode/sse"
 )
 
 func TestWriteError(t *testing.T) {

@@ -29,9 +29,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/caic-xyz/caic/oauth"
-	"github.com/caic-xyz/caic/oauth/oauthclient"
-	"github.com/caic-xyz/caic/oauth/oauthserver"
+	"github.com/maruel/gomode/oauth"
+	"github.com/maruel/gomode/oauth/oauthclient"
+	"github.com/maruel/gomode/oauth/oauthserver"
 )
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksCreate + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite

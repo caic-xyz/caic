@@ -12,10 +12,8 @@
     "types": ["vite/client", "@testing-library/jest-dom", "vite-solid-svg"],
     "paths": {
       "@sdk/*": ["./sdk/caic/ts/v1/*"],
-      "@voicegateway-sdk/*": ["./sdk/voicegateway/ts/v1/*"],
-      "@mcp-sdk/*": ["./sdk/mcp/ts/v1/*"],
       "@tests/*": ["./frontend/tests/*"]
     }
   },
-  "include": ["frontend/src", "frontend/tests", "sdk/caic", "sdk/voicegateway", "sdk/mcp"]
+  "include": ["frontend/src", "frontend/tests", "sdk/caic"]
 }
