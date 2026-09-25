@@ -209,6 +209,11 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 
 	liveCh := live
 	statsCh := statsLive
+	flushTimer := time.NewTimer(0)
+	if !flushTimer.Stop() {
+		<-flushTimer.C
+	}
+	defer flushTimer.Stop()
 	for {
 		select {
 		case msg, ok := <-liveCh:
@@ -237,7 +242,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			if err := stream.writeMessage(msg.Message, sequence, at, false); err != nil {
 				return err
 			}
-			if err := stream.flush(); err != nil {
+			if err := stream.coalescedFlush(flushTimer); err != nil {
 				return fmt.Errorf("flush task SSE stream: %w", err)
 			}
 		case cs, ok := <-statsCh:
@@ -249,6 +254,16 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			if err := stream.writeStats([]runtime.Stats{cs}); err != nil {
 				return err
 			}
+			if err := stream.coalescedFlush(flushTimer); err != nil {
+				return fmt.Errorf("flush task SSE stream: %w", err)
+			}
+		case <-flushTimer.C:
+			// Deliver live events deferred by coalescedFlush when their window
+			// expires, so a quiet stream never withholds them indefinitely.
+			if !stream.pendingFlush {
+				continue
+			}
+			stream.pendingFlush = false
 			if err := stream.flush(); err != nil {
 				return fmt.Errorf("flush task SSE stream: %w", err)
 			}
@@ -792,6 +807,8 @@ type taskEventStream struct {
 	nextMessage  uint64
 	writtenBytes int
 	idBuffer     []byte
+	lastFlush    time.Time
+	pendingFlush bool
 }
 
 // beginWrite bounds writes to a task SSE client. A client can disappear while
@@ -806,7 +823,35 @@ func (s *taskEventStream) clearWriteDeadline() error {
 }
 
 func (s *taskEventStream) flush() error {
+	s.lastFlush = time.Now()
 	return s.writer.Flush()
+}
+
+// flushCoalesceWindow bounds how long a live task SSE event may wait for a
+// shared flush. Flushing per event forces a compressor block boundary on
+// every event, multiplying wire bytes on delta-heavy streams; a short window
+// lets bursts share one flush while keeping added latency imperceptible.
+// A stream idle longer than the window still flushes immediately.
+const flushCoalesceWindow = 50 * time.Millisecond
+
+// coalescedFlush flushes when the previous flush is older than the coalesce
+// window, otherwise defers delivery to the window timer. Call only from the
+// handler goroutine so timer-driven flushes never race response writes.
+func (s *taskEventStream) coalescedFlush(timer *time.Timer) error {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	now := time.Now()
+	if now.Sub(s.lastFlush) >= flushCoalesceWindow {
+		s.pendingFlush = false
+		return s.flush()
+	}
+	s.pendingFlush = true
+	timer.Reset(time.Until(s.lastFlush.Add(flushCoalesceWindow)))
+	return nil
 }
 
 func (s *taskEventStream) writeMessage(msg agent.Message, sequence uint64, at time.Time, suppress bool) error {
@@ -840,6 +885,8 @@ func (s *taskEventStream) writeStats(stats []runtime.Stats) error {
 	return nil
 }
 
+// writeEvent writes one message event. The SSE event type is omitted because
+// EventSource defaults to "message", saving framing bytes on every event.
 func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error {
 	data, err := apiconv.MarshalEvent(ev)
 	if err != nil {
@@ -850,10 +897,10 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error 
 	}
 	var n int
 	if id.message == 0 {
-		n, err = fmt.Fprintf(s.w, "event: message\ndata: %s\n\n", data)
+		n, err = fmt.Fprintf(s.w, "data: %s\n\n", data)
 	} else {
 		s.idBuffer = id.appendTo(s.idBuffer[:0])
-		n, err = fmt.Fprintf(s.w, "id: %s\nevent: message\ndata: %s\n\n", s.idBuffer, data)
+		n, err = fmt.Fprintf(s.w, "id: %s\ndata: %s\n\n", s.idBuffer, data)
 	}
 	if err != nil {
 		return errors.Join(fmt.Errorf("write SSE event: %w", err), s.clearWriteDeadline())

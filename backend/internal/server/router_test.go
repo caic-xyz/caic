@@ -60,7 +60,7 @@ type reviveDuringStoppedScanWriter struct {
 
 func (w *reviveDuringStoppedScanWriter) Write(data []byte) (int, error) {
 	n, err := w.ResponseRecorder.Write(data)
-	if !w.revived && bytes.Contains(data, []byte("event: message")) {
+	if !w.revived && bytes.Contains(data, []byte(`data: {"kind":`)) {
 		w.revived = true
 		w.revive()
 	}
@@ -2708,6 +2708,130 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Fatalf("stream body is missing the ready marker:\n%s", body)
 		}
 	})
+}
+
+// flushRecordingWriter records write and flush timestamps so a test can
+// observe how the task SSE handler coalesces stream flushes.
+type flushRecordingWriter struct {
+	*httptest.ResponseRecorder
+
+	onWrite func(data []byte)
+	writes  []time.Time
+	flushes []time.Time
+}
+
+func (w *flushRecordingWriter) Write(data []byte) (int, error) {
+	w.writes = append(w.writes, time.Now())
+	if w.onWrite != nil {
+		w.onWrite(data)
+	}
+	return w.ResponseRecorder.Write(data)
+}
+
+func (w *flushRecordingWriter) Flush() {
+	w.flushes = append(w.flushes, time.Now())
+	w.ResponseRecorder.Flush()
+}
+
+func TestTaskEventStreamLiveFlushes(t *testing.T) {
+	t.Parallel()
+
+	taskID := ksid.NewID()
+	tk := mustNewTask(t, taskID, agent.Prompt{Text: "stream a burst"}, harness.Claude)
+	tk.SetState(taskslog.StateRunning)
+
+	// Attach a live session so SendInput can append synthetic user messages.
+	sessCtx, sessCancel := context.WithCancel(t.Context())
+	defer sessCancel()
+	cmd := exec.CommandContext(sessCtx, "cat")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	conn := agent.NewConn(sessCtx, testLogger(), stdin, agent.DiscardLogSink{Version: agent.LogVersionV1}, (&agenttest.FakeBackend{}).NewWire())
+	sess := agent.NewSession(sessCtx, cmd, conn, stdout, make(chan agent.TimedMessage, 256), testLogger())
+	tk.AttachSession(&task.SessionHandle{Session: sess})
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = sess.Wait()
+	})
+
+	s := newTestRouter(t, nil)
+	insertTestTask(s, taskID, tk)
+
+	texts := []string{"burst one", "burst two", "burst three", "burst four"}
+	recorder := &flushRecordingWriter{ResponseRecorder: httptest.NewRecorder()}
+	ready := make(chan struct{})
+	recorder.onWrite = func(data []byte) {
+		// The live subscription precedes the ready write, so signaling here
+		// means the stream is subscribed and idle before the burst.
+		if bytes.Contains(data, []byte("event: ready")) {
+			close(ready)
+		}
+	}
+
+	reqCtx, reqCancel := context.WithCancel(sessCtx)
+	t.Cleanup(reqCancel)
+	req := httptest.NewRequestWithContext(reqCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
+	req.SetPathValue("id", taskID.String())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		testTaskHandlers(s).handleTaskEvents(recorder, req)
+	}()
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler never wrote the ready frame")
+	}
+
+	// Send one burst of live messages: they queue back-to-back and the
+	// handler should share a single coalesced flush for the tail of the burst.
+	for _, text := range texts {
+		if err := tk.SendInput(sessCtx, agent.Prompt{Text: text}); err != nil {
+			t.Fatalf("SendInput %q: %v", text, err)
+		}
+	}
+	// Wait out the coalesce window so the burst's deferred timer flush
+	// delivers the tail of the burst before the stream is cancelled.
+	time.Sleep(3 * flushCoalesceWindow)
+	reqCancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler kept the stream open after request cancel")
+	}
+
+	body := recorder.Body.String()
+	for _, text := range texts {
+		if !strings.Contains(body, text) {
+			t.Errorf("stream body is missing live message %q:\n%s", text, body)
+		}
+	}
+	// The SSE event type defaults to "message", so the frame omits it.
+	if strings.Contains(body, "event: message") {
+		t.Errorf("stream body emits redundant event type:\n%s", body)
+	}
+	if !strings.Contains(body, "id: v1/") {
+		t.Errorf("stream body is missing stable event IDs:\n%s", body)
+	}
+
+	// The burst shares one deferred flush: the ready flush plus at most an
+	// immediate flush and the window timer flush.
+	if len(recorder.flushes) > 3 {
+		t.Errorf("flushes = %d, want at most ready + 2 for one burst", len(recorder.flushes))
+	}
+	// A deferred flush must still deliver the burst after the last write.
+	if len(recorder.flushes) == 0 || recorder.flushes[len(recorder.flushes)-1].Before(recorder.writes[len(recorder.writes)-1]) {
+		t.Errorf("last flush %v did not follow last write %v", recorder.flushes, recorder.writes)
+	}
 }
 
 func TestVoiceGatewayMetadata(t *testing.T) {
