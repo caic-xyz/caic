@@ -339,7 +339,13 @@ func readTaskEvents(ctx context.Context, baseURL, taskID string, stop func(ready
 			event = strings.TrimPrefix(line, "event: ")
 		case strings.HasPrefix(line, "data: "):
 			payload := strings.TrimPrefix(line, "data: ")
-			switch event {
+			// The SSE event type defaults to "message" when the frame omits the
+			// event field, which task message frames now do.
+			eventName := event
+			if eventName == "" {
+				eventName = "message"
+			}
+			switch eventName {
 			case "ready":
 				ready = true
 			case "message":
