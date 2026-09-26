@@ -1920,39 +1920,6 @@ prompt context consumed by the model.
 | `outputTokens` | `int64` |  | yes |
 | `reasoningTokens` | `int64` |  | yes |
 
-### UsageDashboardModel
-
-UsageDashboardModel is one model's totals within a UTC day.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `model` | `string` |  | yes |
-| `tokens` | `UsageDashboardTokens` |  | yes |
-| `turns` | `int` |  | yes |
-| `costUSD` | `float64` |  | yes |
-| `contextWindow` | `int` |  | yes |
-
-### UsageDashboardHarness
-
-UsageDashboardHarness is one coding harness's totals within a UTC day.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `harness` | `string` |  | yes |
-| `tokens` | `UsageDashboardTokens` |  | yes |
-| `turns` | `int` |  | yes |
-| `costUSD` | `float64` |  | yes |
-
-### UsageDashboardRepo
-
-UsageDashboardRepo is a repository leaderboard entry for one UTC day.
-Tasks is the number of distinct tasks that touched the repository.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `repo` | `string` |  | yes |
-| `tasks` | `int` |  | yes |
-
 ### UsageDashboardCount
 
 UsageDashboardCount is a named counter such as a skill read or tool call.
@@ -1971,6 +1938,62 @@ UsageDashboardToolTiming measures completed tool calls with known duration.
 | `name` | `string` |  | yes |
 | `count` | `int` |  | yes |
 | `durationMs` | `int64` |  | yes |
+
+### UsageDashboardRepo
+
+UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+Tasks is the number of distinct tasks that touched the repository.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repo` | `string` |  | yes |
+| `tasks` | `int` |  | yes |
+
+### UsageDashboardModel
+
+UsageDashboardModel is one model's totals within a UTC day. It carries the
+full delta fold so clients can drill every dashboard panel down to the
+model; skills and repos keep the day leaderboards' distinct-task counts.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `model` | `string` |  | yes |
+| `tokens` | `UsageDashboardTokens` |  | yes |
+| `turns` | `int` |  | yes |
+| `erroredTurns` | `int` |  | yes |
+| `apiMs` | `int64` |  | yes |
+| `wallMs` | `int64` |  | yes |
+| `compactions` | `int` |  | yes |
+| `subagentSpawns` | `int` |  | yes |
+| `costUSD` | `float64` |  | yes |
+| `contextWindow` | `int` |  | yes |
+| `tools` | `UsageDashboardCount[]` |  | yes |
+| `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
+| `skills` | `UsageDashboardCount[]` |  | yes |
+| `repos` | `UsageDashboardRepo[]` |  | yes |
+
+### UsageDashboardHarness
+
+UsageDashboardHarness is one coding harness's totals within a UTC day,
+mirroring UsageDashboardModel plus the harness-by-model cross product so a
+harness filter can still list the models used under it.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `harness` | `string` |  | yes |
+| `tokens` | `UsageDashboardTokens` |  | yes |
+| `turns` | `int` |  | yes |
+| `erroredTurns` | `int` |  | yes |
+| `apiMs` | `int64` |  | yes |
+| `wallMs` | `int64` |  | yes |
+| `compactions` | `int` |  | yes |
+| `subagentSpawns` | `int` |  | yes |
+| `costUSD` | `float64` |  | yes |
+| `tools` | `UsageDashboardCount[]` |  | yes |
+| `toolTimings` | `UsageDashboardToolTiming[]` |  | yes |
+| `skills` | `UsageDashboardCount[]` |  | yes |
+| `repos` | `UsageDashboardRepo[]` |  | yes |
+| `models` | `UsageDashboardModel[]` |  | yes |
 
 ### UsageDashboardDay
 

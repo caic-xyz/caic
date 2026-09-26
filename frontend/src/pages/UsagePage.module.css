@@ -69,6 +69,41 @@
   margin: 0.75rem 0;
 }
 
+.drilldown {
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.clearLink,
+.rowButton {
+  padding: 0;
+  font: inherit;
+  color: var(--color-link);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.rowButton {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.clearLink:hover,
+.rowButton:hover {
+  text-decoration: underline;
+}
+
+.clearLink:focus-visible,
+.rowButton:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
 .error {
   font-size: 0.85rem;
   color: var(--color-error);

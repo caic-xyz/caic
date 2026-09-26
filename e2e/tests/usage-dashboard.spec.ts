@@ -30,4 +30,29 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await page.getByLabel("Usage date range").selectOption("all");
   await expect(page.getByLabel("Usage date range")).toHaveValue("all");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  // Drill into the fake task's model: the banner confirms the filter, the
+  // URL hash carries it, and clearing restores the unfiltered leaderboard.
+  const modelRow = page.getByRole("button", { name: "fake-model" });
+  await expect(modelRow).toBeVisible();
+  await modelRow.click();
+  await expect(page.getByText("Showing usage for")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Usage summary" })).toBeVisible();
+  await expect(page.getByTestId("usage-charts")).toBeVisible();
+  await expect(page).toHaveURL(/#model=fake-model$/);
+  await page.getByRole("button", { name: "Show all usage" }).click();
+  await expect(page.getByText("Showing usage for")).toBeHidden();
+  await expect(page).toHaveURL(/^[^#]*$/);
+  await expect(modelRow).toBeVisible();
+
+  // Drill into a harness: the model list stays visible through the
+  // harness-by-model cross product, and selecting a model narrows to the pair.
+  const harnessPanel = page.locator("section", { has: page.getByRole("heading", { name: "Harnesses" }) });
+  await harnessPanel.getByRole("button").first().click();
+  await expect(page).toHaveURL(/#harness=/);
+  await expect(modelRow).toBeVisible();
+  await modelRow.click();
+  await expect(page).toHaveURL(/#harness=.+&model=fake-model$/);
+  await expect(page.getByText("Showing usage for")).toContainText("harness");
+  await expect(page.getByText("Showing usage for")).toContainText("model fake-model");
 });

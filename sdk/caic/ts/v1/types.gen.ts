@@ -1771,32 +1771,6 @@ export interface UsageDashboardTokens {
   reasoningTokens: number /* int64 */;
 }
 
-/** UsageDashboardModel is one model's totals within a UTC day. */
-export interface UsageDashboardModel {
-  model: string;
-  tokens: UsageDashboardTokens;
-  turns: number /* int */;
-  costUSD: number /* float64 */;
-  contextWindow: number /* int */;
-}
-
-/** UsageDashboardHarness is one coding harness's totals within a UTC day. */
-export interface UsageDashboardHarness {
-  harness: string;
-  tokens: UsageDashboardTokens;
-  turns: number /* int */;
-  costUSD: number /* float64 */;
-}
-
-/**
- * UsageDashboardRepo is a repository leaderboard entry for one UTC day.
- * Tasks is the number of distinct tasks that touched the repository.
- */
-export interface UsageDashboardRepo {
-  repo: string;
-  tasks: number /* int */;
-}
-
 /** UsageDashboardCount is a named counter such as a skill read or tool call. */
 export interface UsageDashboardCount {
   name: string;
@@ -1808,6 +1782,59 @@ export interface UsageDashboardToolTiming {
   name: string;
   count: number /* int */;
   durationMs: number /* int64 */;
+}
+
+/**
+ * UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+ * Tasks is the number of distinct tasks that touched the repository.
+ */
+export interface UsageDashboardRepo {
+  repo: string;
+  tasks: number /* int */;
+}
+
+/**
+ * UsageDashboardModel is one model's totals within a UTC day. It carries the
+ * full delta fold so clients can drill every dashboard panel down to the
+ * model; skills and repos keep the day leaderboards' distinct-task counts.
+ */
+export interface UsageDashboardModel {
+  model: string;
+  tokens: UsageDashboardTokens;
+  turns: number /* int */;
+  erroredTurns: number /* int */;
+  apiMs: number /* int64 */;
+  wallMs: number /* int64 */;
+  compactions: number /* int */;
+  subagentSpawns: number /* int */;
+  costUSD: number /* float64 */;
+  contextWindow: number /* int */;
+  tools: UsageDashboardCount[];
+  toolTimings: UsageDashboardToolTiming[];
+  skills: UsageDashboardCount[];
+  repos: UsageDashboardRepo[];
+}
+
+/**
+ * UsageDashboardHarness is one coding harness's totals within a UTC day,
+ * mirroring UsageDashboardModel plus the harness-by-model cross product so a
+ * harness filter can still list the models used under it.
+ */
+export interface UsageDashboardHarness {
+  harness: string;
+  tokens: UsageDashboardTokens;
+  turns: number /* int */;
+  erroredTurns: number /* int */;
+  apiMs: number /* int64 */;
+  wallMs: number /* int64 */;
+  compactions: number /* int */;
+  subagentSpawns: number /* int */;
+  costUSD: number /* float64 */;
+  tools: UsageDashboardCount[];
+  toolTimings: UsageDashboardToolTiming[];
+  skills: UsageDashboardCount[];
+  repos: UsageDashboardRepo[];
+  models: UsageDashboardModel[];
 }
 
 /**

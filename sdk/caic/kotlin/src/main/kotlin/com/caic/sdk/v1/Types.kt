@@ -2521,32 +2521,6 @@ data class UsageDashboardTokens(
     val reasoningTokens: Long,
 )
 
-/** UsageDashboardModel is one model's totals within a UTC day. */
-@Serializable
-data class UsageDashboardModel(
-    val model: String,
-    val tokens: UsageDashboardTokens,
-    val turns: Int,
-    @SerialName("costUSD") val costUSD: Double,
-    val contextWindow: Int,
-)
-
-/** UsageDashboardHarness is one coding harness's totals within a UTC day. */
-@Serializable
-data class UsageDashboardHarness(
-    val harness: String,
-    val tokens: UsageDashboardTokens,
-    val turns: Int,
-    @SerialName("costUSD") val costUSD: Double,
-)
-
-/**
- * UsageDashboardRepo is a repository leaderboard entry for one UTC day.
- * Tasks is the number of distinct tasks that touched the repository.
- */
-@Serializable
-data class UsageDashboardRepo(val repo: String, val tasks: Int)
-
 /** UsageDashboardCount is a named counter such as a skill read or tool call. */
 @Serializable
 data class UsageDashboardCount(val name: String, val count: Int)
@@ -2557,6 +2531,59 @@ data class UsageDashboardToolTiming(
     val name: String,
     val count: Int,
     val durationMs: Long,
+)
+
+/**
+ * UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+ * Tasks is the number of distinct tasks that touched the repository.
+ */
+@Serializable
+data class UsageDashboardRepo(val repo: String, val tasks: Int)
+
+/**
+ * UsageDashboardModel is one model's totals within a UTC day. It carries the
+ * full delta fold so clients can drill every dashboard panel down to the
+ * model; skills and repos keep the day leaderboards' distinct-task counts.
+ */
+@Serializable
+data class UsageDashboardModel(
+    val model: String,
+    val tokens: UsageDashboardTokens,
+    val turns: Int,
+    val erroredTurns: Int,
+    val apiMs: Long,
+    val wallMs: Long,
+    val compactions: Int,
+    val subagentSpawns: Int,
+    @SerialName("costUSD") val costUSD: Double,
+    val contextWindow: Int,
+    val tools: List<UsageDashboardCount>,
+    val toolTimings: List<UsageDashboardToolTiming>,
+    val skills: List<UsageDashboardCount>,
+    val repos: List<UsageDashboardRepo>,
+)
+
+/**
+ * UsageDashboardHarness is one coding harness's totals within a UTC day,
+ * mirroring UsageDashboardModel plus the harness-by-model cross product so a
+ * harness filter can still list the models used under it.
+ */
+@Serializable
+data class UsageDashboardHarness(
+    val harness: String,
+    val tokens: UsageDashboardTokens,
+    val turns: Int,
+    val erroredTurns: Int,
+    val apiMs: Long,
+    val wallMs: Long,
+    val compactions: Int,
+    val subagentSpawns: Int,
+    @SerialName("costUSD") val costUSD: Double,
+    val tools: List<UsageDashboardCount>,
+    val toolTimings: List<UsageDashboardToolTiming>,
+    val skills: List<UsageDashboardCount>,
+    val repos: List<UsageDashboardRepo>,
+    val models: List<UsageDashboardModel>,
 )
 
 /**

@@ -7,6 +7,7 @@ import { expect } from "@tests/expect";
 
 import type { UsageDashboardDay } from "@sdk/types.gen";
 
+import { usageDailySeries } from "../usageDashboard";
 import UsageCharts from "./UsageCharts";
 
 function day(dayKey: string, tokens: number, costUSD: number): UsageDashboardDay {
@@ -46,7 +47,7 @@ function utcDay(offsetDays: number): string {
 describe("UsageCharts", () => {
   it("totals every token category for each day", async () => {
     const user = userEvent.setup();
-    const { findByTestId } = render(() => <UsageCharts days={[day(utcDay(-1), 15_000, 0.5)]} />);
+    const { findByTestId } = render(() => <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5)])} />);
     const charts = await findByTestId("usage-charts");
 
     await user.click(within(charts).getByText("Daily totals (1)"));
@@ -59,7 +60,7 @@ describe("UsageCharts", () => {
 
   it("marks the accumulating day as provisional in the trend and the totals", async () => {
     const { findByTestId } = render(() => (
-      <UsageCharts days={[day(utcDay(-1), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)]} />
+      <UsageCharts points={usageDailySeries([day(utcDay(-1), 15_000, 0.5), day(utcDay(0), 3_000, 0.1)])} />
     ));
     const charts = await findByTestId("usage-charts");
 
@@ -75,7 +76,7 @@ describe("UsageCharts", () => {
 
   it("says nothing about an unfinished day when every day is complete", async () => {
     const { findByTestId } = render(() => (
-      <UsageCharts days={[day(utcDay(-2), 15_000, 0.5), day(utcDay(-1), 3_000, 0.1)]} />
+      <UsageCharts points={usageDailySeries([day(utcDay(-2), 15_000, 0.5), day(utcDay(-1), 3_000, 0.1)])} />
     ));
     const charts = await findByTestId("usage-charts");
 

@@ -70,7 +70,22 @@ func usageDashboardModels(models map[string]usagedb.ModelRollup) []v1.UsageDashb
 	out := make([]v1.UsageDashboardModel, len(names))
 	for i, name := range names {
 		model := models[name]
-		out[i] = v1.UsageDashboardModel{Model: name, Tokens: usageDashboardTokens(model.Tokens), Turns: model.Turns, CostUSD: model.CostUSD, ContextWindow: model.ContextWindow}
+		out[i] = v1.UsageDashboardModel{
+			Model:          name,
+			Tokens:         usageDashboardTokens(model.Tokens),
+			Turns:          model.Turns,
+			ErroredTurns:   model.ErroredTurns,
+			APIMs:          model.APIMs,
+			WallMs:         model.WallMs,
+			Compactions:    model.Compactions,
+			SubagentSpawns: model.SubagentSpawns,
+			CostUSD:        model.CostUSD,
+			ContextWindow:  model.ContextWindow,
+			Tools:          usageDashboardCounts(model.ToolCalls),
+			ToolTimings:    usageDashboardToolTimings(model.ToolTimings),
+			Skills:         usageDashboardCounts(model.Skills),
+			Repos:          usageDashboardRepos(model.Repos),
+		}
 	}
 	return out
 }
@@ -80,7 +95,22 @@ func usageDashboardHarnesses(harnesses map[string]usagedb.HarnessRollup) []v1.Us
 	out := make([]v1.UsageDashboardHarness, len(names))
 	for i, name := range names {
 		harness := harnesses[name]
-		out[i] = v1.UsageDashboardHarness{Harness: name, Tokens: usageDashboardTokens(harness.Tokens), Turns: harness.Turns, CostUSD: harness.CostUSD}
+		out[i] = v1.UsageDashboardHarness{
+			Harness:        name,
+			Tokens:         usageDashboardTokens(harness.Tokens),
+			Turns:          harness.Turns,
+			ErroredTurns:   harness.ErroredTurns,
+			APIMs:          harness.APIMs,
+			WallMs:         harness.WallMs,
+			Compactions:    harness.Compactions,
+			SubagentSpawns: harness.SubagentSpawns,
+			CostUSD:        harness.CostUSD,
+			Tools:          usageDashboardCounts(harness.ToolCalls),
+			ToolTimings:    usageDashboardToolTimings(harness.ToolTimings),
+			Skills:         usageDashboardCounts(harness.Skills),
+			Repos:          usageDashboardRepos(harness.Repos),
+			Models:         usageDashboardModels(harness.Models),
+		}
 	}
 	return out
 }

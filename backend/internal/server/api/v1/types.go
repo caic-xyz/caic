@@ -832,21 +832,44 @@ type UsageDashboardTokens struct {
 	Reasoning    int64 `json:"reasoningTokens"`
 }
 
-// UsageDashboardModel is one model's totals within a UTC day.
+// UsageDashboardModel is one model's totals within a UTC day. It carries the
+// full delta fold so clients can drill every dashboard panel down to the
+// model; skills and repos keep the day leaderboards' distinct-task counts.
 type UsageDashboardModel struct {
-	Model         string               `json:"model"`
-	Tokens        UsageDashboardTokens `json:"tokens"`
-	Turns         int                  `json:"turns"`
-	CostUSD       float64              `json:"costUSD"`
-	ContextWindow int                  `json:"contextWindow"`
+	Model          string                     `json:"model"`
+	Tokens         UsageDashboardTokens       `json:"tokens"`
+	Turns          int                        `json:"turns"`
+	ErroredTurns   int                        `json:"erroredTurns"`
+	APIMs          int64                      `json:"apiMs"`
+	WallMs         int64                      `json:"wallMs"`
+	Compactions    int                        `json:"compactions"`
+	SubagentSpawns int                        `json:"subagentSpawns"`
+	CostUSD        float64                    `json:"costUSD"`
+	ContextWindow  int                        `json:"contextWindow"`
+	Tools          []UsageDashboardCount      `json:"tools"`
+	ToolTimings    []UsageDashboardToolTiming `json:"toolTimings"`
+	Skills         []UsageDashboardCount      `json:"skills"`
+	Repos          []UsageDashboardRepo       `json:"repos"`
 }
 
-// UsageDashboardHarness is one coding harness's totals within a UTC day.
+// UsageDashboardHarness is one coding harness's totals within a UTC day,
+// mirroring UsageDashboardModel plus the harness-by-model cross product so a
+// harness filter can still list the models used under it.
 type UsageDashboardHarness struct {
-	Harness string               `json:"harness"`
-	Tokens  UsageDashboardTokens `json:"tokens"`
-	Turns   int                  `json:"turns"`
-	CostUSD float64              `json:"costUSD"`
+	Harness        string                     `json:"harness"`
+	Tokens         UsageDashboardTokens       `json:"tokens"`
+	Turns          int                        `json:"turns"`
+	ErroredTurns   int                        `json:"erroredTurns"`
+	APIMs          int64                      `json:"apiMs"`
+	WallMs         int64                      `json:"wallMs"`
+	Compactions    int                        `json:"compactions"`
+	SubagentSpawns int                        `json:"subagentSpawns"`
+	CostUSD        float64                    `json:"costUSD"`
+	Tools          []UsageDashboardCount      `json:"tools"`
+	ToolTimings    []UsageDashboardToolTiming `json:"toolTimings"`
+	Skills         []UsageDashboardCount      `json:"skills"`
+	Repos          []UsageDashboardRepo       `json:"repos"`
+	Models         []UsageDashboardModel      `json:"models"`
 }
 
 // UsageDashboardRepo is a repository leaderboard entry for one UTC day.

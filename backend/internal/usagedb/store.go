@@ -426,10 +426,19 @@ func foldUsageRow(day *dayAggregate, row *UsageRow) {
 		}
 	}
 	if row.Model != "" {
-		day.modelBucket(row.Model).fold(&row.Delta)
+		b := day.modelBucket(row.Model)
+		b.fold(&row.Delta)
+		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 	if row.Harness != "" {
-		day.harnessBucket(row.Harness).fold(&row.Delta)
+		b := day.harnessBucket(row.Harness)
+		b.fold(&row.Delta)
+		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
+	}
+	if row.Harness != "" && row.Model != "" {
+		b := day.crossBucket(row.Harness, row.Model)
+		b.fold(&row.Delta)
+		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 }
 
@@ -464,6 +473,7 @@ func newDayAggregate() *dayAggregate {
 	return &dayAggregate{
 		models:    make(map[string]*bucket),
 		harnesses: make(map[string]*bucket),
+		crosses:   make(map[crossKey]*bucket),
 		repos:     make(map[string]map[string]struct{}),
 		skills:    make(map[string]map[string]struct{}),
 	}
@@ -735,15 +745,10 @@ func (s *Store) dayRollupLocked(day string) DayRollup {
 		ToolTimings:              maps.Clone(d.ToolTimings),
 	}
 	for model, b := range d.models {
-		out.Models[model] = ModelRollup{
-			Tokens:        b.TokenBuckets,
-			Turns:         b.Turns,
-			CostUSD:       b.CostUSD,
-			ContextWindow: b.ContextWindow,
-		}
+		out.Models[model] = newModelRollup(b)
 	}
 	for harness, b := range d.harnesses {
-		out.Harnesses[harness] = HarnessRollup{Tokens: b.TokenBuckets, Turns: b.Turns, CostUSD: b.CostUSD}
+		out.Harnesses[harness] = newHarnessRollup(harness, b, d.crosses)
 	}
 	for repo, tasks := range d.repos {
 		out.Repos[repo] = len(tasks)
@@ -1055,6 +1060,44 @@ type bucket struct {
 
 	ts        Time // newest producer time folded into the group
 	synthetic bool
+
+	// Distinct-task sets for skill reads and repo touches, tracked only by
+	// day-aggregate buckets so model and harness drill-down rollups keep the
+	// task-day semantics of the day leaderboards. Pending task buckets and
+	// bucket folding never populate them; only noteTasks does.
+	skillTasks map[string]map[string]struct{}
+	repoTasks  map[string]map[string]struct{}
+}
+
+// noteTasks attributes one flushed row's skill reads and repo touches to the
+// bucket's distinct-task sets. Rows repeat a task across turn boundaries; the
+// sets deduplicate so counts stay task-days, not reads or rows.
+func (b *bucket) noteTasks(taskID string, repos []string, skillReads map[string]int) {
+	if taskID == "" {
+		return
+	}
+	for _, repo := range repos {
+		if b.repoTasks == nil {
+			b.repoTasks = make(map[string]map[string]struct{})
+		}
+		tasks := b.repoTasks[repo]
+		if tasks == nil {
+			tasks = make(map[string]struct{})
+			b.repoTasks[repo] = tasks
+		}
+		tasks[taskID] = struct{}{}
+	}
+	for skill := range skillReads {
+		if b.skillTasks == nil {
+			b.skillTasks = make(map[string]map[string]struct{})
+		}
+		tasks := b.skillTasks[skill]
+		if tasks == nil {
+			tasks = make(map[string]struct{})
+			b.skillTasks[skill] = tasks
+		}
+		tasks[taskID] = struct{}{}
+	}
 }
 
 // dayAggregate accumulates flushed rows for one day.
@@ -1063,8 +1106,19 @@ type dayAggregate struct {
 
 	models    map[string]*bucket
 	harnesses map[string]*bucket
+	crosses   map[crossKey]*bucket           // harness-by-model drill-down rollups
 	repos     map[string]map[string]struct{} // repo -> distinct task ids
 	skills    map[string]map[string]struct{} // skill -> distinct task ids
+}
+
+func (a *dayAggregate) crossBucket(harness, model string) *bucket {
+	key := crossKey{harness: harness, model: model}
+	b := a.crosses[key]
+	if b == nil {
+		b = &bucket{}
+		a.crosses[key] = b
+	}
+	return b
 }
 
 func (a *dayAggregate) modelBucket(model string) *bucket {
@@ -1083,6 +1137,12 @@ func (a *dayAggregate) harnessBucket(harness string) *bucket {
 		a.harnesses[harness] = b
 	}
 	return b
+}
+
+// crossKey identifies one harness-by-model drill-down bucket.
+type crossKey struct {
+	harness string
+	model   string
 }
 
 // quotaKey identifies one provider quota window.
@@ -1105,5 +1165,63 @@ func cloneCounts(m map[string]int) map[string]int {
 	}
 	out := make(map[string]int, len(m))
 	maps.Copy(out, m)
+	return out
+}
+
+// countTaskSets flattens skill or repo distinct-task sets to their counts.
+func countTaskSets(sets map[string]map[string]struct{}) map[string]int {
+	if sets == nil {
+		return nil
+	}
+	out := make(map[string]int, len(sets))
+	for name, tasks := range sets {
+		out[name] = len(tasks)
+	}
+	return out
+}
+
+// newModelRollup exports one accumulated bucket as a model rollup.
+func newModelRollup(b *bucket) ModelRollup {
+	return ModelRollup{
+		Tokens:         b.TokenBuckets,
+		Turns:          b.Turns,
+		ErroredTurns:   b.ErroredTurns,
+		APIMs:          b.APIMs,
+		WallMs:         b.WallMs,
+		Compactions:    b.Compactions,
+		SubagentSpawns: b.Spawns,
+		CostUSD:        b.CostUSD,
+		ContextWindow:  b.ContextWindow,
+		ToolCalls:      cloneCounts(b.ToolCalls),
+		ToolTimings:    maps.Clone(b.ToolTimings),
+		Skills:         countTaskSets(b.skillTasks),
+		Repos:          countTaskSets(b.repoTasks),
+	}
+}
+
+// newHarnessRollup exports one accumulated bucket as a harness rollup, plus
+// the harness-by-model cross buckets for that harness.
+func newHarnessRollup(harness string, b *bucket, crosses map[crossKey]*bucket) HarnessRollup {
+	out := HarnessRollup{
+		Tokens:         b.TokenBuckets,
+		Turns:          b.Turns,
+		ErroredTurns:   b.ErroredTurns,
+		APIMs:          b.APIMs,
+		WallMs:         b.WallMs,
+		Compactions:    b.Compactions,
+		SubagentSpawns: b.Spawns,
+		CostUSD:        b.CostUSD,
+		ToolCalls:      cloneCounts(b.ToolCalls),
+		ToolTimings:    maps.Clone(b.ToolTimings),
+		Skills:         countTaskSets(b.skillTasks),
+		Repos:          countTaskSets(b.repoTasks),
+		Models:         make(map[string]ModelRollup),
+	}
+	for key, cross := range crosses {
+		if key.harness != harness {
+			continue
+		}
+		out.Models[key.model] = newModelRollup(cross)
+	}
 	return out
 }

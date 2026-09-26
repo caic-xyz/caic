@@ -1903,30 +1903,6 @@ public struct UsageDashboardTokens: Codable {
     public let reasoningTokens: Int
 }
 
-/// UsageDashboardModel is one model's totals within a UTC day.
-public struct UsageDashboardModel: Codable {
-    public let model: String
-    public let tokens: UsageDashboardTokens
-    public let turns: Int
-    public let costUSD: Double
-    public let contextWindow: Int
-}
-
-/// UsageDashboardHarness is one coding harness's totals within a UTC day.
-public struct UsageDashboardHarness: Codable {
-    public let harness: String
-    public let tokens: UsageDashboardTokens
-    public let turns: Int
-    public let costUSD: Double
-}
-
-/// UsageDashboardRepo is a repository leaderboard entry for one UTC day.
-/// Tasks is the number of distinct tasks that touched the repository.
-public struct UsageDashboardRepo: Codable {
-    public let repo: String
-    public let tasks: Int
-}
-
 /// UsageDashboardCount is a named counter such as a skill read or tool call.
 public struct UsageDashboardCount: Codable {
     public let name: String
@@ -1938,6 +1914,53 @@ public struct UsageDashboardToolTiming: Codable {
     public let name: String
     public let count: Int
     public let durationMs: Int
+}
+
+/// UsageDashboardRepo is a repository leaderboard entry for one UTC day.
+/// Tasks is the number of distinct tasks that touched the repository.
+public struct UsageDashboardRepo: Codable {
+    public let repo: String
+    public let tasks: Int
+}
+
+/// UsageDashboardModel is one model's totals within a UTC day. It carries the
+/// full delta fold so clients can drill every dashboard panel down to the
+/// model; skills and repos keep the day leaderboards' distinct-task counts.
+public struct UsageDashboardModel: Codable {
+    public let model: String
+    public let tokens: UsageDashboardTokens
+    public let turns: Int
+    public let erroredTurns: Int
+    public let apiMs: Int
+    public let wallMs: Int
+    public let compactions: Int
+    public let subagentSpawns: Int
+    public let costUSD: Double
+    public let contextWindow: Int
+    public let tools: [UsageDashboardCount]
+    public let toolTimings: [UsageDashboardToolTiming]
+    public let skills: [UsageDashboardCount]
+    public let repos: [UsageDashboardRepo]
+}
+
+/// UsageDashboardHarness is one coding harness's totals within a UTC day,
+/// mirroring UsageDashboardModel plus the harness-by-model cross product so a
+/// harness filter can still list the models used under it.
+public struct UsageDashboardHarness: Codable {
+    public let harness: String
+    public let tokens: UsageDashboardTokens
+    public let turns: Int
+    public let erroredTurns: Int
+    public let apiMs: Int
+    public let wallMs: Int
+    public let compactions: Int
+    public let subagentSpawns: Int
+    public let costUSD: Double
+    public let tools: [UsageDashboardCount]
+    public let toolTimings: [UsageDashboardToolTiming]
+    public let skills: [UsageDashboardCount]
+    public let repos: [UsageDashboardRepo]
+    public let models: [UsageDashboardModel]
 }
 
 /// UsageDashboardDay is the complete daily usage snapshot from the durable

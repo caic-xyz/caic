@@ -409,9 +409,23 @@ func TestDays(t *testing.T) {
 		}
 		if m := day.Models["m1"]; m.Tokens.Output != 20 || m.CostUSD != 0.20 {
 			t.Errorf("model rollup = %+v", m)
+		} else {
+			if m.ToolCalls["Edit"] != 2 || m.ToolTimings != nil {
+				t.Errorf("model tools = %v / %v", m.ToolCalls, m.ToolTimings)
+			}
+			if m.Skills["code-review"] != 2 || m.Repos["github/caic"] != 2 {
+				t.Errorf("model drill-down task counts = %v / %v", m.Skills, m.Repos)
+			}
+			if m.ErroredTurns != 0 || m.APIMs != 0 || m.WallMs != 0 || m.Compactions != 0 || m.SubagentSpawns != 0 {
+				t.Errorf("model counters = %+v", m)
+			}
 		}
 		if h := day.Harnesses["claude"]; h.Tokens.Output != 20 {
 			t.Errorf("harness rollup = %+v", h)
+		} else if h.ToolCalls["Edit"] != 2 || h.Skills["code-review"] != 2 {
+			t.Errorf("harness drill-down = %v / %v", h.ToolCalls, h.Skills)
+		} else if m := h.Models["m1"]; m.Tokens.Output != 20 || m.ToolCalls["Edit"] != 2 || m.Skills["code-review"] != 2 {
+			t.Errorf("harness-by-model cross = %+v", m)
 		}
 		if day.Repos["github/caic"] != 2 {
 			t.Errorf("repos = %v, want 2 distinct tasks", day.Repos)
@@ -448,6 +462,14 @@ func TestDays(t *testing.T) {
 		}
 		if got := days[0].Skills["review"]; got != 1 {
 			t.Errorf("Skills[review] = %d, want 1", got)
+		}
+		// Drill-down rollups follow the same task-day rule per model.
+		m := days[0].Models["m1"]
+		if got := m.Skills["code-quality"]; got != 2 {
+			t.Errorf("model Skills[code-quality] = %d, want 2 distinct tasks", got)
+		}
+		if got := m.Skills["review"]; got != 1 {
+			t.Errorf("model Skills[review] = %d, want 1", got)
 		}
 	})
 

@@ -1,46 +1,17 @@
-// UsageCharts renders daily token and cost trends from selected rollup days.
+// UsageCharts renders daily token and cost trends from drill-down-resolved
+// chart points.
 
 import * as Plot from "@observablehq/plot";
 import { Show } from "solid-js";
 
-import type { UsageDashboardDay } from "@sdk/types.gen";
-
 import { formatCost, formatTokens } from "../formatting";
+import type { UsageDailyPoint } from "../usageDashboard";
 import ChartDataTable from "./ChartDataTable";
 import PlotHost from "./PlotHost";
 import styles from "./UsageCharts.module.css";
 
-interface DailyUsageDatum {
-  day: string;
-  tokens: number;
-  costUSD: number;
-  inProgress: boolean;
-}
-
-// The rollup already holds the current UTC day, which is still accumulating. Its
-// total is drawn from a dashed segment with a hollow marker and stated in the
-// note, so a partial day cannot be read as a completed fall in usage.
-function currentUTCDay(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function dailyUsage(days: readonly UsageDashboardDay[]): DailyUsageDatum[] {
-  const today = currentUTCDay();
-  return days.map((day) => ({
-    day: day.day,
-    inProgress: day.day === today,
-    tokens:
-      day.tokens.inputTokens +
-      day.tokens.cacheWrite5mTokens +
-      day.tokens.cacheWrite1hTokens +
-      day.tokens.cacheReadTokens +
-      day.tokens.outputTokens,
-    costUSD: day.costUSD,
-  }));
-}
-
 interface TrendOptions {
-  value: (item: DailyUsageDatum) => number;
+  value: (item: UsageDailyPoint) => number;
   color: string;
   format: (value: number) => string;
   area: boolean;
@@ -48,13 +19,13 @@ interface TrendOptions {
 
 // The completed days draw the trend; the accumulating day extends it with a
 // dashed segment so its provisional value stays visible without joining the trend.
-function trendMarks(data: readonly DailyUsageDatum[], options: TrendOptions): Plot.Markish[] {
+function trendMarks(data: readonly UsageDailyPoint[], options: TrendOptions): Plot.Markish[] {
   const complete = data.filter((item) => !item.inProgress);
   const partial = data.find((item) => item.inProgress);
   const last = complete.at(-1);
-  const title = (item: DailyUsageDatum) =>
+  const title = (item: UsageDailyPoint) =>
     `${item.day}${item.inProgress ? " (in progress)" : ""}: ${options.format(options.value(item))}`;
-  const x = (item: DailyUsageDatum) => item.day;
+  const x = (item: UsageDailyPoint) => item.day;
   const marks: Plot.Markish[] = [];
   if (options.area) {
     marks.push(Plot.areaY(complete, { x, y: options.value, fill: options.color, fillOpacity: 0.2 }));
@@ -90,7 +61,7 @@ function trendMarks(data: readonly DailyUsageDatum[], options: TrendOptions): Pl
 }
 
 function drawDailyTrend(
-  data: readonly DailyUsageDatum[],
+  data: readonly UsageDailyPoint[],
   width: number,
   options: TrendOptions & { y: string; tickFormat: (value: number) => string },
 ): Element {
@@ -106,11 +77,12 @@ function drawDailyTrend(
   });
 }
 
-export default function UsageCharts(props: { days: readonly UsageDashboardDay[] }) {
-  const data = () => dailyUsage(props.days);
+export default function UsageCharts(props: { points: readonly UsageDailyPoint[]; subject?: string }) {
+  const data = () => props.points;
   const accumulating = () => data().some((item) => item.inProgress);
+  const scope = () => (props.subject ? ` for ${props.subject}` : "");
   const description = (subject: string) =>
-    `${subject} per UTC day for the selected range.${
+    `${subject} per UTC day for the selected range${scope()}.${
       accumulating() ? " The current day is still accumulating, so its point is provisional." : ""
     }`;
 

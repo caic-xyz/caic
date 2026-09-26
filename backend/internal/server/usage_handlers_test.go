@@ -184,6 +184,22 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 	if len(day.Models) != 1 || day.Models[0].Model != "claude-opus" || len(day.Harnesses) != 1 || day.Harnesses[0].Harness != "claude" {
 		t.Errorf("breakdowns = models %#v, harnesses %#v", day.Models, day.Harnesses)
 	}
+	// Model and harness drill-down carry the full delta fold with task-day
+	// skill and repo semantics matching the day leaderboards.
+	model := day.Models[0]
+	if model.Tools[0] != (v1.UsageDashboardCount{Name: "Read", Count: 2}) || model.Skills[0].Name != "review" || model.Skills[0].Count != 1 {
+		t.Errorf("model drill-down = tools %#v, skills %#v", model.Tools, model.Skills)
+	}
+	if model.Repos[0].Repo != "caic" || model.Repos[1].Repo != "sdk" || model.Repos[0].Tasks != 1 {
+		t.Errorf("model repos = %#v", model.Repos)
+	}
+	harness := day.Harnesses[0]
+	if harness.Tools[0] != (v1.UsageDashboardCount{Name: "Read", Count: 2}) || harness.ToolTimings[0].DurationMs != 1250 || harness.Skills[0].Count != 1 {
+		t.Errorf("harness drill-down = %#v / %#v / %#v", harness.Tools, harness.ToolTimings, harness.Skills)
+	}
+	if len(harness.Models) != 1 || harness.Models[0].Model != "claude-opus" || harness.Models[0].Tokens.Output != 40 {
+		t.Errorf("harness-by-model cross = %#v", harness.Models)
+	}
 	if len(day.Repos) != 2 || day.Repos[0].Repo != "caic" || day.Repos[1].Repo != "sdk" {
 		t.Errorf("repos = %#v", day.Repos)
 	}

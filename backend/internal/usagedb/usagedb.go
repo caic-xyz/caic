@@ -218,19 +218,42 @@ type QuotaRow struct {
 	ResetsAt    Time    `json:"resets_at,omitzero"`   // When the window resets; 0 = unknown
 }
 
-// ModelRollup is one model's aggregated usage within a day.
+// ModelRollup is one model's aggregated usage within a day. It carries the
+// full delta fold so dashboard drill-down can filter every panel by model;
+// Skills and Repos keep the day leaderboards' distinct-task semantics.
 type ModelRollup struct {
-	Tokens        TokenBuckets
-	Turns         int
-	CostUSD       float64
-	ContextWindow int
+	Tokens         TokenBuckets
+	Turns          int
+	ErroredTurns   int
+	APIMs          int64
+	WallMs         int64
+	Compactions    int
+	SubagentSpawns int
+	CostUSD        float64
+	ContextWindow  int
+	ToolCalls      map[string]int
+	ToolTimings    map[string]ToolTiming
+	Skills         map[string]int // distinct tasks that read the skill under this model
+	Repos          map[string]int // distinct tasks that touched the repo under this model
 }
 
-// HarnessRollup is one harness's aggregated usage within a day.
+// HarnessRollup is one harness's aggregated usage within a day, mirroring
+// ModelRollup plus the harness-by-model cross product so a harness filter can
+// still list the models used under it.
 type HarnessRollup struct {
-	Tokens  TokenBuckets
-	Turns   int
-	CostUSD float64
+	Tokens         TokenBuckets
+	Turns          int
+	ErroredTurns   int
+	APIMs          int64
+	WallMs         int64
+	Compactions    int
+	SubagentSpawns int
+	CostUSD        float64
+	ToolCalls      map[string]int
+	ToolTimings    map[string]ToolTiming
+	Skills         map[string]int // distinct tasks that read the skill under this harness
+	Repos          map[string]int // distinct tasks that touched the repo under this harness
+	Models         map[string]ModelRollup
 }
 
 // DayRollup is one UTC day's aggregated usage snapshot for dashboard reads.

@@ -1,6 +1,6 @@
 // UsagePage is the /usage route for cross-task daily usage analytics.
 
-import { createMemo, createSignal, For, lazy, onMount, Show, Suspense } from "solid-js";
+import { createMemo, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
 
 import type { UsageDashboardResp } from "@sdk/types.gen";
 
@@ -9,10 +9,15 @@ import Button from "../components/Button";
 import { Layout } from "../components/Layout";
 import { formatCost, formatTokens } from "../formatting";
 import {
+  drilldownEqual,
+  drilldownFromHash,
+  hashFromDrilldown,
   summarizeUsageDays,
   usageCacheHitRate,
+  usageDailySeries,
   usageDaysForRange,
   usageRangeFrom,
+  type UsageDrilldown,
   type UsageRange,
 } from "../usageDashboard";
 import styles from "./UsagePage.module.css";
@@ -39,6 +44,7 @@ function formatUsageDuration(ms: number): string {
 export default function UsagePage() {
   const [dashboard, setDashboard] = createSignal<UsageDashboardResp | null>(null);
   const [range, setRange] = createSignal<UsageRange>("30");
+  const [drilldown, setDrilldown] = createSignal<UsageDrilldown | null>(null);
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
 
@@ -59,9 +65,47 @@ export default function UsagePage() {
   });
 
   const days = createMemo(() => usageDaysForRange(dashboard()?.days ?? [], range()));
-  const summary = createMemo(() => summarizeUsageDays(days()));
+  const summary = createMemo(() => summarizeUsageDays(days(), drilldown()));
+  const points = createMemo(() => usageDailySeries(days(), drilldown()));
   const cacheHitRate = () => usageCacheHitRate(summary().tokens);
   const dataSince = () => formatDay(dashboard()?.dataSince);
+
+  // applyDrilldown keeps the location hash fragment in sync so a filtered
+  // view can be shared or restored after a reload; history navigation and
+  // manual hash edits flow back through the hashchange listener.
+  const applyDrilldown = (next: UsageDrilldown | null) => {
+    setDrilldown(next);
+    const fragment = hashFromDrilldown(next);
+    const url = fragment || `${window.location.pathname}${window.location.search}`;
+    if (!window.location.href.endsWith(url)) {
+      window.history.pushState(null, "", url);
+    }
+  };
+  const onHashChange = () => {
+    const next = drilldownFromHash(window.location.hash);
+    if (!drilldownEqual(next, drilldown())) setDrilldown(next);
+  };
+  const selectModel = (name: string) => applyDrilldown({ ...(drilldown() ?? {}), model: name });
+  const selectHarness = (name: string) => applyDrilldown({ ...(drilldown() ?? {}), harness: name });
+  const drillLabel = () => {
+    const active = drilldown();
+    if (!active) return "";
+    const parts = [];
+    if (active.model) parts.push(`model ${active.model}`);
+    if (active.harness) parts.push(`harness ${active.harness}`);
+    return parts.join(" in ");
+  };
+
+  onMount(() => {
+    void refresh();
+    setDrilldown(drilldownFromHash(window.location.hash));
+    window.addEventListener("hashchange", onHashChange);
+    window.addEventListener("popstate", onHashChange);
+  });
+  onCleanup(() => {
+    window.removeEventListener("hashchange", onHashChange);
+    window.removeEventListener("popstate", onHashChange);
+  });
 
   return (
     <Layout>
@@ -94,6 +138,7 @@ export default function UsagePage() {
         <Show when={dataSince()}>
           <p class={styles.meta}>
             Data since {dataSince()} · {rangeLabel(range())}
+            <Show when={drillLabel()}> · filtered to {drillLabel()}</Show>
           </p>
         </Show>
         <Show when={error()}>
@@ -107,6 +152,15 @@ export default function UsagePage() {
           fallback={<p class={styles.empty}>{loading() ? "Loading usage…" : "Usage data is unavailable."}</p>}
         >
           <Show when={days().length > 0} fallback={<p class={styles.empty}>No usage was recorded in this range.</p>}>
+            <Show when={drilldown()}>
+              <p class={styles.drilldown} role="status">
+                Showing usage for <strong>{drillLabel()}</strong>
+                {" · "}
+                <button type="button" class={styles.clearLink} onClick={() => applyDrilldown(null)}>
+                  Show all usage
+                </button>
+              </p>
+            </Show>
             <section class={styles.metrics} aria-label="Usage summary">
               <div>
                 <span>Total tokens</span>
@@ -151,19 +205,25 @@ export default function UsagePage() {
             </section>
 
             <Suspense fallback={<p class={styles.empty}>Loading charts…</p>}>
-              <UsageCharts days={days()} />
+              <UsageCharts points={points()} subject={drillLabel()} />
             </Suspense>
 
             <div class={styles.lowerGrid}>
               <section class={styles.panel}>
                 <h2>Models</h2>
-                <p>Tokens, turns, and reported cost over the selected range.</p>
-                <Leaderboard entries={summary().models} showCost />
+                <p>
+                  Tokens, turns, and reported cost over the selected range. Select a row to drill every panel down to
+                  that model.
+                </p>
+                <Leaderboard entries={summary().models} showCost kind="model" onSelect={selectModel} />
               </section>
               <section class={styles.panel}>
                 <h2>Harnesses</h2>
-                <p>Tokens, turns, reported cost, and cached input over the selected range.</p>
-                <Leaderboard entries={summary().harnesses} showCost showCache />
+                <p>
+                  Tokens, turns, reported cost, and cached input over the selected range. Select a row to drill every
+                  panel down to that harness.
+                </p>
+                <Leaderboard entries={summary().harnesses} showCost showCache kind="harness" onSelect={selectHarness} />
               </section>
               <section class={styles.panel}>
                 <h2>Tools</h2>
@@ -195,6 +255,8 @@ function Leaderboard(props: {
   entries: ReturnType<typeof summarizeUsageDays>["models"];
   showCost: boolean;
   showCache?: boolean;
+  kind?: "model" | "harness";
+  onSelect?: (name: string) => void;
 }) {
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No usage in this range.</p>}>
@@ -223,7 +285,18 @@ function Leaderboard(props: {
             <For each={props.entries}>
               {(entry) => (
                 <tr>
-                  <th scope="row">{entry.name}</th>
+                  <th scope="row">
+                    <Show when={props.kind && props.onSelect} fallback={entry.name}>
+                      <button
+                        type="button"
+                        class={styles.rowButton}
+                        title={`Show only ${props.kind} ${entry.name}`}
+                        onClick={() => props.onSelect?.(entry.name)}
+                      >
+                        {entry.name}
+                      </button>
+                    </Show>
+                  </th>
                   <td>{formatTokens(entry.tokens)}</td>
                   <td>{entry.turns}</td>
                   <Show when={props.showCost}>
