@@ -38,32 +38,32 @@ export type EventKind =
 /**
  * Supported values.
  */
-export const EventKindInit: EventKind = "init";
-export const EventKindText: EventKind = "text";
-export const EventKindTextDelta: EventKind = "textDelta";
-export const EventKindToolUse: EventKind = "toolUse";
-export const EventKindToolResult: EventKind = "toolResult";
-export const EventKindAsk: EventKind = "ask";
-export const EventKindUsage: EventKind = "usage";
-export const EventKindResult: EventKind = "result";
-export const EventKindSystem: EventKind = "system";
-export const EventKindUserInput: EventKind = "userInput";
-export const EventKindTodo: EventKind = "todo";
-export const EventKindDiffStat: EventKind = "diffStat";
-export const EventKindError: EventKind = "error";
-export const EventKindThinking: EventKind = "thinking";
-export const EventKindThinkingDelta: EventKind = "thinkingDelta";
-export const EventKindSubagentStart: EventKind = "subagentStart";
-export const EventKindSubagentEnd: EventKind = "subagentEnd";
-export const EventKindNativeSubagent: EventKind = "nativeSubagent";
-export const EventKindBackgroundCommand: EventKind = "backgroundCommand";
-export const EventKindLog: EventKind = "log";
-export const EventKindToolOutputDelta: EventKind = "toolOutputDelta";
-export const EventKindWidget: EventKind = "widget";
-export const EventKindWidgetDelta: EventKind = "widgetDelta";
-export const EventKindRateLimit: EventKind = "rateLimit";
-export const EventKindStats: EventKind = "stats";
-export const EventKindCommitSnapshot: EventKind = "commitSnapshot";
+export const EventKindInit = "init";
+export const EventKindText = "text";
+export const EventKindTextDelta = "textDelta";
+export const EventKindToolUse = "toolUse";
+export const EventKindToolResult = "toolResult";
+export const EventKindAsk = "ask";
+export const EventKindUsage = "usage";
+export const EventKindResult = "result";
+export const EventKindSystem = "system";
+export const EventKindUserInput = "userInput";
+export const EventKindTodo = "todo";
+export const EventKindDiffStat = "diffStat";
+export const EventKindError = "error";
+export const EventKindThinking = "thinking";
+export const EventKindThinkingDelta = "thinkingDelta";
+export const EventKindSubagentStart = "subagentStart";
+export const EventKindSubagentEnd = "subagentEnd";
+export const EventKindNativeSubagent = "nativeSubagent";
+export const EventKindBackgroundCommand = "backgroundCommand";
+export const EventKindLog = "log";
+export const EventKindToolOutputDelta = "toolOutputDelta";
+export const EventKindWidget = "widget";
+export const EventKindWidgetDelta = "widgetDelta";
+export const EventKindRateLimit = "rateLimit";
+export const EventKindStats = "stats";
+export const EventKindCommitSnapshot = "commitSnapshot";
 
 export type EventNativeSubagentScope =
   | "agent"
@@ -71,8 +71,8 @@ export type EventNativeSubagentScope =
 /**
  * Supported values.
  */
-export const EventNativeSubagentScopeAgent: EventNativeSubagentScope = "agent";
-export const EventNativeSubagentScopeBatch: EventNativeSubagentScope = "batch";
+export const EventNativeSubagentScopeAgent = "agent";
+export const EventNativeSubagentScopeBatch = "batch";
 
 export type EventNativeSubagentStatus =
   | "completed"
@@ -84,12 +84,12 @@ export type EventNativeSubagentStatus =
 /**
  * Supported values.
  */
-export const EventNativeSubagentStatusCompleted: EventNativeSubagentStatus = "completed";
-export const EventNativeSubagentStatusFailed: EventNativeSubagentStatus = "failed";
-export const EventNativeSubagentStatusInterrupted: EventNativeSubagentStatus = "interrupted";
-export const EventNativeSubagentStatusPaused: EventNativeSubagentStatus = "paused";
-export const EventNativeSubagentStatusRunning: EventNativeSubagentStatus = "running";
-export const EventNativeSubagentStatusUnknown: EventNativeSubagentStatus = "unknown";
+export const EventNativeSubagentStatusCompleted = "completed";
+export const EventNativeSubagentStatusFailed = "failed";
+export const EventNativeSubagentStatusInterrupted = "interrupted";
+export const EventNativeSubagentStatusPaused = "paused";
+export const EventNativeSubagentStatusRunning = "running";
+export const EventNativeSubagentStatusUnknown = "unknown";
 
 export type EventRateLimitStatus =
   | "allowed"
@@ -98,9 +98,9 @@ export type EventRateLimitStatus =
 /**
  * Supported values.
  */
-export const EventRateLimitStatusAllowed: EventRateLimitStatus = "allowed";
-export const EventRateLimitStatusAllowedWarning: EventRateLimitStatus = "allowed_warning";
-export const EventRateLimitStatusRejected: EventRateLimitStatus = "rejected";
+export const EventRateLimitStatusAllowed = "allowed";
+export const EventRateLimitStatusAllowedWarning = "allowed_warning";
+export const EventRateLimitStatusRejected = "rejected";
 
 export type EventToolInputKind =
   | "fileChanges"
@@ -108,8 +108,8 @@ export type EventToolInputKind =
 /**
  * Supported values.
  */
-export const EventToolInputFileChanges: EventToolInputKind = "fileChanges";
-export const EventToolInputSubagents: EventToolInputKind = "subagents";
+export const EventToolInputFileChanges = "fileChanges";
+export const EventToolInputSubagents = "subagents";
 
 export type ToolOutputContentType =
   | "text"
@@ -118,9 +118,9 @@ export type ToolOutputContentType =
 /**
  * Supported values.
  */
-export const ToolOutputText: ToolOutputContentType = "text";
-export const ToolOutputJSON: ToolOutputContentType = "json";
-export const ToolOutputMarkdown: ToolOutputContentType = "markdown";
+export const ToolOutputText = "text";
+export const ToolOutputJSON = "json";
+export const ToolOutputMarkdown = "markdown";
 
 /**
  * EventInit is emitted once at the start of a session. It includes a Harness
@@ -505,8 +505,8 @@ export type BranchAction =
 /**
  * Supported values.
  */
-export const BranchActionAdopt: BranchAction = "adopt";
-export const BranchActionBranchOff: BranchAction = "branch_off";
+export const BranchActionAdopt = "adopt";
+export const BranchActionBranchOff = "branch_off";
 
 export type CIStatus =
   | "pending"
@@ -515,9 +515,9 @@ export type CIStatus =
 /**
  * Supported values.
  */
-export const CIStatusPending: CIStatus = "pending";
-export const CIStatusSuccess: CIStatus = "success";
-export const CIStatusFailure: CIStatus = "failure";
+export const CIStatusPending = "pending";
+export const CIStatusSuccess = "success";
+export const CIStatusFailure = "failure";
 
 export type CheckConclusion =
   | "success"
@@ -531,14 +531,14 @@ export type CheckConclusion =
 /**
  * Supported values.
  */
-export const CheckConclusionSuccess: CheckConclusion = "success";
-export const CheckConclusionFailure: CheckConclusion = "failure";
-export const CheckConclusionNeutral: CheckConclusion = "neutral";
-export const CheckConclusionSkipped: CheckConclusion = "skipped";
-export const CheckConclusionCancelled: CheckConclusion = "cancelled";
-export const CheckConclusionTimedOut: CheckConclusion = "timed_out";
-export const CheckConclusionActionRequired: CheckConclusion = "action_required";
-export const CheckConclusionStale: CheckConclusion = "stale";
+export const CheckConclusionSuccess = "success";
+export const CheckConclusionFailure = "failure";
+export const CheckConclusionNeutral = "neutral";
+export const CheckConclusionSkipped = "skipped";
+export const CheckConclusionCancelled = "cancelled";
+export const CheckConclusionTimedOut = "timed_out";
+export const CheckConclusionActionRequired = "action_required";
+export const CheckConclusionStale = "stale";
 
 export type CheckStatus =
   | "queued"
@@ -547,9 +547,9 @@ export type CheckStatus =
 /**
  * Supported values.
  */
-export const CheckStatusQueued: CheckStatus = "queued";
-export const CheckStatusInProgress: CheckStatus = "in_progress";
-export const CheckStatusCompleted: CheckStatus = "completed";
+export const CheckStatusQueued = "queued";
+export const CheckStatusInProgress = "in_progress";
+export const CheckStatusCompleted = "completed";
 
 export type ErrorCode =
   | "BAD_REQUEST"
@@ -573,23 +573,23 @@ export type ErrorCode =
 /**
  * Supported values.
  */
-export const ErrorCodeBadRequest: ErrorCode = "BAD_REQUEST";
-export const ErrorCodeUnknownHarness: ErrorCode = "UNKNOWN_HARNESS";
-export const ErrorCodeUnknownRepository: ErrorCode = "UNKNOWN_REPOSITORY";
-export const ErrorCodeUnsupportedModel: ErrorCode = "UNSUPPORTED_MODEL";
-export const ErrorCodeInvalidOauthState: ErrorCode = "INVALID_OAUTH_STATE";
-export const ErrorCodeUnknownCache: ErrorCode = "UNKNOWN_CACHE";
-export const ErrorCodeUnknownRuntime: ErrorCode = "UNKNOWN_RUNTIME";
-export const ErrorCodeUnauthorized: ErrorCode = "UNAUTHORIZED";
-export const ErrorCodeForbidden: ErrorCode = "FORBIDDEN";
-export const ErrorCodeNotFound: ErrorCode = "NOT_FOUND";
-export const ErrorCodeOauthGrantNotFound: ErrorCode = "OAUTH_GRANT_NOT_FOUND";
-export const ErrorCodeOauthProviderUnavailable: ErrorCode = "OAUTH_PROVIDER_UNAVAILABLE";
-export const ErrorCodeConflict: ErrorCode = "CONFLICT";
-export const ErrorCodeRepositoryPathConflict: ErrorCode = "REPOSITORY_PATH_CONFLICT";
-export const ErrorCodeInternalError: ErrorCode = "INTERNAL_ERROR";
-export const ErrorCodeUpdateCheckFailed: ErrorCode = "UPDATE_CHECK_FAILED";
-export const ErrorCodeUpdateUnavailable: ErrorCode = "UPDATE_UNAVAILABLE";
+export const ErrorCodeBadRequest = "BAD_REQUEST";
+export const ErrorCodeUnknownHarness = "UNKNOWN_HARNESS";
+export const ErrorCodeUnknownRepository = "UNKNOWN_REPOSITORY";
+export const ErrorCodeUnsupportedModel = "UNSUPPORTED_MODEL";
+export const ErrorCodeInvalidOauthState = "INVALID_OAUTH_STATE";
+export const ErrorCodeUnknownCache = "UNKNOWN_CACHE";
+export const ErrorCodeUnknownRuntime = "UNKNOWN_RUNTIME";
+export const ErrorCodeUnauthorized = "UNAUTHORIZED";
+export const ErrorCodeForbidden = "FORBIDDEN";
+export const ErrorCodeNotFound = "NOT_FOUND";
+export const ErrorCodeOauthGrantNotFound = "OAUTH_GRANT_NOT_FOUND";
+export const ErrorCodeOauthProviderUnavailable = "OAUTH_PROVIDER_UNAVAILABLE";
+export const ErrorCodeConflict = "CONFLICT";
+export const ErrorCodeRepositoryPathConflict = "REPOSITORY_PATH_CONFLICT";
+export const ErrorCodeInternalError = "INTERNAL_ERROR";
+export const ErrorCodeUpdateCheckFailed = "UPDATE_CHECK_FAILED";
+export const ErrorCodeUpdateUnavailable = "UPDATE_UNAVAILABLE";
 
 export type Forge =
   | "github"
@@ -597,8 +597,8 @@ export type Forge =
 /**
  * Supported values.
  */
-export const ForgeGitHub: Forge = "github";
-export const ForgeGitLab: Forge = "gitlab";
+export const ForgeGitHub = "github";
+export const ForgeGitLab = "gitlab";
 
 export type ForgePRState =
   | "open"
@@ -607,9 +607,9 @@ export type ForgePRState =
 /**
  * Supported values.
  */
-export const ForgePRStateOpen: ForgePRState = "open";
-export const ForgePRStateClosed: ForgePRState = "closed";
-export const ForgePRStateMerged: ForgePRState = "merged";
+export const ForgePRStateOpen = "open";
+export const ForgePRStateClosed = "closed";
+export const ForgePRStateMerged = "merged";
 
 export type GitOperation =
   | "rebase"
@@ -620,11 +620,11 @@ export type GitOperation =
 /**
  * Supported values.
  */
-export const GitOperationRebase: GitOperation = "rebase";
-export const GitOperationMerge: GitOperation = "merge";
-export const GitOperationCherryPick: GitOperation = "cherry-pick";
-export const GitOperationRevert: GitOperation = "revert";
-export const GitOperationBisect: GitOperation = "bisect";
+export const GitOperationRebase = "rebase";
+export const GitOperationMerge = "merge";
+export const GitOperationCherryPick = "cherry-pick";
+export const GitOperationRevert = "revert";
+export const GitOperationBisect = "bisect";
 
 export type Harness =
   | "claude"
@@ -634,10 +634,10 @@ export type Harness =
 /**
  * Supported values.
  */
-export const HarnessClaude: Harness = "claude";
-export const HarnessCodex: Harness = "codex";
-export const HarnessOpenCode: Harness = "opencode";
-export const HarnessPi: Harness = "pi";
+export const HarnessClaude = "claude";
+export const HarnessCodex = "codex";
+export const HarnessOpenCode = "opencode";
+export const HarnessPi = "pi";
 
 export type OAuthGrantStatus =
   | "active"
@@ -646,9 +646,9 @@ export type OAuthGrantStatus =
 /**
  * Supported values.
  */
-export const OAuthGrantStatusActive: OAuthGrantStatus = "active";
-export const OAuthGrantStatusExpired: OAuthGrantStatus = "expired";
-export const OAuthGrantStatusRevoked: OAuthGrantStatus = "revoked";
+export const OAuthGrantStatusActive = "active";
+export const OAuthGrantStatusExpired = "expired";
+export const OAuthGrantStatusRevoked = "revoked";
 
 export type Platform =
   | ""
@@ -657,9 +657,9 @@ export type Platform =
 /**
  * Supported values.
  */
-export const PlatformDefault: Platform = "";
-export const PlatformLinuxARM64: Platform = "linux/arm64";
-export const PlatformLinuxAMD64: Platform = "linux/amd64";
+export const PlatformDefault = "";
+export const PlatformLinuxARM64 = "linux/arm64";
+export const PlatformLinuxAMD64 = "linux/amd64";
 
 export type ProviderAuthKind =
   | "oauth"
@@ -667,8 +667,8 @@ export type ProviderAuthKind =
 /**
  * Supported values.
  */
-export const ProviderAuthKindOAuth: ProviderAuthKind = "oauth";
-export const ProviderAuthKindAPIKey: ProviderAuthKind = "apikey";
+export const ProviderAuthKindOAuth = "oauth";
+export const ProviderAuthKindAPIKey = "apikey";
 
 export type ProviderFetchStatus =
   | "error"
@@ -678,10 +678,10 @@ export type ProviderFetchStatus =
 /**
  * Supported values.
  */
-export const ProviderFetchStatusError: ProviderFetchStatus = "error";
-export const ProviderFetchStatusFresh: ProviderFetchStatus = "fresh";
-export const ProviderFetchStatusStale: ProviderFetchStatus = "stale";
-export const ProviderFetchStatusUnknown: ProviderFetchStatus = "unknown";
+export const ProviderFetchStatusError = "error";
+export const ProviderFetchStatusFresh = "fresh";
+export const ProviderFetchStatusStale = "stale";
+export const ProviderFetchStatusUnknown = "unknown";
 
 export type QuotaProvider =
   | "alibaba"
@@ -701,20 +701,20 @@ export type QuotaProvider =
 /**
  * Supported values.
  */
-export const QuotaProviderAlibaba: QuotaProvider = "alibaba";
-export const QuotaProviderAnthropic: QuotaProvider = "anthropic";
-export const QuotaProviderCerebras: QuotaProvider = "cerebras";
-export const QuotaProviderClaudeCode: QuotaProvider = "claudecode";
-export const QuotaProviderCodex: QuotaProvider = "codex";
-export const QuotaProviderDeepSeek: QuotaProvider = "deepseek";
-export const QuotaProviderGemini: QuotaProvider = "gemini";
-export const QuotaProviderGrok: QuotaProvider = "grok";
-export const QuotaProviderGroq: QuotaProvider = "groq";
-export const QuotaProviderOpenRouter: QuotaProvider = "openrouter";
-export const QuotaProviderRunInfra: QuotaProvider = "runinfra";
-export const QuotaProviderTypeSafe: QuotaProvider = "typesafe";
-export const QuotaProviderXiaomi: QuotaProvider = "xiaomi";
-export const QuotaProviderZai: QuotaProvider = "zai";
+export const QuotaProviderAlibaba = "alibaba";
+export const QuotaProviderAnthropic = "anthropic";
+export const QuotaProviderCerebras = "cerebras";
+export const QuotaProviderClaudeCode = "claudecode";
+export const QuotaProviderCodex = "codex";
+export const QuotaProviderDeepSeek = "deepseek";
+export const QuotaProviderGemini = "gemini";
+export const QuotaProviderGrok = "grok";
+export const QuotaProviderGroq = "groq";
+export const QuotaProviderOpenRouter = "openrouter";
+export const QuotaProviderRunInfra = "runinfra";
+export const QuotaProviderTypeSafe = "typesafe";
+export const QuotaProviderXiaomi = "xiaomi";
+export const QuotaProviderZai = "zai";
 
 export type SyncTarget =
   | "branch"
@@ -722,8 +722,8 @@ export type SyncTarget =
 /**
  * Supported values.
  */
-export const SyncTargetBranch: SyncTarget = "branch";
-export const SyncTargetDefault: SyncTarget = "default";
+export const SyncTargetBranch = "branch";
+export const SyncTargetDefault = "default";
 
 export type TaskState =
   | "pending"
@@ -745,22 +745,22 @@ export type TaskState =
 /**
  * Supported values.
  */
-export const TaskStatePending: TaskState = "pending";
-export const TaskStateBranching: TaskState = "branching";
-export const TaskStateProvisioning: TaskState = "provisioning";
-export const TaskStateStarting: TaskState = "starting";
-export const TaskStateRunning: TaskState = "running";
-export const TaskStateWaiting: TaskState = "waiting";
-export const TaskStateAsking: TaskState = "asking";
-export const TaskStateHasPlan: TaskState = "has_plan";
-export const TaskStatePulling: TaskState = "pulling";
-export const TaskStatePushing: TaskState = "pushing";
-export const TaskStateStopping: TaskState = "stopping";
-export const TaskStateStopped: TaskState = "stopped";
-export const TaskStatePurging: TaskState = "purging";
-export const TaskStateCrashed: TaskState = "crashed";
-export const TaskStateFailed: TaskState = "failed";
-export const TaskStatePurged: TaskState = "purged";
+export const TaskStatePending = "pending";
+export const TaskStateBranching = "branching";
+export const TaskStateProvisioning = "provisioning";
+export const TaskStateStarting = "starting";
+export const TaskStateRunning = "running";
+export const TaskStateWaiting = "waiting";
+export const TaskStateAsking = "asking";
+export const TaskStateHasPlan = "has_plan";
+export const TaskStatePulling = "pulling";
+export const TaskStatePushing = "pushing";
+export const TaskStateStopping = "stopping";
+export const TaskStateStopped = "stopped";
+export const TaskStatePurging = "purging";
+export const TaskStateCrashed = "crashed";
+export const TaskStateFailed = "failed";
+export const TaskStatePurged = "purged";
 
 export type VoiceGatewayMode =
   | "disabled"
@@ -769,9 +769,9 @@ export type VoiceGatewayMode =
 /**
  * Supported values.
  */
-export const VoiceGatewayModeDisabled: VoiceGatewayMode = "disabled";
-export const VoiceGatewayModeEmbedded: VoiceGatewayMode = "embedded";
-export const VoiceGatewayModeExternal: VoiceGatewayMode = "external";
+export const VoiceGatewayModeDisabled = "disabled";
+export const VoiceGatewayModeEmbedded = "embedded";
+export const VoiceGatewayModeExternal = "external";
 
 /** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];

@@ -3,21 +3,14 @@
 .DEFAULT_GOAL := help
 .PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-dev playwright-browser refresh-generated test test-e2e test-smoke tools upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
 
-# Tool versions. The tools target installs a tool that is missing or at another version, so
-# these are the only places the versions are written down.
-GOLANGCI_LINT_VERSION=v2.13.2
-SHFMT_VERSION=v3.14.1
+# Ruff is installed separately; Go tool versions are declared in go.mod.
 RUFF_VERSION=0.16.8
 
-# The tools target installs into the Go and uv tool directories. Prepend them so a recipe
-# that just installed a tool can run it, whatever the caller's PATH holds.
-GO_BIN := $(if $(shell command -v go 2>/dev/null),$(shell go env GOPATH 2>/dev/null)/bin)
+# Prepend uv's tool directory so a recipe can run Ruff after installing it.
 UV_BIN := $(if $(shell command -v uv 2>/dev/null),$(shell uv tool dir --bin 2>/dev/null))
-export PATH := $(if $(GO_BIN),$(GO_BIN):)$(if $(UV_BIN),$(UV_BIN):)$(PATH)
+export PATH := $(if $(UV_BIN),$(UV_BIN):)$(PATH)
 
 tools:
-	@command -v golangci-lint > /dev/null 2>&1 && golangci-lint --version 2>/dev/null | grep -Fqw "$(GOLANGCI_LINT_VERSION:v%=%)" || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	@command -v shfmt > /dev/null 2>&1 && shfmt --version 2>/dev/null | grep -Fqw "$(SHFMT_VERSION)" || go install mvdan.cc/sh/v3/cmd/shfmt@$(SHFMT_VERSION)
 	@command -v uv > /dev/null 2>&1 || { echo 'uv is required to install the Python tools; see https://docs.astral.sh/uv/' >&2; exit 1; }
 	@ruff --version 2>/dev/null | grep -Fqw "$(RUFF_VERSION)" || uv tool install --force --quiet ruff==$(RUFF_VERSION)
 
@@ -45,7 +38,7 @@ VERIFY_JS = pnpm --silent format:check && pnpm --silent lint:style && node scrip
 VERIFY_TS = pnpm --silent typecheck
 VERIFY_ESLINT = pnpm --silent lint:check
 VERIFY_PY = ruff format --check --quiet . && ruff check --quiet .
-VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || { out=$$(shfmt -l $$files); [ -z "$$out" ] || { echo "Shell files need shfmt:" >&2; echo "$$out" >&2; exit 1; }; }
+VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || { out=$$(go tool shfmt -l $$files) || exit; [ -z "$$out" ] || { echo "Shell files need shfmt:" >&2; echo "$$out" >&2; exit 1; }; }
 VERIFY_MISC = python3 scripts/lint_binaries.py && python3 scripts/update_agents_file_index.py --check && python3 scripts/update_backend_architecture.py --check
 
 help:
@@ -93,10 +86,11 @@ frontend-build: $(FRONTEND_STAMP) generate-sdks
 # rebuild; a version or config change must.
 .PHONY: custom-gcl
 custom-gcl:
-	@want=$$({ sha256sum .custom-gcl.yml | cut -d" " -f1; echo "$(GOLANGCI_LINT_VERSION)"; go env GOVERSION; } | sha256sum | cut -d" " -f1); \
+	@version=$$(go list -m -f '{{.Version}}' github.com/golangci/golangci-lint/v2); \
+	want=$$({ sha256sum .custom-gcl.yml | cut -d" " -f1; echo "$$version"; go env GOVERSION; } | sha256sum | cut -d" " -f1); \
 	if [ -x custom-gcl ] && [ "$$want" = "$$(cat .custom-gcl.sha 2>/dev/null)" ]; then exit 0; fi; \
 	echo 'Building custom-gcl with the methodfilecheck plugin (one-off; runs when the config, golangci-lint version, or Go toolchain changes)...'; \
-	golangci-lint custom --version $(GOLANGCI_LINT_VERSION) && echo "$$want" > .custom-gcl.sha
+	go tool golangci-lint custom --version "$$version" && echo "$$want" > .custom-gcl.sha
 
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
@@ -113,12 +107,12 @@ verify: tools custom-gcl $(FRONTEND_STAMP)
 # re-check; run verify for that.
 fix: tools custom-gcl $(FRONTEND_STAMP)
 	@./custom-gcl run --show-stats=false ./... --fix
-	@golangci-lint fmt
+	@go tool golangci-lint fmt
 	@pnpm --silent lint:fix
 	@pnpm --silent format
 	@ruff check --quiet --fix .
 	@ruff format --quiet .
-	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || shfmt -w $$files
+	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
 	@pnpm --silent lint:style:fix
 	@./scripts/update_agents_file_index.py
 	@./scripts/update_backend_architecture.py

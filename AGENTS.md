@@ -40,10 +40,7 @@ or backend package layout.
 
 ### Git Hooks
 
-`pnpm install` configures the versioned hooks in `scripts/hooks/`; run
-`pnpm hooks:install` (or `make git-hooks`, which also configures the merge
-driver) to restore them after an installation that skipped lifecycle scripts.
-The hook scripts document their own rules.
+Mandatory: Run `make git-hooks` to install git hooks before making any change.
 
 ### Performance
 
