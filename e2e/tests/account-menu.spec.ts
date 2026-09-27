@@ -237,10 +237,33 @@ test("mobile quota pills keep their compact height", async ({ page }) => {
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(2);
 });
 
+test("mobile wordmark centers with the first quota pill", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/");
+
+  const pill = page.getByTestId("provider-usage").first();
+  await expect(pill).toBeVisible();
+  const titleBox = await page.getByRole("button", { name: "caic", exact: true }).boundingBox();
+  const pillBox = await pill.boundingBox();
+  expect(titleBox).not.toBeNull();
+  expect(pillBox).not.toBeNull();
+  if (!titleBox || !pillBox) throw new Error("Mobile header controls are not visible");
+  const titleCenter = titleBox.y + titleBox.height / 2;
+  const pillCenter = pillBox.y + pillBox.height / 2;
+  expect(Math.abs(titleCenter - pillCenter)).toBeLessThanOrEqual(2.5);
+});
+
 test("circular connection wave crosses a stationary word and respects reduced motion", async ({ page }) => {
   await page.goto("/");
   const word = page.getByTestId("new-task-button");
   await expect(word).toHaveAttribute("data-status", "connected");
+  await expect(word).toHaveCSS("background-image", /radial-gradient/);
+  await expect(word).toHaveCSS("background-image", /rgb\(255, 255, 255\)/);
+  await expect(word).toHaveCSS("animation-name", /connection-wave/);
+  await expect(word).toHaveCSS("animation-duration", "6s");
+  await expect(word).toHaveCSS("animation-delay", "-2s");
+  await expect(word).toHaveCSS("animation-iteration-count", "1");
+  await expect(word).toHaveCSS("animation-fill-mode", "forwards");
 
   // The fake backend settles quickly; set only the visual state to inspect its CSS.
   for (const status of ["settled-loading", "settled-error"]) {
@@ -252,5 +275,7 @@ test("circular connection wave crosses a stationary word and respects reduced mo
   }
 
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(word).toHaveCSS("animation-name", "none");
+  await word.evaluate((el) => el.setAttribute("data-status", "connected"));
   await expect(word).toHaveCSS("animation-name", "none");
 });

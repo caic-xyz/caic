@@ -135,6 +135,6 @@ a.providerPill:hover {
   .providerPill {
     margin: 0 0.2rem 0.25rem 0;
     line-height: normal;
-    vertical-align: middle;
+    vertical-align: baseline;
   }
 }

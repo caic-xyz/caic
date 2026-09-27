@@ -37,6 +37,14 @@
   border: none;
 }
 
+.titleButton[data-status="connected"] {
+  --connection-wave-base: var(--color-connection-wave-connected-base);
+  --connection-wave-center: var(--color-connection-wave-connected-center);
+  --connection-wave-rim: var(--color-connection-wave-connected-rim);
+
+  color: var(--connection-wave-base);
+}
+
 .titleButton[data-status="settled-loading"] {
   --connection-wave-base: var(--color-warning-text);
   --connection-wave-center: var(--color-connection-wave-loading-center);
@@ -55,7 +63,12 @@
 }
 
 @supports (background-clip: text) {
-  .titleButton:is([data-status="settled-loading"], [data-status="disconnected"], [data-status="settled-error"]) {
+  .titleButton:is(
+    [data-status="connected"],
+    [data-status="settled-loading"],
+    [data-status="disconnected"],
+    [data-status="settled-error"]
+  ) {
     background-color: var(--connection-wave-base);
     background-image: radial-gradient(
       circle,
@@ -69,6 +82,14 @@
     background-size: 2.5rem 2.5rem;
     animation: connection-wave 2.2s linear infinite;
     -webkit-text-fill-color: transparent;
+  }
+
+  .titleButton[data-status="connected"] {
+    /* Off-word travel fills the rest of the cycle; glyph traversal takes about 2s. */
+    animation-duration: 6s;
+    animation-delay: -2s;
+    animation-iteration-count: 1;
+    animation-fill-mode: forwards;
   }
 }
 
@@ -97,13 +118,23 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .titleButton:is([data-status="settled-loading"], [data-status="disconnected"], [data-status="settled-error"]) {
+  .titleButton:is(
+    [data-status="connected"],
+    [data-status="settled-loading"],
+    [data-status="disconnected"],
+    [data-status="settled-error"]
+  ) {
     animation: none;
   }
 }
 
 @media (forced-colors: active) {
-  .titleButton:is([data-status="settled-loading"], [data-status="disconnected"], [data-status="settled-error"]) {
+  .titleButton:is(
+    [data-status="connected"],
+    [data-status="settled-loading"],
+    [data-status="disconnected"],
+    [data-status="settled-error"]
+  ) {
     background: none;
     -webkit-text-fill-color: currentcolor;
     animation: none;
@@ -204,6 +235,6 @@
   .title {
     display: inline-block;
     margin-right: 0.4rem;
-    vertical-align: middle;
+    vertical-align: baseline;
   }
 }

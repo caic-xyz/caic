@@ -45,7 +45,10 @@
   --color-warning-border: #ffc107;
   --color-warning-text: #856404;
 
-  /* Readable tints for the connection wordmark's amber and red waves. */
+  /* Connection wordmark wave colors for each status. */
+  --color-connection-wave-connected-base: #000;
+  --color-connection-wave-connected-center: #fff;
+  --color-connection-wave-connected-rim: #b8b8b8;
   --color-connection-wave-loading-center: #5f4300;
   --color-connection-wave-loading-rim: #977000;
   --color-connection-wave-error-center: #80202d;
