@@ -894,6 +894,9 @@ func (r *AgentRuntime) setup(ctx context.Context, t *Task, metadata runtime.Meta
 		return setupResult{}, errors.Join(err, provisioningLog.Flush())
 	}
 	r.Log.Debug("checkout", "msg", "instance.Launch succeeded", "instance", instanceID)
+	// The task owns the instance as soon as launch succeeds so every later
+	// setup failure can purge it, including failures before Connect returns.
+	t.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{}, "", "", 0)
 	if err := provisioningLog.Flush(); err != nil {
 		return setupResult{}, err
 	}

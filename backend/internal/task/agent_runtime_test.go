@@ -153,6 +153,16 @@ func (r *setupLogFailureRuntime) Launch(ctx context.Context, repos []runtime.Rep
 	return "", errors.New("runtime launch failed")
 }
 
+type connectFailureRuntime struct {
+	*runtimetest.FakeBackend
+
+	err error
+}
+
+func (r *connectFailureRuntime) Connect(context.Context, runtime.ID, *runtime.StartOptions) (runtime.ConnectionInfo, error) {
+	return runtime.ConnectionInfo{}, r.err
+}
+
 type forkLogRuntime struct {
 	*runtimetest.FakeBackend
 
@@ -432,6 +442,22 @@ func TestRunner(t *testing.T) {
 
 	t.Run("Start", func(t *testing.T) {
 		t.Parallel()
+		t.Run("CleansUpInstanceWhenConnectFails", func(t *testing.T) {
+			t.Parallel()
+			connectErr := errors.New("connect failed")
+			runtimeBackend := &connectFailureRuntime{FakeBackend: &runtimetest.FakeBackend{}, err: connectErr}
+			r := newTestAgentRuntimeWithRuntime(t, runtimeBackend, nil, t.TempDir())
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
+			tk.StartedAt = time.Now().UTC()
+
+			if _, err := r.Start(t.Context(), tk, ""); !errors.Is(err, connectErr) {
+				t.Fatalf("Start error = %v, want %v", err, connectErr)
+			}
+			instanceID := runtime.NewID(runtimeBackend.Name(), "fake-container")
+			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusPurged {
+				t.Errorf("runtime status = %s, want purged", got)
+			}
+		})
 		t.Run("CleansUpInstanceWhenSessionStartupFails", func(t *testing.T) {
 			t.Parallel()
 			for _, tc := range []struct {
