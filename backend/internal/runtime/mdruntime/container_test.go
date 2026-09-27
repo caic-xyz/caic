@@ -21,4 +21,7 @@ func TestNew(t *testing.T) {
 	if c == nil {
 		t.Fatal("New returned nil client")
 	}
+	if !c.ControlMaster {
+		t.Error("New did not enable SSH connection multiplexing")
+	}
 }

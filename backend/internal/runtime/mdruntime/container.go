@@ -47,6 +47,7 @@ func New(ctx context.Context, log *slog.Logger, tailscaleAPIKey, githubToken, ru
 	}
 	c.TailscaleAPIKey = tailscaleAPIKey
 	c.GithubToken = githubToken
+	c.ControlMaster = true
 	return c, nil
 }
 

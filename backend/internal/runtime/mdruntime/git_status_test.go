@@ -261,7 +261,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -310,7 +310,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		runTestGit(t, dir, "add", "task.txt")
 		runTestGit(t, dir, "commit", "-m", "task change")
 
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "usage")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "usage")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -331,7 +331,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "missing", "branch")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "missing", "branch")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -368,11 +368,11 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		runTestGit(t, dir, "commit", "-am", "main change")
 		runTestGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
 		runTestGit(t, dir, "checkout", "feature")
-		if err := exec.CommandContext(t.Context(), "git", "-C", dir, "merge", "main").Run(); err == nil { //nolint:gosec // temporary repository is test-owned.
+		if err := newIsolatedGitCommand(t, "git", "-C", dir, "merge", "main").Run(); err == nil {
 			t.Fatal("expected the merge to conflict")
 		}
 
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +408,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		}
 		runTestGit(t, dir, "add", "staged.txt")
 
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := newIsolatedGitCommand(t, "bash", "-c", compactGitStatusCommand(dir, "origin", "main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -471,7 +471,7 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		out, err := exec.CommandContext(t.Context(), "bash", "-c", gitStatusCommand(dir, "origin", "main")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "origin", "main")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -503,7 +503,7 @@ func TestGitStatusCommand(t *testing.T) {
 			t.Errorf("cached diff after status = %q, want staged.txt", cached)
 		}
 
-		out, err = exec.CommandContext(t.Context(), "bash", "-c", gitStatusCommand(dir, "missing", "branch")).Output() //nolint:gosec // command and temporary repository are test-owned.
+		out, err = newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "missing", "branch")).Output()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -809,7 +809,7 @@ func initFileDiffRepo(t *testing.T) string {
 }
 
 func runFileDiffCommand(t *testing.T, command string) string {
-	cmd := exec.CommandContext(t.Context(), "bash", "-c", command) //nolint:gosec // command is built from test-owned paths and refs.
+	cmd := newIsolatedGitCommand(t, "bash", "-c", command)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("file diff command: %v: %s", err, out)
@@ -855,8 +855,8 @@ func gitShim(t *testing.T, inject string) string {
 }
 
 func runGitStatusCommand(t *testing.T, dir string, env []string) (stdout, stderr string) {
-	cmd := exec.CommandContext(t.Context(), "bash", "-c", gitStatusCommand(dir, "origin", "main")) //nolint:gosec // repository is a test temp dir.
-	cmd.Env = env
+	cmd := newIsolatedGitCommand(t, "bash", "-c", gitStatusCommand(dir, "origin", "main"))
+	cmd.Env = append(slices.Clone(env), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut
@@ -867,7 +867,7 @@ func runGitStatusCommand(t *testing.T, dir string, env []string) (stdout, stderr
 }
 
 func runTestGitOutput(t *testing.T, dir string, args ...string) string {
-	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // arguments are hardcoded test fixtures.
+	cmd := newIsolatedGitCommand(t, "git", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
@@ -875,4 +875,12 @@ func runTestGitOutput(t *testing.T, dir string, args ...string) string {
 		return strings.TrimSpace(string(out))
 	}
 	return ""
+}
+
+// newIsolatedGitCommand returns a test-owned Git or shell command that cannot
+// inherit user or system Git configuration.
+func newIsolatedGitCommand(t *testing.T, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(t.Context(), name, args...) //nolint:gosec // executable and arguments are test-owned.
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	return cmd
 }
