@@ -15,7 +15,7 @@
 
 .navbar {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem;
   align-items: center;
   margin-bottom: 0.75rem;
 }
@@ -189,8 +189,21 @@
 @media (width <= 480px) {
   .navbar {
     position: relative;
-    flex-wrap: wrap;
-    row-gap: 0.5rem;
-    padding-right: 2.4rem;
+    display: flow-root;
+    line-height: 2rem;
+  }
+
+  /* Reserve the avatar's first line without narrowing wrapped badge lines. */
+  .navbar::before {
+    float: right;
+    width: 2rem;
+    height: 2rem;
+    content: "";
+  }
+
+  .title {
+    display: inline-block;
+    margin-right: 0.4rem;
+    vertical-align: middle;
   }
 }

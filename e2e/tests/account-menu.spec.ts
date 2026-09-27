@@ -103,6 +103,140 @@ test("quota pills use the space beside the connection word", async ({ page }) =>
   }
 });
 
+test("desktop quota pills start beside the subtitle while the avatar stays at the edge", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 720 });
+  await page.goto("/");
+
+  const header = page.locator("header");
+  const subtitle = page.getByText("Coding Agents in Containers");
+  const firstPill = page.getByTestId("provider-usage").first();
+  const avatar = page.getByRole("button", { name: "Menu" });
+  await expect(firstPill).toBeVisible();
+
+  await expect
+    .poll(async () => {
+      const [headerBox, subtitleBox, pillBox, avatarBox] = await Promise.all([
+        header.boundingBox(),
+        subtitle.boundingBox(),
+        firstPill.boundingBox(),
+        avatar.boundingBox(),
+      ]);
+      if (!headerBox || !subtitleBox || !pillBox || !avatarBox) return false;
+      return (
+        pillBox.x - (subtitleBox.x + subtitleBox.width) <= 20 &&
+        Math.abs(headerBox.x + headerBox.width - avatarBox.x - avatarBox.width) <= 2
+      );
+    })
+    .toBe(true);
+});
+
+test("a dense desktop quota row keeps its last pill beside the avatar", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 720 });
+  await page.goto("/");
+
+  const pills = page.getByTestId("provider-usage");
+  await expect(pills.first()).toBeVisible();
+  // The fake backend exposes only a few providers. Fill the existing row with
+  // the widths of a populated account to exercise its wrapping geometry.
+  await pills.first().evaluate((pill) => {
+    const row = pill.parentElement;
+    if (!row) throw new Error("Quota row is missing");
+    const widths = [147, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
+    row.replaceChildren(
+      ...widths.map((width) => {
+        const item = document.createElement("span");
+        item.className = pill.className;
+        item.dataset.testid = "provider-usage";
+        item.style.boxSizing = "border-box";
+        item.style.width = `${width}px`;
+        item.style.height = "24px";
+        return item;
+      }),
+    );
+  });
+
+  const [firstBox, lastBox, avatarBox] = await Promise.all([
+    pills.first().boundingBox(),
+    pills.last().boundingBox(),
+    page.getByRole("button", { name: "Menu" }).boundingBox(),
+  ]);
+  expect(firstBox).not.toBeNull();
+  expect(lastBox).not.toBeNull();
+  expect(avatarBox).not.toBeNull();
+  if (!firstBox || !lastBox || !avatarBox) throw new Error("Header controls are not visible");
+  expect(lastBox.y).toBe(firstBox.y);
+  expect(Math.abs(lastBox.y + lastBox.height / 2 - avatarBox.y - avatarBox.height / 2)).toBeLessThanOrEqual(2);
+  expect(lastBox.x + lastBox.width).toBeLessThan(avatarBox.x);
+
+  await page.setViewportSize({ width: 900, height: 720 });
+  const [headerBox, wrappedAvatarBox] = await Promise.all([
+    page.locator("header").boundingBox(),
+    page.getByRole("button", { name: "Menu" }).boundingBox(),
+  ]);
+  expect(headerBox).not.toBeNull();
+  expect(wrappedAvatarBox).not.toBeNull();
+  if (!headerBox || !wrappedAvatarBox) throw new Error("Header or avatar is not visible");
+  expect(Math.abs(wrappedAvatarBox.y - headerBox.y)).toBeLessThanOrEqual(1);
+});
+
+test("mobile quota lines use the space below the avatar", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/");
+
+  const pills = page.getByTestId("provider-usage");
+  await expect(pills.first()).toBeVisible();
+  await pills.first().evaluate((pill) => {
+    const row = pill.parentElement;
+    if (!row) throw new Error("Quota row is missing");
+    const widths = [103, 60, 60, 55, 55, 33, 33, 98, 25, 25, 25, 27];
+    row.replaceChildren(
+      ...widths.map((width) => {
+        const item = document.createElement("span");
+        item.className = pill.className;
+        item.dataset.testid = "provider-usage";
+        item.style.boxSizing = "border-box";
+        item.style.width = `${width}px`;
+        item.style.height = "20px";
+        return item;
+      }),
+    );
+  });
+
+  const boxes = await pills.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().toJSON()));
+  const avatarBox = await page.getByRole("button", { name: "Menu" }).boundingBox();
+  const headerBox = await page.locator("header").boundingBox();
+  expect(avatarBox).not.toBeNull();
+  expect(headerBox).not.toBeNull();
+  if (!avatarBox || !headerBox) throw new Error("Header or avatar is not visible");
+  const firstLineY = boxes[0]?.y;
+  expect(firstLineY).toBeDefined();
+  const firstLine = boxes.filter((box) => box.y === firstLineY);
+  const lowerLines = boxes.filter((box) => box.y > (firstLineY ?? 0));
+  expect(boxes[3]?.y).toBe(firstLineY);
+  expect(firstLine.every((box) => box.x + box.width <= avatarBox.x)).toBe(true);
+  expect(avatarBox.x - Math.max(...firstLine.map((box) => box.x + box.width))).toBeGreaterThanOrEqual(4);
+  expect(lowerLines.some((box) => box.x + box.width > avatarBox.x)).toBe(true);
+  expect(boxes.every((box) => box.x + box.width <= headerBox.x + headerBox.width)).toBe(true);
+});
+
+test("mobile quota pills keep their compact height", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/");
+
+  const firstPill = page.getByTestId("provider-usage").first();
+  await expect(firstPill).toBeVisible();
+  const pillBox = await firstPill.boundingBox();
+  const avatarBox = await page.getByRole("button", { name: "Menu" }).boundingBox();
+  expect(pillBox).not.toBeNull();
+  expect(avatarBox).not.toBeNull();
+  if (!pillBox || !avatarBox) throw new Error("Header controls are not visible");
+  expect(pillBox.height).toBeLessThanOrEqual(avatarBox.height);
+  const heights = await page
+    .getByTestId("provider-usage")
+    .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height));
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(2);
+});
+
 test("circular connection wave crosses a stationary word and respects reduced motion", async ({ page }) => {
   await page.goto("/");
   const word = page.getByTestId("new-task-button");

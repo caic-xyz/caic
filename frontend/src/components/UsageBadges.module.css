@@ -2,9 +2,10 @@
 
 .usageRow {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-left: auto;
+  gap: 0.3rem;
+  min-width: 0;
 }
 
 .providerPill {
@@ -129,5 +130,11 @@ a.providerPill:hover {
 @media (width <= 480px) {
   .usageRow {
     display: contents;
+  }
+
+  .providerPill {
+    margin: 0 0.2rem 0.25rem 0;
+    line-height: normal;
+    vertical-align: middle;
   }
 }

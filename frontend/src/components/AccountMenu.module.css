@@ -4,6 +4,12 @@
   position: relative;
 }
 
+@media (width > 768px) {
+  .userMenu {
+    align-self: flex-start;
+  }
+}
+
 .avatarButton {
   display: flex;
   align-items: center;
