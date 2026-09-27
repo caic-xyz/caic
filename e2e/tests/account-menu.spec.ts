@@ -63,3 +63,40 @@ test("top header keeps its controls within a narrow viewport", async ({ page }) 
     expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
   }
 });
+
+test("quota pills use the space beside the title and connection dot keeps its side", async ({ page }) => {
+  for (const width of [320, 390, 600, 1024]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.goto("/");
+
+    const title = page.getByRole("button", { name: "caic", exact: true });
+    const dot = page.getByTestId("connection-dot");
+    const avatar = page.getByRole("button", { name: "Menu" });
+    const firstPill = page.getByTestId("provider-usage").first();
+    await expect(firstPill).toBeVisible();
+
+    const [titleBox, dotBox, avatarBox, pillBox] = await Promise.all([
+      title.boundingBox(),
+      dot.boundingBox(),
+      avatar.boundingBox(),
+      firstPill.boundingBox(),
+    ]);
+    expect(titleBox && dotBox && avatarBox && pillBox).toBeTruthy();
+    if (!titleBox || !dotBox || !avatarBox || !pillBox) throw new Error("Header content is not visible");
+
+    expect(dotBox.x).toBeGreaterThan(titleBox.x + titleBox.width);
+    expect(dotBox.x - (titleBox.x + titleBox.width)).toBeLessThanOrEqual(8);
+    expect(dotBox.y + dotBox.height).toBeLessThan(titleBox.y + titleBox.height / 2);
+    expect(dotBox.x + dotBox.width).toBeLessThan(pillBox.x);
+    expect(pillBox.x + pillBox.width).toBeLessThan(avatarBox.x);
+    if (width <= 390) {
+      expect(pillBox.y).toBeLessThan(titleBox.y + titleBox.height);
+    }
+    if (width === 1024) {
+      const subtitleBox = await page.getByText("Coding Agents in Containers").boundingBox();
+      expect(subtitleBox).not.toBeNull();
+      if (!subtitleBox) throw new Error("Header subtitle is not visible");
+      expect(subtitleBox.y + subtitleBox.height).toBeGreaterThanOrEqual(titleBox.y + titleBox.height - 2);
+    }
+  }
+});

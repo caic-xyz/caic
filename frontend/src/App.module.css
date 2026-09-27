@@ -20,8 +20,15 @@
   margin-bottom: 0.75rem;
 }
 
-.title {
+.brand {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.2rem;
+  align-items: flex-start;
   align-self: baseline;
+}
+
+.title {
   margin: 0;
   font-size: 1.5rem;
   line-height: 1;
@@ -153,7 +160,9 @@
 
 @media (width <= 480px) {
   .navbar {
+    position: relative;
     flex-wrap: wrap;
     row-gap: 0.5rem;
+    padding-right: 2.4rem;
   }
 }

@@ -128,8 +128,6 @@ a.providerPill:hover {
 
 @media (width <= 480px) {
   .usageRow {
-    flex-basis: 100%;
-    order: 1;
-    margin-left: 0;
+    display: contents;
   }
 }

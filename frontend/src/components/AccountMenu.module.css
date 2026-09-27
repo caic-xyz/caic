@@ -92,6 +92,8 @@
 
 @media (width <= 480px) {
   .userMenu {
-    margin-left: auto;
+    position: absolute;
+    top: 0;
+    right: 0;
   }
 }

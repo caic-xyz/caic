@@ -133,24 +133,26 @@ function Shell(props: { children?: JSX.Element }) {
       <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
         <div class={styles.app} data-testid="app-shell">
           <header class={styles.navbar}>
-            <h1 class={styles.title}>
-              <button
-                class={styles.titleButton}
-                type="button"
-                onClick={() => s.navigate("/")}
-                title="New task"
-                data-testid="new-task-button"
-              >
-                caic
-              </button>
-            </h1>
+            <div class={styles.brand}>
+              <h1 class={styles.title}>
+                <button
+                  class={styles.titleButton}
+                  type="button"
+                  onClick={() => s.navigate("/")}
+                  title="New task"
+                  data-testid="new-task-button"
+                >
+                  caic
+                </button>
+              </h1>
+              <ConnectionDot
+                connected={s.connected()}
+                settledLoading={s.settledLoading()}
+                settledError={s.settledError()}
+              />
+            </div>
             <span class={styles.subtitle}>Coding Agents in Containers</span>
             <UsageBadges usage={s.usage} now={s.now} />
-            <ConnectionDot
-              connected={s.connected()}
-              settledLoading={s.settledLoading()}
-              settledError={s.settledError()}
-            />
             <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
           </header>
 
