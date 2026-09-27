@@ -20,15 +20,8 @@
   margin-bottom: 0.75rem;
 }
 
-.brand {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 0.2rem;
-  align-items: flex-start;
-  align-self: baseline;
-}
-
 .title {
+  align-self: baseline;
   margin: 0;
   font-size: 1.5rem;
   line-height: 1;
@@ -44,8 +37,57 @@
   border: none;
 }
 
-.titleButton:hover {
-  color: var(--color-primary);
+.titleButton[data-status="settled-loading"] {
+  --connection-wave-base: var(--color-warning-text);
+  --connection-wave-center: var(--color-connection-wave-loading-center);
+  --connection-wave-rim: var(--color-connection-wave-loading-rim);
+
+  color: var(--connection-wave-base);
+}
+
+.titleButton[data-status="disconnected"],
+.titleButton[data-status="settled-error"] {
+  --connection-wave-base: var(--color-danger);
+  --connection-wave-center: var(--color-connection-wave-error-center);
+  --connection-wave-rim: var(--color-connection-wave-error-rim);
+
+  color: var(--connection-wave-base);
+}
+
+@supports (background-clip: text) {
+  .titleButton:is([data-status="settled-loading"], [data-status="disconnected"], [data-status="settled-error"]) {
+    background-color: var(--connection-wave-base);
+    background-image: radial-gradient(
+      circle,
+      var(--connection-wave-center) 0 15%,
+      var(--connection-wave-rim) 42%,
+      var(--connection-wave-base) 75%
+    );
+    background-repeat: no-repeat;
+    background-position: -4rem -0.45rem;
+    background-clip: text;
+    background-size: 2.5rem 2.5rem;
+    animation: connection-wave 2.2s linear infinite;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+@keyframes connection-wave {
+  to {
+    background-position: calc(100% + 4rem) -0.45rem;
+  }
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
 }
 
 .subtitle {
@@ -54,32 +96,18 @@
   color: var(--color-text-muted);
 }
 
-.dotConnected,
-.dotDisconnected,
-.dotSettledError,
-.dotSettledLoading {
-  display: inline-block;
-  flex-shrink: 0;
-  width: 0.5rem;
-  height: 0.5rem;
-  vertical-align: middle;
-  border-radius: 50%;
+@media (prefers-reduced-motion: reduce) {
+  .titleButton:is([data-status="settled-loading"], [data-status="disconnected"], [data-status="settled-error"]) {
+    animation: none;
+  }
 }
 
-.dotConnected {
-  background: var(--color-success);
-}
-
-.dotDisconnected {
-  background: var(--color-danger);
-}
-
-.dotSettledError {
-  background: var(--color-settled-error);
-}
-
-.dotSettledLoading {
-  background: var(--color-settled-loading);
+@media (forced-colors: active) {
+  .titleButton:is([data-status="settled-loading"], [data-status="disconnected"], [data-status="settled-error"]) {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+    animation: none;
+  }
 }
 
 .errorFallback {

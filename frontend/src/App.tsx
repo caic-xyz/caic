@@ -63,9 +63,8 @@ function ErrorFallback(props: { error: unknown; reset: () => void }) {
   );
 }
 
-// ConnectionStatus is the worst-wins ordering of the navbar connection dot:
-// disconnected (red) > settled pass failed (orange) > settled pass in progress
-// (yellow) > pass completed (green).
+// ConnectionStatus is the worst-wins ordering of the navbar wordmark:
+// disconnected or failed (red) > loading (amber) > connected (black).
 type ConnectionStatus = "disconnected" | "settled-error" | "settled-loading" | "connected";
 
 function connectionStatus(connected: boolean, settledError: string, settledLoading: boolean): ConnectionStatus {
@@ -75,35 +74,17 @@ function connectionStatus(connected: boolean, settledError: string, settledLoadi
   return "connected";
 }
 
-function ConnectionDot(props: { connected: boolean; settledLoading: boolean; settledError: string }) {
-  const status = () => connectionStatus(props.connected, props.settledError, props.settledLoading);
-  const classFor = (s: ConnectionStatus) => {
-    switch (s) {
-      case "disconnected":
-        return styles.dotDisconnected;
-      case "settled-error":
-        return styles.dotSettledError;
-      case "settled-loading":
-        return styles.dotSettledLoading;
-      case "connected":
-        return styles.dotConnected;
-    }
-  };
-  const titleFor = (s: ConnectionStatus) => {
-    switch (s) {
-      case "disconnected":
-        return "Disconnected";
-      case "settled-error":
-        return props.settledError;
-      case "settled-loading":
-        return "Loading history…";
-      case "connected":
-        return "Connected";
-    }
-  };
-  return (
-    <span class={classFor(status())} title={titleFor(status())} data-status={status()} data-testid="connection-dot" />
-  );
+function connectionStatusLabel(status: ConnectionStatus, settledError: string): string {
+  switch (status) {
+    case "disconnected":
+      return "Disconnected";
+    case "settled-error":
+      return settledError;
+    case "settled-loading":
+      return "Loading history…";
+    case "connected":
+      return "Connected";
+  }
 }
 
 /** Holds the screen while cookie identity is unresolved and offers a reload. */
@@ -127,30 +108,30 @@ function Shell(props: { children?: JSX.Element }) {
   const hostMode = useHostMode();
   const auth = s.auth;
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const status = () => connectionStatus(s.connected(), s.settledError(), s.settledLoading());
+  const statusLabel = () => connectionStatusLabel(status(), s.settledError());
 
   return (
     <Show when={auth.ready() || auth.providers().length === 0} fallback={<SessionCheckPage />}>
       <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
         <div class={styles.app} data-testid="app-shell">
           <header class={styles.navbar}>
-            <div class={styles.brand}>
-              <h1 class={styles.title}>
-                <button
-                  class={styles.titleButton}
-                  type="button"
-                  onClick={() => s.navigate("/")}
-                  title="New task"
-                  data-testid="new-task-button"
-                >
-                  caic
-                </button>
-              </h1>
-              <ConnectionDot
-                connected={s.connected()}
-                settledLoading={s.settledLoading()}
-                settledError={s.settledError()}
-              />
-            </div>
+            <h1 class={styles.title}>
+              <button
+                class={styles.titleButton}
+                type="button"
+                onClick={() => s.navigate("/")}
+                title={`New task — ${statusLabel()}`}
+                aria-describedby="connection-status"
+                data-status={status()}
+                data-testid="new-task-button"
+              >
+                caic
+              </button>
+            </h1>
+            <span id="connection-status" class={styles.visuallyHidden} aria-live="polite">
+              {statusLabel()}
+            </span>
             <span class={styles.subtitle}>Coding Agents in Containers</span>
             <UsageBadges usage={s.usage} now={s.now} />
             <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />

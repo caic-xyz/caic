@@ -476,38 +476,46 @@ describe("App task list loading state", () => {
   });
 });
 
-describe("App connection dot settled states", () => {
-  const dot = () => screen.getByTestId("connection-dot");
+describe("App connection word settled states", () => {
+  const word = () => screen.getByTestId("new-task-button");
+  const status = () => document.getElementById("connection-status");
 
-  it("is green (connected) after a clean settled snapshot", async () => {
+  it("exposes connected status on the caic button", async () => {
     renderApp();
+    expect(word().getAttribute("data-status")).toBe("connected");
+    expect(word().getAttribute("aria-describedby")).toBe("connection-status");
+    expect(status()).toHaveTextContent("Connected");
+    expect(screen.queryByTestId("connection-dot")).not.toBeInTheDocument();
+
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
+    await waitFor(() => expect(word().getAttribute("data-status")).toBe("connected"));
+    expect(status()).toHaveTextContent("Connected");
   });
 
-  it("is yellow (settled-loading) while the pass is in progress and green after a completed status", async () => {
+  it("shows loading while the pass is in progress and connected after completion", async () => {
     renderApp();
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
+    await waitFor(() => expect(word().getAttribute("data-status")).toBe("settled-loading"));
+    expect(status()).toHaveTextContent("Loading history…");
 
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("connected"));
+    await waitFor(() => expect(word().getAttribute("data-status")).toBe("connected"));
   });
 
-  it("is orange (settled-error) with the error tooltip after a failed status", async () => {
+  it("shows the history error in the button description after a failed status", async () => {
     renderApp();
     await waitForTaskEventsSubscription();
     dispatchSSE({ kind: "snapshot", snapshot: [] });
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
-    await waitFor(() => expect(dot().getAttribute("data-status")).toBe("settled-loading"));
+    await waitFor(() => expect(word().getAttribute("data-status")).toBe("settled-loading"));
 
     dispatchSSE({
       kind: "status",
@@ -515,8 +523,9 @@ describe("App connection dot settled states", () => {
     });
 
     await waitFor(() => {
-      expect(dot().getAttribute("data-status")).toBe("settled-error");
-      expect(dot().getAttribute("title")).toBe("load purged tasks: boom");
+      expect(word().getAttribute("data-status")).toBe("settled-error");
+      expect(word().getAttribute("title")).toBe("New task — load purged tasks: boom");
+      expect(status()).toHaveTextContent("load purged tasks: boom");
     });
   });
 });

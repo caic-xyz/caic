@@ -69,14 +69,20 @@ test("network failure shows reconnect banner", async ({ page }) => {
   // then reload the page so it tries to reconnect through the blocked route.
   await page.reload();
 
-  // The connection dot should turn red (dotDisconnected class).
-  const dot = page.getByTestId("connection-dot");
-  await expect(dot).toHaveClass(/dotDisconnected/, { timeout: 15_000 });
+  // The caic wordmark should turn red when disconnected.
+  const word = page.getByTestId("new-task-button");
+  await expect(word).toHaveAttribute("data-status", "disconnected", { timeout: 15_000 });
+  await expect(word).toHaveCSS("color", "rgb(220, 53, 69)");
+  await expect(word).toHaveCSS("animation-name", /connection-wave/);
+  await expect(word).toHaveCSS("transform", "none");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(word).toHaveCSS("animation-name", "none");
 
   // Restore network and reload to verify recovery.
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.reload();
-  await expect(dot).toHaveClass(/dotConnected/, { timeout: 15_000 });
+  await expect(word).toHaveAttribute("data-status", "connected", { timeout: 15_000 });
+  await expect(word).toHaveCSS("color", "rgb(0, 0, 0)");
 });
 
 test("creating a task with special characters in prompt", async ({ api }) => {

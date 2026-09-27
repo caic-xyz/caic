@@ -21,7 +21,7 @@ export async function prepareVisualPage(page: Page): Promise<void> {
 }
 
 export async function waitForVisualReadiness(page: Page): Promise<void> {
-  const connection = page.getByTestId("connection-dot");
+  const connection = page.getByTestId("new-task-button");
   if ((await connection.count()) > 0) {
     await expect(connection).toHaveAttribute("data-status", "connected");
   }

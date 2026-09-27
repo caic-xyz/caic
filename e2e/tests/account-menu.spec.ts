@@ -46,7 +46,6 @@ test("top header keeps its controls within a narrow viewport", async ({ page }) 
   const header = page.locator("header");
   const controls = [
     page.getByRole("button", { name: "caic", exact: true }),
-    page.getByTestId("connection-dot"),
     page.getByRole("button", { name: "Menu" }),
   ];
   await Promise.all(controls.map((control) => expect(control).toBeVisible()));
@@ -64,39 +63,60 @@ test("top header keeps its controls within a narrow viewport", async ({ page }) 
   }
 });
 
-test("quota pills use the space beside the title and connection dot keeps its side", async ({ page }) => {
+test("quota pills use the space beside the connection word", async ({ page }) => {
   for (const width of [320, 390, 600, 1024]) {
     await page.setViewportSize({ width, height: 720 });
     await page.goto("/");
 
     const title = page.getByRole("button", { name: "caic", exact: true });
-    const dot = page.getByTestId("connection-dot");
     const avatar = page.getByRole("button", { name: "Menu" });
     const firstPill = page.getByTestId("provider-usage").first();
     await expect(firstPill).toBeVisible();
+    await expect(title).toHaveAttribute("data-status", "connected");
+    await expect(title).toHaveCSS("color", "rgb(0, 0, 0)");
+    await title.hover();
+    await expect(title).toHaveCSS("text-decoration-line", "none");
 
-    const [titleBox, dotBox, avatarBox, pillBox] = await Promise.all([
-      title.boundingBox(),
-      dot.boundingBox(),
-      avatar.boundingBox(),
-      firstPill.boundingBox(),
-    ]);
-    expect(titleBox && dotBox && avatarBox && pillBox).toBeTruthy();
-    if (!titleBox || !dotBox || !avatarBox || !pillBox) throw new Error("Header content is not visible");
-
-    expect(dotBox.x).toBeGreaterThan(titleBox.x + titleBox.width);
-    expect(dotBox.x - (titleBox.x + titleBox.width)).toBeLessThanOrEqual(8);
-    expect(dotBox.y + dotBox.height).toBeLessThan(titleBox.y + titleBox.height / 2);
-    expect(dotBox.x + dotBox.width).toBeLessThan(pillBox.x);
-    expect(pillBox.x + pillBox.width).toBeLessThan(avatarBox.x);
-    if (width <= 390) {
-      expect(pillBox.y).toBeLessThan(titleBox.y + titleBox.height);
-    }
+    await expect
+      .poll(async () => {
+        const [titleBox, avatarBox, pillBox] = await Promise.all([
+          title.boundingBox(),
+          avatar.boundingBox(),
+          firstPill.boundingBox(),
+        ]);
+        if (!titleBox || !avatarBox || !pillBox) return false;
+        return (
+          pillBox.x > titleBox.x + titleBox.width &&
+          pillBox.x + pillBox.width < avatarBox.x &&
+          (width > 390 || pillBox.y < titleBox.y + titleBox.height)
+        );
+      })
+      .toBe(true);
     if (width === 1024) {
+      const titleBox = await title.boundingBox();
       const subtitleBox = await page.getByText("Coding Agents in Containers").boundingBox();
+      expect(titleBox).not.toBeNull();
       expect(subtitleBox).not.toBeNull();
-      if (!subtitleBox) throw new Error("Header subtitle is not visible");
+      if (!titleBox || !subtitleBox) throw new Error("Header title or subtitle is not visible");
       expect(subtitleBox.y + subtitleBox.height).toBeGreaterThanOrEqual(titleBox.y + titleBox.height - 2);
     }
   }
+});
+
+test("circular connection wave crosses a stationary word and respects reduced motion", async ({ page }) => {
+  await page.goto("/");
+  const word = page.getByTestId("new-task-button");
+  await expect(word).toHaveAttribute("data-status", "connected");
+
+  // The fake backend settles quickly; set only the visual state to inspect its CSS.
+  for (const status of ["settled-loading", "settled-error"]) {
+    await word.evaluate((el, value) => el.setAttribute("data-status", value), status);
+    await expect(word).toHaveCSS("background-image", /radial-gradient/);
+    await expect(word).toHaveCSS("background-clip", "text");
+    await expect(word).toHaveCSS("animation-name", /connection-wave/);
+    await expect(word).toHaveCSS("transform", "none");
+  }
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(word).toHaveCSS("animation-name", "none");
 });

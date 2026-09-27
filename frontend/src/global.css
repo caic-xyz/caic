@@ -45,9 +45,11 @@
   --color-warning-border: #ffc107;
   --color-warning-text: #856404;
 
-  /* Settled-history status dot. */
-  --color-settled-loading: #fbc02d;
-  --color-settled-error: #ff9800;
+  /* Readable tints for the connection wordmark's amber and red waves. */
+  --color-connection-wave-loading-center: #5f4300;
+  --color-connection-wave-loading-rim: #977000;
+  --color-connection-wave-error-center: #80202d;
+  --color-connection-wave-error-rim: #bb2e3e;
 
   /* Gray button variant */
   --color-gray: #6c757d;
