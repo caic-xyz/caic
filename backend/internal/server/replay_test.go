@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -476,6 +478,49 @@ func TestTaskEventStreamResume(t *testing.T) {
 			t.Fatalf("error = %v, want invalid task event ID", err)
 		}
 	})
+}
+
+func TestReplayMemoryHistoryRebuildsFilterAfterCursorReset(t *testing.T) {
+	t.Parallel()
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "fix the bug"}, harness.Claude)
+	tk.SeedTimeline([]agent.Message{
+		&agent.UserInputMessage{Text: "fix the bug"},
+		&agent.TextDeltaMessage{Text: "hel"},
+		&agent.TextDeltaMessage{Text: "lo"},
+		&agent.TextMessage{Text: "hello"},
+	})
+	history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
+	defer unsubscribe()
+
+	s := newTestRouter(t, nil)
+	entry := s.taskMgr.NewEntry(tk, nil)
+	w := httptest.NewRecorder()
+	stream := taskEventStream{
+		w:       w,
+		writer:  sse.New(w),
+		tracker: newHistoryTracker(tk),
+		resume: taskEventResume{
+			timelineID: tk.TimelineID(),
+			source:     taskEventSourceMemory,
+			after: taskEventID{
+				timeline: tk.TimelineID(),
+				source:   taskEventSourceMemory,
+				message:  4,
+				event:    99,
+			},
+		},
+	}
+	if err := testTaskHandlers(s).replayMemoryHistory(&stream, entry, history, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	body := w.Body.String()
+	resetAt := strings.LastIndex(body, "event: reset")
+	if resetAt < 0 {
+		t.Fatalf("replay did not reset invalid cursor:\n%s", body)
+	}
+	if suffix := body[resetAt:]; !strings.Contains(suffix, "fix the bug") || !strings.Contains(suffix, "hello") {
+		t.Fatalf("reset replay lost early or final history:\n%s", suffix)
+	}
 }
 
 func TestFilterHistoryForReplay(t *testing.T) {

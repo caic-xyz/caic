@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -4083,6 +4084,119 @@ func TestManager(t *testing.T) {
 
 	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
+		t.Run("marks_interrupted_startup_failed_before_reconnect", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			instanceID := runtime.NewID("test-runtime", "md-agent-incomplete-startup")
+			info := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-incomplete-startup\x00caic.id":      taskID.String(),
+				"md-agent-incomplete-startup\x00caic.harness": string(harness.Codex),
+			}}
+			runtimeBackend := &runtimetest.FakeBackend{}
+			logDir := t.TempDir()
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				LogStore:  taskslog.NewStore(testLogger(), logDir),
+				Runtimes:  newTestRuntime(t, runtimeBackend, info),
+				Backends: map[harness.Name]agent.Backend{
+					harness.Codex: &agenttest.FakeBackend{WireFactory: codex.New("", nil).NewWire},
+				},
+			})
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+					return true, "alive", nil
+				},
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+					return agent.ParsedTimeline{}, 0, nil
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			tk := mustNewTask(t, taskID, agent.Prompt{Text: "must not be silently retried"}, harness.Codex, "")
+			log, _, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := m.logStore.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "running"}}, logs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("len(adopted) = %d, want 1", len(adopted))
+			}
+			entry := adopted[0]
+			if got := entry.Task().GetState(); got != taskslog.StateFailed {
+				t.Errorf("state = %s, want failed", got)
+			}
+			result := entry.Result()
+			if result == nil || !errors.Is(result.Err, task.ErrInitialPromptNotAccepted) {
+				t.Errorf("result = %#v, want incomplete-startup failure", result)
+			}
+			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusStopped {
+				t.Errorf("runtime status = %s, want stopped", got)
+			}
+			if entry.Task().HasSession() {
+				t.Error("incomplete startup attached a live relay session")
+			}
+		})
+		t.Run("restores_accepted_opencode_prompt_from_durable_input", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			instanceID := runtime.NewID("test-runtime", "md-agent-opencode-accepted-input")
+			info := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-opencode-accepted-input\x00caic.id":      taskID.String(),
+				"md-agent-opencode-accepted-input\x00caic.harness": string(harness.OpenCode),
+			}}
+			logDir := t.TempDir()
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				LogStore:  taskslog.NewStore(testLogger(), logDir),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, info),
+				Backends: map[harness.Name]agent.Backend{
+					harness.OpenCode: &agenttest.FakeBackend{HarnessName: harness.OpenCode, WireFactory: opencode.New("", nil).NewWire},
+				},
+			})
+			tk := mustNewTask(t, taskID, agent.Prompt{Text: "accepted prompt"}, harness.OpenCode, "")
+			log, _, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := []byte(`{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"ses_1","prompt":[{"type":"text","text":"accepted prompt"}]}}` + "\n")
+			if err := agent.AppendInputNativeRecord(log, log.LogVersion(), request); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := m.logStore.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "running"}}, logs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("len(adopted) = %d, want 1", len(adopted))
+			}
+			if !adopted[0].Task().HasAcceptedInputEvidence() {
+				t.Fatal("durable OpenCode session/prompt did not restore accepted input")
+			}
+			if got := adopted[0].Task().GetState(); got == taskslog.StateFailed {
+				t.Fatalf("state = %s, accepted OpenCode prompt was misclassified", got)
+			}
+			if result := adopted[0].Result(); result != nil && errors.Is(result.Err, task.ErrInitialPromptNotAccepted) {
+				t.Fatalf("result = %#v, accepted OpenCode prompt was misclassified", result)
+			}
+		})
 		t.Run("rejects_duplicate_runtime_task_ids", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()

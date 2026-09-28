@@ -9,6 +9,10 @@
 
 ---
 
+## User
+
+Read the file nonexistent_file.txt
+
 ### 🔧 Tool: `Read`
 
 **File**: `/workspace/nonexistent_file.txt`

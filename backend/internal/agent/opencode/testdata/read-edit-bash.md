@@ -9,6 +9,10 @@
 
 ---
 
+## User
+
+Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.
+
 ### 🔧 Tool: `Read`
 
 **File**: `/workspace/main.go`

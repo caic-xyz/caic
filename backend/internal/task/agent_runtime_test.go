@@ -63,6 +63,17 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 	return agent.NewSession(ctx, cmd, agent.NewConn(ctx, opts.Logger, stdin, opts.Log, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, opts.Logger), nil
 }
 
+type reviveCaptureBackend struct {
+	instantExitBackend
+
+	starts []agent.Options
+}
+
+func (b *reviveCaptureBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	b.starts = append(b.starts, *opts)
+	return b.instantExitBackend.Start(ctx, opts)
+}
+
 // reviveEnsureFailureBackend lets the resumed session exit, then rejects the
 // idle replacement started by EnsureSession.
 type reviveEnsureFailureBackend struct {
@@ -939,6 +950,56 @@ func TestRunner(t *testing.T) {
 
 	t.Run("ReviveTask", func(t *testing.T) {
 		t.Parallel()
+		t.Run("rejects_task_that_never_accepted_initial_prompt", func(t *testing.T) {
+			t.Parallel()
+			backend := &reviveCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
+			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			prompt := agent.Prompt{Text: "recover this task", Images: []agent.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}
+			tk := mustNewTask(t, ksid.NewID(), prompt, "test", "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(taskslog.StateStopped)
+
+			if _, err := r.ReviveTask(t.Context(), tk); err == nil || !strings.Contains(err.Error(), "did not accept its initial prompt") {
+				t.Fatalf("ReviveTask error = %v, want incomplete-startup error", err)
+			}
+			if len(backend.starts) != 0 {
+				t.Fatalf("backend starts = %d, want 0", len(backend.starts))
+			}
+		})
+		t.Run("does_not_duplicate_an_accepted_initial_prompt", func(t *testing.T) {
+			t.Parallel()
+			backend := &reviveCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
+			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "already accepted"}, "test", "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetSessionMetadata("session-1", "", "", "")
+			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}})
+			tk.SetState(taskslog.StateStopped)
+
+			h, err := r.ReviveTask(t.Context(), tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				tk.CloseAndDetachSession(t.Context())
+				h.CloseMsgCh()
+				<-h.DispatchDone
+				_ = h.Log.Close()
+			})
+
+			if len(backend.starts) == 0 {
+				t.Fatal("backend received no starts")
+			}
+			if got := backend.starts[0].InitialPrompt; got.Text != "" || len(got.Images) != 0 {
+				t.Errorf("InitialPrompt = %#v, want empty prompt", got)
+			}
+			if got := backend.starts[0].ResumeSessionID; got != "session-1" {
+				t.Errorf("ResumeSessionID = %q, want session-1", got)
+			}
+			if got := len(tk.Messages()); got != 1 {
+				t.Errorf("len(Messages()) = %d, want 1", got)
+			}
+		})
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
 			t.Run("no_runtime", func(t *testing.T) {
@@ -1000,6 +1061,7 @@ func TestRunner(t *testing.T) {
 					r := newTestAgentRuntimeWithRuntime(t, tc.runtime, tc.backends, logDir)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+					tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "test"}})
 					tk.SetState(taskslog.StateStopped)
 					log, err := r.openLog(tk)
 					if err != nil {
@@ -1033,6 +1095,7 @@ func TestRunner(t *testing.T) {
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "test"}})
 			tk.SetState(taskslog.StateStopped)
 
 			h, err := r.ReviveTask(t.Context(), tk)

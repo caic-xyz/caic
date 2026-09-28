@@ -13,70 +13,131 @@ import (
 // ThinkingMessage are omitted — the frontend uses only the final message when
 // available, so the deltas are pure waste during history replay.
 func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
-	skip := historyReplaySkip(msgs)
+	filter := newHistoryReplayFilter(agentReplayHistory(msgs))
 	out := make([]agent.Message, 0, len(msgs))
 	for i, msg := range msgs {
-		if !skip[i] {
+		if !filter.Skip(i) {
 			out = append(out, msg)
 		}
 	}
 	return out
 }
 
-func historyReplaySkip(msgs []agent.Message) []bool {
-	skip := make([]bool, len(msgs))
-	for i, msg := range msgs {
-		switch m := msg.(type) {
-		case *agent.TextMessage:
-			for j := i - 1; j >= 0; j-- {
-				if _, ok := msgs[j].(*agent.TextDeltaMessage); ok {
-					skip[j] = true
-				} else {
-					break
-				}
-			}
-		case *agent.ThinkingMessage:
-			for j := i - 1; j >= 0; j-- {
-				if _, ok := msgs[j].(*agent.ThinkingDeltaMessage); ok {
-					skip[j] = true
-				} else {
-					break
-				}
-			}
-		case *agent.WidgetMessage:
-			for j := i - 1; j >= 0; j-- {
-				if _, ok := msgs[j].(*agent.WidgetDeltaMessage); ok {
-					skip[j] = true
-				} else {
-					break
-				}
-			}
-		case *agent.ToolResultMessage:
-			for j := i - 1; j >= 0; j-- {
-				if td, ok := msgs[j].(*agent.ToolOutputDeltaMessage); ok && td.ToolUseID == m.ToolUseID {
-					skip[j] = true
-				} else {
-					break
-				}
-			}
-		}
+type replayHistory interface {
+	Len() int
+	At(index int) agent.Message
+}
+
+type agentReplayHistory []agent.Message
+
+func (h agentReplayHistory) Len() int               { return len(h) }
+func (h agentReplayHistory) At(i int) agent.Message { return h[i] }
+
+type timelineReplayHistory struct {
+	snapshot task.TimelineSnapshot
+}
+
+func (h timelineReplayHistory) Len() int               { return h.snapshot.Len() }
+func (h timelineReplayHistory) At(i int) agent.Message { return h.snapshot.At(i).Message }
+
+type historyReplayFilter[H replayHistory] struct {
+	history           H
+	skipUntil         int
+	keepUntil         int
+	cleanTurnComplete bool
+}
+
+func newHistoryReplayFilter[H replayHistory](history H) historyReplayFilter[H] {
+	return historyReplayFilter[H]{history: history}
+}
+
+func (f *historyReplayFilter[H]) Skip(i int) bool {
+	if i < f.skipUntil {
+		return true
 	}
-	cleanTurnComplete := false
-	for i, msg := range msgs {
-		if skip[i] {
-			continue
+	if i >= f.keepUntil {
+		end, superseded := deltaRunEnd(f.history, i)
+		if superseded {
+			f.skipUntil = end
+			return true
 		}
-		if exit, ok := msg.(*agent.ExitMessage); ok {
-			if exit.ExitCode != 0 && cleanTurnComplete {
-				skip[i] = true
-				continue
-			}
-		} else if task.ClearsExitError(msg) {
-			cleanTurnComplete = false
-		}
-		if rm, ok := msg.(*agent.ResultMessage); ok {
-			cleanTurnComplete = !rm.IsError
-		}
+		f.keepUntil = end
+	} else {
+		return false
 	}
-	return skip
+	msg := f.history.At(i)
+	if exit, ok := msg.(*agent.ExitMessage); ok {
+		if exit.ExitCode != 0 && f.cleanTurnComplete {
+			return true
+		}
+	} else if task.ClearsExitError(msg) {
+		f.cleanTurnComplete = false
+	}
+	if result, ok := msg.(*agent.ResultMessage); ok {
+		f.cleanTurnComplete = !result.IsError
+	}
+	return false
+}
+
+func deltaRunEnd[H replayHistory](history H, start int) (int, bool) {
+	switch first := history.At(start).(type) {
+	case *agent.TextDeltaMessage:
+		end := start + 1
+		for end < history.Len() {
+			if _, ok := history.At(end).(*agent.TextDeltaMessage); !ok {
+				break
+			}
+			end++
+		}
+		if end < history.Len() {
+			if _, ok := history.At(end).(*agent.TextMessage); ok {
+				return end, true
+			}
+		}
+		return end, false
+	case *agent.ThinkingDeltaMessage:
+		end := start + 1
+		for end < history.Len() {
+			if _, ok := history.At(end).(*agent.ThinkingDeltaMessage); !ok {
+				break
+			}
+			end++
+		}
+		if end < history.Len() {
+			if _, ok := history.At(end).(*agent.ThinkingMessage); ok {
+				return end, true
+			}
+		}
+		return end, false
+	case *agent.WidgetDeltaMessage:
+		end := start + 1
+		for end < history.Len() {
+			if _, ok := history.At(end).(*agent.WidgetDeltaMessage); !ok {
+				break
+			}
+			end++
+		}
+		if end < history.Len() {
+			if _, ok := history.At(end).(*agent.WidgetMessage); ok {
+				return end, true
+			}
+		}
+		return end, false
+	case *agent.ToolOutputDeltaMessage:
+		end := start + 1
+		for end < history.Len() {
+			delta, ok := history.At(end).(*agent.ToolOutputDeltaMessage)
+			if !ok || delta.ToolUseID != first.ToolUseID {
+				break
+			}
+			end++
+		}
+		if end < history.Len() {
+			if result, ok := history.At(end).(*agent.ToolResultMessage); ok && result.ToolUseID == first.ToolUseID {
+				return end, true
+			}
+		}
+		return end, false
+	}
+	return start, false
 }

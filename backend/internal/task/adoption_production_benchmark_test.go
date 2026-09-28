@@ -75,8 +75,8 @@ func BenchmarkTaskAdoption(b *testing.B) {
 // into task state. The message mix mirrors a long session: mostly text and
 // tool traffic punctuated by turn results, diff stats and context boundaries.
 //
-// The seeded entries are shared across iterations; SeedTimelineEntries only
-// reads the slice, so sharing is safe.
+// The seeded entries contain no streaming deltas, so the in-place compaction
+// performed by SeedTimelineEntries leaves the shared fixture unchanged.
 func BenchmarkSeedTimeline(b *testing.B) {
 	const turns = 500
 	entries := make([]agent.TimedMessage, 0, turns*8)

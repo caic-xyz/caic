@@ -278,7 +278,7 @@ func (svc *Service) SetRepoCIStatus(relPath, sha string, result forgecache.Resul
 // emits a ResultMessage (end of turn) or ctx is cancelled. Returns true when
 // a ResultMessage arrives, false on cancellation or closed channel.
 func (svc *Service) waitForAgentResult(ctx context.Context, t *task.Task) bool {
-	_, live, unsub := t.Subscribe(ctx)
+	_, live, unsub := t.SubscribeLiveMessages(ctx)
 	defer unsub()
 	for {
 		select {

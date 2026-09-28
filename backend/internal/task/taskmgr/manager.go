@@ -1966,7 +1966,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			// trusted local history, skip the unverified offline tail, and resume at
 			// the inspected end so only future relay output is appended.
 			timeline = append(slices.Clone(lt.Timeline), agent.TimedMessage{Message: &agent.LogMessage{
-				Line: "Recovered legacy relay session; output produced while caic was unavailable could not be verified and was not retained.",
+				Line: task.LegacyRelayRecoveryNotice,
 			}})
 			m.log.WarnContext(ctx, "relay", "msg", "legacy recovery skipped unverified relay tail",
 				"repo", relPath, "br", branch, "instance", c.ID, "reason", merger.err)
@@ -1987,6 +1987,17 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 	if relaySnapshotRead {
 		t.SetRelayOffset(relaySize)
+	}
+	var importFailure error
+	if lt.LogPath() != "" && lt.State == taskslog.StateRunning && t.InitialPrompt.Text != "" && !t.HasAcceptedInputEvidence() && t.LastExitError() == "" {
+		importFailure = task.ErrInitialPromptNotAccepted
+		t.SetStateAt(taskslog.StateFailed, stateUpdatedAt)
+		m.log.ErrorContext(ctx, "imported task startup incomplete", "task", t.ID, "instance", c.ID, "err", importFailure)
+		if !isExited {
+			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // import must outlive request
+				m.log.ErrorContext(ctx, "stop incomplete imported task failed", "task", t.ID, "instance", c.ID, "err", err)
+			}
+		}
 	}
 	// The durable log only retains a sticky diff-created signal, and relay-tail
 	// overlap filtering omits diff-stat controls. Restore the authoritative full
@@ -2015,10 +2026,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		t.MarkDiffCreated()
 	}
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
-	if lt.State == taskslog.StateFailed {
+	if importFailure == nil && lt.State == taskslog.StateFailed {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
-	if lt.State == taskslog.StateCrashed && t.LastExitError() != "" {
+	if importFailure == nil && lt.State == taskslog.StateCrashed && t.LastExitError() != "" {
 		t.SetStateAt(lt.State, stateUpdatedAt)
 	}
 
@@ -2034,7 +2045,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	if isExited {
-		if t.GetState() != taskslog.StateCrashed {
+		if importFailure == nil && t.GetState() != taskslog.StateCrashed {
 			if t.LastExitError() != "" {
 				t.RecordSessionCrash(ctx, errors.New("agent subprocess exited before import"))
 			} else {
@@ -2065,7 +2076,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// subsequent lookups must use that authoritative in-memory fold.
 	entry.historyInMemory = true
 	if t.GetState() == taskslog.StateCrashed || t.GetState() == taskslog.StateFailed {
-		resultErr := errors.New("agent session failed")
+		resultErr := importFailure
+		if resultErr == nil {
+			resultErr = errors.New("agent session failed")
+		}
 		if t.GetState() == taskslog.StateCrashed {
 			resultErr = errors.New("agent session crashed")
 		}
@@ -2114,7 +2128,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// soon as startup returns. EnsureSession may still replace an already-exited
 	// attach in the background, but the attach itself must not race the first
 	// user reply after restart.
-	if t.GetState() != taskslog.StateStopped && relayAlive {
+	if importFailure == nil && t.GetState() != taskslog.StateStopped && relayAlive {
 		entry.Lifecycle.reconnectImportedSession() //nolint:contextcheck // imported watcher uses the Manager lifetime.
 	} else if !relayAlive && t.GetState() != taskslog.StateStopped && t.GetState() != taskslog.StateCrashed && t.GetState() != taskslog.StateFailed {
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",

@@ -152,7 +152,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	if err := stream.resume.prepare(stream.w, entry.Task().TimelineID(), source); err != nil {
 		return err
 	}
-	var history []task.TimelineMessage
+	var history task.TimelineSnapshot
 	var statsHistory []runtime.Stats
 	var live <-chan task.TimelineMessage
 	var statsLive <-chan runtime.Stats
@@ -165,7 +165,7 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 		liveAfter, live, unsub = entry.Task().SubscribeLiveMessages(stream.ctx)
 		statsLive, statsUnsub = entry.Task().SubscribeLiveStats(stream.ctx)
 	} else {
-		history, live, unsub = entry.Task().Subscribe(stream.ctx)
+		history, live, unsub = entry.Task().SubscribeSnapshot(stream.ctx)
 		statsHistory, statsLive, statsUnsub = entry.Task().SubscribeStats(stream.ctx)
 	}
 	defer unsub()
@@ -281,22 +281,19 @@ func newHistoryTracker(t *task.Task) *apiconv.ToolTimingTracker {
 	return apiconv.NewToolTimingTracker(t.Harness, t.PlanContentFor)
 }
 
-func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskmgr.Entry, history []task.TimelineMessage, at time.Time) error {
-	messages := make([]agent.Message, len(history))
-	for i := range history {
-		messages[i] = history[i].Message
-	}
-	skip := historyReplaySkip(messages)
+func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskmgr.Entry, history task.TimelineSnapshot, at time.Time) error {
 	return h.replayWithCursorReset(stream, entry, func() error {
-		if stream.resume.beyond(uint64(len(history))) {
+		filter := newHistoryReplayFilter(timelineReplayHistory{snapshot: history})
+		if stream.resume.beyond(uint64(history.Len())) { //nolint:gosec // A timeline cannot approach uint64 capacity.
 			return errInvalidTaskEventID
 		}
-		for i, message := range history {
+		for i := range history.Len() {
+			message := history.At(i)
 			messageTime := message.ObservedAt
 			if messageTime.IsZero() {
 				messageTime = at
 			}
-			if err := stream.writeMessage(message.Message, message.Sequence, messageTime, skip[i]); err != nil {
+			if err := stream.writeMessage(message.Message, message.Sequence, messageTime, filter.Skip(i)); err != nil {
 				return err
 			}
 		}

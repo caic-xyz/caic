@@ -39,6 +39,14 @@ type CreateRequest struct {
 
 const statsRingSize = 60
 
+// LegacyRelayRecoveryNotice marks imported V2 histories whose live relay
+// proves that the original prompt ran even though its offline output could not
+// be reconciled safely with the durable task log.
+//
+// TODO(2026-11): Remove this notice, its accepted-input exception, the live V2
+// relay recovery fallback, and their tests. Retain historical V2 log parsing.
+const LegacyRelayRecoveryNotice = "Recovered legacy relay session; output produced while caic was unavailable could not be verified and was not retained."
+
 // stateTransitionHistory bounds each task's journal of recent state
 // transitions. It only needs to cover the states a task-list connection can
 // miss between two snapshots, so a short window is sufficient.
@@ -793,6 +801,33 @@ func (t *Task) Messages() []agent.Message {
 	return messages
 }
 
+// HasAcceptedInputEvidence reports whether durable conversation history proves
+// that a user prompt reached the harness. Native user-input records are the
+// direct signal; turn output is accepted as evidence for older log formats
+// that did not persist their input side of the protocol.
+func (t *Task) HasAcceptedInputEvidence() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, entry := range t.timeline {
+		switch message := entry.Message.(type) {
+		case *agent.UserInputMessage,
+			*agent.TextMessage, *agent.TextDeltaMessage,
+			*agent.ThinkingMessage, *agent.ThinkingDeltaMessage,
+			*agent.ToolUseMessage, *agent.ToolResultMessage, *agent.ToolOutputDeltaMessage,
+			*agent.SkillReadMessage, *agent.AskMessage, *agent.PendingUserActionMessage,
+			*agent.TodoMessage, *agent.ResultMessage,
+			*agent.NativeSubagentMessage, *agent.BackgroundCommandMessage,
+			*agent.WidgetMessage, *agent.WidgetDeltaMessage:
+			return true
+		case *agent.LogMessage:
+			if message.Line == LegacyRelayRecoveryNotice {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // BackwardMessages returns the task's messages newest first as a snapshot taken
 // when BackwardMessages is called. Messages appended afterward are excluded.
 // Existing timeline slots are immutable, so iteration needs neither a slice
@@ -849,13 +884,15 @@ func (t *Task) SeedTimeline(messages []agent.Message) {
 	t.SeedTimelineEntries(entries)
 }
 
-// SeedTimelineEntries restores an adopted task from timestamped history.
+// SeedTimelineEntries restores an adopted task from timestamped history. It
+// takes ownership of entries and compacts finalized streaming deltas in place.
 func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if len(t.timeline) > 0 {
 		panic(fmt.Sprintf("task %s: SeedTimeline on a timeline that already holds %d messages", t.ID, len(t.timeline)))
 	}
+	compactFinalizedDeltas(entries)
 	t.timeline = entries
 	// One forward pass: the task starts empty, so every field below is derived
 	// from msgs alone and the per-concern handlers touch disjoint fields.
@@ -1038,6 +1075,48 @@ func (t *Task) SeedTimelineEntries(entries []agent.TimedMessage) {
 	}
 }
 
+var (
+	compactedTextDelta     = &agent.TextDeltaMessage{}
+	compactedThinkingDelta = &agent.ThinkingDeltaMessage{}
+	compactedWidgetDelta   = &agent.WidgetDeltaMessage{}
+)
+
+func compactFinalizedDeltas(entries []agent.TimedMessage) {
+	for i, entry := range entries {
+		switch final := entry.Message.(type) {
+		case *agent.TextMessage:
+			for j := i - 1; j >= 0; j-- {
+				if _, ok := entries[j].Message.(*agent.TextDeltaMessage); !ok {
+					break
+				}
+				entries[j].Message = compactedTextDelta
+			}
+		case *agent.ThinkingMessage:
+			for j := i - 1; j >= 0; j-- {
+				if _, ok := entries[j].Message.(*agent.ThinkingDeltaMessage); !ok {
+					break
+				}
+				entries[j].Message = compactedThinkingDelta
+			}
+		case *agent.WidgetMessage:
+			for j := i - 1; j >= 0; j-- {
+				if _, ok := entries[j].Message.(*agent.WidgetDeltaMessage); !ok {
+					break
+				}
+				entries[j].Message = compactedWidgetDelta
+			}
+		case *agent.ToolResultMessage:
+			for j := i - 1; j >= 0; j-- {
+				delta, ok := entries[j].Message.(*agent.ToolOutputDeltaMessage)
+				if !ok || delta.ToolUseID != final.ToolUseID {
+					break
+				}
+				delta.Delta = ""
+			}
+		}
+	}
+}
+
 // AttachSession stores the SessionHandle under the mutex.
 func (t *Task) AttachSession(h *SessionHandle) {
 	t.mu.Lock()
@@ -1132,6 +1211,18 @@ func (t *Task) Subscribe(ctx context.Context) (history []TimelineMessage, live <
 	t.subs = append(t.subs, s)
 	t.mu.Unlock()
 
+	return history, s.ch, unsubscribeMessages(t, ctx, s)
+}
+
+// SubscribeSnapshot returns a zero-copy immutable view of past messages plus
+// a live channel for messages appended after the snapshot. Existing timeline
+// entries are immutable; later appends cannot change the snapshot's length.
+func (t *Task) SubscribeSnapshot(ctx context.Context) (history TimelineSnapshot, live <-chan TimelineMessage, unsubFn func()) {
+	s := &sub{ch: make(chan TimelineMessage, 256)}
+	t.mu.Lock()
+	history.entries = t.timeline
+	t.subs = append(t.subs, s)
+	t.mu.Unlock()
 	return history, s.ch, unsubscribeMessages(t, ctx, s)
 }
 
@@ -1330,6 +1421,10 @@ const (
 // ErrNoActiveSession reports that input cannot be delivered because no live
 // session is attached to the task.
 var ErrNoActiveSession = errors.New("no active session")
+
+// ErrInitialPromptNotAccepted reports that startup ended before the task's
+// first user input became part of the durable conversation.
+var ErrInitialPromptNotAccepted = errors.New("task startup did not accept its initial prompt")
 
 // SendInput sends a user message to the running agent.
 //
@@ -2158,6 +2253,21 @@ type TimelineMessage struct {
 	Message    agent.Message
 	Sequence   uint64
 	ObservedAt time.Time
+}
+
+// TimelineSnapshot is an immutable view of a task timeline at subscription
+// time. It retains the underlying entries without copying them.
+type TimelineSnapshot struct {
+	entries []agent.TimedMessage
+}
+
+// Len returns the number of messages retained by the snapshot.
+func (s TimelineSnapshot) Len() int { return len(s.entries) }
+
+// At returns the indexed message with its stable one-based sequence number.
+func (s TimelineSnapshot) At(i int) TimelineMessage {
+	entry := s.entries[i]
+	return TimelineMessage{Message: entry.Message, Sequence: uint64(i + 1), ObservedAt: entry.ProducerTime} //nolint:gosec // A timeline cannot approach uint64 capacity.
 }
 
 // syntheticUserInput builds the UserInputMessage recorded in the task log for

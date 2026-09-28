@@ -218,6 +218,40 @@ func BenchmarkHandleTaskRawEventsPurgedReplay(b *testing.B) {
 	})
 }
 
+var benchmarkReplaySkipped int
+
+func BenchmarkHistoryReplayFilter(b *testing.B) {
+	const deltaCount = 100_000
+	for _, final := range []bool{true, false} {
+		name := "Unterminated"
+		if final {
+			name = "Finalized"
+		}
+		b.Run(name, func(b *testing.B) {
+			messages := make([]agent.Message, 0, deltaCount+1)
+			for range deltaCount {
+				messages = append(messages, &agent.TextDeltaMessage{Text: "x"})
+			}
+			if final {
+				messages = append(messages, &agent.TextMessage{Text: "complete"})
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				filter := newHistoryReplayFilter(agentReplayHistory(messages))
+				skipped := 0
+				for i := range messages {
+					if filter.Skip(i) {
+						skipped++
+					}
+				}
+				benchmarkReplaySkipped = skipped
+			}
+		})
+	}
+}
+
 func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *testRouter) {
 	logDir := b.TempDir()
 	taskID := ksid.NewID()

@@ -567,6 +567,9 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
 	defer task.End()
 
+	if (t.InitialPrompt.Text != "" || len(t.InitialPrompt.Images) > 0) && !t.HasAcceptedInputEvidence() {
+		return nil, ErrInitialPromptNotAccepted
+	}
 	instanceID := t.RuntimeInstanceID()
 	if instanceID == "" {
 		return nil, errors.New("no instance to revive")

@@ -4,7 +4,9 @@
 package taskslog
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +14,34 @@ import (
 )
 
 const realTaskLogDirEnv = "CAIC_REAL_TASK_LOG_DIR"
+
+func TestCopyRealTaskLogCorpusLinksSameFilesystemLogs(t *testing.T) {
+	source := t.TempDir()
+	destination := filepath.Join(t.TempDir(), "tasks")
+	sourcePath := filepath.Join(source, "0123456789AB-test-main.jsonl")
+	if err := os.WriteFile(sourcePath, []byte("task log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	bytes, err := copyRealTaskLogCorpus(source, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes != int64(len("task log\n")) {
+		t.Errorf("bytes = %d, want %d", bytes, len("task log\n"))
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destinationInfo, err := os.Stat(filepath.Join(destination, filepath.Base(sourcePath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(sourceInfo, destinationInfo) {
+		t.Error("staged task log is not linked to its source")
+	}
+}
 
 // TestRealTaskLogCorpus verifies that the production loader accepts every
 // copied log it recognizes and skips corrupt historical files. It is disabled
@@ -107,14 +137,37 @@ func copyRealTaskLogCorpus(source, destination string) (int64, error) {
 		}
 		sourcePath := filepath.Join(source, entry.Name())
 		destinationPath := filepath.Join(destination, entry.Name())
-		data, err := os.ReadFile(sourcePath)
+		info, err := entry.Info()
 		if err != nil {
-			return 0, fmt.Errorf("read task log %s: %w", sourcePath, err)
+			return 0, fmt.Errorf("stat task log %s: %w", sourcePath, err)
 		}
-		if err := os.WriteFile(destinationPath, data, 0o600); err != nil {
+		if err := linkOrCopyRealTaskLog(sourcePath, destinationPath); err != nil {
 			return 0, fmt.Errorf("copy task log %s: %w", sourcePath, err)
 		}
-		bytes += int64(len(data))
+		bytes += info.Size()
 	}
 	return bytes, nil
+}
+
+func linkOrCopyRealTaskLog(source, destination string) error {
+	if err := os.Link(source, destination); err == nil {
+		return nil
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return errors.Join(err, in.Close())
+	}
+	_, copyErr := io.Copy(out, in)
+	if err := errors.Join(copyErr, out.Close(), in.Close()); err != nil {
+		removeErr := os.Remove(destination)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return errors.Join(err, removeErr)
+	}
+	return nil
 }

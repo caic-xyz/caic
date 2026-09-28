@@ -253,6 +253,30 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			if probe.Method != "" {
 				if probe.Method == opencode.MethodSessionPrompt {
 					w.notePromptRequest(id)
+					params, err := extractParams(line)
+					if err != nil {
+						return nil, fmt.Errorf("extract session/prompt params: %w", err)
+					}
+					var prompt opencode.SessionPromptParams
+					if err := json.Unmarshal(params, &prompt); err != nil {
+						return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
+					}
+					input := &agent.UserInputMessage{}
+					for i := range prompt.Prompt {
+						content := &prompt.Prompt[i]
+						switch content.Type {
+						case opencode.ContentText:
+							input.Text += content.Text
+						case opencode.ContentImage:
+							input.Images = append(input.Images, agent.ImageData{MediaType: content.MimeType, Data: content.Data})
+						case opencode.ContentAudio, opencode.ContentResource, opencode.ContentResourceLink:
+							// UserInputMessage currently has no representation for these ACP content types.
+						}
+					}
+					return []agent.Message{
+						input,
+						&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)},
+					}, nil
 				}
 				return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_request", Raw: append([]byte(nil), line...)}}, nil
 			}

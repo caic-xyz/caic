@@ -983,6 +983,40 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 	})
 
+	t.Run("RecordedPromptRestoresAcceptedUserInput", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		req := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      12,
+			"method":  "session/prompt",
+			"params": map[string]any{
+				"sessionId": "ses_1",
+				"prompt": []map[string]any{
+					{"type": "text", "text": "fix the bug"},
+					{"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="},
+				},
+			},
+		})
+		msgs, err := w.ParseMessage(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("messages = %d, want accepted input and raw request", len(msgs))
+		}
+		input, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("messages[0] = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if input.Text != "fix the bug" || len(input.Images) != 1 || input.Images[0].MediaType != "image/png" || input.Images[0].Data != "aW1hZ2U=" {
+			t.Errorf("accepted input = %#v", input)
+		}
+		if _, ok := msgs[1].(*agent.RawMessage); !ok {
+			t.Fatalf("messages[1] = %T, want *agent.RawMessage", msgs[1])
+		}
+	})
+
 	t.Run("SyntheticFinalMessages", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}

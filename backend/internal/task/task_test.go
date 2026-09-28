@@ -155,6 +155,56 @@ func TestTask(t *testing.T) {
 			t.Fatalf("history = %#v, want message observed at %d", history, timestamp)
 		}
 	})
+	t.Run("SeedTimelineCompactsFinalizedDeltas", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		textDelta := &agent.TextDeltaMessage{Text: strings.Repeat("text", 1024)}
+		thinkingDelta := &agent.ThinkingDeltaMessage{Text: strings.Repeat("thinking", 1024)}
+		toolDelta := &agent.ToolOutputDeltaMessage{ToolUseID: "tool-1", Delta: strings.Repeat("output", 1024)}
+		unfinished := &agent.TextDeltaMessage{Text: "still live"}
+		tk.SeedTimeline([]agent.Message{
+			textDelta,
+			&agent.TextMessage{Text: "text complete"},
+			thinkingDelta,
+			&agent.ThinkingMessage{Text: "thinking complete"},
+			toolDelta,
+			&agent.ToolResultMessage{ToolUseID: "tool-1"},
+			unfinished,
+		})
+
+		if compacted, ok := tk.timeline[0].Message.(*agent.TextDeltaMessage); !ok || compacted == textDelta || compacted.Text != "" {
+			t.Errorf("text delta = %#v, want shared empty delta", tk.timeline[0].Message)
+		}
+		if compacted, ok := tk.timeline[2].Message.(*agent.ThinkingDeltaMessage); !ok || compacted == thinkingDelta || compacted.Text != "" {
+			t.Errorf("thinking delta = %#v, want shared empty delta", tk.timeline[2].Message)
+		}
+		if toolDelta.Delta != "" {
+			t.Errorf("tool delta retained %d bytes, want empty", len(toolDelta.Delta))
+		}
+		if tk.timeline[6].Message != unfinished || unfinished.Text != "still live" {
+			t.Errorf("unfinished delta = %#v, want original live delta", tk.timeline[6].Message)
+		}
+	})
+	t.Run("SubscribeSnapshotRetainsCallTimeHistory", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		first := &agent.TextMessage{Text: "first"}
+		tk.SeedTimeline([]agent.Message{first})
+		history, live, unsubscribe := tk.SubscribeSnapshot(t.Context())
+		defer unsubscribe()
+
+		second := &agent.TextMessage{Text: "second"}
+		tk.addMessage(t.Context(), second, false)
+		if history.Len() != 1 {
+			t.Fatalf("snapshot length = %d, want 1", history.Len())
+		}
+		if got := history.At(0); got.Message != first || got.Sequence != 1 {
+			t.Errorf("snapshot message = %#v, want first message at sequence 1", got)
+		}
+		if got := recvMsg(t, live); got != second {
+			t.Errorf("live message = %#v, want second message", got)
+		}
+	})
 	t.Run("TerminalLogSummary", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "persist me"}, harness.Claude, "requested", "high")
