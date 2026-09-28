@@ -36,8 +36,8 @@ if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]];
 fi
 
 # Classify added, copied, modified, and renamed files for focused checks. Only a file
-# named AGENTS.md (or its CLAUDE.md symlink, which the symlink check skips) is exempt
-# from formatting: a doc whose name merely ends in AGENTS.md is a normal source file.
+# named AGENTS.md is exempt from formatting: a doc whose name merely ends in
+# AGENTS.md is a normal source file.
 format_files=()
 eslint_files=()
 go_files=()
@@ -134,7 +134,7 @@ if ((${#python_files[@]} > 0)); then
 fi
 
 if ((${#style_files[@]} > 0)); then
-  run_check style pnpm --silent lint:style:files -- "${style_files[@]}"
+  run_check style pnpm exec stylelint -- "${style_files[@]}"
 fi
 
 if "$frontend_source_changed"; then

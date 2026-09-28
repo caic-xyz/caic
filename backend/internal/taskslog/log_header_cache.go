@@ -76,14 +76,14 @@ func reapHeaderCaches(logDir string, entries []os.DirEntry, logBases map[string]
 		if !ok {
 			// Temp names are <log-base><headerCacheExt>.<random>.tmp.
 			stem, isTmp := strings.CutSuffix(e.Name(), ".tmp")
-			idx := strings.LastIndex(stem, headerCacheExt)
-			if !isTmp || idx < 0 {
+			before, after, ok := strings.CutLast(stem, headerCacheExt)
+			if !isTmp || !ok {
 				continue
 			}
-			if rest := stem[idx+len(headerCacheExt):]; rest != "" && !strings.HasPrefix(rest, ".") {
+			if after != "" && !strings.HasPrefix(after, ".") {
 				continue
 			}
-			base = stem[:idx]
+			base = before
 		}
 		if _, valid := logBases[base]; valid {
 			continue
