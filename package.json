@@ -15,7 +15,6 @@
     }
   },
   "scripts": {
-    "check:pre-commit": "scripts/check-staged.sh",
     "dev": "vite",
     "build": "vite build",
     "benchmark": "tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'",
@@ -25,8 +24,7 @@
     "test:watch": "pnpm --silent test -- --watch",
     "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --conditions=browser --test-force-exit --experimental-test-coverage --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json",
-    "hooks:install": "scripts/install-git-hooks.sh",
-    "prepare": "pnpm --silent hooks:install"
+    "prepare": "scripts/install-git-hooks.sh"
   },
   "dependencies": {
     "@maruel/gomode": "git+https://github.com/maruel/gomode.git#644eb2fe168844966706963d322f41d0190d9146",

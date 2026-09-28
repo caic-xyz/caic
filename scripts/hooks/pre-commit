@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs the staged-snapshot commit checks.
+# Runs focused checks against the staged snapshot.
 
 set -euo pipefail
 
@@ -9,4 +9,4 @@ repo_root="$(CDPATH='' cd -- "$script_dir/../.." && pwd)"
 readonly repo_root
 
 cd -- "$repo_root"
-pnpm check:pre-commit
+./scripts/check-staged.sh
