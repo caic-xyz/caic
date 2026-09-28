@@ -232,12 +232,13 @@ test("mobile quota pills keep their compact height", async ({ page }) => {
 
   const firstPill = page.getByTestId("provider-usage").first();
   await expect(firstPill).toBeVisible();
-  const pillBox = await firstPill.boundingBox();
-  const avatarBox = await page.getByRole("button", { name: "Menu" }).boundingBox();
-  expect(pillBox).not.toBeNull();
-  expect(avatarBox).not.toBeNull();
-  if (!pillBox || !avatarBox) throw new Error("Header controls are not visible");
-  expect(pillBox.height).toBeLessThanOrEqual(avatarBox.height);
+  await expect
+    .poll(async () => {
+      const pillBox = await firstPill.boundingBox();
+      const avatarBox = await page.getByRole("button", { name: "Menu" }).boundingBox();
+      return pillBox !== null && avatarBox !== null && pillBox.height <= avatarBox.height;
+    })
+    .toBe(true);
   const heights = await page
     .getByTestId("provider-usage")
     .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height));

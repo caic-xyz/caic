@@ -44,8 +44,9 @@ for (const width of [390, 1280]) {
     const cards = page.getByTestId("background-command-card");
     await expect(cards).toHaveCount(2);
     const lintCard = page.locator('[data-command-id="claude:shell:lint1"]');
-    await lintCard.locator("summary").focus();
-    await page.keyboard.press("Enter");
+    await expect(lintCard.getByTestId("background-command-exit")).toHaveText("exit 0");
+    await lintCard.locator("summary").press("Enter");
+    await expect(lintCard).toHaveAttribute("open", "");
     await expect(lintCard.getByText("claude:shell:lint1")).toBeVisible();
     await expect(lintCard.getByText("/tmp/tasks/lint1.output")).toBeVisible();
     for (const card of await cards.all()) {

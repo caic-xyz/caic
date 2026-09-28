@@ -18,8 +18,18 @@ test("resource charts read samples through the crosshair", async ({ page, api })
     .toBeGreaterThanOrEqual(2);
 
   const cpu = page.getByLabel("CPU utilization over time");
-  const box = await cpu.boundingBox();
-  if (!box) throw new Error("CPU utilization chart has no layout box");
+  // PlotHost replaces the SVG as samples arrive. Read its box in one browser
+  // evaluation so a redraw cannot detach it between lookup and measurement.
+  let box = { x: 0, y: 0, width: 0, height: 0 };
+  await expect
+    .poll(async () => {
+      box = await cpu.evaluate((svg) => {
+        const { x, y, width, height } = svg.getBoundingClientRect();
+        return { x, y, width, height };
+      });
+      return box.width > 0 && box.height > 0;
+    })
+    .toBe(true);
 
   // The first sample sits on the left frame edge and every later sample reports
   // the same CPU reading, so both edges stay readable however the paced stream
@@ -32,10 +42,11 @@ test("resource charts read samples through the crosshair", async ({ page, api })
   // inside the frame instead of being clipped by the viewport.
   const readout = cpu.locator('[aria-label="text"] text');
   await expect(readout).toHaveCount(1);
+  // Plot and DOM layout use slightly different floating-point rounding.
   await expect
     .poll(async () => {
       const transform = (await readout.getAttribute("transform")) ?? "";
       return Number(/translate\(([-\d.]+)/u.exec(transform)?.[1] ?? Number.NaN);
     })
-    .toBeLessThanOrEqual(box.width - 3 - 34);
+    .toBeLessThanOrEqual(box.width - 3 - 34 + 0.5);
 });
