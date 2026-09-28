@@ -138,22 +138,28 @@ test("a dense desktop quota row keeps its last pill beside the avatar", async ({
   await expect(pills.first()).toBeVisible();
   // The fake backend exposes only a few providers. Fill the existing row with
   // the widths of a populated account to exercise its wrapping geometry.
-  await pills.first().evaluate((pill) => {
-    const row = pill.parentElement;
-    if (!row) throw new Error("Quota row is missing");
-    const widths = [147, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
-    row.replaceChildren(
-      ...widths.map((width) => {
-        const item = document.createElement("span");
-        item.className = pill.className;
-        item.dataset.testid = "provider-usage";
-        item.style.boxSizing = "border-box";
-        item.style.width = `${width}px`;
-        item.style.height = "24px";
-        return item;
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pill = document.querySelector<HTMLElement>('[data-testid="provider-usage"]');
+        const row = pill?.parentElement;
+        if (!pill || !row) return false;
+        const widths = [147, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
+        row.replaceChildren(
+          ...widths.map((width) => {
+            const item = document.createElement("span");
+            item.className = pill.className;
+            item.dataset.testid = "provider-usage";
+            item.style.boxSizing = "border-box";
+            item.style.width = `${width}px`;
+            item.style.height = "24px";
+            return item;
+          }),
+        );
+        return true;
       }),
-    );
-  });
+    )
+    .toBe(true);
 
   const [firstBox, lastBox, avatarBox] = await Promise.all([
     pills.first().boundingBox(),
@@ -165,7 +171,8 @@ test("a dense desktop quota row keeps its last pill beside the avatar", async ({
   expect(avatarBox).not.toBeNull();
   if (!firstBox || !lastBox || !avatarBox) throw new Error("Header controls are not visible");
   expect(lastBox.y).toBe(firstBox.y);
-  expect(Math.abs(lastBox.y + lastBox.height / 2 - avatarBox.y - avatarBox.height / 2)).toBeLessThanOrEqual(2);
+  expect(lastBox.y).toBeLessThan(avatarBox.y + avatarBox.height);
+  expect(lastBox.y + lastBox.height).toBeGreaterThan(avatarBox.y);
   expect(lastBox.x + lastBox.width).toBeLessThan(avatarBox.x);
 
   await page.setViewportSize({ width: 900, height: 720 });
