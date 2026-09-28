@@ -364,6 +364,9 @@ func TestParseMessage(t *testing.T) {
 		if um.ContextWindow != 200000 {
 			t.Errorf("ContextWindow = %d, want 200000", um.ContextWindow)
 		}
+		if um.CumulativeCostUSD == nil || *um.CumulativeCostUSD != 0.42 {
+			t.Errorf("CumulativeCostUSD = %v, want 0.42", um.CumulativeCostUSD)
+		}
 	})
 
 	t.Run("UserMessageChunk", func(t *testing.T) {
@@ -854,11 +857,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("FallbackToAccumulatedUsage", func(t *testing.T) {
+	t.Run("EmptyPromptUsageStaysEmpty", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 3
-		w.totalUsage = agent.Usage{InputTokens: 1000, OutputTokens: 200}
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      3,
@@ -874,12 +876,8 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
 		}
-		if rm.Usage.InputTokens != 1000 {
-			t.Errorf("InputTokens = %d, want 1000 (fallback)", rm.Usage.InputTokens)
-		}
-		// totalUsage should be reset.
-		if w.totalUsage != (agent.Usage{}) {
-			t.Errorf("totalUsage not reset: %+v", w.totalUsage)
+		if rm.Usage != (agent.Usage{}) {
+			t.Errorf("Usage = %+v, want empty", rm.Usage)
 		}
 	})
 

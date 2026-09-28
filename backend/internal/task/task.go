@@ -193,6 +193,7 @@ type Task struct {
 	priorDuration     time.Duration   // accumulated duration from all cleared sessions
 	turnStartedAt     time.Time       // when the current running turn started; zero when not running
 	sessionPricedCost float64         // quota-provider priced cost accumulated in the current session
+	opencodeCostSeen  bool            // current OpenCode session has reported its cumulative cost
 	liveCostUSD       float64
 	liveNumTurns      int
 	liveDuration      time.Duration
@@ -950,8 +951,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	// carries the current plan; a new ExitPlanMode or context_cleared
 	// supersedes it so only the latest plan is visible.
 	//
-	// Live stats: TotalCostUSD is cumulative per-session (resets on
-	// compact_boundary), so cost uses priorCostUSD + currentSessionTotal.
+	// Live stats: Claude's TotalCostUSD is cumulative until context_cleared.
 	// DurationMs and NumTurns are per-invocation, so they always accumulate.
 	// Token usage is always summed.
 	cleanTurnComplete := false
@@ -1012,10 +1012,18 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 					t.planDismissed = true
 					t.planExitID = ""
 				}
-				t.priorCostUSD = t.liveCostUSD
+				// Replay uses the same cost boundary as live folding: Claude
+				// and OpenCode totals survive compaction; a cleared context
+				// starts a new segment for every harness.
+				if m.Subtype == "context_cleared" || (t.Harness != harness.Claude && t.Harness != harness.OpenCode) {
+					t.priorCostUSD = t.liveCostUSD
+					t.sessionPricedCost = 0
+				}
+				if m.Subtype == "context_cleared" {
+					t.opencodeCostSeen = false
+				}
 				t.priorNumTurns = t.liveNumTurns
 				t.priorDuration = t.liveDuration
-				t.sessionPricedCost = 0
 				// Compaction replaces the conversation with a summary, so the
 				// pre-compaction usage no longer describes the live context.
 				if m.ContextTokensAfter > 0 {
@@ -1033,15 +1041,20 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			t.trackToolUse(m)
 		case *agent.UsageMessage:
 			t.lastAPIUsage = m.Usage
+			t.applyReportedCostLocked(m)
 			if m.ReportedModel != "" {
 				t.reportedModel = m.ReportedModel
-				if !m.ModelDerived {
-					at := entry.ProducerTime
-					if at.IsZero() {
-						at = time.Now()
-					}
-					t.addPricedUsageLocked(m.ReportedModel, "", m.Usage, at)
+			}
+			model := m.ReportedModel
+			if model == "" && t.Harness == harness.Pi {
+				model = t.activeModel() // Pi's compaction usage has no model field.
+			}
+			if model != "" && !m.ModelDerived {
+				at := entry.ProducerTime
+				if at.IsZero() {
+					at = time.Now()
 				}
+				t.addPricedUsageLocked(model, "", m.Usage, at)
 			}
 			t.cacheExpiresAt = time.Time{}
 			if m.Usage.CacheTTLSeconds > 0 {
@@ -1237,6 +1250,7 @@ func (t *Task) ClearMessages(ctx context.Context) {
 	t.priorNumTurns = t.liveNumTurns
 	t.priorDuration = t.liveDuration
 	t.sessionPricedCost = 0
+	t.opencodeCostSeen = false
 	t.inPlanMode = false
 	t.planFile = ""
 	t.planContent = ""
@@ -1904,11 +1918,16 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	}
 	if u, ok := m.(*agent.UsageMessage); ok {
 		t.lastAPIUsage = u.Usage
+		t.applyReportedCostLocked(u)
 		if u.ReportedModel != "" {
 			t.reportedModel = u.ReportedModel
-			if !u.ModelDerived {
-				t.addPricedUsageLocked(u.ReportedModel, "", u.Usage, at)
-			}
+		}
+		model := u.ReportedModel
+		if model == "" && t.Harness == harness.Pi {
+			model = t.activeModel() // Pi's compaction usage has no model field.
+		}
+		if model != "" && !u.ModelDerived {
+			t.addPricedUsageLocked(model, "", u.Usage, at)
 		}
 		t.cacheExpiresAt = time.Time{}
 		if u.Usage.CacheTTLSeconds > 0 {
@@ -1978,16 +1997,19 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	} else if ClearsExitError(m) {
 		t.lastExitError = ""
 	}
-	// compact_boundary resets TotalCostUSD in Claude Code's subsequent
-	// ResultMessages (same as context_cleared). Snapshot priors so the
-	// cost accumulation across the boundary is correct. DurationMs and
-	// NumTurns are per-invocation and always use +=, so priors just carry
-	// the running total forward.
-	if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "compact_boundary" {
-		t.priorCostUSD = t.liveCostUSD
+	// A cleared context starts a new cost segment. Claude and OpenCode retain
+	// cumulative totals across compaction; Pi's separate summarization usage was
+	// already priced before the boundary, and Codex starts a new priced segment.
+	if sm, ok := m.(*agent.SystemMessage); ok && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
+		if sm.Subtype == "context_cleared" || (t.Harness != harness.Claude && t.Harness != harness.OpenCode) {
+			t.priorCostUSD = t.liveCostUSD
+			t.sessionPricedCost = 0
+		}
+		if sm.Subtype == "context_cleared" {
+			t.opencodeCostSeen = false
+		}
 		t.priorNumTurns = t.liveNumTurns
 		t.priorDuration = t.liveDuration
-		t.sessionPricedCost = 0
 		// Compaction replaces the conversation with a summary, so the
 		// pre-compaction usage no longer describes the live context.
 		if sm.ContextTokensAfter > 0 {
@@ -2205,11 +2227,11 @@ func (t *Task) terminalLogSummary(version agent.LogVersion, res *taskslog.Result
 	}
 }
 
-// addPricedUsageLocked accumulates quota-provider priced cost for one usage
-// report (per API call for Pi, per turn for OpenCode and Codex). provider
-// hints at the billing provider for unprefixed model IDs; "" derives it from
-// the model ID prefix. Returns true when the model was priced. The caller
-// holds t.mu.
+// addPricedUsageLocked accumulates API-equivalent USD cost for one usage
+// report (per API call for Pi, per turn for OpenCode and Codex). Subscription
+// charges can differ. provider hints at the billing provider for unprefixed
+// model IDs; "" derives it from the model ID prefix. Returns true when the
+// model was priced. The caller holds t.mu.
 func (t *Task) addPricedUsageLocked(model string, provider agent.QuotaProvider, u agent.Usage, at time.Time) bool {
 	if model == "" || t.Pricer == nil {
 		return false
@@ -2223,18 +2245,34 @@ func (t *Task) addPricedUsageLocked(model string, provider agent.QuotaProvider, 
 	return true
 }
 
+// applyReportedCostLocked folds an OpenCode ACP cost snapshot into task cost.
+// ACP totals include all stored assistant steps in the session, survive
+// compaction, and reset only on context_cleared. Some subscription providers
+// report zero despite chargeable API-equivalent usage; those sessions retain
+// the per-turn pricing fallback.
+func (t *Task) applyReportedCostLocked(u *agent.UsageMessage) {
+	if t.Harness != harness.OpenCode || u.CumulativeCostUSD == nil || *u.CumulativeCostUSD <= 0 {
+		return
+	}
+	t.opencodeCostSeen = true
+	t.liveCostUSD = t.priorCostUSD + *u.CumulativeCostUSD
+}
+
 // applyResultCostLocked folds one turn result into the running cost. The
 // caller holds t.mu.
 func (t *Task) applyResultCostLocked(rm *agent.ResultMessage, at time.Time) {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	// OpenCode reports no per-call usage, and Codex reports no cost at all:
-	// price their per-turn result usage, Codex at OpenAI API-equivalent
-	// rates. Claude Code reports the API-equivalent total itself, so its
-	// harness never prices here.
+	// OpenCode's prompt result has only its last assistant step; price it
+	// when no positive cumulative ACP cost arrived. Codex reports no cost,
+	// so price its turn usage at OpenAI API-equivalent rates. Claude Code's
+	// reported total already includes cache reads and compaction cost.
 	switch t.Harness {
 	case harness.OpenCode:
+		if t.opencodeCostSeen {
+			return
+		}
 		if t.addPricedUsageLocked(t.activeModel(), "", rm.Usage, at) {
 			return
 		}
@@ -2243,7 +2281,8 @@ func (t *Task) applyResultCostLocked(rm *agent.ResultMessage, at time.Time) {
 			return
 		}
 	case harness.Claude:
-		// Claude Code reports the API-equivalent total itself.
+		// Use the reported total unchanged; a cache-read surcharge would
+		// count those tokens twice.
 	case harness.Pi:
 		// Pi's per-call usage messages are priced as they arrive.
 	}
@@ -2253,7 +2292,7 @@ func (t *Task) applyResultCostLocked(rm *agent.ResultMessage, at time.Time) {
 		// total would regress the accumulated value.
 		return
 	}
-	t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
+	t.liveCostUSD = t.priorCostUSD + rm.TotalCostUSD
 }
 
 // activeModel returns the model to price usage against: the harness-reported
@@ -2710,26 +2749,6 @@ func (s *sub) close() {
 
 type rateLimitSub struct {
 	ch chan *agent.RateLimitMessage
-}
-
-// computeCost returns the true USD cost for a Claude Code result by adding
-// the cache-read surcharge that TotalCostUSD omits.
-//
-// Claude Code's TotalCostUSD correctly prices input, output, and cache-write
-// tokens but excludes cache_read_input_tokens. All Claude models share the same
-// structural price ratios, so we derive the per-token input price from
-// TotalCostUSD and the non-cache-read token counts, then add the missing term.
-//
-// If there are no non-cache-read tokens to derive a unit price from,
-// TotalCostUSD is returned unchanged.
-func computeCost(totalCostUSD float64, u agent.Usage) float64 {
-	// Express all non-cache-read tokens as an equivalent number of input tokens.
-	nonCREquiv := float64(u.InputTokens) + 5*float64(u.OutputTokens) + 1.25*float64(u.CacheCreationInputTokens)
-	if nonCREquiv == 0 {
-		return totalCostUSD
-	}
-	inputPricePerTok := totalCostUSD / nonCREquiv
-	return totalCostUSD + float64(u.CacheReadInputTokens)*0.10*inputPricePerTok
 }
 
 const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."

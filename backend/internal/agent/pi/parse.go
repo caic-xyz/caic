@@ -264,7 +264,14 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 				m.ContextTokensAfter = ev.Result.EstimatedTokensAfter
 			}
 		}
-		return []agent.Message{m}, decodedRecord{}, nil
+		// Price the summarization before the boundary resets session cost and
+		// replaces the last API usage with the compacted context size.
+		var msgs []agent.Message
+		if ev.Result != nil && ev.Result.Usage != nil {
+			msgs = append(msgs, &agent.UsageMessage{Usage: toAgentUsage(ev.Result.Usage)})
+		}
+		msgs = append(msgs, m)
+		return msgs, decodedRecord{}, nil
 
 	case pi.EventExtensionUI:
 		// Extension UI requests are passed through as RawMessage, and the

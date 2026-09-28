@@ -165,9 +165,11 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		if err := json.Unmarshal(sup.Update, &u); err != nil {
 			return nil, nil, fmt.Errorf("usage_update: %w", err)
 		}
-		return []agent.Message{&agent.UsageMessage{
-			ContextWindow: u.Size,
-		}}, nil, nil
+		usage := &agent.UsageMessage{ContextWindow: u.Size}
+		if u.Cost.Currency == "USD" {
+			usage.CumulativeCostUSD = &u.Cost.Amount
+		}
+		return []agent.Message{usage}, nil, nil
 
 	case opencode.UpdateCurrentModeUpdate:
 		var u opencode.CurrentModeUpdate

@@ -68,6 +68,24 @@ func BenchmarkParseTurnEndUsage(b *testing.B) {
 	}
 }
 
+func BenchmarkParseCompactionUsage(b *testing.B) {
+	line := []byte(`{"type":"compaction_end","reason":"threshold","result":{"summary":"summary","tokensBefore":450350,"estimatedTokensAfter":25283,"usage":{"input":349745,"output":5812,"cacheRead":0,"cacheWrite":0,"totalTokens":355557,"cost":{"input":0.1049235,"output":0.0069744,"total":0.1118979}}},"aborted":false,"willRetry":false}`)
+	parser := New("", nil).NewWire().ParseMessage
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(line)))
+	b.ResetTimer()
+	for range b.N {
+		msgs, err := parser(line)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(msgs) == 0 {
+			b.Fatal("compaction produced no messages")
+		}
+	}
+}
+
 func benchmarkToolExecEndLine(b *testing.B, outputBytes int) []byte {
 	ev := struct {
 		Type       pi.EventType `json:"type"`

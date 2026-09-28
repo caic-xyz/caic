@@ -290,6 +290,8 @@ type wireFormat struct {
 	reportedModel     string      // Resolved by thread/start; updated by model/rerouted.
 	reportedEffort    string      // Resolved by thread/start.
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
+	lastThreadTotals  map[string]codex.TokenUsageBreakdown
+	threadTurnStarted map[string]bool // usage before a thread's first turn is its saved baseline
 }
 
 // handshake performs the JSON-RPC initialize → initialized → model/list →
@@ -358,6 +360,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		return nil, nil, nil, errors.New("thread/start response missing thread.id")
 	}
 	w.threadID = result.Thread.ID
+	w.threadTurnStarted = map[string]bool{result.Thread.ID: false}
 	w.agentVersion = result.Thread.CLIVersion
 	w.reportedModel = result.Model
 	if result.ReasoningEffort != nil {
@@ -424,8 +427,8 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 
 // ParseMessage wraps the package-level parseMessage with three interceptions:
 //
-//   - thread/tokenUsage/updated → emits UsageMessage (incremental Last
-//     breakdown) attributed to the session's active model; values are also
+//   - thread/tokenUsage/updated → emits UsageMessage (delta of cumulative
+//     thread totals) attributed to the session's active model; values are also
 //     accumulated into totalUsage. Not forwarded to the package-level
 //     parseMessage.
 //   - ResultMessage (from turn/completed) has Usage populated from totalUsage,
@@ -435,10 +438,49 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 //
 // It also captures the thread ID from InitMessage (thread/started).
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	// Intercept thread/tokenUsage/updated: emit a UsageMessage with the
-	// incremental (Last) usage and accumulate into totalUsage.
-	var probe codex.MethodProbe
+	// Intercept thread/tokenUsage/updated: derive incremental usage from the
+	// per-thread cumulative total, which Codex may resend unchanged. Codex
+	// reports no separate usage for compaction itself.
+	var probe codex.MessageProbe
 	_ = json.Unmarshal(line, &probe)
+	if probe.Method == codex.MethodTurnStarted {
+		var msg codex.JSONRPCMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return nil, fmt.Errorf("turn/started: %w", err)
+		}
+		var p codex.TurnStartedNotification
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return nil, fmt.Errorf("turn/started params: %w", err)
+		}
+		w.mu.Lock()
+		if w.threadTurnStarted == nil {
+			w.threadTurnStarted = make(map[string]bool)
+		}
+		w.threadTurnStarted[p.ThreadID] = true
+		w.mu.Unlock()
+	}
+	if probe.ID != nil && probe.Method == "" {
+		var response struct {
+			Result struct {
+				Thread struct {
+					ID string `json:"id"`
+				} `json:"thread"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(line, &response); err != nil {
+			return nil, fmt.Errorf("thread response: %w", err)
+		}
+		if response.Result.Thread.ID != "" {
+			// A thread response precedes any saved usage snapshot. A turn
+			// may start without one when the thread has no earlier usage.
+			w.mu.Lock()
+			if w.threadTurnStarted == nil {
+				w.threadTurnStarted = make(map[string]bool)
+			}
+			w.threadTurnStarted[response.Result.Thread.ID] = false
+			w.mu.Unlock()
+		}
+	}
 	if probe.Method == codex.MethodTokenUsageUpdated {
 		var msg codex.JSONRPCMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
@@ -459,17 +501,45 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		// Codex usage event reports no applied policy or TTL, leave it unknown:
 		// https://developers.openai.com/api/docs/guides/prompt-caching
 		// Wire schema: https://github.com/maruel/genai/blob/main/providers/codex/dto.go
-		cacheWriteInputTokens := p.TokenUsage.Last.CacheWriteInputTokens
-		cacheReadInputTokens := p.TokenUsage.Last.CachedInputTokens
-		inputTokens := max(0, p.TokenUsage.Last.InputTokens-cacheWriteInputTokens-cacheReadInputTokens)
+		w.mu.Lock()
+		if w.lastThreadTotals == nil {
+			w.lastThreadTotals = make(map[string]codex.TokenUsageBreakdown)
+		}
+		previous, seen := w.lastThreadTotals[p.ThreadID]
+		started, tracked := w.threadTurnStarted[p.ThreadID]
+		current := p.TokenUsage.Total
+		breakdown := current
+		switch {
+		case tracked && !started:
+			breakdown = codex.TokenUsageBreakdown{}
+		case !seen:
+			// A bounded relay tail can start mid-thread. Last bounds the
+			// charge to one call when the preceding total is unavailable.
+			// If this is an unchanged resend, that prior call may be counted
+			// once more; full history and continuous parsing have its total.
+			breakdown = p.TokenUsage.Last
+		case current.TotalTokens == 0 || (seen && current.TotalTokens < previous.TotalTokens):
+			breakdown = p.TokenUsage.Last
+		case seen:
+			breakdown = codex.TokenUsageBreakdown{
+				InputTokens:           max(0, current.InputTokens-previous.InputTokens),
+				CachedInputTokens:     max(0, current.CachedInputTokens-previous.CachedInputTokens),
+				CacheWriteInputTokens: max(0, current.CacheWriteInputTokens-previous.CacheWriteInputTokens),
+				OutputTokens:          max(0, current.OutputTokens-previous.OutputTokens),
+				ReasoningOutputTokens: max(0, current.ReasoningOutputTokens-previous.ReasoningOutputTokens),
+			}
+		}
+		w.lastThreadTotals[p.ThreadID] = current
+		cacheWriteInputTokens := breakdown.CacheWriteInputTokens
+		cacheReadInputTokens := breakdown.CachedInputTokens
+		inputTokens := max(0, breakdown.InputTokens-cacheWriteInputTokens-cacheReadInputTokens)
 		incremental := agent.Usage{
 			InputTokens:              int(inputTokens),
 			CacheCreationInputTokens: int(cacheWriteInputTokens),
 			CacheReadInputTokens:     int(cacheReadInputTokens),
-			OutputTokens:             int(p.TokenUsage.Last.OutputTokens),
-			ReasoningOutputTokens:    int(p.TokenUsage.Last.ReasoningOutputTokens),
+			OutputTokens:             int(breakdown.OutputTokens),
+			ReasoningOutputTokens:    int(breakdown.ReasoningOutputTokens),
 		}
-		w.mu.Lock()
 		w.totalUsage.InputTokens += incremental.InputTokens
 		w.totalUsage.CacheCreationInputTokens += incremental.CacheCreationInputTokens
 		w.totalUsage.CacheReadInputTokens += incremental.CacheReadInputTokens

@@ -174,7 +174,7 @@ const maxAccumulatedOutputBytes = 1 << 20
 
 // wireFormat implements agent.WireFormat for the ACP JSON-RPC protocol.
 // It holds per-session state: the session ID, a request ID counter,
-// accumulated token usage, and image support flag.
+// prompt state and image support flag.
 type wireFormat struct {
 	nativeSubagents nativeSubagents
 	sessionID       string // Set during handshake; read-only after.
@@ -182,8 +182,7 @@ type wireFormat struct {
 
 	mu             sync.Mutex
 	nextID         int64
-	promptReqID    int64 // JSON-RPC ID of the current session/prompt request.
-	totalUsage     agent.Usage
+	promptReqID    int64               // JSON-RPC ID of the current session/prompt request.
 	skillReadCalls map[string]struct{} // active tool calls whose skill read was emitted
 	textAccum      strings.Builder     // Accumulated text from agent_message_chunk.
 	thinkAccum     strings.Builder     // Accumulated text from agent_thought_chunk.
@@ -233,7 +232,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 
 // ParseMessage wraps the package-level parseMessage with interceptions:
 //
-//   - usage_update → emits UsageMessage and accumulates into totalUsage.
+//   - usage_update → emits the cumulative session cost and context window.
 //   - logged session/prompt requests → restores prompt response correlation.
 //   - session/request_permission → auto-approves with "allow_once".
 //   - prompt responses → emits final Text/Thinking messages and ResultMessage.
@@ -291,7 +290,10 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
 	}
 
-	// Intercept usage_update to accumulate totals.
+	// ACP's cumulative cost includes every stored assistant step in this
+	// session, including compaction. Its prompt result has only the last step;
+	// child-session subagent cost is absent from both parent-session signals.
+	// Retain the cost snapshot for the task fold.
 	if probe.Method == opencode.MethodSessionUpdate {
 		params, err := extractParams(line)
 		if err != nil {
@@ -303,16 +305,11 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			if err := json.Unmarshal(sup.Update, &uprobe); err == nil && uprobe.SessionUpdate == opencode.UpdateUsageUpdate {
 				var u opencode.UsageUpdateUpdate
 				if err := json.Unmarshal(sup.Update, &u); err == nil {
-					// usage_update carries the context window fill and the cost,
-					// but no per-step token breakdown: token details come from
-					// the prompt result, which is priced per turn instead. The
-					// cost is not consumed because opencode reports it as a
-					// cumulative total over its whole ACP session, which spans
-					// caic's context_cleared boundaries and would double-count
-					// pre-boundary turns.
-					return []agent.Message{&agent.UsageMessage{
-						ContextWindow: u.Size,
-					}}, nil
+					usage := &agent.UsageMessage{ContextWindow: u.Size}
+					if u.Cost.Currency == "USD" {
+						usage.CumulativeCostUSD = &u.Cost.Amount
+					}
+					return []agent.Message{usage}, nil
 				}
 			}
 		}
@@ -451,10 +448,6 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 	}
 	// Emit synthetic final messages from accumulated deltas, then reset.
 	w.mu.Lock()
-	if rm.Usage == (agent.Usage{}) {
-		rm.Usage = w.totalUsage
-	}
-	w.totalUsage = agent.Usage{}
 	var msgs []agent.Message
 	if !w.thinkOverflow && w.thinkAccum.Len() > 0 {
 		msgs = append(msgs, &agent.ThinkingMessage{Text: w.thinkAccum.String()})

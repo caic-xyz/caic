@@ -1154,6 +1154,28 @@ func TestParseCompactionEvents(t *testing.T) {
 		}
 	})
 
+	t.Run("success reports compaction usage", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"compaction_end","reason":"threshold","result":{"tokensBefore":120000,"estimatedTokensAfter":20000,"usage":{"input":100000,"output":5000,"cacheRead":1000,"totalTokens":106000,"cost":{"input":0.03,"output":0.006,"cacheRead":0.000006,"total":0.036006}}},"aborted":false,"willRetry":false}`)
+		msgs, err := parseMessage(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("got %d messages, want boundary and usage", len(msgs))
+		}
+		u, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("first message = %T, want *agent.UsageMessage", msgs[0])
+		}
+		if u.Usage.InputTokens != 100000 || u.Usage.OutputTokens != 5000 || u.Usage.CacheReadInputTokens != 1000 {
+			t.Errorf("usage = %+v, want compaction token counts", u.Usage)
+		}
+		if sm, ok := msgs[1].(*agent.SystemMessage); !ok || sm.Subtype != agent.SystemSubtypeCompactBoundary {
+			t.Fatalf("second message = %#v, want compact boundary", msgs[1])
+		}
+	})
+
 	t.Run("retry defers the boundary", func(t *testing.T) {
 		t.Parallel()
 		msgs, err := parseMessage([]byte(`{"type":"compaction_end","reason":"overflow","aborted":false,"willRetry":true}`))

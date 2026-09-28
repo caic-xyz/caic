@@ -135,7 +135,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 			t.Errorf("result must mark the turn boundary")
 		}
 		// The result's cost snapshot must equal the task's live cost after
-		// its fold (harness-reported total plus the cache-read surcharge).
+		// its fold (the harness-reported total).
 		if cost := sink.Observes[2].Event.CostUSD; cost <= 0 {
 			t.Errorf("result cost snapshot = %v, want the folded live cost", cost)
 		} else if live, _, _, _, _ := tk.LiveStats(); cost != live {

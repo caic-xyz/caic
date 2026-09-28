@@ -1132,7 +1132,7 @@ func TestWireFormat(t *testing.T) {
 		if !um.ModelDerived {
 			t.Errorf("ModelDerived = false, want true (session model stamp, not harness-reported)")
 		}
-		// incremental is accumulated into totalUsage
+		// A wire that starts mid-thread can charge only the last call.
 		w.mu.Lock()
 		total := w.totalUsage
 		w.mu.Unlock()
@@ -1188,6 +1188,115 @@ func TestWireFormat(t *testing.T) {
 		}
 		if total.CacheReadInputTokens != 10 {
 			t.Errorf("totalUsage.CacheReadInputTokens = %d, want 10", total.CacheReadInputTokens)
+		}
+	})
+	t.Run("RepeatedCumulativeTotalIsNotChargedTwice", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		lines := []string{
+			`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":100,"inputTokens":80,"outputTokens":20},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`,
+			`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":100,"inputTokens":80,"outputTokens":20},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`,
+			`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":160,"inputTokens":130,"outputTokens":30},"last":{"totalTokens":40,"inputTokens":30,"outputTokens":10}}}}`,
+		}
+		want := []agent.Usage{{InputTokens: 80, OutputTokens: 20}, {}, {InputTokens: 50, OutputTokens: 10}}
+		for i, line := range lines {
+			msgs, err := w.ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			usage, ok := msgs[0].(*agent.UsageMessage)
+			if !ok {
+				t.Fatalf("event %d type = %T, want *agent.UsageMessage", i, msgs[0])
+			}
+			got := usage.Usage
+			if got != want[i] {
+				t.Errorf("event %d usage = %+v, want %+v", i, got, want[i])
+			}
+		}
+	})
+	t.Run("ResumedThreadSnapshotIsBaseline", func(t *testing.T) {
+		t.Parallel()
+		prior := []byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"outputTokens":200},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`)
+		newCall := []byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":1120,"inputTokens":900,"outputTokens":220},"last":{"totalTokens":120,"inputTokens":100,"outputTokens":20}}}}`)
+		turnComplete := []byte(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`)
+		response := []byte(`{"jsonrpc":"2.0","id":7,"result":{"thread":{"id":"t1"}}}`)
+		turnStarted := []byte(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_2","status":"inProgress"}}}`)
+		for _, live := range []bool{false, true} {
+			w := &wireFormat{threadID: "t1", suppressUserInput: live}
+			if !live {
+				if _, err := w.ParseMessage(prior); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := w.ParseMessage(turnComplete); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := w.ParseMessage(response); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err := w.ParseMessage(prior)
+			if err != nil {
+				t.Fatal(err)
+			}
+			usage, ok := msgs[0].(*agent.UsageMessage)
+			if !ok || usage.Usage != (agent.Usage{}) {
+				t.Fatalf("live=%v snapshot = %#v, want zero usage", live, msgs[0])
+			}
+			if _, err := w.ParseMessage(turnStarted); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err = w.ParseMessage(newCall)
+			if err != nil {
+				t.Fatal(err)
+			}
+			usage, ok = msgs[0].(*agent.UsageMessage)
+			if !ok || usage.Usage.InputTokens != 100 || usage.Usage.OutputTokens != 20 {
+				t.Errorf("live=%v new call = %#v, want 100 input and 20 output", live, msgs[0])
+			}
+			msgs, err = w.ParseMessage(turnComplete)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, ok := msgs[0].(*agent.ResultMessage)
+			if !ok || result.Usage.InputTokens != 100 || result.Usage.OutputTokens != 20 {
+				t.Errorf("live=%v result = %#v, want 100 input and 20 output", live, msgs[0])
+			}
+		}
+	})
+	t.Run("ResumedThreadWithoutSnapshotChargesFirstCall", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{threadID: "t1"}
+		for _, line := range []string{
+			`{"jsonrpc":"2.0","id":7,"result":{"thread":{"id":"t1"}}}`,
+			`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_1","status":"inProgress"}}}`,
+		} {
+			if _, err := w.ParseMessage([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		msgs, err := w.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":100,"inputTokens":80,"outputTokens":20},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		usage, ok := msgs[0].(*agent.UsageMessage)
+		if !ok || usage.Usage.InputTokens != 80 || usage.Usage.OutputTokens != 20 {
+			t.Errorf("first call = %#v, want 80 input and 20 output", msgs[0])
+		}
+	})
+	t.Run("MidThreadTailChargesOnlyLastCall", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		usageLine := []byte(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"outputTokens":200},"last":{"totalTokens":100,"inputTokens":80,"outputTokens":20}}}}`)
+		if _, err := w.ParseMessage(usageLine); err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := w.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, ok := msgs[0].(*agent.ResultMessage)
+		if !ok || result.Usage.InputTokens != 80 || result.Usage.OutputTokens != 20 {
+			t.Errorf("result = %#v, want 80 input and 20 output", msgs[0])
 		}
 	})
 	t.Run("TurnCompletedInjectsAndResetsUsage", func(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1607,8 +1608,7 @@ func TestTask(t *testing.T) {
 	t.Run("LiveCostCumulativeAcrossSessions", func(t *testing.T) {
 		t.Parallel()
 		// Cost, turns, and duration must accumulate across sessions separated
-		// by ClearMessages. computeCost uses TotalCostUSD as the base and adds
-		// the cache-read surcharge.
+		// by ClearMessages. Reported totals are already fully priced.
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		// Session 1: TotalCostUSD = $10.00.
@@ -1763,12 +1763,9 @@ func TestTask(t *testing.T) {
 		}
 	})
 
-	t.Run("LiveCostIncludesCacheRead", func(t *testing.T) {
+	t.Run("LiveCostUsesClaudeReportedTotal", func(t *testing.T) {
 		t.Parallel()
-		// Regression: TotalCostUSD from Claude Code omits cache_read cost.
-		// computeCost must add the surcharge on top of TotalCostUSD.
-		// Setup: TotalCostUSD = $1.50 from 100K input tokens (price = $0.000015/tok).
-		// Cache read surcharge = 10M × 0.10 × $0.000015 = $15.00.
+		// Claude's reported total already includes cache reads.
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		tk.SetState(taskslog.StateRunning)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
@@ -1780,18 +1777,17 @@ func TestTask(t *testing.T) {
 			},
 		}, false)
 		costUSD, _, _, _, _ := tk.LiveStats()
-		if costUSD != 16.50 { // $1.50 (reported) + $15.00 (cache read surcharge)
-			t.Errorf("costUSD = %v, want 16.50 (cache reads must be added to TotalCostUSD)", costUSD)
+		if costUSD != 1.50 {
+			t.Errorf("costUSD = %v, want reported 1.50", costUSD)
 		}
 	})
 
 	t.Run("CompactBoundaryAccumulatesStats", func(t *testing.T) {
 		t.Parallel()
-		// compact_boundary resets NumTurns, DurationMs, and TotalCostUSD in
-		// Claude Code's subsequent ResultMessages. Stats must be accumulated
-		// across the boundary, just like context_cleared.
+		// Claude's total cost persists across compaction; turns and duration
+		// are per invocation and still accumulate across the boundary.
 		newTask := func() *Task {
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
 			tk.SetState(taskslog.StateRunning)
 			return tk
 		}
@@ -1802,7 +1798,7 @@ func TestTask(t *testing.T) {
 			return []agent.Message{
 				&agent.ResultMessage{MessageType: "result", TotalCostUSD: 10.0, NumTurns: 3, DurationMs: 5000},
 				&agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"},
-				&agent.ResultMessage{MessageType: "result", TotalCostUSD: 5.0, NumTurns: 2, DurationMs: 3000},
+				&agent.ResultMessage{MessageType: "result", TotalCostUSD: 15.0, NumTurns: 2, DurationMs: 3000},
 			}
 		}
 
@@ -3802,6 +3798,93 @@ func TestPricedCost(t *testing.T) {
 	// glm-5.3-flash: $0.15/M input, $0.03/M cache read, $0.50/M output.
 	prices := fakePricer{"zai/glm-5.3-flash": {InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}}
 
+	t.Run("OpenCodeReportedCostAcrossCompactionAndClear", func(t *testing.T) {
+		t.Parallel()
+		newMessages := func() []agent.Message {
+			cost := func(value float64) *agent.UsageMessage {
+				return &agent.UsageMessage{CumulativeCostUSD: &value}
+			}
+			return []agent.Message{
+				cost(0.40),
+				&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}},
+				&agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"},
+				cost(0.75),
+				&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}},
+				agent.ContextCleared(),
+				cost(0.20),
+				&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}},
+			}
+		}
+		for _, replay := range []bool{false, true} {
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, "zai/glm-5.3-flash", "")
+			tk.Pricer = prices
+			tk.SetState(taskslog.StateRunning)
+			if replay {
+				tk.SeedTimeline(newMessages())
+			} else {
+				for _, m := range newMessages() {
+					tk.addMessage(t.Context(), m, false)
+				}
+			}
+			if got, _, _, _, _ := tk.LiveStats(); got != 0.95 {
+				t.Errorf("replay=%v cost = %v, want 0.95", replay, got)
+			}
+		}
+	})
+	t.Run("OpenCodeZeroReportedCostUsesPricer", func(t *testing.T) {
+		t.Parallel()
+		const model = "zai-coding-plan/glm-4.7"
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.OpenCode, model, "")
+		tk.Pricer = fakePricer{model: {InputPerMTok: 0.15}}
+		tk.SetState(taskslog.StateRunning)
+		zero := 0.0
+		tk.addMessage(t.Context(), &agent.UsageMessage{CumulativeCostUSD: &zero}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}, false)
+		if got, _, _, _, _ := tk.LiveStats(); got != 0.15 {
+			t.Errorf("cost = %v, want 0.15 API-equivalent pricing", got)
+		}
+	})
+
+	t.Run("PiCompactionUsageCountsAcrossBoundary", func(t *testing.T) {
+		t.Parallel()
+		newTask := func(t *testing.T) *Task {
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "zai/glm-5.3-flash", "")
+			tk.Pricer = prices
+			tk.SetState(taskslog.StateRunning)
+			return tk
+		}
+		messages := func() []agent.Message {
+			return []agent.Message{
+				&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
+				&agent.UsageMessage{Usage: agent.Usage{InputTokens: 1_000_000}},
+				&agent.SystemMessage{MessageType: "system", Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 20_000},
+				&agent.UsageMessage{ReportedModel: "zai/glm-5.3-flash", Usage: agent.Usage{InputTokens: 1_000_000}},
+			}
+		}
+		for _, tc := range []struct {
+			name    string
+			restore bool
+		}{
+			{name: "live"},
+			{name: "restore", restore: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				tk := newTask(t)
+				if tc.restore {
+					tk.SeedTimeline(messages())
+				} else {
+					for _, m := range messages() {
+						tk.addMessage(t.Context(), m, false)
+					}
+				}
+				if cost, _, _, _, _ := tk.LiveStats(); math.Abs(cost-0.45) > 1e-9 {
+					t.Errorf("costUSD = %v, want 0.45 including compaction", cost)
+				}
+			})
+		}
+	})
+
 	t.Run("UsageMessagesAccumulatePerCall", func(t *testing.T) {
 		t.Parallel()
 		// Pi reports usage per API call; its result carries only the last
@@ -3943,8 +4026,8 @@ func TestPricedCost(t *testing.T) {
 			NumTurns:     1,
 		}, false)
 		costUSD, _, _, _, _ := tk.LiveStats()
-		if want := 10.0 + 0.10*10.0; costUSD != want {
-			t.Errorf("costUSD = %v, want %v (reported total + cache-read surcharge)", costUSD, want)
+		if want := 10.0; costUSD != want {
+			t.Errorf("costUSD = %v, want %v (reported total)", costUSD, want)
 		}
 	})
 

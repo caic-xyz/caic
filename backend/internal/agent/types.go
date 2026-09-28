@@ -407,7 +407,7 @@ func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
 	return time.Duration(m.DurationMs) * time.Millisecond, m.DurationMs > 0
 }
 
-// UsageMessage reports token consumption for a single API call.
+// UsageMessage reports token consumption or a harness cost snapshot.
 //
 // Its JSON encoding is persisted in task logs. Keep JSON field names and their
 // meanings backward-compatible with logs written by released binaries.
@@ -415,6 +415,9 @@ type UsageMessage struct {
 	Usage         Usage  `json:"usage"`
 	ReportedModel string `json:"model,omitempty"`
 	ContextWindow int    `json:"context_window,omitempty"` // Non-zero when the backend reports the active context window size.
+	// CumulativeCostUSD is the harness-reported cost for its current session.
+	// A pointer distinguishes a reported zero from an absent cost.
+	CumulativeCostUSD *float64 `json:"cumulative_cost_usd,omitempty"`
 	// ModelDerived reports that ReportedModel was derived by caic from session
 	// state because the harness record carried no model. Such records must not
 	// be priced per call: the harness prices this usage in its turn result, or
