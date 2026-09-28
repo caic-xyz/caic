@@ -24,7 +24,6 @@ interface DropdownProps {
  * Wraps the trigger (children) and dropdown content in a single container,
  * managing click-outside dismissal via a capture-phase document listener. */
 export default function Dropdown(props: DropdownProps) {
-  // eslint-disable-next-line no-unassigned-vars -- assigned by SolidJS ref
   let containerRef: HTMLDivElement | undefined;
 
   const menuItems = (menu: Element) =>

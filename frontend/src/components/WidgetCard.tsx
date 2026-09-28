@@ -26,8 +26,8 @@ export default function WidgetCard(props: { group: MessageGroup }) {
   const [iframeHeight, setIframeHeight] = createSignal(400);
   const [iframeReady, setIframeReady] = createSignal(false);
   const [fullscreen, setFullscreen] = createSignal(false);
-  let iframeRef: HTMLIFrameElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
-  let fullscreenIframeRef: HTMLIFrameElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  let iframeRef: HTMLIFrameElement | undefined;
+  let fullscreenIframeRef: HTMLIFrameElement | undefined;
   const [fullscreenReady, setFullscreenReady] = createSignal(false);
 
   function postContent(html: string, final: boolean) {

@@ -16,7 +16,7 @@ interface PlotHostProps {
 
 export default function PlotHost(props: PlotHostProps) {
   const [width, setWidth] = createSignal(0);
-  // eslint-disable-next-line no-unassigned-vars -- assigned by SolidJS ref
+
   let host: HTMLDivElement | undefined;
 
   onMount(() => {

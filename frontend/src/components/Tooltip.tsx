@@ -17,8 +17,8 @@ const GAP = 6; // px between element and popup
 
 export default function Tooltip(props: Props) {
   const [show, setShow] = createSignal(false);
-  let wrapperRef: HTMLSpanElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
-  let popupRef: HTMLSpanElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  let wrapperRef: HTMLSpanElement | undefined;
+  let popupRef: HTMLSpanElement | undefined;
 
   function onDocClick(e: MouseEvent) {
     if (wrapperRef && !wrapperRef.contains(e.target as Node)) {

@@ -133,7 +133,7 @@ export default function TaskCard(props: TaskCardProps) {
   const repoStates = () => props.repoStates ?? [];
   const hasRepositoryRuntime = () => Boolean(props.runtime?.id) && props.state !== "purged";
   let cardRef: HTMLDivElement | undefined;
-  let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  let titleRef: HTMLElement | undefined;
   let contextMenuRef: HTMLDivElement | undefined;
 
   const repositoryState = (repo: TaskRepo) => {

@@ -20,8 +20,8 @@ export default function VncViewer(props: Props) {
   const navigate = useNavigate();
   const [error, setError] = createSignal<string | null>(null);
   const [fullscreen, setFullscreen] = createSignal(false);
-  let containerRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
-  let canvasRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  let containerRef: HTMLDivElement | undefined;
+  let canvasRef: HTMLDivElement | undefined;
 
   onMount(() => {
     const canvas = canvasRef;

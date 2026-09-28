@@ -323,7 +323,7 @@ export default function TaskDetail(props: Props) {
   });
 
   // Auto-scroll: keep scrolled to bottom unless the user scrolled up.
-  let messageAreaRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  let messageAreaRef: HTMLDivElement | undefined;
   let userScrolledUp = false;
 
   function isNearBottom(el: HTMLElement): boolean {
