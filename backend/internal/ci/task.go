@@ -4,7 +4,6 @@ package ci
 
 import (
 	"context"
-	"slices"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -70,8 +69,7 @@ type Backend interface {
 // lastResultText returns the Result field of the most recent ResultMessage in
 // the task's message history. Used as the squash-merge commit body.
 func lastResultText(t *task.Task) string {
-	msgs := t.Messages()
-	for _, msg := range slices.Backward(msgs) {
+	for msg := range t.BackwardMessages() {
 		if rm, ok := msg.(*agent.ResultMessage); ok {
 			return rm.Result
 		}

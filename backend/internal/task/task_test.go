@@ -141,13 +141,60 @@ func TestTask(t *testing.T) {
 		if len(got) != 3 || got[0] != last || got[2] != first {
 			t.Fatalf("BackwardMessages = %#v, want the backward three-message call-time snapshot", got)
 		}
+		for range messages {
+			t.Fatal("second BackwardMessages range yielded a message")
+		}
+		if tk.timelineReaders != 0 {
+			t.Errorf("timeline readers = %d, want released", tk.timelineReaders)
+		}
+	})
+	t.Run("TimelineEntriesIteration", func(t *testing.T) {
+		t.Parallel()
+		first := agent.TimedMessage{Message: &agent.TextMessage{Text: "first"}}
+		second := agent.TimedMessage{Message: &agent.TextMessage{Text: "second"}}
+		third := agent.TimedMessage{Message: &agent.TextMessage{Text: "third"}}
+		entries := timelineEntries{
+			prefix: []agent.TimedMessage{first, second},
+			suffix: []agent.TimedMessage{third},
+		}
+
+		var forward, backward []int
+		var forwardText, backwardText []string
+		for i, entry := range entries.Forward() {
+			forward = append(forward, i)
+			message, ok := entry.Message.(*agent.TextMessage)
+			if !ok {
+				t.Fatalf("Forward entry %d type = %T, want *agent.TextMessage", i, entry.Message)
+			}
+			forwardText = append(forwardText, message.Text)
+		}
+		for i, entry := range entries.Backward() {
+			backward = append(backward, i)
+			message, ok := entry.Message.(*agent.TextMessage)
+			if !ok {
+				t.Fatalf("Backward entry %d type = %T, want *agent.TextMessage", i, entry.Message)
+			}
+			backwardText = append(backwardText, message.Text)
+		}
+		if !reflect.DeepEqual(forward, []int{0, 1, 2}) {
+			t.Errorf("Forward indexes = %v, want [0 1 2]", forward)
+		}
+		if !reflect.DeepEqual(forwardText, []string{"first", "second", "third"}) {
+			t.Errorf("Forward entries = %v, want [first second third]", forwardText)
+		}
+		if !reflect.DeepEqual(backward, []int{2, 1, 0}) {
+			t.Errorf("Backward indexes = %v, want [2 1 0]", backward)
+		}
+		if !reflect.DeepEqual(backwardText, []string{"third", "second", "first"}) {
+			t.Errorf("Backward entries = %v, want [third second first]", backwardText)
+		}
 	})
 	t.Run("SeedTimelineWithTimes", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		message := &agent.TextMessage{Text: "timed"}
 		const timestamp = int64(1_788_122_692_466)
-		tk.SeedTimelineEntries([]agent.TimedMessage{{Message: message, ProducerTime: time.UnixMilli(timestamp)}})
+		tk.SeedTimelineParts(nil, []agent.TimedMessage{{Message: message, ProducerTime: time.UnixMilli(timestamp)}})
 
 		history, _, unsubscribe := tk.Subscribe(t.Context())
 		defer unsubscribe()
@@ -178,11 +225,106 @@ func TestTask(t *testing.T) {
 		if compacted, ok := tk.timeline[2].Message.(*agent.ThinkingDeltaMessage); !ok || compacted == thinkingDelta || compacted.Text != "" {
 			t.Errorf("thinking delta = %#v, want shared empty delta", tk.timeline[2].Message)
 		}
-		if toolDelta.Delta != "" {
-			t.Errorf("tool delta retained %d bytes, want empty", len(toolDelta.Delta))
+		if compacted, ok := tk.timeline[4].Message.(*agent.ToolOutputDeltaMessage); !ok || compacted == toolDelta || compacted.Delta != "" || compacted.ToolUseID != toolDelta.ToolUseID {
+			t.Errorf("tool delta = %#v, want an immutable empty replacement", tk.timeline[4].Message)
+		}
+		if toolDelta.Delta == "" {
+			t.Error("source tool delta was mutated")
 		}
 		if tk.timeline[6].Message != unfinished || unfinished.Text != "still live" {
 			t.Errorf("unfinished delta = %#v, want original live delta", tk.timeline[6].Message)
+		}
+	})
+	t.Run("SeedTimelinePartsCompactsAcrossOwnershipBoundary", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
+		diff := agent.DiffStat{{Path: "main.go", LinesAdded: 3}}
+		repos := []agent.RepoState{{RepoIndex: 0, Branch: "caic-test", ChangedFiles: 1}}
+		prefix := []agent.TimedMessage{
+			{Message: &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: diff, Repos: repos}},
+			{Message: delta},
+		}
+		suffix := []agent.TimedMessage{{Message: &agent.TextMessage{Text: "complete"}}}
+		tk.SeedTimelineParts(prefix, suffix)
+
+		if tk.timelinePrefix[1].Message != compactedTextDelta {
+			t.Errorf("prefix delta = %#v, want compacted placeholder", tk.timelinePrefix[1].Message)
+		}
+		snapshot := tk.Snapshot()
+		if !reflect.DeepEqual(snapshot.DiffStat, diff) {
+			t.Errorf("restored diff stat = %#v, want %#v", snapshot.DiffStat, diff)
+		}
+		if !reflect.DeepEqual(snapshot.RepoStates, repos) {
+			t.Errorf("restored repo states = %#v, want %#v", snapshot.RepoStates, repos)
+		}
+	})
+	t.Run("LiveFinalCompactsDeltas", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
+		tk.addMessage(t.Context(), delta, false)
+		tk.addMessage(t.Context(), &agent.TextMessage{Text: "complete"}, false)
+
+		if tk.timeline[0].Message != compactedTextDelta {
+			t.Errorf("live delta = %#v, want compacted placeholder", tk.timeline[0].Message)
+		}
+		if delta.Text == "" {
+			t.Error("published live delta was mutated")
+		}
+	})
+	t.Run("LiveCompactionWaitsForSnapshotRelease", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
+		tk.addMessage(t.Context(), delta, false)
+		history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
+		defer unsubscribe()
+		tk.addMessage(t.Context(), &agent.TextMessage{Text: "complete"}, false)
+
+		if got := history.At(0).Message; got != delta {
+			t.Fatalf("active snapshot delta = %#v, want original", got)
+		}
+		if tk.timeline[0].Message != delta {
+			t.Fatal("retained delta compacted while snapshot was active")
+		}
+		history.Release()
+		if tk.timeline[0].Message != compactedTextDelta {
+			t.Errorf("released snapshot delta = %#v, want compacted placeholder", tk.timeline[0].Message)
+		}
+	})
+	t.Run("CanceledSnapshotRemainsStableUntilRelease", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
+		tk.addMessage(t.Context(), delta, false)
+		ctx, cancel := context.WithCancel(t.Context())
+		history, _, unsubscribe := tk.SubscribeSnapshot(ctx)
+		cancel()
+		tk.addMessage(t.Context(), &agent.TextMessage{Text: "complete"}, false)
+
+		if got := history.At(0).Message; got != delta {
+			t.Fatalf("canceled snapshot delta = %#v, want original", got)
+		}
+		if tk.timeline[0].Message != delta {
+			t.Fatal("retained delta compacted before canceled snapshot was released")
+		}
+		unsubscribe()
+		if tk.timeline[0].Message != compactedTextDelta {
+			t.Errorf("released canceled snapshot delta = %#v, want compacted placeholder", tk.timeline[0].Message)
+		}
+	})
+	t.Run("LiveSubscriberRetainsPublishedDelta", func(t *testing.T) {
+		t.Parallel()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+		_, live, unsubscribe := tk.SubscribeLiveMessages(t.Context())
+		defer unsubscribe()
+		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
+		tk.addMessage(t.Context(), delta, false)
+		tk.addMessage(t.Context(), &agent.TextMessage{Text: "complete"}, false)
+
+		if got := recvMsg(t, live); got != delta || delta.Text == "" {
+			t.Errorf("published delta = %#v, want original payload", got)
 		}
 	})
 	t.Run("SubscribeSnapshotRetainsCallTimeHistory", func(t *testing.T) {
@@ -192,6 +334,7 @@ func TestTask(t *testing.T) {
 		tk.SeedTimeline([]agent.Message{first})
 		history, live, unsubscribe := tk.SubscribeSnapshot(t.Context())
 		defer unsubscribe()
+		defer history.Release()
 
 		second := &agent.TextMessage{Text: "second"}
 		tk.addMessage(t.Context(), second, false)
@@ -3397,7 +3540,7 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		t.Run("Empty", func(t *testing.T) {
 			t.Parallel()
-			if lastAgentMessage(nil) != nil {
+			if lastAgentMessage(timelineEntries{}) != nil {
 				t.Error("lastAgentMessage(nil) should be nil")
 			}
 		})
@@ -3414,7 +3557,7 @@ func TestTask(t *testing.T) {
 			for i, message := range msgs {
 				entries[i].Message = message
 			}
-			got := lastAgentMessage(entries)
+			got := lastAgentMessage(timelineEntries{suffix: entries})
 			if got == nil || got.Result != "done" {
 				t.Errorf("lastAgentMessage should find ResultMessage skipping non-semantic, got %+v", got)
 			}
@@ -3429,7 +3572,7 @@ func TestTask(t *testing.T) {
 			for i, message := range msgs {
 				entries[i].Message = message
 			}
-			if lastAgentMessage(entries) != nil {
+			if lastAgentMessage(timelineEntries{suffix: entries}) != nil {
 				t.Error("lastAgentMessage should be nil when last semantic is not result")
 			}
 		})
@@ -3480,6 +3623,29 @@ func TestTask(t *testing.T) {
 			}
 		})
 	})
+}
+
+// BenchmarkLiveDeltaFinalization measures retaining a long live delta run and
+// replacing its payloads when the corresponding final message arrives.
+func BenchmarkLiveDeltaFinalization(b *testing.B) {
+	const deltaCount = 1_000
+	deltas := make([]*agent.TextDeltaMessage, deltaCount)
+	for i := range deltas {
+		deltas[i] = &agent.TextDeltaMessage{Text: strings.Repeat("delta", 128)}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		tk := mustNewTask(b, ksid.NewID(), agent.Prompt{Text: "benchmark"}, harness.Claude, "", "")
+		for _, delta := range deltas {
+			tk.addMessage(b.Context(), delta, true)
+		}
+		tk.addMessage(b.Context(), &agent.TextMessage{Text: "complete"}, true)
+		if tk.timeline[0].Message != compactedTextDelta {
+			b.Fatal("live delta payload was not compacted")
+		}
+	}
 }
 
 func TestSessionHandle(t *testing.T) {

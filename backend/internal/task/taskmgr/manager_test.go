@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -404,8 +405,8 @@ func BenchmarkMergeLogAndRelayTimeline(b *testing.B) {
 	for b.Loop() {
 		logTimeline := agent.ParsedTimeline{Messages: logEntries, RelayRecords: logRecords}
 		relayTimeline := agent.ParsedTimeline{Messages: relayEntries, RelayRecords: relayRecords}
-		if got := newLogRelayMessageMerger(logTimeline, harness.Codex).merge(relayTimeline); len(got) != logCount+1 {
-			b.Fatalf("merged %d entries, want %d", len(got), logCount+1)
+		if got := newLogRelayMessageMerger(logTimeline, harness.Codex).mergeOwned(relayTimeline); got.Len() != logCount+1 {
+			b.Fatalf("merged %d entries, want %d", got.Len(), logCount+1)
 		}
 	}
 }
@@ -456,8 +457,8 @@ func BenchmarkMergeUnmarkedLogAndSeededRelayTimeline(b *testing.B) {
 		logTimeline := agent.ParsedTimeline{Messages: logEntries, RelayRecords: logRecords}
 		merger := newLogRelayMessageMerger(logTimeline, harness.Codex)
 		merger.strictRelay = true
-		if got := merger.merge(relayTimeline); merger.err != nil || len(got) != logCount+1 {
-			b.Fatalf("merged %d entries with error %v, want %d", len(got), merger.err, logCount+1)
+		if got := merger.mergeOwned(relayTimeline); merger.err != nil || got.Len() != logCount+1 {
+			b.Fatalf("merged %d entries with error %v, want %d", got.Len(), merger.err, logCount+1)
 		}
 	}
 }
@@ -4084,6 +4085,95 @@ func TestManager(t *testing.T) {
 
 	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
+		t.Run("bounds_concurrent_imports", func(t *testing.T) {
+			t.Parallel()
+			const taskCount = maxConcurrentTaskImports + 3
+			info := &runtimetest.FakeInfo{Meta: make(map[string]string, taskCount*2)}
+			instances := make([]runtime.Instance, 0, taskCount)
+			logDir := t.TempDir()
+			store := taskslog.NewStore(testLogger(), logDir)
+			for i := range taskCount {
+				taskID := ksid.NewID()
+				name := fmt.Sprintf("md-agent-bounded-import-%d", i)
+				info.Meta[name+"\x00caic.id"] = taskID.String()
+				info.Meta[name+"\x00caic.harness"] = string(harness.Codex)
+				instances = append(instances, runtime.Instance{
+					ID:          runtime.NewID("test-runtime", runtime.InstanceID(name)),
+					AgentTarget: runtime.ConnectionTarget{SSHHost: name},
+					State:       "running",
+				})
+				tk := mustNewTask(t, taskID, agent.Prompt{Text: "accepted"}, harness.Codex, "")
+				log, _, err := store.Open(tk.LogFilename(), tk.LogHeader())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := errors.Join(log.AppendMessage(&agent.UserInputMessage{Text: "accepted"}), log.Close()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs, err := store.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				LogStore:  store,
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, info),
+				Backends: map[harness.Name]agent.Backend{
+					harness.Codex: &agenttest.FakeBackend{HarnessName: harness.Codex, WireFactory: codex.New("", nil).NewWire},
+				},
+			})
+			started := make(chan struct{}, taskCount)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			releaseImports := func() {
+				releaseOnce.Do(func() { close(release) })
+			}
+			t.Cleanup(releaseImports)
+			var active atomic.Int32
+			var peak atomic.Int32
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+					current := active.Add(1)
+					for {
+						previous := peak.Load()
+						if current <= previous || peak.CompareAndSwap(previous, current) {
+							break
+						}
+					}
+					started <- struct{}{}
+					<-release
+					active.Add(-1)
+					return agent.ParsedTimeline{}, 0, nil
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, importErr := m.ImportInstances(t.Context(), instances, logs)
+				done <- importErr
+			}()
+			for range maxConcurrentTaskImports {
+				select {
+				case <-started:
+				case <-time.After(time.Second):
+					t.Fatal("timed out waiting for bounded imports to start")
+				}
+			}
+			select {
+			case <-started:
+				t.Fatalf("more than %d imports started before a slot was released", maxConcurrentTaskImports)
+			case <-time.After(50 * time.Millisecond):
+			}
+			releaseImports()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if got := peak.Load(); got != maxConcurrentTaskImports {
+				t.Errorf("peak imports = %d, want %d", got, maxConcurrentTaskImports)
+			}
+		})
 		t.Run("marks_interrupted_startup_failed_before_reconnect", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
@@ -4512,6 +4602,43 @@ func TestManager(t *testing.T) {
 			}
 			if adopted[0].Task().Primary() != nil {
 				t.Fatalf("primary repo = %#v, want none", adopted[0].Task().Primary())
+			}
+		})
+		t.Run("log_only_history_is_fixed_prefix", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			instanceID := runtime.NewID("test-runtime", "md-agent-log-only-prefix")
+			fake := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-log-only-prefix\x00caic.id":      taskID.String(),
+				"md-agent-log-only-prefix\x00caic.harness": string(harness.Claude),
+			}}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+				Backends:  map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}},
+			})
+			backing := make([]agent.TimedMessage, 2)
+			backing[0].Message = &agent.TextMessage{Text: "durable"}
+			loaded := &taskslog.LoadedTask{
+				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "test", Timeline: backing[:1],
+			}
+
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{
+				ID: instanceID, State: "exited",
+			}}, []*taskslog.LoadedTask{loaded})
+			if err != nil {
+				t.Fatalf("ImportInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+
+			adopted[0].Task().ClearMessages(t.Context())
+			if got := backing[1].Message; got != nil {
+				t.Fatalf("durable history spare slot = %T, want untouched", got)
+			}
+			if got := adopted[0].Task().MessageCount(); got != 2 {
+				t.Fatalf("MessageCount = %d, want 2", got)
 			}
 		})
 		t.Run("valid_restores_branch_diff_for_exited_instance", func(t *testing.T) {
@@ -5978,13 +6105,13 @@ func TestCountResultMessages(t *testing.T) {
 			&agent.TextMessage{Text: "world"},
 			&agent.ResultMessage{MessageType: "result"},
 		}
-		if n := countResultMessages(msgs); n != 2 {
+		if n := countResultMessages(slices.Values(msgs)); n != 2 {
 			t.Errorf("countResultMessages = %d, want 2", n)
 		}
 	})
 	t.Run("valid_empty", func(t *testing.T) {
 		t.Parallel()
-		if n := countResultMessages(nil); n != 0 {
+		if n := countResultMessages(slices.Values([]agent.Message(nil))); n != 0 {
 			t.Errorf("countResultMessages(nil) = %d, want 0", n)
 		}
 	})

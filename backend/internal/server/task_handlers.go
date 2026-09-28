@@ -187,7 +187,9 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 			return nil
 		}
 	} else {
-		if err := h.replayMemoryHistory(stream, entry, history, now); err != nil {
+		err := h.replayMemoryHistory(stream, entry, history, now)
+		history.Release()
+		if err != nil {
 			return err
 		}
 	}

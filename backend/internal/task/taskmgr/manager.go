@@ -101,6 +101,16 @@ type TaskMCPScoper interface {
 	ForTask(id ksid.ID) mcp.Registry
 }
 
+const maxConcurrentTaskImports = 2
+
+type instanceImportJob struct {
+	checkout         *repo.Checkout
+	instance         *runtime.Instance
+	branch           string
+	taskID           string
+	metadataResolved bool
+}
+
 // Manager owns task lifecycle state, runtime import, session watching, and
 // stats streaming.
 type Manager struct {
@@ -568,17 +578,15 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 		return true
 	})
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
 	var errs []error
 	if validationErr != nil {
 		errs = append(errs, validationErr)
 	}
-	var entries []*Entry
 	claimed := make(map[runtime.ID]bool, len(instances))
 	for id := range rejected {
 		claimed[id] = true
 	}
+	jobs := make([]instanceImportJob, 0, len(instances)-len(claimed))
 
 	for checkout := range m.Checkouts.Checkouts() {
 		for i := range instances {
@@ -592,22 +600,9 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 			}
 			claimed[c.ID] = true
 			taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
-			wg.Go(func() {
-				entry, err := m.importInstance(ctx, checkout, c, branch, taskIDVal, metadataResolved, branchIDs, allLogs)
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, err)
-					mu.Unlock()
-				}
-				if entry != nil {
-					mu.Lock()
-					entries = append(entries, entry)
-					mu.Unlock()
-				}
-			})
+			jobs = append(jobs, instanceImportJob{checkout: checkout, instance: c, branch: branch, taskID: taskIDVal, metadataResolved: metadataResolved})
 		}
 	}
-	wg.Wait()
 
 	// Import no-repo runtime instances.
 	for i := range instances {
@@ -616,16 +611,28 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 			continue
 		}
 		taskIDVal, metadataResolved := resolvedTaskIDs[c.ID]
+		jobs = append(jobs, instanceImportJob{instance: c, taskID: taskIDVal, metadataResolved: metadataResolved})
+	}
+
+	jobsCh := make(chan instanceImportJob, len(jobs))
+	for _, job := range jobs {
+		jobsCh <- job
+	}
+	close(jobsCh)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var entries []*Entry
+	for range min(maxConcurrentTaskImports, len(jobs)) {
 		wg.Go(func() {
-			entry, err := m.importInstance(ctx, nil, c, "", taskIDVal, metadataResolved, branchIDs, allLogs)
-			if err != nil {
+			for job := range jobsCh {
+				entry, err := m.importInstance(ctx, job.checkout, job.instance, job.branch, job.taskID, job.metadataResolved, branchIDs, allLogs)
 				mu.Lock()
-				errs = append(errs, err)
-				mu.Unlock()
-			}
-			if entry != nil {
-				mu.Lock()
-				entries = append(entries, entry)
+				if err != nil {
+					errs = append(errs, err)
+				}
+				if entry != nil {
+					entries = append(entries, entry)
+				}
 				mu.Unlock()
 			}
 		})
@@ -674,7 +681,7 @@ func needsTitleRegen(t *task.Task, lt *taskslog.LoadedTask, resolver taskslog.Wi
 	if err := lt.LoadMessagesWithResolver(resolver); err == nil {
 		logResults = countTimelineResults(lt.Timeline)
 	}
-	restoredResults := countResultMessages(t.Messages())
+	restoredResults := countResultMessages(t.ForwardMessages())
 	return restoredResults > logResults
 }
 
@@ -689,9 +696,9 @@ func countTimelineResults(entries []agent.TimedMessage) int {
 }
 
 // countResultMessages counts the number of ResultMessages in msgs.
-func countResultMessages(msgs []agent.Message) int {
+func countResultMessages(msgs iter.Seq[agent.Message]) int {
 	n := 0
-	for _, m := range msgs {
+	for m := range msgs {
 		if _, ok := m.(*agent.ResultMessage); ok {
 			n++
 		}
@@ -801,8 +808,7 @@ func (m *Manager) WatchTaskCompletion(ctx context.Context, taskID ksid.ID) (stat
 
 // lastResultText returns the Result field of the most recent ResultMessage.
 func lastResultText(t *task.Task) string {
-	msgs := t.Messages()
-	for _, msg := range slices.Backward(msgs) {
+	for msg := range t.BackwardMessages() {
 		if rm, ok := msg.(*agent.ResultMessage); ok {
 			return rm.Result
 		}
@@ -1955,7 +1961,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		merger := newLogRelayMessageMerger(logTimeline, lt.Harness)
 		merger.logGeneration = lt.RelayGeneration
 		merger.strictRelay = lt.LogVersion != agent.LogVersionV1
-		timeline := merger.merge(relayTimeline)
+		timeline := merger.mergeOwned(relayTimeline)
 		if merger.err != nil {
 			if lt.LogVersion != agent.LogVersionV2 || !relayAlive || !relaySnapshotRead {
 				return nil, fmt.Errorf("reconcile imported relay snapshot %s: %w", taskID, merger.err)
@@ -1965,9 +1971,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			// be valid even though its durable endpoint is ambiguous. Preserve the
 			// trusted local history, skip the unverified offline tail, and resume at
 			// the inspected end so only future relay output is appended.
-			timeline = append(slices.Clone(lt.Timeline), agent.TimedMessage{Message: &agent.LogMessage{
-				Line: task.LegacyRelayRecoveryNotice,
-			}})
+			timeline = mergedTimeline{
+				prefix: lt.Timeline,
+				suffix: []agent.TimedMessage{{Message: &agent.LogMessage{Line: task.LegacyRelayRecoveryNotice}}},
+			}
 			m.log.WarnContext(ctx, "relay", "msg", "legacy recovery skipped unverified relay tail",
 				"repo", relPath, "br", branch, "instance", c.ID, "reason", merger.err)
 		} else if encoded := merger.relayAppend(relayTimeline); len(encoded) > 0 {
@@ -1979,10 +1986,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 				return nil, fmt.Errorf("persist imported relay snapshot %s: %w", taskID, err)
 			}
 		}
-		t.SeedTimelineEntries(timeline)
-		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(timeline), "relayMsgs", len(relayTimeline.Messages))
+		t.SeedTimelineParts(timeline.prefix, timeline.suffix)
+		m.log.DebugContext(ctx, "relay", "msg", "restored from", "repo", relPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", timeline.Len(), "relayMsgs", len(relayTimeline.Messages))
 	} else if len(lt.Timeline) > 0 {
-		t.SeedTimelineEntries(lt.Timeline)
+		t.SeedTimelineParts(lt.Timeline, nil)
 		m.log.WarnContext(ctx, "relay", "msg", "restored from log", "repo", relPath, "br", branch, "instance", c.ID, "msgs", len(lt.Timeline))
 	}
 	if relaySnapshotRead {
@@ -2067,7 +2074,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			t.SetStateAt(taskslog.StateWaiting, stateUpdatedAt)
 			m.log.WarnContext(ctx, "relay", "msg", "dead, marking waiting",
 				"repo", relPath, "br", branch, "instance", c.ID,
-				"sess", t.GetSessionID(), "msgs", len(t.Messages()))
+				"sess", t.GetSessionID(), "msgs", t.MessageCount())
 		}
 	}
 
@@ -2195,18 +2202,25 @@ func newLogRelayMessageMerger(logTimeline agent.ParsedTimeline, h harness.Name) 
 }
 
 func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agent.TimedMessage {
+	return m.mergeOwned(relayTimeline).flatten()
+}
+
+// mergeOwned returns the durable log and unmatched relay suffix as separate
+// owned slices so adoption can transfer both to Task without cloning the full
+// durable timeline.
+func (m *logRelayMessageMerger) mergeOwned(relayTimeline agent.ParsedTimeline) mergedTimeline {
 	relayEntries := relayTimeline.Messages
 	if (m.strictRelay || m.logGeneration != "") && len(m.logRecords) == 0 {
 		if len(relayTimeline.RelayRecords) == 0 {
-			return slices.Clone(m.logEntries)
+			return mergedTimeline{prefix: m.logEntries}
 		}
 		first := relayTimeline.RelayRecords[0]
 		if first.RelayEnd != int64(first.ByteEnd) {
 			m.err = errors.New("marked empty relay generation has a truncated snapshot")
-			return slices.Clone(m.logEntries)
+			return mergedTimeline{prefix: m.logEntries}
 		}
 		m.recordOverlap = true
-		return append(slices.Clone(m.logEntries), m.comparableRelayTimeline(relayEntries)...)
+		return mergedTimeline{prefix: m.logEntries, suffix: m.comparableRelayTimeline(relayEntries)}
 	}
 	if len(relayTimeline.RelayRecords) > 0 {
 		relayGeneration := relayTimeline.RelayRecords[0].Generation
@@ -2214,11 +2228,11 @@ func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agen
 			first := relayTimeline.RelayRecords[0]
 			if first.RelayEnd == int64(first.ByteEnd) {
 				m.recordOverlap = true
-				return append(slices.Clone(m.logEntries), m.comparableRelayTimeline(relayEntries)...)
+				return mergedTimeline{prefix: m.logEntries, suffix: m.comparableRelayTimeline(relayEntries)}
 			}
 			if m.logGeneration != "" {
 				m.err = errors.New("new relay generation has a truncated snapshot")
-				return slices.Clone(m.logEntries)
+				return mergedTimeline{prefix: m.logEntries}
 			}
 		}
 	}
@@ -2226,34 +2240,34 @@ func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agen
 		return merged
 	}
 	if m.err != nil {
-		return slices.Clone(m.logEntries)
+		return mergedTimeline{prefix: m.logEntries}
 	}
 	if len(m.logRecords) > 0 && len(relayTimeline.RelayRecords) > 0 &&
 		m.logRecords[len(m.logRecords)-1].Generation != "" {
 		m.err = errors.New("marked relay generation has no physical position overlap")
-		return slices.Clone(m.logEntries)
+		return mergedTimeline{prefix: m.logEntries}
 	}
 	if merged, ok := m.mergeByRelayFingerprint(relayTimeline); ok {
 		return merged
 	}
 	if m.err != nil {
-		return slices.Clone(m.logEntries)
+		return mergedTimeline{prefix: m.logEntries}
 	}
 	if len(m.logEntries) == 0 {
-		return slices.Clone(m.comparableRelayTimeline(relayEntries))
+		return mergedTimeline{suffix: m.comparableRelayTimeline(relayEntries)}
 	}
 	if len(relayEntries) == 0 {
-		return slices.Clone(m.logEntries)
+		return mergedTimeline{prefix: m.logEntries}
 	}
 	relayEntries = m.comparableRelayTimeline(relayEntries)
 	comparableLogEntries := m.comparableLogTimeline()
 	maxOverlap := min(len(comparableLogEntries), len(relayEntries))
 	for n := maxOverlap; n > 0; n-- {
 		if m.messagesEqual(comparableLogEntries[len(comparableLogEntries)-n:], relayEntries[:n]) {
-			return append(slices.Clone(m.logEntries), relayEntries[n:]...)
+			return mergedTimeline{prefix: m.logEntries, suffix: slices.Clone(relayEntries[n:])}
 		}
 	}
-	return append(slices.Clone(m.logEntries), relayEntries...)
+	return mergedTimeline{prefix: m.logEntries, suffix: relayEntries}
 }
 
 // mergeByRelayPosition matches physical relay records shared by the durable
@@ -2261,13 +2275,13 @@ func (m *logRelayMessageMerger) merge(relayTimeline agent.ParsedTimeline) []agen
 // so the overlap may end anywhere within it. Absolute offsets remain stable
 // when stateful parsing produces different semantic fields or message counts
 // across the two scans.
-func (m *logRelayMessageMerger) mergeByRelayPosition(relayTimeline agent.ParsedTimeline) ([]agent.TimedMessage, bool) {
+func (m *logRelayMessageMerger) mergeByRelayPosition(relayTimeline agent.ParsedTimeline) (mergedTimeline, bool) {
 	if len(m.logRecords) == 0 || len(relayTimeline.RelayRecords) == 0 {
-		return nil, false
+		return mergedTimeline{}, false
 	}
 	generation := m.logRecords[len(m.logRecords)-1].Generation
 	if generation == "" {
-		return nil, false
+		return mergedTimeline{}, false
 	}
 	logEnd := m.logRecords[len(m.logRecords)-1]
 	matchEnd := 0
@@ -2300,7 +2314,7 @@ func (m *logRelayMessageMerger) mergeByRelayPosition(relayTimeline agent.ParsedT
 	if matches > 1 {
 		m.err = errors.New("marked relay generation has ambiguous physical position overlap")
 	}
-	return nil, false
+	return mergedTimeline{}, false
 }
 
 // mergeByRelayFingerprint upgrades logs written before relay-generation
@@ -2309,18 +2323,18 @@ func (m *logRelayMessageMerger) mergeByRelayPosition(relayTimeline agent.ParsedT
 // log. A unique endpoint with two adjacent exact records is still authoritative;
 // a shorter match is accepted only when it reaches the start of either input.
 // Future launches use generation-local offsets instead.
-func (m *logRelayMessageMerger) mergeByRelayFingerprint(relayTimeline agent.ParsedTimeline) ([]agent.TimedMessage, bool) {
+func (m *logRelayMessageMerger) mergeByRelayFingerprint(relayTimeline agent.ParsedTimeline) (mergedTimeline, bool) {
 	if len(m.logRecords) == 0 || len(relayTimeline.RelayRecords) == 0 {
-		return nil, false
+		return mergedTimeline{}, false
 	}
 	for _, record := range m.logRecords {
 		if record.Fingerprint == ([32]byte{}) {
-			return nil, false
+			return mergedTimeline{}, false
 		}
 	}
 	for _, record := range relayTimeline.RelayRecords {
 		if record.Fingerprint == ([32]byte{}) {
-			return nil, false
+			return mergedTimeline{}, false
 		}
 	}
 	logEnd := m.logRecords[len(m.logRecords)-1].Fingerprint
@@ -2349,22 +2363,22 @@ func (m *logRelayMessageMerger) mergeByRelayFingerprint(relayTimeline agent.Pars
 	} else {
 		m.err = errors.New("unmarked relay history has ambiguous repeated physical overlap")
 	}
-	return nil, false
+	return mergedTimeline{}, false
 }
 
-func (m *logRelayMessageMerger) finishPhysicalMerge(relayTimeline agent.ParsedTimeline, relayRecordEnd int) ([]agent.TimedMessage, bool) {
+func (m *logRelayMessageMerger) finishPhysicalMerge(relayTimeline agent.ParsedTimeline, relayRecordEnd int) (mergedTimeline, bool) {
 	messageEnd := relayTimeline.RelayRecords[relayRecordEnd-1].MessageEnd
 	if messageEnd < 0 || messageEnd > len(relayTimeline.Messages) {
-		return nil, false
+		return mergedTimeline{}, false
 	}
 	byteEnd := relayTimeline.RelayRecords[relayRecordEnd-1].ByteEnd
 	if byteEnd < 0 || byteEnd > len(relayTimeline.Encoded) {
-		return nil, false
+		return mergedTimeline{}, false
 	}
 	m.relayByteStart = byteEnd
 	m.recordOverlap = true
-	relaySuffix := m.comparableRelayTimeline(relayTimeline.Messages[messageEnd:])
-	return append(slices.Clone(m.logEntries), relaySuffix...), true
+	relaySuffix := slices.Clone(m.comparableRelayTimeline(relayTimeline.Messages[messageEnd:]))
+	return mergedTimeline{prefix: m.logEntries, suffix: relaySuffix}, true
 }
 
 func (m *logRelayMessageMerger) relayAppend(relayTimeline agent.ParsedTimeline) []byte {
@@ -2474,4 +2488,15 @@ func (m *logRelayMessageMerger) messagesEquivalent(a, b agent.Message) bool {
 	default:
 		return reflect.DeepEqual(a, b)
 	}
+}
+
+type mergedTimeline struct {
+	prefix []agent.TimedMessage
+	suffix []agent.TimedMessage
+}
+
+func (m mergedTimeline) Len() int { return len(m.prefix) + len(m.suffix) }
+
+func (m mergedTimeline) flatten() []agent.TimedMessage {
+	return append(slices.Clone(m.prefix), m.suffix...)
 }

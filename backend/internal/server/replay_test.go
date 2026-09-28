@@ -491,6 +491,7 @@ func TestReplayMemoryHistoryRebuildsFilterAfterCursorReset(t *testing.T) {
 	})
 	history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
 	defer unsubscribe()
+	defer history.Release()
 
 	s := newTestRouter(t, nil)
 	entry := s.taskMgr.NewEntry(tk, nil)

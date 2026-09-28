@@ -76,7 +76,7 @@ func BenchmarkTaskAdoption(b *testing.B) {
 // tool traffic punctuated by turn results, diff stats and context boundaries.
 //
 // The seeded entries contain no streaming deltas, so the in-place compaction
-// performed by SeedTimelineEntries leaves the shared fixture unchanged.
+// performed by SeedTimelineParts leaves the shared fixture unchanged.
 func BenchmarkSeedTimeline(b *testing.B) {
 	const turns = 500
 	entries := make([]agent.TimedMessage, 0, turns*8)
@@ -101,7 +101,7 @@ func BenchmarkSeedTimeline(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		mustNewTask(b, id, agent.Prompt{Text: "benchmark seed"}).SeedTimelineEntries(entries)
+		mustNewTask(b, id, agent.Prompt{Text: "benchmark seed"}).SeedTimelineParts(nil, entries)
 	}
 }
 

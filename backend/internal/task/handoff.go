@@ -68,13 +68,13 @@ func BuildHandoffPrompt(source *Task, maxBytes int) string {
 		fmt.Fprintf(&b, "\nThe original request included %d image attachment(s).\n", len(input.initialPrompt.Images))
 	}
 
-	if result, ok := latestHandoffResult(input.messages); ok {
-		if result.IsError {
+	if input.hasResult {
+		if input.result.IsError {
 			b.WriteString("\n## Latest harness error\n\n")
 		} else {
 			b.WriteString("\n## Latest assistant result\n\n")
 		}
-		writeQuote(&b, result.Text, maxHandoffResultBytes)
+		writeQuote(&b, input.result.Text, maxHandoffResultBytes)
 	}
 
 	if len(input.diffStat) > 0 {
@@ -91,10 +91,9 @@ func BuildHandoffPrompt(source *Task, maxBytes int) string {
 		}
 	}
 
-	turns := recentHandoffTurns(input.initialPrompt.Text, input.messages)
-	if len(turns) > 0 {
+	if len(input.turns) > 0 {
 		b.WriteString("\n## Recent conversation\n")
-		for _, turn := range turns {
+		for _, turn := range input.turns {
 			fmt.Fprintf(&b, "\n### %s\n\n", turn.role)
 			writeQuote(&b, turn.text, maxHandoffTurnBytes)
 		}
@@ -111,10 +110,8 @@ func snapshotHandoffPromptInput(source *Task) handoffPromptInput {
 	if model == "" {
 		model = source.RequestedModel
 	}
-	messages := make([]agent.Message, len(source.timeline))
-	for i, entry := range source.timeline {
-		messages[i] = entry.Message
-	}
+	entries := source.timelineViewLocked()
+	result, hasResult := latestHandoffResult(entries)
 	return handoffPromptInput{
 		initialPrompt: source.InitialPrompt,
 		title:         source.title,
@@ -123,7 +120,9 @@ func snapshotHandoffPromptInput(source *Task) handoffPromptInput {
 		repos:         slices.Clone(source.Repos),
 		rateLimit:     handoffRateLimitLocked(source),
 		diffStat:      slices.Clone(source.liveDiffStat),
-		messages:      messages,
+		result:        result,
+		hasResult:     hasResult,
+		turns:         recentHandoffTurns(source.InitialPrompt.Text, entries),
 	}
 }
 
@@ -135,7 +134,9 @@ type handoffPromptInput struct {
 	repos         []taskslog.RepoMount
 	rateLimit     RateLimit
 	diffStat      agent.DiffStat
-	messages      []agent.Message
+	result        handoffResult
+	hasResult     bool
+	turns         []handoffTurn
 }
 
 type handoffTurn struct {
@@ -179,7 +180,8 @@ func handoffRateLimitLocked(source *Task) RateLimit {
 		return source.rateLimit
 	}
 	seen := make(map[quotaWindowKey]struct{})
-	for _, entry := range slices.Backward(source.timeline) {
+	entries := source.timelineViewLocked()
+	for _, entry := range entries.Backward() {
 		message, ok := entry.Message.(*agent.RateLimitMessage)
 		if !ok {
 			continue
@@ -197,19 +199,15 @@ func handoffRateLimitLocked(source *Task) RateLimit {
 	return RateLimit{}
 }
 
-func latestHandoffResult(messages []agent.Message) (handoffResult, bool) {
-	for i, message := range slices.Backward(messages) {
-		result, ok := message.(*agent.ResultMessage)
+func latestHandoffResult(entries timelineEntries) (handoffResult, bool) {
+	for i, entry := range entries.Backward() {
+		result, ok := entry.Message.(*agent.ResultMessage)
 		if !ok {
 			continue
 		}
 		text := result.Result
 		if strings.TrimSpace(text) == "" {
-			entries := make([]agent.TimedMessage, i+1)
-			for j, message := range messages[:i+1] {
-				entries[j].Message = message
-			}
-			text = fallbackResultText(entries)
+			text = fallbackResultText(entries.Slice(i + 1))
 		}
 		if text == "" {
 			text = "(no result text reported)"
@@ -219,12 +217,12 @@ func latestHandoffResult(messages []agent.Message) (handoffResult, bool) {
 	return handoffResult{}, false
 }
 
-func recentHandoffTurns(initialPrompt string, messages []agent.Message) []handoffTurn {
+func recentHandoffTurns(initialPrompt string, entries timelineEntries) []handoffTurn {
 	turns := make([]handoffTurn, 0, maxHandoffConversationTurns)
 	skippedInitialPrompt := false
-	for _, message := range messages {
+	for _, entry := range entries.Forward() {
 		var turn handoffTurn
-		switch m := message.(type) {
+		switch m := entry.Message.(type) {
 		case *agent.UserInputMessage:
 			if !skippedInitialPrompt && m.Text == initialPrompt {
 				skippedInitialPrompt = true
@@ -237,11 +235,13 @@ func recentHandoffTurns(initialPrompt string, messages []agent.Message) []handof
 			continue
 		}
 		if strings.TrimSpace(turn.text) != "" {
-			turns = append(turns, turn)
+			if len(turns) == maxHandoffConversationTurns {
+				copy(turns, turns[1:])
+				turns[len(turns)-1] = turn
+			} else {
+				turns = append(turns, turn)
+			}
 		}
-	}
-	if len(turns) > maxHandoffConversationTurns {
-		turns = turns[len(turns)-maxHandoffConversationTurns:]
 	}
 	return turns
 }
