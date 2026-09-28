@@ -28,6 +28,7 @@ RestartSec=1s
 CPUQuota=800%
 MemoryMax=4G
 MemoryHigh=3G
+OOMScoreAdjust=100
 
 # --- Security Hardening ---
 

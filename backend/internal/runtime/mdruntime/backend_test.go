@@ -466,8 +466,12 @@ func TestBackend(t *testing.T) {
 		if src.forkOpts.Sudo {
 			t.Error("Fork Sudo = true, want explicit disabled value")
 		}
-		if !slices.Equal(src.forkOpts.ExtraRunArgs, []string{"--pids-limit", "4096"}) {
-			t.Errorf("Fork ExtraRunArgs = %v, want PID limit", src.forkOpts.ExtraRunArgs)
+		wantRunArgs, err := containerRunArgs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(src.forkOpts.ExtraRunArgs, wantRunArgs) {
+			t.Errorf("Fork ExtraRunArgs = %v, want %v", src.forkOpts.ExtraRunArgs, wantRunArgs)
 		}
 	})
 
@@ -566,8 +570,12 @@ func TestBackend(t *testing.T) {
 		if opts.MaxCPUs <= 0 {
 			t.Errorf("MaxCPUs = %d, want positive default", opts.MaxCPUs)
 		}
-		if !slices.Equal(opts.ExtraRunArgs, []string{"--pids-limit", "4096"}) {
-			t.Errorf("ExtraRunArgs = %v, want PID limit", opts.ExtraRunArgs)
+		wantRunArgs, err := containerRunArgs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(opts.ExtraRunArgs, wantRunArgs) {
+			t.Errorf("ExtraRunArgs = %v, want %v", opts.ExtraRunArgs, wantRunArgs)
 		}
 		if len(opts.Caches) != 1 || opts.Caches[0].Name != "npm" {
 			t.Errorf("Caches = %+v, want npm passthrough", opts.Caches)
@@ -594,6 +602,36 @@ func TestBackend(t *testing.T) {
 		if got := maxCPUsOrDefault(0); got <= 0 {
 			t.Errorf("maxCPUsOrDefault(0) = %d, want positive default", got)
 		}
+	})
+
+	t.Run("incrementOOMScoreAdj", func(t *testing.T) {
+		t.Parallel()
+		for _, test := range []struct {
+			name string
+			raw  string
+			want int
+		}{
+			{name: "negative", raw: "-1000\n", want: -900},
+			{name: "service", raw: "100\n", want: 200},
+			{name: "cap", raw: "1000\n", want: 1000},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				got, err := incrementOOMScoreAdj(test.raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got != test.want {
+					t.Errorf("incrementOOMScoreAdj(%q) = %d, want %d", test.raw, got, test.want)
+				}
+			})
+		}
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			if _, err := incrementOOMScoreAdj("invalid"); err == nil {
+				t.Fatal("incrementOOMScoreAdj() error = nil, want parse error")
+			}
+		})
 	})
 }
 

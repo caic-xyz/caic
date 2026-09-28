@@ -207,6 +207,37 @@ def _load_fixture() -> AgentRecordFixture:
     )
 
 
+def test_oom_adjusted_command() -> None:
+    """The agent command raises its OOM score while preserving every argument."""
+    relay = _load_relay()
+    command = [sys.executable, "-c", "import json, sys; print(json.dumps(sys.argv[1:]))", "spaces stay intact"]
+    with tempfile.NamedTemporaryFile() as score_file:
+        score_file.write(b"200\n")
+        score_file.flush()
+        relay._OOM_SCORE_ADJ_PATH = score_file.name
+        completed = subprocess.run(
+            relay._oom_adjusted_command(command),
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        assert json.loads(completed.stdout) == ["spaces stay intact"]
+        score_file.seek(0)
+        assert score_file.read() == b"300\n"
+
+    assert relay._increment_oom_score_adj("-1000\n") == -900
+    assert relay._increment_oom_score_adj("1000\n") == 1000
+    try:
+        relay._increment_oom_score_adj("invalid")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid OOM score adjustment did not fail")
+
+    relay._OOM_SCORE_ADJ_PATH = "/missing/oom_score_adj"
+    assert relay._oom_adjusted_command(command) == command
+
+
 def _decode_records(data: bytes) -> list[dict[str, object]]:
     return [json.loads(line) for line in data.splitlines()]
 
@@ -902,6 +933,7 @@ def main() -> int:
         test_real_relay_output_superset_no_stdin_echo_and_attach_offset,
         test_exit_and_stripped_environment_controls,
         test_harness_caic_mcp_integrations,
+        test_oom_adjusted_command,
         test_caic_mcp_bridge,
         test_caic_mcp_stdio_server,
         test_parse_numstat,

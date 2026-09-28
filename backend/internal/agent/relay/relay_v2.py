@@ -77,6 +77,38 @@ _DEFAULT_SHUTDOWN_GRACE = 10
 # first attach connect back to back, so the accept queue must tolerate both.
 _LISTEN_BACKLOG = 8
 
+# The container runtime gives every process an elevated OOM score adjustment.
+# Raise the agent and everything it spawns above the container baseline so the
+# relay remains available to report an agent OOM whenever possible.
+_OOM_SCORE_ADJ_INCREMENT = 100
+_OOM_SCORE_ADJ_MAX = 1000
+_OOM_SCORE_ADJ_PATH = "/proc/self/oom_score_adj"
+
+
+def _increment_oom_score_adj(raw: str) -> int:
+    """Return an OOM score adjustment one tier above raw, capped by Linux."""
+    current = int(raw.strip())
+    if not -1000 <= current <= _OOM_SCORE_ADJ_MAX:
+        raise ValueError(f"invalid OOM score adjustment: {current}")
+    return min(current + _OOM_SCORE_ADJ_INCREMENT, _OOM_SCORE_ADJ_MAX)
+
+
+def _oom_adjusted_command(cmd_args: list[str]) -> list[str]:
+    """Wrap a command so it raises its OOM score before replacing the shell."""
+    if not os.path.exists(_OOM_SCORE_ADJ_PATH):
+        return cmd_args
+    with open(_OOM_SCORE_ADJ_PATH, encoding="ascii") as score_file:
+        child_oom_score_adj = _increment_oom_score_adj(score_file.read())
+    return [
+        "/bin/sh",
+        "-c",
+        'printf "%s\\n" "$1" > "$2" && shift 2 && exec "$@"',
+        "caic-agent",
+        str(child_oom_score_adj),
+        _OOM_SCORE_ADJ_PATH,
+        *cmd_args,
+    ]
+
 
 def _write_claude_code_caic_mcp_config() -> None:
     """Write Claude Code's local CAIC MCP configuration atomically."""
@@ -917,14 +949,14 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
             }
             env["OPENCODE_CONFIG_CONTENT"] = json.dumps(opencode_config)
         proc = subprocess.Popen(
-            cmd_args,
+            _oom_adjusted_command(cmd_args),
             cwd=work_dir,
             env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-    except OSError as e:
+    except (OSError, ValueError) as e:
         logging.exception("subprocess failed to start")
         d.write_exit_event(-1, error=str(e))
         d.proc_ready.set()

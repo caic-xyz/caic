@@ -6,14 +6,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"log/slog"
 	"maps"
+	"os"
 	"os/exec"
 	"runtime/trace"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -24,11 +27,20 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-// Limit all threads and processes in a caic container, leaving room for builds
-// and browsers while bounding runaway process creation.
-//
-// TODO: Probably move to md.
-const containerPIDsLimit = "4096"
+const (
+	// Non-Linux hosts have no procfs score to inherit; keep their container
+	// preference aligned with the systemd 100 → container 200 policy.
+	defaultContainerOOMScoreAdj = 200
+	oomScoreAdjIncrement        = 100
+	oomScoreAdjMax              = 1000
+	oomScoreAdjPath             = "/proc/self/oom_score_adj"
+
+	// Limit all threads and processes in a caic container, leaving room for
+	// builds and browsers while bounding runaway process creation.
+	//
+	// TODO: Probably move to md.
+	containerPIDsLimit = "4096"
+)
 
 // mdClient is the subset of *md.Client that Backend needs. Production wraps a
 // *md.Client (mdClientAdapter); tests supply a fake. Container and Get return
@@ -651,6 +663,10 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 	if err != nil {
 		return "", runtime.ConnectionInfo{}, err
 	}
+	extraRunArgs, err := containerRunArgs()
+	if err != nil {
+		return "", runtime.ConnectionInfo{}, err
+	}
 	b.log.DebugContext(ctx, "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkRepos := make([]md.ForkRepo, len(opts.Repos))
 	for i, r := range opts.Repos {
@@ -670,7 +686,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.ID, opts *runtime.ForkOpt
 		ExtraEnv:     append(b.baseExtraEnv(opts.Harness), opts.ExtraEnv...),
 		Mounts:       mounts,
 		MaxCPUs:      maxCPUsOrDefault(opts.MaxCPUs),
-		ExtraRunArgs: []string{"--pids-limit", containerPIDsLimit},
+		ExtraRunArgs: extraRunArgs,
 	}
 	stdout, stderr := b.logWriters(ctx, opts.LogWriter, "fork")
 	b.log.DebugContext(ctx, "calling fork", "source", name)
@@ -1008,6 +1024,10 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	if err != nil {
 		return nil, err
 	}
+	extraRunArgs, err := containerRunArgs()
+	if err != nil {
+		return nil, err
+	}
 	extraEnv := b.baseExtraEnv(opts.Harness)
 	if opts.GitHubToken != "" {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
@@ -1025,8 +1045,41 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 		ExtraEnv:     extraEnv,
 		Mounts:       mounts,
 		MaxCPUs:      maxCPUsOrDefault(opts.MaxCPUs),
-		ExtraRunArgs: []string{"--pids-limit", containerPIDsLimit},
+		ExtraRunArgs: extraRunArgs,
 	}, nil
+}
+
+func containerRunArgs() ([]string, error) {
+	oomScoreAdj, err := containerOOMScoreAdj()
+	if err != nil {
+		return nil, err
+	}
+	return []string{
+		"--oom-score-adj", strconv.Itoa(oomScoreAdj),
+		"--pids-limit", containerPIDsLimit,
+	}, nil
+}
+
+func containerOOMScoreAdj() (int, error) {
+	raw, err := os.ReadFile(oomScoreAdjPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return defaultContainerOOMScoreAdj, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read current OOM score adjustment: %w", err)
+	}
+	return incrementOOMScoreAdj(string(raw))
+}
+
+func incrementOOMScoreAdj(raw string) (int, error) {
+	current, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("parse current OOM score adjustment %q: %w", strings.TrimSpace(raw), err)
+	}
+	if current < -1000 || current > oomScoreAdjMax {
+		return 0, fmt.Errorf("parse current OOM score adjustment %q", strings.TrimSpace(raw))
+	}
+	return min(current+oomScoreAdjIncrement, oomScoreAdjMax), nil
 }
 
 func (b *Backend) localID(id runtime.ID) (runtime.InstanceID, error) {
