@@ -5,12 +5,10 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: flex-start;
-  max-height: 15rem;
   margin-bottom: 1rem;
   overflow: visible;
   opacity: 1;
   transition:
-    max-height 150ms ease-out,
     opacity 150ms ease-out,
     margin-bottom 150ms ease-out;
 }
@@ -38,16 +36,6 @@
 
 /* Mobile: <=768px */
 @media (width <= 768px) {
-  .submitForm {
-    max-height: none;
-    overflow: visible;
-  }
-
-  .submitForm.hidden {
-    max-height: 0;
-    overflow: hidden;
-  }
-
   .promptInput {
     min-height: 2.5rem;
   }
