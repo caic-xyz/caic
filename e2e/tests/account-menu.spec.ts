@@ -267,7 +267,7 @@ test("circular connection wave crosses a stationary word and respects reduced mo
   await expect(word).toHaveAttribute("data-status", "connected");
   await expect(word).toHaveCSS("background-image", /radial-gradient/);
   await expect(word).toHaveCSS("background-image", /rgb\(255, 255, 255\)/);
-  await expect(word).toHaveCSS("animation-name", /connection-wave/);
+  await expect(word).toHaveCSS("animation-name", /connection-ready-wave/);
   await expect(word).toHaveCSS("animation-duration", "6s");
   await expect(word).toHaveCSS("animation-delay", "-2s");
   await expect(word).toHaveCSS("animation-iteration-count", "1");
@@ -281,6 +281,11 @@ test("circular connection wave crosses a stationary word and respects reduced mo
     await expect(word).toHaveCSS("animation-name", /connection-wave/);
     await expect(word).toHaveCSS("transform", "none");
   }
+
+  await word.evaluate((el) => el.setAttribute("data-status", "settled-loading"));
+  await expect(word).toHaveCSS("animation-name", /connection-wave/);
+  await word.evaluate((el) => el.setAttribute("data-status", "connected"));
+  await expect(word).toHaveCSS("animation-name", /connection-ready-wave/);
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(word).toHaveCSS("animation-name", "none");

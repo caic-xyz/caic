@@ -86,6 +86,7 @@
 
   .titleButton[data-status="connected"] {
     /* Off-word travel fills the rest of the cycle; glyph traversal takes about 2s. */
+    animation-name: connection-ready-wave;
     animation-duration: 6s;
     animation-delay: -2s;
     animation-iteration-count: 1;
@@ -94,6 +95,12 @@
 }
 
 @keyframes connection-wave {
+  to {
+    background-position: calc(100% + 4rem) -0.45rem;
+  }
+}
+
+@keyframes connection-ready-wave {
   to {
     background-position: calc(100% + 4rem) -0.45rem;
   }
