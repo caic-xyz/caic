@@ -13,7 +13,7 @@ import { api } from "../api";
 import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 
 // Spies on the real api singleton replace the former module mocks.
-const taskEventStreamMock = vi.spyOn(api, "taskEvents");
+const taskEventStreamMock = vi.spyOn(api, "taskEventBackfill");
 const clearContextMock = vi.spyOn(api, "clearContext");
 const compactContextMock = vi.spyOn(api, "compactContext");
 const getTaskDiffMock = vi.spyOn(api, "getTaskDiff");
@@ -31,7 +31,7 @@ taskEventStreamMock.mockImplementation(((_id: string, handlers: { onReady?: () =
     handlers.onReady?.();
   }, 0);
   return fakeES as unknown as EventSource;
-}) as typeof api.taskEvents);
+}) as typeof api.taskEventBackfill);
 clearContextMock.mockImplementation(() => Promise.resolve({ status: "cleared" }) as never);
 compactContextMock.mockImplementation(() => Promise.resolve({ status: "compacting" }) as never);
 getTaskDiffMock.mockImplementation(() => Promise.resolve({} as never));

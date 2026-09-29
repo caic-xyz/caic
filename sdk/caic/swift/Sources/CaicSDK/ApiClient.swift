@@ -288,11 +288,7 @@ public final class ApiClient {
     }
 
     // SSE endpoints
-    /// Streams raw backend-specific task events via SSE.
-    public func taskRawEvents(id: String) -> AsyncThrowingStream<EventMessage, Error> {
-        sseStream(path: "/api/caic/v1/tasks/\(id)/raw_events")
-    }
-    /// Streams backend-neutral task events via SSE.
+    /// Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged.
     public func taskEvents(id: String) -> AsyncThrowingStream<EventMessage, Error> {
         sseStream(path: "/api/caic/v1/tasks/\(id)/events")
     }
@@ -306,9 +302,6 @@ public final class ApiClient {
     }
 
     // Reconnecting SSE wrappers with exponential backoff
-    public func taskRawEventsReconnecting(id: String) -> AsyncThrowingStream<EventMessage, Error> {
-        reconnectingStream { self.taskRawEvents(id: id) }
-    }
     public func taskEventsReconnecting(id: String) -> AsyncThrowingStream<EventMessage, Error> {
         reconnectingStream { self.taskEvents(id: id) }
     }

@@ -259,7 +259,7 @@ func TestSmoke(t *testing.T) {
 
 		t.Run("TerminalHistoryRestart", func(t *testing.T) {
 			history := func() string {
-				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody)
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/caic/v1/tasks/"+taskID+"/events", http.NoBody)
 				if err != nil {
 					t.Fatal(err)
 				}

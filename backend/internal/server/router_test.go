@@ -756,7 +756,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/api/caic/v1/tasks/99/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/api/caic/v1/tasks/99/events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -772,7 +772,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	t.Run("NonexistentID", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/api/caic/v1/tasks/abc/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/api/caic/v1/tasks/abc/events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -782,6 +782,74 @@ func TestHandleTaskEvents(t *testing.T) {
 		e := decodeError(t, w)
 		if e.Code != api.CodeNotFound {
 			t.Errorf("code = %q, want %q", e.Code, api.CodeNotFound)
+		}
+	})
+
+	t.Run("BackwardBoundaryPrecedesCanonicalHistory", func(t *testing.T) {
+		t.Parallel()
+		taskID := ksid.NewID()
+		tk := mustNewTask(t, taskID, agent.Prompt{Text: "fix the bug"}, harness.Claude)
+		tk.SeedTimeline([]agent.Message{
+			&agent.UserInputMessage{Text: "fix the bug"},
+			&agent.TextMessage{Text: "latest response"},
+			&agent.ToolUseMessage{ToolUseID: "tool-after-boundary", Name: "BashAfterBoundary"},
+		})
+		tk.SetState(taskslog.StateRunning)
+		s := newTestRouter(t, nil)
+		insertTestTask(s, taskID, tk)
+
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		t.Cleanup(cancel)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events?backward=1", http.NoBody)
+		req.SetPathValue("id", taskID.String())
+		w := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(w, req)
+
+		body := w.Body.String()
+		backwardAt := strings.Index(body, "event: backward")
+		canonicalAt := strings.Index(body, "id: v1/")
+		if backwardAt < 0 || canonicalAt < 0 || backwardAt >= canonicalAt {
+			t.Fatalf("backward boundary did not precede canonical history:\n%s", body)
+		}
+		backwardEnd := backwardAt + strings.Index(body[backwardAt:], "\n\n")
+		if backwardEnd < backwardAt || strings.Contains(body[backwardAt:backwardEnd], "id:") {
+			t.Fatalf("backward boundary unexpectedly carried an SSE ID:\n%s", body[backwardAt:canonicalAt])
+		}
+		backwardID := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 2}.String()
+		if !strings.Contains(body[backwardAt:backwardEnd], "latest response") ||
+			!strings.Contains(body[backwardAt:backwardEnd], `"eventId":"`+backwardID+`"`) ||
+			!strings.Contains(body, "event: ready") {
+			t.Fatalf("backward boundary or canonical ready marker missing:\n%s", body)
+		}
+		if strings.Contains(body, "BashAfterBoundary") {
+			t.Fatalf("history replay crossed the backward event ID:\n%s", body)
+		}
+
+		resumeCtx, resumeCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		t.Cleanup(resumeCancel)
+		resumeReq := httptest.NewRequestWithContext(resumeCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
+		resumeReq.SetPathValue("id", taskID.String())
+		resumeReq.URL.RawQuery = "last-event-id=" + url.QueryEscape(backwardID)
+		resumeWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(resumeWriter, resumeReq)
+		resumedBody := resumeWriter.Body.String()
+		if strings.Contains(resumedBody, "event: backward") {
+			t.Fatalf("resumed task stream unexpectedly replayed a backward boundary:\n%s", resumedBody)
+		}
+		if !strings.Contains(resumedBody, "BashAfterBoundary") {
+			t.Fatalf("resumed task stream omitted events after the backward event ID:\n%s", resumedBody)
+		}
+
+		headerCtx, headerCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		t.Cleanup(headerCancel)
+		headerReq := httptest.NewRequestWithContext(headerCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
+		headerReq.SetPathValue("id", taskID.String())
+		headerReq.URL.RawQuery = "last-event-id=" + url.QueryEscape(backwardID)
+		headerReq.Header.Set("Last-Event-ID", taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 3}.String())
+		headerWriter := httptest.NewRecorder()
+		testTaskHandlers(s).handleTaskEvents(headerWriter, headerReq)
+		if body := headerWriter.Body.String(); strings.Contains(body, "BashAfterBoundary") {
+			t.Fatalf("Last-Event-ID did not take precedence over the bootstrap query value:\n%s", body)
 		}
 	})
 }
@@ -2150,7 +2218,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 }
 
-func TestHandleTaskRawEvents(t *testing.T) {
+func TestHandleTaskEventHistory(t *testing.T) {
 	t.Parallel()
 	t.Run("PurgedTaskEvents", func(t *testing.T) {
 		t.Parallel()
@@ -2204,7 +2272,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// replay instead of waiting for the request context deadline.
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		t.Cleanup(cancel)
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2236,7 +2304,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Errorf("task SSE body is missing stable event IDs:\n%s", body)
 		}
 
-		resumeReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		resumeReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		resumeReq.SetPathValue("id", taskID.String())
 		resumeReq.Header.Set("Last-Event-ID", id2)
 		resumeWriter := httptest.NewRecorder()
@@ -2249,7 +2317,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Errorf("resumed task SSE omitted unseen history or ready marker:\n%s", resumedBody)
 		}
 
-		staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		staleReq.SetPathValue("id", taskID.String())
 		staleReq.Header.Set("Last-Event-ID", taskEventID{timeline: entry.Task().TimelineID(), source: taskEventSourceDisk, message: 99}.String())
 		staleWriter := httptest.NewRecorder()
@@ -2279,7 +2347,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			taskID = id
 			return false
 		})
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2311,7 +2379,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		entry.LogPath.Set(path)
 		s.taskMgr.Insert(taskID, entry)
 
-		stoppedReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		stoppedReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		stoppedReq.SetPathValue("id", taskID.String())
 		stoppedWriter := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(stoppedWriter, stoppedReq)
@@ -2326,7 +2394,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(cancel)
 		time.AfterFunc(20*time.Millisecond, cancel)
-		revivedReq := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		revivedReq := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		revivedReq.SetPathValue("id", taskID.String())
 		revivedWriter := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(revivedWriter, revivedReq)
@@ -2370,7 +2438,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			tk.SeedTimeline([]agent.Message{&agent.TextMessage{Text: "revived live event"}})
 		}}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		testTaskHandlers(s).handleTaskEvents(w, req)
 
@@ -2392,7 +2460,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		s := newTestRouter(t, nil)
 		insertTestTask(s, taskID, tk)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2446,7 +2514,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2470,7 +2538,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		resumeCtx, resumeCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer resumeCancel()
-		resumeReq := httptest.NewRequestWithContext(resumeCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		resumeReq := httptest.NewRequestWithContext(resumeCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		resumeReq.SetPathValue("id", taskID.String())
 		resumeReq.Header.Set("Last-Event-ID", id1)
 		resumeWriter := httptest.NewRecorder()
@@ -2485,7 +2553,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		resetCtx, resetCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer resetCancel()
-		resetReq := httptest.NewRequestWithContext(resetCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		resetReq := httptest.NewRequestWithContext(resetCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		resetReq.SetPathValue("id", taskID.String())
 		resetReq.Header.Set("Last-Event-ID", taskEventID{timeline: tk.TimelineID(), source: taskEventSourceDisk, message: 1}.String())
 		resetWriter := httptest.NewRecorder()
@@ -2537,7 +2605,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2608,7 +2676,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody).WithContext(ctx)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody).WithContext(ctx)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2674,7 +2742,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		reqCtx, reqCancel := context.WithCancel(sessCtx)
 		t.Cleanup(reqCancel)
-		req := httptest.NewRequestWithContext(reqCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(reqCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 
 		done := make(chan struct{})

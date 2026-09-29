@@ -506,6 +506,16 @@ export interface EventMessage {
   commitSnapshot?: EventCommitSnapshot;
 }
 
+/**
+ * TaskEventBackward carries the latest visible agent response and its canonical
+ * event ID. Pass EventID as the events endpoint's last-event-id query parameter
+ * to stream newer events while earlier history is replayed.
+ */
+export interface TaskEventBackward {
+  message: EventMessage;
+  eventId: string;
+}
+
 /** TaskHistoryStreamError reports that task history could not be replayed. */
 export interface TaskHistoryStreamError {
   message: string;

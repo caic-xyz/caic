@@ -19,6 +19,23 @@ import (
 	"github.com/maruel/gomode/sse"
 )
 
+func TestTaskEventBackwardProjector(t *testing.T) {
+	t.Parallel()
+	p := newTaskEventBackwardProjector(agentReplayHistory{
+		&agent.TextMessage{Text: "older response"},
+		&agent.UserInputMessage{Text: "new turn"},
+		&agent.TextDeltaMessage{Text: "new "},
+		&agent.ToolUseMessage{ToolUseID: "tool", Name: "Read"},
+		&agent.TextDeltaMessage{Text: "answer"},
+	})
+	if p.message == nil || p.message.Text == nil || p.message.Text.Text != "new answer" {
+		t.Fatalf("backward boundary = %+v, want accumulated current-turn deltas", p.message)
+	}
+	if p.sequence != 5 {
+		t.Fatalf("backward sequence = %d, want 5", p.sequence)
+	}
+}
+
 func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()
 	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
@@ -497,6 +514,7 @@ func TestReplayMemoryHistoryRebuildsFilterAfterCursorReset(t *testing.T) {
 	entry := s.taskMgr.NewEntry(tk, nil)
 	w := httptest.NewRecorder()
 	stream := taskEventStream{
+		ctx:     t.Context(),
 		w:       w,
 		writer:  sse.New(w),
 		tracker: newHistoryTracker(tk),
@@ -511,7 +529,8 @@ func TestReplayMemoryHistoryRebuildsFilterAfterCursorReset(t *testing.T) {
 			},
 		},
 	}
-	if err := testTaskHandlers(s).replayMemoryHistory(&stream, entry, history, time.Now()); err != nil {
+	through := uint64(history.Len()) //nolint:gosec // Test history cannot approach uint64 capacity.
+	if err := testTaskHandlers(s).replayMemoryHistory(&stream, entry, history, time.Now(), through); err != nil {
 		t.Fatal(err)
 	}
 	body := w.Body.String()

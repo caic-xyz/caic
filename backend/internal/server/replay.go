@@ -1,11 +1,110 @@
-// History replay filtering for task SSE: drops streaming deltas superseded by a final message.
+// History replay filtering and backward-loading boundaries for task SSE streams.
 
 package server
 
 import (
+	"strings"
+	"time"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
+
+// taskEventBackwardProjector finds the latest-response projection and event ID
+// independently from canonical event conversion. Canonical conversion remains
+// strictly ordered because its tracker carries cost, timing, and turn state.
+type taskEventBackwardProjector struct {
+	message  *v1.EventMessage
+	sequence uint64
+}
+
+func newTaskEventBackwardProjector(history replayHistory) *taskEventBackwardProjector {
+	p := &taskEventBackwardProjector{}
+	var deltaParts []string
+	for i := history.Len() - 1; i >= 0; i-- {
+		msg := history.At(i)
+		switch m := msg.(type) {
+		case *agent.TextDeltaMessage:
+			if m.Text != "" {
+				deltaParts = append(deltaParts, m.Text)
+				if p.sequence == 0 {
+					p.sequence = uint64(i + 1)
+				}
+			}
+		case *agent.TextMessage:
+			if len(deltaParts) > 0 {
+				p.setDeltaParts(deltaParts)
+				return p
+			}
+			if m.Text != "" {
+				p.sequence = uint64(i + 1)
+				p.setText(m.Text, time.Time{})
+				return p
+			}
+		case *agent.AskMessage:
+			if len(deltaParts) > 0 {
+				p.setDeltaParts(deltaParts)
+				return p
+			}
+			if len(m.Questions) > 0 {
+				p.sequence = uint64(i + 1)
+				p.setAsk(m, time.Time{})
+				return p
+			}
+		case *agent.ResultMessage:
+			if len(deltaParts) > 0 {
+				p.setDeltaParts(deltaParts)
+				return p
+			}
+			if m.Result != "" {
+				p.sequence = uint64(i + 1)
+				p.setText(m.Result, time.Time{})
+				return p
+			}
+		case *agent.UserInputMessage, *agent.InitMessage:
+			if len(deltaParts) > 0 {
+				p.setDeltaParts(deltaParts)
+			}
+			return p
+		}
+	}
+	if len(deltaParts) > 0 {
+		p.setDeltaParts(deltaParts)
+	}
+	return p
+}
+
+func (p *taskEventBackwardProjector) setText(text string, at time.Time) {
+	p.message = &v1.EventMessage{Kind: v1.EventKindText, Ts: backwardTimestamp(at), Text: &v1.EventText{Text: text}}
+}
+
+func (p *taskEventBackwardProjector) setDeltaParts(parts []string) {
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	p.setDeltaText(strings.Join(parts, ""), time.Time{})
+}
+
+func (p *taskEventBackwardProjector) setDeltaText(text string, at time.Time) {
+	p.message = &v1.EventMessage{Kind: v1.EventKindText, Ts: backwardTimestamp(at), Text: &v1.EventText{Text: text}}
+}
+
+func (p *taskEventBackwardProjector) setAsk(msg *agent.AskMessage, at time.Time) {
+	p.message = &v1.EventMessage{
+		Kind: v1.EventKindAsk,
+		Ts:   backwardTimestamp(at),
+		Ask:  &v1.EventAsk{ToolUseID: msg.ToolUseID, Questions: apiconv.AskQuestions(msg.Questions)},
+	}
+}
+
+func backwardTimestamp(at time.Time) int64 {
+	if at.IsZero() {
+		return 0
+	}
+	return at.UnixMilli()
+}
 
 // filterHistoryForReplay removes streaming delta messages that have a
 // corresponding final message later in the history. TextDeltaMessage runs

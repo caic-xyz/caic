@@ -10,7 +10,8 @@ import type { EventMessage } from "@sdk/types.gen";
 import { api } from "./api";
 import { createTaskEventTimeline } from "./taskEventTimeline";
 
-const taskEventStreamMock = vi.spyOn(api, "taskEvents");
+const taskEventStreamMock = vi.spyOn(api, "taskEventBackfill");
+const taskEventStreamFromLastEventIDMock = vi.spyOn(api, "taskEventStreamFromLastEventID");
 
 interface FakeEventSource {
   close: ReturnType<typeof vi.fn>;
@@ -29,6 +30,13 @@ function captureConnections(): Connection[] {
     connections.push({ handlers, source });
     return source as unknown as EventSource;
   });
+  taskEventStreamFromLastEventIDMock.mockImplementation(
+    (_id: string, _eventId: string, handlers: TaskEventsHandlers) => {
+      const source: FakeEventSource = { close: vi.fn(), onerror: null };
+      connections.push({ handlers, source });
+      return source as unknown as EventSource;
+    },
+  );
   return connections;
 }
 
@@ -40,6 +48,7 @@ describe("createTaskEventTimeline", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     taskEventStreamMock.mockReset();
+    taskEventStreamFromLastEventIDMock.mockReset();
   });
 
   afterEach(() => {
@@ -74,6 +83,69 @@ describe("createTaskEventTimeline", () => {
     handlers.onReady?.();
     expect(timeline.messages()).toEqual([textEvent("replacement", 3)]);
     expect(timeline.epoch()).toBe(2);
+    timeline.dispose();
+  });
+
+  it("renders the backward boundary while history loads, then reconciles canonical history", () => {
+    const connections = captureConnections();
+    const timeline = createRoot((dispose) => ({
+      dispose,
+      ...createTaskEventTimeline({
+        taskId: () => "task",
+        taskState: () => "running",
+        onError: vi.fn(),
+      }),
+    }));
+    const handlers = connections[0].handlers;
+    const backwardMessage = textEvent("latest", 3);
+    const tailEvent = textEvent("!", 5);
+
+    handlers.onBackward?.({ message: backwardMessage, eventId: "v1/timeline/memory/4/0" });
+    expect(timeline.messages()).toEqual([backwardMessage]);
+    expect(connections).toHaveLength(2);
+    const tail = connections[1].handlers;
+    tail.onMessage(tailEvent);
+    expect(timeline.messages()).toEqual([backwardMessage, tailEvent]);
+    handlers.onMessage(textEvent("older", 1));
+    handlers.onMessage(textEvent("latest response", 4));
+    handlers.onReady?.();
+    expect(timeline.messages()).toEqual([textEvent("older", 1), textEvent("latest response", 4), tailEvent]);
+    expect(timeline.epoch()).toBe(1);
+    expect(connections[0].source.close).toHaveBeenCalledOnce();
+
+    tail.onReady?.();
+    tail.onMessage(textEvent(" live", 6));
+    vi.advanceTimersByTime(100);
+    expect(timeline.messages()).toEqual([
+      textEvent("older", 1),
+      textEvent("latest response", 4),
+      tailEvent,
+      textEvent(" live", 6),
+    ]);
+    timeline.dispose();
+  });
+
+  it("replaces backfill when the backward event ID is rejected", () => {
+    const connections = captureConnections();
+    const timeline = createRoot((dispose) => ({
+      dispose,
+      ...createTaskEventTimeline({
+        taskId: () => "task",
+        taskState: () => "running",
+        onError: vi.fn(),
+      }),
+    }));
+    const handlers = connections[0].handlers;
+    const stale = textEvent("stale", 1);
+    const replacement = textEvent("replacement", 2);
+
+    handlers.onBackward?.({ message: stale, eventId: "v1/stale/memory/1/0" });
+    const tail = connections[1].handlers;
+    tail.onReset?.();
+    tail.onMessage(replacement);
+    expect(timeline.messages()).toEqual([]);
+    tail.onReady?.();
+    expect(timeline.messages()).toEqual([replacement]);
     timeline.dispose();
   });
 

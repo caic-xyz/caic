@@ -232,21 +232,14 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[Task](),
 	},
 	{
-		Name:   "taskRawEvents",
-		Doc:    "Streams raw backend-specific task events via SSE.",
-		Method: "GET",
-		Path:   "/api/caic/v1/tasks/{id}/raw_events",
-		Resp:   reflect.TypeFor[EventMessage](),
-		IsSSE:  true,
-	},
-	{
 		Name:   "taskEvents",
-		Doc:    "Streams backend-neutral task events via SSE.",
+		Doc:    "Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged.",
 		Method: "GET",
 		Path:   "/api/caic/v1/tasks/{id}/events",
 		Resp:   reflect.TypeFor[EventMessage](),
 		IsSSE:  true,
 		SSEEvents: []SSEEvent{
+			{Name: "backward", Handler: "onBackward", Resp: reflect.TypeFor[TaskEventBackward]()},
 			{Name: "ready", Handler: "onReady"},
 			{Name: "reset", Handler: "onReset"},
 			{Name: "error", Handler: "onHistoryError", Resp: reflect.TypeFor[TaskHistoryStreamError]()},

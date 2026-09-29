@@ -66,6 +66,7 @@ class FakeEventSource {
   private readonly registered: Array<() => void> = [];
 
   constructor(
+    _url = "",
     private readonly messages: MessageListener[] = fakeESListeners,
     private readonly opens: OpenListener[] = fakeESOpenListeners,
   ) {}
@@ -166,6 +167,7 @@ const apiSpyNames = [
   "globalTaskEvents",
   "globalUsageEvents",
   "taskEvents",
+  "taskEventBackfill",
   "sendInput",
   "restartTask",
   "clearContext",
@@ -251,11 +253,14 @@ beforeEach(() => {
     return es;
   }) as unknown as typeof api.globalTaskEvents);
   vi.mocked(api.globalUsageEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
-    const es = new FakeEventSource(fakeUsageESListeners);
+    const es = new FakeEventSource("", fakeUsageESListeners);
     es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
     return es;
   }) as unknown as typeof api.globalUsageEvents);
   vi.mocked(api.taskEvents).mockImplementation((() => new FakeEventSource()) as unknown as typeof api.taskEvents);
+  vi.mocked(api.taskEventBackfill).mockImplementation(
+    (() => new FakeEventSource()) as unknown as typeof api.taskEventBackfill,
+  );
   vi.mocked(api.listCaches).mockResolvedValue(null as never);
   vi.mocked(api.getCacheSizes).mockResolvedValue(null as never);
   vi.mocked(api.getMetrics).mockResolvedValue({ series: [] } as never);

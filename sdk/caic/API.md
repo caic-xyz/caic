@@ -54,8 +54,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
-| GET | `/api/caic/v1/tasks/{id}/raw_events` | Streams raw backend-specific task events via SSE. |  | `EventMessage` SSE |
-| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE<br>Named events: `ready`, `reset`, `error` (`TaskHistoryStreamError`) |
+| GET | `/api/caic/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. |  | `EventMessage` SSE<br>Named events: `backward` (`TaskEventBackward`), `ready`, `reset`, `error` (`TaskHistoryStreamError`) |
 | POST | `/api/caic/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
@@ -1536,6 +1535,17 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `rateLimit` | `EventRateLimit` |  |  |
 | `stats` | `EventStats` |  |  |
 | `commitSnapshot` | `EventCommitSnapshot` |  |  |
+
+### TaskEventBackward
+
+TaskEventBackward carries the latest visible agent response and its canonical
+event ID. Pass EventID as the events endpoint's last-event-id query parameter
+to stream newer events while earlier history is replayed.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `message` | `EventMessage` |  | yes |
+| `eventId` | `string` |  | yes |
 
 ### TaskHistoryStreamError
 

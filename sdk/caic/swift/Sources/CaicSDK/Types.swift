@@ -1577,6 +1577,14 @@ public struct EventMessage: Codable {
     public let commitSnapshot: EventCommitSnapshot?
 }
 
+/// TaskEventBackward carries the latest visible agent response and its canonical
+/// event ID. Pass EventID as the events endpoint's last-event-id query parameter
+/// to stream newer events while earlier history is replayed.
+public struct TaskEventBackward: Codable {
+    public let message: EventMessage
+    public let eventId: String
+}
+
 /// TaskHistoryStreamError reports that task history could not be replayed.
 public struct TaskHistoryStreamError: Codable {
     public let message: String

@@ -8,6 +8,13 @@ library, this parent `api` package, `github.com/maruel/ksid` for API IDs, and
 application packages. Keep cross-layer contract checks in a dependent package,
 not in `api/v1` tests.
 
+## API Reachability
+
+Generated SDK methods document the declared API surface; generation alone does
+not make a route or symbol used. Treat an API as used only when the frontend
+calls it or MCP exposes it. Tests and generated clients do not keep an otherwise
+unreferenced API alive.
+
 ## Time Fields
 
 Do not use `float64` to represent timestamps. Use `time.Time` instead;

@@ -31,7 +31,12 @@ function shouldFlushBufferedEvent(ev: EventMessage): boolean {
 }
 
 export function createTaskEventTimeline(options: TaskEventTimelineOptions): TaskEventTimeline {
-  const [messages, setMessages] = createSignal<EventMessage[]>([]);
+  const [canonicalMessages, setCanonicalMessages] = createSignal<EventMessage[]>([]);
+  const [backwardMessages, setBackwardMessages] = createSignal<EventMessage[] | null>(null);
+  const messages = createMemo(() => {
+    const latest = backwardMessages();
+    return latest === null ? canonicalMessages() : latest;
+  });
   const [epoch, setEpoch] = createSignal(0);
   const terminal = createMemo(() => isTerminalTaskState(options.taskState()));
   let renderedTaskId = "";
@@ -41,13 +46,21 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
     const initialTaskIsTerminal = terminal();
     if (id !== renderedTaskId) {
       renderedTaskId = id;
-      setMessages([]);
+      batch(() => {
+        setCanonicalMessages([]);
+        setBackwardMessages(null);
+      });
     }
 
-    let source: EventSource | null = null;
+    let historySource: EventSource | null = null;
     let active = true;
     let historyFailed = false;
     let live = false;
+    let backfillReady = false;
+    let tailSource: EventSource | null = null;
+    let tailLive = false;
+    let tailReplace = false;
+    let tailEvents: EventMessage[] = [];
     let replaceOnNextFlush = true;
     let liveFlushTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingEvents: EventMessage[] = [];
@@ -65,20 +78,96 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
       if (replaceOnNextFlush) {
         batch(() => {
           setEpoch((previous) => previous + 1);
-          setMessages(events);
+          setCanonicalMessages(events);
+          setBackwardMessages(null);
         });
         replaceOnNextFlush = false;
       } else if (events.length > 0) {
-        setMessages((previous) => [...previous, ...events]);
+        setCanonicalMessages((previous) => [...previous, ...events]);
       }
     }
 
     function scheduleLiveFlush() {
       if (liveFlushTimer !== null) return;
-      liveFlushTimer = setTimeout(flushPendingEvents, liveFlushDelayMs);
+      liveFlushTimer = setTimeout(() => {
+        liveFlushTimer = null;
+        if (tailSource !== null && backfillReady) flushTailEvents();
+        else flushPendingEvents();
+      }, liveFlushDelayMs);
     }
 
-    const connected = api.taskEvents(id, {
+    function flushTailEvents() {
+      if (tailEvents.length === 0 && !tailReplace) return;
+      const events = tailEvents;
+      tailEvents = [];
+      if (tailReplace) {
+        batch(() => {
+          setEpoch((previous) => previous + 1);
+          setCanonicalMessages(events);
+          setBackwardMessages(null);
+        });
+        tailReplace = false;
+      } else if (events.length > 0) {
+        setCanonicalMessages((previous) => [...previous, ...events]);
+      }
+    }
+
+    function connectTail(eventId: string) {
+      if (tailSource !== null) return;
+      tailSource = api.taskEventStreamFromLastEventID(id, eventId, {
+        onMessage: (event) => {
+          if (!active || historyFailed) return;
+          tailEvents.push(event);
+          if (!backfillReady) {
+            setBackwardMessages((previous) => [...(previous ?? []), event]);
+            return;
+          }
+          if (!tailLive) return;
+          if (shouldFlushBufferedEvent(event)) flushTailEvents();
+          else scheduleLiveFlush();
+        },
+        onError: (err) => {
+          if (!active || historyFailed) return;
+          const message = err instanceof Error ? err.message : String(err);
+          untrack(() => options.onError(`Task event error: ${message}`));
+        },
+        onReady: () => {
+          if (!active || historyFailed) return;
+          tailLive = true;
+          if (backfillReady) flushTailEvents();
+        },
+        onReset: () => {
+          if (!active || historyFailed) return;
+          historySource?.close();
+          historySource = null;
+          pendingEvents = [];
+          tailEvents = [];
+          tailLive = false;
+          tailReplace = true;
+          backfillReady = true;
+          setBackwardMessages(null);
+        },
+        onHistoryError: failHistory,
+      });
+    }
+
+    function failHistory(error: { message: string }) {
+      if (!active || historyFailed) return;
+      historyFailed = true;
+      clearLiveFlushTimer();
+      pendingEvents = [];
+      tailEvents = [];
+      live = false;
+      tailLive = false;
+      setBackwardMessages(null);
+      historySource?.close();
+      tailSource?.close();
+      historySource = null;
+      tailSource = null;
+      untrack(() => options.onError(`Task history error: ${error.message}`));
+    }
+
+    const connected = api.taskEventBackfill(id, {
       onMessage: (event) => {
         if (!active || historyFailed) return;
         pendingEvents.push(event);
@@ -91,21 +180,23 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
         const message = err instanceof Error ? err.message : String(err);
         untrack(() => options.onError(`Task event error: ${message}`));
       },
+      onBackward: (event) => {
+        if (!active || historyFailed || live || !replaceOnNextFlush) return;
+        setBackwardMessages([event.message]);
+        connectTail(event.eventId);
+      },
       onReady: () => {
         if (!active || historyFailed) return;
         flushPendingEvents();
         live = true;
+        backfillReady = true;
+        if (tailSource !== null) {
+          historySource?.close();
+          historySource = null;
+          flushTailEvents();
+        }
       },
-      onHistoryError: (error) => {
-        if (!active || historyFailed) return;
-        historyFailed = true;
-        clearLiveFlushTimer();
-        pendingEvents = [];
-        live = false;
-        source?.close();
-        source = null;
-        untrack(() => options.onError(`Task history error: ${error.message}`));
-      },
+      onHistoryError: failHistory,
       onReset: () => {
         if (!active || historyFailed) return;
         clearLiveFlushTimer();
@@ -114,7 +205,7 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
         replaceOnNextFlush = true;
       },
     });
-    source = connected;
+    historySource = connected;
     connected.onerror = () => {
       if (!active || historyFailed) return;
       const wasLive = live;
@@ -123,15 +214,17 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
       if (!wasLive || !initialTaskIsTerminal) return;
       active = false;
       connected.close();
-      if (source === connected) source = null;
     };
 
     onCleanup(() => {
       active = false;
       clearLiveFlushTimer();
       pendingEvents = [];
-      source?.close();
-      source = null;
+      tailEvents = [];
+      historySource?.close();
+      tailSource?.close();
+      historySource = null;
+      tailSource = null;
     });
   });
 

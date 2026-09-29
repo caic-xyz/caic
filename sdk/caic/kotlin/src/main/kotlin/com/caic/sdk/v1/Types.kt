@@ -2181,6 +2181,14 @@ data class EventMessage(
     val commitSnapshot: EventCommitSnapshot? = null,
 )
 
+/**
+ * TaskEventBackward carries the latest visible agent response and its canonical
+ * event ID. Pass EventID as the events endpoint's last-event-id query parameter
+ * to stream newer events while earlier history is replayed.
+ */
+@Serializable
+data class TaskEventBackward(val message: EventMessage, val eventId: String)
+
 /** TaskHistoryStreamError reports that task history could not be replayed. */
 @Serializable
 data class TaskHistoryStreamError(val message: String)

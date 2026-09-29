@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -503,6 +503,14 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
     // Unknown kinds pass through.
   }
   return result;
+}
+
+export function validateTaskEventBackward(raw: ValidatorInput): TaskEventBackward {
+  const obj = asObject(raw, "TaskEventBackward");
+  return {
+    message: validateEventMessage(obj["message"]),
+    eventId: asString(obj["eventId"], "TaskEventBackward.eventId"),
+  };
 }
 
 export function validateTaskHistoryStreamError(raw: ValidatorInput): TaskHistoryStreamError {
