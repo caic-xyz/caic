@@ -347,7 +347,7 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("serverDiscoverInstructionsKeepVoiceRepliesBriefAndReactive", func(t *testing.T) {
+	t.Run("serverDiscoverInstructionsDescribeCaicTaskBehavior", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
@@ -359,9 +359,7 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatalf("Instructions() error: %v", err)
 		}
 		for _, want := range []string{
-			"one or two short sentences",
-			"Never ask a follow-up or confirmation",
-			"Do not volunteer ideas, next steps, related actions, or offers",
+			"Stick to the current task being discussed",
 			"Notify the user only when an agent enters the waiting, asking, failed, or crashed state",
 			"Do not notify on any other state transition",
 			"When StartupFailure is present, state its harness, phase, and cause exactly",
