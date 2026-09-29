@@ -1699,6 +1699,39 @@ describe("App repo chips: No repository", () => {
     expect(await screen.findByText("#1")).toBeInTheDocument();
   });
 
+  it("opens task details from the mobile voice list", async () => {
+    window.goModeHost = { isVoiceConnected: () => true };
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: query === "(max-width: 768px)",
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "task1", title: "Review output", state: "waiting" })] });
+
+    const normal = screen.getByTestId("normal-content");
+    expect(within(normal).getByTestId("task-list")).toBeInTheDocument();
+    expect(within(normal).getByTestId("new-task-form")).toBeInTheDocument();
+    expect(normal.querySelector("header")).toBeInTheDocument();
+
+    const voiceView = await screen.findByTestId("mobile-voice-tasks");
+    expect(normal).toHaveAttribute("aria-hidden", "true");
+    const link = within(voiceView).getByRole("link", { name: "Task 1, waiting: Review output" });
+    expect(link).toHaveAttribute("href", "/task/@task1");
+    fireEvent.click(link);
+
+    await waitFor(() => expect(history.get()).toBe("/task/@task1"));
+    await waitFor(() => expect(screen.queryByTestId("mobile-voice-tasks")).not.toBeInTheDocument());
+    expect(normal).toHaveAttribute("aria-hidden", "false");
+    expect(within(normal).getByTestId("detail-pane")).toBeInTheDocument();
+  });
+
   it("does not mount browser voice when the server disables the voice gateway", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       displayName: "test",

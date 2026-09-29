@@ -1,0 +1,88 @@
+/* Full-screen mobile voice task colors and compact, two-line numbered rows. */
+
+.view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 0 6rem;
+  overflow-y: auto;
+}
+
+.list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.item {
+  margin-bottom: 0.4rem;
+}
+
+.taskLink {
+  box-sizing: border-box;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.4rem 0.75rem;
+  color: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+  background: var(--color-bg-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.taskLink:focus-visible {
+  outline: 3px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
+.taskLink[data-state="waiting"] {
+  color: var(--color-warning-text);
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+}
+
+.taskLink[data-state="asking"] {
+  color: var(--color-on-primary-container);
+  background: var(--color-state-asking-bg);
+  border-color: var(--color-primary-border);
+}
+
+.taskLink[data-state="has_plan"] {
+  color: var(--color-plan);
+  background: var(--color-plan-bg);
+  border-color: var(--color-plan-border);
+}
+
+.taskLink[data-state="running"] {
+  color: var(--color-success-text);
+  background: var(--color-success-bg);
+  border-color: var(--color-success);
+}
+
+.number {
+  flex-shrink: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+
+.name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+}
+
+.empty {
+  font-size: 1.25rem;
+}

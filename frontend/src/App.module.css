@@ -13,6 +13,17 @@
   font-family: system-ui;
 }
 
+.normalContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.voiceHidden {
+  display: none;
+}
+
 .navbar {
   display: flex;
   gap: 0.5rem;

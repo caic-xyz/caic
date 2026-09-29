@@ -1,6 +1,7 @@
-// Application shell: top-level chrome, dialogs, diagnostic error boundary, browser voice integration, and routed panes.
+// Application shell: top-level chrome, dialogs, mobile voice view, diagnostic error boundary, and routed panes.
 
-import { createEffect, createMemo, createSignal, ErrorBoundary, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, ErrorBoundary, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { useLocation } from "@solidjs/router";
 
 import BrowserVoiceShell from "./BrowserVoiceShell";
 import { HostModeProvider, useHostMode } from "@maruel/gomode/web/HostMode";
@@ -16,6 +17,8 @@ import KeyboardShortcuts from "./components/KeyboardShortcuts";
 import Toasts from "./components/Toasts";
 import UsageBadges from "./components/UsageBadges";
 import CloneRepoDialog from "./components/CloneRepoDialog";
+import MobileVoiceTasks from "./components/MobileVoiceTasks";
+import { getVoiceTaskNumber, voiceConnected } from "./voiceTaskState";
 import styles from "./App.module.css";
 
 /** Fallback UI shown when an ErrorBoundary catches a render error. */
@@ -105,41 +108,66 @@ function SessionCheckPage() {
 /** Top-level chrome: navbar, modals, overlays, and the routed detail panes. */
 function Shell(props: { children?: JSX.Element }) {
   const s = useAppState();
+  const location = useLocation();
   const hostMode = useHostMode();
   const auth = s.auth;
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const status = () => connectionStatus(s.connected(), s.settledError(), s.settledLoading());
   const statusLabel = () => connectionStatusLabel(status(), s.settledError());
+  const mobileQuery = window.matchMedia("(max-width: 768px)");
+  const [mobile, setMobile] = createSignal(mobileQuery.matches);
+  const mobileVoice = () => mobile() && voiceConnected() && location.pathname === "/";
+
+  onMount(() => {
+    const onViewportChange = (event: MediaQueryListEvent) => setMobile(event.matches);
+    mobileQuery.addEventListener("change", onViewportChange);
+    onCleanup(() => mobileQuery.removeEventListener("change", onViewportChange));
+  });
 
   return (
     <Show when={auth.ready() || auth.providers().length === 0} fallback={<SessionCheckPage />}>
       <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
         <div class={styles.app} data-testid="app-shell">
-          <header class={styles.navbar}>
-            <h1 class={styles.title}>
-              <button
-                class={styles.titleButton}
-                type="button"
-                onClick={() => s.navigate("/")}
-                title={`New task — ${statusLabel()}`}
-                aria-describedby="connection-status"
-                data-status={status()}
-                data-testid="new-task-button"
-              >
-                caic
-              </button>
-            </h1>
-            <span id="connection-status" class={styles.visuallyHidden} aria-live="polite">
-              {statusLabel()}
-            </span>
-            <span class={styles.subtitle}>Coding Agents in Containers</span>
-            <UsageBadges usage={s.usage} now={s.now} />
-            <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
-          </header>
+          <div
+            class={`${styles.normalContent} ${mobileVoice() ? styles.voiceHidden : ""}`}
+            aria-hidden={mobileVoice()}
+            data-testid="normal-content"
+          >
+            <header class={styles.navbar}>
+              <h1 class={styles.title}>
+                <button
+                  class={styles.titleButton}
+                  type="button"
+                  onClick={() => s.navigate("/")}
+                  title={`New task — ${statusLabel()}`}
+                  aria-describedby="connection-status"
+                  data-status={status()}
+                  data-testid="new-task-button"
+                >
+                  caic
+                </button>
+              </h1>
+              <span id="connection-status" class={styles.visuallyHidden} aria-live="polite">
+                {statusLabel()}
+              </span>
+              <span class={styles.subtitle}>Coding Agents in Containers</span>
+              <UsageBadges usage={s.usage} now={s.now} />
+              <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
+            </header>
 
-          <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
-            {props.children}
-          </ErrorBoundary>
+            <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>
+              {props.children}
+            </ErrorBoundary>
+          </div>
+
+          <Show when={mobileVoice()}>
+            <MobileVoiceTasks
+              tasks={s.tasks}
+              tasksLoading={s.tasksLoading}
+              settledLoading={s.settledLoading}
+              getTaskNumber={getVoiceTaskNumber}
+            />
+          </Show>
 
           <Show when={s.cloneOpen()}>
             <CloneRepoDialog

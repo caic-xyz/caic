@@ -9,8 +9,8 @@ export class TaskNumberMap {
   /** Sync with the current task list, giving active tasks sequential numbers before inactive tasks. */
   update(tasks: Task[]): void {
     const orderedTasks = [...tasks].sort((a, b) => {
-      const aInactive = isInactive(a);
-      const bInactive = isInactive(b);
+      const aInactive = isInactiveTask(a);
+      const bInactive = isInactiveTask(b);
       if (aInactive !== bInactive) return aInactive ? 1 : -1;
 
       // Sort by ID ascending (KSID encodes creation time) so that the oldest
@@ -42,7 +42,7 @@ export class TaskNumberMap {
   }
 }
 
-function isInactive(task: Task): boolean {
+export function isInactiveTask(task: Task): boolean {
   return (
     task.state === "stopping" ||
     task.state === "stopped" ||
