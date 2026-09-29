@@ -97,11 +97,13 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
                 </div>
               )}
             </Show>
-            <Show when={result().totalCostUSD > 0}>
-              <div>
-                <dt>Cost</dt>
-                <dd>{formatUSD(result().totalCostUSD)}</dd>
-              </div>
+            <Show when={result().cost} keyed>
+              {(cost) => (
+                <div>
+                  <dt>{cost.source === "estimated" ? "Estimated cost" : "Cost"}</dt>
+                  <dd>{formatUSD(cost.usd)}</dd>
+                </div>
+              )}
             </Show>
           </dl>
           <section class={styles.usage} aria-labelledby="turn-token-usage">
@@ -144,7 +146,12 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
       (total, turn) => {
         const usage = turn.result.usage;
         total.apiMs += turn.result.durationAPI * 1_000;
-        total.costUSD += turn.result.totalCostUSD;
+        if (turn.result.cost) {
+          total.costUSD += turn.result.cost.usd;
+          if (turn.result.cost.source === "estimated") total.estimatedCost = true;
+        } else {
+          total.costKnown = false;
+        }
         total.durationMs += turn.result.duration * 1_000;
         total.inputTokens += usage.inputTokens;
         total.cacheWriteInputTokens += usage.cacheCreationInputTokens;
@@ -165,6 +172,8 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
         cacheReadInputTokens: 0,
         cacheWriteInputTokens: 0,
         costUSD: 0,
+        costKnown: props.turns.length > 0,
+        estimatedCost: false,
         durationMs: 0,
         inputTokens: 0,
         outputTokens: 0,
@@ -240,10 +249,12 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
                 <dd>{formatChangeStat(totals().changeStat, true)}</dd>
               </div>
             </Show>
-            <div>
-              <dt>Cost</dt>
-              <dd>{formatUSD(totals().costUSD)}</dd>
-            </div>
+            <Show when={totals().costKnown}>
+              <div>
+                <dt>{totals().estimatedCost ? "Estimated cost" : "Cost"}</dt>
+                <dd>{formatUSD(totals().costUSD)}</dd>
+              </div>
+            </Show>
           </dl>
           <section class={styles.usage} aria-labelledby="session-token-usage">
             <h3 id="session-token-usage">Token usage</h3>

@@ -276,6 +276,34 @@ object ErrorCodeSerializer : KSerializer<ErrorCode> {
     }
 }
 
+@Serializable(with = EventCostSourceSerializer::class)
+sealed interface EventCostSource {
+    val value: String
+    @Serializable
+    data object EventCostEstimated : EventCostSource {
+        override val value = "estimated"
+    }
+    @Serializable
+    data object EventCostReported : EventCostSource {
+        override val value = "reported"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventCostSource
+}
+
+object EventCostSourceSerializer : KSerializer<EventCostSource> {
+    override val descriptor = PrimitiveSerialDescriptor("EventCostSource", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventCostSource) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventCostSource {
+        val v = decoder.decodeString()
+        return when (v) {
+            "estimated" -> EventCostSource.EventCostEstimated
+            "reported" -> EventCostSource.EventCostReported
+            else -> EventCostSource.Other(v)
+        }
+    }
+}
+
 @Serializable(with = EventKindSerializer::class)
 sealed interface EventKind {
     val value: String
@@ -1877,9 +1905,14 @@ data class EventUsage(
     val reportedModel: String,
 )
 
+/** EventCost is one completed turn's reported or API-equivalent estimated cost. */
+@Serializable
+data class EventCost(val usd: Double, val source: EventCostSource)
+
 /** EventResult is emitted when the task reaches a terminal state. */
 @Serializable
 data class EventResult(
+    val cost: EventCost? = null,
     val subtype: String,
     val isError: Boolean,
     val result: String,

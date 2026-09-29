@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 // InputTruncateThreshold is the maximum byte length of a tool input JSON before it
@@ -32,6 +33,8 @@ const maxPendingToolTimings = 1024
 // (pending, window) accumulates across ConvertMessage calls.
 type ToolTimingTracker struct {
 	harness     harness.Name
+	cost        task.CostTracker
+	pricer      usage.ModelPricer
 	pending     map[string]time.Time
 	planContent func(toolUseID string) string
 	window      task.ResultTextWindow
@@ -41,9 +44,11 @@ type ToolTimingTracker struct {
 // harness into API events. planContent resolves the plan text to display on
 // an ExitPlanMode event with the given tool use ID; pass nil to disable the
 // projection.
-func NewToolTimingTracker(h harness.Name, planContent func(toolUseID string) string) *ToolTimingTracker {
+func NewToolTimingTracker(h harness.Name, model string, pricer usage.ModelPricer, planContent func(toolUseID string) string) *ToolTimingTracker {
 	return &ToolTimingTracker{
 		harness:     h,
+		cost:        task.CostTracker{Harness: h, Model: model},
+		pricer:      pricer,
 		planContent: planContent,
 		pending:     make(map[string]time.Time),
 	}
@@ -51,6 +56,7 @@ func NewToolTimingTracker(h harness.Name, planContent func(toolUseID string) str
 
 // ConvertMessage converts an agent.Message into zero or more EventMessages.
 func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
+	turnCost, hasCost := tt.cost.Observe(msg, now, tt.pricer)
 	var ts int64
 	if !now.IsZero() {
 		ts = now.UnixMilli()
@@ -200,10 +206,15 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			result = tt.window.Value()
 		}
 		tt.window.Update(m)
+		var cost v1.EventCost
+		if hasCost {
+			cost = v1.EventCost{USD: turnCost.USD, Source: v1.EventCostSource(turnCost.Source)}
+		}
 		return []v1.EventMessage{{
 			Kind: v1.EventKindResult,
 			Ts:   ts,
 			Result: &v1.EventResult{
+				Cost:         cost,
 				Subtype:      m.Subtype,
 				IsError:      m.IsError,
 				Result:       result,

@@ -280,7 +280,7 @@ func isTaskEventTerminal(state taskslog.State) bool {
 // newHistoryTracker builds the per-stream API conversion tracker with the
 // task's plan-content projection wired in.
 func newHistoryTracker(t *task.Task) *apiconv.ToolTimingTracker {
-	return apiconv.NewToolTimingTracker(t.Harness, t.PlanContentFor)
+	return apiconv.NewToolTimingTracker(t.Harness, t.RequestedModel, t.Pricer, t.PlanContentFor)
 }
 
 func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskmgr.Entry, history task.TimelineSnapshot, at time.Time) error {
@@ -337,6 +337,7 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 	cleanTurnComplete := false
 	emit := func(parsed agent.TimedMessage) error {
 		message := parsed.Message
+		at := parsed.ProducerTime
 		if exit, ok := message.(*agent.ExitMessage); ok && exit.ExitCode != 0 && cleanTurnComplete {
 			return nil
 		}
@@ -346,7 +347,6 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 		if result, ok := message.(*agent.ResultMessage); ok {
 			cleanTurnComplete = !result.IsError
 		}
-		at := parsed.ProducerTime
 		sequence := stream.nextMessage + 1
 		if err := stream.writeMessage(message, sequence, at, false); err != nil {
 			return err
@@ -368,30 +368,6 @@ func (h *taskHandlers) streamHistoryFromDisk(stream *taskEventStream, entry *tas
 		}
 	}
 	return stream.resume.complete()
-}
-
-func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
-	data, err := json.Marshal(v1.TaskHistoryStreamError{Message: "task history is unavailable"})
-	if err != nil {
-		return
-	}
-	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
-	flusher.Flush()
-}
-
-func shouldReplayHistoryFromDisk(state taskslog.State, lt *taskslog.LoadedTask) bool {
-	return state == taskslog.StateStopped && lt != nil && lt.LogPath() != ""
-}
-
-// emitSettledStatusEvent sends a kind=="status" event carrying the settled-
-// history pass state (loading flag and error). It is the only event that can
-// carry the status variant, so the initial state and every transition go
-// through it.
-func emitSettledStatusEvent(stream *sse.Stream, loading bool, errStr string) error {
-	return emitTaskListEvent(stream, &v1.TaskListEvent{
-		Kind:   "status",
-		Status: &v1.TaskListSettledStatus{Loading: loading, Error: errStr},
-	})
 }
 
 // handleTaskListEvents streams patch events for the task list as SSE. On first
@@ -784,6 +760,30 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
+}
+
+func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
+	data, err := json.Marshal(v1.TaskHistoryStreamError{Message: "task history is unavailable"})
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
+	flusher.Flush()
+}
+
+func shouldReplayHistoryFromDisk(state taskslog.State, lt *taskslog.LoadedTask) bool {
+	return state == taskslog.StateStopped && lt != nil && lt.LogPath() != ""
+}
+
+// emitSettledStatusEvent sends a kind=="status" event carrying the settled-
+// history pass state (loading flag and error). It is the only event that can
+// carry the status variant, so the initial state and every transition go
+// through it.
+func emitSettledStatusEvent(stream *sse.Stream, loading bool, errStr string) error {
+	return emitTaskListEvent(stream, &v1.TaskListEvent{
+		Kind:   "status",
+		Status: &v1.TaskListSettledStatus{Loading: loading, Error: errStr},
+	})
 }
 
 // historyLoadError marks a failure before any task history is available for SSE

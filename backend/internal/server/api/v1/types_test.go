@@ -9,6 +9,35 @@ import (
 	"testing"
 )
 
+func TestEventResultCostJSON(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		cost    EventCost
+		present bool
+	}{
+		{name: "unknown"},
+		{name: "reported zero", cost: EventCost{Source: EventCostReported}, present: true},
+		{name: "estimated nonzero", cost: EventCost{USD: 0.25, Source: EventCostEstimated}, present: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := json.Marshal(EventResult{Cost: tc.cost})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			_, present := fields["cost"]
+			if present != tc.present {
+				t.Errorf("cost present = %v, want %v: %s", present, tc.present, data)
+			}
+		})
+	}
+}
+
 func TestTaskListEvent(t *testing.T) {
 	t.Parallel()
 

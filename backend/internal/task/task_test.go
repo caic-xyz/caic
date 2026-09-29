@@ -3798,6 +3798,32 @@ func TestPricedCost(t *testing.T) {
 	// glm-5.3-flash: $0.15/M input, $0.03/M cache read, $0.50/M output.
 	prices := fakePricer{"zai/glm-5.3-flash": {InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}}
 
+	t.Run("CodexResultKeepsRawCostSeparate", func(t *testing.T) {
+		t.Parallel()
+		const model = "gpt-6-sol"
+		for _, replay := range []bool{false, true} {
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, model, "")
+			tk.Pricer = fakePricer{model: {InputPerMTok: 2, CachedInputPerMTok: 0.2, OutputPerMTok: 10}}
+			tk.SetState(taskslog.StateRunning)
+			first := &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 100_000, CacheReadInputTokens: 1_000_000, OutputTokens: 10_000}}
+			second := &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 50_000, OutputTokens: 10_000}}
+			messages := []agent.Message{first, &agent.SystemMessage{MessageType: "system", Subtype: "compact_boundary"}, second}
+			if replay {
+				tk.SeedTimeline(messages)
+			} else {
+				for _, m := range messages {
+					tk.addMessage(t.Context(), m, false)
+				}
+			}
+			if first.TotalCostUSD != 0 || second.TotalCostUSD != 0 {
+				t.Errorf("replay=%v raw result costs = %v, %v; want 0, 0", replay, first.TotalCostUSD, second.TotalCostUSD)
+			}
+			if got, _, _, _, _ := tk.LiveStats(); got != 0.7 {
+				t.Errorf("replay=%v task cost = %v, want 0.7", replay, got)
+			}
+		}
+	})
+
 	t.Run("OpenCodeReportedCostAcrossCompactionAndClear", func(t *testing.T) {
 		t.Parallel()
 		newMessages := func() []agent.Message {

@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { expect } from "@tests/expect";
 
 import type { TurnTiming } from "../timing";
-import TurnInvocationIcon from "./TurnInvocationIcon";
+import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
 
 const turn: TurnTiming = {
   event: { kind: "result", ts: 5_000 },
@@ -15,6 +15,7 @@ const turn: TurnTiming = {
     isError: false,
     result: "done",
     totalCostUSD: 0.125,
+    cost: { usd: 0.125, source: "reported" },
     duration: 5,
     durationAPI: 4,
     numTurns: 1,
@@ -63,6 +64,7 @@ describe("TurnInvocationIcon", () => {
       result: {
         ...turn.result,
         totalCostUSD: 0,
+        cost: undefined,
         durationAPI: 0,
         usage: { ...turn.result.usage, reportedModel: "" },
       },
@@ -78,5 +80,31 @@ describe("TurnInvocationIcon", () => {
     expect(dialog).not.toHaveTextContent("User wait");
     expect(dialog).not.toHaveTextContent("Cost");
     expect(dialog).not.toHaveTextContent("Unavailable");
+  });
+});
+
+describe("SessionInvocationIcon", () => {
+  it("sums turn costs and identifies an estimate", async () => {
+    const user = userEvent.setup();
+    const estimated = {
+      ...turn,
+      result: { ...turn.result, cost: { usd: 0.25, source: "estimated" } },
+    } satisfies TurnTiming;
+    render(() => <SessionInvocationIcon turns={[turn, estimated]} model={null} />);
+
+    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    expect(screen.getByTestId("session-invocation-dialog")).toHaveTextContent("Estimated cost$0.38");
+  });
+
+  it("does not present a partial total as a session cost", async () => {
+    const user = userEvent.setup();
+    const unknown = {
+      ...turn,
+      result: { ...turn.result, cost: undefined },
+    } satisfies TurnTiming;
+    render(() => <SessionInvocationIcon turns={[turn, unknown]} model={null} />);
+
+    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    expect(screen.getByTestId("session-invocation-dialog")).not.toHaveTextContent("Cost");
   });
 });

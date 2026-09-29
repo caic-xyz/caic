@@ -52,6 +52,7 @@ function formatUSD(usd: number): string {
 }
 
 function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
+  const completeCost = turns.every((turn) => turn.result.cost !== undefined);
   return turns.reduce<UsageDetails>(
     (total, turn) => {
       const usage = turn.result.usage;
@@ -62,7 +63,7 @@ function sumTurnUsage(turns: TurnTiming[]): UsageDetails {
       total.reasoningOutputTokens += usage.reasoningOutputTokens ?? 0;
       total.totalTokens +=
         usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
-      total.costUSD += turn.result.totalCostUSD;
+      if (completeCost) total.costUSD += turn.result.cost?.usd ?? 0;
       return total;
     },
     {

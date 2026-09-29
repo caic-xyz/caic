@@ -1772,7 +1772,8 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
   const meta = createMemo(() => {
     const current = result();
     const parts: string[] = [];
-    if (current.totalCostUSD > 0) parts.push(`$${current.totalCostUSD.toFixed(4)}`);
+    if (current.cost && current.cost.usd > 0)
+      parts.push(`${current.cost.source === "estimated" ? "~" : ""}$${current.cost.usd.toFixed(4)}`);
     if (current.numTurns > 0) parts.push(`${current.numTurns} ${current.numTurns === 1 ? "turn" : "turns"}`);
     return parts.join(" · ");
   });

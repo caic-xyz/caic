@@ -8,6 +8,15 @@ export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 SSE event types sent to the frontend for task event streams.
 */
 
+export type EventCostSource =
+  | "estimated"
+  | "reported";
+/**
+ * Supported values.
+ */
+export const EventCostEstimated = "estimated";
+export const EventCostReported = "reported";
+
 export type EventKind =
   | "init"
   | "text"
@@ -230,8 +239,15 @@ export interface EventUsage {
   reportedModel: string;
 }
 
+/** EventCost is one completed turn's reported or API-equivalent estimated cost. */
+export interface EventCost {
+  usd: number /* float64 */;
+  source: EventCostSource;
+}
+
 /** EventResult is emitted when the task reaches a terminal state. */
 export interface EventResult {
+  cost?: EventCost;
   subtype: string;
   isError: boolean;
   result: string;

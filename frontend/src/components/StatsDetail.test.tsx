@@ -26,6 +26,7 @@ const turns: TurnTiming[] = [
       isError: false,
       result: "done",
       totalCostUSD: 0.125,
+      cost: { usd: 0.125, source: "reported" },
       duration: 5,
       durationAPI: 4,
       numTurns: 1,

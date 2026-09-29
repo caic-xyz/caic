@@ -194,6 +194,7 @@ type EventUsage struct {
 
 // EventResult is emitted when the task reaches a terminal state.
 type EventResult struct {
+	Cost         EventCost  `json:"cost,omitzero"`
 	Subtype      string     `json:"subtype"`
 	IsError      bool       `json:"isError"`
 	Result       string     `json:"result"`
@@ -204,6 +205,22 @@ type EventResult struct {
 	NumTurns     int        `json:"numTurns"`
 	Usage        EventUsage `json:"usage"`
 }
+
+// EventCost is one completed turn's reported or API-equivalent estimated cost.
+type EventCost struct {
+	USD    float64         `json:"usd"`
+	Source EventCostSource `json:"source"`
+}
+
+// EventCostSource distinguishes harness-reported cost from a token-price estimate.
+type EventCostSource string
+
+const (
+	// EventCostEstimated is calculated from model token prices.
+	EventCostEstimated EventCostSource = "estimated"
+	// EventCostReported is supplied by the harness.
+	EventCostReported EventCostSource = "reported"
+)
 
 // EventCommitSnapshot records the exact committed repository branch tips
 // fetched from the runtime when a turn finishes.

@@ -165,6 +165,27 @@ public struct ErrorCode: Codable, Equatable, Hashable {
     }
 }
 
+public struct EventCostSource: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let EventCostEstimated = EventCostSource("estimated")
+    public static let EventCostReported = EventCostSource("reported")
+
+    public static func other(_ value: String) -> EventCostSource { EventCostSource(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct EventKind: Codable, Equatable, Hashable {
     public let value: String
 
@@ -1309,8 +1330,15 @@ public struct EventUsage: Codable {
     public let reportedModel: String
 }
 
+/// EventCost is one completed turn's reported or API-equivalent estimated cost.
+public struct EventCost: Codable {
+    public let usd: Double
+    public let source: EventCostSource
+}
+
 /// EventResult is emitted when the task reaches a terminal state.
 public struct EventResult: Codable {
+    public let cost: EventCost?
     public let subtype: String
     public let isError: Bool
     public let result: String

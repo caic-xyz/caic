@@ -116,6 +116,7 @@ function resultEvent(ts: number): EventMessage {
       isError: false,
       result: "done",
       totalCostUSD: 0,
+      cost: { usd: 0, source: "reported" },
       duration: 1,
       durationAPI: 1,
       numTurns: 1,

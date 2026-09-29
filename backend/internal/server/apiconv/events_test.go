@@ -15,14 +15,47 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 )
+
+type conversionPricer struct{}
+
+func (conversionPricer) ModelPrice(_ agent.QuotaProvider, model string, _ time.Time) (usage.ModelPrice, bool) {
+	if model != "gpt-6-sol" {
+		return usage.ModelPrice{}, false
+	}
+	return usage.ModelPrice{InputPerMTok: 2}, true
+}
 
 func TestToolTimingTrackerConvertMessage(t *testing.T) {
 	t.Parallel()
 
+	t.Run("cost projection preserves raw reports", func(t *testing.T) {
+		t.Parallel()
+		at := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+		codex := NewToolTimingTracker(harness.Codex, "gpt-6-sol", conversionPricer{}, nil)
+		raw := &agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}
+		first := codex.ConvertMessage(raw, at)[0].Result
+		if first == nil || first.Cost.USD != 2 || first.Cost.Source != "estimated" || raw.TotalCostUSD != 0 {
+			t.Fatalf("Codex result = %+v; raw cost = %v", first, raw.TotalCostUSD)
+		}
+		codex.ConvertMessage(&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, at)
+		second := codex.ConvertMessage(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 1_000_000}}, at)[0].Result
+		if second == nil || second.Cost.USD != 2 {
+			t.Fatalf("Codex result after compaction = %+v", second)
+		}
+
+		claude := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		claude.ConvertMessage(&agent.ResultMessage{MessageType: "result", TotalCostUSD: 2}, at)
+		cumulative := claude.ConvertMessage(&agent.ResultMessage{MessageType: "result", TotalCostUSD: 3}, at)[0].Result
+		if cumulative == nil || cumulative.Cost.USD != 1 || cumulative.Cost.Source != "reported" || cumulative.TotalCostUSD != 3 {
+			t.Fatalf("Claude cumulative result = %+v", cumulative)
+		}
+	})
+
 	t.Run("tool use includes replacement file changes display", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
 			ToolUseID: "edit-1",
 			Name:      "Edit",
@@ -57,7 +90,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("native subagent preserves only harness-reported lifecycle facts", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.OpenCode, nil)
+		tracker := NewToolTimingTracker(harness.OpenCode, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.NativeSubagentMessage{Subagent: agent.NativeSubagent{
 			ID:      "child-1",
 			GroupID: "spawn-1",
@@ -77,7 +110,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool use includes harness normalized subagent display", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
 			ToolUseID: "agent-1",
 			Name:      "Agent",
@@ -108,7 +141,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool use includes patch file changes display", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.ToolUseMessage{
 			ToolUseID: "edit-1",
 			Name:      "Edit",
@@ -138,7 +171,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("nonzero exit becomes error event", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}, time.Unix(1, 0))
 		if len(events) != 1 {
 			t.Fatalf("got %d events, want 1", len(events))
@@ -153,7 +186,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("zero exit is hidden", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Pi, nil)
+		tracker := NewToolTimingTracker(harness.Pi, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.ExitMessage{ExitCode: 0}, time.Unix(1, 0))
 		if len(events) != 0 {
 			t.Fatalf("got %d events, want 0", len(events))
@@ -162,7 +195,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("tool result prefers harness duration", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Codex, nil)
+		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
 		start := time.Unix(1, 0)
 		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"}, start)
 		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool", DurationMs: 125}, start.Add(time.Second))
@@ -173,7 +206,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("missing producer time leaves tool duration unknown", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
 		tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tool", Name: "Read"}, time.Time{})
 		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "tool"}, time.Time{})
 		if len(events) != 1 || events[0].Ts != 0 || events[0].ToolResult == nil || events[0].ToolResult.Duration != 0 {
@@ -183,7 +216,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("pending tool timings are bounded", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
 		start := time.Unix(1, 0)
 		for i := range maxPendingToolTimings {
 			tracker.ConvertMessage(&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", i), Name: "Tool"}, start)
@@ -203,7 +236,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("rate limit uses API status", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
 		events := tracker.ConvertMessage(&agent.RateLimitMessage{
 			Status: agent.RateLimitStatusAllowedWarning,
 		}, time.Unix(1, 0))
@@ -217,7 +250,7 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 
 	t.Run("commit snapshot is a standalone event", func(t *testing.T) {
 		t.Parallel()
-		tracker := NewToolTimingTracker(harness.Claude, nil)
+		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
 		events := tracker.ConvertMessage(agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
@@ -254,7 +287,7 @@ func TestConvertMessagePlanContentProjection(t *testing.T) {
 		exit := &agent.ToolUseMessage{ToolUseID: "tu-2", Name: "ExitPlanMode"}
 		tk.SeedTimeline([]agent.Message{planWrite, exit})
 
-		tt := NewToolTimingTracker(harness.Claude, tk.PlanContentFor)
+		tt := NewToolTimingTracker(harness.Claude, "", nil, tk.PlanContentFor)
 		if events := tt.ConvertMessage(planWrite, time.Unix(1, 0)); len(events) != 1 || events[0].ToolUse == nil {
 			t.Fatalf("write events = %#v, want 1 tool_use event", events)
 		} else if events[0].ToolUse.PlanContent != "" {
@@ -271,7 +304,7 @@ func TestConvertMessagePlanContentProjection(t *testing.T) {
 
 	t.Run("nil resolver yields empty plan content", func(t *testing.T) {
 		t.Parallel()
-		tt := NewToolTimingTracker(harness.Claude, nil)
+		tt := NewToolTimingTracker(harness.Claude, "", nil, nil)
 		events := tt.ConvertMessage(&agent.ToolUseMessage{ToolUseID: "tu-1", Name: "ExitPlanMode"}, time.Unix(1, 0))
 		if len(events) != 1 || events[0].ToolUse == nil {
 			t.Fatalf("events = %#v, want 1 tool_use event", events)

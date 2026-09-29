@@ -195,6 +195,15 @@ ErrorCode is a machine-readable API error identifier.
 | `UPDATE_CHECK_FAILED` |  |
 | `UPDATE_UNAVAILABLE` |  |
 
+### EventCostSource
+
+EventCostSource distinguishes harness-reported cost from a token-price estimate.
+
+| Value | Description |
+|-------|-------------|
+| `estimated` | EventCostEstimated is calculated from model token prices. |
+| `reported` | EventCostReported is supplied by the harness. |
+
 ### EventKind
 
 EventKind identifies the type of SSE event.
@@ -1228,12 +1237,22 @@ or reasoning summaries (Codex). Zero when the harness does not report it.
 | `reasoningOutputTokens` | `int` |  |  |
 | `reportedModel` | `string` |  | yes |
 
+### EventCost
+
+EventCost is one completed turn's reported or API-equivalent estimated cost.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `usd` | `float64` |  | yes |
+| `source` | `EventCostSource` |  | yes |
+
 ### EventResult
 
 EventResult is emitted when the task reaches a terminal state.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `cost` | `EventCost` |  |  |
 | `subtype` | `string` |  | yes |
 | `isError` | `boolean` |  | yes |
 | `result` | `string` |  | yes |
