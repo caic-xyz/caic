@@ -86,7 +86,7 @@ type AgentRuntime struct {
 //   - --resume fallback: always transitions to StateRunning since a new agent
 //     process is started.
 //   - All-fail: reverts to StateWaiting.
-func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
+func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error) {
 	ctx, task := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
 	defer task.End()
 
@@ -105,7 +105,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task, skipSideEffects b
 	// blindly override it to StateRunning for an idle relay.
 	prevState := t.GetState()
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, skipSideEffects)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 
 	// Reconnect resumes an existing session, so append only after Reopen
 	// validates the existing file's authoritative header. A missing or corrupt
@@ -594,9 +594,9 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	t.SetVNCPort(r.Runtimes.VNCPort(ctx, instanceID))
 
 	// 2. Start a new relay with --resume to continue the previous session.
-	// skipSideEffects=true: --resume replays all historical messages and
-	// each would trigger fetch+diff+title if side effects were enabled.
-	// Instead we do a single BranchDiffStat at the end.
+	// Resuming restores harness context inside a fresh relay. Its output is
+	// live activity, so keep tool and turn measurements enabled while
+	// preserving the existing title in the resumed session.
 	t.SetState(taskslog.StateStarting)
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
@@ -642,9 +642,8 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 		return nil, r.finishReviveFailure(ctx, t, err, nil)
 	}
 
-	// 4. Compute host-side diff stat and per-repo states once. The resume
-	// replay keeps side effects off, so this one-shot restore is what the
-	// card shows until the next mutating tool call.
+	// 4. Restore diff stat and per-repo states before returning. Subsequent
+	// mutating tool results refresh them through normal message dispatch.
 	if r.Checkout != nil {
 		if ds, states, err := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, instanceID, t.RuntimeRepos()); err == nil {
 			if len(ds) > 0 {
@@ -1174,7 +1173,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 // startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
 // t.addMessage, and reports task state transitions.
-func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
+func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTitleGen bool) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
 	instanceID := t.RuntimeInstanceID()
@@ -1197,10 +1196,10 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 			case *agent.ToolResultMessage:
 				if _, ok := pendingMutating[msg.ToolUseID]; ok {
 					delete(pendingMutating, msg.ToolUseID)
-					emitToolDiff = !skipSideEffects && r.Runtimes != nil && r.Checkout != nil
+					emitToolDiff = r.Runtimes != nil && r.Checkout != nil
 				}
 			case *agent.ResultMessage:
-				if !skipSideEffects && r.Runtimes != nil && r.Checkout != nil {
+				if r.Runtimes != nil && r.Checkout != nil {
 					// TODO: Consolidate these result-time branch and turn measurements
 					// into one runtime operation. They currently require two Git diffs
 					// and two container-reference synchronizations per repository.
@@ -1212,7 +1211,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipSi
 					}
 				}
 			}
-			stateChanged, generateTitle := t.addParsedMessage(parsed, skipSideEffects)
+			stateChanged, generateTitle := t.addParsedMessage(parsed, skipTitleGen)
 			if commitSnapshot != nil {
 				r.persistCommitSnapshot(ctx, t, commitSnapshot, instanceID)
 				t.addMessage(ctx, commitSnapshot, false)

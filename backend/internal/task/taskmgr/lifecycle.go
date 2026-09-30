@@ -528,7 +528,7 @@ func (r *Lifecycle) reconnectForInput() error {
 	if t.HasSession() {
 		return nil
 	}
-	h, err := r.agentRuntime.Reconnect(r.ctx, t, false)
+	h, err := r.agentRuntime.Reconnect(r.ctx, t)
 	if err != nil {
 		if t.HasSession() {
 			return nil
@@ -560,7 +560,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 	// parsed through the wire without reaching the dispatch loop. Skipping
 	// them here would permanently disable the post-tool repository-state
 	// probe and the result-time diff stat for this session.
-	h, err := r.agentRuntime.Reconnect(r.ctx, t, false)
+	h, err := r.agentRuntime.Reconnect(r.ctx, t)
 	if err != nil {
 		tlog.Warn("auto-reconnect failed", "err", err)
 		r.manager.NotifyTaskChange()

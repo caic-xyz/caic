@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -42,6 +43,18 @@ type statusFailingRuntime struct {
 
 func (*statusFailingRuntime) CompactRepositoryStatus(context.Context, runtime.ID, int) (runtime.RepositoryStatus, error) {
 	return runtime.RepositoryStatus{}, errors.New("probe failed")
+}
+
+// titleProviderSpy records title requests and returns a replacement title.
+type titleProviderSpy struct {
+	genai.Provider
+
+	calls chan struct{}
+}
+
+func (p *titleProviderSpy) GenSync(context.Context, genai.Messages, ...genai.GenOption) (genai.Result, error) {
+	p.calls <- struct{}{}
+	return genai.Result{Message: genai.NewTextMessage("replacement title")}, nil
 }
 
 // instantExitBackend embeds testBackend but spawns a process that exits
@@ -950,6 +963,54 @@ func TestRunner(t *testing.T) {
 
 	t.Run("ReviveTask", func(t *testing.T) {
 		t.Parallel()
+		t.Run("refreshes_repository_state_after_live_tool", func(t *testing.T) {
+			t.Parallel()
+			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
+			stub := &fetchRecorder{FakeBackend: testContainer()}
+			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), t.TempDir(), map[harness.Name]agent.Backend{"test": backend})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
+			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetSessionMetadata("session-1", "", "", "")
+			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
+			tk.SetState(taskslog.StateStopped)
+			tk.SetTitle("existing title")
+			provider := &titleProviderSpy{calls: make(chan struct{}, 1)}
+			tk.Provider = provider
+
+			h, err := r.ReviveTask(t.Context(), tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				tk.CloseAndDetachSession(t.Context())
+				_ = h.Log.Close()
+			})
+			// Replace the one-shot revival probe with stale state. The next
+			// live Bash result must publish an authoritative probe again.
+			tk.SetLiveRepoStates([]agent.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}})
+			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: "rebase", Name: "Bash", Input: json.RawMessage(`{}`)}}
+			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{ToolUseID: "rebase"}}
+			h.MsgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result", Result: "rebased"}}
+			h.CloseMsgCh()
+			<-h.DispatchDone
+
+			states := tk.Snapshot().RepoStates
+			if len(states) != 1 || states[0].Behind != 0 || states[0].ChangedFiles != 1 {
+				t.Fatalf("RepoStates = %+v, want fresh probe with one changed file and no behind commits", states)
+			}
+			if !stub.fetched.Load() {
+				t.Error("live turn did not fetch its commit snapshot")
+			}
+			select {
+			case <-provider.calls:
+				t.Error("revived session requested a replacement title")
+			case <-time.After(100 * time.Millisecond):
+			}
+			if got := tk.Title(); got != "existing title" {
+				t.Errorf("Title = %q, want existing title", got)
+			}
+		})
 		t.Run("rejects_task_that_never_accepted_initial_prompt", func(t *testing.T) {
 			t.Parallel()
 			backend := &reviveCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
@@ -1355,7 +1416,7 @@ func testRunnerSessions(t *testing.T) {
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness, "", "")
 					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 					tk.SetState(taskslog.StateRunning)
-					_, err := r.Reconnect(t.Context(), tk, true)
+					_, err := r.Reconnect(t.Context(), tk)
 					if err == nil {
 						t.Fatal("Reconnect returned nil error")
 					}
@@ -1397,7 +1458,7 @@ func testRunnerSessions(t *testing.T) {
 				},
 			})
 
-			h, err := r.Reconnect(t.Context(), tk, true)
+			h, err := r.Reconnect(t.Context(), tk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1431,7 +1492,7 @@ func testRunnerSessions(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 
-			if _, err := r.Reconnect(t.Context(), tk, true); !errors.Is(err, os.ErrNotExist) {
+			if _, err := r.Reconnect(t.Context(), tk); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("Reconnect error = %v, want os.ErrNotExist", err)
 			}
 			if backend.capturedAttachOpts.Log != nil {
@@ -1856,7 +1917,7 @@ func testRunnerSessions(t *testing.T) {
 			})
 		})
 
-		t.Run("SkipSideEffects", func(t *testing.T) {
+		t.Run("SkipTitleGenerationKeepsTurnMeasurements", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
@@ -1881,8 +1942,8 @@ func testRunnerSessions(t *testing.T) {
 			close(msgCh)
 			<-done
 
-			if stub.fetched.Load() {
-				t.Error("Fetch was called despite skipSideEffects=true")
+			if !stub.fetched.Load() {
+				t.Error("Fetch was skipped with title generation disabled")
 			}
 		})
 
