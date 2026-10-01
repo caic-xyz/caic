@@ -449,8 +449,8 @@ github.com/maruel/apisdkgen v0.1.1 h1:YX9g0+QDiKDOpvbH0nTgabCVS1s/RGgsrOHN7VPAHA
 github.com/maruel/apisdkgen v0.1.1/go.mod h1:S4tV7GOUaW6aRhd8AQiN5WJkgLtl+DWWISNYwdpbugc=
 github.com/maruel/genai v0.8.1 h1:chYtEB1zWwfh66wl7NcUZ7DM/UKYES/2VeKLz+jp8Tc=
 github.com/maruel/genai v0.8.1/go.mod h1:GiZhhtKOJct3g19u+yLevtAcpXnRpgIoIcPv4BL5OKs=
-github.com/maruel/gomode v0.1.1 h1:CRoBZUfLtOxkiJE07Kl0IzsNIosG+acQCvAHsnFYquI=
-github.com/maruel/gomode v0.1.1/go.mod h1:WBV5k5ikRtSyrZcbHp+Svfgh4mmm+b0RES4YPvencJM=
+github.com/maruel/gomode v0.1.2-0.20261001215416-96f119b2438d h1:loS7NqanIHGkQUKCM9BeuHSWHKJ1wknuLdhLJb5hNCk=
+github.com/maruel/gomode v0.1.2-0.20261001215416-96f119b2438d/go.mod h1:kQqIDZ5VLylBT6cJar0mCGYU+8JYUIHpZS99o7/ubPE=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 h1:B96AE27WGCnXjaItfg9i6bnj7iGs//NPBDz6kMgKYto=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38/go.mod h1:k6iNRgw7GovdcpFDalSZhuveD/oFLUU188FrWXdduXc=
 github.com/maruel/httpjson v0.5.2 h1:uMAyE9ajEZOpwFmpF6HCvuGOMLQ5D/9vVEMYaRYYXuc=
