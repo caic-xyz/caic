@@ -44,10 +44,11 @@ Mandatory: Run `make git-hooks` to install git hooks before making any change.
 
 ### Performance
 
-When changing startup, parsing, serialization, cache, compression, hot-loop, or
-request-path behavior, run `make benchmark` (Go benchmarks plus `scripts/bench.ts`)
-before and after the change, add a focused benchmark when the changed path has
-none, and report the deltas. Benchmarks requiring local production data remain
+Benchmark when a change could materially affect user-visible latency,
+throughput, or memory use. Run the relevant focused benchmark before and after,
+add one when needed, and report the delta. Use `make benchmark` for broad
+performance work. Mechanical refactors and minor overhead on infrequent paths
+do not require benchmarks. Benchmarks requiring local production data remain
 documented beside their source and are not part of `make benchmark`.
 
 ### E2E Tests

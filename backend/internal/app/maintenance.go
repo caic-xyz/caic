@@ -1,4 +1,4 @@
-// Startup and scheduled maintenance for md images.
+// Startup and scheduled maintenance for md images and Git repositories.
 
 package app
 
@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 )
 
@@ -20,6 +22,45 @@ import (
 // versions. It also sets DigestCacheTTL so runtime starts between warmup cycles
 // reuse the cached digest instead of hitting the registry.
 const warmupInterval = 6 * time.Hour
+
+const minRepackObjectBytes = 1 << 30
+const minRepackLooseObjects = 1000
+const minRepackLooseBytes = 64 << 20
+
+// repackRepositories packs large checkouts serially on the configured schedule.
+func repackRepositories(ctx context.Context, log *slog.Logger, checkouts *repo.Registry, sched *autoupdate.Schedule) error {
+	for {
+		now := time.Now()
+		timer := time.NewTimer(sched.Next(now).Sub(now))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+		for checkout := range checkouts.Checkouts() {
+			if ctx.Err() != nil {
+				return nil
+			}
+			stats, err := (&git.Checkout{Root: checkout.Dir}).ObjectStats(ctx)
+			if err != nil {
+				log.WarnContext(ctx, "measure repository objects", "repo", checkout.Dir, "err", err)
+				continue
+			}
+			if stats.LooseBytes+stats.PackBytes < minRepackObjectBytes ||
+				stats.LooseCount <= minRepackLooseObjects || stats.LooseBytes <= minRepackLooseBytes {
+				continue
+			}
+			start := time.Now()
+			if err := repackRepository(ctx, checkout.Dir); err != nil {
+				log.WarnContext(ctx, "repack repository", "repo", checkout.Dir, "err", err)
+				continue
+			}
+			log.InfoContext(ctx, "repacked repository", "repo", checkout.Dir,
+				"loose_objects", stats.LooseCount, "loose_bytes", stats.LooseBytes, "duration", time.Since(start))
+		}
+	}
+}
 
 func warmupImages(ctx context.Context, log *slog.Logger, client *md.Client, prefs *preferences.Store) error {
 	ticker := time.NewTicker(warmupInterval)

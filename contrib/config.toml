@@ -15,6 +15,12 @@
 # daily at 05:00; "" disables.
 # e.g. prune = "0 5 * * *"
 
+# Repack repositories with at least 1 GiB of Git objects only when they have
+# more than 1,000 loose objects using more than 64 MiB. This keeps the checkout's
+# object store ready for direct transfer into new task containers.
+# Unset = daily at 02:00 local time; "" disables.
+# e.g. repo_repack = "0 2 * * *"
+
 # Environment variables added to those inherited by the server process. Each key
 # falls back to the host environment when omitted here.
 [core.env]

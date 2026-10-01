@@ -75,6 +75,7 @@ func TestLoadTOMLConfig(t *testing.T) {
 root = "/srv/repos"
 auto_update = ""
 prune = "0 6 * * *"
+repo_repack = "0 7 * * *"
 
 [core.env]
 TAILSCALE_API_KEY = "tskey_test"
@@ -408,11 +409,13 @@ func TestTomlToServerConfig(t *testing.T) {
 		githubClientSecret := strings.Join([]string{"github", "client", "secret"}, "-")
 		gitlabClientSecret := strings.Join([]string{"gitlab", "client", "secret"}, "-")
 		prune := "0 6 * * *"
+		repoRepack := "0 7 * * *"
 
 		tc := &tomlConfig{
 			Core: tomlCore{
-				Root:  "/repos",
-				Prune: &prune,
+				Root:       "/repos",
+				Prune:      &prune,
+				RepoRepack: &repoRepack,
 				Env: map[string]string{
 					"GEMINI_API_KEY":    "AIza_from_core_env",
 					"DEEPSEEK_API_KEY":  "sk_deepseek_from_core_env",
@@ -521,6 +524,9 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.Runtime.ImagePruneSchedule == nil || len(cfg.Runtime.ImagePruneSchedule.Hour) != 1 || cfg.Runtime.ImagePruneSchedule.Hour[0] != 6 {
 			t.Errorf("ImagePruneSchedule = %+v, want daily at 06:00", cfg.Runtime.ImagePruneSchedule)
+		}
+		if cfg.Runtime.RepoRepackSchedule == nil || len(cfg.Runtime.RepoRepackSchedule.Hour) != 1 || cfg.Runtime.RepoRepackSchedule.Hour[0] != 7 {
+			t.Errorf("RepoRepackSchedule = %+v, want daily at 07:00", cfg.Runtime.RepoRepackSchedule)
 		}
 	})
 
@@ -836,6 +842,34 @@ func TestPruneSchedule(t *testing.T) {
 		_, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: &cron}})
 		if err == nil {
 			t.Error("expected error for invalid cron")
+		}
+	})
+}
+
+func TestRepoRepackSchedule(t *testing.T) {
+	t.Parallel()
+	t.Run("default nightly", func(t *testing.T) {
+		t.Parallel()
+		s, err := repoRepackSchedule(&tomlConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s == nil || len(s.Hour) != 1 || s.Hour[0] != 2 {
+			t.Fatalf("schedule = %+v, want daily at 02:00", s)
+		}
+	})
+	t.Run("disabled", func(t *testing.T) {
+		t.Parallel()
+		s, err := repoRepackSchedule(&tomlConfig{Core: tomlCore{RepoRepack: new(string)}})
+		if err != nil || s != nil {
+			t.Fatalf("schedule = %+v, %v; want disabled", s, err)
+		}
+	})
+	t.Run("invalid", func(t *testing.T) {
+		t.Parallel()
+		cron := "invalid"
+		if _, err := repoRepackSchedule(&tomlConfig{Core: tomlCore{RepoRepack: &cron}}); err == nil {
+			t.Fatal("expected invalid schedule error")
 		}
 	})
 }

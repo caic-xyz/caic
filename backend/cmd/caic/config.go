@@ -45,6 +45,7 @@ type tomlCore struct {
 	Root       string            `toml:"root"`
 	AutoUpdate *string           `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
 	Prune      *string           `toml:"prune"`       // nil = default schedule; "" = disabled; else cron expression
+	RepoRepack *string           `toml:"repo_repack"` // nil = default schedule; "" = disabled; else cron expression
 	Env        map[string]string `toml:"env"`
 }
 
@@ -206,6 +207,10 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 	if err != nil {
 		return nil, "", "", "", err
 	}
+	repoRepack, err := repoRepackSchedule(tc)
+	if err != nil {
+		return nil, "", "", "", err
+	}
 	// gh CLI fallback: when no token and no OAuth configured, try gh auth token.
 	// TODO: remove OAuth guard once gh auth token reliably provides a scoped PAT.
 	ghToken := tc.GitHub.PAT.Token
@@ -267,6 +272,7 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 		Runtime: server.RuntimeConfig{
 			TailscaleAPIKey:    tailscaleAPIKey,
 			ImagePruneSchedule: prune,
+			RepoRepackSchedule: repoRepack,
 		},
 		Agent: server.AgentConfig{
 			HarnessEnv: harnessEnv,
@@ -374,6 +380,9 @@ const defaultAutoUpdate = "50 4 * * *"
 // defaultPrune is the default cron schedule: daily at 05:00 local time.
 const defaultPrune = "0 5 * * *"
 
+// defaultRepoRepack repacks large repositories daily at 02:00 local time.
+const defaultRepoRepack = "0 2 * * *"
+
 // autoUpdateSchedule returns the parsed auto-update schedule, or nil if
 // disabled. When auto_update is not set in the config file, the default
 // schedule "50 4 * * *" (daily at 04:50) is used. Set to "" to disable.
@@ -412,6 +421,24 @@ func pruneSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
 	s, err := autoupdate.ParseSchedule(*tc.Core.Prune)
 	if err != nil {
 		return nil, fmt.Errorf("core.prune: %w", err)
+	}
+	return &s, nil
+}
+
+func repoRepackSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
+	if tc.Core.RepoRepack == nil {
+		s, err := autoupdate.ParseSchedule(defaultRepoRepack)
+		if err != nil {
+			return nil, fmt.Errorf("core.repo_repack: %w", err)
+		}
+		return &s, nil
+	}
+	if *tc.Core.RepoRepack == "" {
+		return nil, nil //nolint:nilnil // nil schedule means disabled, not an error
+	}
+	s, err := autoupdate.ParseSchedule(*tc.Core.RepoRepack)
+	if err != nil {
+		return nil, fmt.Errorf("core.repo_repack: %w", err)
 	}
 	return &s, nil
 }

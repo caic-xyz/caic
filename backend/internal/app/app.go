@@ -510,6 +510,11 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			return pruneImages(ctx, log.With("cmp", "prune"), mdRuntimes, cfg.Runtime.ImagePruneSchedule)
 		})
 	}
+	if cfg.Runtime.RepoRepackSchedule != nil {
+		backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
+			return repackRepositories(ctx, log.With("cmp", "repo-repack"), checkoutRegistry, cfg.Runtime.RepoRepackSchedule)
+		})
+	}
 	backgroundTasks = append(backgroundTasks,
 		func(ctx context.Context) error {
 			_, tk := trace.NewTask(ctx, "watch-harness-model-cache")

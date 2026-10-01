@@ -89,6 +89,7 @@ type DirsConfig struct {
 type RuntimeConfig struct {
 	TailscaleAPIKey    string               // required for Tailscale networking inside runtime instances
 	ImagePruneSchedule *autoupdate.Schedule // nil disables unused md image pruning
+	RepoRepackSchedule *autoupdate.Schedule // nil disables nightly large-repository repacking
 	System             runtime.System       // optional runtime override for smoke/e2e tests
 	Metadata           runtime.Metadata     // optional runtime metadata added to every created instance
 	// SkipWarmup skips base-image warmup at startup. Used by e2e fake mode to
