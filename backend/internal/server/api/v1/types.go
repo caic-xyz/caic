@@ -88,6 +88,37 @@ func (r *RefreshHarnessReq) Validate() error {
 	return nil
 }
 
+// ImageRefreshStatus describes the current or most recent image refresh.
+type ImageRefreshStatus struct {
+	State     ImageRefreshState `json:"state"`
+	Error     string            `json:"error,omitempty"`
+	Scheduled bool              `json:"scheduled,omitempty"`
+}
+
+// ImageRefreshReq identifies the runtime whose specialized image is refreshed.
+type ImageRefreshReq struct {
+	Runtime string `json:"-" path:"runtime"`
+}
+
+// Validate checks that the runtime path parameter is present.
+func (r *ImageRefreshReq) Validate() error {
+	if r.Runtime == "" {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "runtime is required"}
+	}
+	return nil
+}
+
+// ImageRefreshState describes the lifecycle of a specialized image refresh.
+type ImageRefreshState string
+
+// Image refresh states.
+const (
+	ImageRefreshIdle      ImageRefreshState = "idle"
+	ImageRefreshRunning   ImageRefreshState = "running"
+	ImageRefreshSucceeded ImageRefreshState = "succeeded"
+	ImageRefreshFailed    ImageRefreshState = "failed"
+)
+
 // Model describes the configuration choices supported by a harness model.
 type Model struct {
 	ID            string   `json:"id"`

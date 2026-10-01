@@ -665,6 +665,19 @@ export const HarnessCodex = "codex";
 export const HarnessOpenCode = "opencode";
 export const HarnessPi = "pi";
 
+export type ImageRefreshState =
+  | "idle"
+  | "running"
+  | "succeeded"
+  | "failed";
+/**
+ * Supported values.
+ */
+export const ImageRefreshIdle = "idle";
+export const ImageRefreshRunning = "running";
+export const ImageRefreshSucceeded = "succeeded";
+export const ImageRefreshFailed = "failed";
+
 export type OAuthGrantStatus =
   | "active"
   | "expired"
@@ -1019,6 +1032,17 @@ export interface HarnessInfo {
 
 /** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */
 export interface RefreshHarnessReq {
+}
+
+/** ImageRefreshReq identifies the runtime whose specialized image is refreshed. */
+export interface ImageRefreshReq {
+}
+
+/** ImageRefreshStatus describes the current or most recent image refresh. */
+export interface ImageRefreshStatus {
+  state: ImageRefreshState;
+  error?: string;
+  scheduled?: boolean;
 }
 
 /** WellKnownCache describes a single well-known cache. */

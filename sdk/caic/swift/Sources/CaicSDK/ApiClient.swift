@@ -154,6 +154,14 @@ public final class ApiClient {
     public func refreshHarness(harness: String, req: RefreshHarnessReq) async throws -> HarnessInfo {
         try await request("POST", path: "/api/caic/v1/server/harnesses/\(harness)/refresh", body: try encoder.encode(req))
     }
+    /// Rebuilds one runtime's specialized image and updates its installed coding agents.
+    public func startImageRefresh(runtime: String, req: ImageRefreshReq) async throws -> ImageRefreshStatus {
+        try await request("POST", path: "/api/caic/v1/server/runtimes/\(runtime)/image/refresh", body: try encoder.encode(req))
+    }
+    /// Returns one runtime's specialized image refresh progress.
+    public func getImageRefresh(runtime: String) async throws -> ImageRefreshStatus {
+        try await request("GET", path: "/api/caic/v1/server/runtimes/\(runtime)/image/refresh")
+    }
     /// Lists well-known cache configurations.
     public func listCaches() async throws -> WellKnownCachesResp {
         try await request("GET", path: "/api/caic/v1/server/caches")

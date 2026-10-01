@@ -109,6 +109,10 @@ class ApiClient(
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
     /** Refreshes one coding agent model inventory, bypassing its cache. */
     suspend fun refreshHarness(harness: String, req: RefreshHarnessReq): HarnessInfo = request("POST", "/api/caic/v1/server/harnesses/$harness/refresh", json.encodeToString(req))
+    /** Rebuilds one runtime's specialized image and updates its installed coding agents. */
+    suspend fun startImageRefresh(runtime: String, req: ImageRefreshReq): ImageRefreshStatus = request("POST", "/api/caic/v1/server/runtimes/$runtime/image/refresh", json.encodeToString(req))
+    /** Returns one runtime's specialized image refresh progress. */
+    suspend fun getImageRefresh(runtime: String): ImageRefreshStatus = request("GET", "/api/caic/v1/server/runtimes/$runtime/image/refresh")
     /** Lists well-known cache configurations. */
     suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/caic/v1/server/caches")
     /** Returns the latest size snapshot for well-known caches. */

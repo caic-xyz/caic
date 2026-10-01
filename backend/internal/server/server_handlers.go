@@ -51,6 +51,7 @@ type serverHandlers struct {
 	cacheSizes         *CacheSizeStore
 	metrics            *metrics.Store
 	harnessModels      *HarnessModels
+	imageRefresh       *ImageRefresh
 	authStore          *auth.Store
 	githubOAuth        *oauthclient.ProviderConfig
 	gitlabOAuth        *oauthclient.ProviderConfig
@@ -407,6 +408,35 @@ func (h *serverHandlers) refreshHarness(ctx context.Context, req *v1.RefreshHarn
 	return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "harness not available"}
 }
 
+func (h *serverHandlers) startImageRefresh(ctx context.Context, req *v1.ImageRefreshReq) (*v1.ImageRefreshStatus, error) {
+	if h.imageRefresh == nil {
+		return nil, &api.Error{Status: http.StatusServiceUnavailable, Code: api.CodeInternalError, Message: "image refresh is unavailable"}
+	}
+	// The build must outlive this request and stop with the server.
+	status, err := h.imageRefresh.Start(h.serverCtx, userIDFromCtx(ctx), req.Runtime) //nolint:contextcheck // background job uses server lifetime
+	if err != nil {
+		if errors.Is(err, errImageRefreshBusy) {
+			return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeBadRequest, Message: err.Error()}
+		}
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+	}
+	return &status, nil
+}
+
+func (h *serverHandlers) getImageRefresh(ctx context.Context, req *v1.ImageRefreshReq) (*v1.ImageRefreshStatus, error) {
+	if h.imageRefresh == nil {
+		return &v1.ImageRefreshStatus{State: v1.ImageRefreshIdle}, nil
+	}
+	status, err := h.imageRefresh.Status(userIDFromCtx(ctx), req.Runtime)
+	if err != nil {
+		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()}
+	}
+	if status.State == "" {
+		status.State = v1.ImageRefreshIdle
+	}
+	return &status, nil
+}
+
 func nonNilSlice[T any](values []T) []T {
 	if values == nil {
 		return []T{}
@@ -680,6 +710,8 @@ func (h *serverHandlers) routes() http.Handler {
 	m.HandleFunc("POST /server/preferences", handle(h.updatePreferences))
 	m.HandleFunc("GET /server/harnesses", handle(h.listHarnesses))
 	m.HandleFunc("POST /server/harnesses/{harness}/refresh", handle(h.refreshHarness))
+	m.HandleFunc("POST /server/runtimes/{runtime}/image/refresh", handle(h.startImageRefresh))
+	m.HandleFunc("GET /server/runtimes/{runtime}/image/refresh", handle(h.getImageRefresh))
 	m.HandleFunc("GET /server/caches", handle(h.listCaches))
 	m.HandleFunc("GET /server/cache-sizes", handle(h.getCacheSizes))
 	m.HandleFunc("GET /server/metrics", handle(h.getMetrics))

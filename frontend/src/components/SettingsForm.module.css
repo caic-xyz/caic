@@ -241,6 +241,13 @@
   border-radius: var(--radius-md);
 }
 
+.runtimeRefresh {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.25rem;
+  justify-items: start;
+}
+
 .settingsHeader {
   display: flex;
   gap: 1rem;

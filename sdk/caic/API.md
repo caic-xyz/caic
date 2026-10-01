@@ -17,6 +17,8 @@ Type notation: `JSONValue` means any valid JSON value.
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
 | GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
 | POST | `/api/caic/v1/server/harnesses/{harness}/refresh` | Refreshes one coding agent model inventory, bypassing its cache. | `RefreshHarnessReq` | `HarnessInfo` |
+| POST | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Rebuilds one runtime's specialized image and updates its installed coding agents. | `ImageRefreshReq` | `ImageRefreshStatus` |
+| GET | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Returns one runtime's specialized image refresh progress. |  | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
 | GET | `/api/caic/v1/server/metrics` | Returns aggregated operation latency statistics. |  | `MetricsResp` |
@@ -321,6 +323,17 @@ Values must match harness.Name constants.
 | `codex` |  |
 | `opencode` |  |
 | `pi` |  |
+
+### ImageRefreshState
+
+ImageRefreshState describes the lifecycle of a specialized image refresh.
+
+| Value | Description |
+|-------|-------------|
+| `idle` |  |
+| `running` |  |
+| `succeeded` |  |
+| `failed` |  |
 
 ### OAuthGrantStatus
 
@@ -681,6 +694,23 @@ RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+
+### ImageRefreshReq
+
+ImageRefreshReq identifies the runtime whose specialized image is refreshed.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+
+### ImageRefreshStatus
+
+ImageRefreshStatus describes the current or most recent image refresh.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `state` | `ImageRefreshState` |  | yes |
+| `error` | `string` |  |  |
+| `scheduled` | `boolean` |  |  |
 
 ### WellKnownCache
 

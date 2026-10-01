@@ -303,6 +303,14 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		TaskManager: taskMgr,
 		HarnessEnv:  cfg.Agent.HarnessEnv,
 	}
+	imageClients := make(map[string]server.ImageWarmer, len(mdRuntimes))
+	for _, rt := range mdRuntimes {
+		imageClients[string(rt.backend.Name())] = rt.client
+	}
+	imageRefresh := &server.ImageRefresh{
+		Log: log.With("cmp", "image-refresh"), Clients: imageClients,
+		Prefs: prefsStore,
+	}
 
 	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
 	warnings := server.NewWarningStore(taskMgr)
@@ -363,6 +371,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		CacheSizes:                 cacheSizes,
 		Metrics:                    metricsStore,
 		HarnessModels:              harnessModels,
+		ImageRefresh:               imageRefresh,
 		GitHubAllowedUsers:         cfg.GitHub.OAuthAllowedUsers,
 		GitLabAllowedUsers:         cfg.GitLab.OAuthAllowedUsers,
 		GoogleAllowedUsers:         cfg.Google.OAuthAllowedUsers,
@@ -523,13 +532,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 			_, tk := trace.NewTask(ctx, "warmup-images")
 			defer tk.End()
 			trace.Log(ctx, "startup", "warmup-images: begin")
-			var errs []error
-			for i := range mdRuntimes {
-				if err := warmupImages(ctx, log.With("cmp", "warmup"), mdRuntimes[i].client, prefsStore); err != nil {
-					errs = append(errs, err)
-				}
-			}
-			return errors.Join(errs...)
+			return imageRefresh.RunScheduled(ctx, warmupInterval)
 		})
 	}
 	if cfg.Runtime.ImagePruneSchedule != nil {

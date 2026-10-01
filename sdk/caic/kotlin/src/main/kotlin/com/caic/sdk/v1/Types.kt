@@ -731,6 +731,44 @@ object HarnessSerializer : KSerializer<Harness> {
     }
 }
 
+@Serializable(with = ImageRefreshStateSerializer::class)
+sealed interface ImageRefreshState {
+    val value: String
+    @Serializable
+    data object ImageRefreshIdle : ImageRefreshState {
+        override val value = "idle"
+    }
+    @Serializable
+    data object ImageRefreshRunning : ImageRefreshState {
+        override val value = "running"
+    }
+    @Serializable
+    data object ImageRefreshSucceeded : ImageRefreshState {
+        override val value = "succeeded"
+    }
+    @Serializable
+    data object ImageRefreshFailed : ImageRefreshState {
+        override val value = "failed"
+    }
+    @Serializable
+    data class Other(override val value: String) : ImageRefreshState
+}
+
+object ImageRefreshStateSerializer : KSerializer<ImageRefreshState> {
+    override val descriptor = PrimitiveSerialDescriptor("ImageRefreshState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ImageRefreshState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ImageRefreshState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "idle" -> ImageRefreshState.ImageRefreshIdle
+            "running" -> ImageRefreshState.ImageRefreshRunning
+            "succeeded" -> ImageRefreshState.ImageRefreshSucceeded
+            "failed" -> ImageRefreshState.ImageRefreshFailed
+            else -> ImageRefreshState.Other(v)
+        }
+    }
+}
+
 @Serializable(with = OAuthGrantStatusSerializer::class)
 sealed interface OAuthGrantStatus {
     val value: String
@@ -1390,6 +1428,18 @@ data class HarnessInfo(
 /** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */
 @Serializable
 class RefreshHarnessReq
+
+/** ImageRefreshReq identifies the runtime whose specialized image is refreshed. */
+@Serializable
+class ImageRefreshReq
+
+/** ImageRefreshStatus describes the current or most recent image refresh. */
+@Serializable
+data class ImageRefreshStatus(
+    val state: ImageRefreshState,
+    val error: String? = null,
+    val scheduled: Boolean? = null,
+)
 
 /** WellKnownCache describes a single well-known cache. */
 @Serializable

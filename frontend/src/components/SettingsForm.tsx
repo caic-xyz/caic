@@ -8,6 +8,7 @@ import type {
   CacheSize,
   Harness,
   HarnessInfo,
+  ImageRefreshStatus,
   OAuthGrantResp,
   MountMappingResp,
   Platform,
@@ -70,6 +71,8 @@ interface SettingsFormProps {
   updateStatus: Accessor<string>;
   refreshingHarness: Accessor<Harness | null>;
   modelRefreshStatus: AppStore["modelRefreshStatus"];
+  imageRefreshStatus: (runtimeName: string) => ImageRefreshStatus;
+  startImageRefresh: (runtimeName: string) => Promise<void>;
   saveSettings: (overrides?: SettingsOverrides) => Promise<void>;
   triggerServerUpdate: () => Promise<void>;
   refreshAvailableModels: (harness: Harness) => Promise<void>;
@@ -263,6 +266,32 @@ export default function SettingsForm(props: SettingsFormProps) {
                       }}
                     />
                   </label>
+                  <div class={styles.runtimeRefresh}>
+                    <Button
+                      type="button"
+                      variant="gray"
+                      aria-label={`Refresh image and coding agents for ${rt.name}`}
+                      disabled={props.imageRefreshStatus(rt.name).state === "running"}
+                      loading={
+                        props.imageRefreshStatus(rt.name).state === "running" &&
+                        !props.imageRefreshStatus(rt.name).scheduled
+                      }
+                      onClick={() => void props.startImageRefresh(rt.name)}
+                    >
+                      Refresh image and coding agents
+                    </Button>
+                    <Show when={props.imageRefreshStatus(rt.name).state !== "idle"}>
+                      <p class={styles.settingsDescription} role="status">
+                        {props.imageRefreshStatus(rt.name).state === "running"
+                          ? props.imageRefreshStatus(rt.name).scheduled
+                            ? "Scheduled image warmup is running on this runtime…"
+                            : "Refreshing image and coding agents…"
+                          : props.imageRefreshStatus(rt.name).state === "succeeded"
+                            ? "Image and coding agents refreshed. New tasks will use the updated image."
+                            : `Image refresh failed: ${props.imageRefreshStatus(rt.name).error ?? "Unknown error"}`}
+                      </p>
+                    </Show>
+                  </div>
                 </fieldset>
               )}
             </For>

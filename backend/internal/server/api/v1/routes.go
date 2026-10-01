@@ -141,6 +141,21 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[HarnessInfo](),
 	},
 	{
+		Name:   "startImageRefresh",
+		Doc:    "Rebuilds one runtime's specialized image and updates its installed coding agents.",
+		Method: "POST",
+		Path:   "/api/caic/v1/server/runtimes/{runtime}/image/refresh",
+		Req:    reflect.TypeFor[ImageRefreshReq](),
+		Resp:   reflect.TypeFor[ImageRefreshStatus](),
+	},
+	{
+		Name:   "getImageRefresh",
+		Doc:    "Returns one runtime's specialized image refresh progress.",
+		Method: "GET",
+		Path:   "/api/caic/v1/server/runtimes/{runtime}/image/refresh",
+		Resp:   reflect.TypeFor[ImageRefreshStatus](),
+	},
+	{
 		Name:   "listCaches",
 		Doc:    "Lists well-known cache configurations.",
 		Method: "GET",

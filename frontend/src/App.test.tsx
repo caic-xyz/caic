@@ -164,6 +164,8 @@ const apiSpyNames = [
   "updatePreferences",
   "listHarnesses",
   "refreshHarness",
+  "getImageRefresh",
+  "startImageRefresh",
   "listCaches",
   "getCacheSizes",
   "getMetrics",
@@ -322,6 +324,8 @@ beforeEach(() => {
     supportsCompact: false,
     supportsModelRefresh: false,
   } as unknown as HarnessInfo);
+  vi.mocked(api.getImageRefresh).mockResolvedValue({ state: "idle" });
+  vi.mocked(api.startImageRefresh).mockResolvedValue({ state: "running" });
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getVersion).mockResolvedValue({
     current: "0.0.1",
@@ -2342,6 +2346,103 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByRole("checkbox", { name: "Review and fix new PRs" }));
     await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledTimes(3));
     expect(status).toHaveTextContent("Unsaved settings");
+  });
+
+  it("starts an image refresh from settings", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
+      voiceGateway: { mode: "disabled" },
+      runtimes: [{ name: "docker" }, { name: "podman" }],
+    });
+    vi.mocked(api.startImageRefresh).mockResolvedValue({ state: "succeeded" });
+    renderApp("/settings");
+    expect(screen.queryByRole("combobox", { name: "Runtime to refresh" })).not.toBeInTheDocument();
+    expect(api.updatePreferences).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "Refresh image and coding agents for podman" }));
+    await waitFor(() => expect(api.startImageRefresh).toHaveBeenCalledWith("podman", {}));
+    await waitFor(() => expect(api.getImageRefresh).toHaveBeenCalledWith("podman"));
+    expect(within(screen.getByRole("group", { name: "podman" })).getByRole("status")).toHaveTextContent(
+      "Image and coding agents refreshed. New tasks will use the updated image.",
+    );
+    expect(within(screen.getByRole("group", { name: "docker" })).queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows scheduled image warmup in settings", async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
+      voiceGateway: { mode: "disabled" },
+      runtimes: [{ name: "docker" }, { name: "podman" }],
+    });
+    vi.mocked(api.getImageRefresh).mockImplementation(async (runtimeName) =>
+      runtimeName === "docker" ? { state: "running", scheduled: true } : { state: "idle" },
+    );
+    renderApp("/settings");
+    expect(await screen.findByText("Scheduled image warmup is running on this runtime…")).toBeInTheDocument();
+    const refresh = screen.getByRole("button", { name: "Refresh image and coding agents for docker" });
+    expect(refresh).toBeDisabled();
+    expect(refresh.querySelector("span")).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh image and coding agents for podman" })).toBeEnabled();
+  });
+
+  it("waits for image settings to save before refreshing", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      mcpOAuthAvailable: false,
+      voiceGateway: { mode: "disabled" },
+      runtimes: [{ name: "docker" }],
+    });
+    let finishSave: ((value: PreferencesResp) => void) | undefined;
+    vi.mocked(api.updatePreferences).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishSave = resolve;
+      }),
+    );
+    vi.mocked(api.startImageRefresh).mockResolvedValue({ state: "succeeded" });
+    renderApp("/settings");
+    const image = await screen.findByRole("textbox", { name: "Docker image" });
+    await user.clear(image);
+    await user.type(image, "example.com/new-agent:v2");
+    await user.click(screen.getByRole("button", { name: "Refresh image and coding agents for docker" }));
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalled());
+    expect(api.startImageRefresh).not.toHaveBeenCalled();
+    const settings = vi.mocked(api.updatePreferences).mock.calls.at(-1)?.[0].settings;
+    if (!settings || !finishSave) throw new Error("settings save was not started");
+    finishSave({ repositories: [], models: {}, harness: "", settings } as PreferencesResp);
+    await waitFor(() => expect(api.startImageRefresh).toHaveBeenCalledWith("docker", {}));
   });
 
   it("saves the task purge delay", async () => {

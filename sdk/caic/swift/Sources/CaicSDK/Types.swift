@@ -410,6 +410,29 @@ public struct Harness: Codable, Equatable, Hashable {
     }
 }
 
+public struct ImageRefreshState: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let ImageRefreshIdle = ImageRefreshState("idle")
+    public static let ImageRefreshRunning = ImageRefreshState("running")
+    public static let ImageRefreshSucceeded = ImageRefreshState("succeeded")
+    public static let ImageRefreshFailed = ImageRefreshState("failed")
+
+    public static func other(_ value: String) -> ImageRefreshState { ImageRefreshState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct OAuthGrantStatus: Codable, Equatable, Hashable {
     public let value: String
 
@@ -849,6 +872,17 @@ public struct HarnessInfo: Codable {
 
 /// RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.
 public struct RefreshHarnessReq: Codable {
+}
+
+/// ImageRefreshReq identifies the runtime whose specialized image is refreshed.
+public struct ImageRefreshReq: Codable {
+}
+
+/// ImageRefreshStatus describes the current or most recent image refresh.
+public struct ImageRefreshStatus: Codable {
+    public let state: ImageRefreshState
+    public let error: String?
+    public let scheduled: Bool?
 }
 
 /// WellKnownCache describes a single well-known cache.

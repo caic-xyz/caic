@@ -212,6 +212,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			cacheSizes:         d.CacheSizes,
 			metrics:            d.Metrics,
 			harnessModels:      d.HarnessModels,
+			imageRefresh:       d.ImageRefresh,
 			authStore:          d.AuthStore,
 			githubOAuth:        d.GitHubOAuth,
 			gitlabOAuth:        d.GitLabOAuth,
@@ -638,6 +639,7 @@ type Dependencies struct {
 	Metrics *metrics.Store
 	// HarnessModels refreshes coding-agent model inventories.
 	HarnessModels *HarnessModels
+	ImageRefresh  *ImageRefresh
 	FakeCI        FakeCIHook // optional fake CI simulation hook for smoke/e2e tests
 
 	GitHubAllowedUsers     []string

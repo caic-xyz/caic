@@ -22,6 +22,42 @@ import (
 
 func TestServerHandlers(t *testing.T) {
 	t.Parallel()
+	t.Run("image_refresh_requires_available_runtime", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		s.serverHandlers.imageRefresh = &ImageRefresh{Prefs: s.serverHandlers.prefs}
+		_, err := s.serverHandlers.startImageRefresh(t.Context(), &v1.ImageRefreshReq{Runtime: "docker"})
+		var apiErr *api.Error
+		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+			t.Fatalf("startImageRefresh error = %v, want bad request", err)
+		}
+		_, err = s.serverHandlers.getImageRefresh(t.Context(), &v1.ImageRefreshReq{Runtime: "docker"})
+		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+			t.Fatalf("getImageRefresh error = %v, want bad request", err)
+		}
+	})
+	t.Run("image_refresh_status_uses_runtime_path", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		s.serverHandlers.imageRefresh = &ImageRefresh{Clients: map[string]ImageWarmer{"docker": &imageWarmerFake{}}}
+		for _, tc := range []struct {
+			runtime string
+			want    int
+		}{
+			{runtime: "docker", want: http.StatusOK},
+			{runtime: "podman", want: http.StatusBadRequest},
+		} {
+			t.Run(tc.runtime, func(t *testing.T) {
+				t.Parallel()
+				r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/server/runtimes/"+tc.runtime+"/image/refresh", nil)
+				w := httptest.NewRecorder()
+				s.serverHandlers.routes().ServeHTTP(w, r)
+				if w.Code != tc.want {
+					t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
+				}
+			})
+		}
+	})
 	t.Run("repo branches unknown repository", func(t *testing.T) {
 		t.Parallel()
 

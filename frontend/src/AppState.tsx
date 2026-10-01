@@ -9,6 +9,7 @@ import type {
   Config,
   Harness,
   HarnessInfo,
+  ImageRefreshStatus,
   Repo,
   Task,
   TaskState,
@@ -176,6 +177,15 @@ function createAppStore() {
     state: "error" | "success";
     message: string;
   } | null>(null);
+  const [imageRefreshStatuses, setImageRefreshStatuses] = createSignal<Record<string, ImageRefreshStatus>>({});
+  const imageRefreshStatus = (runtimeName: string) => imageRefreshStatuses()[runtimeName] ?? { state: "idle" as const };
+  const imageRefreshPolls = new Map<string, ReturnType<typeof setTimeout>>();
+  const imageRefreshRequests = new Map<string, number>();
+  let imageRefreshDisposed = false;
+  onCleanup(() => {
+    imageRefreshDisposed = true;
+    for (const poll of imageRefreshPolls.values()) clearTimeout(poll);
+  });
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
   let latestSettingsSave = 0;
@@ -1416,6 +1426,54 @@ function createAppStore() {
     }
   }
 
+  async function loadImageRefreshStatus(runtimeName: string) {
+    const poll = imageRefreshPolls.get(runtimeName);
+    if (poll !== undefined) clearTimeout(poll);
+    imageRefreshPolls.delete(runtimeName);
+    const request = (imageRefreshRequests.get(runtimeName) ?? 0) + 1;
+    imageRefreshRequests.set(runtimeName, request);
+    try {
+      const status = await api.getImageRefresh(runtimeName);
+      if (imageRefreshDisposed || request !== imageRefreshRequests.get(runtimeName)) return;
+      setImageRefreshStatuses((current) => ({ ...current, [runtimeName]: status }));
+      if (status.state === "running") {
+        imageRefreshPolls.set(
+          runtimeName,
+          setTimeout(() => void loadImageRefreshStatus(runtimeName), 2000),
+        );
+      }
+    } catch (e: unknown) {
+      if (imageRefreshDisposed || request !== imageRefreshRequests.get(runtimeName)) return;
+      setImageRefreshStatuses((current) => ({
+        ...current,
+        [runtimeName]: { state: "failed", error: e instanceof Error ? e.message : "Could not check image refresh" },
+      }));
+    }
+  }
+
+  async function startImageRefresh(runtimeName: string) {
+    const poll = imageRefreshPolls.get(runtimeName);
+    if (poll !== undefined) clearTimeout(poll);
+    imageRefreshPolls.delete(runtimeName);
+    const request = (imageRefreshRequests.get(runtimeName) ?? 0) + 1;
+    imageRefreshRequests.set(runtimeName, request);
+    setImageRefreshStatuses((current) => ({ ...current, [runtimeName]: { state: "running" } }));
+    try {
+      await settingsSaveQueue;
+      if (settingsError()) throw new Error(`Could not save image settings: ${settingsError()}`);
+      const status = await api.startImageRefresh(runtimeName, {});
+      if (imageRefreshDisposed || request !== imageRefreshRequests.get(runtimeName)) return;
+      setImageRefreshStatuses((current) => ({ ...current, [runtimeName]: status }));
+      if (status.state === "running") void loadImageRefreshStatus(runtimeName);
+    } catch (e: unknown) {
+      if (imageRefreshDisposed || request !== imageRefreshRequests.get(runtimeName)) return;
+      setImageRefreshStatuses((current) => ({
+        ...current,
+        [runtimeName]: { state: "failed", error: e instanceof Error ? e.message : "Could not start image refresh" },
+      }));
+    }
+  }
+
   // Navigate to a task's detail route, building the slugged path from its repo/branch/title.
   const navigateToTask = (id: string) => {
     const found = taskById(id);
@@ -1661,6 +1719,9 @@ function createAppStore() {
     updateStatus,
     refreshingHarness,
     modelRefreshStatus,
+    imageRefreshStatus,
+    loadImageRefreshStatus,
+    startImageRefresh,
     saveSettings,
     triggerServerUpdate,
     refreshAvailableModels,
