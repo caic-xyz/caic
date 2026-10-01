@@ -104,12 +104,12 @@ export default function CameraCapture(props: Props) {
       )}
       <div class={styles.actions}>
         <Show when={hasMultiple() && !error()}>
-          <button class={styles.switchBtn} onClick={switchCamera} title="Switch camera">
+          <button type="button" class={styles.switchBtn} onClick={switchCamera} title="Switch camera">
             <SwitchCameraIcon width="1.4em" height="1.4em" />
           </button>
         </Show>
-        {!error() && <button class={styles.captureBtn} onClick={capture} title="Take photo" />}
-        <button class={styles.closeBtn} onClick={() => props.onClose()}>
+        {!error() && <button type="button" class={styles.captureBtn} onClick={capture} title="Take photo" />}
+        <button type="button" class={styles.closeBtn} onClick={() => props.onClose()}>
           Cancel
         </button>
       </div>

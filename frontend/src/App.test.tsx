@@ -1178,6 +1178,86 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByTestId("prompt-input")).toHaveFocus());
   });
 
+  it("focuses the new-task prompt with slash outside an editor", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    screen.getByTestId("new-task-button").focus();
+
+    await user.keyboard("/");
+
+    expect(screen.getByTestId("prompt-input")).toHaveFocus();
+
+    const feature = screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
+    feature.focus();
+    await user.keyboard("/");
+    expect(screen.getByTestId("prompt-input")).toHaveFocus();
+  });
+
+  it("focuses the prompt when slash requires Shift on the keyboard layout", () => {
+    renderApp();
+    const button = screen.getByTestId("new-task-button");
+    button.focus();
+
+    fireEvent.keyDown(button, { key: "/", code: "Digit3", shiftKey: true });
+
+    expect(screen.getByTestId("prompt-input")).toHaveFocus();
+  });
+
+  it("focuses the selected task's prompt with slash", async () => {
+    const user = userEvent.setup();
+    const task = makeTask();
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const { history } = renderApp("/task/@task1+do-something");
+    const prompt = await screen.findByTestId("task-detail-prompt");
+    await waitFor(() => expect(prompt).toHaveFocus());
+    const newTaskButton = screen.getByTestId("new-task-button");
+    newTaskButton.focus();
+    expect(newTaskButton).toHaveFocus();
+
+    await user.keyboard("/");
+
+    await waitFor(() => expect(prompt).toHaveFocus());
+    expect(history.get()).toContain("/task/@task1");
+  });
+
+  it("keeps slash as text when editing a prompt", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    const prompt = screen.getByTestId("prompt-input");
+    prompt.focus();
+
+    await user.keyboard("/");
+
+    expect(prompt).toHaveFocus();
+    expect(prompt).toHaveTextContent("/");
+  });
+
+  it("returns from a task subview to its prompt with slash", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getTask).mockResolvedValue(makeTask());
+    const { history } = renderApp("/task/@task1+do-something/stats");
+    screen.getByTestId("new-task-button").focus();
+
+    await user.keyboard("/");
+
+    await waitFor(() => expect(history.get()).not.toContain("/stats"));
+    await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
+  });
+
+  it("leaves slash with an open dialog", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    screen.getByTestId("new-task-button").focus();
+    await user.keyboard("{F1}");
+    const dialog = screen.getByTestId("keyboard-shortcuts-dialog");
+    expect(dialog).toHaveAttribute("open");
+
+    await user.keyboard("/");
+
+    expect(dialog).toHaveAttribute("open");
+    expect(screen.getByTestId("prompt-input")).not.toHaveFocus();
+  });
+
   it("returns Escape from a detail prompt to the new-task prompt", async () => {
     const user = userEvent.setup();
     const task = makeTask();
@@ -2650,6 +2730,25 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByTestId("submit-task"));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBeUndefined();
+  });
+
+  it("submits with Ctrl+Enter from a feature toggle without changing the toggle", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.type(screen.getByTestId("prompt-input"), "review the change");
+    const toggle = screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
+    expect(toggle).toBeChecked();
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle).not.toBeChecked();
+    expect(api.createTask).not.toHaveBeenCalled();
+
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    expect(toggle).not.toBeChecked();
+    expect(vi.mocked(api.createTask).mock.calls[0][0].initialPrompt.text).toBe("review the change");
     expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBeUndefined();
   });
 });

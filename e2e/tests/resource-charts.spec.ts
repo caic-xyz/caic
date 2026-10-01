@@ -31,22 +31,45 @@ test("resource charts read samples through the crosshair", async ({ page, api })
     })
     .toBe(true);
 
-  // The first sample sits on the left frame edge and every later sample reports
-  // the same CPU reading, so both edges stay readable however the paced stream
-  // was interrupted and restarted.
-  await page.mouse.move(box.x + 44, box.y + box.height / 2);
-  await expect(cpu).toContainText("10.0%");
-  await page.mouse.move(box.x + box.width - 6, box.y + box.height / 2);
-  await expect(cpu).toContainText("50.0%");
+  // New samples replace the SVG and its pointer listener. Enter the current
+  // SVG again on each poll and compare the readout with the table in the same
+  // browser snapshot. Other tasks can restart the fake stream, so table order
+  // alone does not identify the timestamps at the chart edges.
+  async function readAt(edge: "left" | "right"): Promise<string> {
+    box = await cpu.evaluate((svg) => {
+      const { x, y, width, height } = svg.getBoundingClientRect();
+      return { x, y, width, height };
+    });
+    await page.mouse.move(box.x - 2, box.y - 2);
+    await page.mouse.move(box.x + (edge === "left" ? 44 : box.width - 6), box.y + box.height / 2);
+    const snapshot = await cpu.evaluate((svg) => {
+      const text = svg.querySelector('[aria-label="text"] text');
+      const rows = Array.from(svg.closest('[data-testid="resource-charts"]')?.querySelectorAll("table tbody tr") ?? []);
+      const samples = rows.map((row) => {
+        const cells = row.querySelectorAll("td");
+        return { ts: Date.parse(cells[0]?.textContent ?? ""), cpu: Number.parseFloat(cells[1]?.textContent ?? "") };
+      });
+      return { samples, value: text?.textContent ?? "", transform: text?.getAttribute("transform") ?? "" };
+    });
+    if (snapshot.samples.length < 2) return "missing samples";
+    const timestamps = snapshot.samples.map((sample) => sample.ts);
+    const targetTs = edge === "left" ? Math.min(...timestamps) : Math.max(...timestamps);
+    const oppositeTs = edge === "left" ? Math.max(...timestamps) : Math.min(...timestamps);
+    const expected = snapshot.samples.filter((sample) => sample.ts === targetTs).map((sample) => sample.cpu);
+    const opposite = snapshot.samples.filter((sample) => sample.ts === oppositeTs).map((sample) => sample.cpu);
+    if (expected.some((value) => opposite.includes(value))) return "waiting for distinct edge samples";
+    const actual = Number.parseFloat(snapshot.value);
+    if (!expected.includes(actual)) return `${actual} is not a ${edge} edge sample (${expected.join(", ")})`;
+    if (edge === "right") {
+      // Plot and DOM layout use slightly different floating-point rounding.
+      const x = Number(/translate\(([-\d.]+)/u.exec(snapshot.transform)?.[1] ?? Number.NaN);
+      if (!(x <= box.width - 3 - 34 + 0.5)) return `readout at ${x} clips the right edge`;
+    }
+    return "matched";
+  }
+
+  await expect.poll(() => readAt("left"), { timeout: 15_000 }).toBe("matched");
   // The readout is centered on the focused sample; at the right edge it parks
   // inside the frame instead of being clipped by the viewport.
-  const readout = cpu.locator('[aria-label="text"] text');
-  await expect(readout).toHaveCount(1);
-  // Plot and DOM layout use slightly different floating-point rounding.
-  await expect
-    .poll(async () => {
-      const transform = (await readout.getAttribute("transform")) ?? "";
-      return Number(/translate\(([-\d.]+)/u.exec(transform)?.[1] ?? Number.NaN);
-    })
-    .toBeLessThanOrEqual(box.width - 3 - 34 + 0.5);
+  await expect.poll(() => readAt("right"), { timeout: 15_000 }).toBe("matched");
 });

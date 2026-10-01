@@ -138,38 +138,30 @@ test("a dense desktop quota row keeps its last pill beside the avatar", async ({
   await expect(pills.first()).toBeVisible();
   // The fake backend exposes only a few providers. Fill the existing row with
   // the widths of a populated account to exercise its wrapping geometry.
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const pill = document.querySelector<HTMLElement>('[data-testid="provider-usage"]');
-        const row = pill?.parentElement;
-        if (!pill || !row) return false;
-        const widths = [147, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
-        row.replaceChildren(
-          ...widths.map((width) => {
-            const item = document.createElement("span");
-            item.className = pill.className;
-            item.dataset.testid = "provider-usage";
-            item.style.boxSizing = "border-box";
-            item.style.width = `${width}px`;
-            item.style.height = "24px";
-            return item;
-          }),
-        );
-        return true;
-      }),
-    )
-    .toBe(true);
-
-  const [firstBox, lastBox, avatarBox] = await Promise.all([
-    pills.first().boundingBox(),
-    pills.last().boundingBox(),
-    page.getByRole("button", { name: "Menu" }).boundingBox(),
-  ]);
-  expect(firstBox).not.toBeNull();
-  expect(lastBox).not.toBeNull();
-  expect(avatarBox).not.toBeNull();
-  if (!firstBox || !lastBox || !avatarBox) throw new Error("Header controls are not visible");
+  // Live quota updates can replace the row. Measure the injected pills in the
+  // same browser step so the assertions use the row this test constructed.
+  const { firstBox, lastBox, avatarBox } = await page.evaluate(() => {
+    const pill = document.querySelector<HTMLElement>('[data-testid="provider-usage"]');
+    const row = pill?.parentElement;
+    const avatar = document.querySelector('button[aria-controls="account-menu"]');
+    if (!pill || !row || !avatar) throw new Error("Header controls are not visible");
+    const widths = [147, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
+    const items = widths.map((width) => {
+      const item = document.createElement("span");
+      item.className = pill.className;
+      item.dataset.testid = "provider-usage";
+      item.style.boxSizing = "border-box";
+      item.style.width = `${width}px`;
+      item.style.height = "24px";
+      return item;
+    });
+    row.replaceChildren(...items);
+    return {
+      firstBox: items[0].getBoundingClientRect().toJSON(),
+      lastBox: items[items.length - 1].getBoundingClientRect().toJSON(),
+      avatarBox: avatar.getBoundingClientRect().toJSON(),
+    };
+  });
   expect(lastBox.y).toBe(firstBox.y);
   expect(lastBox.y).toBeLessThan(avatarBox.y + avatarBox.height);
   expect(lastBox.y + lastBox.height).toBeGreaterThan(avatarBox.y);

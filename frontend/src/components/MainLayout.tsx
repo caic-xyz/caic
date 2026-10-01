@@ -20,6 +20,7 @@ import { ControlSelect, HarnessControls, ToggleChip } from "./FormControls";
 import { Layout } from "./Layout";
 import TokenIcon from "./github.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
+import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import styles from "./MainLayout.module.css";
 
 export default function MainLayout(props: { children?: JSX.Element }) {
@@ -52,6 +53,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
   return (
     <>
       <form
+        ref={bindPromptSubmitShortcut}
         onSubmit={(e) => {
           e.preventDefault();
           s.submitTask();

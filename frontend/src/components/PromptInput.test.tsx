@@ -8,8 +8,30 @@ import userEvent from "@testing-library/user-event";
 import type { ImageData as APIImageData } from "@sdk/types.gen";
 
 import PromptInput from "./PromptInput";
+import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 
 const fakeImage: APIImageData = { mediaType: "image/png", data: "iVBOR" };
+
+function renderPromptWithCamera(onSubmit: () => void) {
+  return render(() => (
+    <form
+      ref={bindPromptSubmitShortcut}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <PromptInput
+        value="take a photo"
+        onInput={() => {}}
+        images={[]}
+        onImagesChange={() => {}}
+        supportsImages={true}
+        sendButton={<button type="submit">Send</button>}
+      />
+    </form>
+  ));
+}
 
 describe("PromptInput", () => {
   it("renders textarea with placeholder", () => {
@@ -28,6 +50,64 @@ describe("PromptInput", () => {
     getByRole("textbox").focus();
     await user.keyboard("{Enter}");
     expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Ctrl+Enter inside the camera dialog from submitting its containing form", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { getByRole } = renderPromptWithCamera(onSubmit);
+
+    await user.click(getByRole("button", { name: "Attach images" }));
+    await user.click(getByRole("menuitem", { name: "Take photo" }));
+    const dialog = getByRole("dialog");
+    expect(dialog).toHaveAttribute("open");
+    getByRole("button", { name: "Cancel" }).focus();
+    await user.keyboard("{Control>}{Enter}{/Control}");
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keeps plain Enter on camera Cancel from submitting its containing form", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { getByRole, queryByRole } = renderPromptWithCamera(onSubmit);
+
+    await user.click(getByRole("button", { name: "Attach images" }));
+    await user.click(getByRole("menuitem", { name: "Take photo" }));
+    getByRole("button", { name: "Cancel" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keeps plain Enter on Switch camera from submitting its containing form", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const mediaDevices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue();
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => ({ getTracks: () => [] }),
+        enumerateDevices: async () => [{ kind: "videoinput" }, { kind: "videoinput" }],
+      },
+    });
+    try {
+      const { getByRole } = renderPromptWithCamera(onSubmit);
+      await user.click(getByRole("button", { name: "Attach images" }));
+      await user.click(getByRole("menuitem", { name: "Take photo" }));
+      const switchCamera = await vi.waitFor(() => getByRole("button", { name: "Switch camera" }));
+      switchCamera.focus();
+      await user.keyboard("{Enter}");
+
+      expect(getByRole("dialog")).toHaveAttribute("open");
+      expect(onSubmit).not.toHaveBeenCalled();
+    } finally {
+      play.mockRestore();
+      if (mediaDevices) Object.defineProperty(navigator, "mediaDevices", mediaDevices);
+      else Reflect.deleteProperty(navigator, "mediaDevices");
+    }
   });
 
   it("shows attach button when supportsImages is true", () => {

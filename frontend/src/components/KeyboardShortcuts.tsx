@@ -14,6 +14,7 @@ interface Props {
 }
 
 const navigationShortcutsAfterModelSettings = [
+  { keys: "/", action: "Focus the current prompt" },
   { keys: "↓ / Shift + ↓", action: "Select the next task" },
   { keys: "↑ / Shift + ↑", action: "Select the previous task" },
   { keys: "Tab", action: "Move from a task card to its prompt" },
@@ -27,7 +28,10 @@ const promptShortcuts = [
   { keys: "Esc", action: "Focus the new-task prompt" },
 ];
 
-const taskActionShortcuts = [{ keys: "Shift + Delete", action: "Purge the selected task" }];
+const taskActionShortcuts = [
+  { keys: "Ctrl + Enter", action: "Send the prompt in the focused form" },
+  { keys: "Shift + Delete", action: "Purge the selected task" },
+];
 
 function isEditing(target: EventTarget | null): boolean {
   return (
@@ -77,6 +81,24 @@ export default function KeyboardShortcuts(props: Props) {
     });
   }
 
+  function focusCurrentPrompt() {
+    const taskId = s.selectedId();
+    if (!taskId) {
+      document.querySelector<HTMLElement>("[data-testid='prompt-input']")?.focus();
+      return;
+    }
+
+    const prompt = document.querySelector<HTMLElement>("[data-testid='task-detail-prompt']");
+    if (prompt) {
+      prompt.focus();
+      return;
+    }
+
+    const task = s.selectedTask();
+    s.navigate(task ? taskPathForTask(task) : `/task/@${taskId}`);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-testid='task-detail-prompt']")?.focus());
+  }
+
   function openTaskFromCard(card: HTMLElement, focusPrompt: boolean) {
     const task = s.tasks().find((candidate) => candidate.id === card.dataset.taskId);
     if (!task) return;
@@ -122,6 +144,11 @@ export default function KeyboardShortcuts(props: Props) {
       const target = event.target instanceof HTMLElement ? event.target : null;
       const taskPrompt = target?.closest("[data-testid='task-detail-prompt'], [data-testid='prompt-input']");
       const focusedCard = target?.matches("[data-task-id]") ? target : null;
+      if (event.key === "/" && (!isEditing(target) || target?.matches("input[type='checkbox']"))) {
+        event.preventDefault();
+        focusCurrentPrompt();
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         focusNewTaskControl("[data-testid='prompt-input']");

@@ -1,6 +1,6 @@
 // End-to-end keyboard-only navigation through repository selection, task creation, and task focus.
 
-import { test, expect, waitForTaskState } from "../helpers";
+import { test, expect, fillContentEditable, waitForTaskState } from "../helpers";
 
 test("completes the primary task flow using only the keyboard", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
@@ -71,10 +71,16 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
   await taskCard.press("Shift+Tab");
   await expect(page.locator("[data-testid='new-task-form'] :focus")).toHaveCount(0);
   await taskCard.focus();
+  await page.keyboard.press("/");
+  await expect(detailPrompt).toBeFocused();
+  await taskCard.focus();
   await taskCard.press("Tab");
   await expect(detailPrompt).toBeFocused();
   await detailPrompt.press("Escape");
   await expect(page).toHaveURL("/");
+  await expect(newTaskPrompt).toBeFocused();
+  await page.getByTestId("new-task-button").focus();
+  await page.keyboard.press("/");
   await expect(newTaskPrompt).toBeFocused();
   await newTaskPrompt.press("Escape");
   await expect(newTaskPrompt).toBeFocused();
@@ -85,4 +91,22 @@ test("completes the primary task flow using only the keyboard", async ({ page, a
   await shortcutsDialog.press("Escape");
   await expect(page.getByTestId("keyboard-shortcuts-dialog")).not.toBeVisible();
   await expect(newTaskPrompt).toBeFocused();
+});
+
+test("Ctrl+Enter submits from a focused feature toggle without toggling it", async ({ page, uniquePrompt }) => {
+  await page.goto("/");
+  const prompt = uniquePrompt("shortcut from feature toggle");
+  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  await expect(page.getByTestId("submit-task")).toBeEnabled();
+  const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
+  await expect(toggle).toBeChecked();
+  await toggle.focus();
+
+  await page.keyboard.press("Enter");
+  await expect(toggle).not.toBeChecked();
+  await expect(page).toHaveURL("/");
+
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press("Control+Enter");
+  await expect(page).toHaveURL(/\/task\//);
 });

@@ -1594,6 +1594,42 @@ describe("SSE connection", () => {
     expect(getByText("Compact context")).toHaveFocus();
   });
 
+  it("sends the reply with Ctrl+Enter from an action button without opening it", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const sendInput = vi.spyOn(api, "sendInput").mockResolvedValue({} as never);
+    try {
+      renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false });
+      const actions = screen.getByRole("button", { name: "Context actions" });
+      actions.focus();
+
+      await user.keyboard("{Control>}{Enter}{/Control}");
+
+      expect(sendInput).toHaveBeenCalledOnce();
+      expect(sendInput).toHaveBeenCalledWith("abc", { prompt: { text: "follow up" } });
+      expect(screen.queryByRole("menuitem", { name: "Push" })).not.toBeInTheDocument();
+    } finally {
+      sendInput.mockRestore();
+    }
+  });
+
+  it("does not send with Ctrl+Enter when the reply is disabled", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const sendInput = vi.spyOn(api, "sendInput").mockResolvedValue({} as never);
+    try {
+      renderTaskDetail({ taskState: "crashed", inputDraft: "follow up", autoFocusPrompt: false });
+      expect(screen.getByTestId("send-input")).toBeDisabled();
+      screen.getByRole("button", { name: "Context actions" }).focus();
+
+      await user.keyboard("{Control>}{Enter}{/Control}");
+
+      expect(sendInput).not.toHaveBeenCalled();
+    } finally {
+      sendInput.mockRestore();
+    }
+  });
+
   it("context menu is visible but items are disabled when task is running", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();

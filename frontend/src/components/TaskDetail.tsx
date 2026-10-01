@@ -70,6 +70,7 @@ import type { ToolCall } from "../grouping";
 import { Marked, Renderer, type Tokens } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
+import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import Button from "./Button";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
@@ -1347,6 +1348,7 @@ export default function TaskDetail(props: Props) {
 
       <Show when={isActive() || isRecoverable() || !!pendingAction()}>
         <form
+          ref={bindPromptSubmitShortcut}
           onSubmit={(e) => {
             e.preventDefault();
             if (canSendInput()) sendInput();
