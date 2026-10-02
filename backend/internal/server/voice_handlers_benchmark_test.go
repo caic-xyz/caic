@@ -10,17 +10,17 @@ import (
 )
 
 func BenchmarkExternalVoiceToken(b *testing.B) {
-	h := &voiceHandlers{gateway: VoiceGatewayConfig{
+	handler := voiceTokenHandler(&VoiceGatewayConfig{
 		Mode:       VoiceGatewayModeExternal,
 		Issuer:     "https://caic.example.com",
 		InstanceID: "caic-main",
 		SigningKey: ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)),
-	}}
+	}, nil)
 	r := httptest.NewRequestWithContext(b.Context(), http.MethodGet, "/api/caic/v1/voice/token", http.NoBody)
 	b.ReportAllocs()
 	for b.Loop() {
 		w := httptest.NewRecorder()
-		h.tokenHandler(w, r)
+		handler(w, r)
 		if w.Code != http.StatusOK {
 			b.Fatalf("status = %d", w.Code)
 		}

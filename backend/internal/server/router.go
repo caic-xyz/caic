@@ -36,6 +36,7 @@ import (
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/maruel/gomode/voicegateway"
 	"github.com/maruel/gomode/voicegateway/voicertc"
 )
 
@@ -60,7 +61,8 @@ type Router struct {
 	mcpHandlers      *mcpHandlers
 	oauthServer      *oauthserver.Server
 	usageHandlers    *usageHandlers
-	voiceHandlers    *voiceHandlers
+	voiceGateway     VoiceGatewayConfig // mode and external token settings
+	voiceBridge      *voicertc.Bridge   // nil unless caic serves the gateway in-process
 	webFetchHandlers *webFetchHandlers
 
 	// Forge webhook delivery. Established by New (and the test constructors) and
@@ -123,7 +125,6 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		return nil, errors.New("usage rollup is required")
 	}
 	log = log.With("cmp", "server")
-	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	if d.VoiceGateway.Mode == VoiceGatewayModeExternal {
 		switch {
 		case d.VoiceGateway.TokenMode == VoiceTokenModeOAuth:
@@ -140,7 +141,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			log.InfoContext(ctx, "external voice gateway issuer", "issuer", d.VoiceGateway.Issuer, "instance", d.VoiceGateway.InstanceID, "token_mode", VoiceTokenModeScoped, "public_key", publicKey)
 		}
 	}
-	voiceMetadata := voice.metadata()
+	voiceMetadata := voiceGatewayMetadata(&d.VoiceGateway, d.VoiceBridge)
 	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
 	goModeHandler, err := gomode.NewHandler(&goModeSettings)
 	if err != nil {
@@ -228,7 +229,8 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			taskSvc:    svc,
 		},
 		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, rollup: d.UsageRollup, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
-		voiceHandlers:    voice,
+		voiceGateway:     d.VoiceGateway,
+		voiceBridge:      d.VoiceBridge,
 		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,
 		sessionSecret:    d.SessionSecret,
@@ -268,9 +270,6 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		log.WarnContext(ctx, "remote MCP OAuth disabled: configure an explicit external_url to provide a stable issuer; MCP remains available to signed-in browser sessions")
 	}
 	s.serverHandlers.mcpOAuthAvailable = s.oauthServer != nil
-	if s.oauthServer != nil {
-		voice.oauthIssuer = s.oauthServer
-	}
 
 	s.mcpHandlers = &mcpHandlers{
 		rateLimiter: rateLimiter,
@@ -368,11 +367,22 @@ func (r *Router) buildAPIHandler() http.Handler {
 	m("/processes", r.runtimeProcesses.routes())
 	m("/ci", r.ciHandlers.routes())
 	m("/web", r.webFetchHandlers.routes())
-	apiMux.HandleFunc("GET /api/caic/v1/voice/token", r.voiceHandlers.tokenHandler)
+	if r.voiceGateway.Mode == VoiceGatewayModeExternal {
+		var issuer voiceTokenIssuer
+		if r.oauthServer != nil {
+			issuer = r.oauthServer
+		}
+		apiMux.HandleFunc("GET /api/caic/v1/voice/token", voiceTokenHandler(&r.voiceGateway, issuer))
+	}
 	if r.oauthServer != nil {
 		m("/oauth/grants", oauthGrantRoutes(r.oauthServer))
 	}
-	mountPrefix(apiMux, "", "/api/voicegateway/v1", r.voiceHandlers.handler())
+	// The embedded gateway answers only when caic owns a bridge. An external or
+	// disabled gateway has no routes here.
+	if r.voiceBridge != nil {
+		mountPrefix(apiMux, "", "/api/voicegateway/v1",
+			voicegateway.NewEmbeddedHandler(func() voicegateway.MediaBridge { return r.voiceBridge }, r.voiceBridge))
+	}
 	apiMux.Handle("/api/", http.NotFoundHandler())
 	apiMux.Handle("/api", http.NotFoundHandler())
 

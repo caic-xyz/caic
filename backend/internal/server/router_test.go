@@ -2908,8 +2908,7 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 	t.Parallel()
 	t.Run("default disabled", func(t *testing.T) {
 		t.Parallel()
-		h := &voiceHandlers{}
-		got := h.metadata()
+		got := voiceGatewayMetadata(&VoiceGatewayConfig{}, nil)
 		if got.Mode != v1.VoiceGatewayModeDisabled {
 			t.Fatalf("Mode = %q, want disabled", got.Mode)
 		}
@@ -2917,13 +2916,10 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 
 	t.Run("external", func(t *testing.T) {
 		t.Parallel()
-		h := &voiceHandlers{
-			gateway: VoiceGatewayConfig{
-				Mode: VoiceGatewayModeExternal,
-				URL:  "https://voice.example.com",
-			},
-		}
-		got := h.metadata()
+		got := voiceGatewayMetadata(&VoiceGatewayConfig{
+			Mode: VoiceGatewayModeExternal,
+			URL:  "https://voice.example.com",
+		}, nil)
 		if got.Mode != v1.VoiceGatewayModeExternal {
 			t.Fatalf("Mode = %q, want external", got.Mode)
 		}
@@ -2937,16 +2933,106 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 
 	t.Run("embedded", func(t *testing.T) {
 		t.Parallel()
-		h := &voiceHandlers{
-			bridge:  &voicertc.Bridge{},
-			gateway: VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded},
-		}
-		got := h.metadata()
+		got := voiceGatewayMetadata(&VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded}, &voicertc.Bridge{})
 		if got.Mode != v1.VoiceGatewayModeEmbedded {
 			t.Fatalf("Mode = %q, want embedded", got.Mode)
 		}
 		if got.AuthRequired {
 			t.Fatal("AuthRequired = true, want false")
+		}
+	})
+
+	t.Run("embedded without a bridge", func(t *testing.T) {
+		t.Parallel()
+		got := voiceGatewayMetadata(&VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded}, nil)
+		if got.Mode != v1.VoiceGatewayModeDisabled {
+			t.Fatalf("Mode = %q, want disabled", got.Mode)
+		}
+	})
+}
+
+func TestVoiceRoutesByMode(t *testing.T) {
+	t.Parallel()
+	newRouter := func(t *testing.T) (*testRouter, *auth.User) {
+		t.Helper()
+		store, err := auth.Open(filepath.Join(t.TempDir(), "users.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		user, err := store.UpsertUser(&auth.User{Provider: auth.ProviderGitHub, ProviderID: "1", Username: "alice"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return newTestOAuthRouter(t, store), &user
+	}
+	sessionCookie := func(t *testing.T, s *testRouter, user *auth.User) *http.Cookie {
+		t.Helper()
+		jwt, err := auth.IssueToken(user, s.sessionSecret, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Cookie{Name: "caic_session", Value: jwt, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode}
+	}
+	status := func(t *testing.T, h http.Handler, cookie *http.Cookie, path string) int {
+		t.Helper()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com"+path, http.NoBody)
+		req.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	t.Run("external serves only the token endpoint", func(t *testing.T) {
+		t.Parallel()
+		s, user := newRouter(t)
+		s.voiceGateway.Mode = VoiceGatewayModeExternal
+		// A gateway above caic needs tokens; caic serves no gateway routes of its own.
+		s.voiceGateway.Issuer = "https://caic.example.com"
+		s.voiceGateway.InstanceID = "caic-main"
+		s.voiceGateway.SigningKey = ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cookie := sessionCookie(t, s, user)
+		if got := status(t, h, cookie, "/api/caic/v1/voice/token"); got != http.StatusOK {
+			t.Fatalf("token endpoint = %d, want 200", got)
+		}
+		if got := status(t, h, cookie, "/api/voicegateway/v1/voice/text"); got != http.StatusNotFound {
+			t.Fatalf("gateway route = %d, want 404", got)
+		}
+	})
+
+	t.Run("embedded serves only the gateway routes", func(t *testing.T) {
+		t.Parallel()
+		s, user := newRouter(t)
+		s.voiceBridge = &voicertc.Bridge{}
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cookie := sessionCookie(t, s, user)
+		// A bridge without a local-stack backend cannot serve text sessions.
+		if got := status(t, h, cookie, "/api/voicegateway/v1/voice/text"); got != http.StatusServiceUnavailable {
+			t.Fatalf("gateway route = %d, want 503", got)
+		}
+		if got := status(t, h, cookie, "/api/caic/v1/voice/token"); got != http.StatusNotFound {
+			t.Fatalf("token endpoint = %d, want 404", got)
+		}
+	})
+
+	t.Run("disabled serves neither", func(t *testing.T) {
+		t.Parallel()
+		s, user := newRouter(t)
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cookie := sessionCookie(t, s, user)
+		for _, path := range []string{"/api/voicegateway/v1/voice/text", "/api/caic/v1/voice/token"} {
+			if got := status(t, h, cookie, path); got != http.StatusNotFound {
+				t.Fatalf("%s = %d, want 404", path, got)
+			}
 		}
 	})
 }
@@ -2963,14 +3049,14 @@ func TestExternalVoiceToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := newTestOAuthRouter(t, store)
-	s.voiceHandlers.gateway = VoiceGatewayConfig{
+	s.voiceGateway = VoiceGatewayConfig{
 		Mode:       VoiceGatewayModeExternal,
 		URL:        "https://voice.example.com",
 		Issuer:     "https://caic.example.com",
 		InstanceID: "caic-main",
 		SigningKey: key,
 	}
-	settings := newGoModeSettings(s.voiceHandlers.metadata(), true)
+	settings := newGoModeSettings(voiceGatewayMetadata(&s.voiceGateway, s.voiceBridge), true)
 	s.goModeHandler, err = gomode.NewHandler(&settings)
 	if err != nil {
 		t.Fatal(err)

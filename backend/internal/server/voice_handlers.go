@@ -1,4 +1,4 @@
-// HTTP handlers for the embedded WebRTC bridge and external gateway tokens.
+// External voice gateway token minting and Go Mode voice gateway metadata.
 
 package server
 
@@ -23,81 +23,68 @@ type voiceTokenIssuer interface {
 	IssueNarrowToken(user oauth.User, audience, scope string, ttl time.Duration) (string, error)
 }
 
-// voiceHandlers owns the embedded voice gateway HTTP adapter.
-//
-// bridge is nil when the voice gateway is disabled or delegated to an external
-// gateway. In that state metadata reports disabled/external mode and embedded
-// RTC routes return "voice bridge unavailable".
-type voiceHandlers struct {
-	bridge      *voicertc.Bridge
-	gateway     VoiceGatewayConfig
-	oauthIssuer voiceTokenIssuer
-}
-
-func (h *voiceHandlers) handler() http.Handler {
-	return voicegateway.NewEmbeddedHandler(h.mediaBridge)
-}
-
-func (h *voiceHandlers) tokenHandler(w http.ResponseWriter, r *http.Request) {
-	if h.gateway.Mode != VoiceGatewayModeExternal {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	subject := "anonymous"
-	if user, ok := auth.UserFromContext(r.Context()); ok {
-		subject = user.ID
-	}
-	token, err := h.issueToken(subject)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "issue voice gateway token", "err", err)
-		http.Error(w, "voice token unavailable", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(voicev1.ServiceAuthorization{
-		Kind:       goModeServiceCaic,
-		InstanceID: h.gateway.InstanceID,
-		BaseURL:    h.gateway.Issuer,
-		Token:      token,
-	}); err != nil {
-		slog.WarnContext(r.Context(), "write voice gateway token", "err", err)
+// voiceTokenHandler serves the external gateway token endpoint. The route is
+// registered only in external gateway mode, so the handler assumes it.
+func voiceTokenHandler(gateway *VoiceGatewayConfig, issuer voiceTokenIssuer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		subject := "anonymous"
+		if user, ok := auth.UserFromContext(r.Context()); ok {
+			subject = user.ID
+		}
+		token, err := issueVoiceToken(gateway, issuer, subject)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "issue voice gateway token", "err", err)
+			http.Error(w, "voice token unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(voicev1.ServiceAuthorization{
+			Kind:       goModeServiceCaic,
+			InstanceID: gateway.InstanceID,
+			BaseURL:    gateway.Issuer,
+			Token:      token,
+		}); err != nil {
+			slog.WarnContext(r.Context(), "write voice gateway token", "err", err)
+		}
 	}
 }
 
-// issueToken mints the external gateway token for subject: a narrow OAuth 2.0
-// access token when configured, otherwise the transitional scoped Ed25519 token.
-func (h *voiceHandlers) issueToken(subject string) (string, error) {
-	if h.gateway.TokenMode == VoiceTokenModeOAuth {
-		if h.oauthIssuer == nil {
+// issueVoiceToken mints the external gateway token for subject: a narrow OAuth
+// 2.0 access token when configured, otherwise the transitional scoped Ed25519
+// token.
+func issueVoiceToken(gateway *VoiceGatewayConfig, issuer voiceTokenIssuer, subject string) (string, error) {
+	if gateway.TokenMode == VoiceTokenModeOAuth {
+		if issuer == nil {
 			return "", errors.New("OAuth authorization server is not configured")
 		}
-		return h.oauthIssuer.IssueNarrowToken(oauth.User{ID: subject, Username: subject}, gomode.ScopedTokenAudience, voicegateway.DefaultVoiceScope, 5*time.Minute)
+		return issuer.IssueNarrowToken(oauth.User{ID: subject, Username: subject}, gomode.ScopedTokenAudience, voicegateway.DefaultVoiceScope, 5*time.Minute)
 	}
 	claims := &gomode.ScopedTokenClaims{
 		ServiceKind:       goModeServiceCaic,
-		ServiceInstanceID: h.gateway.InstanceID,
-		BackendOrigin:     h.gateway.Issuer,
+		ServiceInstanceID: gateway.InstanceID,
+		BackendOrigin:     gateway.Issuer,
 		Subject:           subject,
 		Capabilities:      []string{voicegateway.DefaultVoiceScope},
 		Audience:          gomode.ScopedTokenAudience,
 		Expiry:            time.Now().Add(5 * time.Minute),
 	}
-	return gomode.IssueServiceScopedToken(claims, h.gateway.SigningKey)
+	return gomode.IssueServiceScopedToken(claims, gateway.SigningKey)
 }
 
-func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
-	cfg := h.gateway
-	if cfg.Mode == "" {
-		if h.bridge != nil {
-			cfg.Mode = VoiceGatewayModeEmbedded
-		} else {
-			cfg.Mode = VoiceGatewayModeDisabled
+// voiceGatewayMetadata reports the gateway mode the Go Mode manifest advertises.
+// Embedded mode downgrades to disabled when caic has no in-process bridge.
+func voiceGatewayMetadata(gateway *VoiceGatewayConfig, bridge *voicertc.Bridge) v1.VoiceGatewayMetadata {
+	mode := gateway.Mode
+	if mode == "" {
+		mode = VoiceGatewayModeDisabled
+		if bridge != nil {
+			mode = VoiceGatewayModeEmbedded
 		}
 	}
-	switch cfg.Mode {
+	switch mode {
 	case VoiceGatewayModeEmbedded:
-		if h.bridge == nil {
+		if bridge == nil {
 			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
 		}
 		return v1.VoiceGatewayMetadata{
@@ -108,18 +95,11 @@ func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
 	case VoiceGatewayModeExternal:
 		return v1.VoiceGatewayMetadata{
 			Mode:         v1.VoiceGatewayModeExternal,
-			URL:          cfg.URL,
+			URL:          gateway.URL,
 			AuthRequired: true,
 			Capabilities: []string{"voice.gatewayGeminiLive", "voice.rtcDiagnostics"},
 		}
 	default:
 		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
 	}
-}
-
-func (h *voiceHandlers) mediaBridge() voicegateway.MediaBridge {
-	if h.bridge == nil {
-		return nil
-	}
-	return h.bridge
 }
