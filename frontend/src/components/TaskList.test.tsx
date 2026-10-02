@@ -1,4 +1,4 @@
-// Tests for task-list selection visibility and navigation behavior.
+// Tests for task-list active-first repository ordering, selection visibility, and navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
@@ -8,6 +8,7 @@ import { expect, vi } from "@tests/expect";
 import type { Task } from "@sdk/types.gen";
 
 import TaskList, { type TaskListProps } from "./TaskList";
+import styles from "./TaskList.module.css";
 
 function task(id: string): Task {
   return {
@@ -99,6 +100,63 @@ describe("TaskList", () => {
       Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
     scrollIntoView.mockReset();
+  });
+
+  it("puts repositories with active tasks first, with natural ordering within each tier", () => {
+    const inactive: Task["state"][] = ["stopped", "stopping", "crashed", "purged", "purging", "failed"];
+    const tasks: Task[] = inactive.map((state, index) => ({
+      ...task(String(index + 1)),
+      state,
+      repos: [{ name: `repo${index + 1}`, branch: "work" }],
+    }));
+    tasks.push(
+      { ...task("7"), repos: [{ name: "repo10", branch: "work" }] },
+      { ...task("8"), state: "waiting", repos: [{ name: "repo8", branch: "work" }] },
+      { ...task("9"), state: "stopped", repos: [{ name: "repo8", branch: "old" }] },
+      task("A"),
+    );
+    const { container } = render(() => <TaskList {...taskListProps(tasks)} selectedId={null} />);
+
+    expect(Array.from(container.querySelectorAll(`.${styles.repoGroupHeader}`), (el) => el.textContent)).toEqual([
+      "repo8",
+      "repo10",
+      "repo1",
+      "repo2",
+      "repo3",
+      "repo4",
+      "repo5",
+      "repo6",
+      "Other",
+    ]);
+  });
+
+  it("reorders repositories when their last active task stops or revives without replacing other cards", () => {
+    const running = { ...task("1"), repos: [{ name: "repo2", branch: "work" }] };
+    const other = { ...task("2"), repos: [{ name: "repo10", branch: "work" }] };
+    let updateTasks: (tasks: Task[]) => void = () => undefined;
+    const { container } = render(() => {
+      const [tasks, setTasks] = createSignal([running, other]);
+      updateTasks = setTasks;
+      return <TaskList {...taskListProps([])} tasks={tasks} selectedId="2" />;
+    });
+    const repoOrder = () =>
+      Array.from(container.querySelectorAll(`.${styles.repoGroupHeader}`), (el) => el.textContent);
+    const card = container.querySelector<HTMLElement>("[data-task-id='2']");
+    if (!card) throw new Error("task card not rendered");
+    card.focus();
+    expect(repoOrder()).toEqual(["repo2", "repo10"]);
+
+    updateTasks([{ ...running, state: "stopped" }, other]);
+
+    expect(repoOrder()).toEqual(["repo10", "repo2"]);
+    expect(container.querySelector("[data-task-id='2']")).toBe(card);
+    expect(card).toHaveFocus();
+
+    updateTasks([running, other]);
+
+    expect(repoOrder()).toEqual(["repo2", "repo10"]);
+    expect(container.querySelector("[data-task-id='2']")).toBe(card);
+    expect(card).toHaveFocus();
   });
 
   it("scrolls the summary bar to a newly selected task", async () => {

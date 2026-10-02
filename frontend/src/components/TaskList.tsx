@@ -1,4 +1,4 @@
-// Sidebar task list with collapsible panel, grouped by repo for active tasks.
+// Sidebar task list with collapsible panel, grouped by repo with active repositories first.
 
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
@@ -148,7 +148,9 @@ export default function TaskList(props: TaskListProps) {
     };
     const stateUpdatedDesc = (a: Task, b: Task) =>
       b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
-    const sortedGroups = Object.values(groups).sort((a, b) => naturalCompare(a.repo, b.repo));
+    const sortedGroups = Object.values(groups).sort(
+      (a, b) => Number(b.active.length > 0) - Number(a.active.length > 0) || naturalCompare(a.repo, b.repo),
+    );
     for (const g of sortedGroups) {
       g.active.sort(idDesc);
       g.stopped.sort(stateUpdatedDesc);
