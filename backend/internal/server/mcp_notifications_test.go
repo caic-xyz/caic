@@ -115,15 +115,15 @@ func TestNotificationFeed(t *testing.T) {
 	blockedUsage := v1.UsageResp{Providers: []v1.ProviderQuota{{
 		Provider: v1.QuotaProviderClaudeCode,
 		RateLimits: []v1.QuotaRateLimit{{
-			UsedPct:  100,
-			ResetsAt: now.Add(time.Hour),
+			Utilization: 1,
+			ResetsAt:    now.Add(time.Hour),
 		}},
 	}}}
 	availableUsage := v1.UsageResp{Providers: []v1.ProviderQuota{{
 		Provider: v1.QuotaProviderClaudeCode,
 		RateLimits: []v1.QuotaRateLimit{{
-			UsedPct:  42,
-			ResetsAt: now.Add(time.Hour),
+			Utilization: 0.42,
+			ResetsAt:    now.Add(time.Hour),
 		}},
 	}}}
 

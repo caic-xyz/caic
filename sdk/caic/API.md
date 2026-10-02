@@ -1446,7 +1446,7 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 | `status` | `EventRateLimitStatus` |  | yes |
 | `resetsAt` | `ISOTimestamp` | When the limit resets; zero if unknown. |  |
 | `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
-| `utilization` | `float64` | 0.0–1.0. | yes |
+| `utilization` | `float64` | 0.0–1.0; -1 when unknown. | yes |
 | `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
 | `overageResetsAt` | `ISOTimestamp` | When overage resets; zero if not using overage. |  |
 
@@ -1863,7 +1863,7 @@ QuotaRateLimit is a single rate-limit window snapshot from any provider.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `window` | `string` | "5h", "7d", "primary", "secondary", "rpm", "tpd", … | yes |
-| `usedPct` | `float64` | 0–100 | yes |
+| `utilization` | `float64` | 0.0–1.0 | yes |
 | `resetsAt` | `ISOTimestamp` | zero when unknown |  |
 
 ### QuotaBalance
@@ -1881,7 +1881,7 @@ or a spend cap), the spend fields carry that information too.
 | `extraEnabled` | `boolean` | ExtraEnabled reports whether the pay-as-you-go spend cap is active. |  |
 | `usedCredits` | `float64` | used against the cap |  |
 | `monthlyLimit` | `float64` | spend cap, 0 when unset |  |
-| `usedPct` | `float64` | 0–100 against the cap |  |
+| `utilization` | `float64` | 0.0–1.0 against the cap |  |
 
 ### ProviderQuota
 

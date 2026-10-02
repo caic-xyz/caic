@@ -731,9 +731,9 @@ type SyncResp struct {
 
 // QuotaRateLimit is a single rate-limit window snapshot from any provider.
 type QuotaRateLimit struct {
-	Window   string    `json:"window"`            // "5h", "7d", "primary", "secondary", "rpm", "tpd", …
-	UsedPct  float64   `json:"usedPct"`           // 0–100
-	ResetsAt time.Time `json:"resetsAt,omitzero"` // zero when unknown
+	Window      string    `json:"window"`            // "5h", "7d", "primary", "secondary", "rpm", "tpd", …
+	Utilization float64   `json:"utilization"`       // 0.0–1.0
+	ResetsAt    time.Time `json:"resetsAt,omitzero"` // zero when unknown
 }
 
 // QuotaBalance is a balance/credit snapshot from any provider. When the
@@ -749,7 +749,7 @@ type QuotaBalance struct {
 	ExtraEnabled bool    `json:"extraEnabled,omitempty"`
 	UsedCredits  float64 `json:"usedCredits,omitempty"`  // used against the cap
 	MonthlyLimit float64 `json:"monthlyLimit,omitempty"` // spend cap, 0 when unset
-	UsedPct      float64 `json:"usedPct,omitempty"`      // 0–100 against the cap
+	Utilization  float64 `json:"utilization,omitempty"`  // 0.0–1.0 against the cap
 }
 
 // ProviderQuota is the quota data for one provider.

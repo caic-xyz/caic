@@ -1677,12 +1677,17 @@ func (m *Manager) watchRateLimitEvents(t *task.Task) {
 }
 
 func (m *Manager) recordRateLimitMessage(rateLimit *agent.RateLimitMessage) bool {
+	// A status-only event must not replace the provider's real value with 0%; a
+	// rejected status already implies a full window.
+	if rateLimit.Utilization < 0 && rateLimit.Status != agent.RateLimitStatusRejected {
+		return false
+	}
 	return m.QuotaTracker.Apply(&quotausage.TaskQuotaUpdate{
 		Provider:      rateLimit.QuotaProvider,
 		ProviderLabel: rateLimit.QuotaLabel,
 		Window:        rateLimit.QuotaWindow,
 		Status:        rateLimit.Status,
-		UsedPct:       rateLimit.Utilization * 100,
+		Utilization:   rateLimit.Utilization,
 		ResetsAt:      rateLimit.ResetsAt,
 		ObservedAt:    time.Now().UTC(),
 	})

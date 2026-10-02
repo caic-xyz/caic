@@ -1558,11 +1558,46 @@ func TestManager(t *testing.T) {
 		if len(quotas) != 1 || len(quotas[0].RateLimits) != 2 {
 			t.Fatalf("tracked quotas = %#v, want two Claude Code quota windows", quotas)
 		}
-		if got := quotas[0].RateLimits[0]; got.Window != "5h" || got.UsedPct != 100 {
+		if got := quotas[0].RateLimits[0]; got.Window != "5h" || got.Utilization != 1 {
 			t.Errorf("5h rate limit = %#v, want rejected update", got)
 		}
-		if got := quotas[0].RateLimits[1]; got.Window != "7d" || got.UsedPct != 91 {
+		if got := quotas[0].RateLimits[1]; got.Window != "7d" || got.Utilization != 0.91 {
 			t.Errorf("7d rate limit = %#v, want warning update", got)
+		}
+	})
+
+	t.Run("RateLimitStatusOnlyUtilization", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		now := time.Now().UTC()
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+		tk.SeedTimeline([]agent.Message{
+			// A status-only event must not replace the provider's real value with 0%.
+			// -1 marks an unreported utilization.
+			&agent.RateLimitMessage{
+				Status:        agent.RateLimitStatusAllowed,
+				ResetsAt:      now.Add(time.Hour),
+				QuotaProvider: agent.QuotaProviderClaudeCode,
+				QuotaWindow:   "5h",
+				Utilization:   -1,
+			},
+			// A rejected status still reports a full window.
+			&agent.RateLimitMessage{
+				Status:        agent.RateLimitStatusRejected,
+				ResetsAt:      now.Add(7 * 24 * time.Hour),
+				QuotaProvider: agent.QuotaProviderClaudeCode,
+				QuotaWindow:   "7d",
+				Utilization:   -1,
+			},
+		})
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
+
+		quotas := m.QuotaTracker.Merge(nil, now)
+		if len(quotas) != 1 || len(quotas[0].RateLimits) != 1 {
+			t.Fatalf("tracked quotas = %#v, want only the rejected 7d window", quotas)
+		}
+		if got := quotas[0].RateLimits[0]; got.Window != "7d" || got.Utilization != 1 {
+			t.Errorf("tracked rate limit = %#v, want rejected 7d update", got)
 		}
 	})
 
@@ -4399,7 +4434,7 @@ func TestManager(t *testing.T) {
 			if len(quotas) != 1 || len(quotas[0].RateLimits) != 1 {
 				t.Fatalf("tracked quotas = %#v, want one restored rate limit", quotas)
 			}
-			if got := quotas[0].RateLimits[0]; got.UsedPct != 100 || !got.ResetsAt.Equal(resetAt) {
+			if got := quotas[0].RateLimits[0]; got.Utilization != 1 || !got.ResetsAt.Equal(resetAt) {
 				t.Errorf("tracked rate limit = %#v, want 100%% used with reset %v", got, resetAt)
 			}
 		})

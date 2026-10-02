@@ -52,9 +52,9 @@ type ProviderFetcher interface {
 
 // QuotaRateLimit is a rate-limit window reported by a provider.
 type QuotaRateLimit struct {
-	Window   string
-	UsedPct  float64
-	ResetsAt time.Time
+	Window      string
+	Utilization float64 // Fraction of the window used in [0, 1].
+	ResetsAt    time.Time
 }
 
 // QuotaBalance is a balance or credit snapshot reported by a provider. When
@@ -67,11 +67,12 @@ type QuotaBalance struct {
 	ToppedUp float64
 
 	// ExtraEnabled reports whether the pay-as-you-go spend cap is active.
-	// UsedCredits, MonthlyLimit, and UsedPct describe usage against the cap.
+	// UsedCredits and MonthlyLimit report the cap, and Utilization is the
+	// fraction of it used in [0, 1].
 	ExtraEnabled bool
 	UsedCredits  float64
 	MonthlyLimit float64
-	UsedPct      float64
+	Utilization  float64
 }
 
 // ProviderQuota is quota data for one provider.
@@ -97,7 +98,7 @@ type TaskQuotaUpdate struct {
 	ProviderLabel string
 	Window        string
 	Status        agent.RateLimitStatus
-	UsedPct       float64
+	Utilization   float64 // Fraction of the window used in [0, 1]; -1 when the harness reported only a status change.
 	ResetsAt      time.Time
 	ObservedAt    time.Time
 }
@@ -126,9 +127,9 @@ func (t *Tracker) Apply(update *TaskQuotaUpdate) bool {
 		return false
 	}
 	normalized := *update
-	normalized.UsedPct = min(max(normalized.UsedPct, 0), 100)
+	normalized.Utilization = min(max(normalized.Utilization, 0), 1)
 	if normalized.Status == agent.RateLimitStatusRejected {
-		normalized.UsedPct = 100
+		normalized.Utilization = 1
 	}
 
 	key := quotaKey{provider: normalized.Provider, window: normalized.Window}
@@ -219,16 +220,16 @@ func mergeTaskQuotaUpdate(quota *ProviderQuota, update *TaskQuotaUpdate) {
 		if quota.RateLimits[i].Window != update.Window {
 			continue
 		}
-		quota.RateLimits[i].UsedPct = update.UsedPct
+		quota.RateLimits[i].Utilization = update.Utilization
 		if !update.ResetsAt.IsZero() {
 			quota.RateLimits[i].ResetsAt = update.ResetsAt
 		}
 		return
 	}
 	quota.RateLimits = append(quota.RateLimits, QuotaRateLimit{
-		Window:   update.Window,
-		UsedPct:  update.UsedPct,
-		ResetsAt: update.ResetsAt,
+		Window:      update.Window,
+		Utilization: update.Utilization,
+		ResetsAt:    update.ResetsAt,
 	})
 }
 

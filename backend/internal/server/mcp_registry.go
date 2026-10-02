@@ -1168,7 +1168,7 @@ func (m *mcpRegistry) handleGetUsage(ctx context.Context, _ struct{}) mcp.ToolRe
 			parts = append(parts, formatBalance(pq.Balance.Currency, pq.Balance.Total))
 		}
 		for _, rl := range pq.RateLimits {
-			parts = append(parts, fmt.Sprintf("%s: %.0f%% remaining", rl.Window, 100-rl.UsedPct))
+			parts = append(parts, fmt.Sprintf("%s: %.0f%% remaining", rl.Window, (1-rl.Utilization)*100))
 		}
 		if len(parts) > 0 {
 			lines = append(lines, pq.Label+": "+strings.Join(parts, ", "))

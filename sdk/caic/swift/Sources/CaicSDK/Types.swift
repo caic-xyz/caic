@@ -1493,7 +1493,7 @@ public struct EventRateLimit: Codable {
     public let resetsAt: ISOTimestamp?
     /// "five_hour", "seven_day", etc.
     public let rateLimitType: String
-    /// 0.0–1.0.
+    /// 0.0–1.0; -1 when unknown.
     public let utilization: Double
     /// True when extra/overage usage is active.
     public let isUsingOverage: Bool?
@@ -1853,8 +1853,8 @@ public struct TaskListEvent: Codable {
 public struct QuotaRateLimit: Codable {
     /// "5h", "7d", "primary", "secondary", "rpm", "tpd", …
     public let window: String
-    /// 0–100
-    public let usedPct: Double
+    /// 0.0–1.0
+    public let utilization: Double
     /// zero when unknown
     public let resetsAt: ISOTimestamp?
 }
@@ -1877,8 +1877,8 @@ public struct QuotaBalance: Codable {
     public let usedCredits: Double?
     /// spend cap, 0 when unset
     public let monthlyLimit: Double?
-    /// 0–100 against the cap
-    public let usedPct: Double?
+    /// 0.0–1.0 against the cap
+    public let utilization: Double?
 }
 
 /// ProviderQuota is the quota data for one provider.

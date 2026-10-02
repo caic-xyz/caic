@@ -28,8 +28,8 @@ func TestUsageFetchers(t *testing.T) {
 	}
 	claude := behavioral[0].Get(t.Context())
 	anthropic := behavioral[1].Get(t.Context())
-	if claude.RateLimits[0].UsedPct == anthropic.RateLimits[0].UsedPct ||
-		claude.RateLimits[1].UsedPct == anthropic.RateLimits[1].UsedPct {
+	if claude.RateLimits[0].Utilization == anthropic.RateLimits[0].Utilization ||
+		claude.RateLimits[1].Utilization == anthropic.RateLimits[1].Utilization {
 		t.Errorf("Claude Code percentages = %#v, want values distinct from Anthropic %#v", claude.RateLimits, anthropic.RateLimits)
 	}
 }

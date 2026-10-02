@@ -205,14 +205,14 @@ func ProviderQuota(q *usage.ProviderQuota, now time.Time) (v1.ProviderQuota, err
 			ExtraEnabled: q.Balance.ExtraEnabled,
 			UsedCredits:  q.Balance.UsedCredits,
 			MonthlyLimit: q.Balance.MonthlyLimit,
-			UsedPct:      q.Balance.UsedPct,
+			Utilization:  q.Balance.Utilization,
 		},
 	}
 	for i := range q.RateLimits {
 		out.RateLimits[i] = v1.QuotaRateLimit{
-			Window:   q.RateLimits[i].Window,
-			UsedPct:  q.RateLimits[i].UsedPct,
-			ResetsAt: q.RateLimits[i].ResetsAt,
+			Window:      q.RateLimits[i].Window,
+			Utilization: q.RateLimits[i].Utilization,
+			ResetsAt:    q.RateLimits[i].ResetsAt,
 		}
 	}
 	if phase, transition := usage.PricingPhaseFor(q.Provider, now); phase != "" {

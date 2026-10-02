@@ -1386,6 +1386,31 @@ describe("SSE connection", () => {
     expect(document.body.textContent).toContain(`resets tomorrow at ${resetTime}`);
   });
 
+  it("omits the percentage when a warning reports no utilization", () => {
+    vi.setSystemTime(new Date("2026-07-08T12:00:00Z"));
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    renderTaskDetail();
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    capturedCb.value({
+      kind: "rateLimit",
+      ts: 1,
+      rateLimit: {
+        status: "allowed_warning",
+        rateLimitType: "seven_day_opus",
+        utilization: -1,
+        resetsAt: "2026-07-09T13:00:00Z" as ISOTimestamp,
+      },
+    });
+    vi.advanceTimersByTime(100);
+
+    expect(document.body.textContent).toContain("Rate limit warning: seven-day-opus quota nearing its limit");
+    expect(document.body.textContent).not.toContain("-100%");
+  });
+
   it("does not render empty usage metadata", () => {
     const created: FakeES[] = [];
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };

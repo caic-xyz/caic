@@ -36,12 +36,26 @@ test("resource charts read samples through the crosshair", async ({ page, api })
   // browser snapshot. Other tasks can restart the fake stream, so table order
   // alone does not identify the timestamps at the chart edges.
   async function readAt(edge: "left" | "right"): Promise<string> {
-    box = await cpu.evaluate((svg) => {
-      const { x, y, width, height } = svg.getBoundingClientRect();
-      return { x, y, width, height };
-    });
+    // Aim at the rendered edge dots instead of a fixed offset: the retained
+    // sample count grows, so the sample spacing shrinks and a fixed offset
+    // drifts onto a neighbouring sample.
+    const aim = await cpu.evaluate((svg, which) => {
+      const rect = svg.getBoundingClientRect();
+      const dots = Array.from(svg.querySelectorAll('[aria-label="dot"] circle'), (circle) =>
+        circle.getBoundingClientRect(),
+      );
+      if (dots.length === 0) return null;
+      const xs = dots.map((r) => r.x + r.width / 2);
+      return {
+        x: which === "left" ? Math.min(...xs) : Math.max(...xs),
+        y: rect.y + rect.height / 2,
+        box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      };
+    }, edge);
+    if (!aim) return "missing sample dots";
+    box = aim.box;
     await page.mouse.move(box.x - 2, box.y - 2);
-    await page.mouse.move(box.x + (edge === "left" ? 44 : box.width - 6), box.y + box.height / 2);
+    await page.mouse.move(aim.x, aim.y);
     const snapshot = await cpu.evaluate((svg) => {
       const text = svg.querySelector('[aria-label="text"] text');
       const rows = Array.from(svg.closest('[data-testid="resource-charts"]')?.querySelectorAll("table tbody tr") ?? []);

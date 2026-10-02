@@ -756,7 +756,7 @@ type RateLimit struct {
 	Status          agent.RateLimitStatus
 	ResetsAt        time.Time
 	RateLimitType   string  // Harness-native window ID; QuotaWindow is the canonical provider window.
-	Utilization     float64 // Fraction of the window used in [0, 1], not a percentage.
+	Utilization     float64 // Fraction of the window used in [0, 1]; -1 when unknown.
 	IsUsingOverage  bool
 	OverageResetsAt time.Time
 	QuotaProvider   agent.QuotaProvider // Canonical usage-provider ID matching ProviderQuota.Provider.

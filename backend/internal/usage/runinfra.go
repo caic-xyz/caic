@@ -95,7 +95,7 @@ func (f *RunInfraFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 		bal.ExtraEnabled = raw.SpendCap.Hard
 		bal.UsedCredits = float64(raw.SpendCap.UsedCents) / 100
 		bal.MonthlyLimit = float64(raw.SpendCap.LimitCents) / 100
-		bal.UsedPct = float64(raw.SpendCap.UsedCents) / float64(raw.SpendCap.LimitCents) * 100
+		bal.Utilization = float64(raw.SpendCap.UsedCents) / float64(raw.SpendCap.LimitCents)
 	}
 	out.Balance = bal
 	return out, nil

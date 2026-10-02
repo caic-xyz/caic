@@ -1240,6 +1240,70 @@ func TestParseMessage(t *testing.T) {
 			t.Error("is_using_overage = true, want false")
 		}
 	})
+	t.Run("RateLimitEventUnifiedWindows", func(t *testing.T) {
+		t.Parallel()
+		// Current CLI versions omit the top-level utilization and report every
+		// window in unifiedWindows. Reading only the top-level field records 0%.
+		tests := []struct {
+			name        string
+			line        string
+			utilization float64
+			resetsAt    int64
+			quotaWindow string
+		}{
+			{
+				name:        "SessionWindow",
+				line:        `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed","resetsAt":1790893800,"rateLimitType":"five_hour","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.25,"resetsAt":1790893800},"seven_day":{"utilization":0.59,"resetsAt":1790910000}}}}`,
+				utilization: 0.25,
+				resetsAt:    1790893800,
+				quotaWindow: "5h",
+			},
+			{
+				name:        "ModelSpecificWindow",
+				line:        `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day_opus","surpassedThreshold":0.8,"unifiedWindows":{"seven_day_opus":{"utilization":0.4,"resetsAt":1788490800}}}}`,
+				utilization: 0.4,
+				resetsAt:    1788490800,
+				quotaWindow: "7d",
+			},
+			{
+				// A model-specific window with no entry of its own must not borrow
+				// the shared seven-day value, which belongs to a different quota.
+				name:        "ModelSpecificWithoutOwnEntry",
+				line:        `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day_opus","surpassedThreshold":0.8,"unifiedWindows":{"five_hour":{"utilization":0.1,"resetsAt":1788359400},"seven_day":{"utilization":0.2,"resetsAt":1788490800}}}}`,
+				utilization: -1, // -1 marks an unreported utilization.
+				quotaWindow: "7d",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				msgs, err := parseMessage([]byte(tt.line))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					t.Fatalf("got %d messages, want 1", len(msgs))
+				}
+				rl, ok := msgs[0].(*agent.RateLimitMessage)
+				if !ok {
+					t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
+				}
+				if rl.Utilization != tt.utilization {
+					t.Errorf("utilization = %v, want %v from unifiedWindows", rl.Utilization, tt.utilization)
+				}
+				if tt.resetsAt == 0 {
+					if !rl.ResetsAt.IsZero() {
+						t.Errorf("resets_at = %v, want zero", rl.ResetsAt)
+					}
+				} else if wantReset := time.Unix(tt.resetsAt, 0).UTC(); !rl.ResetsAt.Equal(wantReset) {
+					t.Errorf("resets_at = %v, want %v", rl.ResetsAt, wantReset)
+				}
+				if rl.QuotaWindow != tt.quotaWindow {
+					t.Errorf("quota_window = %q, want %q", rl.QuotaWindow, tt.quotaWindow)
+				}
+			})
+		}
+	})
 	t.Run("RateLimitWindowCanonicalization", func(t *testing.T) {
 		t.Parallel()
 		tests := []struct {
@@ -1325,6 +1389,50 @@ func TestParseMessage(t *testing.T) {
 		}
 		if !rl.ResetsAt.IsZero() {
 			t.Errorf("resets_at = %v, want zero", rl.ResetsAt)
+		}
+	})
+	t.Run("RateLimitEventWithoutUtilization", func(t *testing.T) {
+		t.Parallel()
+		// Older CLI versions omit the utilization entirely. The message still
+		// reports the status transition, but its utilization is not a reading, so
+		// the tracker must not record it as 0%.
+		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed","resetsAt":1711000000,"rateLimitType":"five_hour"}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		rl, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if rl.Utilization != -1 {
+			t.Errorf("utilization = %v, want -1 for an unreported utilization", rl.Utilization)
+		}
+	})
+	t.Run("RateLimitEventTopLevelUtilization", func(t *testing.T) {
+		t.Parallel()
+		// Older CLI versions report utilization only at the top level, including
+		// for model-specific seven-day windows.
+		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed_warning","resetsAt":1711000000,"rateLimitType":"seven_day_opus","utilization":0.75}}`
+		msgs, err := parseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		rl, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
+		}
+		if rl.Utilization != 0.75 {
+			t.Errorf("utilization = %v, want 0.75", rl.Utilization)
+		}
+		if rl.QuotaWindow != "7d" {
+			t.Errorf("quota_window = %q, want %q", rl.QuotaWindow, "7d")
 		}
 	})
 	t.Run("UnknownFieldsForwardCompat", func(t *testing.T) {

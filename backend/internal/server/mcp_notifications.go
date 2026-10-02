@@ -140,7 +140,7 @@ func taskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) bool {
 			continue
 		}
 		for _, limit := range provider.RateLimits {
-			if limit.UsedPct >= 100 && limit.ResetsAt.After(now) {
+			if limit.Utilization >= 1 && limit.ResetsAt.After(now) {
 				return true
 			}
 		}

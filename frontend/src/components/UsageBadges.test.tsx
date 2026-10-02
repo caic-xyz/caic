@@ -19,8 +19,8 @@ import styles from "./UsageBadges.module.css";
 
 const [now] = createSignal(Date.now());
 
-function makeRateLimit(window: string, usedPct: number, resetsAt?: ISOTimestamp) {
-  return { window, usedPct, resetsAt };
+function makeRateLimit(window: string, utilization: number, resetsAt?: ISOTimestamp) {
+  return { window, utilization, resetsAt };
 }
 
 function makeBalance(total: number, currency = "USD", granted?: number, toppedUp?: number) {
@@ -32,10 +32,10 @@ function makeSpend(
   extraEnabled: boolean,
   usedCredits: number,
   monthlyLimit: number,
-  usedPct: number,
+  utilization: number,
   currency = "USD",
 ): QuotaBalance {
-  return { currency, total: 0, extraEnabled, usedCredits, monthlyLimit, usedPct };
+  return { currency, total: 0, extraEnabled, usedCredits, monthlyLimit, utilization };
 }
 
 function makeProvider(overrides: Partial<ProviderQuota> = {}): ProviderQuota {
@@ -71,7 +71,7 @@ describe("UsageBadges", () => {
       makeProvider({
         provider: QuotaProviderAnthropic,
         label: "Anthropic",
-        rateLimits: [makeRateLimit("5h", 45)],
+        rateLimits: [makeRateLimit("5h", 0.45)],
       }),
       makeProvider({
         provider: QuotaProviderDeepSeek,
@@ -84,9 +84,25 @@ describe("UsageBadges", () => {
     expect(container.querySelectorAll(`.${styles.providerPill}`).length).toBe(2);
   });
 
+  it("keeps pill nodes across usage snapshots", () => {
+    const [usage, setUsage] = createSignal<UsageResp>(
+      makeUsage([makeProvider({ label: "Anthropic", rateLimits: [makeRateLimit("5h", 0.45)] })]),
+    );
+    const { container } = render(() => <UsageBadges usage={usage} now={now} />);
+    const pill = container.querySelector(`.${styles.providerPill}`);
+    expect(pill).not.toBeNull();
+
+    // A fresh snapshot must update the pill in place: replacing the node would
+    // detach any tooltip the user is hovering and any measurement in flight.
+    setUsage(makeUsage([makeProvider({ label: "Anthropic", rateLimits: [makeRateLimit("5h", 0.46)] })]));
+
+    expect(container.querySelector(`.${styles.providerPill}`)).toBe(pill);
+    expect(container.textContent).toContain("46%");
+  });
+
   describe("rate limit badges", () => {
     it("green when < 80%", () => {
-      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("5h", 45)] })]);
+      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("5h", 0.45)] })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       const badge = getBadge(container);
@@ -96,21 +112,21 @@ describe("UsageBadges", () => {
     });
 
     it("yellow when >= 80%", () => {
-      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("5h", 85)] })]);
+      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("5h", 0.85)] })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(getBadge(container)?.className).toContain(styles.yellow);
     });
 
     it("red when >= 90%", () => {
-      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("5h", 95)] })]);
+      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("5h", 0.95)] })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(getBadge(container)?.className).toContain(styles.red);
     });
 
     it("shows window label and percentage", () => {
-      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("7d", 12)] })]);
+      const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("7d", 0.12)] })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("7d");
@@ -150,28 +166,28 @@ describe("UsageBadges", () => {
 
   describe("spend badges", () => {
     it("shows enabled spend info", () => {
-      const u = makeUsage([makeProvider({ balance: makeSpend(true, 3, 140, 2.1) })]);
+      const u = makeUsage([makeProvider({ balance: makeSpend(true, 3, 140, 0.021) })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("$3/$140");
     });
 
     it("shows CNY spend info with ¥", () => {
-      const u = makeUsage([makeProvider({ balance: makeSpend(true, 50, 500, 10, "CNY") })]);
+      const u = makeUsage([makeProvider({ balance: makeSpend(true, 50, 500, 0.1, "CNY") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("¥50/¥500");
     });
 
     it("shows ?? for unknown currency in spend info", () => {
-      const u = makeUsage([makeProvider({ balance: makeSpend(true, 10, 100, 10, "EUR") })]);
+      const u = makeUsage([makeProvider({ balance: makeSpend(true, 10, 100, 0.1, "EUR") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(container.textContent).toContain("??10/??100");
     });
 
     it("disabled spend info has disabled class", () => {
-      const u = makeUsage([makeProvider({ balance: makeSpend(false, 3, 140, 2.1) })]);
+      const u = makeUsage([makeProvider({ balance: makeSpend(false, 3, 140, 0.021) })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(getBadge(container)?.className).toContain(styles.disabled);

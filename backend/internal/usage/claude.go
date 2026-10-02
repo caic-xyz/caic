@@ -115,17 +115,17 @@ func (f *ClaudeCodeFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	if raw.FiveHour != nil {
 		t, _ := time.Parse(time.RFC3339, raw.FiveHour.ResetsAt)
 		out.RateLimits = append(out.RateLimits, QuotaRateLimit{
-			Window:   "5h",
-			UsedPct:  raw.FiveHour.Utilization,
-			ResetsAt: t,
+			Window:      "5h",
+			Utilization: raw.FiveHour.Utilization / 100,
+			ResetsAt:    t,
 		})
 	}
 	if raw.SevenDay != nil {
 		t, _ := time.Parse(time.RFC3339, raw.SevenDay.ResetsAt)
 		out.RateLimits = append(out.RateLimits, QuotaRateLimit{
-			Window:   "7d",
-			UsedPct:  raw.SevenDay.Utilization,
-			ResetsAt: t,
+			Window:      "7d",
+			Utilization: raw.SevenDay.Utilization / 100,
+			ResetsAt:    t,
 		})
 	}
 	// Report no balance when there is nothing to show: an extra-usage object
@@ -136,7 +136,7 @@ func (f *ClaudeCodeFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 			ExtraEnabled: raw.ExtraUsage.IsEnabled,
 			MonthlyLimit: raw.ExtraUsage.MonthlyLimit / 100,
 			UsedCredits:  raw.ExtraUsage.UsedCredits / 100,
-			UsedPct:      raw.ExtraUsage.Utilization,
+			Utilization:  raw.ExtraUsage.Utilization / 100,
 		}
 	}
 	return out, nil

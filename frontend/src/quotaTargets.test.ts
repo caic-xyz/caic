@@ -22,7 +22,7 @@ function harness(name: HarnessInfo["name"], quotaGroup?: QuotaProvider): Harness
 function usage(
   groups: Array<{
     provider: QuotaProvider;
-    usedPct: number;
+    utilization: number;
     resetsAt?: string;
     fetchStatus?: "fresh" | "stale" | "error";
   }>,
@@ -39,7 +39,7 @@ function usage(
       rateLimits: [
         {
           window: "primary",
-          usedPct: group.usedPct,
+          utilization: group.utilization,
           ...(group.resetsAt ? { resetsAt: group.resetsAt as ISOTimestamp } : {}),
         },
       ],
@@ -52,9 +52,9 @@ describe("quotaRecoveryTargets", () => {
     const targets = quotaRecoveryTargets(
       [harness("claude", "claudecode"), harness("codex", "codex"), harness("opencode", "openrouter"), harness("pi")],
       usage([
-        { provider: "claudecode", usedPct: 10 },
-        { provider: "codex", usedPct: 25 },
-        { provider: "openrouter", usedPct: 10 },
+        { provider: "claudecode", utilization: 0.1 },
+        { provider: "codex", utilization: 0.25 },
+        { provider: "openrouter", utilization: 0.1 },
       ]),
       "claudecode",
       "opencode",
@@ -88,7 +88,7 @@ describe("quotaRecoveryTargets", () => {
   it("does not claim an expired exhausted snapshot is available", () => {
     const [target] = quotaRecoveryTargets(
       [harness("codex", "codex")],
-      usage([{ provider: "codex", usedPct: 100, resetsAt: "2026-09-11T11:00:00Z" }]),
+      usage([{ provider: "codex", utilization: 1, resetsAt: "2026-09-11T11:00:00Z" }]),
       "claudecode",
       "codex",
       now,
@@ -102,7 +102,7 @@ describe("quotaRecoveryTargets", () => {
     it(`treats ${fetchStatus} provider data as unknown`, () => {
       const [target] = quotaRecoveryTargets(
         [harness("codex", "codex")],
-        usage([{ provider: "codex", usedPct: 25, fetchStatus }]),
+        usage([{ provider: "codex", utilization: 0.25, fetchStatus }]),
         "claudecode",
         "codex",
         now,

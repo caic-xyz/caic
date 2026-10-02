@@ -2,7 +2,7 @@
 // tooltip that always names the provider, and a backend-reported pricing-phase
 // icon tint (e.g. DeepSeek peak hours).
 
-import { Show, For, Switch, Match } from "solid-js";
+import { Show, Index, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 
 import type { ProviderQuota, QuotaRateLimit, QuotaBalance, UsageResp } from "@sdk/types.gen";
@@ -11,9 +11,10 @@ import Tooltip from "./Tooltip";
 import { currencySign, formatBalance } from "../formatting";
 import styles from "./UsageBadges.module.css";
 
-function pctColor(pct: number) {
-  if (pct >= 90) return styles.red;
-  if (pct >= 80) return styles.yellow;
+// pctColor maps a utilization fraction in [0, 1] to a badge colour.
+function pctColor(utilization: number) {
+  if (utilization >= 0.9) return styles.red;
+  if (utilization >= 0.8) return styles.yellow;
   return styles.green;
 }
 
@@ -44,7 +45,7 @@ function hasSpend(bal: QuotaBalance): boolean {
 
 function spendClass(bal: QuotaBalance): string {
   if (!bal.extraEnabled) return `${styles.badge} ${styles.disabled}`;
-  return `${styles.badge} ${pctColor(bal.usedPct ?? 0)}`;
+  return `${styles.badge} ${pctColor(bal.utilization ?? 0)}`;
 }
 
 function spendLabel(bal: QuotaBalance): string {
@@ -60,15 +61,16 @@ function spendTooltip(bal: QuotaBalance): string {
   return `Disabled — ${s}${(bal.usedCredits ?? 0).toFixed(2)} / ${s}${(bal.monthlyLimit ?? 0).toFixed(2)}`;
 }
 
-function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; label: string }) {
+function RateLimitBadge(props: { rl: Accessor<QuotaRateLimit>; now: Accessor<number>; label: string }) {
+  const percent = () => Math.round(props.rl().utilization * 100);
   const tip = () => {
-    const reset = formatReset(props.rl.resetsAt, props.now());
-    return reset ? `${props.label} ${props.rl.window}: ${Math.round(props.rl.usedPct)}% — Resets ${reset}` : undefined;
+    const reset = formatReset(props.rl().resetsAt, props.now());
+    return reset ? `${props.label} ${props.rl().window}: ${percent()}% — Resets ${reset}` : undefined;
   };
   return (
     <Tooltip text={tip()}>
-      <span class={`${styles.badge} ${pctColor(props.rl.usedPct)}`} data-testid="usage-badge">
-        {props.rl.window} {Math.round(props.rl.usedPct)}%
+      <span class={`${styles.badge} ${pctColor(props.rl().utilization)}`} data-testid="usage-badge">
+        {props.rl().window} {percent()}%
       </span>
     </Tooltip>
   );
@@ -161,18 +163,17 @@ function ProviderIcon(props: {
   );
 }
 
-function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
-  const pricing = () => pricingOf(props.pq);
+function ProviderPill(props: { pq: Accessor<ProviderQuota>; now: Accessor<number> }) {
+  const pricing = () => pricingOf(props.pq());
+  const rateLimits = () => props.pq().rateLimits ?? [];
 
   const badgeSpan = (
     <span class={styles.providerBadges}>
-      <For each={props.pq.rateLimits ?? []}>
-        {(rl) => <RateLimitBadge rl={rl} now={props.now} label={props.pq.label} />}
-      </For>
-      <Show when={props.pq.balance}>
+      <Index each={rateLimits()}>{(rl) => <RateLimitBadge rl={rl} now={props.now} label={props.pq().label} />}</Index>
+      <Show when={props.pq().balance}>
         {(bal) => (
           <Show when={bal().total !== 0 || !hasSpend(bal())}>
-            <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
+            <Tooltip text={`${props.pq().label}: ${formatBalance(bal().currency, bal().total)}`}>
               <span class={balanceClass(bal())} data-testid="usage-badge">
                 {formatBalance(bal().currency, bal().total)}
               </span>
@@ -180,12 +181,12 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
           </Show>
         )}
       </Show>
-      <Show when={props.pq.balance}>
+      <Show when={props.pq().balance}>
         {(bal) => (
           // Spend-only balances (e.g. Claude) report no wallet total, so the
           // zero balance pill stays hidden and only the spend pill shows.
           <Show when={hasSpend(bal())}>
-            <Tooltip text={`${props.pq.label}: ${spendTooltip(bal())}`}>
+            <Tooltip text={`${props.pq().label}: ${spendTooltip(bal())}`}>
               <span class={spendClass(bal())} data-testid="usage-badge">
                 {spendLabel(bal())}
               </span>
@@ -198,25 +199,25 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
 
   const content = (
     <>
-      <ProviderIcon logoUrl={props.pq.logoUrl} label={props.pq.label} pricing={pricing()} now={props.now} />
+      <ProviderIcon logoUrl={props.pq().logoUrl} label={props.pq().label} pricing={pricing()} now={props.now} />
       {badgeSpan}
     </>
   );
 
   return (
     <Switch>
-      <Match when={!!props.pq.usageUrl}>
+      <Match when={!!props.pq().usageUrl}>
         <a
           class={styles.providerPill}
           data-testid="provider-usage"
-          href={props.pq.usageUrl}
+          href={props.pq().usageUrl}
           target="_blank"
           rel="noopener noreferrer"
         >
           {content}
         </a>
       </Match>
-      <Match when={!props.pq.usageUrl}>
+      <Match when={!props.pq().usageUrl}>
         <span class={styles.providerPill} data-testid="provider-usage">
           {content}
         </span>
@@ -225,12 +226,14 @@ function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
   );
 }
 
+// UsageBadges renders one pill per provider. Index keeps each pill's DOM node
+// alive across usage snapshots so a stream update cannot detach a pill a user
+// is hovering or a test is measuring.
 export default function UsageBadges(props: { usage: Accessor<UsageResp | null>; now: Accessor<number> }) {
+  const providers = () => props.usage()?.providers ?? [];
   return (
     <span class={styles.usageRow}>
-      <Show when={props.usage()} keyed>
-        {(u) => <For each={u.providers}>{(pq) => <ProviderPill pq={pq} now={props.now} />}</For>}
-      </Show>
+      <Index each={providers()}>{(pq) => <ProviderPill pq={pq} now={props.now} />}</Index>
     </span>
   );
 }

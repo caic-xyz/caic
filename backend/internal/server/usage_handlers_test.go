@@ -72,7 +72,7 @@ func TestUsageHandlersHandleEvents(t *testing.T) {
 			Label:    "Claude Code",
 			AuthKind: usage.AuthKindOAuth,
 			RateLimits: []usage.QuotaRateLimit{{
-				Window: "5h", UsedPct: 25,
+				Window: "5h", Utilization: 0.25,
 			}},
 		}}}
 
@@ -103,7 +103,7 @@ func TestUsageHandlersHandleEvents(t *testing.T) {
 			t.Fatalf("usage stream did not emit the harness quota update: %q", writer.Body.String())
 		}
 		<-done
-		if !bytes.Contains(writer.Body.Bytes(), []byte(`"usedPct":100`)) {
+		if !bytes.Contains(writer.Body.Bytes(), []byte(`"utilization":1`)) {
 			t.Fatalf("usage stream = %q, want rejected quota update", writer.Body.String())
 		}
 	})
@@ -219,7 +219,7 @@ func BenchmarkUsageHandlersHandleEvents(b *testing.B) {
 		Label:    "Claude Code",
 		AuthKind: usage.AuthKindOAuth,
 		RateLimits: []usage.QuotaRateLimit{{
-			Window: "5h", UsedPct: 25,
+			Window: "5h", Utilization: 0.25,
 		}},
 	}}}
 

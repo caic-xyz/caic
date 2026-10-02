@@ -51,6 +51,9 @@ func TestRunInfraFetcherGet(t *testing.T) {
 		if quota.Balance.MonthlyLimit != 200 || quota.Balance.UsedCredits != 16.20 {
 			t.Fatalf("spend cap = %#v, want limit 200 used 16.20", quota.Balance)
 		}
+		if quota.Balance.Utilization != 0.081 {
+			t.Errorf("balance utilization = %v, want 1620/20000 = 0.081", quota.Balance.Utilization)
+		}
 	})
 
 	t.Run("no spend cap", func(t *testing.T) {

@@ -178,7 +178,7 @@ type QuotaChange struct {
 	Provider    string
 	Window      string
 	Status      string
-	Utilization float64   // fraction in [0, 1]
+	Utilization float64   // fraction in [0, 1]; -1 when unknown
 	ResetsAt    time.Time // zero = unknown
 }
 
@@ -214,7 +214,7 @@ type QuotaRow struct {
 	Provider    string  `json:"provider"`
 	Window      string  `json:"window,omitempty"`
 	Status      string  `json:"status"`
-	Utilization float64 `json:"utilization,omitzero"` // fraction in [0, 1]
+	Utilization float64 `json:"utilization,omitzero"` // fraction in [0, 1]; -1 when unknown
 	ResetsAt    Time    `json:"resets_at,omitzero"`   // When the window resets; 0 = unknown
 }
 

@@ -63,10 +63,10 @@ function quotaGroupStatus(group: QuotaProvider | undefined, usage: UsageResp | n
   if (provider?.fetchStatus !== "fresh") return "unknown";
   const limits = provider.rateLimits;
   if (!limits || limits.length === 0) return "unknown";
-  if (limits.some((limit) => limit.usedPct >= 100 && (!limit.resetsAt || Date.parse(limit.resetsAt) > now))) {
+  if (limits.some((limit) => limit.utilization >= 1 && (!limit.resetsAt || Date.parse(limit.resetsAt) > now))) {
     return "exhausted";
   }
-  if (limits.some((limit) => limit.usedPct >= 100)) return "unknown";
+  if (limits.some((limit) => limit.utilization >= 1)) return "unknown";
   return "available";
 }
 

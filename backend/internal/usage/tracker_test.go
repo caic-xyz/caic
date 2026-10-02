@@ -16,7 +16,7 @@ func TestTrackerMerge(t *testing.T) {
 		Provider: agent.QuotaProviderAnthropic,
 		Label:    "Anthropic",
 		RateLimits: []QuotaRateLimit{{
-			Window: "5h", UsedPct: 97, ResetsAt: now.Add(time.Hour),
+			Window: "5h", Utilization: 0.97, ResetsAt: now.Add(time.Hour),
 		}},
 	}}
 
@@ -26,14 +26,14 @@ func TestTrackerMerge(t *testing.T) {
 		resetAt := now.Add(90 * time.Minute)
 		if !tracker.Apply(&TaskQuotaUpdate{
 			Provider: agent.QuotaProviderAnthropic, ProviderLabel: "Anthropic", Window: "5h",
-			Status: agent.RateLimitStatusAllowedWarning, UsedPct: 91, ResetsAt: resetAt, ObservedAt: now,
+			Status: agent.RateLimitStatusAllowedWarning, Utilization: 0.91, ResetsAt: resetAt, ObservedAt: now,
 		}) {
 			t.Fatal("Apply() = false, want true")
 		}
 
 		limit := tracker.Merge(providerSnapshot, now)[0].RateLimits[0]
-		if limit.UsedPct != 91 {
-			t.Errorf("UsedPct = %v, want 91", limit.UsedPct)
+		if limit.Utilization != 0.91 {
+			t.Errorf("Utilization = %v, want 0.91", limit.Utilization)
 		}
 		if !limit.ResetsAt.Equal(resetAt) {
 			t.Errorf("ResetsAt = %v, want %v", limit.ResetsAt, resetAt)
@@ -51,14 +51,14 @@ func TestTrackerMerge(t *testing.T) {
 		}
 		if !tracker.Apply(&TaskQuotaUpdate{
 			Provider: agent.QuotaProviderAnthropic, ProviderLabel: "Anthropic", Window: "5h",
-			Status: agent.RateLimitStatusAllowed, UsedPct: 12, ObservedAt: now.Add(time.Minute),
+			Status: agent.RateLimitStatusAllowed, Utilization: 0.12, ObservedAt: now.Add(time.Minute),
 		}) {
 			t.Fatal("Apply(allowed) = false, want true")
 		}
 
 		limit := tracker.Merge(providerSnapshot, now)[0].RateLimits[0]
-		if limit.UsedPct != 12 {
-			t.Errorf("UsedPct = %v, want 12 from the newer update", limit.UsedPct)
+		if limit.Utilization != 0.12 {
+			t.Errorf("Utilization = %v, want 0.12 from the newer update", limit.Utilization)
 		}
 		if !limit.ResetsAt.Equal(now.Add(time.Hour)) {
 			t.Errorf("ResetsAt = %v, want provider reset %v", limit.ResetsAt, now.Add(time.Hour))
@@ -76,7 +76,7 @@ func TestTrackerMerge(t *testing.T) {
 		}
 		if !tracker.Apply(&TaskQuotaUpdate{
 			Provider: agent.QuotaProviderClaudeCode, ProviderLabel: "Claude Code", Window: "7d",
-			Status: agent.RateLimitStatusAllowedWarning, UsedPct: 91, ResetsAt: now.Add(7 * 24 * time.Hour), ObservedAt: now,
+			Status: agent.RateLimitStatusAllowedWarning, Utilization: 0.91, ResetsAt: now.Add(7 * 24 * time.Hour), ObservedAt: now,
 		}) {
 			t.Fatal("Apply() = false, want true")
 		}
@@ -84,8 +84,8 @@ func TestTrackerMerge(t *testing.T) {
 			Provider: agent.QuotaProviderClaudeCode,
 			Label:    "Claude Code",
 			RateLimits: []QuotaRateLimit{
-				{Window: "5h", UsedPct: 97, ResetsAt: now.Add(time.Hour)},
-				{Window: "7d", UsedPct: 85, ResetsAt: now.Add(6 * 24 * time.Hour)},
+				{Window: "5h", Utilization: 0.97, ResetsAt: now.Add(time.Hour)},
+				{Window: "7d", Utilization: 0.85, ResetsAt: now.Add(6 * 24 * time.Hour)},
 			},
 		}}
 
@@ -93,10 +93,10 @@ func TestTrackerMerge(t *testing.T) {
 		if len(merged) != 1 || len(merged[0].RateLimits) != 2 {
 			t.Fatalf("Merge() = %#v, want two Claude Code quota windows", merged)
 		}
-		if got := merged[0].RateLimits[0]; got.UsedPct != 100 || !got.ResetsAt.Equal(now.Add(90*time.Minute)) {
+		if got := merged[0].RateLimits[0]; got.Utilization != 1 || !got.ResetsAt.Equal(now.Add(90*time.Minute)) {
 			t.Errorf("5h merged rate limit = %#v, want rejected update", got)
 		}
-		if got := merged[0].RateLimits[1]; got.UsedPct != 91 || !got.ResetsAt.Equal(now.Add(7*24*time.Hour)) {
+		if got := merged[0].RateLimits[1]; got.Utilization != 0.91 || !got.ResetsAt.Equal(now.Add(7*24*time.Hour)) {
 			t.Errorf("7d merged rate limit = %#v, want warning update", got)
 		}
 	})
@@ -112,8 +112,8 @@ func TestTrackerMerge(t *testing.T) {
 		}
 
 		limit := tracker.Merge(providerSnapshot, now)[0].RateLimits[0]
-		if limit.UsedPct != 97 {
-			t.Errorf("UsedPct = %v, want original provider value 97", limit.UsedPct)
+		if limit.Utilization != 0.97 {
+			t.Errorf("Utilization = %v, want original provider value 0.97", limit.Utilization)
 		}
 	})
 
@@ -128,12 +128,12 @@ func TestTrackerMerge(t *testing.T) {
 		}
 
 		current := tracker.Merge(providerSnapshot, now)[0].RateLimits[0]
-		if current.UsedPct != 100 {
-			t.Errorf("current UsedPct = %v, want 100", current.UsedPct)
+		if current.Utilization != 1 {
+			t.Errorf("current Utilization = %v, want 1", current.Utilization)
 		}
 		expired := tracker.Merge(providerSnapshot, now.Add(taskQuotaUnknownResetTTL))[0].RateLimits[0]
-		if expired.UsedPct != 97 {
-			t.Errorf("expired UsedPct = %v, want provider value 97", expired.UsedPct)
+		if expired.Utilization != 0.97 {
+			t.Errorf("expired Utilization = %v, want provider value 0.97", expired.Utilization)
 		}
 	})
 }

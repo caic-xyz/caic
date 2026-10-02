@@ -590,7 +590,7 @@ func TestProviderQuota(t *testing.T) {
 		AuthKind:  usage.AuthKindOAuth,
 		FetchedAt: now,
 		RateLimits: []usage.QuotaRateLimit{
-			{Window: "5h", UsedPct: 42.5, ResetsAt: resetsAt},
+			{Window: "5h", Utilization: 0.425, ResetsAt: resetsAt},
 		},
 		Balance: usage.QuotaBalance{
 			Currency:     "USD",
@@ -600,7 +600,7 @@ func TestProviderQuota(t *testing.T) {
 			ExtraEnabled: true,
 			UsedCredits:  3.5,
 			MonthlyLimit: 25,
-			UsedPct:      14,
+			Utilization:  0.14,
 		},
 	}, now)
 	if err != nil {
@@ -612,7 +612,7 @@ func TestProviderQuota(t *testing.T) {
 		AuthKind:    v1.ProviderAuthKindOAuth,
 		FetchStatus: v1.ProviderFetchStatusFresh,
 		RateLimits: []v1.QuotaRateLimit{
-			{Window: "5h", UsedPct: 42.5, ResetsAt: resetsAt},
+			{Window: "5h", Utilization: 0.425, ResetsAt: resetsAt},
 		},
 		Balance: v1.QuotaBalance{
 			Currency:     "USD",
@@ -622,7 +622,7 @@ func TestProviderQuota(t *testing.T) {
 			ExtraEnabled: true,
 			UsedCredits:  3.5,
 			MonthlyLimit: 25,
-			UsedPct:      14,
+			Utilization:  0.14,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -60,7 +60,7 @@ func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
 		Label:    "Anthropic",
 		AuthKind: usage.AuthKindOAuth,
 		RateLimits: []usage.QuotaRateLimit{
-			{Window: "5h", UsedPct: 12},
+			{Window: "5h", Utilization: 0.12},
 		},
 	}}}
 	c := &mcpRegistry{usage: s.usageHandlers}

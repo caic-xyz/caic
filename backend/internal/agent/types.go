@@ -942,7 +942,7 @@ type RateLimitMessage struct {
 	Status          RateLimitStatus `json:"status"`            // "allowed", "allowed_warning", "rejected".
 	ResetsAt        time.Time       `json:"resets_at"`         // When the quota window resets; zero if unknown.
 	RateLimitType   string          `json:"rate_limit_type"`   // Harness-native window ID (for example, "five_hour"); use QuotaWindow for the canonical ID.
-	Utilization     float64         `json:"utilization"`       // Fraction of the window used in [0, 1], not a percentage; 0 if unknown.
+	Utilization     float64         `json:"utilization"`       // Fraction of the window used in [0, 1], not a percentage; -1 when no utilization was reported.
 	IsUsingOverage  bool            `json:"is_using_overage"`  // True when extra/overage usage is active.
 	OverageResetsAt time.Time       `json:"overage_resets_at"` // When overage resets; zero if unknown.
 	QuotaProvider   QuotaProvider   `json:"quota_provider"`    // Canonical usage-provider ID that matches ProviderQuota.Provider; empty when the harness cannot identify it.

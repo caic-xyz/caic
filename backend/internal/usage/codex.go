@@ -127,16 +127,16 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	if raw.RateLimit != nil {
 		if w := raw.RateLimit.PrimaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
-				Window:   codexWindowLabel(*w, "5h"),
-				UsedPct:  float64(w.UsedPercent),
-				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
+				Window:      codexWindowLabel(*w, "5h"),
+				Utilization: float64(w.UsedPercent) / 100,
+				ResetsAt:    time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
 		}
 		if w := raw.RateLimit.SecondaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
-				Window:   codexWindowLabel(*w, "7d"),
-				UsedPct:  float64(w.UsedPercent),
-				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
+				Window:      codexWindowLabel(*w, "7d"),
+				Utilization: float64(w.UsedPercent) / 100,
+				ResetsAt:    time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
 		}
 	}

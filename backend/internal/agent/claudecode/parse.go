@@ -198,19 +198,21 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 		if err := json.Unmarshal(line, &w); err != nil {
 			return nil, record, err
 		}
+		info := &w.RateLimitInfo
+		utilization, resetsAt := rateLimitWindow(info)
 		// Claude Code rate-limit events describe its OAuth subscription. Keep
 		// them under claudecode rather than anthropic, which represents direct
 		// Anthropic API usage and has independent quotas.
 		return []agent.Message{&agent.RateLimitMessage{
-			Status:          agent.RateLimitStatus(w.RateLimitInfo.Status),
-			ResetsAt:        epochSecondsToTime(w.RateLimitInfo.ResetsAt),
-			RateLimitType:   string(w.RateLimitInfo.RateLimitType),
-			Utilization:     w.RateLimitInfo.Utilization,
-			IsUsingOverage:  w.RateLimitInfo.IsUsingOverage,
-			OverageResetsAt: epochSecondsToTime(w.RateLimitInfo.OverageResetsAt),
+			Status:          agent.RateLimitStatus(info.Status),
+			ResetsAt:        epochSecondsToTime(resetsAt),
+			RateLimitType:   string(info.RateLimitType),
+			Utilization:     utilization,
+			IsUsingOverage:  info.IsUsingOverage,
+			OverageResetsAt: epochSecondsToTime(info.OverageResetsAt),
 			QuotaProvider:   agent.QuotaProviderClaudeCode,
 			QuotaLabel:      "Claude Code",
-			QuotaWindow:     canonicalQuotaWindow(w.RateLimitInfo.RateLimitType),
+			QuotaWindow:     canonicalQuotaWindow(info.RateLimitType),
 		}}, record, nil
 	case claudecode.OutputControlRequest:
 		msgs, err := parseControlRequest(line)
@@ -242,6 +244,27 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, record, nil
 	}
+}
+
+// rateLimitWindow resolves the utilization and reset time for the window that
+// triggered a rate_limit_event. Newer CLI versions omit the top-level
+// utilization while still reporting every window in unifiedWindows, so
+// unifiedWindows wins when it lists the triggering window. A model-specific
+// window without its own entry stays -1 instead of borrowing the shared
+// seven-day value that belongs to a different quota. The wire format omits the
+// field when unknown, so only a non-zero top-level value counts as a reading.
+func rateLimitWindow(info *claudecode.RateLimitInfo) (utilization, resetsAt float64) {
+	if period, ok := info.UnifiedWindows[info.RateLimitType]; ok {
+		resetsAt = info.ResetsAt
+		if period.ResetsAt > 0 {
+			resetsAt = period.ResetsAt
+		}
+		return period.Utilization, resetsAt
+	}
+	if info.Utilization > 0 {
+		return info.Utilization, info.ResetsAt
+	}
+	return -1, info.ResetsAt
 }
 
 func epochSecondsToTime(seconds float64) time.Time {

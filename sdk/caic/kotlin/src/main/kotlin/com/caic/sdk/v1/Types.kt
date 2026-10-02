@@ -2086,7 +2086,7 @@ data class EventRateLimit(
     val resetsAt: Instant? = null,
     /** "five_hour", "seven_day", etc. */
     val rateLimitType: String,
-    /** 0.0–1.0. */
+    /** 0.0–1.0; -1 when unknown. */
     val utilization: Double,
     /** True when extra/overage usage is active. */
     val isUsingOverage: Boolean? = null,
@@ -2465,8 +2465,8 @@ data class TaskListEvent(
 data class QuotaRateLimit(
     /** "5h", "7d", "primary", "secondary", "rpm", "tpd", … */
     val window: String,
-    /** 0–100 */
-    val usedPct: Double,
+    /** 0.0–1.0 */
+    val utilization: Double,
     /** zero when unknown */
     val resetsAt: Instant? = null,
 )
@@ -2492,8 +2492,8 @@ data class QuotaBalance(
     val usedCredits: Double? = null,
     /** spend cap, 0 when unset */
     val monthlyLimit: Double? = null,
-    /** 0–100 against the cap */
-    val usedPct: Double? = null,
+    /** 0.0–1.0 against the cap */
+    val utilization: Double? = null,
 )
 
 /** ProviderQuota is the quota data for one provider. */

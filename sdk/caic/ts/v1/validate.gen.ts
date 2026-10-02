@@ -718,7 +718,7 @@ export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {
   const obj = asObject(raw, "QuotaRateLimit");
   return {
     window: asString(obj["window"], "QuotaRateLimit.window"),
-    usedPct: asNumber(obj["usedPct"], "QuotaRateLimit.usedPct"),
+    utilization: asNumber(obj["utilization"], "QuotaRateLimit.utilization"),
     resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "QuotaRateLimit.resetsAt") as ISOTimestamp),
   };
 }
@@ -733,7 +733,7 @@ export function validateQuotaBalance(raw: ValidatorInput): QuotaBalance {
     extraEnabled: (obj["extraEnabled"] === undefined || obj["extraEnabled"] === null ? undefined : asBoolean(obj["extraEnabled"], "QuotaBalance.extraEnabled")),
     usedCredits: (obj["usedCredits"] === undefined || obj["usedCredits"] === null ? undefined : asNumber(obj["usedCredits"], "QuotaBalance.usedCredits")),
     monthlyLimit: (obj["monthlyLimit"] === undefined || obj["monthlyLimit"] === null ? undefined : asNumber(obj["monthlyLimit"], "QuotaBalance.monthlyLimit")),
-    usedPct: (obj["usedPct"] === undefined || obj["usedPct"] === null ? undefined : asNumber(obj["usedPct"], "QuotaBalance.usedPct")),
+    utilization: (obj["utilization"] === undefined || obj["utilization"] === null ? undefined : asNumber(obj["utilization"], "QuotaBalance.utilization")),
   };
 }
 

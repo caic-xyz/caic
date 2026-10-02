@@ -55,8 +55,8 @@ func UsageFetchers(visualFixtures bool) []usage.ProviderFetcher {
 			Label:    "Claude Code",
 			AuthKind: usage.AuthKindOAuth,
 			RateLimits: []usage.QuotaRateLimit{
-				{Window: "5h", UsedPct: 31, ResetsAt: fiveHourReset},
-				{Window: "7d", UsedPct: 9, ResetsAt: sevenDayReset},
+				{Window: "5h", Utilization: 0.31, ResetsAt: fiveHourReset},
+				{Window: "7d", Utilization: 0.09, ResetsAt: sevenDayReset},
 			},
 		},
 	}
@@ -70,15 +70,15 @@ func UsageFetchers(visualFixtures bool) []usage.ProviderFetcher {
 				Label:    "Anthropic",
 				AuthKind: usage.AuthKindOAuth,
 				RateLimits: []usage.QuotaRateLimit{
-					{Window: "5h", UsedPct: 42, ResetsAt: fiveHourReset},
-					{Window: "7d", UsedPct: 15, ResetsAt: sevenDayReset},
+					{Window: "5h", Utilization: 0.42, ResetsAt: fiveHourReset},
+					{Window: "7d", Utilization: 0.15, ResetsAt: sevenDayReset},
 				},
 				Balance: usage.QuotaBalance{
 					Currency:     "USD",
 					ExtraEnabled: true,
 					UsedCredits:  3.50,
 					MonthlyLimit: 25.00,
-					UsedPct:      14,
+					Utilization:  0.14,
 				},
 			},
 		},
@@ -91,8 +91,8 @@ func UsageFetchers(visualFixtures bool) []usage.ProviderFetcher {
 				Label:    "Codex",
 				AuthKind: usage.AuthKindOAuth,
 				RateLimits: []usage.QuotaRateLimit{
-					{Window: "primary", UsedPct: 68, ResetsAt: primaryReset},
-					{Window: "secondary", UsedPct: 23, ResetsAt: secondaryReset},
+					{Window: "primary", Utilization: 0.68, ResetsAt: primaryReset},
+					{Window: "secondary", Utilization: 0.23, ResetsAt: secondaryReset},
 				},
 				Balance: usage.QuotaBalance{
 					Currency: "USD",

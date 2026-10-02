@@ -1673,6 +1673,17 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     if (r?.isUsingOverage) return `${label} reached; using extra usage`;
     return `Rate limited (${label})`;
   };
+  // Utilization is negative when the harness reported only a status change, so
+  // the banner must not turn it into a percentage.
+  const warningLabel = () => {
+    const r = rl();
+    const label = rateLimitLabel(r?.rateLimitType);
+    const utilization = r?.utilization;
+    if (utilization === undefined || utilization < 0) {
+      return `Rate limit warning: ${label} nearing its limit`;
+    }
+    return `Rate limit warning: ${rateLimitPercentage(utilization)}% of ${label} used`;
+  };
   return (
     <Switch>
       <Match when={rl()?.status === "rejected"}>
@@ -1683,8 +1694,8 @@ function RateLimitBanner(props: { ev: EventMessage }) {
       </Match>
       <Match when={rl()?.status === "allowed_warning"}>
         <div class={styles.rateLimitWarning}>
-          Rate limit warning: {rateLimitPercentage(rl()?.utilization ?? 0)}% of {rateLimitLabel(rl()?.rateLimitType)}{" "}
-          used{resetsLabel()}
+          {warningLabel()}
+          {resetsLabel()}
         </div>
       </Match>
     </Switch>

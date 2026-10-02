@@ -63,6 +63,9 @@ export function isSessionBoundary(ev: EventMessage): boolean {
   return ev.kind === "init" || (ev.kind === "system" && ev.system?.subtype === "compact_boundary");
 }
 
+// rateLimitPercentage converts a utilization fraction to a percentage. A
+// negative utilization means the harness reported only a status change, so
+// callers that display it must check before formatting.
 export function rateLimitPercentage(utilization: number): number {
   return Math.round(utilization * 100);
 }

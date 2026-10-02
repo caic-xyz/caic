@@ -54,8 +54,9 @@ type RuntimeBackend struct {
 
 	vncPort int // non-zero when a fake VNC server is running.
 
-	mu    sync.Mutex
-	repos map[runtime.ID][]runtime.Repo
+	mu       sync.Mutex
+	repos    map[runtime.ID][]runtime.Repo
+	statsSeq int
 }
 
 // NewRuntimeBackend creates a fake runtime backend for smoke and e2e tests.
@@ -258,47 +259,38 @@ func (*RuntimeBackend) Inspect(_ context.Context, id runtime.ID) (*runtime.Insta
 // meaningful per-second throughput.
 const statsSampleInterval = 150 * time.Millisecond
 
-// fakeStatsHistory is the deterministic resource history a watched instance
-// streams. The first sample reports a distinct CPU reading and every later one
-// reports the same value, so a browser test can assert a readout that survives
-// a stream restart: the manager resubscribes whenever any task changes state,
-// which restarts this sequence.
-func fakeStatsHistory() []runtime.Stats {
-	const (
-		count     = 12
-		memLimit  = 4 << 30
-		memStart  = 512 << 20
-		memStep   = 64 << 20
-		diskStart = 1 << 30
-		diskStep  = 32 << 20
-	)
-	history := make([]runtime.Stats, 0, count)
-	for i := range count {
-		cpu := 50.0
-		if i == 0 {
-			cpu = 10
-		}
-		memUsed := uint64(memStart + i*memStep)
-		history = append(history, runtime.Stats{
-			CPUPerc:  cpu,
-			MemUsed:  memUsed,
-			MemLimit: memLimit,
-			MemPerc:  float64(memUsed) / float64(memLimit) * 100,
-			NetRx:    uint64(i) * (64 << 10),
-			NetTx:    uint64(i) * (16 << 10),
-			DiskUsed: int64(diskStart + i*diskStep),
-		})
-	}
-	return history
-}
+// statsStreamSize is the number of samples one WatchStats subscription emits.
+// statsCPUPeriod spans more samples than the retained statistics ring, so no two
+// samples sharing the window report the same CPU reading.
+const (
+	statsStreamSize = 12
+	statsCPUPeriod  = 97
+)
 
 // WatchStats implements runtime.Monitor.
 func (b *RuntimeBackend) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
 	return func(yield func(runtime.StatsSample, error) bool) {
 		if b.StreamStats {
+			const (
+				memLimit  = 4 << 30
+				memStart  = 512 << 20
+				memStep   = 64 << 20
+				diskStart = 1 << 30
+				diskStep  = 32 << 20
+			)
 			ticker := time.NewTicker(statsSampleInterval)
 			defer ticker.Stop()
-			for _, stats := range fakeStatsHistory() {
+			for i := range statsStreamSize {
+				memUsed := uint64(memStart + i*memStep)
+				stats := runtime.Stats{
+					CPUPerc:  float64(b.nextStatsSeq()%statsCPUPeriod + 1),
+					MemUsed:  memUsed,
+					MemLimit: memLimit,
+					MemPerc:  float64(memUsed) / float64(memLimit) * 100,
+					NetRx:    uint64(i) * (64 << 10),
+					NetTx:    uint64(i) * (16 << 10),
+					DiskUsed: int64(diskStart + i*diskStep),
+				}
 				for _, id := range ids {
 					if !yield(runtime.StatsSample{InstanceID: id, Stats: stats}, nil) {
 						return
@@ -337,6 +329,19 @@ func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (
 // SudoPassword implements runtime.PrivilegeInfo.
 func (*RuntimeBackend) SudoPassword(context.Context, runtime.ID) (string, error) {
 	return "", nil
+}
+
+// nextStatsSeq reserves the next CPU index for one streamed sample. The manager
+// resubscribes whenever a task changes state, so histories from several runs
+// land in the same retained ring; consecutive indices keep every CPU reading in
+// that ring unique and let a browser test identify the sample a crosshair
+// readout came from.
+func (b *RuntimeBackend) nextStatsSeq() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	seq := b.statsSeq
+	b.statsSeq++
+	return seq
 }
 
 var _ runtime.System = (*RuntimeBackend)(nil)

@@ -418,7 +418,7 @@ export interface EventRateLimit {
   resetsAt?: ISOTimestamp;
   /** "five_hour", "seven_day", etc. */
   rateLimitType: string;
-  /** 0.0–1.0. */
+  /** 0.0–1.0; -1 when unknown. */
   utilization: number /* float64 */;
   /** True when extra/overage usage is active. */
   isUsingOverage?: boolean;
@@ -1701,8 +1701,8 @@ export interface TaskListEvent {
 export interface QuotaRateLimit {
   /** "5h", "7d", "primary", "secondary", "rpm", "tpd", … */
   window: string;
-  /** 0–100 */
-  usedPct: number /* float64 */;
+  /** 0.0–1.0 */
+  utilization: number /* float64 */;
   /** zero when unknown */
   resetsAt?: ISOTimestamp;
 }
@@ -1727,8 +1727,8 @@ export interface QuotaBalance {
   usedCredits?: number /* float64 */;
   /** spend cap, 0 when unset */
   monthlyLimit?: number /* float64 */;
-  /** 0–100 against the cap */
-  usedPct?: number /* float64 */;
+  /** 0.0–1.0 against the cap */
+  utilization?: number /* float64 */;
 }
 
 /** ProviderQuota is the quota data for one provider. */

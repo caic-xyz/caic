@@ -426,7 +426,7 @@ type EventRateLimit struct {
 	Status          EventRateLimitStatus `json:"status"`
 	ResetsAt        time.Time            `json:"resetsAt,omitzero"`        // When the limit resets; zero if unknown.
 	RateLimitType   string               `json:"rateLimitType"`            // "five_hour", "seven_day", etc.
-	Utilization     float64              `json:"utilization"`              // 0.0–1.0.
+	Utilization     float64              `json:"utilization"`              // 0.0–1.0; -1 when unknown.
 	IsUsingOverage  bool                 `json:"isUsingOverage,omitempty"` // True when extra/overage usage is active.
 	OverageResetsAt time.Time            `json:"overageResetsAt,omitzero"` // When overage resets; zero if not using overage.
 }
