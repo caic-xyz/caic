@@ -1,7 +1,7 @@
 // Application state store: owns task data, settings, SSE wiring, task actions, and account-scoped cache cleanup.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
-import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
+import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 
 import type {
@@ -946,12 +946,15 @@ function createAppStore() {
   const [forkGitHubToken, setForkGitHubToken] = createSignal(false);
   let forkDialogGeneration = 0;
   let forkTargetTouched = false;
-  // Fork dialog harness/model/effort selection, mirroring selectHarness/selectModel/selectEffort.
+  // Update the selection atomically so quota recommendations cannot interrupt it after the harness changes.
   const applyForkHarness = (harness: string) => {
     const model = selectedModelForHarness(harness);
-    setForkHarness(harness);
-    setForkModel(model);
-    setForkEffort(selectedEffortForModel(harness, model));
+    const effort = selectedEffortForModel(harness, model);
+    batch(() => {
+      setForkHarness(harness);
+      setForkModel(model);
+      setForkEffort(effort);
+    });
   };
   const selectForkHarness = (harness: string) => {
     forkTargetTouched = true;
