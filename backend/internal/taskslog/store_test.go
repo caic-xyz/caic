@@ -762,7 +762,7 @@ func TestStore(t *testing.T) {
 					if _, err := loadLogHeader(testLogger(), path, true); err != nil {
 						t.Fatalf("loadLogHeader: %v", err)
 					}
-					if _, err := loadSemanticLog(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+					if _, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 						return claudecode.New().NewWire().ParseMessage, nil
 					})); err != nil {
 						t.Fatalf("loadLogFile: %v", err)
@@ -792,7 +792,7 @@ func TestStore(t *testing.T) {
 						if _, err := loadLogHeader(testLogger(), path, true); err == nil || !strings.Contains(err.Error(), want) {
 							t.Fatalf("loadLogHeader error = %v, want %s", err, want)
 						}
-						if _, err := loadSemanticLog(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
+						if _, err := loadSemanticTask(path, newTestWireResolver(func(harness.Name) (func([]byte) ([]agent.Message, error), error) {
 							return claudecode.New().NewWire().ParseMessage, nil
 						})); err == nil || !strings.Contains(err.Error(), want) {
 							t.Fatalf("loadLogFile error = %v, want %s", err, want)

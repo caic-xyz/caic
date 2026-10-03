@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/andybalholm/brotli v1.2.6
+	github.com/buger/jsonparser v1.6.1
 	github.com/caic-xyz/md v0.18.5-0.20261003204025-1b5207ea8e05
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
@@ -66,7 +67,6 @@ require (
 	github.com/bombsimon/wsl/v5 v5.9.0 // indirect
 	github.com/breml/bidichk v0.3.3 // indirect
 	github.com/breml/errchkjson v0.4.1 // indirect
-	github.com/buger/jsonparser v1.6.1 // indirect
 	github.com/butuzov/ireturn v0.4.1 // indirect
 	github.com/butuzov/mirror v1.3.3 // indirect
 	github.com/catenacyber/perfsprint v0.10.1 // indirect

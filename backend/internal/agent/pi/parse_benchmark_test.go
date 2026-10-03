@@ -189,3 +189,33 @@ func BenchmarkParseSubagentWaitEnd(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkParseMessageUpdateDelta covers the small deltas that dominate long
+// Pi logs, including tool-call deltas that intentionally emit no messages.
+func BenchmarkParseMessageUpdateDelta(b *testing.B) {
+	for _, tc := range []struct {
+		typ  string
+		want int
+	}{
+		{"thinking_delta", 1},
+		{"text_delta", 1},
+		{"toolcall_delta", 0},
+	} {
+		b.Run(tc.typ, func(b *testing.B) {
+			line := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"` + tc.typ + `","contentIndex":0,"delta":"a short streaming fragment"}}`)
+			parser := New("", nil).NewWire().ParseMessage
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				msgs, err := parser(line)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(msgs) != tc.want {
+					b.Fatalf("messages = %d, want %d", len(msgs), tc.want)
+				}
+			}
+		})
+	}
+}

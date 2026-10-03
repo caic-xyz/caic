@@ -51,24 +51,6 @@ type WireResolver interface {
 	ResolveWire(h harness.Name) (agent.WireFormat, error)
 }
 
-// semanticRecord maps one physical record to its parsed messages and optional
-// harness-native identity.
-type semanticRecord struct {
-	end              int
-	control          bool
-	relayRecord      bool
-	relayEnd         int64
-	relayGeneration  string
-	generationMarker bool
-	fingerprint      [32]byte
-}
-
-type semanticLog struct {
-	authority logAuthority
-	messages  []agent.TimedMessage
-	records   []semanticRecord
-}
-
 type physicalLogScanner struct {
 	scanner   *bufio.Scanner
 	src       string
@@ -900,11 +882,33 @@ type LoadedTask struct {
 }
 
 func loadSemanticTask(path string, resolver WireResolver) (*LoadedTask, error) {
-	log, err := loadSemanticLog(path, resolver)
+	loaded := &LoadedTask{}
+	var relayEnd int64
+	var generation string
+	version, err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, encoded []byte) {
+		if record.RelayGeneration != "" {
+			generation = record.RelayGeneration
+			relayEnd = int64(len(encoded) + 1)
+			loaded.RelayRecords = nil
+			loaded.RelayGeneration = generation
+		} else if record.RelayRecord {
+			relayEnd += int64(len(encoded) + 1)
+		}
+		semanticLoadedMessages(loaded, record.Control, record.Messages)
+		if record.RelayRecord {
+			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
+				Generation:  generation,
+				RelayEnd:    relayEnd,
+				MessageEnd:  len(loaded.Timeline),
+				Fingerprint: sha256.Sum256(encoded),
+			})
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
-	return semanticLoadedTask(log), nil
+	loaded.LogVersion = version
+	return loaded, nil
 }
 
 func loadSemanticSessionMetadata(path string, resolver WireResolver) (loaded *LoadedTask, retErr error) {
@@ -947,28 +951,6 @@ func loadSemanticSessionMetadata(path string, resolver WireResolver) (loaded *Lo
 		return nil, retErr
 	}
 	return loaded, nil
-}
-
-func semanticLoadedTask(log *semanticLog) *LoadedTask {
-	loaded := &LoadedTask{LogVersion: log.authority.Version}
-	start := 0
-	for _, record := range log.records {
-		if record.generationMarker {
-			loaded.RelayRecords = nil
-			loaded.RelayGeneration = record.relayGeneration
-		}
-		semanticLoadedMessages(loaded, record.control, log.messages[start:record.end])
-		if record.relayRecord {
-			loaded.RelayRecords = append(loaded.RelayRecords, agent.RelayRecordBoundary{
-				Generation:  record.relayGeneration,
-				RelayEnd:    record.relayEnd,
-				MessageEnd:  len(loaded.Timeline),
-				Fingerprint: record.fingerprint,
-			})
-		}
-		start = record.end
-	}
-	return loaded
 }
 
 func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified time.Time, size int64) *LoadedTask {
@@ -1317,100 +1299,66 @@ func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
 	}
 }
 
-// loadSemanticLog parses one complete task log with a fresh parser selected
-// by its metadata header.
-func loadSemanticLog(path string, resolver WireResolver) (out *semanticLog, retErr error) {
+// scanSemanticLog parses a complete task log with a fresh header-authorized
+// parser and folds each physical record before reusing the scanner buffer.
+// It retains no intermediate message or physical-record arrays.
+func scanSemanticLog(path string, resolver WireResolver, visit func(agent.ParsedRecord, []byte)) (version agent.LogVersion, retErr error) {
 	if resolver == nil {
-		return nil, errors.New("wire resolver is nil")
+		return 0, errors.New("wire resolver is nil")
 	}
 	retErr = scanPhysicalLog(path, true, func(_ os.FileInfo, scanner *physicalLogScanner, _ agent.MetaMessage) error {
+		version = scanner.authority.Version
 		wire, err := resolver.ResolveWire(scanner.authority.Harness)
 		if err != nil {
 			return fmt.Errorf("resolve native wire for harness %q: %w", scanner.authority.Harness, err)
 		}
-		parser, err := agent.NewLogRecordParser(scanner.authority.Version, wire.ParseMessage)
+		parser, err := agent.NewLogRecordParser(version, wire.ParseMessage)
 		if err != nil {
 			return fmt.Errorf("construct log parser: %w", err)
-		}
-		out = &semanticLog{authority: scanner.authority}
-		var relayEnd int64
-		var relayGeneration string
-		appendRecord := func(record agent.ParsedRecord, encoded []byte) {
-			if record.RelayGeneration != "" {
-				relayGeneration = record.RelayGeneration
-				relayEnd = int64(len(encoded) + 1)
-				out.records = append(out.records, semanticRecord{
-					end:              len(out.messages),
-					control:          true,
-					relayRecord:      true,
-					relayEnd:         relayEnd,
-					relayGeneration:  relayGeneration,
-					generationMarker: true,
-					fingerprint:      sha256.Sum256(encoded),
-				})
-				return
-			}
-			if record.RelayRecord {
-				relayEnd += int64(len(encoded) + 1)
-			}
-			if len(record.Messages) == 0 && !record.RelayRecord {
-				return
-			}
-			out.messages = append(out.messages, record.Messages...)
-			out.records = append(out.records, semanticRecord{
-				end:             len(out.messages),
-				control:         record.Control,
-				relayRecord:     record.RelayRecord,
-				relayEnd:        relayEnd,
-				relayGeneration: relayGeneration,
-				fingerprint:     sha256.Sum256(encoded),
-			})
 		}
 		record, err := parser.ParseRecord(scanner.headerRaw)
 		if err != nil {
 			return fmt.Errorf("parse task log bootstrap %s: %w", path, err)
 		}
-		appendRecord(record, scanner.headerRaw)
+		visit(record, scanner.headerRaw)
 		for scanner.Scan() {
 			record, err := parser.ParseRecord(scanner.Bytes())
 			if err != nil {
-				if record.Control || scanner.authority.Version != agent.LogVersionV1 {
+				if record.Control || version != agent.LogVersionV1 {
 					return fmt.Errorf("parse task log %s: %w", path, err)
 				}
 				continue
 			}
-			appendRecord(record, scanner.Bytes())
+			visit(record, scanner.Bytes())
 		}
 		return scanner.Err()
 	})
-	if retErr != nil {
-		return nil, retErr
-	}
-	return out, nil
+	return version, retErr
 }
 
 // ExportDiscussion loads one physical task log with its header-authorized native
 // parser and renders the resulting task data as markdown.
 func ExportDiscussion(path string, resolver WireResolver) (string, error) {
-	log, err := loadSemanticLog(path, resolver)
-	if err != nil {
-		return "", err
-	}
 	var meta *agent.MetaMessage
 	var result *agent.MetaResultMessage
 	var pr *agent.MetaPRMessage
-	messages := make([]agent.Message, 0, len(log.messages))
-	for _, parsed := range log.messages {
-		switch message := parsed.Message.(type) {
-		case *agent.MetaMessage:
-			meta = message
-		case *agent.MetaResultMessage:
-			result = message
-		case *agent.MetaPRMessage:
-			pr = message
-		default:
-			messages = append(messages, message)
+	var messages []agent.Message
+	_, err := scanSemanticLog(path, resolver, func(record agent.ParsedRecord, _ []byte) {
+		for _, parsed := range record.Messages {
+			switch message := parsed.Message.(type) {
+			case *agent.MetaMessage:
+				meta = message
+			case *agent.MetaResultMessage:
+				result = message
+			case *agent.MetaPRMessage:
+				pr = message
+			default:
+				messages = append(messages, message)
+			}
 		}
+	})
+	if err != nil {
+		return "", err
 	}
 	if meta == nil {
 		return "", fmt.Errorf("%s: no caic_meta header", path)

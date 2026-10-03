@@ -8,139 +8,75 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/buger/jsonparser"
 	"github.com/maruel/genai/providers/pi"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// decodeEventType validates the whole event before dispatch, including fields
+// ignored by lifecycle handlers. ObjectEach borrows values instead of copying
+// skipped payloads. The first type wins, but every duplicate must be a string
+// or null, matching the streaming decoder's historical behavior.
 func decodeEventType(line []byte) (pi.EventType, error) {
-	dec := json.NewDecoder(bytes.NewReader(line))
-	if err := consumeObjectStart(dec); err != nil {
-		return "", err
+	if !json.Valid(line) {
+		return "", errors.New("invalid JSON event")
 	}
 	var typ pi.EventType
-	var foundType bool
-	for dec.More() {
-		key, err := nextObjectKey(dec)
-		if err != nil {
-			return "", err
+	var found bool
+	err := jsonparser.ObjectEach(line, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
+		if string(key) != "type" {
+			return nil
 		}
-		if key == "type" {
-			var decoded pi.EventType
-			if err := dec.Decode(&decoded); err != nil {
-				return "", err
+		var decoded string
+		switch kind {
+		case jsonparser.String:
+			var err error
+			decoded, err = jsonparser.ParseString(value)
+			if err != nil {
+				return err
 			}
-			if !foundType {
-				typ = decoded
-				foundType = true
+			if !utf8.ValidString(decoded) {
+				// encoding/json replaces each invalid byte with U+FFFD.
+				decoded = string([]rune(decoded))
 			}
-			continue
+		case jsonparser.Null:
+		default:
+			return fmt.Errorf("event type is %v, want string or null", kind)
 		}
-		if err := discardValue(dec); err != nil {
-			return "", err
+		if !found {
+			typ = pi.EventType(decoded)
+			found = true
 		}
-	}
-	if err := validateUnknownEventRemainder(dec); err != nil {
-		return "", err
-	}
-	return typ, nil
+		return nil
+	})
+	return typ, err
 }
 
-// decodeMessageUpdateEvent decodes only the assistantMessageEvent field,
-// deliberately skipping the line's "message" field: Pi resends the full
-// accumulated assistant message on every delta, and parsing it here would
-// cost O(n²) over a turn's output.
+// decodeMessageUpdateEvent borrows the first assistantMessageEvent field from
+// an event already validated by decodeEventType. Pi can resend the accumulated
+// message on each delta; skipping it avoids copies and quadratic decoding.
 func decodeMessageUpdateEvent(line []byte) (pi.MessageUpdateEvent, error) {
 	var ev pi.MessageUpdateEvent
-	dec := json.NewDecoder(bytes.NewReader(line))
-	if err := consumeObjectStart(dec); err != nil {
+	raw, kind, _, err := jsonparser.Get(line, "assistantMessageEvent")
+	if errors.Is(err, jsonparser.KeyPathNotFoundError) {
+		return ev, nil
+	}
+	if err != nil {
 		return ev, err
 	}
-	for dec.More() {
-		key, err := nextObjectKey(dec)
-		if err != nil {
-			return ev, err
-		}
-		if key == "assistantMessageEvent" {
-			var raw json.RawMessage
-			if err := dec.Decode(&raw); err != nil {
-				return ev, err
-			}
-			if err := json.Unmarshal(raw, &ev.AssistantMessageEvent); err != nil {
-				return ev, err
-			}
-			return ev, nil
-		}
-		if err := discardValue(dec); err != nil {
-			return ev, err
-		}
+	if kind != jsonparser.Object && kind != jsonparser.Null {
+		return ev, fmt.Errorf("assistantMessageEvent is %v, want object or null", kind)
+	}
+	if err := json.Unmarshal(raw, &ev.AssistantMessageEvent); err != nil {
+		return ev, err
 	}
 	return ev, nil
-}
-
-func consumeObjectStart(dec *json.Decoder) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("JSON root is %T, want object", tok)
-	}
-	return nil
-}
-
-func nextObjectKey(dec *json.Decoder) (string, error) {
-	tok, err := dec.Token()
-	if err != nil {
-		return "", err
-	}
-	key, ok := tok.(string)
-	if !ok {
-		return "", fmt.Errorf("JSON object key is %T, want string", tok)
-	}
-	return key, nil
-}
-
-func discardValue(dec *json.Decoder) error {
-	var raw json.RawMessage
-	if err := dec.Decode(&raw); err != nil && err != io.EOF {
-		return err
-	}
-	return nil
-}
-
-func validateUnknownEventRemainder(dec *json.Decoder) error {
-	for dec.More() {
-		if _, err := nextObjectKey(dec); err != nil {
-			return err
-		}
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return err
-		}
-	}
-
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	if delim, ok := tok.(json.Delim); !ok || delim != '}' {
-		return fmt.Errorf("JSON object ends with %T, want closing brace", tok)
-	}
-
-	tok, err = dec.Token()
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("unexpected JSON token %v after object", tok)
 }
 
 // parseMessageTyped decodes a single JSONL line from Pi's stdout into one or

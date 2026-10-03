@@ -1488,7 +1488,7 @@ func TestLoadedTask(t *testing.T) {
 		})
 		t.Run("LoadLogFileNoParser", func(t *testing.T) {
 			t.Parallel()
-			_, err := loadSemanticLog("/does/not/exist.jsonl", nil)
+			_, err := loadSemanticTask("/does/not/exist.jsonl", nil)
 			if err == nil {
 				t.Fatal("expected error when resolver is nil")
 			}

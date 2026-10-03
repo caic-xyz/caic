@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 )
 
 const realTaskLogDirEnv = "CAIC_REAL_TASK_LOG_DIR"
@@ -170,4 +172,32 @@ func linkOrCopyRealTaskLog(source, destination string) error {
 		return errors.Join(err, removeErr)
 	}
 	return nil
+}
+
+// BenchmarkRealTaskLogReplay measures complete semantic replay of one frozen
+// production log. Set CAIC_REAL_TASK_LOG_FILE to a snapshot, then run:
+// go test -tags=real_task_logs ./backend/internal/taskslog -run '^$'
+// -bench '^BenchmarkRealTaskLogReplay$' -benchtime=1x -benchmem -timeout=10m.
+// Large logs can require several GiB of memory; this is outside make benchmark.
+func BenchmarkRealTaskLogReplay(b *testing.B) {
+	path := os.Getenv("CAIC_REAL_TASK_LOG_FILE")
+	if path == "" {
+		b.Skip("set CAIC_REAL_TASK_LOG_FILE to a frozen production log")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	resolver := backends.Default(b.TempDir(), nil)
+	b.SetBytes(info.Size())
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		loaded, err := loadSemanticTask(path, resolver)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.ReportMetric(float64(len(loaded.Timeline)), "messages/op")
+		b.ReportMetric(float64(len(loaded.RelayRecords)), "records/op")
+	}
 }

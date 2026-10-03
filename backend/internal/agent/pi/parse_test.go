@@ -1216,3 +1216,79 @@ func TestParseCompactionEvents(t *testing.T) {
 		}
 	})
 }
+
+func TestDecodeEventType(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct{ name, line, want string }{
+			{"missing", `{"payload":{"type":"nested"}}`, ""},
+			{"null", `{"type":null,"type":"later"}`, ""},
+			{"duplicate", `{"type":"first","type":"later"}`, "first"},
+			{"escaped", `{"ty\u0070e":"fut\u0075re"}`, "future"},
+			{"case sensitive", `{"Type":"future"}`, ""},
+			{"invalid UTF-8", "{\"type\":\"\xff\xff\"}", "\ufffd\ufffd"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				got, err := decodeEventType([]byte(tc.line))
+				if err != nil || string(got) != tc.want {
+					t.Fatalf("type = %q, err = %v, want %q", got, err, tc.want)
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, line := range []string{`[]`, `null`, `1`, `"value"`, `{"type":1}`, `{"type":"first","type":false}`, `{"type":"first","bad":[1,]}`, `{"type":"first"} {}`} {
+			t.Run(line, func(t *testing.T) {
+				t.Parallel()
+				if _, err := decodeEventType([]byte(line)); err == nil {
+					t.Fatal("expected error")
+				}
+			})
+		}
+	})
+}
+
+func TestPiWireMessageUpdateFields(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, line string
+			want       int
+		}{
+			{"escaped key", `{"type":"message_update","assistantMessage\u0045vent":{"type":"text_delta","delta":"hello"}}`, 1},
+			{"first duplicate wins", `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"},"assistantMessageEvent":false}`, 1},
+			{"null first", `{"type":"message_update","assistantMessageEvent":null,"assistantMessageEvent":{"type":"text_delta","delta":"later"}}`, 0},
+			{"missing", `{"type":"message_update","message":{"assistantMessageEvent":{"type":"text_delta","delta":"nested"}}}`, 0},
+			{"ignored tool delta", `{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","delta":"partial"}}`, 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				msgs, err := New("", nil).NewWire().ParseMessage([]byte(tc.line))
+				if err != nil || len(msgs) != tc.want {
+					t.Fatalf("messages = %v, err = %v, want %d", msgs, err, tc.want)
+				}
+				if tc.want == 1 {
+					msg, ok := msgs[0].(*agent.TextDeltaMessage)
+					if !ok || msg.Text != "hello" {
+						t.Fatalf("message = %#v", msgs[0])
+					}
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, field := range []string{`false`, `1`, `"value"`, `[]`, `{"type":"toolcall_delta","delta":1}`} {
+			t.Run(field, func(t *testing.T) {
+				t.Parallel()
+				if _, err := New("", nil).NewWire().ParseMessage([]byte(`{"type":"message_update","assistantMessageEvent":` + field + `}`)); err == nil {
+					t.Fatal("expected error")
+				}
+			})
+		}
+	})
+}
