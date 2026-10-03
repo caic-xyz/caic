@@ -32,12 +32,14 @@ func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []
 }
 
 // estimateUsageRowCost selects today's API-equivalent model price for a
-// historical row. Claude and Codex report unprefixed IDs; the other harnesses
-// carry the billing provider in their model IDs.
+// historical row. Claude and Codex report unprefixed IDs; OpenCode and Pi
+// carry the billing provider in their model IDs. Antigravity pricing is unknown.
 func estimateUsageRowCost(pricer usage.ModelPricer, row *usagedb.UsageRow, at time.Time) (float64, bool) {
 	var provider agent.QuotaProvider
 	var known bool
 	switch harness.Name(row.Harness) {
+	case harness.Antigravity:
+		return 0, false // No verified quota provider or API-equivalent pricing.
 	case harness.Claude:
 		provider, known = agent.QuotaProviderAnthropic, true
 	case harness.Codex:

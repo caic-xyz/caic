@@ -59,6 +59,11 @@ func TestRun(t *testing.T) {
 			input   string
 		}{
 			{
+				name:    "antigravity",
+				harness: "antigravity",
+				input:   `{"event":"user","message":{"content":[{"type":"text","text":"hello"}]}}`,
+			},
+			{
 				name:    "claude",
 				harness: "claude",
 				input:   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`,
@@ -84,6 +89,33 @@ func TestRun(t *testing.T) {
 				var out bytes.Buffer
 				if err := run([]string{path}, &out); err != nil {
 					t.Fatal(err)
+				}
+			})
+		}
+	})
+
+	t.Run("Antigravity output and schema drift", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name   string
+			record string
+			want   string
+		}{
+			{"valid", `{"t":"agent","ts":1.000,"msg":{"event":"init","conversation_id":"s","init":{"model":"gemini-3.8-flash-low"}}}`, ""},
+			{"output drift", `{"t":"agent","ts":1.000,"msg":{"event":"step_update","step_update":{"state":"DONE","future":true}}}`, `unknown field "future"`},
+			{"input drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","future":true}]}}}`, `unknown field "future"`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := writeLog(t, filepath.Join(t.TempDir(), "task.jsonl"), []string{v3Meta("antigravity"), tc.record}, false)
+				var out bytes.Buffer
+				err := run([]string{path}, &out)
+				if tc.want == "" {
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else if err == nil || !strings.Contains(out.String(), tc.want) || !strings.Contains(out.String(), "providers/antigravity/dto.go") {
+					t.Fatalf("schema drift: output=%s err=%v", out.String(), err)
 				}
 			})
 		}

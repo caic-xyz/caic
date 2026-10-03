@@ -6,10 +6,11 @@ type Name string
 
 // Supported agent harnesses.
 const (
-	Claude   Name = "claude"
-	Codex    Name = "codex"
-	OpenCode Name = "opencode"
-	Pi       Name = "pi"
+	Antigravity Name = "antigravity"
+	Claude      Name = "claude"
+	Codex       Name = "codex"
+	OpenCode    Name = "opencode"
+	Pi          Name = "pi"
 )
 
 // RequiresResumeSessionID reports whether h needs a persisted session ID to

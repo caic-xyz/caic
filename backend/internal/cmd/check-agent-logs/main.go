@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	caicopencode "github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/klauspost/compress/zstd"
+	antigravitydto "github.com/maruel/genai/providers/antigravity"
 	claudedto "github.com/maruel/genai/providers/claudecode"
 	codexdto "github.com/maruel/genai/providers/codex"
 	opencodedto "github.com/maruel/genai/providers/opencode"
@@ -80,6 +81,14 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 	var err error
 	var dto string
 	switch harness {
+	case "antigravity":
+		if input {
+			dto = "StreamInputMessage"
+			err = strictDecode(message, &antigravitydto.StreamInputMessage{})
+		} else {
+			dto = "StreamEvent"
+			err = strictDecode(message, &antigravitydto.StreamEvent{})
+		}
 	case "claude":
 		if input {
 			dto, err = checkClaudeInput(message)
