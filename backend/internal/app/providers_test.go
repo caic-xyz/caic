@@ -3,18 +3,72 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"math"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 )
+
+type pingProviderSpy struct {
+	genai.Provider
+
+	pingErr error
+	closed  bool
+}
+
+func (p *pingProviderSpy) Ping(context.Context) error { return p.pingErr }
+
+func (p *pingProviderSpy) Close() error {
+	p.closed = true
+	return nil
+}
+
+func TestPingProvider(t *testing.T) {
+	// Registry mutation requires a non-parallel test.
+	const name = "test-ping-close"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "success", want: true},
+		{name: "error", err: errors.New("ping failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TEST_KEY", "test-key")
+			p := &pingProviderSpy{pingErr: tc.err}
+			providers.All[name] = providers.Config{
+				APIKeyEnvVar: "TEST_KEY",
+				Factory: func(_ context.Context, opts ...genai.ProviderOption) (genai.Provider, error) {
+					if !slices.ContainsFunc(opts, func(o genai.ProviderOption) bool {
+						return o == genai.ProviderOptionAPIKey("test-key")
+					}) {
+						return nil, errors.New("API key is required")
+					}
+					return p, nil
+				},
+			}
+			t.Cleanup(func() { delete(providers.All, name) })
+			if got := pingProvider(t.Context(), slog.New(slog.DiscardHandler), name, nil); got != tc.want {
+				t.Errorf("pingProvider() = %v, want %v", got, tc.want)
+			}
+			if !p.closed {
+				t.Error("provider was not closed")
+			}
+		})
+	}
+}
 
 func TestEstimateUsageRowCost(t *testing.T) {
 	t.Parallel()

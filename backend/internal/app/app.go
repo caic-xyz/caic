@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -57,10 +58,11 @@ type App struct {
 	backgroundTasks []backgroundTask
 	metricsLog      *metricsdb.Log
 	taskMgr         *taskmgr.Manager
+	providerClosers []io.Closer
 }
 
 // New creates the caic backend server application.
-func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Config) (*App, error) {
+func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Config) (_ *App, retErr error) {
 	if log == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -246,12 +248,29 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		forgeManager.SetGitHubApp(app)
 	}
 
+	var providerClosers []io.Closer
+	keepProviders := false
+	defer func() {
+		if !keepProviders {
+			for _, c := range providerClosers {
+				retErr = errors.Join(retErr, c.Close())
+			}
+		}
+	}()
 	provider := initProvider(ctx, appLog, cfg)
+	if provider != nil {
+		providerClosers = append(providerClosers, provider)
+	}
 	for i := range mdRuntimes {
 		mdRuntimes[i].backend.Provider = provider
 	}
 
 	fetchers := usageFetchers(ctx, appLog, cfg)
+	for _, f := range fetchers {
+		if c, ok := f.(io.Closer); ok {
+			providerClosers = append(providerClosers, c)
+		}
+	}
 	checkoutRegistry := repo.NewRegistry()
 	taskMgr, err := taskmgr.New(taskmgr.Config{
 		ServerCtx:           ctx,
@@ -535,12 +554,14 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		},
 	)
 	keepTaskMgr = true
+	keepProviders = true
 	return &App{
 		Server:          s,
 		voiceBridge:     voiceBridge,
 		backgroundTasks: backgroundTasks,
 		metricsLog:      metricsLog,
 		taskMgr:         taskMgr,
+		providerClosers: providerClosers,
 	}, nil
 }
 
@@ -548,6 +569,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 func (a *App) Serve(ctx context.Context, ln net.Listener) (err error) {
 	defer func() {
 		err = errors.Join(err, a.taskMgr.Close(), a.metricsLog.Close())
+		for _, c := range a.providerClosers {
+			err = errors.Join(err, c.Close())
+		}
 	}()
 
 	group, groupCtx := errgroup.WithContext(ctx)

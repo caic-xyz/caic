@@ -298,11 +298,11 @@ var _ agent.WireFormat = (*wireFormat)(nil)
 var _ agent.CompactCommand = (*wireFormat)(nil)
 
 var claudeEffortOptions = []string{
-	claudecode.EffortLow,
-	claudecode.EffortMedium,
-	claudecode.EffortHigh,
-	claudecode.EffortXHigh,
-	claudecode.EffortMax,
+	string(claudecode.EffortLow),
+	string(claudecode.EffortMedium),
+	string(claudecode.EffortHigh),
+	string(claudecode.EffortXHigh),
+	string(claudecode.EffortMax),
 }
 
 func claudeModelInventory() agent.ModelInventory {

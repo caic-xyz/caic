@@ -1228,10 +1228,10 @@ func (b *Backend) logWriters(ctx context.Context, w io.Writer, phase string) (st
 	return w, &SlogWriter{Context: ctx, Logger: b.log, Phase: phase}
 }
 
-// maxCPUsOrDefault returns cpus if non-zero, otherwise [md.DefaultMaxCPUs].
+// maxCPUsOrDefault returns a positive limit or md's runtime-resolved default sentinel.
 func maxCPUsOrDefault(cpus int) int {
 	if cpus <= 0 {
-		return md.DefaultMaxCPUs()
+		return md.DefaultMaxCPUs
 	}
 	return cpus
 }

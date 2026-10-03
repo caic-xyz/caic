@@ -567,8 +567,8 @@ func TestBackend(t *testing.T) {
 		if opts.Platform != "linux/amd64" {
 			t.Errorf("Platform = %q, want linux/amd64", opts.Platform)
 		}
-		if opts.MaxCPUs <= 0 {
-			t.Errorf("MaxCPUs = %d, want positive default", opts.MaxCPUs)
+		if opts.MaxCPUs != -1 {
+			t.Errorf("MaxCPUs = %d, want runtime-resolved default -1", opts.MaxCPUs)
 		}
 		wantRunArgs, err := containerRunArgs()
 		if err != nil {
@@ -599,8 +599,10 @@ func TestBackend(t *testing.T) {
 		if got := maxCPUsOrDefault(5); got != 5 {
 			t.Errorf("maxCPUsOrDefault(5) = %d, want 5", got)
 		}
-		if got := maxCPUsOrDefault(0); got <= 0 {
-			t.Errorf("maxCPUsOrDefault(0) = %d, want positive default", got)
+		for _, cpus := range []int{0, -1} {
+			if got := maxCPUsOrDefault(cpus); got != -1 {
+				t.Errorf("maxCPUsOrDefault(%d) = %d, want runtime-resolved default -1", cpus, got)
+			}
 		}
 	})
 

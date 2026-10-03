@@ -42,10 +42,16 @@ func stubOpenRouterFetcher(t *testing.T, server *httptest.Server) *OpenRouterFet
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &OpenRouterFetcher{
+	f := &OpenRouterFetcher{
 		baseFetcher: newBaseFetcher(agent.QuotaProviderOpenRouter, AuthKindAPIKey, ""),
 		models:      models,
 	}
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("Close() = %v", err)
+		}
+	})
+	return f
 }
 
 func TestOpenRouterFetcherModelPrice(t *testing.T) {

@@ -3,23 +3,23 @@ module github.com/caic-xyz/caic
 go 1.27.0
 
 require (
-	github.com/andybalholm/brotli v1.2.4
-	github.com/caic-xyz/md v0.18.5-0.20261001175834-704bc1804769
+	github.com/andybalholm/brotli v1.2.6
+	github.com/caic-xyz/md v0.18.5-0.20261003135047-78f2e1b365e8
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/huin/goupnp v1.3.0
 	github.com/invopop/jsonschema v0.14.0
-	github.com/klauspost/compress v1.20.0
+	github.com/klauspost/compress v1.20.1
 	github.com/lmittmann/tint v1.2.0
 	github.com/maruel/apisdkgen v0.1.1
-	github.com/maruel/genai v0.8.1
+	github.com/maruel/genai v0.8.2-0.20261003125347-3d02a08a4676
 	github.com/maruel/gomode v0.1.2-0.20261002190001-677182abf052
 	github.com/maruel/ksid v0.1.1
-	github.com/maruel/roundtrippers v0.5.0
+	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.15
 	github.com/mattn/go-isatty v0.0.24
 	github.com/oschwald/maxminddb-golang/v2 v2.6.0
-	github.com/pb33f/ordered-map/v2 v2.3.1
+	github.com/pb33f/ordered-map/v2 v2.3.2
 	github.com/pelletier/go-toml/v2 v2.4.3
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/net v0.59.0
@@ -157,7 +157,7 @@ require (
 	github.com/maratori/testableexamples v1.0.1 // indirect
 	github.com/maratori/testpackage v1.1.2 // indirect
 	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 // indirect
-	github.com/maruel/httpjson v0.5.2 // indirect
+	github.com/maruel/httpjson v0.5.3 // indirect
 	github.com/matoous/godox v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
@@ -170,6 +170,7 @@ require (
 	github.com/nishanths/exhaustive v0.13.0 // indirect
 	github.com/nishanths/predeclared v0.2.2 // indirect
 	github.com/nunnatsa/ginkgolinter v0.24.0 // indirect
+	github.com/pb33f/go-yaml v0.1.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.8 // indirect

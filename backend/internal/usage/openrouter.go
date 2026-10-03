@@ -75,6 +75,14 @@ func NewOpenRouterFetcher(ctx context.Context, apiKey string) *OpenRouterFetcher
 	return f
 }
 
+// Close releases the model listing client after all fetcher calls finish.
+func (f *OpenRouterFetcher) Close() error {
+	if f.models != nil {
+		return f.models.Close()
+	}
+	return nil
+}
+
 // Get returns the cached credit balance.
 func (f *OpenRouterFetcher) Get(ctx context.Context) *ProviderQuota {
 	return f.get(ctx, f.fetch)

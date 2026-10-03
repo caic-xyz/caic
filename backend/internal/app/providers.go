@@ -112,6 +112,11 @@ func pingProvider(ctx context.Context, log *slog.Logger, name string, coreEnv ma
 		log.DebugContext(ctx, "provider factory failed", "prov", name, "err", err)
 		return false
 	}
+	defer func() {
+		if err := p.Close(); err != nil {
+			log.WarnContext(ctx, "close detected provider", "prov", name, "err", err)
+		}
+	}()
 	if pinger, ok := p.(genai.ProviderPing); ok {
 		if err := pinger.Ping(ctx); err != nil {
 			log.DebugContext(ctx, "provider ping failed", "prov", name, "err", err)

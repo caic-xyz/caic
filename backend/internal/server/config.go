@@ -36,6 +36,7 @@ type Config struct {
 
 	// UsageFetchers replaces auto-detected provider usage fetchers.
 	// When non-nil, provider auto-detection is skipped entirely.
+	// App owns these fetchers and closes those that implement io.Closer.
 	UsageFetchers []usage.ProviderFetcher
 }
 
