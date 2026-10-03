@@ -1143,6 +1143,29 @@ object VoiceGatewayModeSerializer : KSerializer<VoiceGatewayMode> {
     }
 }
 
+@Serializable(with = WarningCategorySerializer::class)
+sealed interface WarningCategory {
+    val value: String
+    @Serializable
+    data object CIPollFailed : WarningCategory {
+        override val value = "ci_poll_failed"
+    }
+    @Serializable
+    data class Other(override val value: String) : WarningCategory
+}
+
+object WarningCategorySerializer : KSerializer<WarningCategory> {
+    override val descriptor = PrimitiveSerialDescriptor("WarningCategory", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: WarningCategory) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): WarningCategory {
+        val v = decoder.decodeString()
+        return when (v) {
+            "ci_poll_failed" -> WarningCategory.CIPollFailed
+            else -> WarningCategory.Other(v)
+        }
+    }
+}
+
 typealias DiffStat = List<DiffFileStat>
 
 /** VoiceGatewayMetadata reports structured voice gateway support. */
@@ -2437,6 +2460,22 @@ data class TaskToolInputResp(
     val input: JsonElement,
 )
 
+/** WarningDetail describes a failed operation on a repository. */
+@Serializable
+data class WarningDetail(val repo: String, val error: String)
+
+/**
+ * Warning is an alert episode. ID is stable across detail updates and SSE replay;
+ * a new failure after recovery receives a new ID.
+ */
+@Serializable
+data class Warning(
+    val id: String,
+    val category: WarningCategory,
+    val message: String,
+    val details: List<WarningDetail>,
+)
+
 /**
  * TaskListSettledStatus carries the background task-history load pass state
  * on kind=="status" events. Loading is true while the pass scans and
@@ -2453,7 +2492,7 @@ data class TaskListSettledStatus(val loading: Boolean, val error: String)
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
  * kind=="delete":   Delete holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
- * kind=="warning":  Warning holds a transient server warning message for the user.
+ * kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
  * kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
  */
 @Serializable
@@ -2464,7 +2503,7 @@ data class TaskListEvent(
     val patch: Map<String, JsonElement>? = null,
     val delete: String? = null,
     val repos: List<Repo>? = null,
-    val warning: String? = null,
+    val warning: Warning? = null,
     val status: TaskListSettledStatus? = null,
 )
 

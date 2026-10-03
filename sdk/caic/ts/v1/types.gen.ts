@@ -799,6 +799,13 @@ export const VoiceGatewayModeDisabled = "disabled";
 export const VoiceGatewayModeEmbedded = "embedded";
 export const VoiceGatewayModeExternal = "external";
 
+export type WarningCategory =
+  | "ci_poll_failed";
+/**
+ * Supported values.
+ */
+export const WarningCategoryCIPollFailed = "ci_poll_failed";
+
 /** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];
 
@@ -1672,6 +1679,23 @@ export interface TaskToolInputResp {
   input: any /* json.RawMessage */;
 }
 
+/** WarningDetail describes a failed operation on a repository. */
+export interface WarningDetail {
+  repo: string;
+  error: string;
+}
+
+/**
+ * Warning is an alert episode. ID is stable across detail updates and SSE replay;
+ * a new failure after recovery receives a new ID.
+ */
+export interface Warning {
+  id: string;
+  category: WarningCategory;
+  message: string;
+  details: WarningDetail[];
+}
+
 /**
  * TaskListSettledStatus carries the background task-history load pass state
  * on kind=="status" events. Loading is true while the pass scans and
@@ -1690,7 +1714,7 @@ export interface TaskListSettledStatus {
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
  * kind=="delete":   Delete holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
- * kind=="warning":  Warning holds a transient server warning message for the user.
+ * kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
  * kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
  */
 export interface TaskListEvent {
@@ -1700,7 +1724,7 @@ export interface TaskListEvent {
   patch?: { [key: string]: any /* json.RawMessage */};
   delete?: string;
   repos?: Repo[];
-  warning?: string;
+  warning?: Warning;
   status?: TaskListSettledStatus;
 }
 

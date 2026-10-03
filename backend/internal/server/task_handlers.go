@@ -21,6 +21,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/repo"
@@ -442,7 +443,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	// each task, so a replayed transition is never resent.
 	prevStateSeq := map[string]uint64{}
 	var prevReposJSON []byte
-	var lastWarnTime time.Time
+	ownerID := ""
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+	var lastWarnSeq uint64
 	var prevSettledLoading bool
 	var prevSettledError string
 	first := true
@@ -455,7 +460,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		settledLoading, settledError := h.taskMgr.SettledStatus()
 		out, replays := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq)
 		repoList := repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus)
-		newWarnings := h.warnings.Since(lastWarnTime)
+		newWarnings := h.warnings.Since(ownerID, lastWarnSeq)
 
 		reposJSON, err := json.Marshal(repoList)
 		if err != nil {
@@ -583,14 +588,6 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					delete(prevStateSeq, id)
 				}
 			}
-			// Emit any new warnings.
-			for _, warn := range newWarnings {
-				if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
-					h.log.WarnContext(ctx, "marshal warning", "err", err)
-					return
-				}
-				lastWarnTime = warn.ts
-			}
 
 			// Emit repos update when default-branch CI status has changed.
 			if !bytes.Equal(reposJSON, prevReposJSON) {
@@ -600,6 +597,20 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					return
 				}
 			}
+		}
+
+		// Replay active alerts on connect, then emit diagnostic updates by revision.
+		for _, warn := range newWarnings {
+			info, err := apiconv.Warning(&warn.Warning)
+			if err != nil {
+				h.log.WarnContext(ctx, "convert warning", "err", err)
+				return
+			}
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "warning", Warning: &info}); err != nil {
+				h.log.WarnContext(ctx, "marshal warning", "err", err)
+				return
+			}
+			lastWarnSeq = warn.seq
 		}
 
 		select {

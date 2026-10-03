@@ -1,11 +1,11 @@
-// Tests for app-shell task creation, repo selection, account isolation, and harness preferences.
+// Tests app-shell task creation, repo selection, account isolation, structured warning replay, and harness preferences.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { Config, Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp, UserResp } from "@sdk/types.gen";
+import type { Config, Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp, UserResp, Warning } from "@sdk/types.gen";
 
 // Minimal complete Task, matching what the backend now returns from createTask
 // so the app can seed its store and render the detail view immediately.
@@ -108,6 +108,10 @@ function dispatchSSE(data: unknown) {
   requireLiveSubscription(fakeESListeners, "dispatchSSE");
   const payload = { data: JSON.stringify(data) };
   fakeESListeners.forEach((fn) => fn(payload));
+}
+
+function dispatchWarning(warning: Warning) {
+  dispatchSSE({ kind: "warning", warning });
 }
 
 function dispatchUsageSSE(data: unknown) {
@@ -328,7 +332,67 @@ beforeEach(() => {
 
 afterEach(() => {
   delete window.__CAIC_BOOTSTRAP__;
+  vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("structured warnings", () => {
+  for (const dismissal of ["automatic", "manual"] as const) {
+    it(`updates one episode and stays quiet after ${dismissal} dismissal and replay`, async () => {
+      renderApp();
+      await screen.findByTestId("chip-label-repos/a");
+      await waitForTaskEventsSubscription();
+      vi.useFakeTimers();
+
+      const warning: Warning = {
+        id: "episode-1",
+        category: "ci_poll_failed",
+        message: "Échec de la récupération CI.",
+        details: [{ repo: "repos/a", error: "rate limit exceeded" }],
+      };
+      dispatchWarning(warning);
+      const disclosure = screen.getByText("Details").closest("details");
+      if (!disclosure) throw new Error("Warning details disclosure is missing");
+      fireEvent.click(screen.getByText("Details"));
+      expect(disclosure.open).toBe(true);
+      vi.advanceTimersByTime(7000);
+      const updated: Warning = {
+        ...warning,
+        message: "CI-Abfrage fehlgeschlagen.",
+        details: [...warning.details, { repo: "repos/b", error: "connection refused" }],
+      };
+      dispatchWarning(updated);
+      expect(screen.getAllByText(updated.message)).toHaveLength(1);
+      expect(screen.queryByText(warning.message)).not.toBeInTheDocument();
+      expect(screen.getByText("repos/a")).toBeInTheDocument();
+      expect(screen.getByText("repos/b")).toBeInTheDocument();
+      expect(screen.getByText("Details").closest("details")).toBe(disclosure);
+      expect(disclosure.open).toBe(true);
+
+      if (dismissal === "automatic") {
+        vi.advanceTimersByTime(1000);
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
+      }
+      expect(screen.queryByText(updated.message)).not.toBeInTheDocument();
+
+      dispatchOpen();
+      dispatchWarning({ ...updated, details: [{ repo: "repos/a", error: "request timed out" }] });
+      expect(screen.queryByText(updated.message)).not.toBeInTheDocument();
+
+      // The server assigns a new ID to a failure after recovery.
+      dispatchWarning({ ...warning, id: "episode-2" });
+      expect(screen.getByText(warning.message)).toBeInTheDocument();
+      dispatchWarning({ ...updated, id: "episode-3" });
+      expect(screen.queryByText(warning.message)).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Dismiss warning" })).toHaveLength(1);
+
+      const handlers = vi.mocked(api.globalTaskEvents).mock.calls.at(-1)?.[0];
+      if (!handlers?.onError) throw new Error("Task-list error handler is missing");
+      handlers.onError(new Error("malformed event"));
+      expect(screen.getByText("Task list event error: malformed event")).toBeInTheDocument();
+    });
+  }
 });
 
 it("destroys account A task and repo state before rendering confirmed account B", async () => {
@@ -359,6 +423,13 @@ it("destroys account A task and repo state before rendering confirmed account B"
   await waitForTaskEventsSubscription();
   dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "a-task", title: "Account A task" })] });
   expect(await screen.findByText("Account A task")).toBeInTheDocument();
+  dispatchWarning({
+    id: "same-id",
+    category: "ci_poll_failed",
+    message: "CI polling failed. CI status may be out of date.",
+    details: [{ repo: "repos/a", error: "rate limit exceeded" }],
+  });
+  expect(screen.getByText("CI polling failed. CI status may be out of date.")).toBeInTheDocument();
   await screen.findByTestId("voice-overlay");
   voiceSession.setState((state) => ({ ...state, connected: true }));
   expect(getVoiceTaskNumber("a-task")).toBe(1);
@@ -374,6 +445,7 @@ it("destroys account A task and repo state before rendering confirmed account B"
   expect(screen.getByText("Checking your session…")).toBeInTheDocument();
   expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
   expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
+  expect(screen.queryByText("CI polling failed. CI status may be out of date.")).not.toBeInTheDocument();
   expect(notifications.dismissNotification).toHaveBeenCalledWith("a-task");
   expect(disconnectVoice).toHaveBeenCalled();
   expect(voiceSession.state.connected).toBe(false);
@@ -391,6 +463,13 @@ it("destroys account A task and repo state before rendering confirmed account B"
   injectVoiceText.mockClear();
   dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "b-task", title: "Account B task" })] });
   expect(await screen.findByText("Account B task")).toBeInTheDocument();
+  dispatchWarning({
+    id: "same-id",
+    category: "ci_poll_failed",
+    message: "CI polling failed. CI status may be out of date.",
+    details: [{ repo: "repos/b", error: "connection refused" }],
+  });
+  expect(screen.getByText("CI polling failed. CI status may be out of date.")).toBeInTheDocument();
   expect(injectVoiceText).not.toHaveBeenCalled();
   expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
   expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();

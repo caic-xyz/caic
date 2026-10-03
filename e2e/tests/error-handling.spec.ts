@@ -1,6 +1,7 @@
 // Error handling and edge case tests.
 import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../helpers";
-import type { Harness } from "../../sdk/caic/ts/v1/types.gen";
+import type { Harness, UserResp, Warning } from "../../sdk/caic/ts/v1/types.gen";
+import { validateTaskListEvent } from "../../sdk/caic/ts/v1/validate.gen";
 
 test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) => {
   const err = await api
@@ -9,6 +10,55 @@ test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) 
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(400);
   expect((err as APIError).code).toBeTruthy();
+});
+
+test("categorized CI alerts stay quiet on replay and expose details on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const warning: Warning = {
+    id: "outage-1",
+    category: "ci_poll_failed",
+    message: "Échec de la récupération CI.",
+    details: [
+      { repo: "repos/a", error: "rate limit exceeded" },
+      { repo: "repos/b", error: "connection refused" },
+    ],
+  };
+  let requests = 0;
+  let episode = warning;
+  // Keep the session probe valid so finite SSE fixtures exercise reconnects.
+  await page.route("**/auth/me", (route) =>
+    route.fulfill({
+      json: { id: "warning-test", provider: "github", username: "warning-test" } satisfies UserResp,
+    }),
+  );
+  await page.route("**/api/caic/v1/tasks/events", async (route) => {
+    requests++;
+    const event = validateTaskListEvent({ kind: "warning", warning: episode });
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify(event)}\n\n`,
+    });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Dismiss warning" })).toHaveCount(1);
+  await expect(page.getByText(warning.message)).toBeVisible();
+  await page.getByText("Details", { exact: true }).click();
+  await expect(page.getByText("repos/a", { exact: true })).toBeVisible();
+  await expect(page.getByText("connection refused", { exact: false })).toBeVisible();
+  const bounds = await page.getByText(warning.message).boundingBox();
+  if (!bounds) throw new Error("Warning message is not rendered");
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("ci-warning-mobile.png") });
+  await page.getByRole("button", { name: "Dismiss warning" }).click();
+  const priorRequests = requests;
+  await expect.poll(() => requests).toBeGreaterThan(priorRequests);
+  await expect(page.getByRole("button", { name: "Dismiss warning" })).toHaveCount(0);
+  episode = { ...warning, id: "outage-2" };
+  await expect(page.getByRole("button", { name: "Dismiss warning" })).toHaveCount(1);
+  expect(errors).toEqual([]);
 });
 
 test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) => {

@@ -1,73 +1,86 @@
-// Server warning ring buffer delivered to SSE clients.
+// Account-scoped warning store coalesces categorized failure episodes for SSE clients.
 
 package server
 
 import (
 	"slices"
 	"sync"
-	"time"
 
+	"github.com/maruel/ksid"
+
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
-// serverWarning is a timestamped warning message stored for SSE clients.
 type serverWarning struct {
-	msg string
-	ts  time.Time
+	ci.Warning
+
+	ownerID string
+	seq     uint64
 }
 
-const (
-	// maxWarnings caps the warning ring buffer.
-	maxWarnings = 100
-	// warningDedup suppresses duplicate messages within this window.
-	warningDedup = 5 * time.Minute
-)
-
-// WarningStore is a ring buffer of timestamped server warnings delivered to SSE
-// clients. CI automation (owned by internal/app) writes to it; the task-list SSE
-// handler reads from it.
+// WarningStore retains active alerts by account and category. Recovery removes
+// an alert, so a later failure receives a new ID. Diagnostic updates keep ID.
 type WarningStore struct {
 	taskMgr *taskmgr.Manager
 
 	mu       sync.Mutex
 	warnings []serverWarning
+	seq      uint64
 }
 
-// NewWarningStore creates a warning store that notifies taskMgr subscribers on
-// each new warning.
+// NewWarningStore creates a warning store that wakes task-list subscribers.
 func NewWarningStore(taskMgr *taskmgr.Manager) *WarningStore {
 	return &WarningStore{taskMgr: taskMgr}
 }
 
-// Emit delivers a CI warning to connected SSE clients.
-func (w *WarningStore) Emit(msg string) {
+// Update coalesces an account's alert by category, retaining its episode ID.
+// Details are copied so callers cannot mutate a published warning.
+func (w *WarningStore) Update(ownerID string, category ci.WarningCategory, message string, details []ci.WarningDetail) {
 	w.mu.Lock()
-	now := time.Now()
-	// Deduplicate: skip if the same message was emitted recently.
-	for _, item := range slices.Backward(w.warnings) {
-		if now.Sub(item.ts) > warningDedup {
-			break
-		}
-		if item.msg == msg {
+	idx := slices.IndexFunc(w.warnings, func(item serverWarning) bool {
+		return item.ownerID == ownerID && item.Category == category
+	})
+	var id string
+	if idx >= 0 {
+		previous := w.warnings[idx]
+		if previous.Message == message && slices.Equal(previous.Details, details) {
 			w.mu.Unlock()
 			return
 		}
+		id = previous.ID
+		w.warnings = slices.Delete(w.warnings, idx, idx+1)
+	} else {
+		id = ksid.NewID().String()
 	}
-	w.warnings = append(w.warnings, serverWarning{msg: msg, ts: now})
-	if len(w.warnings) > maxWarnings {
-		w.warnings = w.warnings[len(w.warnings)-maxWarnings:]
-	}
+	w.seq++
+	w.warnings = append(w.warnings, serverWarning{
+		ID: id, Category: category, Message: message, Details: slices.Clone(details),
+		ownerID: ownerID,
+		seq:     w.seq,
+	})
 	w.mu.Unlock()
 	w.taskMgr.NotifyTaskChange()
 }
 
-// Since returns all warnings with a timestamp after t.
-func (w *WarningStore) Since(t time.Time) []serverWarning {
+// Resolve marks recovery for an account and category, removing the active alert.
+func (w *WarningStore) Resolve(ownerID string, category ci.WarningCategory) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.warnings = slices.DeleteFunc(w.warnings, func(item serverWarning) bool {
+		return item.ownerID == ownerID && item.Category == category
+	})
+}
+
+// Since returns active warnings for ownerID newer than the revision cursor.
+// A zero cursor replays active warnings on reconnect, retaining their IDs.
+func (w *WarningStore) Since(ownerID string, seq uint64) []serverWarning {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var out []serverWarning
 	for _, item := range w.warnings {
-		if item.ts.After(t) {
+		if item.ownerID == ownerID && item.seq > seq {
+			item.Details = slices.Clone(item.Details)
 			out = append(out, item)
 		}
 	}

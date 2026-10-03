@@ -1,6 +1,6 @@
-// Toast notification stack rendered via a portal at the bottom of the viewport.
+// Toast notification stack with categorized warning details rendered in a viewport portal.
 
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import { useAppState } from "../AppState";
@@ -14,8 +14,24 @@ export default function Toasts() {
         <For each={s.warnings()}>
           {(w) => (
             <div class={styles.toast}>
-              <span class={styles.toastMessage}>{w.message}</span>
-              <button class={styles.toastDismiss} onClick={() => s.dismissWarning(w.id)}>
+              <div class={styles.toastMessage}>
+                <span>{w.message}</span>
+                <Show when={w.details.length > 0}>
+                  <details>
+                    <summary>Details</summary>
+                    <ul>
+                      <For each={w.details}>
+                        {(d) => (
+                          <li>
+                            <strong>{d.repo}</strong>: {d.error}
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </details>
+                </Show>
+              </div>
+              <button class={styles.toastDismiss} aria-label="Dismiss warning" onClick={() => s.dismissWarning(w.id)}>
                 ×
               </button>
             </div>

@@ -631,6 +631,26 @@ public struct VoiceGatewayMode: Codable, Equatable, Hashable {
     }
 }
 
+public struct WarningCategory: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let CIPollFailed = WarningCategory("ci_poll_failed")
+
+    public static func other(_ value: String) -> WarningCategory { WarningCategory(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 /// DiffStat summarises the changes in a branch relative to its base.
 public typealias DiffStat = [DiffFileStat]
 
@@ -1828,6 +1848,21 @@ public struct TaskToolInputResp: Codable {
     public let input: JSONValue
 }
 
+/// WarningDetail describes a failed operation on a repository.
+public struct WarningDetail: Codable {
+    public let repo: String
+    public let error: String
+}
+
+/// Warning is an alert episode. ID is stable across detail updates and SSE replay;
+/// a new failure after recovery receives a new ID.
+public struct Warning: Codable {
+    public let id: String
+    public let category: WarningCategory
+    public let message: String
+    public let details: [WarningDetail]
+}
+
 /// TaskListSettledStatus carries the background task-history load pass state
 /// on kind=="status" events. Loading is true while the pass scans and
 /// compresses logs; Error is non-empty when the pass could not register its
@@ -1843,7 +1878,7 @@ public struct TaskListSettledStatus: Codable {
 /// kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 /// kind=="delete":   Delete holds the string ID of the removed task.
 /// kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
-/// kind=="warning":  Warning holds a transient server warning message for the user.
+/// kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
 /// kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
 public struct TaskListEvent: Codable {
     public let kind: String
@@ -1852,7 +1887,7 @@ public struct TaskListEvent: Codable {
     public let patch: [String: JSONValue]?
     public let delete: String?
     public let repos: [Repo]?
-    public let warning: String?
+    public let warning: Warning?
     public let status: TaskListSettledStatus?
 }
 

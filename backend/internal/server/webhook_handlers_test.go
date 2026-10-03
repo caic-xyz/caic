@@ -76,9 +76,11 @@ func (b *testCIBackend) SetRepoCIStatusIfChanged(relPath, sha string, result for
 	return b.repoStatus.SetResultIfChanged(relPath, sha, result)
 }
 
-func (b *testCIBackend) NotifyTaskChange()         { b.taskMgr.NotifyTaskChange() }
-func (b *testCIBackend) EmitWarning(string)        {}
-func (b *testCIBackend) Prefs() *preferences.Store { return b.prefs }
+func (b *testCIBackend) NotifyTaskChange() { b.taskMgr.NotifyTaskChange() }
+func (b *testCIBackend) UpdateWarning(context.Context, ci.WarningCategory, string, []ci.WarningDetail) {
+}
+func (b *testCIBackend) ResolveWarning(context.Context, ci.WarningCategory) {}
+func (b *testCIBackend) Prefs() *preferences.Store                          { return b.prefs }
 
 // stubAppClient implements githubAppClient for tests.
 type stubAppClient struct {

@@ -1,7 +1,8 @@
-// Application state store: owns task data, settings, SSE wiring, task actions, and account-scoped cache cleanup.
+// Application state store for task data, settings, SSE, categorized warnings, actions, and account-scoped caches.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
 import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
+import { createStore } from "solid-js/store";
 import { useNavigate, useLocation } from "@solidjs/router";
 
 import type {
@@ -22,6 +23,9 @@ import type {
   RuntimeInfo,
   WellKnownCachesResp,
   VersionResp,
+  Warning as ServerWarning,
+  WarningCategory,
+  WarningDetail,
 } from "@sdk/types.gen";
 
 import { useHostMode } from "@maruel/gomode/web/HostMode";
@@ -60,6 +64,13 @@ type PendingTaskUpdate = { kind: "patch"; patch: Record<string, unknown> } | { k
 
 type TaskRecovery = {
   updates: PendingTaskUpdate[];
+};
+
+type ToastWarning = {
+  id: string;
+  message: string;
+  details: WarningDetail[];
+  category: WarningCategory | null;
 };
 
 function taskDiffChanged(previous: Task, next: Task): boolean {
@@ -210,15 +221,45 @@ function createAppStore() {
     });
   }
 
-  // Transient server warnings shown as auto-dismissing toasts.
-  const [warnings, setWarnings] = createSignal<{ id: number; message: string }[]>([]);
+  // Categorized server alerts retain identity across updates and reconnects.
+  // Keep one last-seen ID per category, rather than an unbounded episode history.
+  const [warningState, setWarningState] = createStore<{ items: ToastWarning[] }>({ items: [] });
+  const warnings = () => warningState.items;
+  const latestWarningIDs = new Map<WarningCategory, string>();
+  const warningTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let nextWarningId = 0;
-  function showWarning(message: string) {
-    const id = nextWarningId++;
-    setWarnings((prev) => [...prev, { id, message }]);
-    setTimeout(() => setWarnings((prev) => prev.filter((w) => w.id !== id)), 8000);
+  function dismissWarning(id: string) {
+    clearTimeout(warningTimers.get(id));
+    warningTimers.delete(id);
+    setWarningState("items", (items) => items.filter((w) => w.id !== id));
   }
-  const dismissWarning = (id: number) => setWarnings((prev) => prev.filter((w) => w.id !== id));
+  function addWarning(warning: ToastWarning) {
+    setWarningState("items", (items) => [...items, warning]);
+    warningTimers.set(
+      warning.id,
+      setTimeout(() => dismissWarning(warning.id), 8000),
+    );
+  }
+  function showWarning(message: string) {
+    addWarning({ id: `local-${nextWarningId++}`, message, details: [], category: null });
+  }
+  function showServerWarning(warning: ServerWarning) {
+    if (latestWarningIDs.get(warning.category) === warning.id) {
+      const idx = warnings().findIndex((w) => w.id === warning.id);
+      // Update an existing toast in place without remounting its disclosure or
+      // restarting its timer. Dismissed episodes stay quiet on SSE replay.
+      if (idx >= 0) {
+        setWarningState("items", idx, { message: warning.message, details: warning.details });
+      }
+      return;
+    }
+    latestWarningIDs.set(warning.category, warning.id);
+    for (const item of warnings().filter((w) => w.category === warning.category)) dismissWarning(item.id);
+    addWarning(warning);
+  }
+  onCleanup(() => {
+    for (const timer of warningTimers.values()) clearTimeout(timer);
+  });
 
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
@@ -748,7 +789,7 @@ function createAppStore() {
               return prev.map((r) => byPath.get(r.path) ?? r);
             });
           } else if (event.kind === "warning" && event.warning) {
-            showWarning(event.warning);
+            showServerWarning(event.warning);
           } else if (event.kind === "status") {
             // Settled-history pass state: emitted on connect and on every
             // transition (in-progress -> completed | failed).

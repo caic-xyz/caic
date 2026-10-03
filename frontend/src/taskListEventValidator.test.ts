@@ -1,4 +1,4 @@
-// Guard for the TaskListEvent SDK validator: proves the settled-history status
+// Guard for the TaskListEvent SDK validator: proves structured warnings and settled-history status.
 // variant survives validateTaskListEvent for a wire-format SSE payload. This is
 // the exact path globalTaskEvents runs on every event, which the component tests
 // bypass by mocking the api module. It fails if the status fields regress into
@@ -34,5 +34,30 @@ describe("validateTaskListEvent settled status", () => {
     expect(ev.kind).toBe("snapshot");
     expect(ev.snapshot).toEqual([]);
     expect(ev.status).toBeUndefined();
+  });
+});
+
+describe("validateTaskListEvent structured warnings", () => {
+  it("preserves identity, category, translated text, and repository diagnostics", () => {
+    const ev = validateTaskListEvent(
+      wire(
+        '{"kind":"warning","warning":{"id":"episode-1","category":"ci_poll_failed","message":"Échec CI","details":[{"repo":"a","error":"timeout"}]}}',
+      ),
+    );
+    expect(ev.warning).toEqual({
+      id: "episode-1",
+      category: "ci_poll_failed",
+      message: "Échec CI",
+      details: [{ repo: "a", error: "timeout" }],
+    });
+  });
+
+  it("rejects warnings with malformed identity or details", () => {
+    for (const warning of [
+      { id: 42, category: "ci_poll_failed", message: "failure", details: [] },
+      { id: "episode-1", category: "ci_poll_failed", message: "failure", details: [{ repo: "a", error: 42 }] },
+    ]) {
+      expect(() => validateTaskListEvent({ kind: "warning", warning })).toThrow();
+    }
   });
 });

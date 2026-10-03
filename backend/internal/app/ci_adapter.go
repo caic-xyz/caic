@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -38,9 +39,22 @@ func (a *ciAdapter) NotifyTaskChange() {
 	a.taskMgr.NotifyTaskChange()
 }
 
-// EmitWarning delivers a CI warning to connected SSE clients.
-func (a *ciAdapter) EmitWarning(msg string) {
-	a.warnings.Emit(msg)
+// UpdateWarning coalesces an authenticated account's warning by category.
+func (a *ciAdapter) UpdateWarning(ctx context.Context, category ci.WarningCategory, message string, details []ci.WarningDetail) {
+	ownerID := ""
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+	a.warnings.Update(ownerID, category, message, details)
+}
+
+// ResolveWarning marks recovery for an authenticated account's warning.
+func (a *ciAdapter) ResolveWarning(ctx context.Context, category ci.WarningCategory) {
+	ownerID := ""
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+	a.warnings.Resolve(ownerID, category)
 }
 
 // GitHubApp returns the GitHub App client for forge operations.

@@ -455,7 +455,7 @@ type TaskInfoObservedRuntime struct {
 // kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 // kind=="delete":   Delete holds the string ID of the removed task.
 // kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
-// kind=="warning":  Warning holds a transient server warning message for the user.
+// kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
 // kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
 type TaskListEvent struct {
 	Kind     string                     `json:"kind"`
@@ -464,7 +464,7 @@ type TaskListEvent struct {
 	Patch    map[string]json.RawMessage `json:"patch,omitempty"`
 	Delete   string                     `json:"delete,omitempty"`
 	Repos    []Repo                     `json:"repos,omitzero"`
-	Warning  string                     `json:"warning,omitempty"`
+	Warning  *Warning                   `json:"warning,omitempty"`
 	Status   *TaskListSettledStatus     `json:"status,omitzero"`
 }
 
@@ -480,6 +480,29 @@ func (e TaskListEvent) MarshalJSON() ([]byte, error) { //nolint:gocritic // json
 		e.Repos = []Repo{}
 	}
 	return json.Marshal(taskListEvent(e))
+}
+
+// WarningCategory identifies a warning independently of translated display text.
+type WarningCategory string
+
+// Supported warning categories.
+const (
+	WarningCategoryCIPollFailed WarningCategory = "ci_poll_failed"
+)
+
+// WarningDetail describes a failed operation on a repository.
+type WarningDetail struct {
+	Repo  string `json:"repo"`
+	Error string `json:"error"`
+}
+
+// Warning is an alert episode. ID is stable across detail updates and SSE replay;
+// a new failure after recovery receives a new ID.
+type Warning struct {
+	ID       string          `json:"id"`
+	Category WarningCategory `json:"category"`
+	Message  string          `json:"message"`
+	Details  []WarningDetail `json:"details"`
 }
 
 // TaskListSettledStatus carries the background task-history load pass state

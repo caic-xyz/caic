@@ -1,4 +1,4 @@
-// CI service: orchestrates CI monitoring, auto-fix loops, and PR creation for forge-connected repos.
+// CI service: orchestrates CI monitoring, coalesced polling alerts, auto-fix loops, and PR creation for forge-connected repos.
 
 package ci
 
@@ -7,11 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -26,6 +30,9 @@ type Service struct {
 	cache    *forgecache.Cache
 	provider genai.Provider
 	backend  Backend
+
+	pollMu  sync.Mutex
+	polling map[string]struct{}
 }
 
 // NewService creates a CI service.
@@ -39,6 +46,7 @@ func NewService(log *slog.Logger, cache *forgecache.Cache, provider genai.Provid
 		cache:    cache,
 		provider: provider,
 		backend:  backend,
+		polling:  make(map[string]struct{}),
 	}
 }
 
@@ -248,6 +256,24 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 // The outer timeout scales with repo count: 2 API calls per repo at 1 req/s
 // (via the throttled HTTP client) plus headroom for retry backoff.
 func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
+	// SSE connections and ticks can overlap. Run one round per account so
+	// an older healthy round cannot resolve a newer failing round's alert.
+	ownerID := ""
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+	svc.pollMu.Lock()
+	if _, ok := svc.polling[ownerID]; ok {
+		svc.pollMu.Unlock()
+		return
+	}
+	svc.polling[ownerID] = struct{}{}
+	svc.pollMu.Unlock()
+	defer func() {
+		svc.pollMu.Lock()
+		delete(svc.polling, ownerID)
+		svc.pollMu.Unlock()
+	}()
 	active := svc.backend.ListActiveRepos()
 
 	// 5 s per API call gives room for the 1 QPS throttle plus Retry backoff.
@@ -255,14 +281,30 @@ func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, total)
 	defer cancel()
 
+	var details []WarningDetail
+	healthy := len(active) > 0
 	for _, info := range active {
 		f := svc.backend.ForgeForInfo(ctx, &info)
 		if f == nil {
+			healthy = false
 			continue
 		}
 		rctx, rcancel := context.WithTimeout(ctx, 60*time.Second)
-		svc.pollRepoCIOnce(rctx, info, f)
+		err := svc.pollRepoCIOnce(rctx, info, f)
 		rcancel()
+		if err != nil {
+			healthy = false
+			if !errors.Is(err, forge.ErrNotFound) {
+				details = append(details, WarningDetail{Repo: info.RelPath, Error: err.Error()})
+			}
+		}
+	}
+	// Empty/no-access rounds and canceled rounds do not prove recovery.
+	if len(details) > 0 {
+		slices.SortFunc(details, func(a, b WarningDetail) int { return strings.Compare(a.Repo, b.Repo) })
+		svc.backend.UpdateWarning(ctx, WarningCategoryCIPollFailed, "CI polling failed. CI status may be out of date.", details)
+	} else if healthy && ctx.Err() == nil {
+		svc.backend.ResolveWarning(ctx, WarningCategoryCIPollFailed)
 	}
 }
 
@@ -375,32 +417,30 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 }
 
 // pollRepoCIOnce fetches the default branch CI status for a single repo.
-// Returns immediately; safe to call from any goroutine with a user context.
-func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.Forge) { //nolint:gocritic // RepoInfo passed by value intentionally
+// Returns the forge error so the caller can aggregate diagnostics for the round.
+func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.Forge) error { //nolint:gocritic // RepoInfo passed by value intentionally
 	sha, err := f.GetDefaultBranchSHA(ctx, info.ForgeOwner, info.ForgeRepo, info.BaseBranch)
 	if err != nil {
 		if !errors.Is(err, forge.ErrNotFound) {
 			svc.log.WarnContext(ctx, "get default branch SHA", "repo", info.RelPath, "err", err)
-			svc.backend.EmitWarning(fmt.Sprintf("CI poll failed for %s: %v", info.RelPath, err))
 		}
-		return
+		return err
 	}
 	// Cache hit: use stored terminal result directly.
 	if cached, ok := svc.cache.Get(info.ForgeOwner, info.ForgeRepo, sha); ok {
 		svc.SetRepoCIStatus(info.RelPath, sha, cached)
-		return
+		return nil
 	}
 	// Fetch check-runs for the new SHA.
 	runs, err := f.GetCheckRuns(ctx, info.ForgeOwner, info.ForgeRepo, sha)
 	if err != nil {
 		if !errors.Is(err, forge.ErrNotFound) {
 			svc.log.WarnContext(ctx, "get check runs", "repo", info.RelPath, "err", err)
-			svc.backend.EmitWarning(fmt.Sprintf("CI poll failed for %s: %v", info.RelPath, err))
 		}
-		return
+		return err
 	}
 	if len(runs) == 0 {
-		return
+		return nil
 	}
 	result, done := EvaluateCheckRuns(info.ForgeOwner, info.ForgeRepo, runs)
 	if !done {
@@ -411,10 +451,11 @@ func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.F
 			repoStatus = forge.CIStatusFailure
 		}
 		svc.SetRepoCIStatus(info.RelPath, sha, forgecache.Result{Status: repoStatus, Checks: result.Checks})
-		return
+		return nil
 	}
 	if err := svc.cache.Put(info.ForgeOwner, info.ForgeRepo, sha, result); err != nil {
 		svc.log.WarnContext(ctx, "cache write failed", "repo", info.RelPath, "err", err)
 	}
 	svc.SetRepoCIStatus(info.RelPath, sha, result)
+	return nil
 }

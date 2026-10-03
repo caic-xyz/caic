@@ -436,6 +436,14 @@ VoiceGatewayMode is the advertised service-side voice gateway mode.
 | `embedded` |  |
 | `external` |  |
 
+### WarningCategory
+
+WarningCategory identifies a warning independently of translated display text.
+
+| Value | Description |
+|-------|-------------|
+| `ci_poll_failed` |  |
+
 ### VoiceGatewayMetadata
 
 VoiceGatewayMetadata reports structured voice gateway support.
@@ -1831,6 +1839,27 @@ It returns the full (untruncated) input for a tool call.
 | `toolUseID` | `string` |  | yes |
 | `input` | `JSONValue` |  | yes |
 
+### WarningDetail
+
+WarningDetail describes a failed operation on a repository.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repo` | `string` |  | yes |
+| `error` | `string` |  | yes |
+
+### Warning
+
+Warning is an alert episode. ID is stable across detail updates and SSE replay;
+a new failure after recovery receives a new ID.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `category` | `WarningCategory` |  | yes |
+| `message` | `string` |  | yes |
+| `details` | `WarningDetail[]` |  | yes |
+
 ### TaskListSettledStatus
 
 TaskListSettledStatus carries the background task-history load pass state
@@ -1851,7 +1880,7 @@ kind=="upsert":   Upsert holds a newly created task.
 kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 kind=="delete":   Delete holds the string ID of the removed task.
 kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
-kind=="warning":  Warning holds a transient server warning message for the user.
+kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
 kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
 
 | Field | Type | Description | Required |
@@ -1862,7 +1891,7 @@ kind=="status":   Status holds the settled-history pass state, emitted on connec
 | `patch` | `Record<string, JSONValue>` |  |  |
 | `delete` | `string` |  |  |
 | `repos` | `Repo[]` |  |  |
-| `warning` | `string` |  |  |
+| `warning` | `Warning` |  |  |
 | `status` | `TaskListSettledStatus` |  |  |
 
 ### QuotaRateLimit

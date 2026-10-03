@@ -1,4 +1,4 @@
-// PR creation flow and forge client resolution for synced branches.
+// CI task contracts, categorized polling warnings, and PR creation flow.
 
 package ci
 
@@ -33,6 +33,28 @@ type RepoInfo struct {
 	ForgeRepo  string
 }
 
+// WarningCategory identifies an alert independently of its display text.
+type WarningCategory string
+
+// Supported warning categories.
+const (
+	WarningCategoryCIPollFailed WarningCategory = "ci_poll_failed"
+)
+
+// WarningDetail describes a failed operation on a repository.
+type WarningDetail struct {
+	Repo  string
+	Error string
+}
+
+// Warning is one failure episode. Updates retain ID until recovery.
+type Warning struct {
+	ID       string
+	Category WarningCategory
+	Message  string
+	Details  []WarningDetail
+}
+
 // TaskEntry is an abstract task handle for CI monitoring.
 type TaskEntry interface {
 	Task() *task.Task
@@ -60,7 +82,8 @@ type Backend interface {
 
 	// Notifications.
 	NotifyTaskChange()
-	EmitWarning(msg string)
+	UpdateWarning(ctx context.Context, category WarningCategory, message string, details []WarningDetail)
+	ResolveWarning(ctx context.Context, category WarningCategory)
 
 	// Preferences.
 	Prefs() *preferences.Store
