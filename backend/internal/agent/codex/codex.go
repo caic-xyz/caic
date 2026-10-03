@@ -438,18 +438,13 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 //
 // It also captures the thread ID from InitMessage (thread/started).
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	// Intercept thread/tokenUsage/updated: derive incremental usage from the
-	// per-thread cumulative total, which Codex may resend unchanged. Codex
-	// reports no separate usage for compaction itself.
-	var probe codex.MessageProbe
-	_ = json.Unmarshal(line, &probe)
-	if probe.Method == codex.MethodTurnStarted {
-		var msg codex.JSONRPCMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			return nil, fmt.Errorf("turn/started: %w", err)
-		}
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal probe: %w", err)
+	}
+	if codex.Method(probe.Method) == codex.MethodTurnStarted {
 		var p codex.TurnStartedNotification
-		if err := json.Unmarshal(msg.Params, &p); err != nil {
+		if err := json.Unmarshal(probe.Params, &p); err != nil {
 			return nil, fmt.Errorf("turn/started params: %w", err)
 		}
 		w.mu.Lock()
@@ -459,7 +454,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		w.threadTurnStarted[p.ThreadID] = true
 		w.mu.Unlock()
 	}
-	if probe.ID != nil && probe.Method == "" {
+	if probe.ID != nil && string(probe.ID) != "null" && probe.Method == "" {
 		var response struct {
 			Result struct {
 				Thread struct {
@@ -481,13 +476,9 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			w.mu.Unlock()
 		}
 	}
-	if probe.Method == codex.MethodTokenUsageUpdated {
-		var msg codex.JSONRPCMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			return nil, fmt.Errorf("tokenUsage/updated: %w", err)
-		}
+	if codex.Method(probe.Method) == codex.MethodTokenUsageUpdated {
 		var p codex.ThreadTokenUsageUpdatedNotification
-		if err := json.Unmarshal(msg.Params, &p); err != nil {
+		if err := json.Unmarshal(probe.Params, &p); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
 		// Current Codex sends prompt_cache_key but no prompt_cache_options or
@@ -553,7 +544,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return []agent.Message{usageMsg}, nil
 	}
 
-	msgs, record, err := parseMessage(line)
+	msgs, record, err := parseMessage(line, &probe)
 	if err != nil {
 		return nil, err
 	}

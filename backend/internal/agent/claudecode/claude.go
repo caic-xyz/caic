@@ -155,13 +155,11 @@ func newWireFormat() *wireFormat {
 // tracking for streaming deltas, session-model attribution for model-less
 // usage records, and Skill tool-result suppression.
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	if estimate, ok := systemThinkingTokenEstimate(line); ok {
-		w.pendingReasoningEstimate += estimate
-	}
 	msgs, record, err := parseMessageWithTracker(line, w.widgetTracker)
 	if err != nil {
 		return nil, err
 	}
+	w.pendingReasoningEstimate += record.reasoningEstimate
 	native, err := w.nativeSubagents.parse(record, msgs)
 	if err != nil {
 		return nil, err

@@ -14,17 +14,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-// decodedLine carries the typed records of one wire line that the canonical
-// conversion drops. A task record must stay out of the transcript, and a tool
-// result is reduced to the fields a message needs, so the parser hands the
-// decoded records over rather than making the adapter unmarshal the line again:
-// a second decode of every user and task record would cost more than the
-// correlation itself.
-type decodedLine struct {
-	system *claudecode.OutputSystemMsg // Set for a task lifecycle record.
-	user   *claudecode.OutputUserMsg   // Set for a decoded user record.
-}
-
 // nativeSubagents folds Claude's subagent evidence into canonical lifecycles.
 //
 // The canonical identity is the native task ID, which every task record carries.

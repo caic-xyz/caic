@@ -4,6 +4,7 @@ package opencode
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -34,12 +35,7 @@ import (
 //   - SystemMessage        — current_mode_update
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func parseMessage(line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
-	var probe opencode.MessageProbe
-	if err := json.Unmarshal(line, &probe); err != nil {
-		return nil, nil, fmt.Errorf("unmarshal probe: %w", err)
-	}
-
+func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
 	// caic-injected lines have a "type" field.
 	if probe.Type != "" {
 		switch probe.Type {
@@ -87,10 +83,7 @@ func parseMessage(line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate,
 	}
 
 	// JSON-RPC notification — dispatch on method.
-	var msg opencode.JSONRPCMessage
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, nil, fmt.Errorf("unmarshal jsonrpc: %w", err)
-	}
+	msg := opencode.JSONRPCMessage{Method: opencode.Method(probe.Method), Params: probe.Params}
 
 	switch msg.Method {
 	case opencode.MethodSessionUpdate:
@@ -109,34 +102,36 @@ func parseMessage(line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate,
 
 // parseSessionUpdate dispatches on the sessionUpdate discriminator.
 func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *opencode.ToolCallUpdateUpdate, error) {
-	var sup opencode.SessionUpdateParams
-	if err := json.Unmarshal(params, &sup); err != nil {
+	update, err := agent.JSONField(params, "update")
+	if err != nil {
 		return nil, nil, fmt.Errorf("session/update params: %w", err)
 	}
-
-	var probe opencode.UpdateProbe
-	if err := json.Unmarshal(sup.Update, &probe); err != nil {
+	if update == nil {
+		return nil, nil, errors.New("session/update params: missing update")
+	}
+	typ, err := agent.JSONString(update, "sessionUpdate")
+	if err != nil {
 		return nil, nil, fmt.Errorf("session/update probe: %w", err)
 	}
 
-	switch probe.SessionUpdate {
+	switch opencode.UpdateType(typ) {
 	case opencode.UpdateAgentMessageChunk:
 		var u opencode.AgentMessageChunkUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil, nil
 
 	case opencode.UpdateAgentThoughtChunk:
 		var u opencode.AgentThoughtChunkUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil, nil
 
 	case opencode.UpdateUserMessageChunk:
 		var u opencode.UserMessageChunkUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil, nil
@@ -145,11 +140,11 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		// The announcement and the update carry the same fields, so decode once
 		// and hand the same value to the conversion and to native correlation.
 		var u opencode.ToolCallUpdateUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", probe.SessionUpdate, err)
+		if err := json.Unmarshal(update, &u); err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", opencode.UpdateType(typ), err)
 		}
 		var msgs []agent.Message
-		if probe.SessionUpdate == opencode.UpdateToolCall {
+		if opencode.UpdateType(typ) == opencode.UpdateToolCall {
 			msgs = parseToolCall(&u)
 		} else {
 			msgs = parseToolCallUpdate(&u)
@@ -157,12 +152,14 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		return msgs, &u, nil
 
 	case opencode.UpdatePlan:
-		msgs, err := parsePlanUpdate(sup.Update)
+		msgs, err := parsePlanUpdate(update)
 		return msgs, nil, err
 
 	case opencode.UpdateUsageUpdate:
+		// ACP reports cumulative session cost, including compaction, separately
+		// from the prompt result. Retain the snapshot for the task fold.
 		var u opencode.UsageUpdateUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("usage_update: %w", err)
 		}
 		usage := &agent.UsageMessage{ContextWindow: u.Size}
@@ -173,7 +170,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 
 	case opencode.UpdateCurrentModeUpdate:
 		var u opencode.CurrentModeUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := json.Unmarshal(update, &u); err != nil {
 			return nil, nil, fmt.Errorf("current_mode_update: %w", err)
 		}
 		return []agent.Message{&agent.SystemMessage{
@@ -189,7 +186,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, *
 		return nil, nil, nil // internal, skip
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(probe.SessionUpdate), Raw: append([]byte(nil), line...)}}, nil, nil
+		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(opencode.UpdateType(typ)), Raw: append([]byte(nil), line...)}}, nil, nil
 	}
 }
 

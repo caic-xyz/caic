@@ -41,3 +41,29 @@ func BenchmarkParseNativeSubagentLines(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkParseStreamingDelta covers the frequent small text and thinking
+// records at the live wire boundary, including stateful dispatch overhead.
+func BenchmarkParseStreamingDelta(b *testing.B) {
+	for _, tc := range []struct{ name, line string }{
+		{"text", `{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":"a short fragment"}}`},
+		{"thinking", `{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":"a short fragment","summaryIndex":0}}`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			line := []byte(tc.line)
+			wire := New("", nil).NewWire()
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				msgs, err := wire.ParseMessage(line)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					b.Fatalf("messages = %d, want 1", len(msgs))
+				}
+			}
+		})
+	}
+}

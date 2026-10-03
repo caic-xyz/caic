@@ -232,15 +232,14 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, log agent.LogSink) err
 
 // ParseMessage wraps the package-level parseMessage with interceptions:
 //
-//   - usage_update → emits the cumulative session cost and context window.
 //   - logged session/prompt requests → restores prompt response correlation.
 //   - session/request_permission → auto-approves with "allow_once".
 //   - prompt responses → emits final Text/Thinking messages and ResultMessage.
 //
 // It also captures the session ID from InitMessage if present.
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	var probe opencode.MessageProbe
-	if err := json.Unmarshal(line, &probe); err != nil {
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
@@ -250,14 +249,10 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		var id int64
 		if json.Unmarshal(probe.ID, &id) == nil {
 			if probe.Method != "" {
-				if probe.Method == opencode.MethodSessionPrompt {
+				if opencode.Method(probe.Method) == opencode.MethodSessionPrompt {
 					w.notePromptRequest(id)
-					params, err := extractParams(line)
-					if err != nil {
-						return nil, fmt.Errorf("extract session/prompt params: %w", err)
-					}
 					var prompt opencode.SessionPromptParams
-					if err := json.Unmarshal(params, &prompt); err != nil {
+					if err := json.Unmarshal(probe.Params, &prompt); err != nil {
 						return nil, fmt.Errorf("unmarshal session/prompt params: %w", err)
 					}
 					input := &agent.UserInputMessage{}
@@ -290,32 +285,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, nil
 	}
 
-	// ACP's cumulative cost includes every stored assistant step in this
-	// session, including compaction. Its prompt result has only the last step;
-	// child-session subagent cost is absent from both parent-session signals.
-	// Retain the cost snapshot for the task fold.
-	if probe.Method == opencode.MethodSessionUpdate {
-		params, err := extractParams(line)
-		if err != nil {
-			return nil, fmt.Errorf("extract params: %w", err)
-		}
-		var sup opencode.SessionUpdateParams
-		if err := json.Unmarshal(params, &sup); err == nil {
-			var uprobe opencode.UpdateProbe
-			if err := json.Unmarshal(sup.Update, &uprobe); err == nil && uprobe.SessionUpdate == opencode.UpdateUsageUpdate {
-				var u opencode.UsageUpdateUpdate
-				if err := json.Unmarshal(sup.Update, &u); err == nil {
-					usage := &agent.UsageMessage{ContextWindow: u.Size}
-					if u.Cost.Currency == "USD" {
-						usage.CumulativeCostUSD = &u.Cost.Amount
-					}
-					return []agent.Message{usage}, nil
-				}
-			}
-		}
-	}
-
-	msgs, toolCall, err := parseMessage(line)
+	msgs, toolCall, err := parseMessage(line, &probe)
 	if err != nil {
 		return nil, err
 	}
@@ -861,13 +831,4 @@ func parseModels(out []byte) ([]agent.Model, error) {
 		return nil, errors.New("no model metadata")
 	}
 	return normalizeModels(models), nil
-}
-
-// extractParams extracts the raw "params" field from a JSON-RPC message.
-func extractParams(line []byte) (json.RawMessage, error) {
-	var p opencode.ParamsProbe
-	if err := json.Unmarshal(line, &p); err != nil {
-		return nil, err
-	}
-	return p.Params, nil
 }

@@ -28,7 +28,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +160,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -199,7 +199,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -275,7 +275,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -316,7 +316,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +350,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -382,7 +382,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -428,7 +428,7 @@ func TestParseMessage(t *testing.T) {
 				map[string]any{"path": "main.go", "added": 10, "deleted": 3},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -454,7 +454,7 @@ func TestParseMessage(t *testing.T) {
 			"id":      1,
 			"result":  map[string]any{"stopReason": "end_turn"},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -487,7 +487,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -519,7 +519,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -543,7 +543,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -574,7 +574,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -603,7 +603,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -634,7 +634,7 @@ func TestParseMessage(t *testing.T) {
 				},
 			},
 		})
-		msgs, _, err := parseMessage(input)
+		msgs, err := parseTestMessage(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1140,7 +1140,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func assertInitMessage(t *testing.T, input []byte, wantSessionID, wantModel, wantVersion string) {
-	msgs, _, err := parseMessage(input)
+	msgs, err := parseTestMessage(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1215,4 +1215,30 @@ func TestAddEditInputView(t *testing.T) {
 			t.Fatalf("file change = %#v", file)
 		}
 	})
+}
+
+func parseTestMessage(line []byte) ([]agent.Message, error) {
+	probe, err := agent.ParseJSONRPCEnvelope(line)
+	if err != nil {
+		return nil, err
+	}
+	msgs, _, err := parseMessage(line, &probe)
+	return msgs, err
+}
+
+func TestReplayBufferOwnership(t *testing.T) {
+	t.Parallel()
+	wire := New("", nil).NewWire()
+	line := []byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call","title":"read","kind":"read","rawInput":{"filePath":"hello.txt"}}}}`)
+	msgs, err := wire.ParseMessage(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range line {
+		line[i] = 'x'
+	}
+	msg, ok := msgs[0].(*agent.ToolUseMessage)
+	if !ok || string(msg.Input) != `{"filePath":"hello.txt"}` {
+		t.Fatalf("message = %#v", msgs)
+	}
 }

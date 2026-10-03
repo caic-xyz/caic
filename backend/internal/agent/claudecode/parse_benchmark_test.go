@@ -87,3 +87,29 @@ func BenchmarkParseBackgroundCommandLines(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkParseStreamingDelta covers the frequent small text and thinking
+// records at the live wire boundary, including stateful dispatch overhead.
+func BenchmarkParseStreamingDelta(b *testing.B) {
+	for _, tc := range []struct{ name, line string }{
+		{"text", `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"a short fragment"}}}`},
+		{"thinking", `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"a short fragment"}}}`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			line := []byte(tc.line)
+			wire := New().NewWire()
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				msgs, err := wire.ParseMessage(line)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					b.Fatalf("messages = %d, want 1", len(msgs))
+				}
+			}
+		})
+	}
+}

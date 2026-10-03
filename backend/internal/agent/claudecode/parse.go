@@ -149,20 +149,44 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 	return nil, false
 }
 
+// decodedLine carries thinking-token estimates and the typed records of one
+// wire line that the canonical conversion drops. A task record stays out of the
+// transcript, and a tool
+// result is reduced to the fields a message needs, so the parser hands the
+// decoded records over rather than making the adapter unmarshal the line again:
+// a second decode of every user and task record would cost more than the
+// correlation itself.
+type decodedLine struct {
+	reasoningEstimate int                         // Nonnegative thinking-token estimate from a system record.
+	system            *claudecode.OutputSystemMsg // Set for a task lifecycle record.
+	user              *claudecode.OutputUserMsg   // Set for a decoded user record.
+}
+
 // parseMessageWithTracker decodes a single Claude Code NDJSON line with
 // optional widget tracking. When wt is non-nil, content_block_start and
 // input_json_delta events for widget tools produce WidgetDeltaMessage. It returns
 // the decoded records of the line so the native-subagent adapter reads the
 // fields the canonical conversion drops without decoding the line again.
 func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, decodedLine, error) {
-	var env claudecode.OutputTypeProbe
-	if err := json.Unmarshal(line, &env); err != nil {
+	typ, err := agent.JSONString(line, "type")
+	if err != nil {
 		return nil, decodedLine{}, fmt.Errorf("unmarshal envelope: %w", err)
 	}
+	// Missing types are uncommon, but malformed records must still surface a
+	// history error rather than leaving stopped-task streams waiting forever.
+	if typ == "" {
+		if err := json.Unmarshal(line, &struct{}{}); err != nil {
+			return nil, decodedLine{}, fmt.Errorf("unmarshal envelope: %w", err)
+		}
+	}
 	var record decodedLine
-	switch env.Type {
+	switch claudecode.OutputType(typ) {
 	case claudecode.OutputSystem:
-		msgs, err := parseSystem(line, env.Subtype, &record)
+		subtype, err := agent.JSONString(line, "subtype")
+		if err != nil {
+			return nil, record, err
+		}
+		msgs, err := parseSystem(line, subtype, &record)
 		return msgs, record, err
 	case claudecode.OutputAssistant:
 		msgs, err := parseAssistant(line)
@@ -242,7 +266,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 		}
 		return []agent.Message{&m}, record, nil
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, record, nil
+		return []agent.Message{&agent.RawMessage{MessageType: typ, Raw: append([]byte(nil), line...)}}, record, nil
 	}
 }
 
@@ -349,7 +373,14 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 			Version:        w.Version,
 		}}, nil
 	}
-	if subtype == "thinking_tokens" {
+	if claudecode.SystemSubtype(subtype) == claudecode.SystemThinkingTokens {
+		var estimate struct {
+			Delta int64 `json:"estimated_tokens_delta"`
+		}
+		if err := json.Unmarshal(line, &estimate); err != nil {
+			return nil, err
+		}
+		record.reasoningEstimate = int(max(0, estimate.Delta))
 		return nil, nil
 	}
 	var w claudecode.OutputSystemMsg
@@ -723,6 +754,44 @@ func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultM
 }
 
 func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
+	event, err := agent.JSONField(line, "event")
+	if err != nil {
+		return nil, err
+	}
+	typ, err := agent.JSONString(event, "type")
+	if err != nil {
+		return nil, err
+	}
+	if typ == "content_block_delta" {
+		delta, err := agent.JSONField(event, "delta")
+		if err != nil {
+			return nil, err
+		}
+		subtype, err := agent.JSONString(delta, "type")
+		if err != nil {
+			return nil, err
+		}
+		switch subtype {
+		case "text_delta":
+			text, err := agent.JSONString(delta, "text")
+			if err != nil {
+				return nil, err
+			}
+			if text == "" {
+				return nil, nil
+			}
+			return []agent.Message{&agent.TextDeltaMessage{Text: text}}, nil
+		case "thinking_delta":
+			text, err := agent.JSONString(delta, "thinking")
+			if err != nil {
+				return nil, err
+			}
+			if text == "" {
+				return nil, nil
+			}
+			return []agent.Message{&agent.ThinkingDeltaMessage{Text: text}}, nil
+		}
+	}
 	var w claudecode.OutputStreamEventMsg
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
@@ -737,25 +806,8 @@ func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
 
 	switch w.Event.Type {
 	case "content_block_delta":
-		if w.Event.Delta.Type == "" {
-			return nil, nil
-		}
-		switch w.Event.Delta.Type {
-		case "text_delta":
-			if w.Event.Delta.Text != "" {
-				return []agent.Message{&agent.TextDeltaMessage{Text: w.Event.Delta.Text}}, nil
-			}
-			return nil, nil
-		case "thinking_delta":
-			if w.Event.Delta.Thinking != "" {
-				return []agent.Message{&agent.ThinkingDeltaMessage{Text: w.Event.Delta.Thinking}}, nil
-			}
-			return nil, nil
-		case "input_json_delta", "signature_delta":
-			return nil, nil
-		default:
-			return nil, nil
-		}
+		// Text/thinking deltas took the fast path; widget JSON was handled above.
+		return nil, nil
 	case "content_block_start", "content_block_stop",
 		"message_start", "message_stop", "message_delta", "ping":
 		if w.Event.Type == "message_delta" && !w.Event.Usage.IsZero() {
@@ -796,17 +848,6 @@ func resultThinkingTokens(line []byte) int {
 		return 0
 	}
 	return usageThinkingTokens(p.Usage)
-}
-
-func systemThinkingTokenEstimate(line []byte) (int, bool) {
-	var w claudecode.OutputSystemMsg
-	if json.Unmarshal(line, &w) != nil ||
-		w.Type != claudecode.OutputSystem ||
-		w.Subtype != claudecode.SystemThinkingTokens ||
-		w.EstimatedTokensDelta <= 0 {
-		return 0, false
-	}
-	return int(w.EstimatedTokensDelta), true
 }
 
 func usageThinkingTokens(raw json.RawMessage) int {

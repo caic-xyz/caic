@@ -37,13 +37,7 @@ import (
 //   - ResultMessage        — turn/completed, error notification
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func parseMessage(line []byte) ([]agent.Message, decodedItem, error) {
-	// Fast probe: check for "type" (caic-injected) vs "method"/"id" (JSON-RPC).
-	var probe codex.MessageProbe
-	if err := json.Unmarshal(line, &probe); err != nil {
-		return nil, decodedItem{}, fmt.Errorf("unmarshal probe: %w", err)
-	}
-
+func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, decodedItem, error) {
 	// caic-injected lines have a "type" field (not "jsonrpc").
 	if probe.Type != "" {
 		switch probe.Type {
@@ -76,15 +70,12 @@ func parseMessage(line []byte) ([]agent.Message, decodedItem, error) {
 	}
 
 	// JSON-RPC response (has "id").
-	if probe.ID != nil {
+	if probe.ID != nil && string(probe.ID) != "null" {
 		return []agent.Message{&agent.RawMessage{MessageType: "jsonrpc_response", Raw: append([]byte(nil), line...)}}, decodedItem{}, nil
 	}
 
 	// JSON-RPC notification — dispatch on method.
-	var msg codex.JSONRPCMessage
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, decodedItem{}, fmt.Errorf("unmarshal jsonrpc: %w", err)
-	}
+	msg := codex.JSONRPCMessage{Method: codex.Method(probe.Method), Params: probe.Params}
 
 	switch msg.Method {
 	case codex.MethodThreadStarted:
@@ -412,17 +403,15 @@ func codexReachedQuotaWindow(reason codex.RateLimitReachedType) string {
 // it. The stateful native-subagent adapter reads that item, so the conversion
 // hands it over instead of making the adapter decode the notification again.
 func decodeItem(method codex.Method, params json.RawMessage) (json.RawMessage, codex.ItemType, error) {
-	var p struct {
-		Item json.RawMessage `json:"item"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
+	raw, err := agent.JSONField(params, "item")
+	if err != nil {
 		return nil, "", fmt.Errorf("%s params: %w", method, err)
 	}
-	var h codex.ItemHeader
-	if err := json.Unmarshal(p.Item, &h); err != nil {
-		return nil, "", fmt.Errorf("%s header: %w", method, err)
+	if raw == nil {
+		return nil, "", fmt.Errorf("%s params: missing item", method)
 	}
-	return p.Item, h.Type, nil
+	typ, err := agent.JSONString(raw, "type")
+	return raw, codex.ItemType(typ), err
 }
 
 // parseItemStarted handles item/started notifications.

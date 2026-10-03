@@ -13,7 +13,7 @@ func BenchmarkParseToolCallUpdateRawOutput(b *testing.B) {
 	line := []byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"in_progress","rawOutput":{"output":"streaming output"}}}}`)
 	b.ReportAllocs()
 	for b.Loop() {
-		msgs, _, err := parseMessage(line)
+		msgs, err := parseTestMessage(line)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -63,6 +63,32 @@ func BenchmarkParseNativeSubagentUpdates(b *testing.B) {
 			for range b.N {
 				if _, err := wire.ParseMessage(line); err != nil {
 					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParseStreamingDelta covers the frequent small text and thinking
+// records at the live wire boundary, including stateful dispatch overhead.
+func BenchmarkParseStreamingDelta(b *testing.B) {
+	for _, tc := range []struct{ name, line string }{
+		{"text", `{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a short fragment"}}}}`},
+		{"thinking", `{"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"a short fragment"}}}}`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			line := []byte(tc.line)
+			wire := New("", nil).NewWire()
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				msgs, err := wire.ParseMessage(line)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(msgs) != 1 {
+					b.Fatalf("messages = %d, want 1", len(msgs))
 				}
 			}
 		})

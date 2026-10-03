@@ -768,3 +768,20 @@ func decodeControlResponse(t *testing.T, data []byte) claudecode.InputControlRes
 	}
 	return got
 }
+
+func TestReplayBufferOwnership(t *testing.T) {
+	t.Parallel()
+	wire := New().NewWire()
+	line := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}`)
+	msgs, err := wire.ParseMessage(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range line {
+		line[i] = 'x'
+	}
+	msg, ok := msgs[0].(*agent.TextDeltaMessage)
+	if !ok || msg.Text != "hello" {
+		t.Fatalf("message = %#v", msgs)
+	}
+}
