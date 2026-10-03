@@ -190,6 +190,13 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 			ReadOnly:              m.ReadOnly,
 		}
 	}
+	runtimeSettings := make(map[string]v1.RuntimeSettings, len(prefs.Settings.RuntimeSettings))
+	for name, settings := range prefs.Settings.RuntimeSettings {
+		runtimeSettings[name] = v1.RuntimeSettings{
+			ContainerPlatform: v1.Platform(settings.ContainerPlatform),
+			MaxCPUs:           settings.MaxCPUs,
+		}
+	}
 	return &v1.PreferencesResp{
 		Repositories: repoPrefs,
 		Harness:      prefs.Harness,
@@ -199,8 +206,7 @@ func (h *serverHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
 			BaseImage:          prefs.Settings.BaseImage,
-			ContainerPlatform:  v1.Platform(prefs.Settings.ContainerPlatform),
-			MaxCPUs:            prefs.Settings.MaxCPUs,
+			RuntimeSettings:    runtimeSettings,
 			PurgeDelay:         prefs.Settings.PurgeDelay,
 			RuntimeName:        prefs.Settings.RuntimeName,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
@@ -223,8 +229,7 @@ func (h *serverHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePr
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
-		p.Settings.ContainerPlatform = md.Platform(req.Settings.ContainerPlatform)
-		p.Settings.MaxCPUs = req.Settings.MaxCPUs
+		p.Settings.RuntimeSettings = runtimeSettingsFromAPI(req.Settings.RuntimeSettings)
 		p.Settings.PurgeDelay = req.Settings.PurgeDelay
 		p.Settings.RuntimeName = req.Settings.RuntimeName
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
@@ -274,6 +279,17 @@ func validatePreferenceSettings(settings *v1.UserSettings) error {
 		}
 	}
 	return nil
+}
+
+func runtimeSettingsFromAPI(settings map[string]v1.RuntimeSettings) map[string]preferences.RuntimeSettings {
+	if settings == nil {
+		return nil
+	}
+	result := make(map[string]preferences.RuntimeSettings, len(settings))
+	for name, config := range settings {
+		result[name] = preferences.RuntimeSettings{ContainerPlatform: md.Platform(config.ContainerPlatform), MaxCPUs: config.MaxCPUs}
+	}
+	return result
 }
 
 func cacheMountsFromSettings(settings *preferences.Settings) ([]caicruntime.CacheMount, error) {

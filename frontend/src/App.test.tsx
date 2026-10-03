@@ -2891,3 +2891,78 @@ describe("SSE test harness", () => {
     expect(() => dispatchSSE({ kind: "upsert" })).toThrow(/no live subscription/);
   });
 });
+
+it("edits CPU settings independently for each runtime", async () => {
+  const config: Config = {
+    displayName: "test",
+    tailscaleAvailable: false,
+    usbAvailable: false,
+    displayAvailable: false,
+    sudoAvailable: false,
+    gitHubTokenAvailable: false,
+    mcpOAuthAvailable: false,
+    voiceGateway: { mode: "disabled" },
+    runtimes: [{ name: "docker" }, { name: "podman" }],
+  };
+  const prefs: PreferencesResp = {
+    repositories: [],
+    settings: {
+      autoFixOnCIFailure: false,
+      autoFixOnPROpen: false,
+      purgeDelay: 15_000_000_000,
+      runtimeName: "docker",
+      runtimeSettings: {
+        docker: { containerPlatform: "linux/amd64", maxCPUs: 4 },
+        podman: { containerPlatform: "linux/arm64", maxCPUs: 2 },
+      },
+    },
+  };
+  vi.mocked(api.getConfig).mockResolvedValue(config);
+  vi.mocked(api.getPreferences).mockResolvedValue(prefs);
+  const view = renderApp("/settings");
+  const docker = await screen.findByRole("group", { name: "docker" });
+  const podman = await screen.findByRole("group", { name: "podman" });
+  await waitFor(() => expect(within(docker).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(4));
+  expect(within(podman).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(2);
+  fireEvent.change(within(docker).getByRole("combobox", { name: "CPU architecture" }), {
+    target: { value: "linux/arm64" },
+  });
+  const cores = within(docker).getByRole("spinbutton", { name: "CPU cores" });
+  fireEvent.change(cores, { target: { value: "6" } });
+  fireEvent.blur(cores);
+  await waitFor(() =>
+    expect(api.updatePreferences).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({
+          runtimeSettings: {
+            docker: { containerPlatform: "linux/arm64", maxCPUs: 6 },
+            podman: { containerPlatform: "linux/arm64", maxCPUs: 2 },
+          },
+        }),
+      }),
+    ),
+  );
+  expect(within(podman).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(2);
+  fireEvent.change(within(podman).getByRole("combobox", { name: "CPU architecture" }), { target: { value: "" } });
+  await waitFor(() =>
+    expect(api.updatePreferences).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({
+          runtimeSettings: {
+            docker: { containerPlatform: "linux/arm64", maxCPUs: 6 },
+            podman: { containerPlatform: "", maxCPUs: 2 },
+          },
+        }),
+      }),
+    ),
+  );
+  const savedCall = vi.mocked(api.updatePreferences).mock.calls.at(-1);
+  if (!savedCall) throw new Error("Settings were not saved");
+  const saved = savedCall[0];
+  vi.mocked(api.getPreferences).mockResolvedValue({ ...prefs, settings: saved.settings });
+  view.unmount();
+  renderApp("/settings");
+  const restored = await screen.findByRole("group", { name: "docker" });
+  await waitFor(() => expect(within(restored).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(6));
+  expect(within(restored).getByRole("combobox", { name: "CPU architecture" })).toHaveValue("linux/arm64");
+});

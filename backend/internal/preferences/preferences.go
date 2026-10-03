@@ -160,6 +160,7 @@ func (p *Preferences) clone() Preferences {
 	c.Settings.CacheMappings = slices.Clone(p.Settings.CacheMappings)
 	c.Settings.CustomMounts = slices.Clone(p.Settings.CustomMounts)
 	c.Settings.WellKnownCaches = maps.Clone(p.Settings.WellKnownCaches)
+	c.Settings.RuntimeSettings = maps.Clone(p.Settings.RuntimeSettings)
 	return c
 }
 
@@ -188,12 +189,8 @@ type Settings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
-	// ContainerPlatform selects the container CPU architecture. Empty means use
-	// the host's native platform.
-	ContainerPlatform md.Platform `json:"containerPlatform,omitempty"`
-	// MaxCPUs limits the number of CPU cores the container may use.
-	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
-	MaxCPUs int `json:"maxCPUs,omitempty"`
+	// RuntimeSettings stores CPU architecture and limits by runtime name.
+	RuntimeSettings map[string]RuntimeSettings `json:"runtimeSettings,omitempty"`
 	// PurgeDelay is the recovery window before a stopped task is deleted.
 	PurgeDelay time.Duration `json:"purgeDelay"`
 	// WellKnownCaches maps cache name to enabled state. Absent or false means
@@ -223,8 +220,13 @@ func (s *Settings) Validate() error {
 			return fmt.Errorf("customMounts[%d]: %w", i, err)
 		}
 	}
-	if err := s.ContainerPlatform.Validate(); err != nil {
-		return fmt.Errorf("unsupported containerPlatform %q", s.ContainerPlatform)
+	for name, settings := range s.RuntimeSettings {
+		if name == "" {
+			return errors.New("runtimeSettings requires a non-empty runtime name")
+		}
+		if err := settings.Validate(); err != nil {
+			return fmt.Errorf("runtimeSettings[%q]: %w", name, err)
+		}
 	}
 	if s.PurgeDelay < MinPurgeDelay || s.PurgeDelay > MaxPurgeDelay {
 		return fmt.Errorf("purgeDelay must be between %s and %s", MinPurgeDelay, MaxPurgeDelay)
@@ -238,6 +240,25 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	type plainSettings Settings
 	*s = defaultSettings()
 	return json.Unmarshal(data, (*plainSettings)(s))
+}
+
+// RuntimeSettings holds CPU configuration for a single runtime.
+type RuntimeSettings struct {
+	// ContainerPlatform selects the CPU architecture. Empty means native.
+	ContainerPlatform md.Platform `json:"containerPlatform,omitempty"`
+	// MaxCPUs limits CPU cores. Zero uses md's automatic runtime default.
+	MaxCPUs int `json:"maxCPUs,omitempty"`
+}
+
+// Validate checks the runtime's CPU configuration.
+func (s *RuntimeSettings) Validate() error {
+	if err := s.ContainerPlatform.Validate(); err != nil {
+		return fmt.Errorf("unsupported containerPlatform %q", s.ContainerPlatform)
+	}
+	if s.MaxCPUs < 0 {
+		return errors.New("maxCPUs must be non-negative")
+	}
+	return nil
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
@@ -336,7 +357,10 @@ func (s *Store) BaseImages() []ContainerImage {
 	for k := range s.cached {
 		settings := s.cached[k].Settings
 		if settings.BaseImage != "" {
-			seen[settings.BaseImage+"\x00"+settings.ContainerPlatform.String()] = struct{}{}
+			seen[settings.BaseImage+"\x00"] = struct{}{}
+			for _, config := range settings.RuntimeSettings {
+				seen[settings.BaseImage+"\x00"+config.ContainerPlatform.String()] = struct{}{}
+			}
 		}
 	}
 	keys := slices.Sorted(maps.Keys(seen))

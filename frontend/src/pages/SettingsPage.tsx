@@ -11,10 +11,8 @@ export default function SettingsPage() {
       <SettingsForm
         selectedImage={s.selectedImage}
         setSelectedImage={s.setSelectedImage}
-        containerPlatform={s.containerPlatform}
-        setContainerPlatform={s.setContainerPlatform}
-        maxCPUs={s.maxCPUs}
-        setMaxCPUs={s.setMaxCPUs}
+        runtimeSettings={s.runtimeSettings}
+        updateRuntimeSettings={s.updateRuntimeSettings}
         purgeDelay={s.purgeDelay}
         setPurgeDelay={s.setPurgeDelay}
         runtimes={s.runtimes}

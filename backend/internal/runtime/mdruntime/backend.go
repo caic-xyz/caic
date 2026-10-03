@@ -1228,7 +1228,8 @@ func (b *Backend) logWriters(ctx context.Context, w io.Writer, phase string) (st
 	return w, &SlogWriter{Context: ctx, Logger: b.log, Phase: phase}
 }
 
-// maxCPUsOrDefault returns a positive limit or md's runtime-resolved default sentinel.
+// maxCPUsOrDefault preserves positive limits and delegates the default to md,
+// which calculates it from the runtime server CPU count at container launch.
 func maxCPUsOrDefault(cpus int) int {
 	if cpus <= 0 {
 		return md.DefaultMaxCPUs

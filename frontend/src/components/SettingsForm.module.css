@@ -297,3 +297,10 @@
   color: var(--color-text-secondary);
   text-transform: uppercase;
 }
+
+.runtimeSettings {
+  min-width: 0;
+  padding: 0.5rem;
+  margin: 0.75rem 0 0;
+  border: 1px solid var(--color-border-light);
+}

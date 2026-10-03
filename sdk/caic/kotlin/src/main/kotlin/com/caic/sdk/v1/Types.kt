@@ -1219,6 +1219,22 @@ data class RepoPrefsResp(
     val requestedModel: String? = null,
 )
 
+/** RuntimeSettings holds CPU configuration for a single runtime. */
+@Serializable
+data class RuntimeSettings(
+    /**
+     * ContainerPlatform selects the runtime CPU architecture. Empty means use
+     * the host's native platform. Valid values are linux/amd64 and linux/arm64.
+     */
+    val containerPlatform: Platform? = null,
+    /**
+     * MaxCPUs limits the number of CPU cores the runtime instance may use.
+     * Zero means use the runtime default: leave two CPUs of headroom where
+     * possible, allowing at least two CPUs when available.
+     */
+    @SerialName("maxCPUs") val maxCPUs: Int? = null,
+)
+
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
 @Serializable
 data class CacheMappingResp(
@@ -1261,16 +1277,8 @@ data class UserSettings(
      * the default.
      */
     val baseImage: String? = null,
-    /**
-     * ContainerPlatform selects the runtime CPU architecture. Empty means use
-     * the host's native platform. Valid values are linux/amd64 and linux/arm64.
-     */
-    val containerPlatform: Platform? = null,
-    /**
-     * MaxCPUs limits the number of CPU cores the runtime instance may use.
-     * Zero means use the system default (max(2, NumCPU-2)).
-     */
-    @SerialName("maxCPUs") val maxCPUs: Int? = null,
+    /** RuntimeSettings stores CPU architecture and limits by runtime name. */
+    val runtimeSettings: Map<String, RuntimeSettings>? = null,
     /**
      * PurgeDelay is the recovery window in nanoseconds before a stopped task is
      * permanently deleted.

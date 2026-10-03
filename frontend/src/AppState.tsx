@@ -17,7 +17,7 @@ import type {
   CacheSize,
   OAuthGrantResp,
   MountMappingResp,
-  Platform,
+  RuntimeSettings,
   PreferencesResp,
   RuntimeInfo,
   WellKnownCachesResp,
@@ -127,9 +127,11 @@ function createAppStore() {
 
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [autoFixPR, setAutoFixPR] = createSignal(false);
-  const [maxCPUs, setMaxCPUs] = createSignal(0);
+  const [runtimeSettings, setRuntimeSettings] = createSignal<Record<string, RuntimeSettings>>({});
+  const updateRuntimeSettings = (name: string, config: Partial<RuntimeSettings>) => {
+    setRuntimeSettings((current) => ({ ...current, [name]: { ...current[name], ...config } }));
+  };
   const [purgeDelay, setPurgeDelay] = createSignal(0);
-  const [containerPlatform, setContainerPlatform] = createSignal("");
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
   const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<Record<string, CacheSize | undefined>>({});
@@ -162,8 +164,7 @@ function createAppStore() {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
-      containerPlatform: (containerPlatform() || "") as Platform,
-      maxCPUs: maxCPUs(),
+      runtimeSettings: runtimeSettings(),
       purgeDelay: purgeDelay(),
       runtimeName: selectedRuntimeName(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
@@ -228,10 +229,9 @@ function createAppStore() {
   const applySettings = (settings: PreferencesResp["settings"]) => {
     setAutoFixCI(settings.autoFixOnCIFailure);
     setAutoFixPR(settings.autoFixOnPROpen);
-    setMaxCPUs(settings.maxCPUs ?? 0);
+    setRuntimeSettings(settings.runtimeSettings ?? {});
     setPurgeDelay(settings.purgeDelay);
     setSelectedRuntimeName(settings.runtimeName ?? selectedRuntimeName());
-    setContainerPlatform(settings.containerPlatform ?? "");
     setWellKnownCaches(settings.wellKnownCaches ?? {});
     setCacheMappings(settings.cacheMappings ?? []);
     setCustomMounts(settings.customMounts ?? []);
@@ -1423,10 +1423,8 @@ function createAppStore() {
     // settings
     selectedImage,
     setSelectedImage,
-    containerPlatform,
-    setContainerPlatform,
-    maxCPUs,
-    setMaxCPUs,
+    runtimeSettings,
+    updateRuntimeSettings,
     purgeDelay,
     setPurgeDelay,
     wellKnownCaches,

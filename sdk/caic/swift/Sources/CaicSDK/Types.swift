@@ -704,6 +704,17 @@ public struct RepoPrefsResp: Codable {
     public let requestedModel: String?
 }
 
+/// RuntimeSettings holds CPU configuration for a single runtime.
+public struct RuntimeSettings: Codable {
+    /// ContainerPlatform selects the runtime CPU architecture. Empty means use
+    /// the host's native platform. Valid values are linux/amd64 and linux/arm64.
+    public let containerPlatform: Platform?
+    /// MaxCPUs limits the number of CPU cores the runtime instance may use.
+    /// Zero means use the runtime default: leave two CPUs of headroom where
+    /// possible, allowing at least two CPUs when available.
+    public let maxCPUs: Int?
+}
+
 /// CacheMappingResp represents a directory mapping for cache/state sharing.
 public struct CacheMappingResp: Codable {
     public let hostPath: String
@@ -737,12 +748,8 @@ public struct UserSettings: Codable {
     /// BaseImage overrides the default runtime base image. Empty means use
     /// the default.
     public let baseImage: String?
-    /// ContainerPlatform selects the runtime CPU architecture. Empty means use
-    /// the host's native platform. Valid values are linux/amd64 and linux/arm64.
-    public let containerPlatform: Platform?
-    /// MaxCPUs limits the number of CPU cores the runtime instance may use.
-    /// Zero means use the system default (max(2, NumCPU-2)).
-    public let maxCPUs: Int?
+    /// RuntimeSettings stores CPU architecture and limits by runtime name.
+    public let runtimeSettings: [String: RuntimeSettings]?
     /// PurgeDelay is the recovery window in nanoseconds before a stopped task is
     /// permanently deleted.
     public let purgeDelay: Int

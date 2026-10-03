@@ -1162,6 +1162,17 @@ type MountMappingResp struct {
 	ReadOnly              bool   `json:"readOnly"`
 }
 
+// RuntimeSettings holds CPU configuration for a single runtime.
+type RuntimeSettings struct {
+	// ContainerPlatform selects the runtime CPU architecture. Empty means use
+	// the host's native platform. Valid values are linux/amd64 and linux/arm64.
+	ContainerPlatform Platform `json:"containerPlatform,omitempty"`
+	// MaxCPUs limits the number of CPU cores the runtime instance may use.
+	// Zero means use the runtime default: leave two CPUs of headroom where
+	// possible, allowing at least two CPUs when available.
+	MaxCPUs int `json:"maxCPUs,omitempty"`
+}
+
 // UserSettings holds user-configurable behavioral settings.
 type UserSettings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
@@ -1174,12 +1185,8 @@ type UserSettings struct {
 	// BaseImage overrides the default runtime base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
-	// ContainerPlatform selects the runtime CPU architecture. Empty means use
-	// the host's native platform. Valid values are linux/amd64 and linux/arm64.
-	ContainerPlatform Platform `json:"containerPlatform,omitempty"`
-	// MaxCPUs limits the number of CPU cores the runtime instance may use.
-	// Zero means use the system default (max(2, NumCPU-2)).
-	MaxCPUs int `json:"maxCPUs,omitempty"`
+	// RuntimeSettings stores CPU architecture and limits by runtime name.
+	RuntimeSettings map[string]RuntimeSettings `json:"runtimeSettings,omitempty"`
 	// PurgeDelay is the recovery window in nanoseconds before a stopped task is
 	// permanently deleted.
 	PurgeDelay time.Duration `json:"purgeDelay"`
@@ -1243,8 +1250,16 @@ func (r *UpdatePreferencesReq) Validate() error {
 	if r.Settings.PurgeDelay < preferences.MinPurgeDelay || r.Settings.PurgeDelay > preferences.MaxPurgeDelay {
 		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("purgeDelay must be between %s and %s", preferences.MinPurgeDelay, preferences.MaxPurgeDelay)}
 	}
-	if err := validateContainerPlatform(r.Settings.ContainerPlatform); err != nil {
-		return err
+	for name, settings := range r.Settings.RuntimeSettings {
+		if name == "" {
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "runtimeSettings requires a non-empty runtime name"}
+		}
+		if err := validateContainerPlatform(settings.ContainerPlatform); err != nil {
+			return err
+		}
+		if settings.MaxCPUs < 0 {
+			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: fmt.Sprintf("runtimeSettings[%q]: maxCPUs must be non-negative", name)}
+		}
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1291,7 +1292,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Set docker image in user preferences.
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
-			p.Settings.ContainerPlatform = "linux/amd64"
+			p.Settings.RuntimeSettings = map[string]preferences.RuntimeSettings{"test-runtime": {ContainerPlatform: "linux/amd64"}, "other": {ContainerPlatform: "linux/arm64", MaxCPUs: 12}}
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1406,8 +1407,8 @@ func TestHandleCreateTask(t *testing.T) {
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
-			p.Settings.ContainerPlatform = "linux/amd64"
-			p.Settings.MaxCPUs = 4
+			p.Settings.RuntimeSettings = map[string]preferences.RuntimeSettings{"test-runtime": {ContainerPlatform: "linux/amd64"}, "other": {ContainerPlatform: "linux/arm64", MaxCPUs: 12}}
+			p.Settings.RuntimeSettings["test-runtime"] = preferences.RuntimeSettings{ContainerPlatform: "linux/amd64", MaxCPUs: 4}
 			p.Settings.CacheMappings = []preferences.CacheMapping{{HostPath: "/host/cache", ContainerPath: "/home/user/.cache", Enabled: true}}
 			p.Settings.CustomMounts = []preferences.MountMapping{{HostPath: "/host/work", ContainerPath: "/workspace/work", Enabled: true, ReadOnly: true}}
 		}); err != nil {
@@ -4051,4 +4052,62 @@ func TestPrefsPerUser(t *testing.T) {
 			t.Error("default prefs should have non-zero version")
 		}
 	})
+}
+
+func TestCreateTaskRuntimeCPUSettings(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		requested string
+		preferred string
+		platform  string
+		cpus      int
+	}{
+		{name: "server_default", platform: "linux/amd64", cpus: 4},
+		{name: "explicit_runtime", requested: "other", platform: "linux/arm64", cpus: 2},
+		{name: "preferred_runtime", preferred: "other", platform: "linux/arm64", cpus: 2},
+		{name: "explicit_overrides_preferred", requested: "test-runtime", preferred: "other", platform: "linux/amd64", cpus: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}})
+			router := s.serverHandlers.runtimes
+			other := &struct {
+				*runtimetest.FakeBackend
+				runtimetest.FakeInfo
+			}{FakeBackend: &runtimetest.FakeBackend{RuntimeName: "other"}}
+			runtimes, err := runtime.NewRouter(append(slices.Clone(router.Runtimes), other), metrics.Nop{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			*router = *runtimes
+			registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
+			if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+				p.Settings.RuntimeName = tc.preferred
+				p.Settings.RuntimeSettings = map[string]preferences.RuntimeSettings{
+					"test-runtime": {ContainerPlatform: "linux/amd64", MaxCPUs: 4},
+					"other":        {ContainerPlatform: "linux/arm64", MaxCPUs: 2},
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			body := fmt.Sprintf(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","runtimeName":%q}`, tc.requested)
+			w := httptest.NewRecorder()
+			handle(testTaskHandlers(s).taskSvc.createTask)(w, httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks", strings.NewReader(body)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			var response v1.Task
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Fatal(err)
+			}
+			entry, ok := s.taskMgr.GetEntry(response.ID)
+			if !ok {
+				t.Fatal("created task missing")
+			}
+			if got := entry.Task(); got.ContainerPlatform != tc.platform || got.MaxCPUs != tc.cpus {
+				t.Fatalf("CPU settings = %s/%d, want %s/%d", got.ContainerPlatform, got.MaxCPUs, tc.platform, tc.cpus)
+			}
+		})
+	}
 }

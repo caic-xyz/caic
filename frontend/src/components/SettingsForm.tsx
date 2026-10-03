@@ -11,6 +11,7 @@ import type {
   MountMappingResp,
   Platform,
   RuntimeInfo,
+  RuntimeSettings,
   UpdatePreferencesReq,
   VersionResp,
   WellKnownCachesResp,
@@ -32,10 +33,8 @@ function defaultContainerPath(hostPath: string, resolvedContainerPath?: string):
 interface SettingsFormProps {
   selectedImage: Accessor<string>;
   setSelectedImage: Setter<string>;
-  containerPlatform: Accessor<string>;
-  setContainerPlatform: Setter<string>;
-  maxCPUs: Accessor<number>;
-  setMaxCPUs: Setter<number>;
+  runtimeSettings: Accessor<Record<string, RuntimeSettings | undefined>>;
+  updateRuntimeSettings: (name: string, settings: Partial<RuntimeSettings>) => void;
   purgeDelay: Accessor<number>;
   setPurgeDelay: Setter<number>;
   runtimes: Accessor<RuntimeInfo[]>;
@@ -130,7 +129,7 @@ export default function SettingsForm(props: SettingsFormProps) {
           </label>
           <Show when={props.runtimes().length > 1}>
             <label class={styles.settingsLabel}>
-              Runtime
+              Default runtime
               <select
                 class={styles.settingsInput}
                 value={props.selectedRuntimeName()}
@@ -150,37 +149,48 @@ export default function SettingsForm(props: SettingsFormProps) {
               </select>
             </label>
           </Show>
-          <label class={styles.settingsLabel}>
-            CPU architecture
-            <select
-              class={styles.settingsInput}
-              value={props.containerPlatform()}
-              onChange={(e) => {
-                const val = e.currentTarget.value as Platform;
-                props.setContainerPlatform(val);
-                void props.saveSettings({ containerPlatform: val });
-              }}
-            >
-              <option value="">Native</option>
-              <option value="linux/amd64">linux/amd64</option>
-              <option value="linux/arm64">linux/arm64</option>
-            </select>
-          </label>
-          <label class={styles.settingsLabel}>
-            CPU cores
-            <input
-              type="number"
-              class={styles.settingsInput}
-              placeholder="Default"
-              min="0"
-              value={props.maxCPUs() || ""}
-              onChange={(e) => props.setMaxCPUs(parseInt(e.currentTarget.value, 10) || 0)}
-              onBlur={() => {
-                void props.saveSettings();
-              }}
-            />
-          </label>
-          <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
+          <For each={props.runtimes()}>
+            {(rt) => (
+              <fieldset class={styles.runtimeSettings}>
+                <legend>{rt.name}</legend>
+                <label class={styles.settingsLabel}>
+                  CPU architecture
+                  <select
+                    class={styles.settingsInput}
+                    value={props.runtimeSettings()[rt.name]?.containerPlatform ?? ""}
+                    onChange={(e) => {
+                      props.updateRuntimeSettings(rt.name, { containerPlatform: e.currentTarget.value as Platform });
+                      void props.saveSettings();
+                    }}
+                  >
+                    <option value="">Native</option>
+                    <option value="linux/amd64">linux/amd64</option>
+                    <option value="linux/arm64">linux/arm64</option>
+                  </select>
+                </label>
+                <label class={styles.settingsLabel}>
+                  CPU cores
+                  <input
+                    type="number"
+                    class={styles.settingsInput}
+                    placeholder="Default"
+                    min="0"
+                    step="1"
+                    value={props.runtimeSettings()[rt.name]?.maxCPUs || ""}
+                    onChange={(e) =>
+                      props.updateRuntimeSettings(rt.name, { maxCPUs: parseInt(e.currentTarget.value, 10) || 0 })
+                    }
+                    onBlur={() => {
+                      void props.saveSettings();
+                    }}
+                  />
+                </label>
+                <p class={styles.settingsDescription}>
+                  Maximum CPU cores for each {rt.name} container (0 = automatic).
+                </p>
+              </fieldset>
+            )}
+          </For>
         </div>
         <div class={styles.settingsSection}>
           <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>

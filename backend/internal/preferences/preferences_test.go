@@ -32,9 +32,9 @@ func TestPreferencesValidate(t *testing.T) {
 			Models:  map[string]string{"claude": "opus", "codex": "o3"},
 			Efforts: EffortPreferences{"claude": {"opus": "max"}, "codex": {"o3": "high"}},
 			Settings: Settings{
-				BaseImage:         "custom:latest",
-				ContainerPlatform: "linux/amd64",
-				PurgeDelay:        91 * time.Second,
+				BaseImage:       "custom:latest",
+				RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}},
+				PurgeDelay:      91 * time.Second,
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
 				},
@@ -74,7 +74,7 @@ func TestPreferencesValidate(t *testing.T) {
 	}
 	t.Run("invalid_container_platform", func(t *testing.T) {
 		t.Parallel()
-		p := &Preferences{Version: currentVersion, Settings: Settings{ContainerPlatform: "linux/386"}}
+		p := &Preferences{Version: currentVersion, Settings: Settings{RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/386"}}, PurgeDelay: MinPurgeDelay}}
 		if err := p.Validate(); err == nil {
 			t.Fatal("expected error for invalid container platform")
 		}
@@ -322,10 +322,10 @@ func TestUsers(t *testing.T) {
 			Models:  map[string]string{"claude": "opus"},
 			Efforts: EffortPreferences{"claude": {"opus": "max"}},
 			Settings: Settings{
-				BaseImage:         "custom:latest",
-				ContainerPlatform: "linux/amd64",
-				PurgeDelay:        91 * time.Second,
-				WellKnownCaches:   map[string]bool{"go-mod": true, "npm": false},
+				BaseImage:       "custom:latest",
+				RuntimeSettings: map[string]RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}},
+				PurgeDelay:      91 * time.Second,
+				WellKnownCaches: map[string]bool{"go-mod": true, "npm": false},
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
 				},
@@ -349,8 +349,8 @@ func TestUsers(t *testing.T) {
 		if got.Settings.BaseImage != want.Settings.BaseImage {
 			t.Errorf("baseImage = %q, want %q", got.Settings.BaseImage, want.Settings.BaseImage)
 		}
-		if got.Settings.ContainerPlatform != want.Settings.ContainerPlatform {
-			t.Errorf("containerPlatform = %q, want %q", got.Settings.ContainerPlatform, want.Settings.ContainerPlatform)
+		if got.Settings.RuntimeSettings["docker"] != want.Settings.RuntimeSettings["docker"] || got.Settings.RuntimeSettings["podman"] != want.Settings.RuntimeSettings["podman"] {
+			t.Errorf("runtimeSettings = %v, want %v", got.Settings.RuntimeSettings, want.Settings.RuntimeSettings)
 		}
 		if got.Settings.PurgeDelay != want.Settings.PurgeDelay {
 			t.Errorf("purgeDelay = %s, want %s", got.Settings.PurgeDelay, want.Settings.PurgeDelay)
@@ -484,6 +484,7 @@ func TestUsers(t *testing.T) {
 			p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
 			p.Efforts = EffortPreferences{"claude": {"opus": "max"}}
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": true}
+			p.Settings.RuntimeSettings = map[string]RuntimeSettings{"docker": {MaxCPUs: 4}}
 			p.Settings.CacheMappings = []CacheMapping{{HostPath: "/a", ContainerPath: "/b", Enabled: true}}
 			p.Settings.CustomMounts = []MountMapping{{HostPath: "/c", ContainerPath: "/d", Enabled: true}}
 		}); err != nil {
@@ -512,6 +513,10 @@ func TestUsers(t *testing.T) {
 			t.Error("efforts map aliased")
 		}
 
+		snapshot.Settings.RuntimeSettings["docker"] = RuntimeSettings{MaxCPUs: 99}
+		if got := s.Get("u"); got.Settings.RuntimeSettings["docker"].MaxCPUs != 4 {
+			t.Fatal("runtime settings snapshot mutated stored preferences")
+		}
 		snapshot.Settings.WellKnownCaches["go-mod"] = false
 		if got := s.Get("u"); !got.Settings.WellKnownCaches["go-mod"] {
 			t.Error("wellKnownCaches map aliased")

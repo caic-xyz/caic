@@ -568,7 +568,7 @@ func TestBackend(t *testing.T) {
 			t.Errorf("Platform = %q, want linux/amd64", opts.Platform)
 		}
 		if opts.MaxCPUs != -1 {
-			t.Errorf("MaxCPUs = %d, want runtime-resolved default -1", opts.MaxCPUs)
+			t.Errorf("MaxCPUs = %d, want automatic runtime default", opts.MaxCPUs)
 		}
 		wantRunArgs, err := containerRunArgs()
 		if err != nil {
@@ -594,15 +594,36 @@ func TestBackend(t *testing.T) {
 		}
 	})
 
-	t.Run("maxCPUsOrDefault", func(t *testing.T) {
+	t.Run("CPU limits", func(t *testing.T) {
 		t.Parallel()
-		if got := maxCPUsOrDefault(5); got != 5 {
-			t.Errorf("maxCPUsOrDefault(5) = %d, want 5", got)
-		}
-		for _, cpus := range []int{0, -1} {
-			if got := maxCPUsOrDefault(cpus); got != -1 {
-				t.Errorf("maxCPUsOrDefault(%d) = %d, want runtime-resolved default -1", cpus, got)
-			}
+		for _, tc := range []struct {
+			name string
+			cpus int
+			want int
+		}{
+			{name: "default", want: -1},
+			{name: "negative", cpus: -2, want: -1},
+			{name: "automatic", cpus: -1, want: -1},
+			{name: "explicit", cpus: 5, want: 5},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1"}}
+				b := newTestBackend(&fakeMDClient{getResult: src})
+				opts, err := b.mdStartOpts(src, &runtime.StartOptions{Harness: harness.Claude, MaxCPUs: tc.cpus})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if opts.MaxCPUs != tc.want {
+					t.Errorf("start MaxCPUs = %d, want %d", opts.MaxCPUs, tc.want)
+				}
+				if _, _, err = b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Claude, MaxCPUs: tc.cpus}); err != nil {
+					t.Fatal(err)
+				}
+				if src.forkOpts == nil || src.forkOpts.MaxCPUs != tc.want {
+					t.Errorf("fork options = %+v, want MaxCPUs %d", src.forkOpts, tc.want)
+				}
+			})
 		}
 	})
 

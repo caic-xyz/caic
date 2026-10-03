@@ -872,6 +872,21 @@ export interface RepoPrefsResp {
   requestedModel?: string;
 }
 
+/** RuntimeSettings holds CPU configuration for a single runtime. */
+export interface RuntimeSettings {
+  /**
+   * ContainerPlatform selects the runtime CPU architecture. Empty means use
+   * the host's native platform. Valid values are linux/amd64 and linux/arm64.
+   */
+  containerPlatform?: Platform;
+  /**
+   * MaxCPUs limits the number of CPU cores the runtime instance may use.
+   * Zero means use the runtime default: leave two CPUs of headroom where
+   * possible, allowing at least two CPUs when available.
+   */
+  maxCPUs?: number /* int */;
+}
+
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
 export interface CacheMappingResp {
   hostPath: string;
@@ -911,16 +926,8 @@ export interface UserSettings {
    * the default.
    */
   baseImage?: string;
-  /**
-   * ContainerPlatform selects the runtime CPU architecture. Empty means use
-   * the host's native platform. Valid values are linux/amd64 and linux/arm64.
-   */
-  containerPlatform?: Platform;
-  /**
-   * MaxCPUs limits the number of CPU cores the runtime instance may use.
-   * Zero means use the system default (max(2, NumCPU-2)).
-   */
-  maxCPUs?: number /* int */;
+  /** RuntimeSettings stores CPU architecture and limits by runtime name. */
+  runtimeSettings?: { [key: string]: RuntimeSettings};
   /**
    * PurgeDelay is the recovery window in nanoseconds before a stopped task is
    * permanently deleted.

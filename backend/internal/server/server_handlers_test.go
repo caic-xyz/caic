@@ -183,13 +183,16 @@ func TestServerHandlers(t *testing.T) {
 
 		want := 91 * time.Second
 		got, err = s.serverHandlers.updatePreferences(t.Context(), &v1.UpdatePreferencesReq{
-			Settings: v1.UserSettings{PurgeDelay: want},
+			Settings: v1.UserSettings{PurgeDelay: want, RuntimeSettings: map[string]v1.RuntimeSettings{"docker": {ContainerPlatform: "linux/amd64", MaxCPUs: 4}, "podman": {ContainerPlatform: "linux/arm64", MaxCPUs: 2}}},
 		})
 		if err != nil {
 			t.Fatalf("updatePreferences: %v", err)
 		}
 		if got.Settings.PurgeDelay != want {
 			t.Errorf("updated purge delay = %s, want %s", got.Settings.PurgeDelay, want)
+		}
+		if got.Settings.RuntimeSettings["docker"].MaxCPUs != 4 || got.Settings.RuntimeSettings["podman"].ContainerPlatform != "linux/arm64" {
+			t.Fatalf("runtime settings not preserved: %+v", got.Settings.RuntimeSettings)
 		}
 	})
 }

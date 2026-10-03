@@ -472,6 +472,10 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 	}
 
 	runtimeName := s.runtimeNameForCreate(req.RuntimeName, &prefs.Settings)
+	if runtimeName == "" {
+		runtimeName = s.runtimes.Runtimes[0].Name()
+	}
+	runtimeSettings := prefs.Settings.RuntimeSettings[string(runtimeName)]
 	cacheMounts, err := cacheMountsFromSettings(&prefs.Settings)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "resolve cache mappings: " + err.Error()}
@@ -501,8 +505,8 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		RuntimeName:         runtimeName,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		BaseImage:           prefs.Settings.BaseImage,
-		ContainerPlatform:   prefs.Settings.ContainerPlatform.String(),
-		MaxCPUs:             prefs.Settings.MaxCPUs,
+		ContainerPlatform:   runtimeSettings.ContainerPlatform.String(),
+		MaxCPUs:             runtimeSettings.MaxCPUs,
 		CacheMounts:         cacheMounts,
 		Mounts:              mounts,
 	})

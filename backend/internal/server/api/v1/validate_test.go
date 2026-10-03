@@ -242,11 +242,28 @@ func TestValidate(t *testing.T) {
 		t.Run("InvalidPlatform", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"containerPlatform":"linux/386","purgeDelay":91000000000}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"runtimeSettings":{"docker":{"containerPlatform":"linux/386"}},"purgeDelay":91000000000}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), `unsupported platform "linux/386"; use linux/amd64 or linux/arm64`)
 		})
+		for _, tc := range []struct {
+			name     string
+			settings string
+			want     string
+		}{
+			{name: "NegativeCPUCount", settings: `"runtimeSettings":{"docker":{"maxCPUs":-1}}`, want: `runtimeSettings["docker"]: maxCPUs must be non-negative`},
+			{name: "EmptyRuntimeName", settings: `"runtimeSettings":{"":{"maxCPUs":4}}`, want: "runtimeSettings requires a non-empty runtime name"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				var r UpdatePreferencesReq
+				if err := json.Unmarshal([]byte(`{"settings":{"purgeDelay":91000000000,`+tc.settings+`}}`), &r); err != nil {
+					t.Fatal(err)
+				}
+				assertBadRequest(t, r.Validate(), tc.want)
+			})
+		}
 		t.Run("AllowsUnsetHomeRelativeContainerPaths", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
