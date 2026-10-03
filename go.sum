@@ -447,10 +447,10 @@ github.com/maratori/testpackage v1.1.2 h1:ffDSh+AgqluCLMXhM19f/cpvQAKygKAJXFl9aU
 github.com/maratori/testpackage v1.1.2/go.mod h1:8F24GdVDFW5Ew43Et02jamrVMNXLUNaOynhDssITGfc=
 github.com/maruel/apisdkgen v0.1.1 h1:YX9g0+QDiKDOpvbH0nTgabCVS1s/RGgsrOHN7VPAHAw=
 github.com/maruel/apisdkgen v0.1.1/go.mod h1:S4tV7GOUaW6aRhd8AQiN5WJkgLtl+DWWISNYwdpbugc=
-github.com/maruel/genai v0.8.2-0.20261003125347-3d02a08a4676 h1:lGVe2ydM0LDr0Dx18+1/0hmsEraFkmUnC/52WgoH5Qk=
-github.com/maruel/genai v0.8.2-0.20261003125347-3d02a08a4676/go.mod h1:a4t2KAGNrtK8Fdz3BUevGwR/A4fy1ANugF10396DRGY=
-github.com/maruel/gomode v0.1.2-0.20261002190001-677182abf052 h1:CAayGnKgiunF0QktQqVC9USmAnvGfZ39hqgrNtRB/V8=
-github.com/maruel/gomode v0.1.2-0.20261002190001-677182abf052/go.mod h1:kQqIDZ5VLylBT6cJar0mCGYU+8JYUIHpZS99o7/ubPE=
+github.com/maruel/genai v0.8.2-0.20261003191951-ce29d0a57a60 h1:SbwA3PoCuaJ4riRau4xiUE7Hw0jR6m6am5rdQO/AOZE=
+github.com/maruel/genai v0.8.2-0.20261003191951-ce29d0a57a60/go.mod h1:a4t2KAGNrtK8Fdz3BUevGwR/A4fy1ANugF10396DRGY=
+github.com/maruel/gomode v0.1.2-0.20261003193509-5b91f5918916 h1:KGELkmPewLloOsHV5PhGlZRkFYgie2o+MSlazv6zm1Q=
+github.com/maruel/gomode v0.1.2-0.20261003193509-5b91f5918916/go.mod h1:KXtpiU8WpK4v1FProexO1Ez0MAMv49fbzc2XwsxHAq0=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 h1:B96AE27WGCnXjaItfg9i6bnj7iGs//NPBDz6kMgKYto=
 github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38/go.mod h1:k6iNRgw7GovdcpFDalSZhuveD/oFLUU188FrWXdduXc=
 github.com/maruel/httpjson v0.5.3 h1:GXxDoiaMJyax0nMR0RfefzDiKd86lbMeqPIgkoFqI2I=
