@@ -424,37 +424,76 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 	}
 
-	phase3 := trace.StartRegion(ctx, "load-live-task-logs")
-	liveLogs, err := loadRuntimeTaskLogs(ctx, logStore, runtimes, instanceRes.instances)
-	if err != nil {
-		appLog.WarnContext(ctx, "load live task logs failed; affected instances will not be imported", "err", err)
-	}
-	phase3.End()
-
-	phase4 := trace.StartRegion(ctx, "import-runtime-instances")
-	imported, err := taskMgr.ImportInstances(ctx, instanceRes.instances, liveLogs)
-	if err != nil {
-		appLog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", err)
-	}
 	backgroundTasks := []backgroundTask{}
-	// Task history loads and usage-rollup backfill run in the background. Both
-	// are best-effort: neither delays server readiness or fails the server group.
+	// Runtime restoration, task history, and usage-rollup backfill run in order
+	// in the background. They are best-effort: none delays server readiness
+	// or fails the server group.
 	// A killed history pass only loses in-memory registration; a killed backfill
 	// leaves its done sentinel absent and retries missing atomic day files.
 	backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
+		started := time.Now()
+		appLog.InfoContext(ctx, "restoring runtime tasks")
+		region := trace.StartRegion(ctx, "load-live-task-logs")
+		liveLogs, loadErr := loadRuntimeTaskLogs(ctx, logStore, runtimes, instanceRes.instances)
+		if loadErr != nil {
+			appLog.WarnContext(ctx, "load live task logs failed; affected instances will not be imported", "err", loadErr)
+		}
+		region.End()
+		region = trace.StartRegion(ctx, "import-runtime-instances")
+		imported, importErr := taskMgr.ImportInstances(ctx, instanceRes.instances, liveLogs)
+		if importErr != nil {
+			appLog.ErrorContext(ctx, "import runtime instances failed; affected instances will remain unmanaged", "err", importErr)
+		}
+		region.End()
+		appLog.InfoContext(ctx, "restored runtime tasks", "n", len(imported), "dur", time.Since(started))
+		importWiring := &importedTaskWiring{
+			log:       log.With("cmp", "import-ci"),
+			authStore: authStore,
+			ciService: ciService,
+			forgeMgr:  forgeManager,
+			taskMgr:   taskMgr,
+		}
+		var wiring sync.WaitGroup
+		defer wiring.Wait()
+		for _, entry := range imported {
+			t := entry.Task()
+			primary := t.Primary()
+			if primary == nil {
+				continue
+			}
+			checkout, ok := taskMgr.Checkouts.Checkout(primary.Name)
+			if !ok || checkout.Repository == nil {
+				continue
+			}
+			if t.GetPR() > 0 {
+				wiring.Go(func() {
+					importWiring.WireCIMonitoring(ctx, entry, checkout)
+				})
+			}
+			if t.ForgeIssue == 0 && t.GetPR() == 0 && primary.Branch != "" {
+				wiring.Go(func() {
+					importWiring.LookupExternalPRForTask(ctx, entry, checkout)
+				})
+			}
+		}
+
+		region = trace.StartRegion(ctx, "bot-resume-comments")
+		botService.ResumePendingComments()
+		region.End()
+
 		// A real failure is logged and reported to the task-list stream; an
 		// interruption from a shutdown is only logged because the stream is
 		// closing anyway.
-		if err := runSettledHistory(ctx, appLog, logStore, taskMgr); err != nil {
+		historyErr := runSettledHistory(ctx, appLog, logStore, taskMgr)
+		if err := historyErr; err != nil {
 			if ctx.Err() != nil {
 				appLog.InfoContext(ctx, "settled history pass interrupted by shutdown", "err", err)
 			} else {
 				appLog.ErrorContext(ctx, "settled history pass failed", "err", err)
 			}
-			taskMgr.CompleteSettledLoad(err)
-		} else {
-			taskMgr.CompleteSettledLoad(nil)
 		}
+		taskMgr.CompleteSettledLoad(errors.Join(loadErr, importErr, historyErr))
+
 		if err := usageRollup.Backfill(ctx, logStore.UsageRows(ctx, taskMgr)); err != nil {
 			if ctx.Err() != nil {
 				appLog.InfoContext(ctx, "usage rollup backfill interrupted by shutdown", "err", err)
@@ -474,41 +513,6 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 		return nil
 	})
-	importWiring := &importedTaskWiring{
-		log:       log.With("cmp", "import-ci"),
-		authStore: authStore,
-		ciService: ciService,
-		forgeMgr:  forgeManager,
-		taskMgr:   taskMgr,
-	}
-	for _, entry := range imported {
-		t := entry.Task()
-		primary := t.Primary()
-		if primary == nil {
-			continue
-		}
-		checkout, ok := taskMgr.Checkouts.Checkout(primary.Name)
-		if !ok || checkout.Repository == nil {
-			continue
-		}
-		if t.GetPR() > 0 {
-			backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
-				importWiring.WireCIMonitoring(ctx, entry, checkout)
-				return nil
-			})
-		}
-		if t.ForgeIssue == 0 && t.GetPR() == 0 && primary.Branch != "" {
-			backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {
-				importWiring.LookupExternalPRForTask(ctx, entry, checkout)
-				return nil
-			})
-		}
-	}
-	phase4.End()
-
-	region := trace.StartRegion(ctx, "bot-resume-comments")
-	botService.ResumePendingComments()
-	region.End()
 
 	if !cfg.Runtime.SkipWarmup {
 		backgroundTasks = append(backgroundTasks, func(ctx context.Context) error {

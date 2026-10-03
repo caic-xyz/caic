@@ -5729,8 +5729,8 @@ func TestManager(t *testing.T) {
 			m.eventMu.Lock()
 			importing := m.importing
 			m.eventMu.Unlock()
-			if importing {
-				t.Fatal("startup import remained fenced after event subscription failed")
+			if !importing {
+				t.Fatal("startup import lost its fence after event subscription failed")
 			}
 		})
 		t.Run("valid_dispatches_death", func(t *testing.T) {

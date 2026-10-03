@@ -1490,6 +1490,9 @@ func newMCPTaskCreateTestRouter(t *testing.T) *testRouter {
 	if err := s.taskMgr.Start(s.TaskMCPScoper); err != nil {
 		t.Fatalf("Start task manager: %v", err)
 	}
+	if _, err := s.taskMgr.ImportInstances(t.Context(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 	return s
 }

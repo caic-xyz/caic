@@ -744,7 +744,8 @@ func (h *taskHandlers) getTask(r *http.Request) (*taskmgr.Entry, error) {
 	return taskEntryFromRequest(r, h.taskMgr)
 }
 
-// taskEntryFromRequest looks up a task by the {id} path parameter.
+// taskEntryFromRequest looks up a task by the {id} path parameter, waiting
+// for runtime restoration before treating an unresolved task as missing.
 // It returns 403 when the caller cannot access the task.
 func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager) (*taskmgr.Entry, error) {
 	id, err := ksid.Parse(r.PathValue("id"))
@@ -752,6 +753,12 @@ func taskEntryFromRequest(r *http.Request, taskMgr *taskmgr.Manager) (*taskmgr.E
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}
 	entry, ok := taskMgr.GetEntry(id)
+	if !ok {
+		if err := taskMgr.WaitForRuntimeImport(r.Context()); err != nil {
+			return nil, err
+		}
+		entry, ok = taskMgr.GetEntry(id)
+	}
 	if !ok {
 		return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task" + " not found"}
 	}

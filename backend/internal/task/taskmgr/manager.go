@@ -137,6 +137,7 @@ type Manager struct {
 	// Guarded by eventMu.
 	eventMu              sync.Mutex
 	importing            bool
+	importDone           chan struct{} // creation waits for startup branch ownership
 	pendingRuntimeEvents []runtime.Event
 
 	// Guarded by quotaWatchMu.
@@ -243,13 +244,9 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 	m.taskMCPScoper = scoper
 	m.eventMu.Lock()
 	m.importing = true
+	m.importDone = make(chan struct{})
 	m.eventMu.Unlock()
 	events, err := m.Runtimes.WatchEvents(m.serverCtx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
-	if err != nil {
-		m.eventMu.Lock()
-		m.importing = false
-		m.eventMu.Unlock()
-	}
 	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, events) })
 	m.background.Go(func() { m.watchStats(m.serverCtx) })
 	m.background.Go(func() { m.watchDiskUsage(m.serverCtx) })
@@ -405,6 +402,12 @@ func (m *Manager) RegisteredLogPaths() map[string]struct{} {
 
 // Create handles the HTTP task creation path.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) { //nolint:gocritic // CreateParams is a request-shaped value bag
+	// Runtime restoration publishes entries only after their histories are
+	// trusted. Wait before allocating branches to avoid adopting one still
+	// owned by an importing task. Reads remain available during restoration.
+	if err := m.WaitForRuntimeImport(ctx); err != nil {
+		return 0, err
+	}
 	// Resolve primary checkout.
 	if len(p.Repos) > 0 {
 		_, ok := m.Checkouts.Checkout(p.Repos[0].Name)
@@ -495,6 +498,25 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 		}
 	})
 	return t.ID, nil
+}
+
+// WaitForRuntimeImport waits until startup restores live task ownership.
+// It returns immediately before Start or after import completion. Callers
+// remain cancellation-aware while creation or an unresolved lookup is fenced.
+func (m *Manager) WaitForRuntimeImport(ctx context.Context) error {
+	m.eventMu.Lock()
+	ready := m.importDone
+	m.eventMu.Unlock()
+	if ready != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-m.serverCtx.Done():
+			return m.serverCtx.Err()
+		case <-ready:
+		}
+	}
+	return nil
 }
 
 // GetEntry returns the entry for taskID.
@@ -1492,6 +1514,7 @@ func (m *Manager) completeRuntimeImport(ctx context.Context) {
 		m.pendingRuntimeEvents = nil
 		if len(events) == 0 {
 			m.importing = false
+			close(m.importDone)
 			m.eventMu.Unlock()
 			return
 		}

@@ -1149,6 +1149,9 @@ func TestHandleCreateTask(t *testing.T) {
 		if err := s.taskMgr.Start(s.TaskMCPScoper); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := s.taskMgr.ImportInstances(t.Context(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "myrepo", newRouterTestCheckout(t.TempDir()))
 		handler := handle(testTaskHandlers(s).taskSvc.createTask)
 
