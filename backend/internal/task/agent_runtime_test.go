@@ -1995,7 +1995,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Errorf("Fetch calls = %+v, want one fetch without a commit", got)
 			}
 			<-done
-			if got := persisted.String(); !strings.Contains(got, `"t":"diff_stat"`) || !strings.Contains(got, `"repos"`) || !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"2222222222222222222222222222222222222222"`) {
+			if got := persisted.String(); !strings.Contains(got, `"t":"git_summary"`) || !strings.Contains(got, `"repos"`) || !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"2222222222222222222222222222222222222222"`) {
 				t.Errorf("persisted task log = %q, want turn commit snapshot", got)
 			}
 			select {

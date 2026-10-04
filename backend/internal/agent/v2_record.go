@@ -73,7 +73,7 @@ func (t logRecordType) controlKind() (logControlKind, bool) {
 	switch t {
 	case logRecordMeta:
 		return logControlMeta, true
-	case logRecordDiffStat:
+	case logRecordDiffStat, logRecordGitSummary:
 		return logControlDiffStat, true
 	case logRecordExit:
 		return logControlExit, true
@@ -114,11 +114,13 @@ func (t logRecordType) relayOwned() bool {
 }
 
 const (
-	logRecordAgent              logRecordType = "agent"
-	logRecordInput              logRecordType = "input"
-	logRecordMeta               logRecordType = "caic_meta"
-	logRecordDiffStat           logRecordType = "diff_stat"
-	logRecordExit               logRecordType = "exit"
+	logRecordAgent    logRecordType = "agent"
+	logRecordInput    logRecordType = "input"
+	logRecordMeta     logRecordType = "caic_meta"
+	logRecordDiffStat logRecordType = "diff_stat"
+	logRecordExit     logRecordType = "exit"
+	// Host summaries must never contribute bytes to generation-local relay offsets.
+	logRecordGitSummary         logRecordType = "git_summary"
 	logRecordStrippedEnv        logRecordType = "stripped_env"
 	logRecordSession            logRecordType = "session"
 	logRecordModelInfo          logRecordType = "model_info"

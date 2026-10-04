@@ -1354,7 +1354,7 @@ func v2ControlToken(m Message) (logRecordType, error) {
 	case messageTypeMeta:
 		return logRecordMeta, nil
 	case messageTypeDiffStat:
-		return logRecordDiffStat, nil
+		return logRecordGitSummary, nil
 	case messageTypeExit:
 		return logRecordExit, nil
 	case messageTypeStrippedEnv:

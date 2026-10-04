@@ -35,6 +35,38 @@ type v2EncoderVector struct {
 	RecordBytes       string `json:"record_bytes"`
 }
 
+func TestHostGitSummaryDoesNotAdvanceRelayPosition(t *testing.T) {
+	t.Parallel()
+	for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+		t.Run(strconv.Itoa(int(version)), func(t *testing.T) {
+			t.Parallel()
+			encoded, err := MarshalLogMessage(version, &DiffStatMessage{
+				MessageType: "caic_diff_stat",
+				DiffStat:    DiffStat{{Path: "main.go", LinesAdded: 2}},
+				Repos:       []RepoState{{RepoIndex: 0, Branch: "main"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parser, err := NewLogRecordParser(version, testParseFn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.RelayRecord || !record.Control || len(record.Messages) != 1 {
+				t.Fatalf("host summary = %+v, want one control outside relay history", record)
+			}
+			summary, ok := record.Messages[0].Message.(*DiffStatMessage)
+			if !ok || len(summary.DiffStat) != 1 || summary.DiffStat[0].LinesAdded != 2 || len(summary.Repos) != 1 || summary.Repos[0].Branch != "main" {
+				t.Fatalf("restored summary = %+v", record.Messages[0].Message)
+			}
+		})
+	}
+}
+
 func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordBytes string) {
 	if name == "" || timestamp == "" || nativeBytes == "" || recordBytes == "" {
 		t.Fatalf("fixture record has an empty required field: name=%q timestamp=%q native=%q record=%q", name, timestamp, nativeBytes, recordBytes)
