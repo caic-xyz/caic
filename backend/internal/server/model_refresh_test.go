@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"iter"
 	"log/slog"
 	"slices"
 	"testing"
@@ -331,6 +332,14 @@ func (*modelRefreshRuntime) Processes(_ context.Context, _ runtime.ID) ([]runtim
 
 func (*modelRefreshRuntime) Signal(_ context.Context, _ runtime.ID, _ int, _ string) error {
 	return nil
+}
+
+func (*modelRefreshRuntime) ReadFile(context.Context, runtime.ID, string, int64, int64) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) { yield(nil, nil) }
+}
+
+func (*modelRefreshRuntime) FileSize(context.Context, runtime.ID, string) (int64, error) {
+	return 0, nil
 }
 
 var _ runtime.Inventory = (*modelRefreshInventory)(nil)

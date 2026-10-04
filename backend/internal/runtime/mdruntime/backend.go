@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"iter"
 	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/trace"
 	"slices"
 	"strconv"
@@ -888,6 +890,140 @@ func (b *Backend) WatchEvents(ctx context.Context, filter runtime.EventFilter) (
 	return out, nil
 }
 
+// ReadFile implements runtime.Files with one reusable 64 KiB buffer. Relative
+// paths are resolved by the task service before reaching this boundary.
+func (b *Backend) ReadFile(ctx context.Context, id runtime.ID, path string, offset, length int64) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		if !filepath.IsAbs(path) || strings.ContainsRune(path, 0) || offset < 0 || length < -1 {
+			yield(nil, fs.ErrInvalid)
+			return
+		}
+		localID, err := b.localID(id)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		ct, err := b.container(ctx, string(localID))
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -f "$p" ] || exit 45; exec dd if="$p" bs=65536 iflag=skip_bytes,count_bytes skip=` + strconv.FormatInt(offset, 10)
+		if length >= 0 {
+			command += " count=" + strconv.FormatInt(length, 10)
+		}
+		command += " status=none"
+		sshArgs := ct.SSHCommand(nil, command)
+		readCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		cmd := exec.CommandContext(readCtx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and quoted path belong to the task container.
+		var stderr commandTailWriter
+		cmd.Stderr = &stderr
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		if err := cmd.Start(); err != nil {
+			yield(nil, err)
+			return
+		}
+		waited := false
+		defer func() {
+			if !waited {
+				// The consumer stopped early. Cancel before waiting so an unread pipe
+				// cannot block the producer. Wait owns and closes the stdout pipe.
+				cancel()
+				if err := cmd.Wait(); err != nil {
+					b.log.DebugContext(ctx, "file stream stopped", "err", err)
+				}
+			}
+		}()
+		buf := make([]byte, runtime.FileChunkSize)
+		emitted := false
+		for {
+			if err := ctx.Err(); err != nil {
+				yield(nil, err)
+				return
+			}
+			n, readErr := io.ReadFull(stdout, buf)
+			if readErr != nil {
+				if readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+					cancel()
+				}
+				err := cmd.Wait()
+				waited = true
+				if ctx.Err() != nil {
+					yield(nil, ctx.Err())
+					return
+				}
+				if err != nil {
+					if e, ok := errors.AsType[*exec.ExitError](err); ok {
+						switch e.ExitCode() {
+						case 44:
+							yield(nil, fs.ErrNotExist)
+							return
+						case 45:
+							yield(nil, fs.ErrInvalid)
+							return
+						}
+					}
+					yield(nil, commandOutputError("read file", ct, err, stderr.data))
+					return
+				}
+				if readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+					yield(nil, readErr)
+					return
+				}
+				if n > 0 || !emitted {
+					yield(buf[:n], nil)
+				}
+				return
+			}
+			emitted = true
+			if !yield(buf[:n], nil) {
+				return
+			}
+		}
+	}
+}
+
+// FileSize implements runtime.Files. Metadata is probed only for range requests.
+func (b *Backend) FileSize(ctx context.Context, id runtime.ID, path string) (int64, error) {
+	if !filepath.IsAbs(path) || strings.ContainsRune(path, 0) {
+		return 0, fs.ErrInvalid
+	}
+	localID, err := b.localID(id)
+	if err != nil {
+		return 0, err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return 0, err
+	}
+	command := "p=" + shellQuote(path) + `; [ -e "$p" ] || exit 44; [ -f "$p" ] || exit 45; exec stat -Lc %s -- "$p"`
+	sshArgs := ct.SSHCommand(nil, command)
+	cmd := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // SSH target and quoted path belong to the task container.
+	var stdout, stderr commandTailWriter
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if e, ok := errors.AsType[*exec.ExitError](err); ok {
+			switch e.ExitCode() {
+			case 44:
+				return 0, fs.ErrNotExist
+			case 45:
+				return 0, fs.ErrInvalid
+			}
+		}
+		return 0, commandOutputError("file size", ct, err, stderr.data)
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(string(stdout.data)), 10, 64)
+	if err != nil || size < 0 {
+		return 0, fmt.Errorf("invalid file size %q", stdout.data)
+	}
+	return size, nil
+}
+
 // commandResult is the separated output of one command run in a container.
 // Reports are parsed from Stdout alone: container shell startup can write
 // diagnostics to Stderr (a malformed ~/.env, for example), and merging the
@@ -1235,4 +1371,22 @@ func maxCPUsOrDefault(cpus int) int {
 		return md.DefaultMaxCPUs
 	}
 	return cpus
+}
+
+// commandTailWriter retains only the final 512 diagnostic bytes.
+type commandTailWriter struct{ data []byte }
+
+// Write retains the diagnostic tail while accepting the whole input.
+func (w *commandTailWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	const limit = 512
+	if n >= limit {
+		w.data = append(w.data[:0], p[n-limit:]...)
+		return n, nil
+	}
+	if excess := len(w.data) + n - limit; excess > 0 {
+		w.data = w.data[excess:]
+	}
+	w.data = append(w.data, p...)
+	return n, nil
 }

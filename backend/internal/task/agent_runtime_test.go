@@ -129,6 +129,7 @@ type testRuntimeSystem struct {
 func (*testRuntimeSystem) Name() runtime.Name { return "test-runtime" }
 
 type testRuntimeBackend interface {
+	runtime.Files
 	runtime.Lifecycle
 	runtime.Repository
 }

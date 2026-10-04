@@ -1,4 +1,4 @@
-// Tests for TaskDetail navigation, prompts, and SSE connection behaviour.
+// Tests for TaskDetail navigation, runtime file links, prompts, and SSE connection behaviour.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -211,6 +211,54 @@ describe("TaskDetail", () => {
       name: /my-repo: 2 changed files/,
     });
     await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
+  });
+
+  it("opens agent screenshot links through the task file endpoint", () => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "text",
+        ts: 1000,
+        text: {
+          text: "[Screenshot: General](/home/user/src/caic/test-results/settings-general-desktop.png)",
+        },
+      });
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    const link = screen.getByRole("link", { name: "Screenshot: General" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/api/caic/v1/tasks/abc/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fsettings-general-desktop.png",
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("resolves file URIs and relative paths while preserving web links", () => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "text",
+        ts: 1000,
+        text: {
+          text: "[Skill](file:///home/user/skill%20notes.md) [Source](./src/App.tsx:12) [Website](https://example.com) [Mail](mailto:user@example.com) [Section](#section)",
+        },
+      });
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    expect(screen.getByRole("link", { name: "Skill" })).toHaveAttribute(
+      "href",
+      "/api/caic/v1/tasks/abc/file?path=%2Fhome%2Fuser%2Fskill+notes.md",
+    );
+    expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
+      "href",
+      "/api/caic/v1/tasks/abc/file?path=.%2Fsrc%2FApp.tsx",
+    );
+    expect(screen.getByRole("link", { name: "Website" })).toHaveAttribute("href", "https://example.com");
+    expect(screen.getByRole("link", { name: "Mail" })).toHaveAttribute("href", "mailto:user@example.com");
+    expect(screen.getByRole("link", { name: "Section" })).toHaveAttribute("href", "#section");
   });
 
   it("copies only the selected fenced code block", async () => {

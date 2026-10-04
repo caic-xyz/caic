@@ -4,6 +4,8 @@ package runtimetest
 
 import (
 	"context"
+	"io/fs"
+	"iter"
 	"slices"
 	"sync"
 
@@ -64,6 +66,8 @@ type FakeBackend struct {
 	RuntimeName runtime.Name
 	// DiffOutput is returned verbatim by Diff.
 	DiffOutput string
+	// Files maps absolute instance paths to file contents.
+	Files map[string][]byte
 	// CommitDiffStatOutput is returned verbatim by CommitDiffStat.
 	CommitDiffStatOutput string
 	// FileDiffOutput is returned verbatim by FileDiff.
@@ -203,6 +207,49 @@ func (f *FakeBackend) Signal(ctx context.Context, id runtime.ID, pid int, sig st
 	f.signals[f.normalizeID(id)] = SignalDelivery{PID: pid, Signal: sig}
 	f.mu.Unlock()
 	return nil
+}
+
+// ReadFile implements runtime.Files with borrowed chunks from the fixture.
+func (f *FakeBackend) ReadFile(_ context.Context, _ runtime.ID, path string, offset, length int64) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		data, ok := f.Files[path]
+		if !ok {
+			yield(nil, fs.ErrNotExist)
+			return
+		}
+		if offset < 0 || length < -1 {
+			yield(nil, fs.ErrInvalid)
+			return
+		}
+		if offset >= int64(len(data)) {
+			data = nil
+		} else {
+			data = data[offset:]
+		}
+		if length >= 0 && length < int64(len(data)) {
+			data = data[:length]
+		}
+		if len(data) == 0 {
+			yield(data, nil)
+			return
+		}
+		for len(data) > 0 {
+			n := min(runtime.FileChunkSize, len(data))
+			if !yield(data[:n], nil) {
+				return
+			}
+			data = data[n:]
+		}
+	}
+}
+
+// FileSize implements runtime.Files.
+func (f *FakeBackend) FileSize(_ context.Context, _ runtime.ID, path string) (int64, error) {
+	data, ok := f.Files[path]
+	if !ok {
+		return 0, fs.ErrNotExist
+	}
+	return int64(len(data)), nil
 }
 
 func (f *FakeBackend) set(id runtime.ID, s InstanceStatus) {

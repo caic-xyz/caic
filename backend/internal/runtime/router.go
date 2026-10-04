@@ -504,6 +504,31 @@ func (r *Router) SudoPassword(ctx context.Context, id ID) (password string, err 
 	return rt.SudoPassword(ctx, id)
 }
 
+// ReadFile streams regular file chunks from the owning runtime.
+func (r *Router) ReadFile(ctx context.Context, id ID, path string, offset, length int64) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		rt, err := r.runtimeForInstance(id)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for chunk, err := range rt.ReadFile(ctx, id, path, offset, length) {
+			if !yield(chunk, err) {
+				return
+			}
+		}
+	}
+}
+
+// FileSize returns the current regular-file size from the owning runtime.
+func (r *Router) FileSize(ctx context.Context, id ID, path string) (int64, error) {
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return 0, err
+	}
+	return rt.FileSize(ctx, id, path)
+}
+
 // observe records the duration of one router operation, attributed to the
 // runtime that served it when there is one.
 func (r *Router) observe(ctx context.Context, name string, start time.Time, err error, attrs ...metrics.Attr) {

@@ -1,4 +1,4 @@
-// Task command orchestration and API DTO assembly.
+// Task command orchestration, runtime artifact streaming, and API DTO assembly.
 
 package server
 
@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"iter"
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"runtime/trace"
 	"sort"
 	"strings"
@@ -963,7 +966,7 @@ func (s *taskService) taskFileDiff(ctx context.Context, entry *taskmgr.Entry, re
 	return &v1.FileDiffResp{Diff: diff}, nil
 }
 
-func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path string) (*v1.DiffResp, error) {
+func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePath string) (*v1.DiffResp, error) {
 	t := entry.Task()
 	if t.RuntimeInstanceID() == "" {
 		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
@@ -977,9 +980,9 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, path s
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
 	diff := ""
-	if path != "" {
+	if filePath != "" {
 		var err error
-		diff, err = checkout.DiffContent(ctx, s.log, s.runtimes, t, path)
+		diff, err = checkout.DiffContent(ctx, s.log, s.runtimes, t, filePath)
 		if err != nil {
 			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 		}
@@ -1183,4 +1186,66 @@ func (s *taskService) resolveGitHubTokenForOwner(ownerID string, enabled bool) s
 		}
 	}
 	return s.forgeMgr.GitHubToken()
+}
+
+// taskFile resolves a container path and lazily streams the requested bytes.
+func (s *taskService) taskFile(ctx context.Context, entry *taskmgr.Entry, name string, offset, length int64) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		id, name, err := taskFilePath(entry, name)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for chunk, err := range s.runtimes.ReadFile(ctx, id, name, offset, length) {
+			err = taskFileError(err)
+			if !yield(chunk, err) || err != nil {
+				return
+			}
+		}
+	}
+}
+
+// taskFileSize obtains current metadata for byte-range selection.
+func (s *taskService) taskFileSize(ctx context.Context, entry *taskmgr.Entry, name string) (int64, error) {
+	id, name, err := taskFilePath(entry, name)
+	if err != nil {
+		return 0, err
+	}
+	size, err := s.runtimes.FileSize(ctx, id, name)
+	return size, taskFileError(err)
+}
+
+// taskFilePath resolves relative links against the primary container checkout.
+// The runtime owns all reads; host files are never used as a fallback.
+func taskFilePath(entry *taskmgr.Entry, name string) (runtime.ID, string, error) {
+	if name == "" || strings.ContainsAny(name, "\x00\r\n") {
+		return "", "", &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid file path"}
+	}
+	name = md.ResolveContainerPath(name)
+	t := entry.Task()
+	id := t.RuntimeInstanceID()
+	if id == "" {
+		return "", "", &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
+	}
+	if !path.IsAbs(name) {
+		repos := t.ReposSnapshot()
+		if len(repos) == 0 {
+			return "", "", &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no checkout"}
+		}
+		name = path.Join(md.ResolveContainerPath(repos[0].ContainerPath), name)
+	}
+	return id, name, nil
+}
+
+func taskFileError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrNotExist):
+		return &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "file not found"}
+	case errors.Is(err, fs.ErrInvalid):
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "path is not a regular file"}
+	default:
+		return &api.Error{Status: http.StatusBadGateway, Code: api.CodeInternalError, Message: err.Error()}
+	}
 }

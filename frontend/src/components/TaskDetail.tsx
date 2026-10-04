@@ -1,6 +1,8 @@
-// TaskDetail renders agent output, task context, actions, and intent-prefetched Git-state diff navigation.
+// TaskDetail renders agent output with runtime file links, task context, actions, and Git-state diff navigation.
 
 import {
+  createContext,
+  useContext,
   createSignal,
   createMemo,
   createEffect,
@@ -107,6 +109,8 @@ const expandedSessionsByTask = new Map<string, Set<string>>();
 // A setup that appears to last longer than this is reconstructed history with
 // unavailable producer timestamps, not a credible container startup duration.
 const maxCredibleSetupDurationMs = 60 * 60 * 1000;
+
+const MarkdownTaskContext = createContext<Accessor<string>>();
 
 interface Props {
   taskId: string;
@@ -858,628 +862,641 @@ export default function TaskDetail(props: Props) {
     return backgroundCommands().filter((command) => !anchored.has(command.id));
   });
 
+  const markdownTaskId = createMemo(() => props.taskId);
   return (
-    <div class={styles.container}>
-      <div
-        class={styles.header}
-        data-testid="task-detail-header"
-        ref={(element) => {
-          headerRef = element;
-        }}
-      >
-        <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close">
-          <CloseIcon width={20} height={20} />
-        </button>
-        <Show when={props.title}>
-          <span class={styles.headerTitle}>{props.title}</span>
-        </Show>
-        <span
-          class={styles.headerMeta}
+    <MarkdownTaskContext.Provider value={markdownTaskId}>
+      <div class={styles.container}>
+        <div
+          class={styles.header}
+          data-testid="task-detail-header"
           ref={(element) => {
-            headerMetaRef = element;
+            headerRef = element;
           }}
         >
-          <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
-            <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">
-              {props.repo}
-            </a>
+          <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close">
+            <CloseIcon width={20} height={20} />
+          </button>
+          <Show when={props.title}>
+            <span class={styles.headerTitle}>{props.title}</span>
           </Show>
-          <span class={styles.headerBranch}>{props.branch}</span>
-          <Show when={prURL()}>
-            <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">
-              {prLabel()}
-            </a>
-          </Show>
-          <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
-            {(() => {
-              const s = props.ciStatus as CIStatus;
-              const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
-              const actionsURL = () => ciActionsURL(props.remoteURL, props.forge);
-              return (
-                <>
-                  <Show
-                    when={hasChecks()}
-                    fallback={
-                      <Show
-                        when={actionsURL()}
-                        keyed
-                        fallback={
-                          <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</span>
-                        }
-                      >
-                        {(url) => (
-                          <a
-                            class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
-                            href={url}
-                            target="_blank"
-                            rel="noopener"
-                          >
-                            {ciLabel(s, props.ciChecks)}
-                          </a>
-                        )}
-                      </Show>
-                    }
-                  >
-                    <details class={styles.ciDetails}>
-                      <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</summary>
-                      <div class={styles.ciDropdown}>
-                        <For each={props.ciChecks}>
-                          {(c) => {
-                            const statusCls =
-                              c.status === "completed"
-                                ? c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped"
-                                  ? styles.ciCheckPassed
-                                  : styles.ciCheckFailed
-                                : c.status === "in_progress"
-                                  ? styles.ciCheckRunning
-                                  : styles.ciCheckQueued;
-                            const jobURL = () => checkJobURL(c, props.forge);
-                            return (
-                              <Show
-                                when={jobURL()}
-                                keyed
-                                fallback={
-                                  <div class={`${styles.ciCheckRow} ${statusCls}`}>
-                                    <span class={styles.ciCheckName}>{c.name}</span>
-                                    <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
-                                    <Show when={c.startedAt || c.queuedAt}>
-                                      <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
-                                    </Show>
-                                  </div>
-                                }
-                              >
-                                {(url) => (
-                                  <a
-                                    class={`${styles.ciCheckRow} ${styles.ciCheckLink} ${statusCls}`}
-                                    href={url}
-                                    target="_blank"
-                                    rel="noopener"
-                                  >
-                                    <span class={styles.ciCheckName}>{c.name}</span>
-                                    <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
-                                    <Show when={c.startedAt || c.queuedAt}>
-                                      <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
-                                    </Show>
-                                  </a>
-                                )}
-                              </Show>
-                            );
-                          }}
-                        </For>
-                      </div>
-                    </details>
-                  </Show>
-                  <Show
-                    when={
-                      s === "failure" &&
-                      props.ciChecks?.some(
-                        (c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped",
-                      )
-                    }
-                  >
-                    <button
-                      class={styles.fixCIBtn}
-                      onClick={handleFixPR}
-                      disabled={fixingPR()}
-                      title="Inject a fix-PR command into this task (auto mode — no new task created)"
+          <span
+            class={styles.headerMeta}
+            ref={(element) => {
+              headerMetaRef = element;
+            }}
+          >
+            <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
+              <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">
+                {props.repo}
+              </a>
+            </Show>
+            <span class={styles.headerBranch}>{props.branch}</span>
+            <Show when={prURL()}>
+              <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">
+                {prLabel()}
+              </a>
+            </Show>
+            <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
+              {(() => {
+                const s = props.ciStatus as CIStatus;
+                const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
+                const actionsURL = () => ciActionsURL(props.remoteURL, props.forge);
+                return (
+                  <>
+                    <Show
+                      when={hasChecks()}
+                      fallback={
+                        <Show
+                          when={actionsURL()}
+                          keyed
+                          fallback={
+                            <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</span>
+                          }
+                        >
+                          {(url) => (
+                            <a
+                              class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}
+                              href={url}
+                              target="_blank"
+                              rel="noopener"
+                            >
+                              {ciLabel(s, props.ciChecks)}
+                            </a>
+                          )}
+                        </Show>
+                      }
                     >
-                      {fixingPR() ? "Sending…" : "Fix PR"}
-                    </button>
-                  </Show>
-                </>
-              );
-            })()}
-          </Show>
-        </span>
-        <A class={styles.diffLink} href={`${location.pathname}/info`} aria-label="Task info" title="Task info">
-          <InfoIcon width="13" height="13" aria-hidden="true" />
-        </A>
-        <Show
-          when={repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))}
-        >
-          <span class={styles.repoStateLinks}>
-            <For each={repoStates()}>
-              {(state) => (
+                      <details class={styles.ciDetails}>
+                        <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>
+                          {ciLabel(s, props.ciChecks)}
+                        </summary>
+                        <div class={styles.ciDropdown}>
+                          <For each={props.ciChecks}>
+                            {(c) => {
+                              const statusCls =
+                                c.status === "completed"
+                                  ? c.conclusion === "success" ||
+                                    c.conclusion === "neutral" ||
+                                    c.conclusion === "skipped"
+                                    ? styles.ciCheckPassed
+                                    : styles.ciCheckFailed
+                                  : c.status === "in_progress"
+                                    ? styles.ciCheckRunning
+                                    : styles.ciCheckQueued;
+                              const jobURL = () => checkJobURL(c, props.forge);
+                              return (
+                                <Show
+                                  when={jobURL()}
+                                  keyed
+                                  fallback={
+                                    <div class={`${styles.ciCheckRow} ${statusCls}`}>
+                                      <span class={styles.ciCheckName}>{c.name}</span>
+                                      <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
+                                      <Show when={c.startedAt || c.queuedAt}>
+                                        <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
+                                      </Show>
+                                    </div>
+                                  }
+                                >
+                                  {(url) => (
+                                    <a
+                                      class={`${styles.ciCheckRow} ${styles.ciCheckLink} ${statusCls}`}
+                                      href={url}
+                                      target="_blank"
+                                      rel="noopener"
+                                    >
+                                      <span class={styles.ciCheckName}>{c.name}</span>
+                                      <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
+                                      <Show when={c.startedAt || c.queuedAt}>
+                                        <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
+                                      </Show>
+                                    </a>
+                                  )}
+                                </Show>
+                              );
+                            }}
+                          </For>
+                        </div>
+                      </details>
+                    </Show>
+                    <Show
+                      when={
+                        s === "failure" &&
+                        props.ciChecks?.some(
+                          (c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped",
+                        )
+                      }
+                    >
+                      <button
+                        class={styles.fixCIBtn}
+                        onClick={handleFixPR}
+                        disabled={fixingPR()}
+                        title="Inject a fix-PR command into this task (auto mode — no new task created)"
+                      >
+                        {fixingPR() ? "Sending…" : "Fix PR"}
+                      </button>
+                    </Show>
+                  </>
+                );
+              })()}
+            </Show>
+          </span>
+          <A class={styles.diffLink} href={`${location.pathname}/info`} aria-label="Task info" title="Task info">
+            <InfoIcon width="13" height="13" aria-hidden="true" />
+          </A>
+          <Show
+            when={repoStates().some((state) => repoStateLabel(state)) || repoStateLabel(diffStatState(props.diffStat))}
+          >
+            <span class={styles.repoStateLinks}>
+              <For each={repoStates()}>
+                {(state) => (
+                  <RepoStateIcons
+                    state={state}
+                    href={`${location.pathname}/diff`}
+                    elideDiffStats={elideHeaderGitStats()}
+                    onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
+                  />
+                )}
+              </For>
+              <Show when={!repoStates().some((state) => repoStateLabel(state))}>
                 <RepoStateIcons
-                  state={state}
+                  state={diffStatState(props.diffStat)}
                   href={`${location.pathname}/diff`}
                   elideDiffStats={elideHeaderGitStats()}
                   onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
                 />
+              </Show>
+            </span>
+          </Show>
+          <Show
+            when={
+              props.taskState !== "pending" &&
+              props.taskState !== "branching" &&
+              props.taskState !== "provisioning" &&
+              props.taskState !== "starting" &&
+              props.taskState !== "stopped" &&
+              props.taskState !== "crashed" &&
+              props.taskState !== "purged" &&
+              props.taskState !== "failed"
+            }
+          >
+            <A
+              class={styles.diffLink}
+              href={`${location.pathname}/processes`}
+              aria-label="Task processes"
+              title="Task processes"
+            >
+              <ProcessesIcon width="13" height="13" aria-hidden="true" />
+            </A>
+          </Show>
+          <Show when={(props.vncPort ?? 0) > 0}>
+            <A class={styles.diffLink} href={`${location.pathname}/vnc`}>
+              VNC
+            </A>
+          </Show>
+          <Show when={props.sudoPassword}>
+            <span class={styles.sudoPassword}>
+              <span class={styles.sudoPasswordText}>{props.sudoPassword}</span>
+              <button
+                class={styles.sudoCopyBtn}
+                title="Copy password"
+                onClick={(e) => {
+                  const btn = e.currentTarget;
+                  if (props.sudoPassword) {
+                    navigator.clipboard.writeText(props.sudoPassword);
+                  }
+                  btn.classList.add(styles.copied);
+                  setTimeout(() => btn.classList.remove(styles.copied), 1500);
+                }}
+              >
+                <CopyIcon width={14} height={14} class={styles.copyIcon} />
+                <CheckIcon width={14} height={14} class={styles.checkIcon} />
+              </button>
+            </span>
+          </Show>
+          <Show when={props.inPlanMode}>
+            <span class={styles.planIndicator} title="Agent is in plan mode">
+              Plan Mode
+            </span>
+          </Show>
+          <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
+            <span class={styles.stoppedDiskUsage} title="Writable disk space retained by this stopped task">
+              Disk {formatBytes(props.stoppedDiskUsedBytes)}
+            </span>
+          </Show>
+          <StatsIcon
+            href={`${location.pathname}/stats`}
+            stats={statsHistory()}
+            usage={{
+              inputTokens: props.cumulativeInputTokens ?? 0,
+              cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
+              cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
+              outputTokens: props.cumulativeOutputTokens ?? 0,
+              costUSD: props.costUSD ?? 0,
+            }}
+          />
+        </div>
+        <Show when={props.parentTaskID || props.childTasks.length > 0}>
+          <nav class={styles.hierarchy} aria-label="Task hierarchy">
+            <Show when={props.parentTaskID} keyed>
+              {(parentID) => (
+                <A class={styles.hierarchyLink} href={`/task/@${parentID}`}>
+                  Parent task
+                </A>
+              )}
+            </Show>
+            <For each={props.childTasks}>
+              {(child) => (
+                <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>
+                  Child: {child.title || child.id}
+                </A>
               )}
             </For>
-            <Show when={!repoStates().some((state) => repoStateLabel(state))}>
-              <RepoStateIcons
-                state={diffStatState(props.diffStat)}
-                href={`${location.pathname}/diff`}
-                elideDiffStats={elideHeaderGitStats()}
-                onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
-              />
-            </Show>
-          </span>
+          </nav>
         </Show>
-        <Show
-          when={
-            props.taskState !== "pending" &&
-            props.taskState !== "branching" &&
-            props.taskState !== "provisioning" &&
-            props.taskState !== "starting" &&
-            props.taskState !== "stopped" &&
-            props.taskState !== "crashed" &&
-            props.taskState !== "purged" &&
-            props.taskState !== "failed"
-          }
-        >
-          <A
-            class={styles.diffLink}
-            href={`${location.pathname}/processes`}
-            aria-label="Task processes"
-            title="Task processes"
+        <Show when={props.rateLimit?.blocked}>
+          <section
+            class={styles.quotaRecovery}
+            aria-labelledby="quota-recovery-title"
+            data-testid="quota-recovery-detail"
           >
-            <ProcessesIcon width="13" height="13" aria-hidden="true" />
-          </A>
-        </Show>
-        <Show when={(props.vncPort ?? 0) > 0}>
-          <A class={styles.diffLink} href={`${location.pathname}/vnc`}>
-            VNC
-          </A>
-        </Show>
-        <Show when={props.sudoPassword}>
-          <span class={styles.sudoPassword}>
-            <span class={styles.sudoPasswordText}>{props.sudoPassword}</span>
-            <button
-              class={styles.sudoCopyBtn}
-              title="Copy password"
-              onClick={(e) => {
-                const btn = e.currentTarget;
-                if (props.sudoPassword) {
-                  navigator.clipboard.writeText(props.sudoPassword);
-                }
-                btn.classList.add(styles.copied);
-                setTimeout(() => btn.classList.remove(styles.copied), 1500);
-              }}
-            >
-              <CopyIcon width={14} height={14} class={styles.copyIcon} />
-              <CheckIcon width={14} height={14} class={styles.checkIcon} />
-            </button>
-          </span>
-        </Show>
-        <Show when={props.inPlanMode}>
-          <span class={styles.planIndicator} title="Agent is in plan mode">
-            Plan Mode
-          </span>
-        </Show>
-        <Show when={props.taskState === "stopped" && props.stoppedDiskUsedBytes >= 0}>
-          <span class={styles.stoppedDiskUsage} title="Writable disk space retained by this stopped task">
-            Disk {formatBytes(props.stoppedDiskUsedBytes)}
-          </span>
-        </Show>
-        <StatsIcon
-          href={`${location.pathname}/stats`}
-          stats={statsHistory()}
-          usage={{
-            inputTokens: props.cumulativeInputTokens ?? 0,
-            cacheWriteInputTokens: props.cumulativeCacheCreationInputTokens ?? 0,
-            cacheReadInputTokens: props.cumulativeCacheReadInputTokens ?? 0,
-            outputTokens: props.cumulativeOutputTokens ?? 0,
-            costUSD: props.costUSD ?? 0,
-          }}
-        />
-      </div>
-      <Show when={props.parentTaskID || props.childTasks.length > 0}>
-        <nav class={styles.hierarchy} aria-label="Task hierarchy">
-          <Show when={props.parentTaskID} keyed>
-            {(parentID) => (
-              <A class={styles.hierarchyLink} href={`/task/@${parentID}`}>
-                Parent task
-              </A>
-            )}
-          </Show>
-          <For each={props.childTasks}>
-            {(child) => (
-              <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>
-                Child: {child.title || child.id}
-              </A>
-            )}
-          </For>
-        </nav>
-      </Show>
-      <Show when={props.rateLimit?.blocked}>
-        <section
-          class={styles.quotaRecovery}
-          aria-labelledby="quota-recovery-title"
-          data-testid="quota-recovery-detail"
-        >
-          <div>
-            <h4 id="quota-recovery-title" class={styles.quotaRecoveryTitle}>
-              Agent quota exhausted
-            </h4>
-            <p class={styles.quotaRecoveryText}>
-              {props.rateLimit?.window || "Current"} quota resets in{" "}
-              {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this task unchanged and
-              continue its workspace in a new agent.
-            </p>
-          </div>
-          <Show when={props.onQuotaRecovery && props.repo}>
-            <Button
-              type="button"
-              onClick={() => props.onQuotaRecovery?.(props.taskId)}
-              data-testid="quota-recovery-detail-action"
-            >
-              Continue in new agent
-            </Button>
-          </Show>
-        </section>
-      </Show>
-      <Show when={props.error} keyed>
-        {(error) => (
-          <section class={styles.taskError} aria-labelledby="task-error-title">
-            <h4 id="task-error-title" class={styles.taskErrorTitle}>
-              Task error
-            </h4>
-            <pre class={styles.taskErrorText}>{error}</pre>
-          </section>
-        )}
-      </Show>
-      <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
-        {(prompt) => (
-          <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
-            <h4 id="task-prompt-title" class={styles.taskPromptTitle}>
-              Prompt
-            </h4>
-            <div class={styles.userInputMsg}>
-              <Markdown text={prompt} />
+            <div>
+              <h4 id="quota-recovery-title" class={styles.quotaRecoveryTitle}>
+                Agent quota exhausted
+              </h4>
+              <p class={styles.quotaRecoveryText}>
+                {props.rateLimit?.window || "Current"} quota resets in{" "}
+                {formatQuotaCountdown(props.rateLimit?.resetsAt ?? "", props.now)}. You can keep this task unchanged and
+                continue its workspace in a new agent.
+              </p>
             </div>
+            <Show when={props.onQuotaRecovery && props.repo}>
+              <Button
+                type="button"
+                onClick={() => props.onQuotaRecovery?.(props.taskId)}
+                data-testid="quota-recovery-detail-action"
+              >
+                Continue in new agent
+              </Button>
+            </Show>
           </section>
-        )}
-      </Show>
-      <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
-        <Show when={setupLogLines().length > 0}>
-          <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
-            <summary class={styles.taskSetupTitle}>
-              <span>Setup logs</span>
-              <TimingIcon events={setupInfo().events} range={setupInfo().range} showZero />
-            </summary>
-            <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">
-              {setupLogLines().join("\n")}
-            </pre>
-          </details>
         </Show>
-        <Index each={items()}>
-          {(item) => {
-            // Type-narrowing accessors for the MsgItem discriminated union.
-            const sessElided = () =>
-              item().kind === "sessionElided" ? (item() as Extract<MsgItem, { kind: "sessionElided" }>) : null;
-            const sessHdr = () =>
-              item().kind === "sessionHeader" ? (item() as Extract<MsgItem, { kind: "sessionHeader" }>) : null;
-            const sessBoundary = () =>
-              item().kind === "sessionBoundary" ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>) : null;
-            const elided = () => (item().kind === "elided" ? (item() as Extract<MsgItem, { kind: "elided" }>) : null);
-            const expHdr = () =>
-              item().kind === "expandedHeader" ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>) : null;
-            const grpItem = () => (item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null);
-            // Canonical native activity anchored to this item: a settled card
-            // renders where it settled, a running one where it spawned.
-            const anchored = () => nativeByAnchor().get(item().key) ?? [];
-            const anchorIndent = () => {
-              const current = item();
-              if (current.kind === "group") {
-                return current.indent === "turn" ? styles.indentTurn : undefined;
-              }
-              if (current.kind === "elided" || current.kind === "expandedHeader") {
-                return current.indent === "session" ? styles.indentSession : undefined;
-              }
-              return undefined;
-            };
-            return (
-              <>
-                <Switch>
-                  {/* Collapsed past session: single clickable row. */}
-                  <Match when={sessElided()} keyed>
-                    {(se) => (
-                      <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
-                        <button
-                          type="button"
-                          class={styles.sessionToggle}
-                          onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
-                        >
-                          <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
-                          <span class={styles.sessionDuration}>
-                            {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
-                          </span>
-                        </button>
-                        <SessionInvocationIcon turns={sessionTimings(se.session)} model={props.model ?? null} />
-                      </div>
-                    )}
-                  </Match>
-                  {/* Expanded past session header: click to collapse. */}
-                  <Match when={sessHdr()} keyed>
-                    {(sh) => (
-                      <div
-                        class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
-                        data-anchor-key={`session:${sh.sessionKey}`}
-                      >
-                        <button
-                          type="button"
-                          class={styles.sessionToggle}
-                          onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
-                        >
-                          <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
-                          <span class={styles.sessionDuration}>
-                            {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
-                          </span>
-                        </button>
-                        <SessionInvocationIcon turns={sessionTimings(sh.session)} model={props.model ?? null} />
-                      </div>
-                    )}
-                  </Match>
-                  {/* Session boundary: init or compact_boundary rendered as a separator. */}
-                  <Match when={sessBoundary()} keyed>
-                    {(sb) => <SessionBoundaryItem event={sb.event} />}
-                  </Match>
-                  {/* Collapsed past turn: single clickable row. */}
-                  <Match when={elided()} keyed>
-                    {(e) => (
-                      <div
-                        class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
-                        data-anchor-key={`turn:${e.key}`}
-                      >
-                        <button type="button" class={styles.turnToggle} onClick={(ev) => anchoredToggleTurn(ev, e.key)}>
-                          <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
-                          <span class={styles.turnDuration}>
-                            {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
-                          </span>
-                        </button>
-                        <Show when={turnTiming(e.turn)} keyed>
-                          {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
-                        </Show>
-                      </div>
-                    )}
-                  </Match>
-                  {/* Expanded past turn header: click to collapse. */}
-                  <Match when={expHdr()} keyed>
-                    {(h) => (
-                      <div
-                        class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`}
-                        data-anchor-key={`turn:${h.turnKey}`}
-                      >
-                        <button
-                          type="button"
-                          class={styles.turnToggle}
-                          onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
-                        >
-                          <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
-                          <span class={styles.turnDuration}>
-                            {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
-                          </span>
-                        </button>
-                        <Show when={turnTiming(h.turn)} keyed>
-                          {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
-                        </Show>
-                      </div>
-                    )}
-                  </Match>
-                  {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
-                  <Match when={grpItem()}>
-                    {(gi) => (
-                      <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
-                        <div class={styles.timedItemContent}>
-                          <Show
-                            when={
-                              hasGroupTiming(gi().group) &&
-                              !gi().group.events.some((event) => event.kind === "result") &&
-                              (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
-                            }
+        <Show when={props.error} keyed>
+          {(error) => (
+            <section class={styles.taskError} aria-labelledby="task-error-title">
+              <h4 id="task-error-title" class={styles.taskErrorTitle}>
+                Task error
+              </h4>
+              <pre class={styles.taskErrorText}>{error}</pre>
+            </section>
+          )}
+        </Show>
+        <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
+          {(prompt) => (
+            <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
+              <h4 id="task-prompt-title" class={styles.taskPromptTitle}>
+                Prompt
+              </h4>
+              <div class={styles.userInputMsg}>
+                <Markdown text={prompt} />
+              </div>
+            </section>
+          )}
+        </Show>
+        <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
+          <Show when={setupLogLines().length > 0}>
+            <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
+              <summary class={styles.taskSetupTitle}>
+                <span>Setup logs</span>
+                <TimingIcon events={setupInfo().events} range={setupInfo().range} showZero />
+              </summary>
+              <pre class={styles.taskSetupLogs} data-testid="task-setup-logs">
+                {setupLogLines().join("\n")}
+              </pre>
+            </details>
+          </Show>
+          <Index each={items()}>
+            {(item) => {
+              // Type-narrowing accessors for the MsgItem discriminated union.
+              const sessElided = () =>
+                item().kind === "sessionElided" ? (item() as Extract<MsgItem, { kind: "sessionElided" }>) : null;
+              const sessHdr = () =>
+                item().kind === "sessionHeader" ? (item() as Extract<MsgItem, { kind: "sessionHeader" }>) : null;
+              const sessBoundary = () =>
+                item().kind === "sessionBoundary" ? (item() as Extract<MsgItem, { kind: "sessionBoundary" }>) : null;
+              const elided = () => (item().kind === "elided" ? (item() as Extract<MsgItem, { kind: "elided" }>) : null);
+              const expHdr = () =>
+                item().kind === "expandedHeader" ? (item() as Extract<MsgItem, { kind: "expandedHeader" }>) : null;
+              const grpItem = () => (item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null);
+              // Canonical native activity anchored to this item: a settled card
+              // renders where it settled, a running one where it spawned.
+              const anchored = () => nativeByAnchor().get(item().key) ?? [];
+              const anchorIndent = () => {
+                const current = item();
+                if (current.kind === "group") {
+                  return current.indent === "turn" ? styles.indentTurn : undefined;
+                }
+                if (current.kind === "elided" || current.kind === "expandedHeader") {
+                  return current.indent === "session" ? styles.indentSession : undefined;
+                }
+                return undefined;
+              };
+              return (
+                <>
+                  <Switch>
+                    {/* Collapsed past session: single clickable row. */}
+                    <Match when={sessElided()} keyed>
+                      {(se) => (
+                        <div class={styles.sessionElided} data-anchor-key={`session:${se.sessionKey}`}>
+                          <button
+                            type="button"
+                            class={styles.sessionToggle}
+                            onClick={(e) => anchoredToggleSession(e, se.sessionKey)}
                           >
-                            <span class={styles.messageTiming}>
-                              <TimingIcon
-                                events={gi().group.events}
-                                segments={gi().group.timingSegments}
-                                userWaitMs={taskTimings().userWaitMs}
-                                previousEventTs={taskTimings().previousEventTs}
-                              />
+                            <span class={styles.turnSummaryText}>{sessionSummary(se.session)}</span>
+                            <span class={styles.sessionDuration}>
+                              {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
                             </span>
-                          </Show>
-                          <GroupContent
-                            group={() => gi().group}
-                            taskId={props.taskId}
-                            isWaiting={isWaiting}
-                            lastAskGroup={lastAskGroup}
-                            onAskAnswer={sendAskAnswer}
-                            onClearAndExecutePlan={clearAndExecutePlan}
-                            pendingAction={pendingAction}
-                            model={props.model ?? null}
-                            turnTiming={(event) => turnTimingsByResultEvent().get(event)}
-                            nativeByToolUseID={nativeByToolUseID}
-                            nativeSettled={nativeSettled}
-                            backgroundByToolUseID={backgroundByToolUseID}
-                            backgroundSettled={backgroundSettled}
-                          />
+                          </button>
+                          <SessionInvocationIcon turns={sessionTimings(se.session)} model={props.model ?? null} />
                         </div>
-                      </div>
-                    )}
-                  </Match>
-                </Switch>
-                <Show when={anchored().length > 0 || backgroundByAnchor().get(item().key)?.length}>
-                  <div class={anchorIndent()}>
-                    <NativeAgents activities={anchored()} settled={nativeSettled()} />
-                    <BackgroundCommands
-                      commands={backgroundByAnchor().get(item().key) ?? []}
-                      settled={backgroundSettled()}
-                    />
-                  </div>
-                </Show>
-              </>
-            );
-          }}
-        </Index>
-        <Show when={nativeUnanchored().length > 0}>
-          <NativeAgents activities={nativeUnanchored()} settled={nativeSettled()} />
-        </Show>
-        <Show when={backgroundUnanchored().length > 0}>
-          <BackgroundCommands commands={backgroundUnanchored()} settled={backgroundSettled()} />
-        </Show>
-        <Show when={messages().length === 0}>
-          <p class={styles.placeholder}>Waiting for agent output...</p>
+                      )}
+                    </Match>
+                    {/* Expanded past session header: click to collapse. */}
+                    <Match when={sessHdr()} keyed>
+                      {(sh) => (
+                        <div
+                          class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
+                          data-anchor-key={`session:${sh.sessionKey}`}
+                        >
+                          <button
+                            type="button"
+                            class={styles.sessionToggle}
+                            onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
+                          >
+                            <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
+                            <span class={styles.sessionDuration}>
+                              {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
+                            </span>
+                          </button>
+                          <SessionInvocationIcon turns={sessionTimings(sh.session)} model={props.model ?? null} />
+                        </div>
+                      )}
+                    </Match>
+                    {/* Session boundary: init or compact_boundary rendered as a separator. */}
+                    <Match when={sessBoundary()} keyed>
+                      {(sb) => <SessionBoundaryItem event={sb.event} />}
+                    </Match>
+                    {/* Collapsed past turn: single clickable row. */}
+                    <Match when={elided()} keyed>
+                      {(e) => (
+                        <div
+                          class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                          data-anchor-key={`turn:${e.key}`}
+                        >
+                          <button
+                            type="button"
+                            class={styles.turnToggle}
+                            onClick={(ev) => anchoredToggleTurn(ev, e.key)}
+                          >
+                            <span class={styles.turnSummaryText}>{turnSummary(e.turn)}</span>
+                            <span class={styles.turnDuration}>
+                              {e.turn.durationMs > 0 ? formatTimingDuration(e.turn.durationMs) : "0s"}
+                            </span>
+                          </button>
+                          <Show when={turnTiming(e.turn)} keyed>
+                            {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                          </Show>
+                        </div>
+                      )}
+                    </Match>
+                    {/* Expanded past turn header: click to collapse. */}
+                    <Match when={expHdr()} keyed>
+                      {(h) => (
+                        <div
+                          class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`}
+                          data-anchor-key={`turn:${h.turnKey}`}
+                        >
+                          <button
+                            type="button"
+                            class={styles.turnToggle}
+                            onClick={(ev) => anchoredToggleTurn(ev, h.turnKey)}
+                          >
+                            <span class={styles.turnSummaryText}>{turnSummary(h.turn)}</span>
+                            <span class={styles.turnDuration}>
+                              {h.turn.durationMs > 0 ? formatTimingDuration(h.turn.durationMs) : "0s"}
+                            </span>
+                          </button>
+                          <Show when={turnTiming(h.turn)} keyed>
+                            {(turn) => <TurnInvocationIcon turn={turn} model={props.model ?? null} />}
+                          </Show>
+                        </div>
+                      )}
+                    </Match>
+                    {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
+                    <Match when={grpItem()}>
+                      {(gi) => (
+                        <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
+                          <div class={styles.timedItemContent}>
+                            <Show
+                              when={
+                                hasGroupTiming(gi().group) &&
+                                !gi().group.events.some((event) => event.kind === "result") &&
+                                (gi().group.kind !== "action" || gi().group.toolCalls.length !== 1)
+                              }
+                            >
+                              <span class={styles.messageTiming}>
+                                <TimingIcon
+                                  events={gi().group.events}
+                                  segments={gi().group.timingSegments}
+                                  userWaitMs={taskTimings().userWaitMs}
+                                  previousEventTs={taskTimings().previousEventTs}
+                                />
+                              </span>
+                            </Show>
+                            <GroupContent
+                              group={() => gi().group}
+                              taskId={props.taskId}
+                              isWaiting={isWaiting}
+                              lastAskGroup={lastAskGroup}
+                              onAskAnswer={sendAskAnswer}
+                              onClearAndExecutePlan={clearAndExecutePlan}
+                              pendingAction={pendingAction}
+                              model={props.model ?? null}
+                              turnTiming={(event) => turnTimingsByResultEvent().get(event)}
+                              nativeByToolUseID={nativeByToolUseID}
+                              nativeSettled={nativeSettled}
+                              backgroundByToolUseID={backgroundByToolUseID}
+                              backgroundSettled={backgroundSettled}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </Match>
+                  </Switch>
+                  <Show when={anchored().length > 0 || backgroundByAnchor().get(item().key)?.length}>
+                    <div class={anchorIndent()}>
+                      <NativeAgents activities={anchored()} settled={nativeSettled()} />
+                      <BackgroundCommands
+                        commands={backgroundByAnchor().get(item().key) ?? []}
+                        settled={backgroundSettled()}
+                      />
+                    </div>
+                  </Show>
+                </>
+              );
+            }}
+          </Index>
+          <Show when={nativeUnanchored().length > 0}>
+            <NativeAgents activities={nativeUnanchored()} settled={nativeSettled()} />
+          </Show>
+          <Show when={backgroundUnanchored().length > 0}>
+            <BackgroundCommands commands={backgroundUnanchored()} settled={backgroundSettled()} />
+          </Show>
+          <Show when={messages().length === 0}>
+            <p class={styles.placeholder}>Waiting for agent output...</p>
+          </Show>
+        </div>
+
+        <ProgressPanel messages={messages()} />
+
+        <Show when={isActive() || isRecoverable() || !!pendingAction()}>
+          <form
+            ref={bindPromptSubmitShortcut}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (canSendInput()) sendInput();
+            }}
+            class={styles.inputForm}
+            data-testid="task-detail-form"
+          >
+            <PromptInput
+              ref={setPromptRef}
+              value={props.inputDraft}
+              onInput={props.onInputDraft}
+              onSubmit={sendInput}
+              onKeyDown={handlePromptNavigation}
+              placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
+              disabled={!canSendInput()}
+              class={styles.textInput}
+              tabIndex={0}
+              data-testid="task-detail-prompt"
+              supportsImages={props.supportsImages}
+              images={props.inputImages}
+              onImagesChange={props.onInputImages}
+              sendButton={
+                <Button
+                  type="submit"
+                  disabled={
+                    !canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)
+                  }
+                  title="Send"
+                  data-testid="send-input"
+                >
+                  <SendIcon width="1.1em" height="1.1em" />
+                </Button>
+              }
+            />
+            <Dropdown
+              open={contextMenuOpen()}
+              onOpenChange={setContextMenuOpen}
+              class={styles.syncButtonGroup}
+              content={
+                <TaskActionsMenu
+                  class={styles.syncDropdown}
+                  forge={props.forge}
+                  forgePR={props.forgePR}
+                  baseBranch={props.baseBranch}
+                  active={isActive()}
+                  recoverable={isRecoverable()}
+                  waiting={isWaiting()}
+                  purging={props.taskState === "purging"}
+                  supportsCompact={props.supportsCompact}
+                  canFork={!!props.onFork && !!props.repo}
+                  onSync={() => {
+                    setContextMenuOpen(false);
+                    doSync(false);
+                  }}
+                  onSyncDefault={() => {
+                    setContextMenuOpen(false);
+                    doSync(false, SyncTargetDefault);
+                  }}
+                  onStop={() => {
+                    setContextMenuOpen(false);
+                    props.onStop(props.taskId);
+                  }}
+                  onRevive={() => {
+                    setContextMenuOpen(false);
+                    props.onRevive(props.taskId);
+                  }}
+                  onPurge={() => {
+                    setContextMenuOpen(false);
+                    props.onPurge(props.taskId);
+                  }}
+                  onCompact={() => {
+                    setContextMenuOpen(false);
+                    doCompact();
+                  }}
+                  onFork={() => {
+                    setContextMenuOpen(false);
+                    props.onFork?.(props.taskId);
+                  }}
+                />
+              }
+            >
+              <Show
+                when={!!pendingAction()}
+                fallback={
+                  <button
+                    type="button"
+                    class={styles.contextMenuToggle}
+                    disabled={!!pendingAction()}
+                    onClick={() => setContextMenuOpen((v) => !v)}
+                    aria-label="Context actions"
+                    title="Context actions"
+                  >
+                    &#8942;
+                  </button>
+                }
+              >
+                <button type="button" class={styles.contextMenuToggle} disabled>
+                  &#8987;
+                </button>
+              </Show>
+            </Dropdown>
+          </form>
+          <Show when={safetyIssues().length > 0}>
+            <div class={styles.safetyWarning}>
+              <strong>Safety issues detected:</strong>
+              <ul>
+                <For each={safetyIssues()}>
+                  {(issue) => (
+                    <li>
+                      <strong>{issue.file}</strong>: {issue.detail} ({issue.kind})
+                    </li>
+                  )}
+                </For>
+              </ul>
+              <Button
+                type="button"
+                variant="red"
+                loading={pendingAction() === "sync"}
+                disabled={!!pendingAction()}
+                onClick={() => {
+                  setSafetyIssues([]);
+                  doSync(true);
+                }}
+              >
+                Force Push to {props.branch}
+              </Button>
+            </div>
+          </Show>
+          <Show when={actionError()}>
+            <div class={styles.actionError}>{actionError()}</div>
+          </Show>
         </Show>
       </div>
-
-      <ProgressPanel messages={messages()} />
-
-      <Show when={isActive() || isRecoverable() || !!pendingAction()}>
-        <form
-          ref={bindPromptSubmitShortcut}
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSendInput()) sendInput();
-          }}
-          class={styles.inputForm}
-          data-testid="task-detail-form"
-        >
-          <PromptInput
-            ref={setPromptRef}
-            value={props.inputDraft}
-            onInput={props.onInputDraft}
-            onSubmit={sendInput}
-            onKeyDown={handlePromptNavigation}
-            placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
-            disabled={!canSendInput()}
-            class={styles.textInput}
-            tabIndex={0}
-            data-testid="task-detail-prompt"
-            supportsImages={props.supportsImages}
-            images={props.inputImages}
-            onImagesChange={props.onInputImages}
-            sendButton={
-              <Button
-                type="submit"
-                disabled={!canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)}
-                title="Send"
-                data-testid="send-input"
-              >
-                <SendIcon width="1.1em" height="1.1em" />
-              </Button>
-            }
-          />
-          <Dropdown
-            open={contextMenuOpen()}
-            onOpenChange={setContextMenuOpen}
-            class={styles.syncButtonGroup}
-            content={
-              <TaskActionsMenu
-                class={styles.syncDropdown}
-                forge={props.forge}
-                forgePR={props.forgePR}
-                baseBranch={props.baseBranch}
-                active={isActive()}
-                recoverable={isRecoverable()}
-                waiting={isWaiting()}
-                purging={props.taskState === "purging"}
-                supportsCompact={props.supportsCompact}
-                canFork={!!props.onFork && !!props.repo}
-                onSync={() => {
-                  setContextMenuOpen(false);
-                  doSync(false);
-                }}
-                onSyncDefault={() => {
-                  setContextMenuOpen(false);
-                  doSync(false, SyncTargetDefault);
-                }}
-                onStop={() => {
-                  setContextMenuOpen(false);
-                  props.onStop(props.taskId);
-                }}
-                onRevive={() => {
-                  setContextMenuOpen(false);
-                  props.onRevive(props.taskId);
-                }}
-                onPurge={() => {
-                  setContextMenuOpen(false);
-                  props.onPurge(props.taskId);
-                }}
-                onCompact={() => {
-                  setContextMenuOpen(false);
-                  doCompact();
-                }}
-                onFork={() => {
-                  setContextMenuOpen(false);
-                  props.onFork?.(props.taskId);
-                }}
-              />
-            }
-          >
-            <Show
-              when={!!pendingAction()}
-              fallback={
-                <button
-                  type="button"
-                  class={styles.contextMenuToggle}
-                  disabled={!!pendingAction()}
-                  onClick={() => setContextMenuOpen((v) => !v)}
-                  aria-label="Context actions"
-                  title="Context actions"
-                >
-                  &#8942;
-                </button>
-              }
-            >
-              <button type="button" class={styles.contextMenuToggle} disabled>
-                &#8987;
-              </button>
-            </Show>
-          </Dropdown>
-        </form>
-        <Show when={safetyIssues().length > 0}>
-          <div class={styles.safetyWarning}>
-            <strong>Safety issues detected:</strong>
-            <ul>
-              <For each={safetyIssues()}>
-                {(issue) => (
-                  <li>
-                    <strong>{issue.file}</strong>: {issue.detail} ({issue.kind})
-                  </li>
-                )}
-              </For>
-            </ul>
-            <Button
-              type="button"
-              variant="red"
-              loading={pendingAction() === "sync"}
-              disabled={!!pendingAction()}
-              onClick={() => {
-                setSafetyIssues([]);
-                doSync(true);
-              }}
-            >
-              Force Push to {props.branch}
-            </Button>
-          </div>
-        </Show>
-        <Show when={actionError()}>
-          <div class={styles.actionError}>{actionError()}</div>
-        </Show>
-      </Show>
-    </div>
+    </MarkdownTaskContext.Provider>
   );
 }
 
@@ -2253,13 +2270,36 @@ const markdownRenderer = {
   },
 };
 
-const marked = new Marked({
-  breaks: true,
-  gfm: true,
-  renderer: markdownRenderer,
-});
-
 function Markdown(props: { text: string }) {
+  const taskId = useContext(MarkdownTaskContext);
+  const marked = new Marked({
+    breaks: true,
+    gfm: true,
+    renderer: {
+      ...markdownRenderer,
+      link(this: Renderer, token: Tokens.Link): string {
+        // Markdown path destinations refer to runtime files. Web URLs,
+        // protocol-relative URLs, and fragment anchors retain normal navigation.
+        let path = token.href;
+        if (path.startsWith("file:///")) path = path.slice(7);
+        else if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//") || path.startsWith("#")) {
+          return Renderer.prototype.link.call(this, token);
+        }
+        if (!taskId || !path) return Renderer.prototype.link.call(this, token);
+        path = path.replace(/#.*$/, "").replace(/:\d+(?::\d+)?$/, "");
+        // Marked decodes neither percent-encoded spaces nor file URI paths.
+        try {
+          path = decodeURIComponent(path);
+        } catch {
+          return Renderer.prototype.link.call(this, token);
+        }
+        const href = `/api/caic/v1/tasks/${encodeURIComponent(taskId())}/file?${new URLSearchParams({ path })}`;
+        return Renderer.prototype.link
+          .call(this, { ...token, href })
+          .replace("<a ", '<a target="_blank" rel="noopener noreferrer" ');
+      },
+    },
+  });
   const html = createMemo(() => marked.parse(props.text) as string);
   const [raw, setRaw] = createSignal(false);
   const [copied, setCopied] = createSignal(false);

@@ -357,10 +357,25 @@ type ForkOptions struct {
 type System interface {
 	Name() Name
 	Lifecycle
+	Files
 	Repository
 	Monitor
 	Inventory
 	PrivilegeInfo
+}
+
+// FileChunkSize bounds each runtime file chunk to 64 KiB.
+const FileChunkSize = 64 << 10
+
+// Files streams regular files from an instance, never the server's filesystem.
+type Files interface {
+	// ReadFile yields chunks of at most FileChunkSize bytes, borrowed until
+	// the next iteration. Empty files yield one empty chunk. Missing files
+	// yield fs.ErrNotExist. Offset is a byte offset; length -1 reads to EOF.
+	// Stopping iteration releases the reader and process.
+	ReadFile(ctx context.Context, id ID, path string, offset, length int64) iter.Seq2[[]byte, error]
+	// FileSize returns the current regular-file size; it is not a version validator.
+	FileSize(ctx context.Context, id ID, path string) (int64, error)
 }
 
 // Lifecycle manages runtime instance lifecycle operations.

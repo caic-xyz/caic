@@ -3,8 +3,10 @@ package smoketest
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
 	"iter"
 	"os"
 	"os/exec"
@@ -331,6 +333,36 @@ func (*RuntimeBackend) SudoPassword(context.Context, runtime.ID) (string, error)
 	return "", nil
 }
 
+// ReadFile serves deterministic artifacts for browser file-link coverage.
+func (*RuntimeBackend) ReadFile(_ context.Context, _ runtime.ID, path string, offset, length int64) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		data, err := artifactFile(path)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		if offset < 0 || length < -1 {
+			yield(nil, fs.ErrInvalid)
+			return
+		}
+		if offset >= int64(len(data)) {
+			data = nil
+		} else {
+			data = data[offset:]
+		}
+		if length >= 0 && length < int64(len(data)) {
+			data = data[:length]
+		}
+		yield(data, nil)
+	}
+}
+
+// FileSize returns the size of a deterministic browser artifact.
+func (*RuntimeBackend) FileSize(_ context.Context, _ runtime.ID, path string) (int64, error) {
+	data, err := artifactFile(path)
+	return int64(len(data)), err
+}
+
 // nextStatsSeq reserves the next CPU index for one streamed sample. The manager
 // resubscribes whenever a task changes state, so histories from several runs
 // land in the same retained ring; consecutive indices keep every CPU reading in
@@ -414,5 +446,16 @@ func fakeProcesses() []runtime.ProcessInfo {
 		{PID: 300, PPID: 201, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 1, OpenFDs: new(4), CPU: 98.7, Mem: 5.6, RSSBytes: 58_720_256, CPUTime: 45 * time.Second, StartedAt: now.Add(-42 * time.Second), Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/main.c -o /tmp/ccXyz.s"},
 		{PID: 301, PPID: 201, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 1, OpenFDs: new(4), CPU: 97.1, Mem: 4.8, RSSBytes: 50_331_648, CPUTime: 42 * time.Second, StartedAt: now.Add(-39 * time.Second), Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/parser.c -o /tmp/ccAbc.s"},
 		{PID: 202, PPID: 100, PGRP: 100, User: "user", State: "R", Priority: 19, Threads: 1, OpenFDs: new(3), CPU: 0.3, Mem: 0.1, RSSBytes: 1_048_576, CPUTime: 0, StartedAt: now, Command: "ps -eo pid,ppid,pgrp,user,stat,pri,ni,nlwp,%cpu,%mem,rss,time,lstart,args"},
+	}
+}
+
+func artifactFile(path string) ([]byte, error) {
+	switch path {
+	case "/home/user/src/caic/test-results/screenshot.png":
+		return base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
+	case "/home/user/src/caic/README.md":
+		return []byte("# Task artifact\n"), nil
+	default:
+		return nil, fs.ErrNotExist
 	}
 }

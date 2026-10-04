@@ -7,13 +7,17 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"iter"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/md"
 
@@ -204,6 +208,144 @@ func newTestBackend(c mdClient) *Backend {
 
 func TestBackend(t *testing.T) {
 	t.Parallel()
+	t.Run("ReadFile", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		name := filepath.Join(dir, "screenshot '$().png")
+		data := bytes.Repeat([]byte("a"), 2*runtime.FileChunkSize+17)
+		if err := os.WriteFile(name, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		empty := filepath.Join(dir, "empty")
+		if err := os.WriteFile(empty, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		b := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+		id := runtime.NewID("docker", "file-test")
+		var got []byte
+		count := 0
+		for chunk, err := range b.ReadFile(t.Context(), id, name, 0, -1) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(chunk) > 64<<10 {
+				t.Fatalf("chunk size = %d", len(chunk))
+			}
+			got = append(got, chunk...)
+			count++
+		}
+		if !bytes.Equal(got, data) || count != 3 {
+			t.Fatalf("read %d bytes in %d chunks", len(got), count)
+		}
+		count = 0
+		for chunk, err := range b.ReadFile(t.Context(), id, empty, 0, -1) {
+			if err != nil || len(chunk) != 0 {
+				t.Fatalf("empty file chunk = %q, %v", chunk, err)
+			}
+			count++
+		}
+		if count != 1 {
+			t.Fatalf("empty file yielded %d chunks", count)
+		}
+		for _, tc := range []struct {
+			path string
+			err  error
+		}{
+			{filepath.Join(dir, "missing"), fs.ErrNotExist},
+			{dir, fs.ErrInvalid},
+			{"relative", fs.ErrInvalid},
+		} {
+			seen := false
+			for _, err := range b.ReadFile(t.Context(), id, tc.path, 0, -1) {
+				if !errors.Is(err, tc.err) {
+					t.Fatalf("ReadFile(%q) = %v, want %v", tc.path, err, tc.err)
+				}
+				seen = true
+			}
+			if !seen {
+				t.Fatalf("missing error for %q", tc.path)
+			}
+		}
+	})
+	t.Run("ReadFile offset", func(t *testing.T) {
+		t.Parallel()
+		name := filepath.Join(t.TempDir(), "offset")
+		if err := os.WriteFile(name, []byte("0123456789"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		b := newTestBackend(&fakeMDClient{getResult: &fileCommandContainer{}})
+		id := runtime.NewID("docker", "file-test")
+		size, err := b.FileSize(t.Context(), id, name)
+		if err != nil || size != 10 {
+			t.Fatalf("FileSize = %d, %v", size, err)
+		}
+		var got []byte
+		for data, err := range b.ReadFile(t.Context(), id, name, 4, 3) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, data...)
+		}
+		if string(got) != "456" {
+			t.Fatalf("offset read = %q", got)
+		}
+	})
+	t.Run("ReadFile early stop", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		t.Cleanup(cancel)
+		b := newTestBackend(&fakeMDClient{getResult: &streamCommandContainer{command: "exec yes x"}})
+		count := 0
+		for chunk, err := range b.ReadFile(ctx, runtime.NewID("docker", "file-test"), "/file", 0, -1) {
+			if err != nil || len(chunk) != 64<<10 {
+				t.Fatalf("first chunk: %d bytes, %v", len(chunk), err)
+			}
+			count++
+			break
+		}
+		if count != 1 || ctx.Err() != nil {
+			t.Fatalf("early stop did not complete before timeout: count %d, %v", count, ctx.Err())
+		}
+	})
+	t.Run("ReadFile cancellation", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		b := newTestBackend(&fakeMDClient{getResult: &streamCommandContainer{command: "exec yes x"}})
+		seenErr := false
+		for _, err := range b.ReadFile(ctx, runtime.NewID("docker", "file-test"), "/file", 0, -1) {
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+				seenErr = true
+			} else {
+				cancel()
+			}
+		}
+		if !seenErr {
+			t.Fatal("cancellation was not reported")
+		}
+	})
+	t.Run("ReadFile late error", func(t *testing.T) {
+		t.Parallel()
+		b := newTestBackend(&fakeMDClient{getResult: &streamCommandContainer{command: "head -c 65536 /dev/zero; head -c 1048576 /dev/zero >&2; printf 'useful diagnostic' >&2; exit 1"}})
+		bytesRead := 0
+		seenErr := false
+		for data, err := range b.ReadFile(t.Context(), runtime.NewID("docker", "file-test"), "/file", 0, -1) {
+			if err != nil {
+				if !strings.Contains(err.Error(), "useful diagnostic") || len(err.Error()) > 3000 {
+					t.Fatalf("unbounded or missing diagnostic: %d bytes", len(err.Error()))
+				}
+				seenErr = true
+			} else {
+				bytesRead += len(data)
+			}
+		}
+		if bytesRead != 64<<10 || !seenErr {
+			t.Fatalf("read %d bytes, error reported %v", bytesRead, seenErr)
+		}
+	})
 	t.Run("parse disk usage", func(t *testing.T) {
 		t.Parallel()
 		usage, err := parseDiskUsage("/one\t376657501\ntwo\t0", "docker")
@@ -708,4 +850,22 @@ func TestCommandOutput(t *testing.T) {
 	if got, want := string(res.Stderr), "diagnostic\n"; got != want {
 		t.Errorf("Stderr = %q, want %q", got, want)
 	}
+}
+
+// fileCommandContainer executes the actual read command locally for file tests.
+type fileCommandContainer struct{ fakeMDContainer }
+
+func (*fileCommandContainer) SSHCommand(_ []string, command string) []string {
+	return []string{"sh", "-c", command}
+}
+
+// streamCommandContainer supplies a controlled long-lived or failing producer.
+type streamCommandContainer struct {
+	fakeMDContainer
+
+	command string
+}
+
+func (c *streamCommandContainer) SSHCommand([]string, string) []string {
+	return []string{"sh", "-c", c.command}
 }

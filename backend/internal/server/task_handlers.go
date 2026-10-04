@@ -1,4 +1,4 @@
-// HTTP handlers for task SSE streams, WebSocket proxying, route-level task lookup, and raw response writing.
+// HTTP handlers for task SSE and file streams, WebSocket proxying, and route-level task lookup.
 
 package server
 
@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -798,10 +800,152 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
 	m.HandleFunc("GET /tasks/{id}/diff/index", h.handleGetDiffIndex)
 	m.HandleFunc("GET /tasks/{id}/diff/file", h.handleGetFileDiff)
+	m.HandleFunc("GET /tasks/{id}/file", h.handleTaskFile)
 	m.HandleFunc("GET /tasks/{id}/repo-status", h.handleTaskRepoStatus)
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
+}
+
+// handleTaskFile is a raw browser resource endpoint, like the VNC WebSocket;
+// it is intentionally outside the generated JSON SDK. Active document formats
+// download as attachments so container content cannot run on caic's origin.
+func (h *taskHandlers) handleTaskFile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	w.Header().Set("Cache-Control", "no-store")
+	entry, err := h.getTask(r)
+	if err != nil {
+		writeError(ctx, w, err)
+		return
+	}
+	name := r.URL.Query().Get("path")
+	w.Header().Set("Accept-Ranges", "bytes")
+	offset, length := int64(0), int64(-1)
+	size := int64(0)
+	contentType := ""
+	// Ignore multipart ranges and unverifiable If-Range validators. A fresh full
+	// response is permitted for either and avoids mixing mutable file versions.
+	rangeHeader := r.Header.Get("Range")
+	if strings.HasPrefix(rangeHeader, "bytes=") && !strings.Contains(rangeHeader, ",") && r.Header.Get("If-Range") == "" {
+		var err error
+		size, err = h.taskSvc.taskFileSize(ctx, entry, name)
+		if err != nil {
+			writeError(ctx, w, err)
+			return
+		}
+		offset, length, err = parseTaskFileRange(strings.TrimPrefix(rangeHeader, "bytes="), size)
+		if err != nil {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+			writeError(ctx, w, &api.Error{Status: http.StatusRequestedRangeNotSatisfiable, Code: api.CodeBadRequest, Message: err.Error()})
+			return
+		}
+		// Sniff the file prefix even when serving a range from its middle.
+		for prefix, err := range h.taskSvc.taskFile(ctx, entry, name, 0, 512) {
+			if err != nil {
+				writeError(ctx, w, err)
+				return
+			}
+			contentType = taskFileContentType(prefix)
+			break
+		}
+	}
+	remaining := length
+	started := false
+	for data, err := range h.taskSvc.taskFile(ctx, entry, name, offset, length) {
+		if err != nil {
+			if !started {
+				writeError(ctx, w, err)
+				return
+			}
+			httpLogger(ctx).WarnContext(ctx, "task file stream failed", "err", err)
+			// Headers are already sent. Abort the transfer so a partial file cannot
+			// look like a complete successful response or contain an appended error.
+			panic(http.ErrAbortHandler)
+		}
+		if !started {
+			if contentType == "" {
+				contentType = taskFileContentType(data)
+			}
+			disposition := "attachment"
+			switch contentType {
+			case "image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/webp", "text/plain; charset=utf-8":
+				disposition = "inline"
+			}
+			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": path.Base(name)}))
+			w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			if length >= 0 {
+				// Byte offsets describe the original file representation.
+				w.Header().Set("Content-Encoding", "identity")
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, size))
+				w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+				w.WriteHeader(http.StatusPartialContent)
+			} else {
+				w.WriteHeader(http.StatusOK)
+			}
+			started = true
+			if r.Method == http.MethodHead {
+				return
+			}
+		}
+		n, err := w.Write(data)
+		if err != nil {
+			httpLogger(ctx).WarnContext(ctx, "write task file chunk", "err", err)
+			panic(http.ErrAbortHandler)
+		}
+		if n != len(data) {
+			panic(http.ErrAbortHandler)
+		}
+		if remaining >= 0 {
+			remaining -= int64(n)
+		}
+	}
+	if remaining > 0 {
+		httpLogger(ctx).WarnContext(ctx, "task file shrank during range read", "missing_bytes", remaining)
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func taskFileContentType(data []byte) string {
+	// The standard MIME sniffer omits AVIF and BMP. These signatures select
+	// inert image decoders; active document types still download as attachments.
+	if len(data) >= 16 && string(data[4:8]) == "ftyp" && (string(data[8:12]) == "avif" || string(data[8:12]) == "avis") {
+		return "image/avif"
+	}
+	if len(data) >= 14 && string(data[:2]) == "BM" {
+		return "image/bmp"
+	}
+	return http.DetectContentType(data)
+}
+
+// parseTaskFileRange resolves one byte-range specification against current size.
+func parseTaskFileRange(spec string, size int64) (offset, length int64, err error) {
+	start, end, ok := strings.Cut(strings.TrimSpace(spec), "-")
+	if !ok || size == 0 {
+		return 0, 0, errors.New("unsatisfiable byte range")
+	}
+	if start == "" {
+		count, err := strconv.ParseInt(strings.TrimSpace(end), 10, 64)
+		if err != nil || count <= 0 {
+			return 0, 0, errors.New("invalid suffix range")
+		}
+		count = min(count, size)
+		return size - count, count, nil
+	}
+	offset, err = strconv.ParseInt(strings.TrimSpace(start), 10, 64)
+	if err != nil || offset < 0 || offset >= size {
+		return 0, 0, errors.New("unsatisfiable byte range")
+	}
+	last := size - 1
+	if end != "" {
+		last, err = strconv.ParseInt(strings.TrimSpace(end), 10, 64)
+		if err != nil || last < offset {
+			return 0, 0, errors.New("invalid byte range end")
+		}
+		last = min(last, size-1)
+	}
+	return offset, last - offset + 1, nil
 }
 
 func writeReplayHistoryError(w io.Writer, flusher http.Flusher) {
