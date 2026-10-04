@@ -4,6 +4,7 @@ package mdruntime
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -229,7 +230,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("compactGitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", `git diff "$comparison" --numstat --stat -z`, "GIT_OPTIONAL_LOCKS=0", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", `git diff "$diff_base" --numstat --stat -z`, "GIT_OPTIONAL_LOCKS=0", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("compactGitStatusCommand() missing %q", fragment)
 			}
@@ -422,6 +423,125 @@ func TestCompactGitStatusCommand(t *testing.T) {
 	})
 }
 
+func TestGitStatusMergeBase(t *testing.T) {
+	t.Parallel()
+	for _, probe := range []struct {
+		name    string
+		command func(string, string, string) string
+		parse   func(string) (runtime.RepositoryStatus, error)
+	}{
+		{name: "compact", command: compactGitStatusCommand, parse: parseCompactGitStatus},
+		{name: "normal", command: gitStatusCommand, parse: parseGitStatus},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			t.Parallel()
+			for _, state := range []string{"behind", "behind with worktree changes", "diverged"} {
+				t.Run(state, func(t *testing.T) {
+					t.Parallel()
+					dir := initStatusRepo(t)
+					runTestGit(t, dir, "branch", "feature")
+					if err := os.WriteFile(filepath.Join(dir, "upstream.txt"), []byte("upstream only\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					runTestGit(t, dir, "add", "upstream.txt")
+					runTestGit(t, dir, "commit", "-m", "upstream change")
+					runTestGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+					runTestGit(t, dir, "checkout", "feature")
+					runTestGit(t, dir, "branch", "--set-upstream-to=origin/main")
+
+					var want []runtime.GitFileStat
+					ahead := 0
+					if state == "diverged" {
+						if err := os.WriteFile(filepath.Join(dir, "branch.txt"), []byte("branch only\n"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+						runTestGit(t, dir, "add", "branch.txt")
+						runTestGit(t, dir, "commit", "-m", "branch change")
+						want = append(want, runtime.GitFileStat{Path: "branch.txt", LinesAdded: 1})
+						ahead = 1
+					}
+					if state != "behind" {
+						if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("working change\n"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked change\n"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+						want = append(want,
+							runtime.GitFileStat{Path: "tracked.txt", LinesAdded: 1, LinesDeleted: 1},
+							runtime.GitFileStat{Path: "untracked.txt", LinesAdded: 1},
+						)
+					}
+
+					out, err := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin", "main")).Output()
+					if err != nil {
+						t.Fatal(err)
+					}
+					status, err := probe.parse(string(out))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if status.Upstream != "origin/main" || status.Ahead != ahead || status.Behind != 1 {
+						t.Errorf("branch status = %+v, want origin/main +%d -1", status, ahead)
+					}
+					if !slices.Equal(status.DiffStat, want) {
+						t.Errorf("diff stat = %+v, want %+v", status.DiffStat, want)
+					}
+					if probe.name == "normal" && len(status.Commits) != ahead {
+						t.Errorf("commits = %+v, want %d branch commits", status.Commits, ahead)
+					}
+				})
+			}
+			t.Run("no common ancestor", func(t *testing.T) {
+				t.Parallel()
+				dir := initStatusRepo(t)
+				if err := os.WriteFile(filepath.Join(dir, "unwanted.txt"), []byte("should not have been committed\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				runTestGit(t, dir, "add", "unwanted.txt")
+				runTestGit(t, dir, "commit", "-m", "unwanted file")
+				runTestGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+				runTestGit(t, dir, "checkout", "--orphan", "unrelated")
+				runTestGit(t, dir, "rm", "-f", "unwanted.txt")
+				runTestGit(t, dir, "commit", "-m", "unrelated root")
+				if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("working change\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				out, err := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin", "main")).Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				status, err := probe.parse(string(out))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := []runtime.GitFileStat{
+					{Path: "untracked.txt", LinesAdded: 1},
+					{Path: "unwanted.txt", LinesDeleted: 1},
+				}
+				if !slices.Equal(status.DiffStat, want) {
+					t.Errorf("diff stat = %+v, want %+v", status.DiffStat, want)
+				}
+				if status.Upstream != "origin/main" || status.Ahead != 1 || status.Behind != 2 {
+					t.Errorf("branch status = %+v, want origin/main +1 -2", status)
+				}
+			})
+			t.Run("merge-base error", func(t *testing.T) {
+				t.Parallel()
+				dir := initStatusRepo(t)
+				shim := gitShim(t, `if [ "$1" = "merge-base" ]; then echo 'injected merge-base failure' >&2; exit 128; fi`)
+				cmd := newIsolatedGitCommand(t, "bash", "-c", probe.command(dir, "origin", "main"))
+				cmd.Env = append(cmd.Env, "PATH="+shim)
+				out, err := cmd.CombinedOutput()
+				exitErr, ok := errors.AsType[*exec.ExitError](err)
+				if !ok || exitErr.ExitCode() != 128 || !strings.Contains(string(out), "injected merge-base failure") {
+					t.Fatalf("merge-base failure: err = %v, output = %q, want injected error with exit code 128", err, out)
+				}
+			})
+		})
+	}
+}
+
 func TestGitStatusCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("quotes repository and includes protocol", func(t *testing.T) {
@@ -430,7 +550,7 @@ func TestGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_OPTIONAL_LOCKS=0", "git add -N", `git diff "$comparison" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_OPTIONAL_LOCKS=0", "git add -N", `git diff "$diff_base" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}

@@ -1,4 +1,4 @@
-// Git inspection reports status, comparison history, stats, and isolated file patches.
+// Git inspection reports status, history, merge-base or rewritten-history stats, and file patches.
 
 package mdruntime
 
@@ -29,7 +29,7 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 	return gitStatusHeader(repo, comparison) + ` && ` +
 		untrackedDiffSetup() + ` && ` +
 		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then untracked_diff git diff "$comparison" --numstat --stat -z -- .; fi && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$diff_base" --numstat --stat -z -- .; fi && ` +
 		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
 		`untracked_diff git diff HEAD --numstat --stat -z -- . && ` +
 		`printf '\0` + gitLogMarker + `\0' && ` +
@@ -40,7 +40,7 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 // compactGitStatusCommand returns the status, divergence, operation, and
 // branch-diff numstat sections of the full status report in one probe. It
 // omits the per-commit log and per-file worktree stats that only the diff
-// view needs, so periodic callers never walk history.
+// view needs, so periodic callers avoid the per-commit log.
 func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 	comparison := ""
 	if defaultRemote != "" && defaultBranch != "" {
@@ -49,7 +49,7 @@ func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 	return gitStatusHeader(repo, comparison) + ` && ` +
 		untrackedDiffSetup() + ` && ` +
 		`printf '` + gitTotalStatMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then untracked_diff git diff "$comparison" --numstat --stat -z -- .; fi && ` +
+		`if [ -n "$comparison" ]; then untracked_diff git diff "$diff_base" --numstat --stat -z -- .; fi && ` +
 		`printf '\0` + gitWorktreeStatMarker + `\0'`
 }
 
@@ -57,6 +57,8 @@ func compactGitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 // and operation detection shared by the full and compact status commands. A
 // configured task base is used only when the checked-out branch has no usable
 // tracking upstream, so the task card and diff agree with git status.
+// Branch stats use the merge-base, falling back to the comparison tip only
+// when rewritten histories have no common ancestor (merge-base exit code 1).
 func gitStatusHeader(repo, configuredComparison string) string {
 	return "cd " + shellQuote(repo) + ` && export GIT_OPTIONAL_LOCKS=0 LC_ALL=C && ` +
 		`git status --porcelain=v2 --branch -z --untracked-files=all && ` +
@@ -67,6 +69,9 @@ func gitStatusHeader(repo, configuredComparison string) string {
 		`if [ -n "$comparison" ]; then ` +
 		`divergence=$(git rev-list --left-right --count "$comparison...HEAD") && ` +
 		`printf '` + gitComparisonMarker + `%s\0` + gitDivergenceMarker + `%s\0' "$comparison" "$divergence"; ` +
+		`fi && diff_base=$comparison && if [ -n "$comparison" ]; then ` +
+		`if merge_base=$(git merge-base "$comparison" HEAD); then diff_base=$merge_base; ` +
+		`else merge_base_status=$?; [ "$merge_base_status" -eq 1 ] || exit "$merge_base_status"; fi; ` +
 		`fi && git_dir=$(git rev-parse --git-dir) && operation= && ` +
 		`if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then operation=rebase; ` +
 		`elif git rev-parse --verify --quiet MERGE_HEAD >/dev/null; then operation=merge; ` +
