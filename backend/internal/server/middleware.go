@@ -1,4 +1,4 @@
-// HTTP transport middleware: response compression, request decompression, and pprof registration.
+// HTTP transport middleware: response compression and finalization logging, request decompression, and pprof registration.
 
 package server
 
@@ -30,7 +30,14 @@ func compressMiddleware(next http.Handler) http.Handler {
 			ResponseWriter: w,
 			encoding:       enc,
 		}
-		defer cw.finish()
+		ctx := r.Context()
+		defer func() {
+			if err := cw.finish(); err != nil {
+				// Finalization runs before the outer access logger. The status may
+				// already be committed; report the transport failure without rewriting it.
+				httpLogger(ctx).ErrorContext(ctx, "response compression finalization failed", "m", r.Method, "p", r.URL.Path, "encoding", cw.encoding, "err", err)
+			}
+		}()
 		next.ServeHTTP(cw, r)
 	})
 }
@@ -134,12 +141,12 @@ func (cw *compressWriter) initOnce() {
 	}
 }
 
-// finish flushes and closes the compressor.
-func (cw *compressWriter) finish() {
+// finish flushes and closes the compressor, preserving its final write error.
+func (cw *compressWriter) finish() error {
 	if cw.writer == nil {
-		return
+		return nil
 	}
-	_ = cw.writer.Close()
+	return cw.writer.Close()
 }
 
 // decompressMiddleware returns a handler that decompresses request bodies

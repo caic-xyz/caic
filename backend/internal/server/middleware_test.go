@@ -4,19 +4,26 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/andybalholm/brotli"
+	"github.com/caic-xyz/caic/backend/internal/httplog"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 )
 
 type flushErrorWriteCloser struct {
-	err error
+	err      error
+	closeErr error
 }
 
 func (w *flushErrorWriteCloser) Write(b []byte) (int, error) {
@@ -24,11 +31,28 @@ func (w *flushErrorWriteCloser) Write(b []byte) (int, error) {
 }
 
 func (w *flushErrorWriteCloser) Close() error {
-	return nil
+	return w.closeErr
 }
 
 func (w *flushErrorWriteCloser) Flush() error {
 	return w.err
+}
+
+// finishFailResponseWriter starts failing after the handler's buffered write.
+type finishFailResponseWriter struct {
+	*httptest.ResponseRecorder
+
+	err          error
+	failing      bool
+	failedWrites int
+}
+
+func (w *finishFailResponseWriter) Write(p []byte) (int, error) {
+	if w.failing {
+		w.failedWrites++
+		return 0, w.err
+	}
+	return w.ResponseRecorder.Write(p)
 }
 
 func jsonHandler() http.HandlerFunc {
@@ -65,6 +89,108 @@ func precompressedHandler() http.HandlerFunc {
 
 func TestCompressMiddleware(t *testing.T) {
 	t.Parallel()
+	t.Run("FinalizationFailure", func(t *testing.T) {
+		t.Parallel()
+		for _, enc := range []string{"br", "gzip", "zstd"} {
+			t.Run(enc, func(t *testing.T) {
+				t.Parallel()
+				const querySecret = "private-query-canary"
+				const payload = "private-payload-canary"
+				want := errors.New("transport write failed")
+				var logs bytes.Buffer
+				log := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+				ctx := context.WithValue(t.Context(), httpLoggerKey{}, log)
+				req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/download?token="+querySecret, http.NoBody)
+				req.Header.Set("Accept-Encoding", enc)
+				wire := &finishFailResponseWriter{ResponseRecorder: httptest.NewRecorder(), err: want}
+				var beforeClose []byte
+				handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					if n, err := w.Write([]byte(payload)); err != nil || n != len(payload) {
+						t.Fatalf("buffered Write = %d,%v", n, err)
+					}
+					beforeClose = bytes.Clone(wire.Body.Bytes())
+					wire.failing = true
+				})
+				h := httplog.Handler{Handler: compressMiddleware(handler), Logger: log}
+				h.ServeHTTP(wire, req)
+				if wire.failedWrites == 0 {
+					t.Fatal("compressor finalization did not exercise transport failure")
+				}
+				if wire.Code != http.StatusOK || !bytes.Equal(wire.Body.Bytes(), beforeClose) {
+					t.Fatal("finalization rewrote the committed response")
+				}
+				if strings.Contains(logs.String(), querySecret) || strings.Contains(logs.String(), payload) {
+					t.Fatal("query or payload leaked into logs")
+				}
+				var records []map[string]any
+				for line := range strings.SplitSeq(strings.TrimSpace(logs.String()), "\n") {
+					var record map[string]any
+					if err := json.Unmarshal([]byte(line), &record); err != nil {
+						t.Fatal(err)
+					}
+					records = append(records, record)
+				}
+				if len(records) != 2 {
+					t.Fatalf("got %d log records; need finalization failure then HTTP access", len(records))
+				}
+				failure := records[0]
+				if failure["level"] != "ERROR" || failure["m"] != "GET" || failure["p"] != "/download" || failure["encoding"] != enc || failure["err"] != want.Error() {
+					t.Fatalf("finalization record=%v", failure)
+				}
+				access := records[1]
+				if access["msg"] != "http" || access["s"] != float64(http.StatusOK) {
+					t.Fatalf("access record lost committed status: %v", access)
+				}
+			})
+		}
+	})
+	t.Run("FinalizationSuccess", func(t *testing.T) {
+		t.Parallel()
+		for _, enc := range []string{"br", "gzip", "zstd"} {
+			t.Run(enc, func(t *testing.T) {
+				t.Parallel()
+				var logs bytes.Buffer
+				log := slog.New(slog.NewJSONHandler(&logs, nil))
+				ctx := context.WithValue(t.Context(), httpLoggerKey{}, log)
+				req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", http.NoBody)
+				req.Header.Set("Accept-Encoding", enc)
+				compressMiddleware(jsonHandler()).ServeHTTP(httptest.NewRecorder(), req)
+				if logs.Len() != 0 {
+					t.Fatal("successful finalization emitted an error log")
+				}
+			})
+		}
+	})
+	t.Run("WebSocketUpgrade", func(t *testing.T) {
+		t.Parallel()
+		var logs bytes.Buffer
+		log := slog.New(slog.NewJSONHandler(&logs, nil))
+		ctx := context.WithValue(t.Context(), httpLoggerKey{}, log)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/ws", http.NoBody)
+		req.Header.Set("Accept-Encoding", "gzip")
+		h := compressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusSwitchingProtocols) }))
+		wire := httptest.NewRecorder()
+		h.ServeHTTP(wire, req)
+		if wire.Code != http.StatusSwitchingProtocols || wire.Header().Get("Content-Encoding") != "" || wire.Body.Len() != 0 || logs.Len() != 0 {
+			t.Fatal("compression interfered with upgrade")
+		}
+	})
+
+	t.Run("FinishPreservesCause", func(t *testing.T) {
+		t.Parallel()
+		want := errors.New("transport close failed")
+		cw := &compressWriter{
+			ResponseWriter: httptest.NewRecorder(),
+			encoding:       "gzip",
+			writer:         &flushErrorWriteCloser{closeErr: fmt.Errorf("codec close: %w", want)},
+			headerSent:     true,
+		}
+		if err := cw.finish(); !errors.Is(err, want) {
+			t.Fatalf("finish error=%v; wrapped cause lost", err)
+		}
+	})
+
 	t.Run("FlushError", func(t *testing.T) {
 		t.Parallel()
 		want := errors.New("encoder flush failed")
