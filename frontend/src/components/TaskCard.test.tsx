@@ -541,6 +541,17 @@ describe("TaskCard", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it("stops a failed task with a retained runtime", () => {
+    const onStop = vi.fn();
+    const { getByRole, unmount } = renderCard(() => <TaskCard {...props({ state: "failed", onStop })} />);
+    fireEvent.click(getByRole("button", { name: "Stop" }));
+    expect(onStop).toHaveBeenCalledOnce();
+    unmount();
+
+    renderCard(() => <TaskCard {...props({ state: "failed", runtime: undefined, onStop })} />);
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+
   it("does not repeat stop and confirms before purging from a double-click", () => {
     const onStop = vi.fn();
     const onPurge = vi.fn();

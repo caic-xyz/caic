@@ -349,7 +349,7 @@ export default function TaskCard(props: TaskCardProps) {
                 props.state !== "stopped" &&
                 props.state !== "crashed" &&
                 props.onStop &&
-                !terminalStates.has(props.state)
+                (!terminalStates.has(props.state) || (props.state === "failed" && !!props.runtime?.id))
               }
             >
               <span class={styles.purgeBtn}>

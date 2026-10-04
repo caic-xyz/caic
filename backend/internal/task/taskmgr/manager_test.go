@@ -3665,6 +3665,53 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
+		t.Run("valid_stops_failed_container", func(t *testing.T) {
+			t.Parallel()
+			fake := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
+			id := runtime.NewID("test-runtime", "ctr-1")
+			tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetState(taskslog.StateFailed)
+			log, path, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.logStore.WriteResultTrailer(log, tk.Title(), &taskslog.Result{State: taskslog.StateFailed}); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			path, err = m.logStore.Compress(path, nil, taskslog.StateFailed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := m.NewEntry(tk, nil)
+			entry.LogPath.Set(path)
+			entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: errors.New("previous revive failed")})
+			m.Insert(tk.ID, entry)
+			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			entry.Lifecycle.wg.Wait()
+			if got := tk.GetState(); got != taskslog.StateStopped {
+				t.Fatalf("state = %s, want stopped", got)
+			}
+			if got := fake.Status(id); got != runtimetest.StatusStopped {
+				t.Fatalf("runtime status = %s, want stopped", got)
+			}
+			if res := entry.Result(); res == nil || res.State != taskslog.StateStopped || res.Err != nil {
+				t.Fatalf("result = %+v, want stopped without old failure", res)
+			}
+			loaded, err := m.logStore.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded) != 1 || loaded[0].LastTrailer.State != taskslog.StateStopped {
+				t.Fatalf("loaded task = %+v, want stopped trailer", loaded)
+			}
+		})
 		t.Run("valid_stops_container_backend", func(t *testing.T) {
 			t.Parallel()
 			// Backend is the interface seam, so a fake stands in for Docker.
@@ -3696,6 +3743,25 @@ func TestManager(t *testing.T) {
 	})
 	t.Run("Revive", func(t *testing.T) {
 		t.Parallel()
+		t.Run("error_stop_completion_in_progress", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.SetState(taskslog.StateStopped)
+			entry := m.NewEntry(tk, nil)
+			entry.Finish(&taskslog.Result{State: taskslog.StateStopped})
+			done := entry.Done()
+			// Stop has published the task state but still owns trailer/result
+			// publication. Revive must not reset this entry incarnation yet.
+			entry.Lifecycle.operationMu.Lock()
+			defer entry.Lifecycle.operationMu.Unlock()
+			if err := entry.Lifecycle.Revive(); err == nil {
+				t.Fatal("Revive accepted an unfinished stop")
+			}
+			if entry.Done() != done || tk.GetState() != taskslog.StateStopped {
+				t.Fatal("Revive reset the entry before stop completion")
+			}
+		})
 		t.Run("error_wrong_state", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -3733,7 +3799,7 @@ func TestManager(t *testing.T) {
 				t.Fatal("failed revive did not close done")
 			}
 		})
-		t.Run("error_failure_closes_done", func(t *testing.T) {
+		t.Run("error_failure_preserves_retryable_crash", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &blockingReviveBackend{FakeBackend: &runtimetest.FakeBackend{}, release: releaseRevive}
@@ -3761,6 +3827,7 @@ func TestManager(t *testing.T) {
 			entry.LogPath.Set(path)
 			m.Insert(tk.ID, entry)
 
+			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "x"}})
 			firstChanged := m.Changed()
 			if err := entry.Lifecycle.Revive(); err != nil {
 				t.Fatalf("Revive: %v", err)
@@ -3783,12 +3850,15 @@ func TestManager(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("failed revive did not notify")
 			}
-			if got := tk.GetState(); got != taskslog.StateFailed {
-				t.Fatalf("state = %v, want StateFailed", got)
+			if got := tk.GetState(); got != taskslog.StateCrashed {
+				t.Fatalf("state = %v, want StateCrashed", got)
 			}
 			result := entry.Result()
-			if result == nil || result.State != taskslog.StateFailed || result.Err == nil {
-				t.Fatalf("Result = %v, want failed result with error", result)
+			if result == nil || result.State != taskslog.StateCrashed || result.Err == nil {
+				t.Fatalf("Result = %v, want crashed result with error", result)
+			}
+			if got := fake.Status(tk.RuntimeInstanceID()); got != runtimetest.StatusStopped {
+				t.Fatalf("runtime status = %v, want stopped", got)
 			}
 		})
 	})

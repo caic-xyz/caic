@@ -30,6 +30,8 @@ type Lifecycle struct {
 	ctx          context.Context
 	wg           sync.WaitGroup
 
+	operationMu sync.Mutex // Keeps Stop/Revive completion in the same entry incarnation.
+
 	purgeMu         sync.Mutex
 	purgeCancel     context.CancelFunc
 	purgeGeneration uint64
@@ -127,17 +129,29 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 }
 
 // Stop transitions the task to stopping and stops its runtime without purging it.
+// Failed and crashed tasks can retain a running instance after partial startup.
 func (r *Lifecycle) Stop(ctx context.Context) error {
+	if !r.operationMu.TryLock() {
+		return conflict("task lifecycle operation is in progress")
+	}
+	defer r.operationMu.Unlock()
 	t := r.entry.Task()
+	if (t.GetState() == taskslog.StateFailed || t.GetState() == taskslog.StateCrashed) && t.RuntimeInstanceID() == "" {
+		return conflict("task has no runtime instance to stop")
+	}
 	state, changed := t.SetStateIfAny(taskslog.StateStopping,
-		taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning)
+		taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning, taskslog.StateFailed, taskslog.StateCrashed)
 	if !changed {
 		return conflict("task is not running or waiting")
 	}
 	r.manager.NotifyTaskChange()
 	r.manager.log.InfoContext(ctx, "stop requested", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state)
 	r.wg.Go(func() {
-		r.agentRuntime.StopTask(r.ctx, t)
+		r.operationMu.Lock()
+		defer r.operationMu.Unlock()
+		if res := r.agentRuntime.StopTask(r.ctx, t); res != nil {
+			r.entry.Finish(res)
+		}
 		r.manager.log.InfoContext(r.ctx, "stop completed", "task", t.ID, "instance", t.RuntimeInstanceID(), "final_state", t.GetState())
 		r.manager.NotifyTaskChange()
 	})
@@ -146,6 +160,10 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 
 // Revive restarts a stopped or crashed task.
 func (r *Lifecycle) Revive() error {
+	if !r.operationMu.TryLock() {
+		return conflict("task lifecycle operation is in progress")
+	}
+	defer r.operationMu.Unlock()
 	t := r.entry.Task()
 	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
@@ -154,13 +172,17 @@ func (r *Lifecycle) Revive() error {
 	r.entry.Reset()
 	r.manager.NotifyTaskChange()
 	r.wg.Go(func() {
+		r.operationMu.Lock()
+		defer r.operationMu.Unlock()
 		ctx, tk := trace.NewTask(r.ctx, "task.revive:"+t.ID.String())
 		defer tk.End()
 		h, err := r.agentRuntime.ReviveTask(ctx, t)
 		if err != nil {
 			r.manager.log.WarnContext(ctx, "revive failed", "task", t.ID, "err", err)
-			t.SetState(taskslog.StateFailed)
-			r.entry.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: internalErr(err, "revive task")})
+			// Failures after revive begins preserve a retryable crashed state.
+			// Precondition failures still terminate an incomplete startup.
+			t.SetStateIf(taskslog.StateProvisioning, taskslog.StateFailed)
+			r.entry.Finish(&taskslog.Result{State: t.GetState(), Err: internalErr(err, "revive task")})
 			r.manager.NotifyTaskChange()
 			return
 		}

@@ -193,16 +193,74 @@ func (s *Store) Open(name string, header *agent.MetaMessage) (agent.LogSink, str
 // Reopen validates and opens an existing task log for appending without a
 // header. name must be a base filename (no path separators or "."/".."
 // elements); Reopen resolves it under LogDir and returns the resolved path.
+// A compressed log is restored to a validated plain log before appending.
 func (s *Store) Reopen(name string, header *agent.MetaMessage) (agent.LogSink, string, error) {
 	path, err := s.resolveName(name)
 	if err != nil {
 		return nil, "", err
+	}
+	if isLogCompressed(path) {
+		s.compressMu.Lock()
+		defer s.compressMu.Unlock()
+		plain := strings.TrimSuffix(path, ".zst")
+		if _, err := os.Stat(plain); errors.Is(err, os.ErrNotExist) {
+			if err := restorePlainLog(path, plain, header); err != nil {
+				return nil, "", err
+			}
+		} else if err != nil {
+			return nil, "", err
+		}
+		w, _, err := openTaskLogForAppend(plain, header, false)
+		if err != nil {
+			return nil, "", err
+		}
+		// The plain log is authoritative, including after an interrupted
+		// restore. Remove the archive only after validating the plain header.
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, "", errors.Join(err, w.Close())
+		}
+		if err := os.Remove(logHeaderCachePath(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, "", errors.Join(err, w.Close())
+		}
+		return w, plain, nil
 	}
 	w, _, err := openTaskLogForAppend(path, header, false)
 	if err != nil {
 		return nil, "", err
 	}
 	return w, path, nil
+}
+
+// restorePlainLog publishes a complete, validated decoded log. A decode or
+// header error leaves the archive intact and never publishes a partial log.
+func restorePlainLog(path, plain string, header *agent.MetaMessage) (err error) {
+	in, err := openLogReader(path)
+	if err != nil {
+		return err
+	}
+	out, err := os.CreateTemp(filepath.Dir(plain), ".restore-task-log-*")
+	if err != nil {
+		return errors.Join(err, in.Close())
+	}
+	tmp := out.Name()
+	defer func() {
+		if removeErr := os.Remove(tmp); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}()
+	_, copyErr := io.Copy(out, in)
+	readErr := errors.Join(copyErr, in.Close())
+	if readErr != nil {
+		return errors.Join(readErr, out.Close())
+	}
+	_, validationErr := validateRawLogAppend(out, tmp, header)
+	if err := errors.Join(validationErr, out.Close()); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, plain); err != nil {
+		return fmt.Errorf("restore plain task log: %w", err)
+	}
+	return nil
 }
 
 func openTaskLogForAppend(path string, header *agent.MetaMessage, create bool) (w *taskLogWriter, created bool, err error) {

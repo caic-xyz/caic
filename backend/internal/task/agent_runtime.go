@@ -465,8 +465,9 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason taskslog.Sta
 
 // StopTask gracefully shuts down the agent session and stops the instance
 // without removing it. The instance can be revived later. Unlike Cleanup,
-// this preserves git remotes and runtime config.
-func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
+// this preserves git remotes and runtime config. It returns the persisted
+// result, or nil when a concurrent teardown supersedes the stop.
+func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) *taskslog.Result {
 	ctx, task := trace.NewTask(ctx, "task.stop:"+t.ID.String())
 	defer task.End()
 
@@ -480,7 +481,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
 	if _, changed := t.SetStateUnless(taskslog.StateStopping, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StateStopped); !changed {
 		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
-		return
+		return nil
 	}
 
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
@@ -524,7 +525,7 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 			_ = h.Log.Close()
 		}
 		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
-		return
+		return nil
 	}
 
 	// Write log trailer so the task reloads as "stopped" (not "failed")
@@ -545,6 +546,14 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 	var log agent.LogSink
 	if h != nil {
 		log = h.Log
+	} else if r.LogPath.Get() != "" {
+		// A failed revive has no attached session. Reopen its preserved log
+		// so stopping the instance also persists the retryable task state.
+		var err error
+		log, err = r.reopenLog(t)
+		if err != nil {
+			tlog.WarnContext(ctx, "reopen stopped task log failed", "err", err)
+		}
 	}
 	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
 	if trailerErr != nil {
@@ -559,6 +568,8 @@ func (r *AgentRuntime) StopTask(ctx context.Context, t *Task) {
 	}
 	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
 		"cost", res.CostUSD, "turns", res.NumTurns)
+	res.Err = errors.Join(trailerErr, closeErr)
+	return &res
 }
 
 // ReviveTask restarts a stopped or crashed instance and resumes the agent session.
@@ -932,19 +943,27 @@ func (r *AgentRuntime) configureTaskMCP(t *Task, opts *agent.Options) error {
 	return nil
 }
 
-// finishReviveFailure records a failed revive result in the task log. A revive
-// may fail before opening a session log, after opening one, or while replacing
-// an immediately-exited resumed session; in every case the final trailer is
-// appended to a validated log and the non-revivable log is compressed before
-// lifecycle cache publication.
+// finishReviveFailure stops a partially revived instance and records a
+// retryable crash. The preserved instance and uncompressed log permit another
+// revive after the cause is repaired.
 func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveErr error, log agent.LogSink) error {
-	t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
+	// Keep revive in progress until cleanup and log closure finish, so another
+	// revive cannot race with stopping this instance or writing its trailer.
+	defer t.SetStateUnless(taskslog.StateCrashed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 	if h := t.CloseAndDetachSession(context.WithoutCancel(ctx)); h != nil {
 		h.CloseMsgCh()
 		<-h.DispatchDone
 		if log == nil {
 			log = h.Log
 		}
+	}
+	// Revive can start the instance before returning an error. Stop even when
+	// the caller was cancelled so the task does not strand a running instance.
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	stopErr := r.Runtimes.Stop(stopCtx, t.RuntimeInstanceID())
+	cancel()
+	if stopErr != nil {
+		reviveErr = errors.Join(reviveErr, fmt.Errorf("stop partially revived instance: %w", stopErr))
 	}
 	var reopenErr error
 	if log == nil {
@@ -953,12 +972,9 @@ func (r *AgentRuntime) finishReviveFailure(ctx context.Context, t *Task, reviveE
 	if log == nil {
 		return errors.Join(reviveErr, reopenErr)
 	}
-	res := taskslog.Result{State: taskslog.StateFailed, Err: reviveErr}
+	res := taskslog.Result{State: taskslog.StateCrashed, Err: reviveErr}
 	trailerErr := r.LogStore.WriteResultTrailer(log, t.Title(), &res)
-	if trailerErr != nil {
-		return errors.Join(reviveErr, trailerErr, log.Close())
-	}
-	return errors.Join(reviveErr, r.compressLog(log, t, &res))
+	return errors.Join(reviveErr, trailerErr, log.Close())
 }
 
 // finishStartupFailure removes a started instance and records the startup
@@ -1000,6 +1016,8 @@ func (r *AgentRuntime) purgeFailedStartupInstance(ctx context.Context, t *Task) 
 	purgeCancel()
 	if err != nil {
 		tlog.WarnContext(ctx, "purge failed startup instance", "err", err)
+	} else {
+		t.SetRuntimeConnectionInfo("", runtime.ConnectionTarget{}, "", "", 0)
 	}
 	return err
 }

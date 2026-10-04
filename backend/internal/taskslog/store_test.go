@@ -381,6 +381,44 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("ReopenCompressedRejectsInvalidArchive", func(t *testing.T) {
+		t.Parallel()
+		for _, name := range []string{"corrupt", "harness_mismatch"} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				store := NewStore(testLogger(), t.TempDir())
+				tk := &testTask{ID: ksid.NewID(), Harness: harness.Codex}
+				log, err := openTaskLog(store, tk)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plain := log.path
+				archive, err := store.Compress(plain, log, StateFailed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				header := tk.logHeader()
+				if name == "corrupt" {
+					if err := os.WriteFile(archive, []byte("invalid zstd"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					header.Harness = harness.Claude
+				}
+				if log, _, err := store.Reopen(filepath.Base(archive), header); err == nil {
+					_ = log.Close()
+					t.Fatal("Reopen succeeded, want validation error")
+				}
+				if _, err := os.Stat(archive); err != nil {
+					t.Fatalf("archive removed on failed restore: %v", err)
+				}
+				if _, err := os.Stat(plain); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("plain log published on failed restore: %v", err)
+				}
+			})
+		}
+	})
+
 	t.Run("CompressPath", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Success", func(t *testing.T) {

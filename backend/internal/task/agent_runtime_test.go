@@ -481,6 +481,9 @@ func TestRunner(t *testing.T) {
 			if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusPurged {
 				t.Errorf("runtime status = %s, want purged", got)
 			}
+			if got := tk.RuntimeInstanceID(); got != "" {
+				t.Fatalf("purged instance remains associated: %s", got)
+			}
 		})
 		t.Run("CleansUpInstanceWhenSessionStartupFails", func(t *testing.T) {
 			t.Parallel()
@@ -506,6 +509,9 @@ func TestRunner(t *testing.T) {
 					instanceID := runtime.NewID(runtimeBackend.Name(), "fake-container")
 					if got := runtimeBackend.Status(instanceID); got != runtimetest.StatusPurged {
 						t.Errorf("runtime status = %s, want purged", got)
+					}
+					if got := tk.RuntimeInstanceID(); got != "" {
+						t.Fatalf("purged instance remains associated: %s", got)
 					}
 				})
 			}
@@ -1090,7 +1096,7 @@ func TestRunner(t *testing.T) {
 				}
 			})
 		})
-		t.Run("failure_persists_terminal_log", func(t *testing.T) {
+		t.Run("failure_stops_runtime_and_preserves_revivable_log", func(t *testing.T) {
 			t.Parallel()
 			for _, tc := range []struct {
 				name     string
@@ -1137,15 +1143,27 @@ func TestRunner(t *testing.T) {
 					if _, err := r.ReviveTask(t.Context(), tk); err == nil {
 						t.Fatal("ReviveTask succeeded, want failure")
 					}
-					loaded, err := taskslog.NewStore(testLogger(), logDir).LoadSettled()
+					if got := tk.GetState(); got != taskslog.StateCrashed {
+						t.Fatalf("state = %s, want crashed", got)
+					}
+					status, ok := tc.runtime.(interface {
+						Status(id runtime.ID) runtimetest.InstanceStatus
+					})
+					if !ok {
+						t.Fatal("runtime fake has no status inspection")
+					}
+					if got := status.Status(tk.RuntimeInstanceID()); got != runtimetest.StatusStopped {
+						t.Fatalf("runtime status = %s, want stopped", got)
+					}
+					loaded, err := taskslog.NewStore(testLogger(), logDir).LoadUnsettled()
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(loaded) != 1 || loaded[0].LastTrailer == nil || loaded[0].LastTrailer.State != taskslog.StateFailed {
-						t.Fatalf("loaded terminal result = %+v, want failed trailer", loaded)
+					if len(loaded) != 1 || loaded[0].LastTrailer == nil || loaded[0].LastTrailer.State != taskslog.StateCrashed {
+						t.Fatalf("loaded result = %+v, want crashed trailer", loaded)
 					}
-					if !strings.HasSuffix(loaded[0].LogPath(), ".zst") {
-						t.Fatalf("final log = %q, want compressed", loaded[0].LogPath())
+					if strings.HasSuffix(loaded[0].LogPath(), ".zst") {
+						t.Fatalf("revivable log = %q, want uncompressed", loaded[0].LogPath())
 					}
 				})
 			}
