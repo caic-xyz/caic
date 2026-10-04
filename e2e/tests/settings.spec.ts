@@ -1,6 +1,56 @@
 // Browser coverage for settings layout, destination ordering, and mapping edits.
 
 import { expect, test } from "../helpers";
+import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
+
+test("server model reload shows progress, success, and recoverable failure", async ({ page, api }, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto("/settings?section=server");
+  const models = page.getByRole("region", { name: "Reload models", exact: true });
+  const codex = models.getByRole("button", { name: "codex", exact: true });
+  const pi = models.getByRole("button", { name: "pi", exact: true });
+  await expect(codex).toBeVisible();
+  await expect(pi).toBeVisible();
+  await expect(models.getByRole("button")).toHaveCount(2);
+  await page.screenshot({ path: testInfo.outputPath("server-ready-desktop.png") });
+  const gate = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  await page.route("**/server/harnesses/codex/refresh", async (route) => {
+    started.resolve();
+    await gate.promise;
+    await route.continue();
+  });
+  try {
+    await codex.click();
+    await started.promise;
+    await expect(codex).toBeDisabled();
+    await expect(pi).toBeDisabled();
+    await page.screenshot({ path: testInfo.outputPath("server-reloading-desktop.png") });
+  } finally {
+    gate.resolve();
+  }
+  const status = models.getByRole("status", { name: "Model reload status" });
+  await expect(status).toHaveText("codex models refreshed.");
+  await expect(codex).toBeEnabled();
+  await expect(pi).toBeEnabled();
+  await expect
+    .poll(async () => (await api.listHarnesses()).find((h) => h.name === "codex")?.models.map((m) => m.id))
+    .toContain("fake-model-fast");
+  await page.screenshot({ path: testInfo.outputPath("server-success-desktop.png") });
+  const failure = { error: { code: "INTERNAL_ERROR", message: "Model provider unavailable." } } satisfies ErrorResponse;
+  await page.route("**/server/harnesses/pi/refresh", (route) => route.fulfill({ status: 503, json: failure }), {
+    times: 1,
+  });
+  await pi.click();
+  await expect(status).toHaveText(failure.error.message);
+  await expect(codex).toBeEnabled();
+  await expect(pi).toBeEnabled();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("server-failure-mobile.png") });
+  await pi.click();
+  await expect(status).toHaveText("pi models refreshed.");
+  await expect(pi).toBeEnabled();
+});
 
 test("desktop settings tabs keep a consistent frame", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 1000 });

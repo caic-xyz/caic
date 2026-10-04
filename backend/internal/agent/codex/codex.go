@@ -173,7 +173,7 @@ func fetchModelInfo(ctx context.Context, target runtime.ConnectionTarget, extraE
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "codex model-list", Container: target.SSHHost}
+	cmd.Stderr = &agent.SlogWriter{Context: ctx, Logger: slog.Default(), Prefix: "codex model-list", Container: target.SSHHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}

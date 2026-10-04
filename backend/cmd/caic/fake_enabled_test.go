@@ -1,4 +1,4 @@
-// Tests fake/e2e fixture selection for behavioral and visual modes.
+// Tests fake/e2e harness identities, quota groups, and model-refresh capabilities.
 
 //go:build e2e
 
@@ -14,14 +14,9 @@ import (
 func TestFakeAgentBackends(t *testing.T) {
 	t.Parallel()
 
-	visual := fakeAgentBackends(true)
-	if len(visual) != 1 || visual[harness.Claude] == nil {
-		t.Fatalf("visual backends = %#v, want only Claude", visual)
-	}
-
-	behavioral := fakeAgentBackends(false)
-	if len(behavioral) != 3 {
-		t.Fatalf("behavioral backend count = %d, want 3", len(behavioral))
+	backends := fakeAgentBackends()
+	if len(backends) != 3 {
+		t.Fatalf("fake backend count = %d, want 3", len(backends))
 	}
 	for _, test := range []struct {
 		harness  harness.Name
@@ -31,13 +26,17 @@ func TestFakeAgentBackends(t *testing.T) {
 		{harness: harness.Codex, provider: agent.QuotaProviderCodex},
 		{harness: harness.Pi, provider: ""},
 	} {
-		backend := behavioral[test.harness]
+		backend := backends[test.harness]
 		if backend == nil {
-			t.Errorf("behavioral backend %q is missing", test.harness)
+			t.Errorf("fake backend %q is missing", test.harness)
 			continue
 		}
 		if got := backend.QuotaProvider(); got != test.provider {
 			t.Errorf("backend %q provider = %q, want %q", test.harness, got, test.provider)
+		}
+		_, refreshable := backend.(agent.ModelFetcher)
+		if want := test.harness != harness.Claude; refreshable != want {
+			t.Errorf("backend %q supports refresh = %t, want %t", test.harness, refreshable, want)
 		}
 	}
 }

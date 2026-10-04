@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
@@ -26,21 +27,35 @@ const isFakeMode = true
 
 const visualFixturesEnv = "CAIC_E2E_VISUALS"
 
-func fakeAgentBackends(visualFixtures bool) agent.Backends {
+func fakeAgentBackends() agent.Backends {
 	claude := smoketest.NewFakeBackend()
 	backends := agent.Backends{harness.Claude: claude}
-	if visualFixtures {
-		return backends
-	}
 	codex := smoketest.NewFakeBackend()
 	codex.HarnessID = harness.Codex
 	codex.QuotaProviderID = agent.QuotaProviderCodex
 	pi := smoketest.NewFakeBackend()
 	pi.HarnessID = harness.Pi
 	pi.QuotaProviderID = ""
-	backends[harness.Codex] = codex
-	backends[harness.Pi] = pi
+	backends[harness.Codex] = &fakeModelBackend{FakeBackend: codex}
+	backends[harness.Pi] = &fakeModelBackend{FakeBackend: pi}
 	return backends
+}
+
+// fakeModelBackend keeps discovery on the normal temporary-runtime/cache path
+// while returning deterministic inventories without SSH or provider credentials.
+type fakeModelBackend struct {
+	*smoketest.FakeBackend
+}
+
+// FetchModelInventory implements agent.ModelFetcher.
+func (*fakeModelBackend) FetchModelInventory(ctx context.Context, _ runtime.ConnectionTarget, _ []string) (agent.ModelInventory, error) {
+	if err := ctx.Err(); err != nil {
+		return agent.ModelInventory{}, err
+	}
+	return agent.ModelInventory{Models: []agent.Model{
+		{ID: "fake-model", ContextWindow: 200_000, EffortOptions: []string{"low", "medium", "high"}},
+		{ID: "fake-model-fast", ContextWindow: 128_000},
+	}}, nil
 }
 
 // serveFake starts the HTTP server with fake container/agent ops and a temp
@@ -122,7 +137,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	// Resource statistics stream only for behaviour tests: the documentation
 	// screenshots compare two renders and need a stable glyph.
 	fc.StreamStats = !visualFixtures
-	cfg.Agent.Backends = fakeAgentBackends(visualFixtures)
+	cfg.Agent.Backends = fakeAgentBackends()
 
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.

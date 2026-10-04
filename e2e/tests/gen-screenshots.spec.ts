@@ -75,6 +75,13 @@ test("generate settings screenshots", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("region", { name: "Custom mounts", exact: true }).scrollIntoViewIfNeeded();
   await captureScreenshot(page, "mobile", "settings-mounts-mobile.png");
+  await page.goto("/settings?section=server");
+  const reloadModels = page.getByRole("region", { name: "Reload models", exact: true });
+  await expect(reloadModels.getByRole("button", { name: "codex", exact: true })).toBeVisible();
+  await expect(reloadModels.getByRole("button", { name: "pi", exact: true })).toBeVisible();
+  await captureScreenshot(page, "mobile", "settings-server-mobile.png");
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await captureScreenshot(page, "desktop", "settings-server.png");
   convertPngsToWebp(screenshotDir("desktop"));
   convertPngsToWebp(screenshotDir("mobile"));
 });

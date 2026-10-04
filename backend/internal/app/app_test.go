@@ -22,6 +22,7 @@ import (
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/ksid"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -306,6 +307,7 @@ func BenchmarkAppStartupWithSlowImport(b *testing.B) {
 	cfg := &server.Config{
 		Dirs:          server.DirsConfig{ConfigDir: b.TempDir(), CacheDir: b.TempDir()},
 		Runtime:       server.RuntimeConfig{System: &slowImportSystem{delay: 20 * time.Millisecond}, SkipWarmup: true},
+		Agent:         server.AgentConfig{Backends: agent.Backends{}},
 		LLM:           server.LLMConfig{Disable: true},
 		IPGeo:         server.IPGeoConfig{Allowlist: "0.0.0.0/0,::/0"},
 		UsageFetchers: []usage.ProviderFetcher{},
@@ -372,10 +374,11 @@ func registerCloseSpyProvider(t *testing.T, spy *closeSpyProvider) string {
 // closeSpyConfig builds a hermetic server config whose LLM is the spy provider.
 func closeSpyConfig(t *testing.T, providerName string) *server.Config {
 	// A fake runtime and a CIDR-only ipgeo allowlist keep New hermetic: no
-	// containers, no database, and no named-origin network fetches.
+	// containers, no model discovery, no database, and no named-origin fetches.
 	return &server.Config{
 		Dirs:          server.DirsConfig{ConfigDir: t.TempDir(), CacheDir: t.TempDir()},
 		Runtime:       server.RuntimeConfig{System: &runtimetest.FakeSystem{}, SkipWarmup: true},
+		Agent:         server.AgentConfig{Backends: agent.Backends{}},
 		LLM:           server.LLMConfig{Provider: providerName},
 		IPGeo:         server.IPGeoConfig{Allowlist: "0.0.0.0/0,::/0"},
 		UsageFetchers: []usage.ProviderFetcher{},
