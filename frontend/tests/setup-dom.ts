@@ -1,4 +1,4 @@
-// Installs jsdom globals, the Solid TSX transform, and asset stubs before tests run.
+// Installs shared Solid/router runtimes, jsdom globals, TSX transforms, and asset stubs for frontend tests.
 // Loaded via `node --test --import ./frontend/tests/setup-dom.ts` so every test-file child
 // process gets a DOM before module evaluation, like vitest's environment: "jsdom".
 import { readFileSync } from "node:fs";
@@ -158,6 +158,10 @@ const isStubbedSpecifier = (specifier: string): boolean => {
 // esbuild cannot compile Solid's JSX, and solid-js ships no jsx-runtime functions.
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    // Match Vite's runtime deduplication when gomode is linked from a sibling checkout.
+    if (specifier === "@solidjs/router" || specifier === "solid-js" || specifier.startsWith("solid-js/")) {
+      return nextResolve(specifier, { ...context, parentURL: import.meta.url });
+    }
     if (specifier.includes("?raw")) {
       // ?raw keeps its real file: resolve the stripped specifier, then mark the URL so
       // the load hook below can serve the file's text as the module's default export.

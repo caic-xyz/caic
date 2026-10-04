@@ -11,8 +11,8 @@ export default defineConfig({
   logLevel: "warn",
   plugins: [solidPlugin(), solidSVG()],
   resolve: {
-    // A duplicated solid-js copy breaks reactivity signal identity at runtime.
-    dedupe: ["solid-js"],
+    // Linked hosts share signals and router contexts with the application.
+    dedupe: ["@solidjs/router", "solid-js"],
     alias: {
       "@sdk": resolve(import.meta.dirname, "sdk/caic/ts/v1"),
     },

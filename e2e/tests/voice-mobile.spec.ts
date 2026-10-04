@@ -1,4 +1,4 @@
-// Browser coverage for the full-screen mobile task view during native voice sessions.
+// Browser coverage for native voice focus, mobile task cards, and detail navigation.
 
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 
@@ -23,6 +23,17 @@ test("mobile voice task links open details and browser back restores the voice l
   await expect.poll(() => voiceView.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
+  // Deliver the same synchronous frontend invocation used by the native bridge.
+  const result = await page.evaluate((id) => {
+    const host = window as Window & {
+      executeGoModeVoiceTool?: (name: string, args: Record<string, unknown>) => Record<string, unknown>;
+    };
+    if (!host.executeGoModeVoiceTool) throw new Error("Frontend voice tools are not registered");
+    return host.executeGoModeVoiceTool("focus_task", { task_number: id });
+  }, id);
+  expect(result).toEqual({ task_id: id });
+  await expect(page).toHaveURL(/\/$/);
+  await expect(taskLink).toHaveAttribute("aria-current", "true");
   await taskLink.click();
   await expect(page).toHaveURL(new RegExp(`/task/@${id}$`));
   await expect(voiceView).not.toBeVisible();
@@ -34,6 +45,15 @@ test("mobile voice task links open details and browser back restores the voice l
   await page.setViewportSize({ width: 900, height: 844 });
   await expect(voiceView).not.toBeVisible();
   await expect(page.getByTestId("task-list")).toBeVisible();
+  await page.evaluate((id) => {
+    const host = window as Window & {
+      executeGoModeVoiceTool?: (name: string, args: Record<string, unknown>) => Record<string, unknown>;
+    };
+    if (!host.executeGoModeVoiceTool) throw new Error("Frontend voice tools are not registered");
+    return host.executeGoModeVoiceTool("focus_task", { task_number: id });
+  }, id);
+  await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
+  await expect(page.getByTestId("detail-pane")).toBeVisible();
 });
 
 test("six long task titles fit above voice controls on a Pixel 6", async ({ page, api }) => {

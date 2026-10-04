@@ -1,10 +1,12 @@
-// Full-screen mobile voice task links ordered by their voice task numbers.
+// Full-screen numbered voice task links with the conversationally focused task highlighted.
 
-import { For, Show, createMemo, type Accessor } from "solid-js";
+import { For, Show, createEffect, createMemo, type Accessor } from "solid-js";
 import { A } from "@solidjs/router";
 
 import type { Task } from "@sdk/types.gen";
 import { isInactiveTask } from "../TaskNumberMap";
+
+import { focusedVoiceTask } from "../voiceTaskState";
 
 import styles from "./MobileVoiceTasks.module.css";
 
@@ -20,7 +22,7 @@ export default function MobileVoiceTasks(props: MobileVoiceTasksProps) {
   const visibleIds = createMemo(() => {
     const active: Array<{ id: string; number: number }> = [];
     for (const task of props.tasks()) {
-      if (isInactiveTask(task)) continue;
+      if (isInactiveTask(task) && task.id !== focusedVoiceTask()) continue;
       active.push({ id: task.id, number: props.getTaskNumber(task.id) ?? Infinity });
     }
     active.sort((a, b) => a.number - b.number);
@@ -41,13 +43,19 @@ export default function MobileVoiceTasks(props: MobileVoiceTasksProps) {
       <ul class={styles.list}>
         <For each={visibleIds()}>
           {(id) => {
+            let link: HTMLAnchorElement | undefined;
+            createEffect(() => {
+              if (focusedVoiceTask() === id) link?.scrollIntoView({ block: "nearest" });
+            });
             const task = () => tasksById().get(id);
             const number = () => props.getTaskNumber(id);
             const stateName = () => (task()?.state === "has_plan" ? "plan ready" : task()?.state);
             return (
               <li class={styles.item}>
                 <A
+                  ref={link}
                   class={styles.taskLink}
+                  aria-current={focusedVoiceTask() === id ? "true" : undefined}
                   href={`/task/@${id}`}
                   data-task-id={id}
                   data-state={task()?.state}

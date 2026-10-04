@@ -1,4 +1,4 @@
-// Caic task-number display state for browser and native voice sessions.
+// Caic task numbering and conversational focus for browser and native voice sessions.
 
 import { createSignal } from "solid-js";
 
@@ -6,6 +6,8 @@ import type { TaskNumberMap } from "./TaskNumberMap";
 
 /** Whether a voice gateway session is currently connected. */
 export const [voiceConnected, setVoiceConnected] = createSignal(false);
+
+export const [focusedVoiceTask, setFocusedVoiceTask] = createSignal<string | null>(null);
 
 const [taskNumberMap, setTaskNumberMap] = createSignal<TaskNumberMap | null>(null, {
   equals: false,
@@ -20,4 +22,10 @@ export function setVoiceTaskNumberMap(map: TaskNumberMap | null): void {
 export function getVoiceTaskNumber(id: string): number | undefined {
   if (!voiceConnected()) return undefined;
   return taskNumberMap()?.toNumber(id);
+}
+
+/** Resolves a voice task number against the current session map. */
+export function getVoiceTaskId(number: number): string | undefined {
+  if (!voiceConnected()) return undefined;
+  return taskNumberMap()?.toId(number);
 }

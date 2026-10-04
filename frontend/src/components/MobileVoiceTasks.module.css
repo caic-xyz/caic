@@ -1,4 +1,4 @@
-/* Full-screen mobile voice task colors and compact, two-line numbered rows. */
+/* Full-screen mobile voice task rows with state colors and conversational focus. */
 
 .view {
   flex: 1;
@@ -85,4 +85,9 @@
 
 .empty {
   font-size: 1.25rem;
+}
+
+.taskLink[aria-current="true"] {
+  outline: 3px solid var(--color-focus-border);
+  outline-offset: -5px;
 }

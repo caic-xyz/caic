@@ -132,11 +132,12 @@ async function waitForTaskEventsSubscription() {
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
 import { notifications } from "@maruel/gomode/web/notifications";
+import { executeFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
 import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
 import { AuthProvider } from "./AuthContext";
-import { getVoiceTaskNumber } from "./voiceTaskState";
+import { getVoiceTaskNumber, focusedVoiceTask } from "./voiceTaskState";
 import { installFetchRouter } from "@tests/fetch-router";
 
 // Spies on the real api singleton and the notifications object replace the former module
@@ -1905,12 +1906,34 @@ describe("App repo chips: No repository", () => {
     expect(normal).toHaveAttribute("aria-hidden", "true");
     const link = within(voiceView).getByRole("link", { name: "Task 1, waiting: Review output" });
     expect(link).toHaveAttribute("href", "/task/@task1");
-    fireEvent.click(link);
+    expect(executeFrontendVoiceTool("focus_task", { task_number: "#1" })).toEqual({ task_id: "task1" });
+    expect(history.get()).toBe("/");
+    expect(link).toHaveAttribute("aria-current", "true");
+    window.goModeHost = { isVoiceConnected: () => false };
+    window.dispatchEvent(new Event("gomodevoicechange"));
+    await waitFor(() => expect(focusedVoiceTask()).toBeNull());
+    window.goModeHost = { isVoiceConnected: () => true };
+    window.dispatchEvent(new Event("gomodevoicechange"));
+    const restoredLink = await screen.findByRole("link", { name: "Task 1, waiting: Review output" });
+    expect(restoredLink).not.toHaveAttribute("aria-current");
+    fireEvent.click(restoredLink);
 
     await waitFor(() => expect(history.get()).toBe("/task/@task1"));
     await waitFor(() => expect(screen.queryByTestId("mobile-voice-tasks")).not.toBeInTheDocument());
     expect(normal).toHaveAttribute("aria-hidden", "false");
     expect(within(normal).getByTestId("detail-pane")).toBeInTheDocument();
+  });
+
+  it("focuses desktop task details through the frontend voice tool", async () => {
+    window.goModeHost = { isVoiceConnected: () => true };
+    const { history } = renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "task1", title: "Review output", state: "waiting" })] });
+    expect(executeFrontendVoiceTool("focus_task", { task_number: "missing" })).toHaveProperty("error");
+    expect(history.get()).toBe("/");
+    expect(executeFrontendVoiceTool("focus_task", { task_number: 1 })).toEqual({ task_id: "task1" });
+    await waitFor(() => expect(history.get()).toContain("@task1"));
+    expect(screen.getByTestId("detail-pane")).toBeInTheDocument();
   });
 
   it("does not mount browser voice when the server disables the voice gateway", async () => {

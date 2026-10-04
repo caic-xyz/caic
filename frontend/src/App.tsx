@@ -3,6 +3,7 @@
 import { createEffect, createMemo, createSignal, ErrorBoundary, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useLocation } from "@solidjs/router";
 
+import VoiceTaskFocus from "./VoiceTaskFocus";
 import BrowserVoiceShell from "./BrowserVoiceShell";
 import { HostModeProvider, useHostMode } from "@maruel/gomode/web/HostMode";
 
@@ -187,6 +188,7 @@ function Shell(props: { children?: JSX.Element }) {
             onOpenChange={setShortcutsOpen}
             voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}
           />
+          <VoiceTaskFocus mobile={mobile} />
           <BrowserVoiceShell />
           <Toasts />
         </div>
