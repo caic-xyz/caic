@@ -17,16 +17,22 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/md"
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
@@ -533,12 +539,40 @@ func startServerFixture(t *testing.T, fx serverFixture) *smokeServer {
 			t.Errorf("cleanup smoke containers: %v", err)
 		}
 	})
+	// Image setup downloads current harness releases even though the test runs
+	// deterministic agents. Retry that preparation before any lifecycle assertions
+	// so a transient installer outage does not fail an otherwise healthy runtime.
+	log := slog.New(slog.NewTextHandler(serverLog, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	client, err := mdruntime.New(ctx, log, "", "", smoketest.SmokeRuntime())
+	if err != nil {
+		t.Fatalf("init smoke image client: %v", err)
+	}
+	warmCtx, cancel := context.WithTimeout(ctx, smokeImagePrepTimeout)
+	defer cancel()
+	w := &mdruntime.SlogWriter{Context: warmCtx, Logger: log, Phase: "warmup"}
+	for attempt := 1; ; attempt++ {
+		if _, err := client.Warmup(warmCtx, w, w, &md.WarmupOpts{}); err == nil {
+			break
+		} else if attempt == 3 || warmCtx.Err() != nil {
+			t.Fatalf("prepare smoke image after %d attempt(s): %v", attempt, err)
+		} else {
+			t.Logf("smoke image preparation attempt %d failed: %v; retrying", attempt, err)
+		}
+		select {
+		case <-warmCtx.Done():
+			t.Fatalf("prepare smoke image: %v", warmCtx.Err())
+		case <-time.After(5 * time.Second):
+		}
+	}
 	s.start()
 	return s
 }
 
 // smokeTaskTimeout bounds one smoke task's wait for a state or a runtime.
 const smokeTaskTimeout = 10 * time.Minute
+
+// smokeImagePrepTimeout bounds all attempts to download and build a fixture image.
+const smokeImagePrepTimeout = 10 * time.Minute
 
 // smokeServerLogTailBytes bounds how much of the fixture's server log a failure
 // copies into the test output.
@@ -600,10 +634,9 @@ func isTerminalTaskState(state v1.TaskState) bool {
 	}
 }
 
-// TestSmokeFailureDiagnostics verifies the two helpers that make a smoke failure
-// diagnosable: the bounded tail read that dumps the fixture's server log, and
-// the terminal-state classification that ends a wait with the real outcome. It
-// needs no container runtime.
+// TestSmokeFailureDiagnostics verifies bounded log tails and immediate launch
+// failure reporting, including the terminal-state classification used by task
+// waits. It needs no container runtime.
 func TestSmokeFailureDiagnostics(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.log")
 	if err := os.WriteFile(path, []byte("first\nsecond\nthird\n"), 0o600); err != nil {
@@ -642,9 +675,35 @@ func TestSmokeFailureDiagnostics(t *testing.T) {
 			t.Errorf("isTerminalTaskState(%q) = %v, want %v", c.state, got, c.want)
 		}
 	}
+	// A subprocess lets the test observe the helper's fatal outcome without
+	// failing the parent test.
+	t.Run("RuntimeWait", func(t *testing.T) {
+		if os.Getenv("CAIC_TEST_RUNTIME_FAILURE") == "1" {
+			id := ksid.NewID()
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if err := json.NewEncoder(w).Encode([]v1.Task{{ID: id, State: v1.TaskStateFailed, Error: "building image: installer unavailable"}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			t.Cleanup(s.Close)
+			waitForTaskRuntime(t, &smokeServer{baseURL: s.URL}, id.String())
+			return
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		t.Cleanup(cancel)
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSmokeFailureDiagnostics$/^RuntimeWait$") //nolint:gosec // rerun this test binary.
+		cmd.Env = append(os.Environ(), "CAIC_TEST_RUNTIME_FAILURE=1")
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			t.Fatalf("failed launch did not end the wait: %v", ctx.Err())
+		}
+		if err == nil || !strings.Contains(string(out), `reached "failed" while waiting for a runtime instance; error "building image: installer unavailable"`) {
+			t.Fatalf("failed launch diagnostic: err=%v output=%s", err, out)
+		}
+	})
 }
 
-// waitForTaskRuntime polls the task list until the task's container is assigned.
+// waitForTaskRuntime polls until the task's container is assigned or launch fails.
 func waitForTaskRuntime(t *testing.T, s *smokeServer, taskID string) runtime.ID {
 	t.Helper()
 	deadline := time.Now().Add(smokeTaskTimeout)
@@ -653,8 +712,11 @@ func waitForTaskRuntime(t *testing.T, s *smokeServer, taskID string) runtime.ID 
 		if task.Runtime.ID != "" {
 			return runtime.ID(task.Runtime.ID)
 		}
+		if isTerminalTaskState(task.State) {
+			t.Fatalf("task %s: reached %q while waiting for a runtime instance; error %q", taskID, task.State, task.Error)
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("task %s: timed out waiting for a runtime instance", taskID)
+			t.Fatalf("task %s: timed out waiting for a runtime instance, current %q error %q", taskID, task.State, task.Error)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
