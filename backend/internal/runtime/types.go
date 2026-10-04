@@ -126,12 +126,13 @@ type RepositoryStatus struct {
 	Uncommitted []GitFileStatus
 }
 
-// GitCommit describes one commit that is ahead of the comparison branch.
+// GitCommit describes one commit unique to either side of the comparison branch.
 type GitCommit struct {
 	SHA          string
 	Subject      string
 	Decorations  string
 	AuthoredDate string
+	Behind       bool // Present only on the comparison branch, not in HEAD's history.
 	Stat         []GitFileStat
 }
 

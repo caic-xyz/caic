@@ -81,6 +81,39 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledWith("task-1", "0", "", "working.go", "old.go");
   });
 
+  it("groups missing upstream commits separately and loads their patches on demand", async () => {
+    const user = userEvent.setup();
+    const index = diffIndexFixture();
+    index.repositories[0].behind = 1;
+    index.repositories[0].commits.push({
+      sha: "abcdef1234567890abcdef1234567890abcdef12",
+      subject: "Missing upstream change",
+      authoredDate: "2026-09-16",
+      behind: true,
+      stat: [{ path: "upstream.go", linesAdded: 1, linesDeleted: 0, oldSize: -1, newSize: -1 }],
+    });
+    getTaskDiffIndexMock.mockResolvedValueOnce(index);
+    getTaskFileDiffMock.mockResolvedValueOnce({ diff: "@@ -0,0 +1 @@\n+upstream change" });
+
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    expect(await screen.findByRole("heading", { name: "Commits ahead (1)" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Commits behind (1)" })).toBeInTheDocument();
+    expect(screen.getByText("Missing upstream change")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).not.toHaveBeenCalled();
+
+    const row = screen.getByRole("button", { name: "upstream.go" });
+    row.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("+upstream change")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledWith(
+      "task-1",
+      "0",
+      "abcdef1234567890abcdef1234567890abcdef12",
+      "upstream.go",
+      "",
+    );
+  });
+
   it("selects a file from the second repository by index", async () => {
     const index = diffIndexFixture();
     index.repositories.push({

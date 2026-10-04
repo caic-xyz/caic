@@ -945,12 +945,13 @@ type UsageDashboardResp struct {
 	Days      []UsageDashboardDay `json:"days"`
 }
 
-// GitCommit describes one commit ahead of a repository's original tracking branch.
+// GitCommit describes one commit unique to either side of a repository's comparison branch.
 type GitCommit struct {
 	SHA          string   `json:"sha"`
 	Subject      string   `json:"subject"`
 	Decorations  string   `json:"decorations,omitempty"`
 	AuthoredDate string   `json:"authoredDate"`
+	Behind       bool     `json:"behind,omitempty"` // Present on the comparison branch and missing from HEAD.
 	Stat         DiffStat `json:"stat"`
 }
 
@@ -1035,6 +1036,7 @@ type DiffIndexCommit struct {
 	Subject      string              `json:"subject"`
 	Decorations  string              `json:"decorations,omitempty"`
 	AuthoredDate string              `json:"authoredDate"`
+	Behind       bool                `json:"behind,omitempty"` // Present on the comparison branch and missing from HEAD.
 	Stat         []DiffIndexFileStat `json:"stat"`
 }
 

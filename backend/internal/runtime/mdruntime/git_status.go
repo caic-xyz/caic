@@ -1,4 +1,4 @@
-// Git inspection reports status, history, merge-base or rewritten-history stats, and file patches.
+// Git inspection reports status, ahead/behind history, merge-base or rewritten-history stats, and file patches.
 
 package mdruntime
 
@@ -14,6 +14,8 @@ import (
 const (
 	gitLogMarker          = "caic-git-log"
 	gitCommitMarker       = "caic-git-commit"
+	gitAheadCommitMarker  = gitCommitMarker + ">"
+	gitBehindCommitMarker = gitCommitMarker + "<"
 	gitComparisonMarker   = "# caic.branch.upstream "
 	gitDivergenceMarker   = "# caic.branch.ab "
 	gitOperationMarker    = "caic-git-operation"
@@ -33,8 +35,8 @@ func gitStatusCommand(repo, defaultRemote, defaultBranch string) string {
 		`printf '\0` + gitWorktreeStatMarker + `\0' && ` +
 		`untracked_diff git diff HEAD --numstat --stat -z -- . && ` +
 		`printf '\0` + gitLogMarker + `\0' && ` +
-		`if [ -n "$comparison" ]; then git log --date-order --decorate=short --no-color ` +
-		`--format='%x00` + gitCommitMarker + `%x00%H%x00%as%x00%D%x00%s%x00' --numstat --stat -z "$comparison..HEAD"; fi`
+		`if [ -n "$comparison" ]; then git log --left-right --date-order --decorate=short --no-color ` +
+		`--format='%x00` + gitCommitMarker + `%m%x00%H%x00%as%x00%D%x00%s%x00' --numstat --stat -z "$comparison...HEAD"; fi`
 }
 
 // compactGitStatusCommand returns the status, divergence, operation, and
@@ -183,7 +185,7 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 			i++
 			continue
 		}
-		if records[i] != gitCommitMarker {
+		if records[i] != gitAheadCommitMarker && records[i] != gitBehindCommitMarker {
 			return runtime.RepositoryStatus{}, fmt.Errorf("unknown git log record %q", records[i])
 		}
 		if i+5 >= len(records) {
@@ -194,9 +196,10 @@ func parseGitStatus(out string) (runtime.RepositoryStatus, error) {
 			AuthoredDate: records[i+2],
 			Decorations:  records[i+3],
 			Subject:      records[i+4],
+			Behind:       records[i] == gitBehindCommitMarker,
 		}
 		i += 5
-		for i < len(records) && records[i] != gitCommitMarker {
+		for i < len(records) && records[i] != gitAheadCommitMarker && records[i] != gitBehindCommitMarker {
 			record := strings.TrimPrefix(records[i], "\n")
 			if record == "" {
 				i++

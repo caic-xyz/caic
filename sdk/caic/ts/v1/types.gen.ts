@@ -1526,12 +1526,14 @@ export interface TaskHandoffResp {
   prompt: string;
 }
 
-/** GitCommit describes one commit ahead of a repository's original tracking branch. */
+/** GitCommit describes one commit unique to either side of a repository's comparison branch. */
 export interface GitCommit {
   sha: string;
   subject: string;
   decorations?: string;
   authoredDate: string;
+  /** Present on the comparison branch and missing from HEAD. */
+  behind?: boolean;
   stat: DiffStat;
 }
 
@@ -1584,6 +1586,8 @@ export interface DiffIndexCommit {
   subject: string;
   decorations?: string;
   authoredDate: string;
+  /** Present on the comparison branch and missing from HEAD. */
+  behind?: boolean;
   stat: DiffIndexFileStat[];
 }
 

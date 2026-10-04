@@ -1,4 +1,4 @@
-// Full-page repository status with shared stale-refresh metadata and persistent lazy file rows.
+// Full-page repository status with ahead/behind commit groups and persistent lazy file rows.
 
 import { createSignal, createEffect, For, Show, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
@@ -27,27 +27,33 @@ type ViewCommit = Omit<DiffIndexCommit, "stat"> & {
 };
 type ViewRepository = Omit<DiffIndexRepository, "commits" | "uncommitted"> & {
   id: string;
-  commits: ViewCommit[];
+  commitGroups: { id: "ahead" | "behind"; commits: ViewCommit[] }[];
   uncommitted: ViewFileStatus[];
 };
 
 function indexedRepositories(repositories: DiffIndexRepository[]): ViewRepository[] {
-  return repositories.map((repo, repositoryIndex) => ({
-    ...repo,
-    id: `${repositoryIndex}\0${repo.name}`,
-    commits: repo.commits.map((commit) => ({
+  return repositories.map(({ commits, uncommitted, ...repo }, repositoryIndex) => {
+    const indexedCommits = commits.map((commit) => ({
       ...commit,
       id: `${repo.name}\0${commit.sha}`,
       stat: commit.stat.map((file) => ({
         ...file,
         id: `${repo.name}\0${commit.sha}\0${file.path}`,
       })),
-    })),
-    uncommitted: repo.uncommitted.map((file) => ({
-      ...file,
-      id: `${repo.name}\0${file.originalPath ?? ""}\0${file.path}`,
-    })),
-  }));
+    }));
+    return {
+      ...repo,
+      id: `${repositoryIndex}\0${repo.name}`,
+      commitGroups: [
+        { id: "ahead", commits: indexedCommits.filter((commit) => !commit.behind) },
+        { id: "behind", commits: indexedCommits.filter((commit) => commit.behind) },
+      ],
+      uncommitted: uncommitted.map((file) => ({
+        ...file,
+        id: `${repo.name}\0${file.originalPath ?? ""}\0${file.path}`,
+      })),
+    };
+  });
 }
 
 export default function DiffDetail(props: Props) {
@@ -196,70 +202,80 @@ export default function DiffDetail(props: Props) {
                     </Show>
                   </div>
 
-                  <div class={styles.statusGroup}>
-                    <h2>Commits ahead ({repo.commits.length})</h2>
-                    <Show
-                      when={repo.commits.length > 0}
-                      fallback={<p class={styles.cleanState}>No commits ahead of upstream</p>}
-                    >
-                      <div class={styles.commitList}>
-                        <For each={repo.commits}>
-                          {(commit) => (
-                            <article class={styles.commit}>
-                              <span class={styles.commitGraph} aria-hidden="true">
-                                <span />
-                              </span>
-                              <div class={styles.commitHeading}>
-                                <code class={styles.commitSha}>{commit.sha.slice(0, 8)}</code>
-                                <Show when={commit.decorations}>
-                                  <span class={styles.commitDecorations}>{commit.decorations}</span>
-                                </Show>
-                                <time class={styles.commitDate} dateTime={commit.authoredDate}>
-                                  {commit.authoredDate}
-                                </time>
-                                <span class={styles.commitSubject}>{commit.subject}</span>
-                              </div>
-                              <Show when={commit.stat.length > 0}>
-                                <div class={styles.commitStat}>
-                                  <For each={commit.stat}>
-                                    {(file) => {
-                                      return (
-                                        <FileDiffRow
-                                          path={file.path}
-                                          linesAdded={file.linesAdded}
-                                          linesDeleted={file.linesDeleted}
-                                          oldSize={file.oldSize}
-                                          newSize={file.newSize}
-                                          loadDiff={() =>
-                                            taskDiffCache.loadPatch({
-                                              taskId: props.taskId,
-                                              repository: String(repositoryIndex()),
-                                              commit: commit.sha,
-                                              path: file.path,
-                                              originalPath: "",
-                                            })
-                                          }
-                                          onLoadError={(err) => props.onTaskRefreshError?.(props.taskId, err) ?? false}
-                                          lineWrap={lineWrap()}
-                                          variant="commit"
-                                          expanded={expandedRows().has(file.id)}
-                                          onToggle={() => toggleRow(file.id)}
-                                          indexVersion={indexVersion()}
-                                        />
-                                      );
-                                    }}
-                                  </For>
-                                  <div class={styles.commitSummary}>
-                                    {commit.stat.length} {commit.stat.length === 1 ? "file" : "files"} changed
-                                  </div>
-                                </div>
-                              </Show>
-                            </article>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  </div>
+                  <For each={repo.commitGroups}>
+                    {(group) => (
+                      <Show when={group.id === "ahead" || group.commits.length > 0}>
+                        <div class={styles.statusGroup}>
+                          <h2>
+                            Commits {group.id} ({group.commits.length})
+                          </h2>
+                          <Show
+                            when={group.commits.length > 0}
+                            fallback={<p class={styles.cleanState}>No commits ahead of upstream</p>}
+                          >
+                            <div class={styles.commitList}>
+                              <For each={group.commits}>
+                                {(commit) => (
+                                  <article class={styles.commit}>
+                                    <span class={styles.commitGraph} aria-hidden="true">
+                                      <span />
+                                    </span>
+                                    <div class={styles.commitHeading}>
+                                      <code class={styles.commitSha}>{commit.sha.slice(0, 8)}</code>
+                                      <Show when={commit.decorations}>
+                                        <span class={styles.commitDecorations}>{commit.decorations}</span>
+                                      </Show>
+                                      <time class={styles.commitDate} dateTime={commit.authoredDate}>
+                                        {commit.authoredDate}
+                                      </time>
+                                      <span class={styles.commitSubject}>{commit.subject}</span>
+                                    </div>
+                                    <Show when={commit.stat.length > 0}>
+                                      <div class={styles.commitStat}>
+                                        <For each={commit.stat}>
+                                          {(file) => {
+                                            return (
+                                              <FileDiffRow
+                                                path={file.path}
+                                                linesAdded={file.linesAdded}
+                                                linesDeleted={file.linesDeleted}
+                                                oldSize={file.oldSize}
+                                                newSize={file.newSize}
+                                                loadDiff={() =>
+                                                  taskDiffCache.loadPatch({
+                                                    taskId: props.taskId,
+                                                    repository: String(repositoryIndex()),
+                                                    commit: commit.sha,
+                                                    path: file.path,
+                                                    originalPath: "",
+                                                  })
+                                                }
+                                                onLoadError={(err) =>
+                                                  props.onTaskRefreshError?.(props.taskId, err) ?? false
+                                                }
+                                                lineWrap={lineWrap()}
+                                                variant="commit"
+                                                expanded={expandedRows().has(file.id)}
+                                                onToggle={() => toggleRow(file.id)}
+                                                indexVersion={indexVersion()}
+                                              />
+                                            );
+                                          }}
+                                        </For>
+                                        <div class={styles.commitSummary}>
+                                          {commit.stat.length} {commit.stat.length === 1 ? "file" : "files"} changed
+                                        </div>
+                                      </div>
+                                    </Show>
+                                  </article>
+                                )}
+                              </For>
+                            </div>
+                          </Show>
+                        </div>
+                      </Show>
+                    )}
+                  </For>
 
                   <div class={styles.statusGroup}>
                     <h2>Uncommitted changes ({repo.uncommitted.length})</h2>

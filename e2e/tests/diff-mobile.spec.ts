@@ -1,6 +1,71 @@
-// End-to-end tests for repository-diff mobile layout and patch retry focus.
+// End-to-end tests for repository-diff missing commits, mobile layout, and patch retry focus.
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 import type { ErrorResponse, FileDiffResp, TaskDiffIndexResp } from "../../sdk/caic/ts/v1/types.gen";
+
+for (const width of [390, 1280]) {
+  test(`missing upstream commits can be inspected at ${width}px`, async ({ page, api }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    const id = await createTaskAPI(api, "Inspect missing upstream commits");
+    const sha = "abcdef1234567890abcdef1234567890abcdef12";
+    const path = "backend/internal/service/upstream.go";
+    let patchRequests = 0;
+    await page.route(
+      (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/index`,
+      async (route) =>
+        route.fulfill({
+          json: {
+            repositories: [
+              {
+                name: "caic-xyz/caic",
+                branch: "feature",
+                upstream: "origin/main",
+                ahead: 0,
+                behind: 1,
+                commits: [
+                  {
+                    sha,
+                    authoredDate: "2026-10-04",
+                    subject: "Missing upstream change",
+                    behind: true,
+                    stat: [{ path, linesAdded: 1, linesDeleted: 0, oldSize: -1, newSize: -1 }],
+                  },
+                ],
+                uncommitted: [],
+              },
+            ],
+          } satisfies TaskDiffIndexResp,
+        }),
+    );
+    await page.route(
+      (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/file`,
+      async (route) => {
+        patchRequests++;
+        const url = new URL(route.request().url());
+        expect(url.searchParams.get("commit")).toBe(sha);
+        expect(url.searchParams.get("path")).toBe(path);
+        await route.fulfill({ json: { diff: "@@ -0,0 +1 @@\n+missing upstream line" } satisfies FileDiffResp });
+      },
+    );
+    await page.goto(`/task/@${id}/diff`);
+    await expect(page.getByRole("heading", { name: "Commits ahead (0)" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Commits behind (1)" })).toBeVisible();
+    await expect(page.getByText("Missing upstream change")).toBeVisible();
+    expect(patchRequests).toBe(0);
+    const row = page.getByRole("button", { name: path });
+    await row.focus();
+    await row.press("Enter");
+    await expect(page.getByText("+missing upstream line")).toBeVisible();
+    expect(patchRequests).toBe(1);
+    await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("behind-commits.png") });
+    expect(errors).toEqual([]);
+  });
+}
 
 test("long diff paths use middle elision on mobile", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });

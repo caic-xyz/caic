@@ -48,7 +48,7 @@ func TestParseGitStatus(t *testing.T) {
 			" src/staged.go       | 2 ++\n src/working.go      | 1 +-\n notes/new.txt       | 3 +++\n assets/photo.jpg    | Bin 400 -> 500 bytes\n 4 files changed\n",
 			gitLogMarker,
 			"",
-			gitCommitMarker,
+			gitAheadCommitMarker,
 			"1111111111111111111111111111111111111111",
 			"2026-08-30",
 			"tag: v1.2.3",
@@ -57,7 +57,7 @@ func TestParseGitStatus(t *testing.T) {
 			"\n12\t0\tsrc/status.go",
 			"-\t-\tassets/logo.png",
 			" src/status.go       | 12 +\n assets/logo.png     | Bin 100 -> 250 bytes\n 2 files changed\n",
-			gitCommitMarker,
+			gitAheadCommitMarker,
 			"2222222222222222222222222222222222222222",
 			"2026-09-01",
 			"HEAD -> caic-42",
@@ -131,11 +131,11 @@ func TestParseGitStatus(t *testing.T) {
 			"bad rename":        "2 R. short\x00" + gitLogMarker + "\x00",
 			"bad unmerged":      "u UU short\x00" + gitLogMarker + "\x00",
 			"unknown record":    "x surprise\x00" + gitLogMarker + "\x00",
-			"incomplete commit": gitLogMarker + "\x00" + gitCommitMarker + "\x00sha",
-			"bad numstat":       gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x00words",
-			"bad rename stat":   gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x001\t1\t",
-			"bad additions":     gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x00many\t1\tfile",
-			"bad deletions":     gitLogMarker + "\x00" + gitCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x001\tmany\tfile",
+			"incomplete commit": gitLogMarker + "\x00" + gitAheadCommitMarker + "\x00sha",
+			"bad numstat":       gitLogMarker + "\x00" + gitAheadCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x00words",
+			"bad rename stat":   gitLogMarker + "\x00" + gitAheadCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x001\t1\t",
+			"bad additions":     gitLogMarker + "\x00" + gitAheadCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x00many\t1\tfile",
+			"bad deletions":     gitLogMarker + "\x00" + gitAheadCommitMarker + "\x00sha\x002026-09-01\x00\x00subject\x001\tmany\tfile",
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -235,7 +235,7 @@ func TestCompactGitStatusCommand(t *testing.T) {
 				t.Errorf("compactGitStatusCommand() missing %q", fragment)
 			}
 		}
-		for _, fragment := range []string{gitLogMarker, gitCommitMarker, "$comparison..HEAD", "git diff HEAD"} {
+		for _, fragment := range []string{gitLogMarker, gitCommitMarker, "git log", "git diff HEAD"} {
 			if strings.Contains(cmd, fragment) {
 				t.Errorf("compactGitStatusCommand() includes history-walk fragment %q", fragment)
 			}
@@ -487,8 +487,22 @@ func TestGitStatusMergeBase(t *testing.T) {
 					if !slices.Equal(status.DiffStat, want) {
 						t.Errorf("diff stat = %+v, want %+v", status.DiffStat, want)
 					}
-					if probe.name == "normal" && len(status.Commits) != ahead {
-						t.Errorf("commits = %+v, want %d branch commits", status.Commits, ahead)
+					if probe.name == "normal" {
+						aheadCommits, behindCommits := 0, 0
+						for _, commit := range status.Commits {
+							if commit.Behind {
+								behindCommits++
+								wantStat := []runtime.GitFileStat{{Path: "upstream.txt", LinesAdded: 1}}
+								if commit.Subject != "upstream change" || !slices.Equal(commit.Stat, wantStat) {
+									t.Errorf("behind commit = %+v, want upstream change with upstream.txt addition", commit)
+								}
+							} else {
+								aheadCommits++
+							}
+						}
+						if aheadCommits != ahead || behindCommits != 1 {
+							t.Errorf("commit counts = ahead %d behind %d, want ahead %d behind 1", aheadCommits, behindCommits, ahead)
+						}
 					}
 				})
 			}
@@ -550,7 +564,7 @@ func TestGitStatusCommand(t *testing.T) {
 		if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
 			t.Errorf("gitStatusCommand() does not safely quote repo: %q", cmd)
 		}
-		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison..HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_OPTIONAL_LOCKS=0", "git add -N", `git diff "$diff_base" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
+		for _, fragment := range []string{"git status --porcelain=v2", "@{upstream}", "upstream/trunk", "$comparison...HEAD", "--left-right", "--date-order", "--decorate=short", "%as", "%D", "GIT_OPTIONAL_LOCKS=0", "git add -N", `git diff "$diff_base" --numstat --stat -z`, "git diff HEAD --numstat --stat -z", gitComparisonMarker, gitDivergenceMarker, gitOperationMarker, gitTotalStatMarker, gitWorktreeStatMarker, gitLogMarker, gitCommitMarker} {
 			if !strings.Contains(cmd, fragment) {
 				t.Errorf("gitStatusCommand() missing %q", fragment)
 			}

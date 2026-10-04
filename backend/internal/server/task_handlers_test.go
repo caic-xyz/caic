@@ -1,4 +1,4 @@
-// Tests task HTTP handler state-precondition errors.
+// Tests task HTTP handler preconditions, lazy diffs, and ahead/behind commit metadata.
 
 package server
 
@@ -49,11 +49,18 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid
 			Branch:   "caic-1",
 			Upstream: "origin/main",
 			Ahead:    1,
+			Behind:   1,
 			Commits: []runtime.GitCommit{{
 				SHA:          diffTestCommit,
 				Subject:      "Add API",
 				AuthoredDate: "2026-09-15",
 				Stat:         []runtime.GitFileStat{{Path: "committed.go", LinesAdded: 4, LinesDeleted: 1}},
+			}, {
+				SHA:          "abcdef1234567890abcdef1234567890abcdef12",
+				Subject:      "Missing upstream change",
+				AuthoredDate: "2026-09-16",
+				Behind:       true,
+				Stat:         []runtime.GitFileStat{{Path: "upstream.go", LinesAdded: 1}},
 			}},
 			Uncommitted: []runtime.GitFileStatus{{Path: "renamed.go", OriginalPath: "old.go", WorktreeStatus: "R", LinesAdded: 2}},
 		},
@@ -89,8 +96,12 @@ func TestTaskDiffHandlers(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
-		if len(resp.Repositories) != 1 || len(resp.Repositories[0].Commits) != 1 || len(resp.Repositories[0].Uncommitted) != 1 {
+		if len(resp.Repositories) != 1 || len(resp.Repositories[0].Commits) != 2 || len(resp.Repositories[0].Uncommitted) != 1 {
 			t.Fatalf("index response = %+v, want one repository with committed and uncommitted files", resp)
+		}
+		commits := resp.Repositories[0].Commits
+		if commits[0].Behind || !commits[1].Behind || commits[1].Subject != "Missing upstream change" {
+			t.Fatalf("index commits = %+v, want ahead and missing upstream commits", commits)
 		}
 	})
 
@@ -158,8 +169,12 @@ func TestTaskDiffHandlers(t *testing.T) {
 		if len(resp.Repositories) != 1 || resp.Repositories[0].Commits[0].Stat[0].Diff != "committed patch" || resp.Repositories[0].Uncommitted[0].Diff != "uncommitted patch" {
 			t.Fatalf("combined diff response = %+v", resp)
 		}
-		if len(backend.fileDiffCalls) != 2 {
-			t.Fatalf("FileDiff calls = %+v, want two", backend.fileDiffCalls)
+		commits := resp.Repositories[0].Commits
+		if len(commits) != 2 || commits[0].Behind || !commits[1].Behind || commits[1].Stat[0].Diff != "committed patch" {
+			t.Fatalf("combined commits = %+v, want ahead and missing upstream commits with patches", commits)
+		}
+		if len(backend.fileDiffCalls) != 3 {
+			t.Fatalf("FileDiff calls = %+v, want three", backend.fileDiffCalls)
 		}
 	})
 

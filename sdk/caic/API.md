@@ -1666,7 +1666,7 @@ a fresh agent session.
 
 ### GitCommit
 
-GitCommit describes one commit ahead of a repository's original tracking branch.
+GitCommit describes one commit unique to either side of a repository's comparison branch.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -1674,6 +1674,7 @@ GitCommit describes one commit ahead of a repository's original tracking branch.
 | `subject` | `string` |  | yes |
 | `decorations` | `string` |  |  |
 | `authoredDate` | `string` |  | yes |
+| `behind` | `boolean` | Present on the comparison branch and missing from HEAD. |  |
 | `stat` | `DiffStat` |  | yes |
 
 ### GitFileStatus
@@ -1737,6 +1738,7 @@ DiffIndexCommit describes one commit and its changed-file metadata.
 | `subject` | `string` |  | yes |
 | `decorations` | `string` |  |  |
 | `authoredDate` | `string` |  | yes |
+| `behind` | `boolean` | Present on the comparison branch and missing from HEAD. |  |
 | `stat` | `DiffIndexFileStat[]` |  | yes |
 
 ### DiffIndexFileStatus

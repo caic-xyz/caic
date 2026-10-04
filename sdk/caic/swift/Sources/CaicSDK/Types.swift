@@ -1696,12 +1696,14 @@ public struct TaskHandoffResp: Codable {
     public let prompt: String
 }
 
-/// GitCommit describes one commit ahead of a repository's original tracking branch.
+/// GitCommit describes one commit unique to either side of a repository's comparison branch.
 public struct GitCommit: Codable {
     public let sha: String
     public let subject: String
     public let decorations: String?
     public let authoredDate: String
+    /// Present on the comparison branch and missing from HEAD.
+    public let behind: Bool?
     public let stat: DiffStat
 }
 
@@ -1754,6 +1756,8 @@ public struct DiffIndexCommit: Codable {
     public let subject: String
     public let decorations: String?
     public let authoredDate: String
+    /// Present on the comparison branch and missing from HEAD.
+    public let behind: Bool?
     public let stat: [DiffIndexFileStat]
 }
 

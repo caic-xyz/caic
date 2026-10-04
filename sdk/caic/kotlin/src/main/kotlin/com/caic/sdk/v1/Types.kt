@@ -2306,13 +2306,15 @@ data class ForkTaskReq(
 @Serializable
 data class TaskHandoffResp(val prompt: String)
 
-/** GitCommit describes one commit ahead of a repository's original tracking branch. */
+/** GitCommit describes one commit unique to either side of a repository's comparison branch. */
 @Serializable
 data class GitCommit(
     val sha: String,
     val subject: String,
     val decorations: String? = null,
     val authoredDate: String,
+    /** Present on the comparison branch and missing from HEAD. */
+    val behind: Boolean? = null,
     val stat: DiffStat,
 )
 
@@ -2367,6 +2369,8 @@ data class DiffIndexCommit(
     val subject: String,
     val decorations: String? = null,
     val authoredDate: String,
+    /** Present on the comparison branch and missing from HEAD. */
+    val behind: Boolean? = null,
     val stat: List<DiffIndexFileStat>,
 )
 

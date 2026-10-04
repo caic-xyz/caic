@@ -909,6 +909,7 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 				Subject:      commit.Subject,
 				Decorations:  commit.Decorations,
 				AuthoredDate: commit.AuthoredDate,
+				Behind:       commit.Behind,
 				Stat:         stat,
 			}
 		}
@@ -1020,6 +1021,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 				Subject:      commit.Subject,
 				Decorations:  commit.Decorations,
 				AuthoredDate: commit.AuthoredDate,
+				Behind:       commit.Behind,
 				Stat:         stat,
 			}
 		}
