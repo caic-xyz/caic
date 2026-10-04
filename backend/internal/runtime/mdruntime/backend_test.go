@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -210,6 +211,9 @@ func TestBackend(t *testing.T) {
 	t.Parallel()
 	t.Run("ReadFile", func(t *testing.T) {
 		t.Parallel()
+		if goruntime.GOOS != "linux" {
+			t.Skip("executes GNU dd from the Linux container locally")
+		}
 		dir := t.TempDir()
 		name := filepath.Join(dir, "screenshot '$().png")
 		data := bytes.Repeat([]byte("a"), 2*runtime.FileChunkSize+17)
@@ -269,6 +273,9 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("ReadFile offset", func(t *testing.T) {
 		t.Parallel()
+		if goruntime.GOOS != "linux" {
+			t.Skip("executes GNU dd and stat from the Linux container locally")
+		}
 		name := filepath.Join(t.TempDir(), "offset")
 		if err := os.WriteFile(name, []byte("0123456789"), 0o600); err != nil {
 			t.Fatal(err)
@@ -852,7 +859,8 @@ func TestCommandOutput(t *testing.T) {
 	}
 }
 
-// fileCommandContainer executes the actual read command locally for file tests.
+// fileCommandContainer executes Linux container commands locally. Callers must
+// run only on Linux because the commands require GNU dd and stat.
 type fileCommandContainer struct{ fakeMDContainer }
 
 func (*fileCommandContainer) SSHCommand(_ []string, command string) []string {

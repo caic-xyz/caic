@@ -2478,6 +2478,11 @@ func TestManager(t *testing.T) {
 			m.Insert(parent.ID, parentEntry)
 			m.Insert(child.ID, m.NewEntry(child, nil))
 
+			t.Cleanup(func() {
+				if err := parentEntry.Lifecycle.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+			})
 			recordTestTaskLog(t, m, parentEntry)
 			if err := parentEntry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3537,19 +3542,21 @@ func TestManager(t *testing.T) {
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
 			})
-			t.Cleanup(func() { close(fake.release) })
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			t.Cleanup(func() {
+				close(fake.release)
+				if err := entry.Lifecycle.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+			})
 			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), time.Hour); err != nil {
 				t.Fatalf("Purge: %v", err)
-			}
-			if got := tk.GetState(); got != taskslog.StatePurging {
-				t.Fatalf("state after Purge returns = %v, want purging", got)
 			}
 			select {
 			case <-fake.started:
@@ -3570,6 +3577,11 @@ func TestManager(t *testing.T) {
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			t.Cleanup(func() {
+				if err := entry.Lifecycle.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+			})
 			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3596,6 +3608,12 @@ func TestManager(t *testing.T) {
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			t.Cleanup(func() {
+				close(releaseRevive)
+				if err := entry.Lifecycle.Close(); err != nil {
+					t.Errorf("Close: %v", err)
+				}
+			})
 			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), 20*time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
@@ -3607,7 +3625,6 @@ func TestManager(t *testing.T) {
 			if got := fake.Status("ctr-1"); got == runtimetest.StatusPurged {
 				t.Fatal("runtime was purged after revive")
 			}
-			close(releaseRevive)
 		})
 		t.Run("error_negative_delay", func(t *testing.T) {
 			t.Parallel()

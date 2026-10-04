@@ -6,12 +6,16 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 func BenchmarkReadFile(b *testing.B) {
+	if goruntime.GOOS != "linux" {
+		b.Skip("executes GNU dd from the Linux container locally")
+	}
 	for _, tc := range []struct {
 		name string
 		size int
