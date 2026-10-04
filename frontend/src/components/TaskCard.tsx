@@ -248,7 +248,7 @@ export default function TaskCard(props: TaskCardProps) {
           setContextMenuPosition({ x: event.clientX, y: event.clientY });
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             props.onClick();
           }
@@ -306,10 +306,10 @@ export default function TaskCard(props: TaskCardProps) {
                 <TokenIcon width="0.7rem" height="0.7rem" />
               </span>
             </Show>
-            {/* Stopped/crashed: expose revive + purge only after selecting the card. */}
-            <Show when={props.selected && (props.state === "stopped" || props.state === "crashed")}>
+            {/* Mobile exposes revive without selection; purge still requires selection. */}
+            <Show when={props.state === "stopped" || props.state === "crashed"}>
               <Show when={props.onRevive}>
-                <span class={styles.reviveBtn}>
+                <span class={styles.reviveBtn} classList={{ [styles.mobileRevive]: !props.selected }}>
                   <button
                     class={styles.reviveIcon}
                     disabled={props.actionLoading}
@@ -326,7 +326,7 @@ export default function TaskCard(props: TaskCardProps) {
                   </button>
                 </span>
               </Show>
-              <Show when={props.onPurge}>
+              <Show when={props.selected && props.onPurge}>
                 <span class={styles.purgeBtn}>
                   <button
                     class={styles.purgeIcon}

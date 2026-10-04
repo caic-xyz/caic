@@ -61,6 +61,34 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await waitForTaskState(api, task!.id, "purged");
 });
 
+test("mobile stopped task card exposes Revive without selection", async ({ page, api }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const id = await createTaskAPI(api, "Revive from the mobile task summary");
+  await waitForTaskState(api, id, "waiting", 30_000);
+  await api.stopTask(id);
+  await waitForTaskState(api, id, "stopped");
+
+  await page.goto("/");
+  const stopped = page.getByRole("button", { name: /Stopped \(/ }).first();
+  await expect(stopped).toBeVisible();
+  const card = page.locator(`[data-task-id="${id}"]`);
+  if (!(await card.isVisible())) await stopped.click();
+  const revive = card.getByRole("button", { name: "Revive", exact: true });
+  await expect(revive).toBeVisible();
+  await expect.poll(() => revive.evaluate((button) => getComputedStyle(button.parentElement!).opacity)).toBe("1");
+  await expect(card.getByTestId("purge-task")).toHaveCount(0);
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await expect(revive).toBeHidden();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(revive).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath("mobile-revive-card.png") });
+
+  await revive.click();
+  await waitForTaskState(api, id, "running", 30_000);
+  await expect(card.getByTestId("state-badge")).toHaveText("running");
+  await expect(page).toHaveURL(/\/$/);
+});
+
 test("setup logs remain visible after task-detail replay", async ({ page, api }, testInfo) => {
   const id = await createTaskAPI(api, "Verify setup log replay");
   await waitForTaskState(api, id, "waiting", 30_000);

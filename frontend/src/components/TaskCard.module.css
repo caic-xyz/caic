@@ -277,6 +277,10 @@ a.featureIconBadge:focus-visible {
   transition: opacity 0.15s;
 }
 
+.mobileRevive {
+  display: none;
+}
+
 .purgeIcon,
 .reviveIcon {
   all: unset;
@@ -393,6 +397,10 @@ a.featureIconBadge:focus-visible {
 }
 
 @media (width <= 768px) {
+  .mobileRevive {
+    display: inline-flex;
+  }
+
   .purgeBtn,
   .reviveBtn {
     opacity: 1;

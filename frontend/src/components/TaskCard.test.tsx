@@ -3,6 +3,7 @@
 import { describe, it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { MemoryRouter, Route } from "@solidjs/router";
+import userEvent from "@testing-library/user-event";
 import type { JSX } from "solid-js";
 import { createSignal } from "solid-js";
 import { expect, vi } from "@tests/expect";
@@ -442,7 +443,7 @@ describe("TaskCard", () => {
     expect(screen.queryByText("forked from")).not.toBeInTheDocument();
   });
 
-  it("selects a stopped task before exposing its inline actions", () => {
+  it("requires selection before exposing purge for a stopped task", () => {
     const onClick = vi.fn();
     const onPurge = vi.fn();
     const { container, unmount } = renderCard(() => (
@@ -452,7 +453,7 @@ describe("TaskCard", () => {
     if (!card) throw new Error("task card not rendered");
 
     expect(screen.queryByTestId("purge-task")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("revive-task")).not.toBeInTheDocument();
+    expect(screen.getByTestId("revive-task")).toBeInTheDocument();
 
     fireEvent.click(card);
 
@@ -465,6 +466,34 @@ describe("TaskCard", () => {
     expect(screen.getByTestId("purge-task")).toBeInTheDocument();
     expect(screen.getByTestId("revive-task")).toBeInTheDocument();
   });
+
+  for (const state of ["crashed", "stopped"] as const) {
+    it(`revives an unselected ${state} task without selecting the card`, () => {
+      const onClick = vi.fn();
+      const onRevive = vi.fn();
+      renderCard(() => <TaskCard {...props({ state, onClick, onRevive })} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Revive" }));
+
+      expect(onRevive).toHaveBeenCalledOnce();
+      expect(onClick).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const key of ["{Enter}", " "]) {
+    it(`revives with ${key} without selecting the card`, async () => {
+      const user = userEvent.setup();
+      const onClick = vi.fn();
+      const onRevive = vi.fn();
+      renderCard(() => <TaskCard {...props({ state: "stopped", onClick, onRevive })} />);
+      screen.getByRole("button", { name: "Revive" }).focus();
+
+      await user.keyboard(key);
+
+      expect(onRevive).toHaveBeenCalledOnce();
+      expect(onClick).not.toHaveBeenCalled();
+    });
+  }
 
   it("opens the task actions menu on right click", () => {
     const onClick = vi.fn();
