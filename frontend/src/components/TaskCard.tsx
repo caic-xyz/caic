@@ -437,10 +437,11 @@ export default function TaskCard(props: TaskCardProps) {
           )}
         </Show>
 
-        {/* Line 2: [timer times] [PR] [CI] [state badge] */}
+        {/* Line 2: [timer times] [cost] [PR] [CI] [state badge] */}
         {(() => {
+          const hasTime = () => (!isTerminal() && props.stateUpdatedAt) || props.duration > 0;
           const timePair = () => (
-            <Show when={(!isTerminal() && props.stateUpdatedAt) || props.duration > 0}>
+            <Show when={hasTime()}>
               <span class={styles.timePair}>
                 <TimerIcon width="0.65rem" height="0.65rem" class={styles.timerIcon} />
                 <Show when={!isTerminal() && props.stateUpdatedAt}>
@@ -489,23 +490,43 @@ export default function TaskCard(props: TaskCardProps) {
           );
           return (
             <div class={styles.metaRow}>
-              {timePair()}
+              <span class={styles.timingSummary}>
+                {timePair()}
+                <Show when={props.costUSD > 0}>
+                  <span class={`${styles.meta} ${styles.cost}`} data-testid="task-card-cost">
+                    <Show when={hasTime()}>· </Show>
+                    <Show when={subscriptionLabel()} fallback={`$${props.costUSD.toFixed(2)}`}>
+                      <Tooltip text={`API-equivalent cost — ${subscriptionLabel()}`}>
+                        <span>${props.costUSD.toFixed(2)}</span>
+                      </Tooltip>
+                    </Show>
+                  </span>
+                </Show>
+              </span>
               <span class={styles.statusBadges}>{statusBadges()}</span>
             </div>
           );
         })()}
 
-        {/* Line 3: harness · model · effort · tokens · cost */}
+        {/* Line 3: harness · model · effort · tokens */}
         <Show when={props.harness || props.model}>
           <div class={styles.metaRow}>
             <span class={styles.meta}>
-              {(() => {
-                const parts: string[] = [];
-                if (props.harness) parts.push(props.harness);
-                if (props.model) parts.push(props.model);
-                if (props.effort) parts.push(props.effort);
-                return parts.join(" · ");
-              })()}
+              {props.harness}
+              <Show when={props.model} keyed>
+                {(model) => (
+                  <>
+                    <Show when={props.harness}>{" · "}</Show>
+                    <Tooltip text={model} disabled={!model.includes("/")} stopActivationPropagation>
+                      <span>{model.slice(model.lastIndexOf("/") + 1)}</span>
+                    </Tooltip>
+                  </>
+                )}
+              </Show>
+              <Show when={props.effort}>
+                {" · "}
+                {props.effort}
+              </Show>
               <Show when={props.rateLimit?.blocked}>
                 <>
                   {" · "}
@@ -537,18 +558,6 @@ export default function TaskCard(props: TaskCardProps) {
                     <Show when={props.contextWindowLimit > 0}>/{formatTokens(props.contextWindowLimit)}</Show>
                   </span>
                 </Tooltip>
-              </Show>
-              <Show when={props.costUSD > 0}>
-                {/* The separator stays a sibling of the price: Tooltip's
-                    inline-flex wrapper blockifies its child, and CSS strips
-                    a leading space at the start of a line box. */}
-                {" · "}
-                <Show when={subscriptionLabel()}>
-                  <Tooltip text={`API-equivalent cost — ${subscriptionLabel()}`}>
-                    <span>${props.costUSD.toFixed(2)}</span>
-                  </Tooltip>
-                </Show>
-                <Show when={!subscriptionLabel()}>${props.costUSD.toFixed(2)}</Show>
               </Show>
             </span>
           </div>

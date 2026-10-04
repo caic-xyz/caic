@@ -2,6 +2,29 @@
 
 import { expect, test, waitForTaskState } from "../helpers";
 
+test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
+  const repos = await api.listRepos();
+  const task = await api.createTask({
+    initialPrompt: { text: uniquePrompt("FAKE_DEMO touch tooltip") },
+    repos: [{ name: repos[0].path }],
+    harness: "claude",
+  });
+  await waitForTaskState(api, task.id, "waiting");
+  // Keep the sidebar visible while exercising Chromium's real touch sequence.
+  const context = await browser.newContext({ baseURL, hasTouch: true, viewport: { width: 1280, height: 900 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(`/task/@${task.id}`);
+    const cost = page.locator(`[data-task-id="${task.id}"]`).getByTestId("task-card-cost").getByRole("button");
+    await cost.tap();
+    await expect(page.getByText(/API-equivalent cost/)).toBeVisible();
+    await cost.tap();
+    await expect(page.getByText(/API-equivalent cost/)).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test("task cards keep single- and multi-repository states coherent", async ({ page, api, uniquePrompt }, testInfo) => {
   const repos = await api.listRepos();
   const harnesses = await api.listHarnesses();
@@ -88,7 +111,54 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
     )
     .toEqual([true, true]);
 
-  await page.getByTestId("task-list").screenshot({
-    path: testInfo.outputPath("task-card-repository-state.png"),
-  });
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    // Return to the list on mobile, where task detail replaces the sidebar.
+    await page.goto("/");
+    await expect(multiStateRows.nth(1)).toBeVisible();
+    const cost = await multiCard.getByTestId("task-card-cost").boundingBox();
+    const badge = await multiCard.getByTestId("state-badge").boundingBox();
+    expect(Math.abs(cost!.y + cost!.height / 2 - badge!.y - badge!.height / 2)).toBeLessThan(1);
+    const rhythm = await multiCard.evaluate((card) => {
+      const rows = Array.from(card.querySelectorAll('[data-testid="task-card-repo-state"]'));
+      const group = card.querySelector('[data-testid="task-card-repo-states"]')!.parentElement!;
+      const metadata = group.previousElementSibling!;
+      const first = rows[0].getBoundingClientRect();
+      const second = rows[1].getBoundingClientRect();
+      return {
+        heights: rows.map((row) => row.getBoundingClientRect().height),
+        textSizes: [
+          metadata.firstElementChild!,
+          card.querySelector('[data-testid="task-card-cost"]')!,
+          card.querySelector('[data-testid="task-card-cost"]')!.previousElementSibling!,
+          ...rows.map((row) => row.firstElementChild!),
+        ].map((el) => getComputedStyle(el).fontSize),
+        lineHeight: Number.parseFloat(getComputedStyle(metadata).lineHeight),
+        groupGap: first.top - metadata.getBoundingClientRect().bottom,
+        rowGap: second.top - first.bottom,
+        contained: card.scrollWidth <= card.clientWidth,
+      };
+    });
+    expect(new Set(rhythm.textSizes).size).toBe(1);
+    expect(Math.abs(rhythm.heights[0] - rhythm.lineHeight)).toBeLessThan(1);
+    expect(Math.abs(rhythm.heights[1] - rhythm.heights[0])).toBeLessThan(1);
+    expect(Math.abs(rhythm.groupGap - rhythm.rowGap)).toBeLessThan(1);
+    expect(rhythm.rowGap).toBeGreaterThan(0);
+    expect(rhythm.rowGap).toBeLessThanOrEqual(3);
+    expect(rhythm.contained).toBe(true);
+    await page.getByTestId("task-list").screenshot({
+      path: testInfo.outputPath(`task-card-repository-state-${width}.png`),
+    });
+  }
+
+  // Purged tasks keep repository labels but no runtime Git markers.
+  await api.purgeTask(multiTask.id);
+  await waitForTaskState(api, multiTask.id, "purged");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/task/@${multiTask.id}`);
+  await expect(multiStateRows.nth(1)).toBeVisible();
+  await expect(multiStateRows.nth(1).getByRole("img")).toHaveCount(0);
+  const emptyRowHeight = (await multiStateRows.nth(1).boundingBox())!.height;
+  const summaryRowHeight = (await singleCard.getByTestId("task-card-repo-state").boundingBox())!.height;
+  expect(Math.abs(emptyRowHeight - summaryRowHeight)).toBeLessThan(1);
 });

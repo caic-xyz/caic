@@ -59,6 +59,88 @@ function renderCard(card: () => JSX.Element) {
 }
 
 describe("TaskCard", () => {
+  it("shortens provider-qualified models and exposes the full name on hover", () => {
+    renderCard(() => <TaskCard {...props({ harness: "pi", model: "openai-codex/gpt-6.1-sol", effort: "medium" })} />);
+
+    const model = screen.getByText("gpt-6.1-sol");
+    expect(model.closest("div")).toHaveTextContent("pi · gpt-6.1-sol · medium");
+    expect(screen.queryByText("openai-codex/gpt-6.1-sol")).not.toBeInTheDocument();
+    const trigger = model.parentElement;
+    if (!trigger) throw new Error("Missing model tooltip trigger");
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByText("openai-codex/gpt-6.1-sol")).toBeInTheDocument();
+  });
+
+  it("uses the final model-name segment without a harness", () => {
+    renderCard(() => <TaskCard {...props({ harness: undefined, model: "provider/family/model", effort: "high" })} />);
+    expect(screen.getByText("model").closest("div")).toHaveTextContent(/^model · high$/);
+  });
+
+  it("opens the model tooltip on tap and keyboard activation without selecting the task", () => {
+    const onClick = vi.fn();
+    renderCard(() => <TaskCard {...props({ model: "provider/model", onClick })} />);
+    const trigger = screen.getByRole("button", { name: "model" });
+
+    fireEvent.click(trigger);
+    expect(screen.getByText("provider/model")).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(screen.queryByText("provider/model")).not.toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(screen.getByText("provider/model")).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: " " });
+    expect(screen.queryByText("provider/model")).not.toBeInTheDocument();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("keeps the full model name visible after the first touch tap", () => {
+    const onClick = vi.fn();
+    renderCard(() => <TaskCard {...props({ model: "provider/model", onClick })} />);
+    const trigger = screen.getByRole("button", { name: "model" });
+
+    fireEvent(trigger, Object.assign(new Event("pointerover", { bubbles: true }), { pointerType: "touch" }));
+    fireEvent.mouseEnter(trigger);
+    fireEvent(trigger, Object.assign(new Event("pointerdown", { bubbles: true }), { pointerType: "touch" }));
+    fireEvent.focus(trigger);
+    fireEvent.click(trigger);
+    expect(screen.getByText("provider/model")).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.queryByText("provider/model")).not.toBeInTheDocument();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("keeps unqualified model names unchanged", () => {
+    renderCard(() => <TaskCard {...props({ model: "claude-sonnet-4" })} />);
+    expect(screen.getByText("claude-sonnet-4")).toBeInTheDocument();
+  });
+
+  for (const harness of ["claude", "codex", "pi", undefined]) {
+    it(`shows cost beside timing without depending on model metadata (${harness})`, () => {
+      renderCard(() => <TaskCard {...props({ harness, model: undefined, costUSD: 1.25, duration: 10 })} />);
+
+      const cost = screen.getByTestId("task-card-cost");
+      const timing = cost.parentElement;
+      expect(cost).toHaveTextContent("$1.25");
+      expect(timing).toHaveTextContent(/1m\s*\/\s*1m 10s/);
+      expect(timing?.parentElement).toContainElement(screen.getByTestId("state-badge"));
+      if (harness === "claude" || harness === "codex") {
+        const trigger = cost.firstElementChild;
+        if (!trigger) throw new Error("Missing cost tooltip trigger");
+        fireEvent.mouseEnter(trigger);
+        expect(screen.getByText(/API-equivalent cost/)).toBeInTheDocument();
+      }
+    });
+  }
+
+  it("shows cost without a timer or leading separator for an untimed stopped task", () => {
+    renderCard(() => <TaskCard {...props({ state: "stopped", duration: 0, costUSD: 0.01 })} />);
+    expect(screen.getByTestId("task-card-cost").parentElement).toHaveTextContent(/^\$0\.01$/);
+  });
+
+  it("omits zero cost", () => {
+    renderCard(() => <TaskCard {...props({ costUSD: 0 })} />);
+    expect(screen.queryByTestId("task-card-cost")).not.toBeInTheDocument();
+  });
+
   it("renders every repository and branch before Git status is available", () => {
     renderCard(() => (
       <TaskCard

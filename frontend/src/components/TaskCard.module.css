@@ -1,8 +1,16 @@
 /* Compact summary card for a single task. */
 
 .card {
+  --card-row-gap: 0.125rem;
+  --card-line-height: 1.1rem;
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-row-gap);
   padding: 0.75rem;
   margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  line-height: var(--card-line-height);
   cursor: pointer;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -23,6 +31,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: var(--card-line-height);
 }
 
 .voiceNumber {
@@ -129,11 +138,22 @@ a.featureIconBadge:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+.timingSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--card-row-gap);
+  align-items: center;
+  min-width: 0;
+}
+
+.cost {
+  white-space: nowrap;
+}
+
 .timePair {
   display: inline-flex;
   gap: 0.2rem;
   align-items: center;
-  font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }
@@ -152,6 +172,7 @@ a.featureIconBadge:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: var(--card-line-height);
 }
 
 .statusBadges {
@@ -166,7 +187,7 @@ a.featureIconBadge:focus-visible {
   gap: 0.3rem;
   align-items: baseline;
   min-width: 0;
-  font-size: 0.7rem;
+  min-height: var(--card-line-height);
   color: var(--color-text-muted);
 }
 
@@ -185,7 +206,6 @@ a.featureIconBadge:focus-visible {
 }
 
 .meta {
-  font-size: 0.75rem;
   color: var(--color-text-meta);
 }
 
@@ -225,7 +245,7 @@ a.featureIconBadge:focus-visible {
 .repoStates {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--card-row-gap);
   width: 100%;
 }
 
@@ -233,18 +253,20 @@ a.featureIconBadge:focus-visible {
   display: flex;
   align-items: center;
   min-width: 0;
+  min-height: var(--card-line-height);
 }
 
 .repoStateLabel {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.7rem;
   color: var(--color-text-muted);
   white-space: nowrap;
 }
 
 .repoStateSummary {
+  display: flex;
+  align-items: center;
   margin-left: auto;
 }
 
@@ -362,10 +384,8 @@ a.featureIconBadge:focus-visible {
 
 .errorSummary {
   display: -webkit-box;
-  margin-top: 0.25rem;
   overflow: hidden;
   -webkit-line-clamp: 2;
-  font-size: 0.8rem;
   color: var(--color-danger-text);
   overflow-wrap: anywhere;
   white-space: pre-wrap;

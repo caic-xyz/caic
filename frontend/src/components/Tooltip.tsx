@@ -11,6 +11,8 @@ interface Props {
   children: JSX.Element;
   class?: string;
   disabled?: boolean;
+  /** Keep activation from triggering a containing control. */
+  stopActivationPropagation?: boolean;
 }
 
 const GAP = 6; // px between element and popup
@@ -19,6 +21,7 @@ export default function Tooltip(props: Props) {
   const [show, setShow] = createSignal(false);
   let wrapperRef: HTMLSpanElement | undefined;
   let popupRef: HTMLSpanElement | undefined;
+  let touch = false;
 
   function onDocClick(e: MouseEvent) {
     if (wrapperRef && !wrapperRef.contains(e.target as Node)) {
@@ -76,14 +79,35 @@ export default function Tooltip(props: Props) {
         class={wrapperClass()}
         role="button"
         tabIndex={0}
-        onMouseEnter={() => setShow(true)}
-        onMouseLeave={() => setShow(false)}
-        onFocus={() => setShow(true)}
-        onBlur={() => setShow(false)}
-        onClick={() => setShow((v) => !v)}
+        // Touch generates compatibility mouse and focus events before click.
+        // Only click toggles visibility for that sequence.
+        onPointerOver={(e) => {
+          touch = e.pointerType === "touch";
+        }}
+        onPointerDown={(e) => {
+          touch = e.pointerType === "touch";
+        }}
+        onMouseEnter={() => {
+          if (!touch) setShow(true);
+        }}
+        onMouseLeave={() => {
+          if (!touch) setShow(false);
+        }}
+        onFocus={() => {
+          if (!touch) setShow(true);
+        }}
+        onBlur={() => {
+          touch = false;
+          setShow(false);
+        }}
+        onClick={(e) => {
+          if (props.stopActivationPropagation) e.stopPropagation();
+          setShow((v) => !v);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") setShow(false);
           if (e.key === "Enter" || e.key === " ") {
+            if (props.stopActivationPropagation) e.stopPropagation();
             e.preventDefault();
             setShow((v) => !v);
           }
