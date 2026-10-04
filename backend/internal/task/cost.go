@@ -76,7 +76,11 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			c.markSource(CostReported)
 		}
 		if !m.ModelDerived && (m.ReportedModel != "" || c.Harness == harness.Pi) {
-			c.priceUsage(m.Usage, "", at, pricer)
+			if !c.priceUsage(m.Usage, "", at, pricer) && c.Harness == harness.Pi && m.ReportedCostUSD != nil {
+				c.priorUSD += *m.ReportedCostUSD
+				c.TotalUSD += *m.ReportedCostUSD
+				c.markSource(CostReported)
+			}
 		}
 	case *agent.ResultMessage:
 		switch c.Harness {
@@ -93,8 +97,13 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 				c.applyResultReport(m.TotalCostUSD, true)
 			}
 		case harness.Pi:
-			if c.sessionPricedUSD == 0 {
-				c.applyResultReport(m.TotalCostUSD, false)
+			// Pi results report per-invocation costs, rather than a session
+			// snapshot. Modern usage messages already account for each call.
+			// Retain a result-only fallback for older logs without per-call costs.
+			if c.pendingTurnSource == "" && m.TotalCostUSD > 0 {
+				c.priorUSD += m.TotalCostUSD
+				c.TotalUSD += m.TotalCostUSD
+				c.markSource(CostReported)
 			}
 		default:
 			if c.sessionPricedUSD == 0 {

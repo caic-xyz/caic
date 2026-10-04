@@ -78,6 +78,22 @@ func TestModelPricingPrice(t *testing.T) {
 
 func TestPricerModelPrice(t *testing.T) {
 	t.Parallel()
+	t.Run("Sol61ProviderForms", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		for _, model := range []string{"gpt-6.1-sol", "openai-codex/gpt-6.1-sol", "openai/gpt-6.1-sol", "openrouter/openai/gpt-6.1-sol"} {
+			provider := agent.QuotaProvider("")
+			if model == "gpt-6.1-sol" {
+				provider = agent.QuotaProviderCodex
+			}
+			got, ok := p.ModelPrice(provider, model, time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC))
+			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, OutputPerMTok: 10}
+			if !ok || got != want {
+				t.Errorf("%s price = %+v/%v, want %+v", model, got, ok, want)
+			}
+		}
+	})
+
 	t.Run("Zai", func(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)

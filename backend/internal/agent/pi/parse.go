@@ -204,7 +204,7 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		// replaces the last API usage with the compacted context size.
 		var msgs []agent.Message
 		if ev.Result != nil && ev.Result.Usage != nil {
-			msgs = append(msgs, &agent.UsageMessage{Usage: toAgentUsage(ev.Result.Usage)})
+			msgs = append(msgs, &agent.UsageMessage{Usage: toAgentUsage(ev.Result.Usage), ReportedCostUSD: &ev.Result.Usage.Cost.Total})
 		}
 		msgs = append(msgs, m)
 		return msgs, decodedRecord{}, nil

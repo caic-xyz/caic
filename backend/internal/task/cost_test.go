@@ -20,6 +20,70 @@ func TestCostTracker(t *testing.T) {
 		"gpt-6-luna": {InputPerMTok: 0.1},
 	}
 
+	t.Run("PiUnpricedInvocationsAccumulateAcrossBoundaries", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Pi, Model: "unknown"}
+		pricer := usage.NewPricer(nil)
+		for i, boundary := range []agent.Message{nil, nil, &agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, agent.ContextCleared()} {
+			if boundary != nil {
+				c.Observe(boundary, at, pricer)
+			}
+			cost, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 0.25}, at, pricer)
+			if !ok || cost.USD != 0.25 || cost.Source != CostReported || c.TotalUSD != float64(i+1)*0.25 {
+				t.Fatalf("invocation %d: cost = %+v, ok = %v, total = %v", i, cost, ok, c.TotalUSD)
+			}
+		}
+	})
+
+	t.Run("PiReportedAndPricedInvocationsAccumulate", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Pi, Model: "unknown"}
+		c.Observe(&agent.ResultMessage{TotalCostUSD: 0.25}, at, prices)
+		c.Observe(&agent.UsageMessage{ReportedModel: "gpt-6-sol", Usage: agent.Usage{InputTokens: 1_000_000}}, at, prices)
+		priced, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 0.125}, at, prices)
+		if !ok || priced.USD != 2 || priced.Source != CostEstimated || c.TotalUSD != 2.25 {
+			t.Fatalf("priced = %+v, ok = %v, total = %v", priced, ok, c.TotalUSD)
+		}
+		c.Observe(&agent.UsageMessage{ReportedModel: "unknown", Usage: agent.Usage{InputTokens: 1_000_000}}, at, prices)
+		reported, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 0.5}, at, prices)
+		if !ok || reported.USD != 0.5 || reported.Source != CostReported || c.TotalUSD != 2.75 {
+			t.Fatalf("reported = %+v, ok = %v, total = %v", reported, ok, c.TotalUSD)
+		}
+	})
+
+	t.Run("PiMixedCallsWithinInvocation", func(t *testing.T) {
+		t.Parallel()
+		for _, unknownFirst := range []bool{false, true} {
+			c := CostTracker{Harness: harness.Pi, Model: "gpt-6-sol"}
+			reported := 0.5
+			pricedCall := &agent.UsageMessage{ReportedModel: "gpt-6-sol", Usage: agent.Usage{InputTokens: 1_000_000}}
+			unknownCall := &agent.UsageMessage{ReportedModel: "unknown", Usage: agent.Usage{InputTokens: 1_000_000}, ReportedCostUSD: &reported}
+			calls := []*agent.UsageMessage{pricedCall, unknownCall}
+			if unknownFirst {
+				calls[0], calls[1] = calls[1], calls[0]
+			}
+			for _, call := range calls {
+				c.Observe(call, at, prices)
+			}
+			cost, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 2.5}, at, prices)
+			if !ok || cost.USD != 2.5 || cost.Source != CostEstimated || c.TotalUSD != 2.5 {
+				t.Fatalf("unknownFirst %v: cost = %+v, ok = %v, total = %v", unknownFirst, cost, ok, c.TotalUSD)
+			}
+		}
+	})
+
+	t.Run("PiReportedCallsAreNotCountedAgainAtResult", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Pi, Model: "unknown"}
+		for _, usd := range []float64{0.25, 0.5} {
+			c.Observe(&agent.UsageMessage{ReportedCostUSD: &usd}, at, nil)
+		}
+		cost, ok := c.Observe(&agent.ResultMessage{TotalCostUSD: 0.75}, at, nil)
+		if !ok || cost.USD != 0.75 || cost.Source != CostReported || c.TotalUSD != 0.75 {
+			t.Fatalf("cost = %+v, ok = %v, total = %v", cost, ok, c.TotalUSD)
+		}
+	})
+
 	t.Run("CodexTurnsAcrossCompactionAndReroute", func(t *testing.T) {
 		t.Parallel()
 		c := CostTracker{Harness: harness.Codex, Model: "gpt-6-luna"}

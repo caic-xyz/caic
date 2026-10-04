@@ -3918,8 +3918,8 @@ func TestPricedCost(t *testing.T) {
 
 	t.Run("UsageMessagesAccumulatePerCall", func(t *testing.T) {
 		t.Parallel()
-		// Pi reports usage per API call; its result carries only the last
-		// call's cost, which must not regress the accumulated value.
+		// Pi reports usage per API call; its result must not regress the
+		// accumulated value when per-call pricing has already accounted for it.
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Pi, "zai/glm-5.3-flash", "")
 		tk.Pricer = prices
 		tk.SetState(taskslog.StateRunning)

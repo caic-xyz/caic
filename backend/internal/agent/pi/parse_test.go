@@ -623,6 +623,22 @@ func TestHandleAgentEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("sums assistant costs and retains last call usage", func(t *testing.T) {
+		t.Parallel()
+		w := &piWireFormat{}
+		msgs, err := w.ParseMessage([]byte(`{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":100,"cost":{"total":0.25}}},{"role":"toolResult","content":[]},{"role":"assistant","usage":{"input":20,"cost":{"total":0.125}}}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("messages = %#v, want one result", msgs)
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
+		if !ok || rm.TotalCostUSD != 0.375 || rm.Usage.InputTokens != 20 {
+			t.Fatalf("result = %#v, want cost 0.375 and last input 20", msgs[0])
+		}
+	})
+
 	t.Run("retrying agent_end defers terminal result", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{startTime: time.Now().Add(-time.Second), numTurns: 2}
@@ -734,7 +750,7 @@ func TestCaicModelInfo(t *testing.T) {
 		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":1000000}`)); err != nil {
 			t.Fatal(err)
 		}
-		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6","content":[],"usage":{"input":100,"output":50,"cacheWrite":30,"cacheWrite1h":20,"reasoning":20,"totalTokens":180}}}`)
+		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","provider":"openrouter","model":"auto","responseModel":"anthropic/claude-opus-4-6","content":[],"usage":{"input":100,"output":50,"cacheWrite":30,"cacheWrite1h":20,"reasoning":20,"totalTokens":180,"cost":{"total":0.125}}}}`)
 		msgs, err := w.ParseMessage(turnEndLine)
 		if err != nil {
 			t.Fatal(err)
@@ -745,6 +761,9 @@ func TestCaicModelInfo(t *testing.T) {
 		um, ok := msgs[0].(*agent.UsageMessage)
 		if !ok {
 			t.Fatalf("expected *agent.UsageMessage, got %T", msgs[0])
+		}
+		if um.ReportedCostUSD == nil || *um.ReportedCostUSD != 0.125 {
+			t.Fatalf("ReportedCostUSD = %v, want 0.125", um.ReportedCostUSD)
 		}
 		if um.ContextWindow != 1000000 {
 			t.Errorf("ContextWindow = %d, want 1000000", um.ContextWindow)

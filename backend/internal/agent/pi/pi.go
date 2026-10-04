@@ -23,7 +23,6 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -746,8 +745,8 @@ func toAgentUsage(u *pi.MessageUsage) agent.Usage {
 	return usage
 }
 
-// handleAgentEnd extracts final usage from the last assistant message and emits
-// a ResultMessage with usage and duration.
+// handleAgentEnd sums the invocation's assistant costs and emits a ResultMessage
+// with the last call's usage and the invocation duration.
 func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	var envelope agentEndEnvelope
 	if err := json.Unmarshal(line, &envelope); err != nil {
@@ -762,17 +761,18 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 		return nil, fmt.Errorf("unmarshal agent_end: %w", err)
 	}
 
-	// Find the last assistant message for usage.
+	// agent_end contains this invocation's messages. Costs are per call, while
+	// result usage remains the last call because turn_end already emits each
+	// call's additive usage.
 	var usage agent.Usage
 	var totalCostUSD float64
-	for i := range slices.Backward(ev.Messages) {
+	for i := range ev.Messages {
 		msg := &ev.Messages[i]
 		if msg.Role != pi.RoleAssistant {
 			continue
 		}
 		usage = toAgentUsage(&msg.Usage)
-		totalCostUSD = msg.Usage.Cost.Total
-		break
+		totalCostUSD += msg.Usage.Cost.Total
 	}
 
 	w.mu.Lock()
@@ -810,9 +810,10 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	w.mu.Unlock()
 	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {
 		return []agent.Message{&agent.UsageMessage{
-			Usage:         toAgentUsage(&ev.Message.Usage),
-			ReportedModel: resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model),
-			ContextWindow: int(w.modelCtxWindow),
+			Usage:           toAgentUsage(&ev.Message.Usage),
+			ReportedCostUSD: &ev.Message.Usage.Cost.Total,
+			ReportedModel:   resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model),
+			ContextWindow:   int(w.modelCtxWindow),
 		}}, nil
 	}
 	return nil, nil

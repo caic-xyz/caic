@@ -3,7 +3,7 @@
     {
       "provider": "anthropic",
       "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "retrieved": "2026-09",
+      "retrieved": "2026-09-21",
       "models": [
         {
           "id": "claude-fable-5",
@@ -193,7 +193,7 @@
     {
       "provider": "deepseek",
       "source": "https://api-docs.deepseek.com/quick_start/pricing",
-      "retrieved": "2026-09",
+      "retrieved": "2026-09-21",
       "holidays": [
         "2026-01-01",
         "2026-01-02",
@@ -297,7 +297,7 @@
     {
       "provider": "openai",
       "source": "https://developers.openai.com/api/docs/pricing",
-      "retrieved": "2026-09",
+      "retrieved": "2026-10-04",
       "models": [
         {
           "id": "gpt-5.3-codex",
@@ -364,6 +364,19 @@
           ]
         },
         {
+          "id": "gpt-6.1-sol",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 2.0,
+                "cached_input_per_mtok": 0.1,
+                "cache_write_per_mtok": 2.5,
+                "output_per_mtok": 10.0
+              }
+            }
+          ]
+        },
+        {
           "id": "gpt-6-astra",
           "tiers": [
             {
@@ -415,7 +428,7 @@
     {
       "provider": "zai",
       "source": "https://docs.z.ai/guides/overview/pricing",
-      "retrieved": "2026-09",
+      "retrieved": "2026-09-21",
       "models": [
         {
           "id": "glm-5.3-flash",
