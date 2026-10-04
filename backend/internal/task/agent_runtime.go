@@ -68,24 +68,9 @@ type AgentRuntime struct {
 	MCPRegistry         mcp.Registry  // Task-scoped CAIC MCP registry; nil when disabled.
 }
 
-// Reconnect reattaches to a running relay, or starts a new agent session
-// resuming the previous conversation if no relay is available. Returns the
-// SessionHandle so the caller can start a session watcher.
-//
-// Strategy:
-//  1. Check if the relay daemon is alive (Unix socket exists in instance).
-//  2. If alive, attach to the relay. This is the preferred path because it
-//     reconnects to the still-running agent process with zero message loss.
-//  3. If attaching fails (relay died between check and attach), fall back to
-//     starting a new agent session with --resume to continue the conversation.
-//  4. If both fail, revert to StateWaiting so the user can retry or purge.
-//
-// State transitions:
-//   - Relay attach: keeps StateWaiting/StateAsking if agent already finished its
-//     turn; transitions to StateRunning only if the agent was mid-output.
-//   - --resume fallback: always transitions to StateRunning since a new agent
-//     process is started.
-//   - All-fail: reverts to StateWaiting.
+// Reconnect attaches to the existing relay using validated persistent history.
+// A dead relay returns an error; startup recovery separately revives eligible
+// retained instances rather than replacing an unverified live relay.
 func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error) {
 	ctx, task := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
 	defer task.End()
@@ -157,7 +142,8 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 
 // EnsureSession waits briefly for h to confirm it's alive. If the session
 // exits within 10 seconds (agent had already finished), it detaches and
-// starts a fresh idle relay so the task can accept new prompts.
+// starts a fresh idle relay only when the task has no saved session.
+// Existing conversations fail instead of silently losing history.
 func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *Task, h *SessionHandle) (*SessionHandle, error) {
 	select {
 	case <-h.Done():
@@ -165,6 +151,9 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 		t.DetachSession()
 		err := h.Drain()
 		_ = h.Log.Close()
+		if t.GetSessionID() != "" {
+			return nil, errors.Join(errors.New("agent session exited before becoming ready"), err)
+		}
 		tlog.Info("attached session exited, starting idle relay", "err", err)
 		if s := t.GetState(); s == taskslog.StateStopping || s == taskslog.StateStopped || s == taskslog.StatePurged {
 			return nil, fmt.Errorf("task is %s", s)
@@ -591,10 +580,20 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	}
 	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
-	// 1. Revive the instance.
 	if state, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed, taskslog.StateProvisioning); !changed {
 		return nil, fmt.Errorf("cannot revive in state %s", state)
 	}
+	// Accepting revival clears a prior stop/purge intent before any runtime
+	// side effects. Interrupted revival remains recoverable on restart.
+	intentLog, err := r.reopenLog(t)
+	if err != nil {
+		return nil, err
+	}
+	if err := errors.Join(r.LogStore.WriteResultTrailer(intentLog, t.Title(), &taskslog.Result{State: taskslog.StateProvisioning}), intentLog.Close()); err != nil {
+		return nil, err
+	}
+
+	// 1. Revive the instance.
 	tlog.Info("reviving instance")
 	tlog.Debug("checkout", "msg", "calling instance.Revive")
 	if err := r.Runtimes.Revive(ctx, instanceID); err != nil {
@@ -612,14 +611,14 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true)
-	log, err := r.openLog(t)
+	// Restore archived history rather than creating a replacement segment.
+	log, err := r.reopenLog(t)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("open log: %w", err), nil)
 	}
 
-	t.SetState(taskslog.StateRunning)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
 		Logger:          r.Log,
@@ -644,10 +643,13 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	}
 
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
+	// Resume has no prompt. Publish idle before exposing the handle, so
+	// input during the readiness wait owns the next Running transition.
+	t.SetStateIf(taskslog.StateStarting, taskslog.StateWaiting)
 	t.AttachSession(h)
 
-	// 3. If --resume exits immediately (previous session was complete),
-	// start a fresh idle relay so the task can accept new prompts.
+	// 3. An immediately exiting resumed agent fails without discarding context.
+	// Tasks without a saved session may start a fresh idle relay.
 	h, err = r.EnsureSession(ctx, tlog, t, h)
 	if err != nil {
 		return nil, r.finishReviveFailure(ctx, t, err, nil)

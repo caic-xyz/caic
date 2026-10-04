@@ -135,6 +135,7 @@ type testRouter struct {
 	*Router
 
 	taskMgr               *taskmgr.Manager
+	logStore              *taskslog.Store
 	checkouts             *repo.Registry
 	repoStatus            *ci.RepoStatusStore
 	prefs                 *preferences.Store
@@ -215,7 +216,8 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	backend := &runtimetest.FakeBackend{}
 	runtimeRouter := newTestRuntime(t, backend)
 	checkoutRegistry := repo.NewRegistry()
-	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Checkouts: checkoutRegistry})
+	logStore := taskslog.NewStore(testLogger(), t.TempDir())
+	taskMgr := newTestTaskManager(t, taskmgr.Config{ServerCtx: t.Context(), Runtimes: runtimeRouter, Backends: backends, Checkouts: checkoutRegistry, LogStore: logStore})
 	repoStatus := ci.NewRepoStatusStore()
 	prefs := newTestPrefs(t)
 	forgeManager := forgemgr.New(testLogger(), "", "", nil, forgemgr.NoOAuthTokenSource())
@@ -235,7 +237,7 @@ func newTestRouter(t testing.TB, backends map[harness.Name]agent.Backend) *testR
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return &testRouter{Router: s, taskMgr: taskMgr, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager}
+	return &testRouter{Router: s, taskMgr: taskMgr, logStore: logStore, checkouts: checkoutRegistry, repoStatus: repoStatus, prefs: prefs, forgeMgr: forgeManager}
 }
 
 // newTestRouterWithAuthHost creates a Router with an auth store, suitable for
@@ -1048,7 +1050,7 @@ func TestHandlePurge(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 		// StatePending is the zero value, but set explicitly for clarity.
 		insertTestTask(s, tk.ID, tk)
 
@@ -1067,12 +1069,13 @@ func TestHandlePurge(t *testing.T) {
 
 	t.Run("Waiting", func(t *testing.T) {
 		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetState(taskslog.StateWaiting)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(s, tk.ID, tk)
+		recordRouterTaskLog(t, s, tk)
 
 		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", tk.ID.String())
@@ -1094,12 +1097,13 @@ func TestHandlePurge(t *testing.T) {
 
 	t.Run("CancelledContext", func(t *testing.T) {
 		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 		tk.Repos = []taskslog.RepoMount{{Name: "r"}}
 		tk.SetState(taskslog.StateRunning)
 		s := newTestRouter(t, nil)
 		registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 		insertTestTask(s, tk.ID, tk)
+		recordRouterTaskLog(t, s, tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
 		// where BaseContext is cancelled before the handler completes.
@@ -4114,4 +4118,21 @@ func TestCreateTaskRuntimeCPUSettings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordRouterTaskLog gives retained-task fixtures the durable history required by lifecycle operations.
+func recordRouterTaskLog(t testing.TB, s *testRouter, tk *task.Task) {
+	t.Helper()
+	log, path, err := s.logStore.Open(tk.LogFilename(), tk.LogHeader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e, ok := s.taskMgr.GetEntry(tk.ID)
+	if !ok {
+		t.Fatal("task entry missing")
+	}
+	e.LogPath.Set(path)
 }

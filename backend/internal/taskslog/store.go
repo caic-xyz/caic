@@ -129,9 +129,9 @@ func (s *Store) LoadAllReadOnly() ([]*LoadedTask, error) {
 	return loadLogsFromPaths(s.log, paths, logLoadRequired, false)
 }
 
-// LoadForTaskIDs loads metadata for plain logs whose parsed filename task ID
-// matches one of taskIDs. It avoids parsing unrelated purged task logs during
-// startup import of live runtime instances, which always own plain logs.
+// LoadForTaskIDs loads plain or archived logs for retained runtime task IDs.
+// Plain sources take precedence over archives left by interrupted compression.
+// Unrelated historical tasks are excluded from startup restoration.
 func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
 	idSet := make(map[string]struct{}, len(taskIDs))
 	for _, id := range taskIDs {
@@ -146,6 +146,11 @@ func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
 	if err != nil {
 		return nil, err
 	}
+	archives, err := logPaths(s.log, s.LogDir, idSet, true, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	paths = append(paths, archives...)
 	found := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
 		found[taskIDFromLogBase(trimLogExt(filepath.Base(path)))] = struct{}{}

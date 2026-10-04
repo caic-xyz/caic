@@ -1579,6 +1579,22 @@ func (m *Manager) handleRuntimeInstanceExit(ctx context.Context, instanceID runt
 	if found == nil {
 		return
 	}
+	// Lifecycle operations own their self-inflicted stop events. A resumed
+	// session must not be detached by the previous incarnation's death.
+	if !found.Lifecycle.operationMu.TryLock() {
+		return
+	}
+	defer found.Lifecycle.operationMu.Unlock()
+	// Events can arrive after a subsequent revival. Only current runtime
+	// observation can distinguish that stale event from a new death.
+	info, err := m.Runtimes.Inspect(ctx, instanceID)
+	if err != nil {
+		m.log.WarnContext(ctx, "confirm runtime exit", "instance", instanceID, "err", err)
+		return
+	}
+	if info.State != "exited" {
+		return
+	}
 	t := found.task
 	// Atomically archive as stopped unless the task is already terminal or in
 	// cleanup. StateStopping and StatePurging are both self-inflicted: Stop and
@@ -1589,7 +1605,7 @@ func (m *Manager) handleRuntimeInstanceExit(ctx context.Context, instanceID runt
 	// between our check and our write.
 	prevState, changed := t.SetStateUnless(taskslog.StateStopped,
 		taskslog.StatePurged, taskslog.StateCrashed, taskslog.StateFailed, taskslog.StateStopped,
-		taskslog.StateStopping, taskslog.StatePurging)
+		taskslog.StateStopping, taskslog.StatePurging, taskslog.StateProvisioning, taskslog.StateStarting)
 	if !changed {
 		return
 	}
@@ -1801,6 +1817,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("multiple task logs found for task %s", taskID)
 	}
 	lt := matchingLogs[0]
+	importLogPath := lt.LogPath()
 	lp := lt.Primary()
 	if branch == "" && relPath == "" {
 		if lp != nil {
@@ -1838,16 +1855,21 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("unknown harness %q for imported task %s", lt.Harness, taskID)
 	}
 	lt.SetWireResolver(m)
+	// Persisted user shutdown intent does not need a readable relay snapshot.
+	// Skip probes so unavailable output cannot prevent completing that intent.
+	shutdownIntent := lt.State == taskslog.StateStopping || lt.State == taskslog.StatePurging || lt.State == taskslog.StateStopped || lt.State == taskslog.StatePurged
 	// Check relay liveness.
 	var relayAlive bool
+	relayConfirmedDead := isExited
 	var relayTimeline agent.ParsedTimeline
 	var relaySize int64
 	var relayDiag string
 	var relaySnapshotRead bool
 	relayTarget := c.AgentTarget
-	if !isExited {
+	if !isExited && !shutdownIntent {
 		var relayErr error
 		relayAlive, relayDiag, relayErr = m.relay.Status(ctx, relayTarget)
+		relayConfirmedDead = relayErr == nil && !relayAlive
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "check failed during import", "repo", relPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
@@ -1860,7 +1882,11 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		readCancel()
 		if relayErr != nil {
 			m.log.WarnContext(ctx, "relay", "msg", "read output failed", "repo", relPath, "br", branch, "instance", c.ID, "err", relayErr)
-			relayAlive = false
+			if !relayConfirmedDead {
+				// A live attachment must start at a verified snapshot boundary.
+				// Offset zero would replay records already in trusted history.
+				return nil, fmt.Errorf("read relay snapshot for %s: %w", c.ID, relayErr)
+			}
 		} else {
 			relaySnapshotRead = true
 		}
@@ -2012,10 +2038,11 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			m.log.WarnContext(ctx, "relay", "msg", "legacy recovery skipped unverified relay tail",
 				"repo", relPath, "br", branch, "instance", c.ID, "reason", merger.err)
 		} else if encoded := merger.relayAppend(relayTimeline); len(encoded) > 0 {
-			log, _, err := m.logStore.Reopen(filepath.Base(lt.LogPath()), t.LogHeader())
+			log, path, err := m.logStore.Reopen(filepath.Base(lt.LogPath()), t.LogHeader())
 			if err != nil {
 				return nil, fmt.Errorf("reopen imported task log %s: %w", taskID, err)
 			}
+			importLogPath = path
 			if err := errors.Join(log.AppendNative(encoded), log.Close()); err != nil {
 				return nil, fmt.Errorf("persist imported relay snapshot %s: %w", taskID, err)
 			}
@@ -2093,7 +2120,7 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 				t.SetState(taskslog.StateStopped)
 			}
 		}
-	} else if !relayAlive {
+	} else if relayConfirmedDead {
 		relayLog := m.relay.ReadLog(ctx, relayTarget, 4096)
 		if relayLog != "" {
 			m.log.WarnContext(ctx, "relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
@@ -2112,7 +2139,21 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		}
 	}
 
+	if shutdownIntent {
+		t.SetState(taskslog.StateStopped)
+		if !isExited {
+			if err := m.Runtimes.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // completing persisted user intent uses the Manager lifetime
+				return nil, fmt.Errorf("complete persisted stop intent: %w", err)
+			}
+		}
+	}
+	recoverImported := importFailure == nil && relayConfirmedDead && canRecoverImportedTask(t, lt)
+	if recoverImported {
+		t.SetState(taskslog.StateProvisioning)
+	}
+	recoveryState := t.GetState()
 	entry := m.NewEntry(t, lt)
+	entry.LogPath.Set(importLogPath)
 	// Import reconstructs the full timeline because the task may resume live;
 	// subsequent lookups must use that authoritative in-memory fold.
 	entry.historyInMemory = true
@@ -2139,8 +2180,10 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 			Err:         resultErr,
 		}
 		entry.Finish(result)
-		if err := m.writeTaskResultTrailer(entry, result); err != nil {
-			m.log.WarnContext(ctx, "write imported result trailer failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
+		if !recoverImported {
+			if err := m.writeTaskResultTrailer(entry, result); err != nil {
+				m.log.WarnContext(ctx, "write imported result trailer failed", "repo", relPath, "br", branch, "instance", c.ID, "err", err)
+			}
 		}
 	}
 
@@ -2165,13 +2208,20 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		entry.Lifecycle.generateTitle()
 	}
 
+	// Recovery runs once during startup, only for a proven dead relay and
+	// trusted resumable history. Old failed revives lack a typed reason;
+	// recognize their persisted runtime-revive error without retrying other
+	// startup failures or deliberate stops.
+	if recoverImported {
+		entry.Lifecycle.scheduleImportedRecovery(recoveryState) //nolint:contextcheck // recovery uses the Manager lifetime
+		return entry, nil
+	}
+
 	// Auto-reconnect immediately so imported live tasks can accept input as
-	// soon as startup returns. EnsureSession may still replace an already-exited
-	// attach in the background, but the attach itself must not race the first
-	// user reply after restart.
+	// soon as startup returns. The attach must not race the first user reply.
 	if importFailure == nil && t.GetState() != taskslog.StateStopped && relayAlive {
 		entry.Lifecycle.reconnectImportedSession() //nolint:contextcheck // imported watcher uses the Manager lifetime.
-	} else if !relayAlive && t.GetState() != taskslog.StateStopped && t.GetState() != taskslog.StateCrashed && t.GetState() != taskslog.StateFailed {
+	} else if relayConfirmedDead && t.GetState() != taskslog.StateStopped && t.GetState() != taskslog.StateCrashed && t.GetState() != taskslog.StateFailed {
 		m.log.ErrorContext(ctx, "relay dead, stopping instance",
 			"repo", relPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
@@ -2183,6 +2233,27 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	return entry, nil
+}
+
+// canRecoverImportedTask requires trusted resumable history and excludes
+// intentional stop/purge records and incomplete startup failures.
+func canRecoverImportedTask(t *task.Task, lt *taskslog.LoadedTask) bool {
+	if t.GetSessionID() == "" || !t.HasAcceptedInputEvidence() {
+		return false
+	}
+	switch t.Harness {
+	case harness.Claude, harness.Codex, harness.OpenCode, harness.Pi:
+	default:
+		return false
+	}
+	switch lt.State {
+	case taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateStarting, taskslog.StateProvisioning, taskslog.StateCrashed:
+		return lt.LastTrailer == nil || lt.LastTrailer.StartupFailure == nil
+	case taskslog.StateFailed:
+		return lt.LastTrailer != nil && lt.LastTrailer.Err != nil && strings.HasPrefix(lt.LastTrailer.Err.Error(), "revive instance:")
+	default:
+		return false
+	}
 }
 
 func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, error) {

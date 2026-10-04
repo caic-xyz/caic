@@ -73,8 +73,9 @@ func (e *Entry) SetLoadedTask(lt *taskslog.LoadedTask) {
 }
 
 // Done returns the channel that closes when the task reaches a terminal
-// state. After Reset (Revive), this returns a fresh channel; goroutines that
-// captured the previous channel will see a stale (already-closed) reference.
+// state. Revival or clearing a result after reconnect returns a fresh channel;
+// goroutines that captured the previous channel will see a stale
+// (already-closed) reference.
 func (e *Entry) Done() <-chan struct{} {
 	return e.term.Load().done
 }
@@ -135,4 +136,21 @@ func (e *Entry) Reset() {
 	e.mu.Lock()
 	e.cleanupOnce = sync.Once{}
 	e.mu.Unlock()
+}
+
+// clearResult reopens completion only if the result captured before reconnect
+// is still current. A newer failure or shutdown result must remain visible.
+func (e *Entry) clearResult(expected *taskslog.Result) {
+	if expected == nil {
+		return
+	}
+	for {
+		cur := e.term.Load()
+		if cur.result != expected {
+			return
+		}
+		if e.term.CompareAndSwap(cur, &entryTerminal{done: make(chan struct{})}) {
+			return
+		}
+	}
 }

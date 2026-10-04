@@ -100,8 +100,12 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 }
 
 // AgentArgs implements agent.Backend.
-func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
-	return []string{"pi", "--mode", "rpc", "--approve"}
+func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
+	args := []string{"pi", "--mode", "rpc", "--approve"}
+	if a.ResumeSessionID != "" {
+		args = append(args, "--session", a.ResumeSessionID)
+	}
+	return args
 }
 
 // AttachRelay connects to an already-running relay in the container.
@@ -137,7 +141,7 @@ func (*Backend) FetchModelInventory(ctx context.Context, target runtime.Connecti
 func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
 
-	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
+	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID})
 	var relayArgs []string
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
@@ -219,6 +223,11 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				reportedEffort = string(state.ThinkingLevel)
 			}
 		}
+	}
+	if opts.ResumeSessionID != "" && sessionID != opts.ResumeSessionID {
+		_ = rp.Cmd.Process.Kill()
+		_ = rp.Cmd.Wait()
+		return nil, fmt.Errorf("pi: resumed session %q does not match requested session %q", sessionID, opts.ResumeSessionID)
 	}
 	rp.Stdout = records.Reader()
 	wire.sessionID = sessionID

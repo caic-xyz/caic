@@ -1957,6 +1957,19 @@ func TestStore(t *testing.T) {
 				t.Errorf("task = (%q, %q), want (live1, wanted)", tasks[0].TaskID, tasks[0].Prompt)
 			}
 		})
+		t.Run("ArchivedRetainedTask", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Harness: "pi", Prompt: "retained"})
+			writeCompressedLogFile(t, dir, "retained-repo-branch.jsonl.zst", seqOf(meta))
+			tasks, err := NewStore(testLogger(), dir).LoadForTaskIDs([]string{"retained"})
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("archived retained task: tasks=%v err=%v", tasks, err)
+			}
+			if tasks[0].Prompt != "retained" || !strings.HasSuffix(tasks[0].LogPath(), ".zst") {
+				t.Fatalf("archived source = %#v", tasks[0])
+			}
+		})
 		t.Run("Missing", func(t *testing.T) {
 			t.Parallel()
 			if _, err := NewStore(testLogger(), t.TempDir()).LoadForTaskIDs([]string{"missing"}); err == nil || !strings.Contains(err.Error(), "missing task logs") {

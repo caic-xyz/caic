@@ -53,10 +53,17 @@ The [relay](backend/internal/agent/relay/AGENTS.md) is a persistent Python daemo
 alive across SSH disconnections and backend restarts, logging all I/O to
 `/tmp/caic-relay/output.jsonl`.
 
-When the relay dies (process crash, OOM, manual kill), the agent subprocess is
-also lost. The backend detects this and marks the task as stopped. To recover,
-**revive** the task — this restarts the container and launches a new relay with
-`--resume`, continuing the conversation from the previous state.
+On server startup, caic automatically recovers retained containers whose relay
+or runtime died, including OOM failures, when validated task history contains
+accepted input and a saved conversation for Claude, Codex, OpenCode, or Pi. It
+preserves archived task history and resumes the exact session idle, without
+replaying the initial prompt. Pi uses `--session <id>` for this.
+
+Stop and purge intent is persisted before shutdown, so deliberate stops remain
+stopped even if the server restarts midway through the operation. Revival clears
+that intent before restarting the runtime. Incomplete startup failures and
+unresumable harnesses require manual recovery; automatic recovery runs once per
+startup and leaves failures retryable.
 
 ### Diagnostics
 
@@ -95,15 +102,15 @@ python3 /tmp/caic-relay/relay.py serve-attach \
   -- <agent> --resume <session-id>
 ```
 
-The relay will replay `output.jsonl` history to the agent via `--resume`. Then
-reattach the backend by restarting the server — the relay is alive and
-`adoptOne` will auto-reconnect.
+The agent restores context from its own saved session. The relay replays
+`output.jsonl` to the backend when it attaches. Restart the server to let
+container import reconnect to the live relay.
 
 ### Common Failure Modes
 
 | Symptom                      | Likely Cause                                 | Recovery                                                                      |
 | ---------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------- |
 | Socket exists but PID stale  | Agent subprocess crashed, daemon still alive | Kill stale pid, `rm -f /tmp/caic-relay/relay.sock`, restart relay             |
-| No socket, container running | Relay daemon died (OOM, crash)               | Check `relay.log`, revive the task                                            |
-| Relay alive but attach fails | Race between check and attach                | Backend automatically falls back to `--resume`                                |
+| No socket, container running | Relay daemon died (OOM, crash)               | Check `relay.log`; restart caic for automatic recovery, or revive manually    |
+| Relay alive but attach fails | Race between check and attach                | Retry attachment; if the relay died, stop and revive the task                 |
 | Graceful stop times out      | Agent subprocess ignores SIGINT/SIGTERM      | Relay escalates to SIGKILL; check `relay.log` for the shutdown watchdog trace |

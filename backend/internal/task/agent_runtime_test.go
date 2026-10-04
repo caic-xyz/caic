@@ -77,14 +77,14 @@ func (b *instantExitBackend) Start(ctx context.Context, opts *agent.Options) (*a
 }
 
 type reviveCaptureBackend struct {
-	instantExitBackend
+	testBackend
 
 	starts []agent.Options
 }
 
 func (b *reviveCaptureBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.starts = append(b.starts, *opts)
-	return b.instantExitBackend.Start(ctx, opts)
+	return b.testBackend.Start(ctx, opts)
 }
 
 // reviveEnsureFailureBackend lets the resumed session exit, then rejects the
@@ -985,6 +985,13 @@ func TestRunner(t *testing.T) {
 			provider := &titleProviderSpy{calls: make(chan struct{}, 1)}
 			tk.Provider = provider
 
+			previousLog, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := previousLog.Close(); err != nil {
+				t.Fatal(err)
+			}
 			h, err := r.ReviveTask(t.Context(), tk)
 			if err != nil {
 				t.Fatal(err)
@@ -1044,6 +1051,16 @@ func TestRunner(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "already accepted"}})
 			tk.SetState(taskslog.StateStopped)
 
+			previousLog, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := r.LogStore.WriteResultTrailer(previousLog, tk.Title(), &taskslog.Result{State: taskslog.StateStopped}); err != nil {
+				t.Fatal(err)
+			}
+			if err := previousLog.Close(); err != nil {
+				t.Fatal(err)
+			}
 			h, err := r.ReviveTask(t.Context(), tk)
 			if err != nil {
 				t.Fatal(err)
@@ -1055,6 +1072,10 @@ func TestRunner(t *testing.T) {
 				_ = h.Log.Close()
 			})
 
+			intent, err := r.LogStore.LoadForTaskIDs([]string{tk.ID.String()})
+			if err != nil || len(intent) != 1 || intent[0].State != taskslog.StateProvisioning {
+				t.Fatalf("revive intent=%v err=%v", intent, err)
+			}
 			if len(backend.starts) == 0 {
 				t.Fatal("backend received no starts")
 			}
@@ -1169,6 +1190,29 @@ func TestRunner(t *testing.T) {
 				})
 			}
 		})
+		t.Run("resume_exit_preserves_context", func(t *testing.T) {
+			t.Parallel()
+			backend := &reviveEnsureFailureBackend{}
+			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, "test", "", "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
+			tk.SetSessionMetadata("saved-session", "", "", "")
+			tk.SetState(taskslog.StateStopped)
+			log, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.ReviveTask(t.Context(), tk); err == nil || !strings.Contains(err.Error(), "agent session exited") {
+				t.Fatalf("resume error=%v", err)
+			}
+			if backend.starts != 1 || tk.GetSessionID() != "saved-session" || tk.GetState() != taskslog.StateCrashed {
+				t.Fatalf("starts=%d session=%s state=%s", backend.starts, tk.GetSessionID(), tk.GetState())
+			}
+		})
 		t.Run("valid", func(t *testing.T) {
 			t.Parallel()
 			backend := &instantExitBackend{}
@@ -1178,6 +1222,13 @@ func TestRunner(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "test"}})
 			tk.SetState(taskslog.StateStopped)
 
+			previousLog, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := previousLog.Close(); err != nil {
+				t.Fatal(err)
+			}
 			h, err := r.ReviveTask(t.Context(), tk)
 			if err != nil {
 				t.Fatal(err)

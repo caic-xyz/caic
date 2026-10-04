@@ -81,6 +81,10 @@ func runPiRelayHelper() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "relay-args"), []byte(strings.Join(os.Args, " ")), 0o600); err != nil { //nolint:gosec // test-controlled helper directory
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	failedStartup := len(count) == 0
 	fmt.Printf(`{"t":"relay_generation","generation":"generation-%d"}`+"\n", len(count)+1)
 	if failedStartup {
@@ -308,15 +312,20 @@ func TestBackendStart(t *testing.T) {
 	msgs := make(chan agent.TimedMessage, 1)
 	log := &agenttest.LogSink{Version: agent.LogVersionV2}
 	sess, err := New("", nil).Start(t.Context(), &agent.Options{
-		Logger: slog.New(slog.DiscardHandler),
-		Target: runtime.ConnectionTarget{SSHHost: "task"},
-		Dir:    "/workspace",
-		Model:  "openai-codex/gpt-5.6-terra",
-		MsgCh:  msgs,
-		Log:    log,
+		ResumeSessionID: "ses-1",
+		Logger:          slog.New(slog.DiscardHandler),
+		Target:          runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:             "/workspace",
+		Model:           "openai-codex/gpt-5.6-terra",
+		MsgCh:           msgs,
+		Log:             log,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "relay-args")) //nolint:gosec // test-owned temporary directory
+	if err != nil || !strings.Contains(string(args), "--session ses-1") {
+		t.Fatalf("Pi resume command=%s err=%v", args, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {
 		t.Fatalf("pi update was not run: %v", err)
@@ -359,7 +368,8 @@ func TestBackendStart(t *testing.T) {
 		t.Fatalf("reported settings = %q/%q, want openai-codex/gpt-5.6-terra/high", meta.ReportedModel, meta.ReportedEffort)
 	}
 
-	stopCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	// Race-instrumented SSH helpers also wait for the race runtime at exit.
+	stopCtx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	if err := sess.Stop(stopCtx); err != nil {
 		t.Errorf("Stop: %v", err)
@@ -456,6 +466,13 @@ func TestPiWireFormat(t *testing.T) {
 func TestAgentArgs(t *testing.T) {
 	t.Parallel()
 
+	t.Run("resume_exact_session", func(t *testing.T) {
+		t.Parallel()
+		args := New("", nil).AgentArgs(agent.HarnessArgs{ResumeSessionID: "saved-session"})
+		if !slices.Equal(args, []string{"pi", "--mode", "rpc", "--approve", "--session", "saved-session"}) {
+			t.Fatalf("resume args = %v", args)
+		}
+	})
 	t.Run("approves project-local inputs in rpc mode", func(t *testing.T) {
 		t.Parallel()
 		args := New("", nil).AgentArgs(agent.HarnessArgs{})
@@ -464,4 +481,25 @@ func TestAgentArgs(t *testing.T) {
 			t.Errorf("args = %v, want %v", args, want)
 		}
 	})
+}
+
+func TestBackendResumeMismatch(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(exe, filepath.Join(dir, "ssh")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(piSSHHelperEnv, "1")
+	t.Setenv("PATH", dir)
+	t.Setenv("PI_SSH_HELPER_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "relay-count"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = New("", nil).Start(t.Context(), &agent.Options{Logger: slog.New(slog.DiscardHandler), Target: runtime.ConnectionTarget{SSHHost: "task"}, Dir: "/workspace", ResumeSessionID: "original-session", MsgCh: make(chan agent.TimedMessage, 1), Log: &agenttest.LogSink{Version: agent.LogVersionV2}})
+	if err == nil || !strings.Contains(err.Error(), "does not match requested session") {
+		t.Fatalf("resume mismatch error=%v", err)
+	}
 }

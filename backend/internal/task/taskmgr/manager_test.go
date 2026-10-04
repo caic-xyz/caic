@@ -30,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
+	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
@@ -128,6 +129,18 @@ func newTestManager(t testing.TB, cfg Config) *Manager { //nolint:gocritic // Co
 	return m
 }
 
+// recordTestTaskLog constructs the durable history owned by a registered fixture.
+func recordTestTaskLog(t testing.TB, m *Manager, e *Entry) {
+	log, path, err := m.logStore.Open(e.Task().LogFilename(), e.Task().LogHeader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e.LogPath.Set(path)
+}
+
 func awaitTaskCleanup(t *testing.T, m *Manager, id ksid.ID) {
 	t.Cleanup(func() {
 		e, ok := m.GetEntry(id)
@@ -159,6 +172,17 @@ type fakeRelayReader struct {
 	statusFn   func(context.Context, runtime.ConnectionTarget) (bool, string, error)
 	readTailFn func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error)
 	readLogFn  func(context.Context, runtime.ConnectionTarget, int) string
+}
+
+// deadRelayFixture isolates history-import tests from real SSH probes.
+func deadRelayFixture() fakeRelayReader {
+	return fakeRelayReader{
+		statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return false, "dead", nil },
+		readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+			return agent.ParsedTimeline{}, 0, nil
+		},
+		readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+	}
 }
 
 func (f fakeRelayReader) Status(ctx context.Context, target runtime.ConnectionTarget) (alive bool, diag string, err error) {
@@ -260,17 +284,21 @@ type reconnectInputBackend struct {
 
 	mu sync.Mutex
 
-	attachCalls int
-	prompts     []agent.Prompt
-	opts        *agent.Options
-	attached    chan struct{}
-	cancel      context.CancelFunc
-	session     *agent.Session
+	attachCalls     int
+	prompts         []agent.Prompt
+	opts            *agent.Options
+	attached        chan struct{}
+	exitImmediately bool
+	cancel          context.CancelFunc
+	session         *agent.Session
 }
 
 func (b *reconnectInputBackend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	cmdCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(cmdCtx, "sleep", "60")
+	if b.exitImmediately {
+		cmd = exec.CommandContext(cmdCtx, "true")
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -1478,11 +1506,12 @@ func TestManager(t *testing.T) {
 			release:     make(chan struct{}, 1),
 		}
 		m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "")
 		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(taskslog.StateRunning)
 		entry := m.NewEntry(tk, nil)
 		m.Insert(tk.ID, entry)
+		recordTestTaskLog(t, m, entry)
 		if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 			t.Fatalf("Stop() = %v", err)
 		}
@@ -1490,6 +1519,10 @@ func TestManager(t *testing.T) {
 		case <-backend.started:
 		case <-time.After(time.Second):
 			t.Fatal("Stop did not reach the runtime backend")
+		}
+		intent, err := m.logStore.LoadForTaskIDs([]string{tk.ID.String()})
+		if err != nil || len(intent) != 1 || intent[0].State != taskslog.StateStopping {
+			t.Fatalf("stop intent=%v err=%v", intent, err)
 		}
 
 		closed := make(chan error, 1)
@@ -2416,15 +2449,16 @@ func TestManager(t *testing.T) {
 		t.Run("parent_stop_does_not_change_child", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, "", "")
+			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, harness.Claude, "")
 			parent.SetState(taskslog.StateWaiting)
-			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, "", "")
+			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, harness.Claude, "")
 			child.ParentTaskID = parent.ID
 			child.SetState(taskslog.StateWaiting)
 			parentEntry := m.NewEntry(parent, nil)
 			m.Insert(parent.ID, parentEntry)
 			m.Insert(child.ID, m.NewEntry(child, nil))
 
+			recordTestTaskLog(t, m, parentEntry)
 			if err := parentEntry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
@@ -2435,15 +2469,16 @@ func TestManager(t *testing.T) {
 		t.Run("parent_purge_does_not_change_child", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})
-			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, "", "")
+			parent := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "parent"}, harness.Claude, "")
 			parent.SetState(taskslog.StateStopped)
-			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, "", "")
+			child := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "child"}, harness.Claude, "")
 			child.ParentTaskID = parent.ID
 			child.SetState(taskslog.StateWaiting)
 			parentEntry := m.NewEntry(parent, nil)
 			m.Insert(parent.ID, parentEntry)
 			m.Insert(child.ID, m.NewEntry(child, nil))
 
+			recordTestTaskLog(t, m, parentEntry)
 			if err := parentEntry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
@@ -2667,9 +2702,19 @@ func TestManager(t *testing.T) {
 			e := m.NewEntry(tk, nil)
 			e.LogPath.Set(path)
 			m.Insert(tk.ID, e)
+			e.Finish(&taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old reconnect failure")})
 
 			if err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "A"}); err != nil {
 				t.Fatal(err)
+			}
+
+			if e.Result() != nil {
+				t.Fatal("successful input reconnect retained stale failure")
+			}
+			select {
+			case <-e.Done():
+				t.Fatal("successful input reconnect is terminal")
+			default:
 			}
 
 			backend.mu.Lock()
@@ -2691,6 +2736,30 @@ func TestManager(t *testing.T) {
 			}
 			if got := tk.GetState(); got != taskslog.StateRunning {
 				t.Fatalf("state = %s, want %s", got, taskslog.StateRunning)
+			}
+		})
+		t.Run("error_reconnect_preserves_failure", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Backends: map[harness.Name]agent.Backend{harness.Codex: &agenttest.FakeBackend{HarnessName: harness.Codex}}})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Codex, "")
+			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+			tk.SetSessionMetadata("saved-session", "", "", "")
+			tk.SetState(taskslog.StateWaiting)
+			e := m.NewEntry(tk, nil)
+			recordTestTaskLog(t, m, e)
+			old := &taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old reconnect failure")}
+			e.Finish(old)
+			m.Insert(tk.ID, e)
+			if err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "retry"}); err == nil {
+				t.Fatal("failed reconnect accepted input")
+			}
+			if e.Result() != old {
+				t.Fatal("failed input reconnect cleared old failure")
+			}
+			select {
+			case <-e.Done():
+			default:
+				t.Fatal("failed reconnect lost terminal state")
 			}
 		})
 		t.Run("error_delivery_failure_is_not_no_session", func(t *testing.T) {
@@ -2896,7 +2965,8 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_transitions_to_stopped", func(t *testing.T) {
 			t.Parallel()
-			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			rb := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: &runtimetest.FakeInfo{}, backend: rb})})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/x", Branch: "caic-1"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
@@ -3468,12 +3538,13 @@ func TestManager(t *testing.T) {
 				Runtimes:  newTestRuntime(t, fake, nil),
 			})
 			t.Cleanup(func() { close(fake.release) })
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), time.Hour); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
@@ -3493,12 +3564,13 @@ func TestManager(t *testing.T) {
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
 			})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), 0); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
@@ -3518,12 +3590,13 @@ func TestManager(t *testing.T) {
 				ServerCtx: t.Context(),
 				Runtimes:  newTestRuntime(t, fake, nil),
 			})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), 20*time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
@@ -3566,13 +3639,14 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			fake := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateCrashed)
 			entry := m.NewEntry(tk, nil)
 			entry.Finish(&taskslog.Result{State: taskslog.StateCrashed, Err: errors.New("agent crashed")})
 			m.Insert(tk.ID, entry)
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Purge(t.Context(), time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
 			}
@@ -3603,12 +3677,13 @@ func TestManager(t *testing.T) {
 				release:     make(chan struct{}),
 			}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
@@ -3620,6 +3695,10 @@ func TestManager(t *testing.T) {
 
 			if err := entry.Lifecycle.Purge(t.Context(), time.Millisecond); err != nil {
 				t.Fatalf("Purge: %v", err)
+			}
+			intent, err := m.logStore.LoadForTaskIDs([]string{tk.ID.String()})
+			if err != nil || len(intent) != 1 || intent[0].State != taskslog.StatePurging {
+				t.Fatalf("purge intent=%v err=%v", intent, err)
 			}
 			select {
 			case <-entry.Done():
@@ -3718,12 +3797,13 @@ func TestManager(t *testing.T) {
 			// Backend is the interface seam, so a fake stands in for Docker.
 			fake := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, fake, nil)})
-			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, harness.Claude, "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 			entry := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, entry)
 
+			recordTestTaskLog(t, m, entry)
 			if err := entry.Lifecycle.Stop(t.Context()); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
@@ -4191,6 +4271,90 @@ func TestManager(t *testing.T) {
 
 	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
+		t.Run("reconnect_clears_historical_failure", func(t *testing.T) {
+			t.Parallel()
+			for _, mode := range []string{"attach_error", "early_exit", "healthy"} {
+				t.Run(mode, func(t *testing.T) {
+					t.Parallel()
+					id := ksid.NewID()
+					instanceID := runtime.NewID("test-runtime", "md-agent-retained-alert")
+					backend := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}, exitImmediately: mode == "early_exit"}
+					var selected agent.Backend = backend
+					if mode == "attach_error" {
+						selected = backend.FakeBackend
+					}
+					info := &runtimetest.FakeInfo{Meta: map[string]string{"md-agent-retained-alert\x00caic.id": id.String(), "md-agent-retained-alert\x00caic.harness": string(harness.Codex)}}
+					m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, info), Backends: map[harness.Name]agent.Backend{harness.Codex: selected}})
+					t.Cleanup(backend.stop)
+					m.relay = fakeRelayReader{
+						statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) { return true, "alive", nil },
+						readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+							return agent.ParsedTimeline{}, 0, nil
+						},
+						readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+					}
+					tk := mustNewTask(t, id, agent.Prompt{Text: "accepted prompt"}, harness.Codex, "")
+					log, path, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := log.AppendMessage(&agent.UserInputMessage{Text: "accepted prompt"}); err != nil {
+						t.Fatal(err)
+					}
+					if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
+						t.Fatal(err)
+					}
+					if err := m.logStore.WriteResultTrailer(log, "", &taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old failure")}); err != nil {
+						t.Fatal(err)
+					}
+					if err := log.Close(); err != nil {
+						t.Fatal(err)
+					}
+					logs, err := m.logStore.LoadForTaskIDs([]string{id.String()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					entries, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "running", AgentTarget: runtime.ConnectionTarget{SSHHost: "md-agent-retained-alert"}}}, logs)
+					if err != nil || len(entries) != 1 {
+						t.Fatalf("entries=%v err=%v", entries, err)
+					}
+					e := entries[0]
+					if mode != "healthy" {
+						e.Lifecycle.wg.Wait()
+						if e.Result() == nil || e.Result().Err == nil {
+							t.Fatal("failed attachment cleared failure")
+						}
+						return
+					}
+					deadline := time.After(12 * time.Second)
+					for e.Result() != nil {
+						select {
+						case <-deadline:
+							t.Fatal("successful reconnect retained stale summary failure")
+						case <-time.After(time.Millisecond):
+						}
+					}
+					if !e.Task().HasAcceptedInputEvidence() || !e.Task().HasSession() {
+						t.Fatal("reconnection lost session or history")
+					}
+					select {
+					case <-e.Done():
+						t.Fatal("reconnected task is still terminal")
+					default:
+					}
+					history, err := taskslog.LoadHistorySource(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := history.LoadMessagesWithResolver(m); err != nil {
+						t.Fatal(err)
+					}
+					if history.LastTrailer == nil || history.LastTrailer.Err == nil {
+						t.Fatal("historical failure was discarded")
+					}
+				})
+			}
+		})
 		t.Run("counts_missing_logs_without_counting_non_caic_instances", func(t *testing.T) {
 			t.Parallel()
 			info := &runtimetest.FakeInfo{Meta: map[string]string{
@@ -4382,6 +4546,7 @@ func TestManager(t *testing.T) {
 					harness.OpenCode: &agenttest.FakeBackend{HarnessName: harness.OpenCode, WireFactory: opencode.New("", nil).NewWire},
 				},
 			})
+			m.relay = deadRelayFixture()
 			tk := mustNewTask(t, taskID, agent.Prompt{Text: "accepted prompt"}, harness.OpenCode, "")
 			log, _, err := m.logStore.Open(tk.LogFilename(), tk.LogHeader())
 			if err != nil {
@@ -4557,6 +4722,7 @@ func TestManager(t *testing.T) {
 				},
 			}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}}})
+			m.relay = deadRelayFixture()
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			adopted, err := m.ImportInstances(t.Context(),
@@ -5274,7 +5440,11 @@ func TestManager(t *testing.T) {
 							GitRoot: "/home/user/src/repo/a", Branch: "caic-reject", ContainerPath: "/home/user/src/repo/a",
 						}},
 					}}, logs)
-					if err == nil || !strings.Contains(err.Error(), "reconcile imported relay snapshot") {
+					wantError := "reconcile imported relay snapshot"
+					if tc.readErr != nil {
+						wantError = "read relay snapshot"
+					}
+					if err == nil || !strings.Contains(err.Error(), wantError) {
 						t.Fatalf("ImportInstances error = %v, want relay reconciliation failure", err)
 					}
 					if len(adopted) != 0 {
@@ -5386,6 +5556,7 @@ func TestManager(t *testing.T) {
 			}}
 			cacheDir := t.TempDir()
 			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: taskslog.NewStore(testLogger(), filepath.Join(cacheDir, "tasks")), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}}})
+			m.relay = deadRelayFixture()
 			registerCheckout(t, m.Checkouts, "caic-xyz/caic", &repo.Checkout{Dir: "/home/user/src/caic-xyz/caic"})
 
 			logDir := filepath.Join(cacheDir, "tasks")
@@ -5780,7 +5951,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			events := make(chan runtime.Event, 1)
 			fake := &runtimetest.FakeInfo{Events: events}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+			rb := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: fake, backend: rb})})
 			t.Cleanup(func() {
 				if err := m.Close(); err != nil {
 					t.Error(err)
@@ -5834,7 +6006,8 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			events := make(chan runtime.Event, 1)
 			fake := &runtimetest.FakeInfo{Events: events}
-			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+			rb := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: fake, backend: rb})})
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
 			tk.Repos = []taskslog.RepoMount{{Name: "repo/x", Branch: "caic-1"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-dead"), runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
@@ -6505,4 +6678,426 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	close(stop)
 	wg.Wait()
+}
+
+// importedRecoveryBackend resumes an idle session or rejects its launch.
+type importedRecoveryBackend struct {
+	reconnectInputBackend
+
+	started chan *agent.Options
+	fail    bool
+}
+
+func (b *importedRecoveryBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	b.started <- opts
+	if b.fail {
+		return nil, errors.New("resume rejected")
+	}
+	return b.AttachRelay(ctx, opts)
+}
+
+func (b *importedRecoveryBackend) NewWire() agent.WireFormat {
+	switch b.HarnessName {
+	case harness.Claude:
+		return claudecode.New().NewWire()
+	case harness.Codex:
+		return codex.New("", nil).NewWire()
+	case harness.OpenCode:
+		return opencode.New("", nil).NewWire()
+	default:
+		return pi.New("", nil).NewWire()
+	}
+}
+
+func TestManagerImportedRecovery(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		harness      harness.Name
+		runtimeState string
+		fail         bool
+		sendInput    bool
+		statusErr    error
+		alive        bool
+		state        taskslog.State
+		reason       string
+		recover      bool
+	}{
+		{name: "input_during_readiness", sendInput: true, state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
+		{name: "success", state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
+		{name: "resume_failure", fail: true, state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
+		{name: "running_uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateRunning},
+		{name: "live_relay_missing_output", alive: true, state: taskslog.StateRunning},
+		{name: "uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateFailed, reason: "revive instance: missing host branch"},
+		{name: "deliberately_stopped", state: taskslog.StateStopped},
+		{name: "relay_crash", state: taskslog.StateRunning, recover: true},
+		{name: "waiting_relay_crash", state: taskslog.StateWaiting, recover: true},
+		{name: "claude_oom_runtime_exit", harness: harness.Claude, runtimeState: "exited", state: taskslog.StateCrashed, reason: "runtime instance ran out of memory", recover: true},
+		{name: "codex_relay_crash", harness: harness.Codex, state: taskslog.StateRunning, recover: true},
+		{name: "opencode_runtime_exit", harness: harness.OpenCode, runtimeState: "exited", state: taskslog.StateRunning, recover: true},
+		{name: "persisted_stop_intent", state: taskslog.StateStopping},
+		{name: "live_persisted_stop_intent", alive: true, state: taskslog.StateStopping},
+		{name: "uncertain_persisted_stop_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StateStopping},
+		{name: "live_persisted_purge_intent", alive: true, state: taskslog.StatePurging},
+		{name: "uncertain_persisted_purge_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StatePurging},
+		{name: "persisted_purge_intent", state: taskslog.StatePurging},
+		{name: "ordinary_failure", state: taskslog.StateFailed, reason: "agent startup failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := tc.harness
+			if h == "" {
+				h = harness.Pi
+			}
+			runtimeState := tc.runtimeState
+			if runtimeState == "" {
+				runtimeState = "running"
+			}
+			id := ksid.NewID()
+			instanceID := runtime.NewID("test-runtime", "md-agent-recovery")
+			backend := &importedRecoveryBackend{started: make(chan *agent.Options, 1), fail: tc.fail}
+			backend.FakeBackend = &agenttest.FakeBackend{HarnessName: h}
+			rb := &runtimetest.FakeBackend{}
+			info := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-recovery\x00caic.id":      id.String(),
+				"md-agent-recovery\x00caic.harness": string(h),
+			}}
+			store := taskslog.NewStore(testLogger(), t.TempDir())
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: info, backend: rb}), Backends: map[harness.Name]agent.Backend{h: backend}})
+			// Exercise the startup fence used by Manager.Start without launching
+			// unrelated stats and runtime watcher goroutines.
+			m.importing = true
+			m.importDone = make(chan struct{})
+			m.pendingRuntimeEvents = []runtime.Event{{Kind: runtime.EventDie, InstanceID: instanceID}}
+			t.Cleanup(func() { _ = m.Close(); backend.stop() })
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+					return tc.alive, "probe", tc.statusErr
+				},
+				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+					return agent.ParsedTimeline{}, 0, errors.New("relay output lost")
+				},
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+			}
+			tk, err := task.NewTask(id, agent.Prompt{Text: "accepted prompt"}, h, "", "", "", "", "existing title")
+			if err != nil {
+				t.Fatal(err)
+			}
+			log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := log.AppendMessage(&agent.UserInputMessage{Text: "accepted prompt"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.WriteResultTrailer(log, "existing title", &taskslog.Result{State: tc.state, Err: errors.New(tc.reason)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Compress(path, log, tc.state); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := store.LoadForTaskIDs([]string{id.String()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: runtimeState, AgentTarget: runtime.ConnectionTarget{SSHHost: "recovery"}}}, logs)
+			shutdownIntent := tc.state == taskslog.StateStopping || tc.state == taskslog.StatePurging || tc.state == taskslog.StateStopped || tc.state == taskslog.StatePurged
+			if !shutdownIntent && (tc.statusErr != nil || tc.alive) {
+				if err == nil || len(entries) != 0 {
+					t.Fatalf("unverified snapshot import entries=%v err=%v", entries, err)
+				}
+				if rb.Status(instanceID) == runtimetest.StatusStopped {
+					t.Fatal("unverified live runtime was stopped")
+				}
+				select {
+				case <-backend.started:
+					t.Fatal("unverified relay was resumed")
+				default:
+				}
+				return
+			}
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("import entries=%v err=%v", entries, err)
+			}
+			if !tc.recover {
+				if shutdownIntent && (entries[0].Task().GetState() != taskslog.StateStopped || rb.Status(instanceID) != runtimetest.StatusStopped) {
+					t.Fatal("persisted shutdown intent was not completed")
+				}
+				select {
+				case <-backend.started:
+					t.Fatal("ineligible task was automatically resumed")
+				default:
+				}
+				return
+			}
+			select {
+			case opts := <-backend.started:
+				if opts.ResumeSessionID != "original-session" || opts.InitialPrompt.Text != "" {
+					t.Fatalf("resume options = %#v", opts)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("saved session was not resumed")
+			}
+			// A delayed die event from recovery's own Stop must not detach
+			// the session while revival owns the lifecycle operation.
+			if !tc.fail {
+				m.handleRuntimeInstanceExit(t.Context(), instanceID)
+			}
+			entry := entries[0]
+			if tc.sendInput {
+				deadline := time.After(time.Second)
+				for !entry.Task().HasSession() {
+					select {
+					case <-deadline:
+						t.Fatal("session was not attached")
+					case <-time.After(time.Millisecond):
+					}
+				}
+				if err := entry.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "new prompt during readiness"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := taskslog.StateWaiting
+			if tc.sendInput {
+				want = taskslog.StateRunning
+			}
+			if tc.fail {
+				want = taskslog.StateCrashed
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			for entry.Task().GetState() != want {
+				select {
+				case <-ctx.Done():
+					t.Fatalf("state=%s want=%s", entry.Task().GetState(), want)
+				case <-time.After(time.Millisecond):
+				}
+			}
+			if tc.fail {
+				select {
+				case <-entry.Done():
+				case <-ctx.Done():
+					t.Fatal("failed recovery did not finish")
+				}
+			}
+			if !tc.fail {
+				func() {
+					entry.Lifecycle.operationMu.Lock()
+					defer entry.Lifecycle.operationMu.Unlock()
+				}()
+				m.handleRuntimeInstanceExit(t.Context(), instanceID)
+				if entry.Task().GetState() != want || !entry.Task().HasSession() {
+					t.Fatal("delayed death detached revived session")
+				}
+			}
+			if tc.sendInput {
+				// Completion of the lifecycle lock means readiness has finished.
+				func() {
+					entry.Lifecycle.operationMu.Lock()
+					defer entry.Lifecycle.operationMu.Unlock()
+					if entry.Task().GetState() != taskslog.StateRunning {
+						t.Fatal("readiness overwrote the new prompt's running state")
+					}
+				}()
+			}
+			if entry.Task().ID != id || entry.Task().Title() != "existing title" {
+				t.Fatal("recovery replaced task identity or title")
+			}
+			if strings.HasSuffix(entry.LogPath.Get(), ".zst") {
+				t.Fatal("recovery did not restore the archived log")
+			}
+			loaded, err := taskslog.LoadHistorySource(entry.LogPath.Get())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := loaded.LoadMessagesWithResolver(m); err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, msg := range loaded.Timeline {
+				if input, ok := msg.Message.(*agent.UserInputMessage); ok && input.Text == "accepted prompt" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("recovery lost original history")
+			}
+			if tc.fail && rb.Status(instanceID) != runtimetest.StatusStopped {
+				t.Fatal("failed recovery left runtime running")
+			}
+		})
+	}
+}
+
+func TestCanRecoverImportedTask(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		state    taskslog.State
+		err      string
+		session  string
+		accepted bool
+		exit     bool
+		harness  harness.Name
+		want     bool
+	}{
+		{name: "legacy_failed_revive", state: taskslog.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Pi, want: true},
+		{name: "active", state: taskslog.StateRunning, session: "saved", accepted: true, harness: harness.Pi, want: true},
+		{name: "stopped", state: taskslog.StateStopped, session: "saved", accepted: true, harness: harness.Pi},
+		{name: "ordinary_failure", state: taskslog.StateFailed, err: "agent failed", session: "saved", accepted: true, harness: harness.Pi},
+		{name: "crashed", state: taskslog.StateCrashed, session: "saved", accepted: true, harness: harness.Pi, want: true},
+		{name: "missing_session", state: taskslog.StateRunning, accepted: true, harness: harness.Pi},
+		{name: "unaccepted_input", state: taskslog.StateRunning, session: "saved", harness: harness.Pi},
+		{name: "agent_exit", state: taskslog.StateRunning, session: "saved", accepted: true, exit: true, harness: harness.Pi, want: true},
+		{name: "other_harness", state: taskslog.StateFailed, err: "revive instance: missing branch", session: "saved", accepted: true, harness: harness.Codex, want: true},
+		{name: "unknown_harness", state: taskslog.StateRunning, session: "saved", accepted: true, harness: "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "prompt"}, tc.harness, "", "", "", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tk.SetSessionMetadata(tc.session, "", "", "")
+			var messages []agent.Message
+			if tc.accepted {
+				messages = append(messages, &agent.UserInputMessage{Text: "prompt"})
+			}
+			if tc.exit {
+				messages = append(messages, &agent.ExitMessage{ExitCode: 1, Error: "agent failed"})
+			}
+			tk.SeedTimeline(messages)
+			lt := &taskslog.LoadedTask{State: tc.state}
+			if tc.err != "" {
+				lt.LastTrailer = &taskslog.Result{Err: errors.New(tc.err)}
+			}
+			if got := canRecoverImportedTask(tk, lt); got != tc.want {
+				t.Fatalf("eligible=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLifecycleImportedRecoveryReservation(t *testing.T) {
+	t.Parallel()
+	rb := &blockingStopBackend{FakeBackend: &runtimetest.FakeBackend{}, started: make(chan struct{}), returned: make(chan struct{}), release: make(chan struct{})}
+	backend := &importedRecoveryBackend{started: make(chan *agent.Options, 1)}
+	backend.FakeBackend = &agenttest.FakeBackend{}
+	store := taskslog.NewStore(testLogger(), t.TempDir())
+	m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Runtimes: newTestRuntime(t, rb, nil), Backends: map[harness.Name]agent.Backend{harness.Pi: backend}})
+	t.Cleanup(func() {
+		select {
+		case <-rb.release:
+		default:
+			close(rb.release)
+		}
+		_ = m.Close()
+		backend.stop()
+	})
+	tk, err := task.NewTask(ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Pi, "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk.SetState(taskslog.StateFailed)
+	tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "recovery"), runtime.ConnectionTarget{SSHHost: "recovery"}, "", "", 0)
+	tk.SetSessionMetadata("saved-session", "", "", "")
+	tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
+	tk.SetState(taskslog.StateFailed)
+	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entry := m.NewEntry(tk, nil)
+	entry.LogPath.Set(path)
+	m.Insert(tk.ID, entry)
+	result := make(chan error, 1)
+	go func() { result <- entry.Lifecycle.recoverImportedSession(taskslog.StateFailed) }()
+	select {
+	case <-rb.started:
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not stop retained runtime")
+	}
+	if got := tk.GetState(); got != taskslog.StateProvisioning {
+		t.Fatalf("reservation state=%s", got)
+	}
+	if err := entry.Lifecycle.Purge(t.Context(), 0); err == nil {
+		t.Fatal("purge accepted during recovery")
+	}
+	if err := entry.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "too early"}); err == nil {
+		t.Fatal("input accepted during recovery stop")
+	}
+	if err := entry.Lifecycle.Revive(); err == nil {
+		t.Fatal("manual revival accepted during recovery")
+	}
+	if got := tk.GetState(); got != taskslog.StateProvisioning {
+		t.Fatalf("concurrent operation overwrote reservation: %s", got)
+	}
+	close(rb.release)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not launch revival")
+	}
+	select {
+	case opts := <-backend.started:
+		if opts.ResumeSessionID != "saved-session" {
+			t.Fatalf("resumed session=%s", opts.ResumeSessionID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reserved recovery did not resume")
+	}
+}
+
+func TestLifecycleIntentFailure(t *testing.T) {
+	t.Parallel()
+	for _, purge := range []bool{false, true} {
+		t.Run(fmt.Sprintf("purge_%v", purge), func(t *testing.T) {
+			t.Parallel()
+			rb := &runtimetest.FakeBackend{}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, rb, nil)})
+			t.Cleanup(func() { _ = m.Close() })
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "accepted"}, harness.Pi, "")
+			id := runtime.NewID("test-runtime", "missing-log")
+			tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetState(taskslog.StateWaiting)
+			entry := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, entry)
+			var err error
+			if purge {
+				err = entry.Lifecycle.Purge(t.Context(), 0)
+			} else {
+				err = entry.Lifecycle.Stop(t.Context())
+			}
+			if err == nil || !strings.Contains(err.Error(), "persist") {
+				t.Fatalf("intent error=%v", err)
+			}
+			if tk.GetState() != taskslog.StateWaiting || rb.Status(id) == runtimetest.StatusStopped || rb.Status(id) == runtimetest.StatusPurged {
+				t.Fatal("failed intent persistence changed task or runtime")
+			}
+		})
+	}
+}
+
+// observedRuntimeInfo reports the fake lifecycle's current incarnation state.
+type observedRuntimeInfo struct {
+	*runtimetest.FakeInfo
+
+	backend *runtimetest.FakeBackend
+}
+
+func (i *observedRuntimeInfo) Inspect(_ context.Context, id runtime.ID) (*runtime.InstanceInspect, error) {
+	state := "exited"
+	if i.backend.Status(id) == runtimetest.StatusRunning {
+		state = "running"
+	}
+	return &runtime.InstanceInspect{ID: id, State: state}, nil
 }

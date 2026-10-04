@@ -67,6 +67,7 @@ func TestTaskListEventsReplayPurgeTransitions(t *testing.T) {
 	tk.SetState(taskslog.StateWaiting)
 	registerRouterCheckout(t, s.taskMgr.Checkouts, "r", newRouterTestCheckout(t.TempDir()))
 	insertTestTask(s, tk.ID, tk)
+	recordRouterTaskLog(t, s, tk)
 
 	r := connectTaskListStream(t, s)
 	for range 3 {

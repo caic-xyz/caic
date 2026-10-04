@@ -84,8 +84,8 @@ test("mobile stopped task card exposes Revive without selection", async ({ page,
   await card.screenshot({ path: testInfo.outputPath("mobile-revive-card.png") });
 
   await revive.click();
-  await waitForTaskState(api, id, "running", 30_000);
-  await expect(card.getByTestId("state-badge")).toHaveText("running");
+  await waitForTaskState(api, id, "waiting", 30_000);
+  await expect(card.getByTestId("state-badge")).toHaveText("waiting");
   await expect(page).toHaveURL(/\/$/);
 });
 

@@ -3,6 +3,8 @@
 package taskmgr
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/maruel/ksid"
@@ -35,6 +37,41 @@ func newTestPurgedEntry(t *testing.T, tk *task.Task, r *taskslog.Result, lt *tas
 
 func TestEntry(t *testing.T) {
 	t.Parallel()
+	t.Run("clearResult", func(t *testing.T) {
+		t.Parallel()
+		for _, replaced := range []bool{false, true} {
+			t.Run(fmt.Sprintf("new_result_%t", replaced), func(t *testing.T) {
+				t.Parallel()
+				e := newTestEntry(t, mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", ""))
+				old := &taskslog.Result{State: taskslog.StateFailed, Err: errors.New("old failure")}
+				e.Finish(old)
+				newResult := &taskslog.Result{State: taskslog.StateCrashed, Err: errors.New("new failure")}
+				if replaced {
+					e.Finish(newResult)
+				}
+				e.clearResult(old)
+				if replaced {
+					if e.Result() != newResult {
+						t.Fatal("reconnect erased a newer failure")
+					}
+					select {
+					case <-e.Done():
+					default:
+						t.Fatal("new failure lost terminal state")
+					}
+				} else {
+					if e.Result() != nil {
+						t.Fatal("stale failure was not cleared")
+					}
+					select {
+					case <-e.Done():
+						t.Fatal("reconnected task is terminal")
+					default:
+					}
+				}
+			})
+		}
+	})
 	t.Run("Result", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_initially_nil", func(t *testing.T) {

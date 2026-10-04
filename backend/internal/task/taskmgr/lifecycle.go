@@ -1,10 +1,11 @@
-// Lifecycle executes operations for one registered task.
+// Lifecycle executes task operations and guarded startup recovery for retained instances.
 
 package taskmgr
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	goruntime "runtime"
@@ -65,6 +66,7 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 
 	state := t.GetState()
 	purgeStoppedImmediately := state == taskslog.StateStopped
+	intentState := taskslog.StateStopping
 	switch state {
 	case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning:
 		if _, changed := t.SetStateIfAny(taskslog.StateStopping,
@@ -73,13 +75,19 @@ func (r *Lifecycle) Purge(ctx context.Context, delay time.Duration) error {
 		}
 	case taskslog.StateStopping:
 	case taskslog.StateStopped:
+		intentState = taskslog.StatePurging
 		if !t.SetStateIf(taskslog.StateStopped, taskslog.StatePurging) {
 			return conflict("task state changed while starting purge")
 		}
 	case taskslog.StateCrashed:
+		intentState = taskslog.StateStopped
 		t.SetState(taskslog.StateStopped)
 	default:
 		return conflict("task is not running, waiting, stopped, or crashed")
+	}
+	if err := r.manager.writeTaskResultTrailer(r.entry, &taskslog.Result{State: taskslog.StatePurging}); err != nil {
+		t.SetStateIf(intentState, state)
+		return fmt.Errorf("persist purge intent: %w", err)
 	}
 	r.purgeScheduled = true
 	r.purgeGeneration++
@@ -144,6 +152,12 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 	if !changed {
 		return conflict("task is not running or waiting")
 	}
+	// Persist user intent before the relay or runtime can be stopped. A
+	// restart during shutdown must not reinterpret that death as a crash.
+	if err := r.manager.writeTaskResultTrailer(r.entry, &taskslog.Result{State: taskslog.StateStopping}); err != nil {
+		t.SetStateIf(taskslog.StateStopping, state)
+		return fmt.Errorf("persist stop intent: %w", err)
+	}
 	r.manager.NotifyTaskChange()
 	r.manager.log.InfoContext(ctx, "stop requested", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", state)
 	r.wg.Go(func() {
@@ -168,28 +182,7 @@ func (r *Lifecycle) Revive() error {
 	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed); !changed {
 		return conflict("task is not stopped or crashed")
 	}
-	r.cancelScheduledPurge()
-	r.entry.Reset()
-	r.manager.NotifyTaskChange()
-	r.wg.Go(func() {
-		r.operationMu.Lock()
-		defer r.operationMu.Unlock()
-		ctx, tk := trace.NewTask(r.ctx, "task.revive:"+t.ID.String())
-		defer tk.End()
-		h, err := r.agentRuntime.ReviveTask(ctx, t)
-		if err != nil {
-			r.manager.log.WarnContext(ctx, "revive failed", "task", t.ID, "err", err)
-			// Failures after revive begins preserve a retryable crashed state.
-			// Precondition failures still terminate an incomplete startup.
-			t.SetStateIf(taskslog.StateProvisioning, taskslog.StateFailed)
-			r.entry.Finish(&taskslog.Result{State: t.GetState(), Err: internalErr(err, "revive task")})
-			r.manager.NotifyTaskChange()
-			return
-		}
-		r.manager.NotifyTaskChange()
-		r.watchSession(h)
-	})
-	return nil
+	return r.reviveLocked()
 }
 
 // Restart starts a fresh agent session with prompt.
@@ -545,11 +538,83 @@ func (r *Lifecycle) waitForStopped(ctx context.Context) bool {
 	return r.entry.Task().GetState() == taskslog.StateStopped
 }
 
+// scheduleImportedRecovery waits until buffered inventory events are applied
+// before stopping and reviving the selected retained instance.
+func (r *Lifecycle) scheduleImportedRecovery(expectedState taskslog.State) {
+	r.wg.Go(func() {
+		if err := r.manager.WaitForRuntimeImport(r.manager.serverCtx); err != nil {
+			return
+		}
+		if err := r.recoverImportedSession(expectedState); err != nil {
+			r.manager.log.Warn("startup recovery failed", "task", r.entry.Task().ID, "err", err)
+		}
+	})
+}
+
+// recoverImportedSession reserves the task before stopping the retained runtime,
+// so user input and manual revival cannot race startup recovery.
+func (r *Lifecycle) recoverImportedSession(expectedState taskslog.State) error {
+	if !r.operationMu.TryLock() {
+		return conflict("task lifecycle operation is in progress")
+	}
+	defer r.operationMu.Unlock()
+	t := r.entry.Task()
+	if _, changed := t.SetStateIfAny(taskslog.StateProvisioning, expectedState); !changed {
+		return conflict("task state changed before startup recovery")
+	}
+	r.manager.NotifyTaskChange()
+	if err := r.manager.Runtimes.Stop(r.ctx, t.RuntimeInstanceID()); err != nil {
+		t.SetState(taskslog.StateCrashed)
+		result := &taskslog.Result{State: taskslog.StateCrashed, Err: fmt.Errorf("stop retained instance before recovery: %w", err)}
+		r.entry.Finish(result)
+		r.manager.NotifyTaskChange()
+		return errors.Join(result.Err, r.manager.writeTaskResultTrailer(r.entry, result))
+	}
+	return r.reviveLocked()
+}
+
+// reviveLocked launches an already-reserved provisioning incarnation with operationMu held.
+func (r *Lifecycle) reviveLocked() error {
+	t := r.entry.Task()
+	r.cancelScheduledPurge()
+	r.entry.Reset()
+	r.manager.NotifyTaskChange()
+	r.wg.Go(func() {
+		r.operationMu.Lock()
+		defer r.operationMu.Unlock()
+		ctx, tk := trace.NewTask(r.ctx, "task.revive:"+t.ID.String())
+		defer tk.End()
+		h, err := r.agentRuntime.ReviveTask(ctx, t)
+		if err != nil {
+			r.manager.log.WarnContext(ctx, "revive failed", "task", t.ID, "err", err)
+			// Failures after revive begins preserve a retryable crashed state.
+			// Precondition failures still terminate an incomplete startup.
+			t.SetStateIf(taskslog.StateProvisioning, taskslog.StateFailed)
+			r.entry.Finish(&taskslog.Result{State: t.GetState(), Err: internalErr(err, "revive task")})
+			r.manager.NotifyTaskChange()
+			return
+		}
+		r.manager.NotifyTaskChange()
+		r.watchSession(h)
+	})
+	return nil
+}
+
 func (r *Lifecycle) reconnectForInput() error {
+	if !r.operationMu.TryLock() {
+		return conflict("task lifecycle operation is in progress")
+	}
+	defer r.operationMu.Unlock()
 	t := r.entry.Task()
 	if t.HasSession() {
 		return nil
 	}
+	switch t.GetState() {
+	case taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateRunning:
+	default:
+		return conflict("task is not ready for input")
+	}
+	previousResult := r.entry.Result()
 	h, err := r.agentRuntime.Reconnect(r.ctx, t)
 	if err != nil {
 		if t.HasSession() {
@@ -562,6 +627,8 @@ func (r *Lifecycle) reconnectForInput() error {
 	if err != nil {
 		return err
 	}
+	r.entry.clearResult(previousResult)
+	r.manager.NotifyTaskChange()
 	r.watchSession(h)
 	return nil
 }
@@ -582,6 +649,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 	// parsed through the wire without reaching the dispatch loop. Skipping
 	// them here would permanently disable the post-tool repository-state
 	// probe and the result-time diff stat for this session.
+	previousResult := r.entry.Result()
 	h, err := r.agentRuntime.Reconnect(r.ctx, t)
 	if err != nil {
 		tlog.Warn("auto-reconnect failed", "err", err)
@@ -596,6 +664,7 @@ func (r *Lifecycle) reconnectImportedSession() {
 			r.manager.NotifyTaskChange()
 			return
 		}
+		r.entry.clearResult(previousResult)
 		tlog.Debug("auto-reconnect succeeded")
 		t.SetVNCPort(r.manager.Runtimes.VNCPort(r.ctx, t.RuntimeInstanceID()))
 		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == taskslog.StateWaiting || t.GetState() == taskslog.StateAsking || t.GetState() == taskslog.StateHasPlan) {
