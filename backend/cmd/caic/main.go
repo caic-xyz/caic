@@ -60,16 +60,16 @@ func localizeAddr(addr string) string {
 	return addr
 }
 
-func mainImpl() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func mainImpl() (err error) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		select {
 		case s := <-sig:
 			slog.InfoContext(ctx, "shutdown", "signal", s)
-			cancel()
+			cancel(nil)
 		case <-ctx.Done():
 		}
 		signal.Stop(sig)
@@ -226,9 +226,11 @@ Flags:
 	slog.InfoContext(ctx, "port acquired", "addr", ln.Addr())
 
 	// Exit when executable or config is modified (systemd/launchd restarts the service).
-	if err := watchForRestart(ctx, cancel, cfgDir); err != nil {
+	w, err := watchForRestart(ctx, cancel, cfgDir)
+	if err != nil {
 		return fmt.Errorf("failed to set up file watcher: %w", err)
 	}
+	defer func() { err = errors.Join(err, w.Close()) }()
 	// Auto-update: checks GitHub Releases on a cron schedule and replaces the binary.
 	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") {
 		sched, err := autoUpdateSchedule(&tc)
@@ -239,7 +241,8 @@ Flags:
 			go autoupdate.Run(ctx, github.NewClient(cfg.GitHub.Token, http.DefaultTransport), sched)
 		}
 	}
-	return serveHTTP(ctx, log, ln, root, cfg)
+	err = serveHTTP(ctx, log, ln, root, cfg)
+	return errors.Join(err, context.Cause(ctx))
 }
 
 // roundDur rounds d to 3 significant digits.
@@ -324,7 +327,7 @@ func serveHTTP(ctx context.Context, log *slog.Logger, ln net.Listener, rootDir s
 }
 
 func main() {
-	if err := mainImpl(); err != nil && !errors.Is(err, context.Canceled) {
+	if err := mainImpl(); err != nil && !isNormalShutdown(err) {
 		fmt.Fprintf(os.Stderr, "caic: %v\n", err)
 		os.Exit(1)
 	}
@@ -373,44 +376,72 @@ func resolveGitHubTokenFromGH(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
+// isNormalShutdown accepts cancellation only when every error in the tree is
+// cancellation. A joined watcher or cleanup failure must still exit 1.
+func isNormalShutdown(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range joined.Unwrap() {
+			if !isNormalShutdown(e) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return isNormalShutdown(wrapped.Unwrap())
+	}
+	return errors.Is(err, context.Canceled)
+}
+
 // watchForRestart watches the executable and config.toml for modifications and
-// calls stop to trigger graceful shutdown when either changes. Combined with
+// cancels to trigger graceful shutdown when either changes. Runtime watcher
+// failures cancel with an error cause so the process exits 1. Combined with
 // systemd's Restart=always or launchd's KeepAlive, this enables seamless
 // restarts after a rebuild or config change.
-func watchForRestart(ctx context.Context, stop context.CancelFunc, cfgDir string) error {
+func watchForRestart(ctx context.Context, cancel context.CancelCauseFunc, cfgDir string) (*fsnotify.Watcher, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("get executable path: %w", err)
 	}
 	exe, err = filepath.EvalSymlinks(exe)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("resolve executable path: %w", err)
+	}
+	configPath, err := filepath.Abs(filepath.Join(cfgDir, "config.toml"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("create restart watcher: %w", err)
 	}
 	if err := w.Add(exe); err != nil {
-		_ = w.Close()
-		return err
+		return nil, errors.Join(fmt.Errorf("watch executable: %w", err), w.Close())
 	}
-	// Watch the config directory (not just the file) so we catch
-	// rename-into-place writes (common with editors like vim).
-	configPath := filepath.Join(cfgDir, "config.toml")
-	if _, statErr := os.Stat(configPath); statErr == nil {
-		if err := w.Add(cfgDir); err != nil {
-			_ = w.Close()
-			return err
+	// Watch the directory so config creation and rename-into-place writes work.
+	configTarget := configPath
+	for dir := filepath.Dir(configPath); ; dir = filepath.Dir(dir) {
+		if err := w.Add(dir); err != nil {
+			if !errors.Is(err, os.ErrNotExist) || dir == filepath.Dir(dir) {
+				return nil, errors.Join(fmt.Errorf("watch config directory: %w", err), w.Close())
+			}
+			// Restart when the next missing ancestor appears. The new process
+			// watches the config directory once it exists.
+			configTarget = dir
+			continue
 		}
+		break
 	}
 	go func() {
-		defer func() { _ = w.Close() }()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case event, ok := <-w.Events:
 				if !ok {
+					if ctx.Err() == nil {
+						cancel(errors.New("restart watcher closed"))
+					}
 					return
 				}
 				var reason string
@@ -428,24 +459,28 @@ func watchForRestart(ctx context.Context, stop context.CancelFunc, cfgDir string
 						}
 					}
 					reason = "executable modified"
-				case filepath.Base(event.Name) == "config.toml":
-					if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
+				case filepath.Clean(event.Name) == configTarget:
+					if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) == 0 {
 						continue
 					}
-					reason = "config.toml modified"
+					reason = "config path modified"
 				default:
 					continue
 				}
 				slog.InfoContext(ctx, "shutdown", "reason", reason, "ev", event)
-				stop()
+				cancel(nil)
 				return
 			case err, ok := <-w.Errors:
 				if !ok {
+					if ctx.Err() == nil {
+						cancel(errors.New("restart watcher stopped"))
+					}
 					return
 				}
-				slog.WarnContext(ctx, "fsnotify", "err", err)
+				cancel(fmt.Errorf("watch restart: %w", err))
+				return
 			}
 		}
 	}()
-	return nil
+	return w, nil
 }
