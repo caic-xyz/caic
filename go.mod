@@ -1,6 +1,6 @@
 module github.com/caic-xyz/caic
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/andybalholm/brotli v1.2.6
@@ -13,8 +13,8 @@ require (
 	github.com/klauspost/compress v1.20.1
 	github.com/lmittmann/tint v1.2.0
 	github.com/maruel/apisdkgen v0.1.1
-	github.com/maruel/genai v0.8.2-0.20261003191951-ce29d0a57a60
-	github.com/maruel/gomode v0.1.2-0.20261003193509-5b91f5918916
+	github.com/maruel/genai v0.9.0
+	github.com/maruel/gomode v0.1.2-0.20261004020602-694cb0eee0b8
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.1
 	github.com/mattn/go-colorable v0.1.15
@@ -156,7 +156,8 @@ require (
 	github.com/manuelarte/funcorder v0.6.0 // indirect
 	github.com/maratori/testableexamples v1.0.1 // indirect
 	github.com/maratori/testpackage v1.1.2 // indirect
-	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38 // indirect
+	github.com/maruel/genaipy v0.1.2-0.20261004020438-2bdf98e17d98 // indirect
+	github.com/maruel/gopus v0.1.0 // indirect
 	github.com/maruel/httpjson v0.5.3 // indirect
 	github.com/matoous/godox v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
