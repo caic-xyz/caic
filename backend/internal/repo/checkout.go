@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime/trace"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,8 +117,7 @@ func LiveBranchesByRoot(instances []runtime.Instance) map[string][]string {
 // TaskView is the read/write surface Checkout needs from a task.
 // *task.Task satisfies it structurally.
 type TaskView interface {
-	RuntimeInstanceID() runtime.ID
-	RuntimeRepos() []runtime.Repo
+	GitTarget() GitTarget
 	SetRepoBranch(i int, branch string)
 	PrimaryBaseBranch() string // "" when no primary/override
 }
@@ -180,7 +180,7 @@ func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBra
 // and any safety issues found. Safety is checked per-repo; when force is
 // false, issues in any repo block the push.
 func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, force bool) (agent.DiffStat, []SafetyIssue, error) {
-	id, repos, err := w.taskRuntime(t)
+	id, repos, err := w.queryRuntime(t.GitTarget())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -195,7 +195,7 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 	fetchCancel()
 	// Per-repo diff failures are already logged; the stat only feeds the
 	// result report, so the sync proceeds regardless.
-	snapshot, _ := w.DiffStat(ctx, log, runtimes, id, repos)
+	snapshot, _ := w.DiffStat(ctx, log, runtimes, GitTarget{InstanceID: id, Repos: repos})
 	ds := snapshot.DiffStat
 	region.End()
 	if err != nil {
@@ -241,7 +241,7 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 // issues always block (no force override). The commit message is built from the
 // task title.
 func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, message string) (agent.DiffStat, []SafetyIssue, error) {
-	id, repos, err := w.taskRuntime(t)
+	id, repos, err := w.queryRuntime(t.GitTarget())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -256,7 +256,7 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 	fetchCancel()
 	// Per-repo diff failures are already logged; the stat only feeds the
 	// result report, so the sync proceeds regardless.
-	snapshot, _ := w.DiffStat(ctx, log, runtimes, id, repos)
+	snapshot, _ := w.DiffStat(ctx, log, runtimes, GitTarget{InstanceID: id, Repos: repos})
 	ds := snapshot.DiffStat
 	region.End()
 	if err != nil {
@@ -301,9 +301,9 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 // to a single file path. When there are multiple repos, file paths are prefixed
 // with `<repoName>/` so the frontend can distinguish changes from different
 // repos. Holds branchMu during diff.
-func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, path string) (string, error) {
+func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, path string) (string, error) {
 	log = log.With("repo", w.RelPath)
-	id, repos, err := w.taskRuntime(t)
+	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return "", err
 	}
@@ -329,8 +329,8 @@ func (w *Checkout) DiffContent(ctx context.Context, log *slog.Logger, runtimes *
 }
 
 // FileDiff returns one committed or uncommitted file patch from a task repository.
-func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, t TaskView, repoIdx int, commit, path, originalPath string) (string, error) {
-	id, repos, err := w.taskRuntime(t)
+func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, target GitTarget, repoIdx int, commit, path, originalPath string) (string, error) {
+	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return "", err
 	}
@@ -347,8 +347,8 @@ func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, t Tas
 // RepositoryStatuses reads branch, upstream commits, and working-tree status
 // for every task repository. The returned snapshot is stamped under branchMu;
 // callers can publish it later without overwriting a newer applied snapshot.
-func (w *Checkout) RepositoryStatuses(ctx context.Context, runtimes *runtime.Router, t TaskView) (GitSnapshot, error) {
-	id, repos, err := w.taskRuntime(t)
+func (w *Checkout) RepositoryStatuses(ctx context.Context, runtimes *runtime.Router, target GitTarget) (GitSnapshot, error) {
+	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return GitSnapshot{}, err
 	}
@@ -364,26 +364,13 @@ func (w *Checkout) RepositoryStatuses(ctx context.Context, runtimes *runtime.Rou
 		}
 	}
 	stats, states := summarizeRepositoryStatuses(repos, statuses)
-	return GitSnapshot{Read: NewGitRead(id), DiffStat: stats, RepoStates: states, Statuses: statuses}, nil
-}
-
-// BranchDiffStat returns the per-repo branch diff stat (md diff --numstat)
-// computed in the instance. Unlike the relay's diff_watcher which only tracks
-// uncommitted changes, this captures the full branch diff relative to the
-// base. Used by task-manager import to restore the diff stat after server
-// restart.
-func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView) (GitSnapshot, error) {
-	id, repos, err := w.taskRuntime(t)
-	if err != nil {
-		return GitSnapshot{}, err
-	}
-	return w.DiffStat(ctx, log, runtimes, id, repos)
+	return GitSnapshot{Read: NewGitRead(id), Target: GitTarget{InstanceID: id, Repos: repos}, DiffStat: stats, RepoStates: states, Statuses: statuses}, nil
 }
 
 // DeleteUnmodifiedTaskBranches deletes generated task branches that never diverged from their base.
 func (w *Checkout) DeleteUnmodifiedTaskBranches(ctx context.Context, log *slog.Logger, t TaskView) {
 	log = log.With("repo", w.RelPath)
-	repos := t.RuntimeRepos()
+	repos := t.GitTarget().Repos
 	if len(repos) == 0 {
 		return
 	}
@@ -520,20 +507,93 @@ func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t
 
 // DiffStat reads combined per-repository numstat. Its snapshot is stamped after
 // the probe under branchMu, even when an error accompanies partial statistics.
-func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (GitSnapshot, error) {
+func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget) (GitSnapshot, error) {
+	id, repos, err := w.queryRuntime(target)
+	if err != nil {
+		return GitSnapshot{}, err
+	}
+
 	log = log.With("repo", w.RelPath)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	stats, err := w.diffStatLocked(ctx, log, runtimes, id, repos)
-	return GitSnapshot{Read: NewGitRead(id), DiffStat: stats}, err
+	stats, failed, err := w.diffStatLocked(ctx, log, runtimes, id, repos)
+	return GitSnapshot{Read: NewGitRead(id), Target: GitTarget{InstanceID: id, Repos: repos}, FailedRepos: failed, DiffStat: stats}, err
+}
+
+// TurnSnapshot fetches branch tips and measures branch/turn changes as one
+// runtime operation, stamped under the checkout lock like every Git query.
+func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, previous []agent.RepositoryCommit) (GitSnapshot, []agent.RepositoryCommit, *agent.ChangeStat, error) {
+	id, repos, err := w.queryRuntime(target)
+	if err != nil {
+		return GitSnapshot{}, nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
+	defer cancel()
+	w.branchMu.Lock()
+	defer w.branchMu.Unlock()
+	baseline := make([]runtime.FetchedBranch, len(previous))
+	for i, c := range previous {
+		baseline[i] = runtime.FetchedBranch{RepositoryPath: c.RepositoryPath, BranchName: c.BranchName, CommitHash: c.CommitHash}
+	}
+	measured, err := runtimes.TurnSnapshot(ctx, id, baseline)
+	snapshot := GitSnapshot{Read: NewGitRead(id), Target: GitTarget{InstanceID: id, Repos: repos}}
+	var commits []agent.RepositoryCommit
+	change := &agent.ChangeStat{}
+	hasBaseline := len(previous) > 0 && len(measured) == len(repos)
+	for i := range repos {
+		var entry *runtime.TurnRepository
+		for j := range measured {
+			if measured[j].RepoIndex == i {
+				entry = &measured[j]
+				break
+			}
+		}
+		if entry == nil || entry.StatusErr != nil {
+			snapshot.FailedRepos = append(snapshot.FailedRepos, i)
+		} else {
+			stats, state := repositorySummary(&repos[i], i, len(repos), &entry.Status)
+			snapshot.DiffStat = append(snapshot.DiffStat, stats...)
+			snapshot.RepoStates = append(snapshot.RepoStates, state)
+		}
+		if entry == nil {
+			hasBaseline = false
+			continue
+		}
+		for _, c := range entry.Branches {
+			commits = append(commits, agent.RepositoryCommit{RepositoryPath: c.RepositoryPath, BranchName: c.BranchName, CommitHash: c.CommitHash})
+		}
+		if entry.TurnDiff == nil {
+			hasBaseline = false
+		}
+		for _, f := range entry.TurnDiff {
+			change.Files++
+			change.LinesAdded += f.LinesAdded
+			change.LinesDeleted += f.LinesDeleted
+			if f.Binary {
+				change.BinaryFiles++
+			}
+		}
+	}
+	if !hasBaseline {
+		change = nil
+	}
+	if err != nil {
+		log.WarnContext(ctx, "turn git snapshot incomplete", "id", id, "err", err)
+	}
+	return snapshot, commits, change, err
 }
 
 // DiffStatAndRepoStates reads branch statistics and compact repository state
 // with one log-free probe per repository. The snapshot carries completion order
 // and can contain partial results when some probes fail.
-func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (GitSnapshot, error) {
+func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget) (GitSnapshot, error) {
+	id, repos, err := w.queryRuntime(target)
+	if err != nil {
+		return GitSnapshot{}, err
+	}
+
 	log = log.With("repo", w.RelPath)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
@@ -542,19 +602,21 @@ func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, 
 	var result agent.DiffStat
 	var states []agent.RepoState
 	var errs []error
+	var failed []int
 	for i := range repos {
 		repo := &repos[i]
 		status, err := runtimes.CompactRepositoryStatus(ctx, id, i)
 		if err != nil {
 			log.Warn("repository status failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
 			errs = append(errs, err)
+			failed = append(failed, i)
 			continue
 		}
 		stat, state := repositorySummary(repo, i, len(repos), &status)
 		result = append(result, stat...)
 		states = append(states, state)
 	}
-	return GitSnapshot{Read: NewGitRead(id), DiffStat: result, RepoStates: states}, errors.Join(errs...)
+	return GitSnapshot{Read: NewGitRead(id), Target: GitTarget{InstanceID: id, Repos: repos}, FailedRepos: failed, DiffStat: result, RepoStates: states}, errors.Join(errs...)
 }
 
 // summarizeRepositoryStatuses derives card statistics from the same snapshots
@@ -613,23 +675,16 @@ func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.Rep
 	return result, state
 }
 
-// taskRuntime resolves the runtime instance and repos for a task.
-func (w *Checkout) taskRuntime(t TaskView) (runtime.ID, []runtime.Repo, error) {
-	if t == nil {
-		return "", nil, errors.New("task is nil")
-	}
-	id := t.RuntimeInstanceID()
-	if id == "" {
+// queryRuntime validates the captured target and resolves its primary host root.
+func (w *Checkout) queryRuntime(target GitTarget) (runtime.ID, []runtime.Repo, error) {
+	if target.InstanceID == "" {
 		return "", nil, errors.New("task has no runtime instance")
 	}
-	repos := t.RuntimeRepos()
-	if len(repos) == 0 {
-		return id, nil, nil
-	}
-	if repos[0].GitRoot == "" {
+	repos := slices.Clone(target.Repos)
+	if len(repos) > 0 && repos[0].GitRoot == "" {
 		repos[0].GitRoot = w.Dir
 	}
-	return id, repos, nil
+	return target.InstanceID, repos, nil
 }
 
 // allocateBranchLocked fetches origin, resolves the start point, and creates
@@ -704,15 +759,17 @@ func (w *Checkout) effectiveBaseBranch(t TaskView) string {
 // diff stat. File paths are prefixed with `<repoName>/` when there are multiple
 // repos so the frontend can distinguish changes per repo. The caller must hold
 // branchMu. It returns an error if any repo's diff fails.
-func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, error) {
+func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, []int, error) {
 	var result agent.DiffStat
 	var errs []error
+	var failed []int
 	for i := range repos {
 		repo := &repos[i]
 		numstat, err := runtimes.Diff(ctx, id, i, "--numstat", "--stat")
 		if err != nil {
 			log.Warn("diff numstat failed", "repo", repo.ContainerPath, "br", repo.Branch, "err", err)
 			errs = append(errs, err)
+			failed = append(failed, i)
 			continue
 		}
 		ds := ParseDiffNumstat(numstat)
@@ -724,7 +781,7 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 		}
 		result = append(result, ds...)
 	}
-	return result, errors.Join(errs...)
+	return result, failed, errors.Join(errs...)
 }
 
 // maxBranchSeqNum finds the highest sequence number N among all local and

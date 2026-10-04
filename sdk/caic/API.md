@@ -858,6 +858,7 @@ GitRepositoryState summarizes the compact Git state of one task repository.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `stale` | `boolean` | Last known data retained after a failed refresh. |  |
 | `name` | `string` |  | yes |
 | `branch` | `string` |  | yes |
 | `ahead` | `int` |  | yes |

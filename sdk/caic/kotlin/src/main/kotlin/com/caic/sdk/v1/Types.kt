@@ -1580,6 +1580,8 @@ data class DiffFileStat(
 /** GitRepositoryState summarizes the compact Git state of one task repository. */
 @Serializable
 data class GitRepositoryState(
+    /** Last known data retained after a failed refresh. */
+    val stale: Boolean? = null,
     val name: String,
     val branch: String,
     val ahead: Int,

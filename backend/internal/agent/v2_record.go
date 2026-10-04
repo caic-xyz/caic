@@ -239,7 +239,7 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 	case logControlMeta:
 		return false
 	case logControlDiffStat:
-		return field == "diff_stat" || field == "ts"
+		return field == "diff_stat" || field == "repos" || field == "ts"
 	case logControlExit:
 		switch field {
 		case "cmd", "error", "exit_code", "signal", "stderr_truncated", "ts":

@@ -40,6 +40,7 @@
   height: 0.72rem;
 }
 
+.stale,
 .dirty,
 .behind {
   color: var(--color-warning-text);

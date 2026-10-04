@@ -1,4 +1,4 @@
-// Git inspection reports status, ahead/behind history, merge-base or rewritten-history stats, and file patches.
+// Git probes report merge-base status, history, patches, and coherent fetched-turn statistics.
 
 package mdruntime
 
@@ -108,17 +108,6 @@ func gitFileDiffCommand(repo, commit, path, originalPath string) (string, error)
 		commands = append(commands, gitPatchCommand("show")+" --format= --diff-merges=first-parent --follow "+shellQuote(commit)+" -- "+shellQuote(path))
 	}
 	return strings.Join(commands, " && "), nil
-}
-
-func gitCommitDiffStatCommand(repo, from, to string) (string, error) {
-	if !isGitObjectID(from) || !isGitObjectID(to) {
-		return "", errors.New("git commit diff stat requires full object IDs")
-	}
-	return strings.Join([]string{
-		"cd " + shellQuote(repo),
-		"export GIT_OPTIONAL_LOCKS=0 LC_ALL=C",
-		"git diff --numstat --stat --find-renames=50% " + shellQuote(from) + " " + shellQuote(to) + " --",
-	}, " && "), nil
 }
 
 func gitPatchCommand(subcommand string) string {
@@ -504,4 +493,48 @@ func statusCode(code byte) string {
 		return ""
 	}
 	return string(code)
+}
+
+// turnGitCommand measures branch and committed-turn changes in one container command.
+// Both commit comparisons use the fetched tip. A moving HEAD invalidates the
+// probe instead of combining stats from different revisions.
+func turnGitCommand(repo, remote, branch, from, to string) (string, error) {
+	if !isGitObjectID(to) || from != "" && !isGitObjectID(from) {
+		return "", errors.New("turn snapshot requires full object IDs")
+	}
+	guard := `test "$(git rev-parse HEAD)" = ` + shellQuote(to)
+	cmd := "cd " + shellQuote(repo) + " && " + guard + " && " + compactGitStatusCommand(repo, remote, branch)
+	cmd += ` && printf '\0caic-git-turn-stat\0' && `
+	if from == "" {
+		cmd += `printf 'unavailable\0'`
+	} else {
+		cmd += `if ! git cat-file -e ` + shellQuote(from+"^{commit}") + ` 2>/dev/null; then printf 'unavailable\0'; elif git merge-base --is-ancestor ` + shellQuote(from) + " " + shellQuote(to) + `; then printf 'available\0' && git diff --numstat --stat -z --find-renames=50% ` + shellQuote(from) + " " + shellQuote(to) + ` --; else git_status=$?; if test "$git_status" -eq 1; then printf 'unavailable\0'; else exit "$git_status"; fi` + "\nfi"
+	}
+	return cmd + " && " + guard, nil
+}
+
+func parseTurnGit(out string) (runtime.RepositoryStatus, []runtime.GitFileStat, error) {
+	header, delta, found := strings.Cut(out, "\x00caic-git-turn-stat\x00")
+	if !found {
+		return runtime.RepositoryStatus{}, nil, errors.New("missing turn stat section")
+	}
+	status, err := parseCompactGitStatus(header)
+	if err != nil {
+		return runtime.RepositoryStatus{}, nil, err
+	}
+	availability, body, found := strings.Cut(delta, "\x00")
+	if !found {
+		return runtime.RepositoryStatus{}, nil, errors.New("missing turn stat availability")
+	}
+	if availability == "unavailable" {
+		return status, nil, nil
+	}
+	if availability != "available" {
+		return runtime.RepositoryStatus{}, nil, errors.New("invalid turn stat availability")
+	}
+	stats, _, err := parseGitNumstats(strings.Split(body, "\x00"), "caic-end-of-turn")
+	if err == nil && stats == nil {
+		stats = []runtime.GitFileStat{}
+	}
+	return status, stats, err
 }

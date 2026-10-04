@@ -534,6 +534,7 @@ export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
 export function validateGitRepositoryState(raw: ValidatorInput): GitRepositoryState {
   const obj = asObject(raw, "GitRepositoryState");
   return {
+    stale: (obj["stale"] === undefined || obj["stale"] === null ? undefined : asBoolean(obj["stale"], "GitRepositoryState.stale")),
     name: asString(obj["name"], "GitRepositoryState.name"),
     branch: asString(obj["branch"], "GitRepositoryState.branch"),
     ahead: asNumber(obj["ahead"], "GitRepositoryState.ahead"),

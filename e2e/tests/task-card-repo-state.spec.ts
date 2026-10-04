@@ -184,7 +184,7 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   expect(Math.abs(emptyRowHeight - summaryRowHeight)).toBeLessThan(1);
 });
 
-test("opening the diff refreshes a waiting task card without another turn", async ({ page, api, uniquePrompt }) => {
+test("turn completion and diff agree on a waiting task card", async ({ page, api, uniquePrompt }) => {
   const repos = await api.listRepos();
   const task = await api.createTask({
     initialPrompt: { text: uniquePrompt("Refresh repository summary") },
@@ -197,8 +197,53 @@ test("opening the diff refreshes a waiting task card without another turn", asyn
   const summary = card.getByRole("img", {
     name: "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream",
   });
-  await expect(summary).toHaveCount(0);
+  await expect(summary).toBeVisible();
   await page.goto(`/task/@${task.id}/diff`);
   await expect(summary).toBeVisible();
   await expect(card.getByTestId("state-badge")).toHaveText("waiting");
+});
+
+test("failed refreshes retain counts and show a stale marker at desktop and mobile widths", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
+  const repos = await api.listRepos();
+  const task = await api.createTask({
+    initialPrompt: { text: uniquePrompt("FAKE_DEMO stale summary") },
+    repos: [{ name: repos[0].path }],
+    harness: "claude",
+  });
+  await waitForTaskState(api, task.id, "waiting");
+  const snapshot = await api.getTask(task.id);
+  const primary = snapshot.repos?.[0];
+  if (!primary) throw new Error("Task has no repository");
+  snapshot.repoStates = [
+    {
+      name: primary.name,
+      branch: primary.branch,
+      stale: true,
+      ahead: 1,
+      behind: 0,
+      changedFiles: 2,
+      linesAdded: 9,
+      linesDeleted: 3,
+      uncommittedFiles: 0,
+      conflicts: 0,
+    },
+  ];
+  const event = { kind: "snapshot", snapshot: [snapshot] } satisfies TaskListEvent;
+  await page.route(
+    (url) => url.pathname === "/api/caic/v1/tasks/events",
+    (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(event)}\n\n` }),
+  );
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    const card = page.locator(`[data-task-id="${task.id}"]`);
+    await expect(card.getByTestId("repo-state-stale")).toBeVisible();
+    await expect(card.getByRole("img", { name: /Refresh failed; showing last known changes/ })).toBeVisible();
+    await expect(card.getByTestId("repo-state-diff-stats")).toContainText("+9");
+    expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
 });

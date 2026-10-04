@@ -118,7 +118,8 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 // tests parse.
 func testContainer() *runtimetest.FakeBackend {
 	return &runtimetest.FakeBackend{
-		DiffOutput: "5\t1\tmain.go\n",
+		DiffOutput:        "5\t1\tmain.go\n",
+		TurnSnapshotValue: []runtime.TurnRepository{{RepoIndex: 0, Status: runtime.RepositoryStatus{DiffStat: []runtime.GitFileStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}}}}},
 		RepositoryStatusValue: runtime.RepositoryStatus{
 			DiffStat: []runtime.GitFileStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}},
 		},
@@ -137,6 +138,11 @@ type fetchRecorder struct {
 func (b *fetchRecorder) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
 	b.fetched.Store(true)
 	return b.FakeBackend.Fetch(ctx, id, opts)
+}
+
+func (b *fetchRecorder) TurnSnapshot(ctx context.Context, id runtime.ID, previous []runtime.FetchedBranch) ([]runtime.TurnRepository, error) {
+	b.fetched.Store(true)
+	return b.FakeBackend.TurnSnapshot(ctx, id, previous)
 }
 
 // recvMsg reads a single message from ch, respecting the test context and a

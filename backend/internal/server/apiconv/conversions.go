@@ -299,6 +299,7 @@ func RepoStates(states []agent.RepoState, repos []v1.TaskRepo) []v1.GitRepositor
 		}
 		out = append(out, v1.GitRepositoryState{
 			Name:             repos[state.RepoIndex].Name,
+			Stale:            state.Stale,
 			Branch:           state.Branch,
 			Ahead:            state.Ahead,
 			Behind:           state.Behind,

@@ -1,4 +1,4 @@
-// Package task orchestrates coding-agent state and applies Git snapshots in read order.
+// Package task orchestrates coding-agent state and durably applies Git summaries in read order.
 //
 // It owns branch creation, instance lifecycle, agent execution, resource
 // history, and git integration.
@@ -277,6 +277,17 @@ func (t *Task) RuntimeRepos() []runtime.Repo {
 		out[i] = r.ToRuntimeRepo()
 	}
 	return out
+}
+
+// GitTarget captures the instance and repository mapping in one task read.
+func (t *Task) GitTarget() repo.GitTarget {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	repos := make([]runtime.Repo, len(t.Repos))
+	for i, r := range t.Repos {
+		repos[i] = r.ToRuntimeRepo()
+	}
+	return repo.GitTarget{InstanceID: t.runtimeInstanceID, Repos: repos}
 }
 
 // ExtraRuntimeRepos returns all repos after the primary.
@@ -630,11 +641,12 @@ func (t *Task) SetLiveRepositorySummary(snapshot *repo.GitSnapshot) bool {
 	if !t.acceptGitReadLocked(snapshot.Read) {
 		return false
 	}
-	if slices.Equal(t.liveDiffStat, snapshot.DiffStat) && (len(snapshot.RepoStates) == 0 || slices.Equal(t.liveRepoStates, snapshot.RepoStates)) {
+	stats, states := snapshot.Summary(t.liveDiffStat, t.liveRepoStates)
+	if slices.Equal(t.liveDiffStat, stats) && (len(states) == 0 || slices.Equal(t.liveRepoStates, states)) {
 		return false
 	}
-	t.setLiveDiffStatLocked(snapshot.DiffStat)
-	t.setLiveRepoStatesLocked(snapshot.RepoStates)
+	t.setLiveDiffStatLocked(stats)
+	t.setLiveRepoStatesLocked(states)
 	return true
 }
 
@@ -1832,19 +1844,25 @@ func (t *Task) addMessage(_ context.Context, m agent.Message, skipTitleGen bool)
 // addParsedMessage records one physical relay record while task state and
 // subscribers consume its Message.
 func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (stateChanged, generateTitle bool) {
-	return t.addParsedMessageWithGitRead(parsed, skipTitleGen, nil)
+	changed, title, _ := t.addParsedMessageWithGitSnapshot(parsed, skipTitleGen, nil, nil)
+	return changed, title
 }
 
-// addParsedMessageWithGitRead applies host statistics only when their snapshot
+// addParsedMessageWithGitSnapshot applies host statistics only when their snapshot
 // is newer. Stale compact controls are dropped; result payloads and lifecycle
 // remain recorded even when their live statistics have been superseded.
-func (t *Task) addParsedMessageWithGitRead(parsed agent.TimedMessage, skipTitleGen bool, read *repo.GitRead) (stateChanged, generateTitle bool) {
+func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTitleGen bool, read *repo.GitSnapshot, log agent.LogSink) (stateChanged, generateTitle bool, persistErr error) {
 	m := parsed.Message
 	t.mu.Lock()
-	if _, compact := m.(*agent.DiffStatMessage); compact && read != nil && !t.acceptGitReadLocked(*read) {
+	if _, compact := m.(*agent.DiffStatMessage); compact && read != nil && !t.acceptGitReadLocked(read.Read) {
 		t.mu.Unlock()
-		return false, false
+		return false, false, nil
 	}
+	if ds, ok := m.(*agent.DiffStatMessage); ok && read != nil {
+		ds.DiffStat, ds.Repos = read.Summary(t.liveDiffStat, t.liveRepoStates)
+		persistErr = appendGitSummary(log, ds)
+	}
+
 	initialState := t.state
 	// A compaction boundary rewrites the summary's live context fill, so the
 	// task list must refresh even though the task state is unchanged.
@@ -1866,7 +1884,7 @@ func (t *Task) addParsedMessageWithGitRead(parsed agent.TimedMessage, skipTitleG
 		if meta.ReportedEffort != "" && t.reportedEffort == "" {
 			t.reportedEffort = meta.ReportedEffort
 		}
-		return stateChanged, generateTitle
+		return stateChanged, generateTitle, persistErr
 	}
 	producerAt := parsed.ProducerTime
 	at := producerAt
@@ -2001,12 +2019,19 @@ func (t *Task) addParsedMessageWithGitRead(parsed agent.TimedMessage, skipTitleG
 	}
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok {
-		current := read == nil || t.acceptGitReadLocked(*read)
-		if current && len(rm.DiffStat) > 0 {
+		current := read == nil || t.acceptGitReadLocked(read.Read)
+		if current && (len(rm.DiffStat) > 0 || read != nil && (len(read.RepoStates) > 0 || len(read.FailedRepos) > 0)) {
 			if read == nil {
 				t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
 			}
-			t.setLiveDiffStatLocked(rm.DiffStat)
+			if read != nil {
+				stats, states := read.Summary(t.liveDiffStat, t.liveRepoStates)
+				summaryChanged = summaryChanged || !slices.Equal(stats, t.liveDiffStat) || len(states) > 0 && !slices.Equal(states, t.liveRepoStates)
+				t.setLiveDiffStatLocked(stats)
+				t.setLiveRepoStatesLocked(states)
+			} else {
+				t.setLiveDiffStatLocked(rm.DiffStat)
+			}
 		}
 		t.liveUsage.InputTokens += rm.Usage.InputTokens
 		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
@@ -2044,8 +2069,29 @@ func (t *Task) addParsedMessageWithGitRead(parsed agent.TimedMessage, skipTitleG
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
-		return stateChanged, generateTitle
+		return stateChanged, generateTitle, persistErr
 	}
+	t.broadcastTimelineMessageLocked(m, at)
+	if _, result := m.(*agent.ResultMessage); result && read != nil {
+		summary := &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: t.liveDiffStat, Repos: t.liveRepoStates}
+		persistErr = appendGitSummary(log, summary)
+		t.timeline = append(t.timeline, agent.TimedMessage{Message: summary, ProducerTime: at})
+		t.broadcastTimelineMessageLocked(summary, at)
+	}
+
+	return stateChanged, generateTitle, persistErr
+}
+
+// appendGitSummary writes backend controls to the dispatch-owned log.
+// Native records are logged by the connection; only host-owned summaries use it.
+func appendGitSummary(log agent.LogSink, summary *agent.DiffStatMessage) error {
+	if log == nil {
+		return taskslog.ErrNoLog
+	}
+	return log.AppendMessage(summary)
+}
+
+func (t *Task) broadcastTimelineMessageLocked(m agent.Message, at time.Time) {
 	event := TimelineMessage{Message: m, Sequence: uint64(t.timelineLenLocked()), ObservedAt: at} //nolint:gosec // A timeline cannot approach uint64 capacity.
 	for i := 0; i < len(t.subs); i++ {
 		select {
@@ -2057,7 +2103,6 @@ func (t *Task) addParsedMessageWithGitRead(parsed agent.TimedMessage, skipTitleG
 			i--
 		}
 	}
-	return stateChanged, generateTitle
 }
 
 func rateLimitFromMessage(m *agent.RateLimitMessage) RateLimit {

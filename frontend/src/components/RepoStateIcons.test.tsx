@@ -170,3 +170,24 @@ it("reports keyboard and pointer navigation intent", () => {
   fireEvent.pointerDown(link);
   expect(onNavigateIntent).toHaveBeenCalledTimes(3);
 });
+
+it("keeps stale clean summaries visible and explains retained counts", () => {
+  renderWithRouter(() => (
+    <RepoStateIcons
+      state={{
+        name: "repo",
+        branch: "main",
+        stale: true,
+        ahead: 0,
+        behind: 0,
+        changedFiles: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+        uncommittedFiles: 0,
+        conflicts: 0,
+      }}
+    />
+  ));
+  expect(screen.getByRole("img")).toHaveAccessibleName("Refresh failed; showing last known changes");
+  expect(screen.getByTestId("repo-state-stale")).toBeInTheDocument();
+});

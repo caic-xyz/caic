@@ -1,4 +1,4 @@
-// RepoStateIcons renders compact Git-state markers and reports intent on optional repository-diff links.
+// RepoStateIcons renders compact Git-state markers and marks stale summaries on optional repository-diff links.
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { A } from "@solidjs/router";
@@ -27,6 +27,7 @@ function countLabel(count: number, singular: string, plural: string): string {
 export function repoStateLabel(state?: GitRepositoryState): string {
   if (!state) return "";
   const labels: string[] = [];
+  if (state.stale) labels.push("Refresh failed; showing last known changes");
   if (state.changedFiles > 0) labels.push(countLabel(state.changedFiles, "changed file", "changed files"));
   if (state.linesAdded > 0) labels.push(countLabel(state.linesAdded, "addition", "additions"));
   if (state.linesDeleted > 0) labels.push(countLabel(state.linesDeleted, "deletion", "deletions"));
@@ -96,6 +97,11 @@ export default function RepoStateIcons(props: Props) {
   const markers = () => (
     <>
       <Show when={label()}>
+        <Show when={props.state?.stale}>
+          <span class={styles.stale} data-testid="repo-state-stale">
+            <ConflictIcon class={styles.icon} aria-hidden="true" />
+          </span>
+        </Show>
         <DiffStats state={props.state} />
         <Show when={(props.state?.conflicts ?? 0) > 0}>
           <span class={styles.conflict}>

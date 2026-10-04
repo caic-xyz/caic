@@ -27,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -4112,13 +4113,133 @@ func TestRepositorySummaryRejectsReplacedInstance(t *testing.T) {
 		}
 	}
 	read := repo.NewGitRead("test-runtime:old")
-	changed, _ := tk.addParsedMessageWithGitRead(agent.TimedMessage{Message: &agent.DiffStatMessage{
+	changed, _, _ := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
 		DiffStat: agent.DiffStat{{Path: "old.go"}}, Repos: []agent.RepoState{{Branch: "old"}},
-	}}, false, &read)
+	}}, false, &repo.GitSnapshot{Read: read}, nil)
 	if changed {
 		t.Fatal("delayed post-tool probe updated the task summary")
 	}
 	if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, current) {
 		t.Fatalf("current stats overwritten: %+v", got)
+	}
+}
+
+func TestPartialGitSummary(t *testing.T) {
+	t.Parallel()
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+	target := repo.GitTarget{InstanceID: tk.RuntimeInstanceID(), Repos: []runtime.Repo{{ContainerPath: "/home/user/src/one", Branch: "branch-one"}, {ContainerPath: "/home/user/src/two", Branch: "branch-two"}}}
+	tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target,
+		DiffStat:   agent.DiffStat{{Path: "one/old.go", LinesAdded: 3}, {Path: "two/old.go", LinesAdded: 7}},
+		RepoStates: []agent.RepoState{{RepoIndex: 0, ChangedFiles: 1, LinesAdded: 3}, {RepoIndex: 1, ChangedFiles: 1, LinesAdded: 7}}})
+	tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, FailedRepos: []int{1},
+		DiffStat: agent.DiffStat{{Path: "one/fresh.go", LinesAdded: 5}}, RepoStates: []agent.RepoState{{RepoIndex: 0, ChangedFiles: 1, LinesAdded: 5}}})
+	if got := tk.LiveDiffStat(); len(got) != 2 || got[0].Path != "one/fresh.go" || got[1].Path != "two/old.go" {
+		t.Fatalf("partial read hid failed repository changes: %+v", got)
+	}
+	states := tk.Snapshot().RepoStates
+	if len(states) != 2 || states[0].Stale || !states[1].Stale || states[1].LinesAdded != 7 {
+		t.Fatalf("failed repository counts or stale marker lost: %+v", states)
+	}
+	// A failed post-tool control persists the merged summary, so replay retains it.
+	control := &agent.DiffStatMessage{MessageType: "caic_diff_stat"}
+	failed := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, FailedRepos: []int{0, 1}}
+	_, _, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: control}, false, &failed, nil)
+	restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "restored"}, "", "", "")
+	restored.SeedTimeline([]agent.Message{control})
+	if len(restored.LiveDiffStat()) != 2 || len(restored.Snapshot().RepoStates) != 2 || !restored.Snapshot().RepoStates[0].Stale {
+		t.Fatal("replay lost retained stale summary")
+	}
+}
+
+func TestPartialGitSummaryRecovery(t *testing.T) {
+	t.Parallel()
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+	target := repo.GitTarget{InstanceID: tk.RuntimeInstanceID(), Repos: []runtime.Repo{{ContainerPath: "/repo", Branch: "main"}}}
+	failed := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, FailedRepos: []int{0}}
+	tk.SetLiveRepositorySummary(&failed)
+	if states := tk.Snapshot().RepoStates; len(states) != 1 || !states[0].Stale {
+		t.Fatalf("initial failure appeared clean: %+v", states)
+	}
+	clean := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, RepoStates: []agent.RepoState{{RepoIndex: 0, Branch: "main"}}}
+	if !tk.SetLiveRepositorySummary(&clean) {
+		t.Fatal("recovery was not published")
+	}
+	if states := tk.Snapshot().RepoStates; len(states) != 1 || states[0].Stale {
+		t.Fatalf("successful clean read did not clear stale marker: %+v", states)
+	}
+	if tk.SetLiveRepositorySummary(&failed) {
+		t.Fatal("older failure overwrote recovery")
+	}
+}
+
+func TestGitSummaryLogRoundTrip(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"compact failure", "result failure", "result clean recovery"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "", "")
+			tk.Repos = []taskslog.RepoMount{{Name: "repo", Branch: "main", ContainerPath: "/repo"}}
+			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+			store := taskslog.NewStore(logtest.Logger(t), t.TempDir())
+			log, err := openTaskLog(store, tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Dispatch owns the log even before a session is attached.
+			target := tk.GitTarget()
+			original := &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "old.go", LinesAdded: 7}}, Repos: []agent.RepoState{{RepoIndex: 0, Branch: "main", ChangedFiles: 1, LinesAdded: 7, Stale: kind == "result clean recovery"}}}
+			if err := log.AppendMessage(original); err != nil {
+				t.Fatal(err)
+			}
+			tk.addMessage(t.Context(), original, false)
+			snapshot := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, FailedRepos: []int{0}}
+			var message agent.Message = &agent.DiffStatMessage{MessageType: "caic_diff_stat"}
+			if kind != "compact failure" {
+				tk.SetState(taskslog.StateWaiting)
+				message = &agent.ResultMessage{MessageType: "result"}
+				// The harness connection logs native results before the host probe.
+				if err := log.AppendNative([]byte(`{"t":"agent","ts":1.000,"msg":{"type":"result","subtype":"success","is_error":false,"result":"done"}}` + "\n")); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "result clean recovery" {
+					snapshot.FailedRepos = nil
+					snapshot.RepoStates = []agent.RepoState{{RepoIndex: 0, Branch: "main"}}
+				}
+			}
+			changed, _, err := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: message}, false, &snapshot, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !changed {
+				t.Fatal("changed summary did not notify waiting task")
+			}
+			live := tk.Snapshot()
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := store.LoadAllReadOnly()
+			if err != nil || len(loaded) != 1 {
+				t.Fatalf("load = %+v, %v", loaded, err)
+			}
+			loaded[0].SetWireResolver(agent.Backends{harness.Claude: claudecode.New()})
+			if err := loaded[0].LoadMessages(); err != nil {
+				t.Fatal(err)
+			}
+			restored := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "restored"}, harness.Claude, "", "")
+			restored.SeedTimelineParts(nil, loaded[0].Timeline)
+			replay := restored.Snapshot()
+			if !reflect.DeepEqual(live.DiffStat, replay.DiffStat) || !reflect.DeepEqual(live.RepoStates, replay.RepoStates) {
+				t.Fatalf("log replay lost Git state: live %+v %+v; replay %+v %+v", live.DiffStat, live.RepoStates, replay.DiffStat, replay.RepoStates)
+			}
+			if kind == "result clean recovery" {
+				if len(replay.DiffStat) != 0 || replay.RepoStates[0].Stale {
+					t.Fatal("clean recovery restored old changes")
+				}
+			} else if len(replay.DiffStat) != 1 || !replay.RepoStates[0].Stale {
+				t.Fatal("failure lost retained data or stale marker")
+			}
+		})
 	}
 }

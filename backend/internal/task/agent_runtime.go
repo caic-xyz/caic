@@ -1,4 +1,4 @@
-// AgentRuntime owns task sessions and guards live Git summaries against delayed results.
+// AgentRuntime owns task sessions, ordered Git summaries, and consolidated turn measurements.
 
 package task
 
@@ -90,17 +90,15 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 	// blindly override it to StateRunning for an idle relay.
 	prevState := t.GetState()
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
-
 	// Reconnect resumes an existing session, so append only after Reopen
 	// validates the existing file's authoritative header. A missing or corrupt
 	// log must not be replaced because the running relay's format is unknown.
 	log, err := r.reopenLog(t)
 	if err != nil {
-		close(msgCh)
-		<-dispatchDone
 		return nil, err
 	}
+
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false, log)
 
 	// Attach to the live relay. If the relay is dead, the session is lost.
 	var primaryBranch string
@@ -127,9 +125,9 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		Log:                log,
 	})
 	if err != nil {
-		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
+		_ = log.Close()
 		t.SetState(taskslog.StateWaiting)
 		r.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
@@ -259,7 +257,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	var dispatchDone <-chan struct{}
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
-		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, false)
+		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, false, log)
 		region.End()
 	}
 
@@ -355,7 +353,7 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason taskslog.Sta
 	// the host branch's own commit count says nothing about it.
 	branchConfirmedEmpty := false
 	if reason == taskslog.StatePurged && !t.DiffCreated() && name != "" && r.Checkout != nil {
-		snapshot, err := r.Checkout.BranchDiffStat(ctx, r.Log, r.Runtimes, t)
+		snapshot, err := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, t.GitTarget())
 		switch {
 		case err != nil:
 			tlog.WarnContext(ctx, "verify empty task branch failed", "err", err)
@@ -610,14 +608,13 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	t.SetState(taskslog.StateStarting)
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true)
 	// Restore archived history rather than creating a replacement segment.
 	log, err := r.reopenLog(t)
 	if err != nil {
-		close(msgCh)
-		<-dispatchDone
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("open log: %w", err), nil)
 	}
+
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true, log)
 
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -658,8 +655,8 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	// 4. Restore diff stat and per-repo states before returning. Subsequent
 	// mutating tool results refresh them through normal message dispatch.
 	if r.Checkout != nil {
-		snapshot, err := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, instanceID, t.RuntimeRepos())
-		if err == nil {
+		snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, t.GitTarget())
+		if snapshot.Read.NewerThan(repo.GitRead{}) {
 			t.SetLiveRepositorySummary(&snapshot)
 		}
 	}
@@ -1034,7 +1031,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
 	r.recordCommitBaseline(ctx, t, log, instanceID)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false, log)
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -1111,7 +1108,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 	// Start new session.
 	t.SetState(taskslog.StateStarting)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false, log)
 
 	var branch string
 	if p := t.Primary(); p != nil {
@@ -1135,25 +1132,25 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 		opts.InitialPrompt = prompt
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
-		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
+		_ = log.Close()
 		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, err
 	}
 	backend := r.Backends[t.Harness]
 	if backend == nil {
-		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
+		_ = log.Close()
 		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, fmt.Errorf("unknown harness %q", t.Harness)
 	}
 	session, err := backend.Start(ctx, opts)
 	if err != nil {
-		_ = log.Close()
 		close(msgCh)
 		<-dispatchDone
+		_ = log.Close()
 		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
@@ -1173,10 +1170,11 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 // startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
 // t.addMessage, and reports task state transitions.
-func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTitleGen bool) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
+func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTitleGen bool, log agent.LogSink) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
-	allRepos := t.RuntimeRepos()
-	instanceID := t.RuntimeInstanceID()
+	target := t.GitTarget()
+	allRepos := target.Repos
+	instanceID := target.InstanceID
 	msgCh = make(chan agent.TimedMessage, 256)
 	done := make(chan struct{})
 	dispatchDone = done
@@ -1188,7 +1186,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 			m := parsed.Message
 			emitToolDiff := false
 			var commitSnapshot *agent.TurnCommitSnapshotMessage
-			var resultRead *repo.GitRead
+			var resultRead *repo.GitSnapshot
 			switch msg := m.(type) {
 			case *agent.ToolUseMessage:
 				if _, ok := mutatingTools[msg.Name]; ok {
@@ -1201,21 +1199,25 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 				}
 			case *agent.ResultMessage:
 				if r.Runtimes != nil && r.Checkout != nil {
-					// TODO: Consolidate these result-time branch and turn measurements
-					// into one runtime operation. They currently require two Git diffs
-					// and two container-reference synchronizations per repository.
-					snapshot, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
-					resultRead = &snapshot.Read
+					previous := t.latestCommitSnapshot()
+					var baseline []agent.RepositoryCommit
+					if previous != nil {
+						baseline = previous.RepositoryCommits
+					}
+					snapshot, commits, change, _ := r.Checkout.TurnSnapshot(ctx, r.Log, r.Runtimes, target, baseline)
+					resultRead = &snapshot
 					msg.DiffStat = snapshot.DiffStat
-					commits := r.fetchTurnCommits(ctx, instanceID)
 					if len(commits) > 0 {
-						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits, false, r.turnChangeStat(ctx, instanceID, allRepos, t.latestCommitSnapshot(), commits))
+						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits, false, change)
 					}
 				}
 			}
-			stateChanged, generateTitle := t.addParsedMessageWithGitRead(parsed, skipTitleGen, resultRead)
+			stateChanged, generateTitle, persistErr := t.addParsedMessageWithGitSnapshot(parsed, skipTitleGen, resultRead, log)
+			if persistErr != nil {
+				r.Log.WarnContext(ctx, "persisting Git summary failed", "err", persistErr)
+			}
 			if commitSnapshot != nil {
-				r.persistCommitSnapshot(ctx, t, commitSnapshot, instanceID)
+				r.persistCommitSnapshot(ctx, log, commitSnapshot, instanceID)
 				t.addMessage(ctx, commitSnapshot, false)
 			}
 			if stateChanged {
@@ -1225,7 +1227,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 				go t.GenerateTitle(ctx, r.Log)
 			}
 			if emitToolDiff {
-				r.emitDiffStatBranch(ctx, t, instanceID, allRepos)
+				r.emitDiffStatBranch(ctx, t, instanceID, allRepos, log)
 			}
 		}
 	}()
@@ -1279,69 +1281,33 @@ func (r *AgentRuntime) recordCommitBaseline(ctx context.Context, t *Task, log ag
 
 // persistCommitSnapshot writes a completed-turn commit snapshot without
 // preventing the turn from completing when persistence is unavailable.
-func (r *AgentRuntime) persistCommitSnapshot(ctx context.Context, t *Task, snapshot *agent.TurnCommitSnapshotMessage, id runtime.ID) {
-	if err := t.WriteToLog(snapshot); err != nil {
+func (r *AgentRuntime) persistCommitSnapshot(ctx context.Context, log agent.LogSink, snapshot *agent.TurnCommitSnapshotMessage, id runtime.ID) {
+	if log == nil {
+		r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", id, "err", taskslog.ErrNoLog)
+		return
+	}
+	if err := log.AppendMessage(snapshot); err != nil {
 		r.Log.WarnContext(ctx, "persisting turn commit snapshot failed", "id", id, "err", err)
 	}
-}
-
-// turnChangeStat summarizes every repository whose current tip can be
-// compared with the preceding durable snapshot. It returns nil rather than a
-// partial statistic when any repository is missing or cannot be compared.
-//
-// TODO: Move this comparison into the runtime operation that fetches the
-// current tips, avoiding its separate container Git command at turn end.
-func (r *AgentRuntime) turnChangeStat(ctx context.Context, id runtime.ID, repos []runtime.Repo, previous *agent.TurnCommitSnapshotMessage, current []agent.RepositoryCommit) *agent.ChangeStat {
-	if previous == nil || len(repos) == 0 {
-		return nil
-	}
-	previousByRepo := make(map[string]string, len(previous.RepositoryCommits))
-	for _, commit := range previous.RepositoryCommits {
-		previousByRepo[commit.RepositoryPath+"\x00"+commit.BranchName] = commit.CommitHash
-	}
-	currentByRepo := make(map[string]string, len(current))
-	for _, commit := range current {
-		currentByRepo[commit.RepositoryPath+"\x00"+commit.BranchName] = commit.CommitHash
-	}
-	stat := &agent.ChangeStat{}
-	for i, runtimeRepo := range repos {
-		key := runtimeRepo.ContainerPath + "\x00" + runtimeRepo.Branch
-		from, previousOK := previousByRepo[key]
-		to, currentOK := currentByRepo[key]
-		if !previousOK || !currentOK {
-			return nil
-		}
-		numstat, err := r.Runtimes.CommitDiffStat(ctx, id, i, from, to)
-		if err != nil {
-			r.Log.WarnContext(ctx, "calculating turn change failed", "id", id, "repo", runtimeRepo.ContainerPath, "err", err)
-			return nil
-		}
-		for _, file := range repo.ParseDiffNumstat(numstat) {
-			stat.Files++
-			stat.LinesAdded += file.LinesAdded
-			stat.LinesDeleted += file.LinesDeleted
-			if file.Binary {
-				stat.BinaryFiles++
-			}
-		}
-	}
-	return stat
 }
 
 // emitDiffStatBranch emits a DiffStatMessage from the current in-container
 // diff. This keeps live UI diff stats and repository states fresh during a
 // running turn.
-func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo) {
+func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.ID, repos []runtime.Repo, log agent.LogSink) {
 	if r.Checkout == nil {
 		return
 	}
-	snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, id, repos)
-	if len(snapshot.DiffStat) == 0 && len(snapshot.RepoStates) == 0 {
+	snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, repo.GitTarget{InstanceID: id, Repos: repos})
+	if len(snapshot.DiffStat) == 0 && len(snapshot.RepoStates) == 0 && len(snapshot.FailedRepos) == 0 {
 		return
 	}
-	changed, _ := t.addParsedMessageWithGitRead(agent.TimedMessage{Message: &agent.DiffStatMessage{
+	changed, _, persistErr := t.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
 		MessageType: "caic_diff_stat", DiffStat: snapshot.DiffStat, Repos: snapshot.RepoStates,
-	}}, false, &snapshot.Read)
+	}}, false, &snapshot, log)
+	if persistErr != nil {
+		r.Log.WarnContext(ctx, "persisting Git summary failed", "err", persistErr)
+	}
 	if changed {
 		r.NotifyTaskChange()
 	}

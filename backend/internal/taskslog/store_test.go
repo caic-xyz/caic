@@ -941,8 +941,8 @@ func TestStore(t *testing.T) {
 						})); err != nil {
 							t.Fatal(err)
 						}
-						if calls != 1 || len(loaded.Timeline) != 1 {
-							t.Fatalf("lazy semantic load calls/messages = %d/%#v, want 1/one conversation", calls, loaded.Timeline)
+						if calls != 1 || len(loaded.Timeline) != 2 {
+							t.Fatalf("lazy semantic load calls/messages = %d/%#v, want 1/summary and conversation", calls, loaded.Timeline)
 						}
 					}
 					if compressed {

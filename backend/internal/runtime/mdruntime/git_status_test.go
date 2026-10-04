@@ -736,25 +736,6 @@ fi`)
 	})
 }
 
-func TestGitCommitDiffStatCommand(t *testing.T) {
-	t.Parallel()
-	from := "1111111111111111111111111111111111111111"
-	to := "2222222222222222222222222222222222222222"
-	cmd, err := gitCommitDiffStatCommand("/work/repo's copy", from, to)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(cmd, `cd '/work/repo'"'"'s copy'`) {
-		t.Errorf("gitCommitDiffStatCommand() does not safely quote repo: %q", cmd)
-	}
-	if !strings.Contains(cmd, "git diff --numstat --stat --find-renames=50% '"+from+"' '"+to+"' --") {
-		t.Errorf("gitCommitDiffStatCommand() = %q, want commit comparison", cmd)
-	}
-	if _, err := gitCommitDiffStatCommand("/repo", "short", to); err == nil {
-		t.Fatal("gitCommitDiffStatCommand() accepted a short object ID")
-	}
-}
-
 func TestGitFileDiffCommand(t *testing.T) {
 	t.Parallel()
 	t.Run("normalizes configurable output", func(t *testing.T) {
@@ -951,13 +932,13 @@ func runFileDiffCommand(t *testing.T, command string) string {
 	return string(out)
 }
 
-func runTestGit(t *testing.T, dir string, args ...string) {
+func runTestGit(t testing.TB, dir string, args ...string) {
 	_ = runTestGitOutput(t, dir, args...)
 }
 
 // initStatusRepo creates a repository that gitStatusCommand can inspect: one
 // commit on main tracking origin/main, matching a container's primary branch.
-func initStatusRepo(t *testing.T) string {
+func initStatusRepo(t testing.TB) string {
 	dir := t.TempDir()
 	runTestGit(t, dir, "init", "-b", "main")
 	runTestGit(t, dir, "config", "user.email", "caic@example.com")
@@ -1000,7 +981,7 @@ func runGitStatusCommand(t *testing.T, dir string, env []string) (stdout, stderr
 	return out.String(), errOut.String()
 }
 
-func runTestGitOutput(t *testing.T, dir string, args ...string) string {
+func runTestGitOutput(t testing.TB, dir string, args ...string) string {
 	cmd := newIsolatedGitCommand(t, "git", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -1013,8 +994,104 @@ func runTestGitOutput(t *testing.T, dir string, args ...string) string {
 
 // newIsolatedGitCommand returns a test-owned Git or shell command that cannot
 // inherit user or system Git configuration.
-func newIsolatedGitCommand(t *testing.T, name string, args ...string) *exec.Cmd {
+func newIsolatedGitCommand(t testing.TB, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(t.Context(), name, args...) //nolint:gosec // executable and arguments are test-owned.
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	return cmd
+}
+
+func TestTurnGitCommand(t *testing.T) {
+	t.Parallel()
+	dir := initStatusRepo(t)
+	from := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "turn file.txt"), []byte("committed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "image.bin"), []byte{0, 1, 2}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", ".")
+	runTestGit(t, dir, "commit", "-m", "turn")
+	to := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "pending.txt"), []byte("pending\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, from, to  string
+		count           int
+		available, fail bool
+	}{
+		{name: "committed delta", from: from, to: to, count: 2, available: true},
+		{name: "initial baseline", to: to},
+		{name: "rewritten baseline removed", from: strings.Repeat("f", 40), to: to},
+		{name: "clean committed delta", from: to, to: to, available: true},
+		{name: "HEAD moved after fetch", from: from, to: from, fail: true},
+		{name: "invalid object ID", from: "bad", to: to, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd, err := turnGitCommand(dir, "origin", "main", tc.from, tc.to)
+			var out []byte
+			if err == nil {
+				out, err = newIsolatedGitCommand(t, "bash", "-c", cmd).Output()
+			}
+			if tc.fail {
+				if err == nil {
+					t.Fatal("invalid snapshot succeeded")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, delta, err := parseTurnGit(string(out))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(status.DiffStat) != 3 {
+				t.Fatalf("branch summary lost committed or pending work: %+v", status.DiffStat)
+			}
+			if (delta != nil) != tc.available || len(delta) != tc.count {
+				t.Fatalf("turn delta = %+v", delta)
+			}
+			if tc.count == 2 && (!delta[0].Binary || delta[1].Path != "turn file.txt") {
+				t.Fatalf("binary/name parsing failed: %+v", delta)
+			}
+		})
+	}
+}
+
+func TestTurnGitCommandRewrittenExistingTip(t *testing.T) {
+	t.Parallel()
+	dir := initStatusRepo(t)
+	base := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "old.txt"), []byte("old history\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", ".")
+	runTestGit(t, dir, "commit", "-m", "old tip")
+	old := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+	runTestGit(t, dir, "branch", "keep-old", old)
+	runTestGit(t, dir, "reset", "--hard", base)
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new history\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", ".")
+	runTestGit(t, dir, "commit", "-m", "rewritten tip")
+	to := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+	cmd, err := turnGitCommand(dir, "origin", "main", old, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := newIsolatedGitCommand(t, "bash", "-c", cmd).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, delta, err := parseTurnGit(string(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delta != nil || len(status.DiffStat) != 1 || status.DiffStat[0].Path != "new.txt" {
+		t.Fatalf("rewritten existing tip claimed a turn: %+v, %+v", status, delta)
+	}
 }

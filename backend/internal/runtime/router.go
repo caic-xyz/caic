@@ -30,9 +30,9 @@ const (
 	metricContainerInspect      = "container.inspect"
 	metricContainerMetadata     = "container.metadata"
 	metricContainerSudoPassword = "container.sudo_password"
+	metricRepoTurnSnapshot      = "repo.turn_snapshot"
 	metricRepoDiff              = "repo.diff"
 	metricRepoFileDiff          = "repo.file_diff"
-	metricRepoCommitDiff        = "repo.commit_diff"
 	metricRepoFetch             = "repo.fetch"
 	metricRepoStatus            = "repo.status"
 	metricRepoCompactStatus     = "repo.compact_status"
@@ -146,15 +146,15 @@ func (r *Router) Diff(ctx context.Context, id ID, repoIdx int, args ...string) (
 	return rt.Diff(ctx, id, repoIdx, args...)
 }
 
-// CommitDiffStat returns the net committed diff stat between two repository tips.
-func (r *Router) CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (out string, err error) {
+// TurnSnapshot fetches once and measures branch and turn changes on the owning backend.
+func (r *Router) TurnSnapshot(ctx context.Context, id ID, previous []FetchedBranch) (out []TurnRepository, err error) {
 	start := time.Now()
-	defer func() { r.observe(ctx, metricRepoCommitDiff, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
+	defer func() { r.observe(ctx, metricRepoTurnSnapshot, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
 	rt, err := r.runtimeForInstance(id)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return rt.CommitDiffStat(ctx, id, repoIdx, from, to)
+	return rt.TurnSnapshot(ctx, id, previous)
 }
 
 // FileDiff returns one committed or uncommitted file patch from the owning backend.

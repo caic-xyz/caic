@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -321,20 +322,14 @@ func caic0BranchExists(t *testing.T, dir string) bool {
 type resultFetchBackend struct {
 	*runtimetest.FakeBackend
 
-	onFetch func()
-	onDiff  func()
+	onDiff func()
 }
 
-func (b *resultFetchBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
+func (b *resultFetchBackend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []runtime.FetchedBranch) ([]runtime.TurnRepository, error) {
 	if b.onDiff != nil {
 		b.onDiff()
 	}
-	return b.FakeBackend.Diff(ctx, id, repoIdx, args...)
-}
-
-func (b *resultFetchBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
-	b.onFetch()
-	return b.FakeBackend.Fetch(ctx, id, opts)
+	return b.FakeBackend.TurnSnapshot(ctx, id, previous)
 }
 
 func TestRunner(t *testing.T) {
@@ -1720,7 +1715,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false, nil)
 			log := &agenttest.LogSink{Version: agent.LogVersionV2}
 			opts := agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: log}
 			var v2Message agent.Message
@@ -1777,22 +1772,22 @@ func testRunnerSessions(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
 			tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
-			full, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk)
+			full, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk.GitTarget())
 			if err != nil {
 				t.Fatal(err)
 			}
-			compact, err := checkout.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, tk.RuntimeInstanceID(), tk.RuntimeRepos())
+			compact, err := checkout.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, tk.GitTarget())
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := checkout.DiffStat(t.Context(), logtest.Logger(t), runtimes, tk.RuntimeInstanceID(), tk.RuntimeRepos())
+			result, err := checkout.DiffStat(t.Context(), logtest.Logger(t), runtimes, tk.GitTarget())
 			if err != nil {
 				t.Fatal(err)
 			}
 			backend.RepositoryStatusValue = runtime.RepositoryStatus{
 				Branch: "caic-0", Behind: 2, DiffStat: []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 9}},
 			}
-			latest, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk)
+			latest, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk.GitTarget())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1804,19 +1799,19 @@ func testRunnerSessions(t *testing.T) {
 					t.Fatal("older full or compact snapshot replaced the newer summary")
 				}
 			}
-			changed, _ := tk.addParsedMessageWithGitRead(agent.TimedMessage{Message: &agent.DiffStatMessage{
+			changed, _, _ := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
 				DiffStat: compact.DiffStat, Repos: compact.RepoStates,
-			}}, false, &compact.Read)
+			}}, false, &compact, nil)
 			if changed || len(tk.timeline) != 0 {
 				t.Fatal("stale compact control was recorded or applied")
 			}
 			rm := &agent.ResultMessage{MessageType: "result", NumTurns: 1, DiffStat: result.DiffStat}
-			tk.addParsedMessageWithGitRead(agent.TimedMessage{Message: rm}, false, &result.Read)
+			_, _, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: rm}, false, &result, nil)
 			snap := tk.Snapshot()
 			if len(snap.DiffStat) != 1 || snap.DiffStat[0].Path != "fresh.go" || len(snap.RepoStates) != 1 || snap.RepoStates[0].Behind != 2 {
 				t.Fatalf("deferred publication changed the newest summary: %+v, %+v", snap.DiffStat, snap.RepoStates)
 			}
-			if len(tk.timeline) != 1 || snap.State != taskslog.StateWaiting || rm.DiffStat[0].Path != "main.go" {
+			if len(tk.timeline) != 2 || snap.State != taskslog.StateWaiting || rm.DiffStat[0].Path != "main.go" {
 				t.Fatal("stale result lost its recorded payload or lifecycle")
 			}
 			// A later relay refresh supersedes already completed host probes.
@@ -1830,7 +1825,7 @@ func testRunnerSessions(t *testing.T) {
 			for _, replaced := range []bool{false, true} {
 				t.Run(fmt.Sprintf("instance replaced %v", replaced), func(t *testing.T) {
 					t.Parallel()
-					backend := &resultFetchBackend{FakeBackend: testContainer(), onFetch: func() {}}
+					backend := &resultFetchBackend{FakeBackend: testContainer()}
 					r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", backend), "", nil)
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 					tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
@@ -1845,7 +1840,7 @@ func testRunnerSessions(t *testing.T) {
 							tk.SetRuntimeConnectionInfo("test-runtime:replacement", runtime.ConnectionTarget{}, "", "", 0)
 						}
 					}
-					msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+					msgCh, done := r.startMessageDispatch(t.Context(), tk, false, nil)
 					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1}
 					msgCh <- agent.TimedMessage{Message: result}
 					close(msgCh)
@@ -1885,29 +1880,24 @@ func testRunnerSessions(t *testing.T) {
 					tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
 					tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
 					tk.SetState(taskslog.StateRunning)
-					// Fetch happens after the result's diff read, before result ingestion.
-					// A /diff read here must remain the live summary after ingestion.
-					backend.onFetch = func() {
-						snapshot, err := r.Checkout.RepositoryStatuses(t.Context(), r.Runtimes, tk)
-						if err == nil {
-							tk.SetLiveRepositorySummary(&snapshot)
-						}
+					// Publication can be deferred after the consolidated read returns.
+					refresh := func() {
+						snapshot, err := r.Checkout.RepositoryStatuses(t.Context(), r.Runtimes, tk.GitTarget())
 						if err != nil {
-							t.Errorf("fresh status read failed: %v", err)
+							t.Fatal(err)
 						}
+						tk.SetLiveRepositorySummary(&snapshot)
 					}
 					if tc.unchanged {
-						backend.onFetch()
+						refresh()
 					}
-					msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
-					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1}
-					msgCh <- agent.TimedMessage{Message: result}
-					close(msgCh)
-					select {
-					case <-done:
-					case <-time.After(time.Second):
-						t.Fatal("result dispatch did not finish")
+					snapshot, _, _, err := r.Checkout.TurnSnapshot(t.Context(), r.Log, r.Runtimes, tk.GitTarget(), nil)
+					if err != nil {
+						t.Fatal(err)
 					}
+					refresh()
+					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1, DiffStat: snapshot.DiffStat}
+					_, _, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: result}, false, &snapshot, nil)
 					if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, want) {
 						t.Errorf("live stats = %+v, want newer snapshot %+v", got, want)
 					}
@@ -1924,7 +1914,7 @@ func testRunnerSessions(t *testing.T) {
 		t.Run("ResultMessageRecordsDiffStatAndCommitSnapshot", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
-			stub.CommitDiffStatOutput = "6\t2\tchange.go\n-\t-\timage.png\n"
+			stub.TurnSnapshotValue[0].TurnDiff = []runtime.GitFileStat{{Path: "change.go", LinesAdded: 6, LinesDeleted: 2}, {Path: "image.png", Binary: true}}
 			stub.FetchedBranches = []runtime.FetchedBranch{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
@@ -1939,7 +1929,7 @@ func testRunnerSessions(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
 			persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
-			tk.AttachSession(&SessionHandle{Log: persisted})
+			// Exercise delivery before AttachSession.
 			tk.addMessage(t.Context(), agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
@@ -1948,7 +1938,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false, persisted)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- agent.TimedMessage{Message: rm}
@@ -1970,6 +1960,12 @@ func testRunnerSessions(t *testing.T) {
 			}
 			if got := tk.LiveDiffStat(); len(got) != 1 || got[0].Path != "main.go" {
 				t.Errorf("result did not update live stats without a newer read: %+v", got)
+			}
+
+			summaryMessage := recvMsg(t, ch)
+			summary, ok := summaryMessage.(*agent.DiffStatMessage)
+			if !ok || len(summary.DiffStat) != 1 {
+				t.Fatalf("result summary = %#v", summaryMessage)
 			}
 
 			wantCommits := []agent.RepositoryCommit{{
@@ -1999,7 +1995,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Errorf("Fetch calls = %+v, want one fetch without a commit", got)
 			}
 			<-done
-			if got := persisted.String(); !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"2222222222222222222222222222222222222222"`) {
+			if got := persisted.String(); !strings.Contains(got, `"t":"diff_stat"`) || !strings.Contains(got, `"repos"`) || !strings.Contains(got, `"t":"turn_commit_snapshot"`) || !strings.Contains(got, `"commit_hash":"2222222222222222222222222222222222222222"`) {
 				t.Errorf("persisted task log = %q, want turn commit snapshot", got)
 			}
 			select {
@@ -2027,7 +2023,7 @@ func testRunnerSessions(t *testing.T) {
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
+					msgCh, _ := r.startMessageDispatch(t.Context(), tk, false, nil)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -2081,7 +2077,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false, nil)
 
 			toolID := "tool_read_1"
 			msgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{
@@ -2128,15 +2124,17 @@ func testRunnerSessions(t *testing.T) {
 				tk.addMessage(t.Context(), &agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe}, false)
 				before := len(tk.timeline)
 
-				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos)
+				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos, nil)
 
 				// A transient probe failure must not push an empty update
 				// that would blank the stats the card already shows.
-				if len(tk.timeline) != before {
-					t.Errorf("timeline grew from %d to %d messages, want no emission", before, len(tk.timeline))
+				if len(tk.timeline) != before+1 {
+					t.Errorf("failed refresh did not publish stale state")
 				}
-				if got := tk.Snapshot().RepoStates; !reflect.DeepEqual(got, probe) {
-					t.Errorf("RepoStates = %+v, want the previous probe %+v", got, probe)
+				want := slices.Clone(probe)
+				want[0].Stale = true
+				if got := tk.Snapshot().RepoStates; !reflect.DeepEqual(got, want) {
+					t.Errorf("RepoStates = %+v, want retained stale state %+v", got, want)
 				}
 			})
 
@@ -2147,7 +2145,7 @@ func testRunnerSessions(t *testing.T) {
 				notifications := 0
 				r.NotifyTaskChange = func() { notifications++ }
 
-				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos)
+				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos, nil)
 
 				if notifications != 1 {
 					t.Fatalf("task-list notifications = %d, want 1", notifications)
@@ -2181,7 +2179,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, true)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, true, nil)
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
@@ -2206,7 +2204,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false, nil)
 
 			// Buffer several messages, then close without draining.
 			msgs := []*agent.TextMessage{

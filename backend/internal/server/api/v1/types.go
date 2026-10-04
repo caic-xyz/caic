@@ -984,6 +984,7 @@ const (
 
 // GitRepositoryState summarizes the compact Git state of one task repository.
 type GitRepositoryState struct {
+	Stale            bool         `json:"stale,omitempty"` // Last known data retained after a failed refresh.
 	Name             string       `json:"name"`
 	Branch           string       `json:"branch"`
 	Ahead            int          `json:"ahead"`

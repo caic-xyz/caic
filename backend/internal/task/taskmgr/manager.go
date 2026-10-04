@@ -2074,9 +2074,8 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// post-reconnect refresh below. Without this restore an adopted task's card
 	// stays blank until its next mutating tool call.
 	if checkout != nil {
-		instanceID := t.RuntimeInstanceID()
-		snapshot, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, instanceID, t.RuntimeRepos())
-		if err == nil {
+		snapshot, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, t.GitTarget())
+		if snapshot.Read.NewerThan(repo.GitRead{}) {
 			t.SetLiveRepositorySummary(&snapshot)
 		}
 		if err != nil {

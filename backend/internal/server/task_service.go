@@ -868,8 +868,8 @@ func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, t
 }
 
 // repositoryStatuses keeps task-list cards coherent with successful Git reads.
-func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Checkout, t *task.Task) ([]runtime.RepositoryStatus, error) {
-	snapshot, err := checkout.RepositoryStatuses(ctx, s.runtimes, t)
+func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Checkout, t *task.Task, target repo.GitTarget) ([]runtime.RepositoryStatus, error) {
+	snapshot, err := checkout.RepositoryStatuses(ctx, s.runtimes, target)
 	if err == nil && t.SetLiveRepositorySummary(&snapshot) {
 		s.taskMgr.NotifyTaskChange()
 	}
@@ -879,7 +879,8 @@ func (s *taskService) repositoryStatuses(ctx context.Context, checkout *repo.Che
 func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (*v1.TaskDiffIndexResp, error) {
 	defer trace.StartRegion(ctx, "task.diff.index").End()
 	t := entry.Task()
-	if t.RuntimeInstanceID() == "" {
+	target := t.GitTarget()
+	if target.InstanceID == "" {
 		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
 	}
 	primaryName := ""
@@ -890,7 +891,7 @@ func (s *taskService) taskDiffIndex(ctx context.Context, entry *taskmgr.Entry) (
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
-	statuses, err := s.repositoryStatuses(ctx, checkout, t)
+	statuses, err := s.repositoryStatuses(ctx, checkout, t, target)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
@@ -969,7 +970,7 @@ func (s *taskService) taskFileDiff(ctx context.Context, entry *taskmgr.Entry, re
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
-	diff, err := checkout.FileDiff(ctx, s.runtimes, t, req.Repository, req.Commit, req.Path, req.OriginalPath)
+	diff, err := checkout.FileDiff(ctx, s.runtimes, t.GitTarget(), req.Repository, req.Commit, req.Path, req.OriginalPath)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
@@ -978,7 +979,8 @@ func (s *taskService) taskFileDiff(ctx context.Context, entry *taskmgr.Entry, re
 
 func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePath string) (*v1.DiffResp, error) {
 	t := entry.Task()
-	if t.RuntimeInstanceID() == "" {
+	target := t.GitTarget()
+	if target.InstanceID == "" {
 		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
 	}
 	diffPrimaryName := ""
@@ -992,12 +994,12 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 	diff := ""
 	if filePath != "" {
 		var err error
-		diff, err = checkout.DiffContent(ctx, s.log, s.runtimes, t, filePath)
+		diff, err = checkout.DiffContent(ctx, s.log, s.runtimes, target, filePath)
 		if err != nil {
 			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 		}
 	}
-	statuses, err := s.repositoryStatuses(ctx, checkout, t)
+	statuses, err := s.repositoryStatuses(ctx, checkout, t, target)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}
@@ -1012,7 +1014,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 		for j, commit := range status.Commits {
 			stat := make(v1.DiffStat, len(commit.Stat))
 			for k, file := range commit.Stat {
-				fileDiff, err := checkout.FileDiff(ctx, s.runtimes, t, i, commit.SHA, file.Path, "")
+				fileDiff, err := checkout.FileDiff(ctx, s.runtimes, target, i, commit.SHA, file.Path, "")
 				if err != nil {
 					return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 				}
@@ -1036,7 +1038,7 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 		}
 		uncommitted := make([]v1.GitFileStatus, len(status.Uncommitted))
 		for j, file := range status.Uncommitted {
-			fileDiff, err := checkout.FileDiff(ctx, s.runtimes, t, i, "", file.Path, file.OriginalPath)
+			fileDiff, err := checkout.FileDiff(ctx, s.runtimes, target, i, "", file.Path, file.OriginalPath)
 			if err != nil {
 				return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 			}
@@ -1067,7 +1069,8 @@ func (s *taskService) taskDiff(ctx context.Context, entry *taskmgr.Entry, filePa
 
 func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) (*v1.TaskRepoStatusResp, error) {
 	t := entry.Task()
-	if t.RuntimeInstanceID() == "" {
+	target := t.GitTarget()
+	if target.InstanceID == "" {
 		return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "task has no instance"}
 	}
 	primaryName := ""
@@ -1078,7 +1081,7 @@ func (s *taskService) taskRepoStatus(ctx context.Context, entry *taskmgr.Entry) 
 	if !ok {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "unknown repo"}
 	}
-	statuses, err := s.repositoryStatuses(ctx, checkout, t)
+	statuses, err := s.repositoryStatuses(ctx, checkout, t, target)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}

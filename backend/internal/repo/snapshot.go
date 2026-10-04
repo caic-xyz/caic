@@ -1,8 +1,10 @@
-// Git snapshots carry process-local read order for safe deferred publication.
+// Git targets and ordered snapshots preserve repository summaries across partial failures.
 
 package repo
 
 import (
+	"slices"
+	"strings"
 	"sync/atomic"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -33,12 +35,72 @@ func (r GitRead) NewerThan(previous GitRead) bool {
 	return r.sequence > previous.sequence
 }
 
+// GitTarget captures a runtime instance and its repository mapping together.
+// Task constructs it under its lock; query callers must treat it as immutable.
+type GitTarget struct {
+	InstanceID runtime.ID
+	Repos      []runtime.Repo
+}
+
 // GitSnapshot contains owned, immutable data from one full, compact, or numstat
 // probe. Full probes include Statuses; compact and full probes include RepoStates.
 // Partial probe failures can return populated data together with an error.
 type GitSnapshot struct {
-	Read       GitRead
-	DiffStat   agent.DiffStat
-	RepoStates []agent.RepoState
-	Statuses   []runtime.RepositoryStatus
+	Read        GitRead
+	Target      GitTarget
+	FailedRepos []int // Repositories whose previous summary must be retained and marked stale.
+	DiffStat    agent.DiffStat
+	RepoStates  []agent.RepoState
+	Statuses    []runtime.RepositoryStatus
+}
+
+// Summary retains the last known files and state for failed repositories.
+// Successful repositories replace their data, including newly clean states.
+func (s *GitSnapshot) Summary(previous agent.DiffStat, states []agent.RepoState) (agent.DiffStat, []agent.RepoState) {
+	if len(s.FailedRepos) == 0 {
+		return s.DiffStat, s.RepoStates
+	}
+	var stats agent.DiffStat
+	var merged []agent.RepoState
+	for i := range s.Target.Repos {
+		r := &s.Target.Repos[i]
+		prefix := ""
+		if len(s.Target.Repos) > 1 {
+			prefix = diffRepoPrefix(r) + "/"
+		}
+		failed := slices.Contains(s.FailedRepos, i)
+		source := s.DiffStat
+		if failed {
+			source = previous
+		}
+		start := len(stats)
+		for _, f := range source {
+			if prefix == "" || strings.HasPrefix(f.Path, prefix) {
+				stats = append(stats, f)
+			}
+		}
+		state := agent.RepoState{RepoIndex: i, Branch: r.Branch}
+		candidates := s.RepoStates
+		if failed || len(s.RepoStates) == 0 {
+			candidates = states
+		}
+		for _, old := range candidates {
+			if old.RepoIndex == i {
+				state = old
+				break
+			}
+		}
+		if !failed && len(s.RepoStates) == 0 {
+			state.ChangedFiles = len(stats) - start
+			state.LinesAdded = 0
+			state.LinesDeleted = 0
+			for _, f := range stats[start:] {
+				state.LinesAdded += f.LinesAdded
+				state.LinesDeleted += f.LinesDeleted
+			}
+		}
+		state.Stale = failed || state.Stale && len(s.RepoStates) == 0
+		merged = append(merged, state)
+	}
+	return stats, merged
 }

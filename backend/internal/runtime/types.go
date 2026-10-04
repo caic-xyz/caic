@@ -427,10 +427,21 @@ type FetchedBranch struct {
 	CommitHash string
 }
 
+// TurnRepository contains one fetched repository's branch summary and committed turn delta.
+// StatusErr leaves the previous live summary in place; fetched branches remain usable.
+// A nil TurnDiff means the previous tip was absent or could not be compared.
+type TurnRepository struct {
+	RepoIndex int
+	Status    RepositoryStatus
+	Branches  []FetchedBranch
+	TurnDiff  []GitFileStat
+	StatusErr error
+}
+
 // Repository provides repository operations inside runtime instances.
 type Repository interface {
+	TurnSnapshot(ctx context.Context, id ID, previous []FetchedBranch) ([]TurnRepository, error)
 	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
-	CommitDiffStat(ctx context.Context, id ID, repoIdx int, from, to string) (string, error)
 	Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error)
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)

@@ -94,11 +94,6 @@ func (*RuntimeBackend) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string)
 	return "", nil
 }
 
-// CommitDiffStat implements runtime.Repository.
-func (*RuntimeBackend) CommitDiffStat(_ context.Context, _ runtime.ID, _ int, _, _ string) (string, error) {
-	return "", nil
-}
-
 // FileDiff implements runtime.Repository.
 func (*RuntimeBackend) FileDiff(_ context.Context, _ runtime.ID, repoIdx int, commit, path, _ string) (string, error) {
 	switch {
@@ -207,6 +202,19 @@ func (b *RuntimeBackend) RepositoryStatus(_ context.Context, id runtime.ID, repo
 // walk to skip, so it returns the same fixture as the full status.
 func (b *RuntimeBackend) CompactRepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
 	return b.RepositoryStatus(ctx, id, repoIdx)
+}
+
+// TurnSnapshot supplies fake branch summaries without container synchronization.
+func (b *RuntimeBackend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []runtime.FetchedBranch) ([]runtime.TurnRepository, error) {
+	b.mu.Lock()
+	repos := slices.Clone(b.repos[id])
+	b.mu.Unlock()
+	out := make([]runtime.TurnRepository, len(repos))
+	for i := range repos {
+		status, err := b.CompactRepositoryStatus(ctx, id, i)
+		out[i] = runtime.TurnRepository{RepoIndex: i, Status: status, StatusErr: err}
+	}
+	return out, nil
 }
 
 // Fetch implements runtime.Repository.

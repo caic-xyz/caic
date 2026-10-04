@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"iter"
@@ -876,4 +877,51 @@ type streamCommandContainer struct {
 
 func (c *streamCommandContainer) SSHCommand([]string, string) []string {
 	return []string{"sh", "-c", c.command}
+}
+
+// gitCommandContainer executes the same Bash probes as a real container while
+// its embedded md fake models branch fetching separately.
+type gitCommandContainer struct{ fakeMDContainer }
+
+func (*gitCommandContainer) SSHCommand(_ []string, cmd string) []string {
+	return []string{"bash", "-c", cmd}
+}
+
+func TestTurnSnapshotBackend(t *testing.T) {
+	t.Parallel()
+	dir := initStatusRepo(t)
+	tip := runTestGitOutput(t, dir, "rev-parse", "HEAD")
+	for _, invalid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("invalid fetched tip %v", invalid), func(t *testing.T) {
+			t.Parallel()
+			fetched := tip
+			if invalid {
+				fetched = strings.Repeat("f", 40)
+			}
+			ct := &gitCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: fetched}}}}
+			backend := newTestBackend(&fakeMDClient{getResult: ct})
+			measured, err := backend.TurnSnapshot(t.Context(), "docker:ctr", []runtime.FetchedBranch{{RepositoryPath: dir, BranchName: "main", CommitHash: tip}})
+			if (err != nil) != invalid {
+				t.Fatalf("measurement error = %v", err)
+			}
+			if len(measured) != 1 || len(measured[0].Branches) != 1 || measured[0].Branches[0].CommitHash != fetched {
+				t.Fatalf("fetched tips lost: %+v", measured)
+			}
+			if invalid {
+				if measured[0].StatusErr == nil {
+					t.Fatal("moving HEAD was published as current")
+				}
+			} else {
+				if measured[0].TurnDiff == nil || len(measured[0].TurnDiff) != 0 {
+					t.Fatalf("clean delta unavailable: %+v", measured[0])
+				}
+			}
+			if !slices.Equal(ct.calls, []string{"Fetch"}) {
+				t.Fatalf("duplicated reference synchronization: %v", ct.calls)
+			}
+			if ct.fetchOpts.Commit {
+				t.Fatal("turn snapshot committed pending work")
+			}
+		})
+	}
 }

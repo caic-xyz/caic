@@ -1201,6 +1201,8 @@ export interface DiffFileStat {
 
 /** GitRepositoryState summarizes the compact Git state of one task repository. */
 export interface GitRepositoryState {
+  /** Last known data retained after a failed refresh. */
+  stale?: boolean;
   name: string;
   branch: string;
   ahead: number /* int */;

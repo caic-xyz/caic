@@ -472,31 +472,6 @@ func (b *Backend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...
 	return stdout.String(), nil
 }
 
-// CommitDiffStat implements runtime.Repository.
-func (b *Backend) CommitDiffStat(ctx context.Context, id runtime.ID, repoIdx int, from, to string) (string, error) {
-	localID, err := b.localID(id)
-	if err != nil {
-		return "", err
-	}
-	ct, err := b.container(ctx, string(localID))
-	if err != nil {
-		return "", err
-	}
-	repos := ct.Repos()
-	if repoIdx < 0 || repoIdx >= len(repos) {
-		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
-	}
-	cmd, err := gitCommitDiffStatCommand(repos[repoIdx].ContainerPath, from, to)
-	if err != nil {
-		return "", err
-	}
-	res, err := b.commandOutput(ctx, ct, cmd)
-	if err != nil {
-		return "", commandOutputError("git commit diff stat", ct, err, res.Stderr)
-	}
-	return string(res.Stdout), nil
-}
-
 // FileDiff implements runtime.Repository.
 func (b *Backend) FileDiff(ctx context.Context, id runtime.ID, repoIdx int, commit, path, originalPath string) (string, error) {
 	localID, err := b.localID(id)
@@ -532,6 +507,63 @@ func (b *Backend) RepositoryStatus(ctx context.Context, id runtime.ID, repoIdx i
 // in a single container probe, without the per-commit log walk.
 func (b *Backend) CompactRepositoryStatus(ctx context.Context, id runtime.ID, repoIdx int) (runtime.RepositoryStatus, error) {
 	return b.repositoryStatusFromProbe(ctx, id, repoIdx, compactGitStatusCommand, parseCompactGitStatus)
+}
+
+// TurnSnapshot fetches each repository once, then reads its branch and turn
+// statistics together. Fetch failures abort durability; measurement failures
+// keep the fetched tips but mark that repository's live summary unavailable.
+func (b *Backend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []runtime.FetchedBranch) ([]runtime.TurnRepository, error) {
+	localID, err := b.localID(id)
+	if err != nil {
+		return nil, err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return nil, err
+	}
+	repos := ct.Repos()
+	out := make([]runtime.TurnRepository, len(repos))
+	var errs []error
+	for i := range repos {
+		r := &repos[i]
+		entry := &out[i]
+		entry.RepoIndex = i
+		branches, err := ct.Fetch(ctx, &SlogWriter{Context: ctx, Logger: b.log, Phase: "turn-fetch"}, &SlogWriter{Context: ctx, Logger: b.log, Phase: "turn-fetch"}, i, &md.FetchOpts{})
+		if err != nil {
+			return nil, fmt.Errorf("fetch turn repository %s: %w", r.ContainerPath, err)
+		}
+		to := ""
+		for _, branch := range branches {
+			entry.Branches = append(entry.Branches, runtime.FetchedBranch{RepositoryPath: r.ContainerPath, BranchName: branch.BranchName, CommitHash: branch.CommitHash})
+			if branch.BranchName == primaryBranch(r) {
+				to = branch.CommitHash
+			}
+		}
+		from := ""
+		for _, branch := range previous {
+			if branch.RepositoryPath == r.ContainerPath && branch.BranchName == primaryBranch(r) {
+				from = branch.CommitHash
+				break
+			}
+		}
+		cmd, err := turnGitCommand(r.ContainerPath, r.DefaultRemote, r.DefaultBranch, from, to)
+		if err == nil {
+			res, runErr := b.commandOutput(ctx, ct, cmd)
+			if runErr != nil {
+				err = commandOutputError("turn git snapshot", ct, runErr, res.Stderr)
+			} else {
+				entry.Status, entry.TurnDiff, err = parseTurnGit(string(res.Stdout))
+			}
+		}
+		if err == nil && from != "" && entry.TurnDiff == nil {
+			errs = append(errs, fmt.Errorf("turn baseline %s unavailable for %s", from, r.ContainerPath))
+		}
+		if err != nil {
+			entry.StatusErr = err
+			errs = append(errs, fmt.Errorf("measure turn repository %s: %w", r.ContainerPath, err))
+		}
+	}
+	return out, errors.Join(errs...)
 }
 
 // Fetch implements runtime.Repository.

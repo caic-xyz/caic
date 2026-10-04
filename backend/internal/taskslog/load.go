@@ -1448,7 +1448,7 @@ func applyInventoryMetadata(loaded *LoadedTask, tail *logTailScan, messages []ag
 
 func isInventoryMetadataMessage(msg agent.Message) bool {
 	switch msg.(type) {
-	case *agent.InitMessage, *agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *agent.DiffStatMessage, *inventoryResultMetadata:
+	case *agent.InitMessage, *agent.MetaMessage, *agent.MetaPRMessage, *agent.MetaResultMessage, *inventoryResultMetadata:
 		return true
 	default:
 		return false

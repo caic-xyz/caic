@@ -68,12 +68,13 @@ type FakeBackend struct {
 	DiffOutput string
 	// Files maps absolute instance paths to file contents.
 	Files map[string][]byte
-	// CommitDiffStatOutput is returned verbatim by CommitDiffStat.
-	CommitDiffStatOutput string
 	// FileDiffOutput is returned verbatim by FileDiff.
 	FileDiffOutput string
 	// RepositoryStatusValue is returned by RepositoryStatus.
 	RepositoryStatusValue runtime.RepositoryStatus
+	// TurnSnapshotValue configures consolidated measurements.
+	TurnSnapshotValue []runtime.TurnRepository
+	TurnSnapshotErr   error
 	// LaunchErr, when set, is returned by Launch.
 	LaunchErr error
 	// FetchErr, when set, is returned by Fetch.
@@ -130,9 +131,24 @@ func (f *FakeBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args
 	return f.DiffOutput, nil
 }
 
-// CommitDiffStat implements runtime.Repository.
-func (f *FakeBackend) CommitDiffStat(context.Context, runtime.ID, int, string, string) (string, error) {
-	return f.CommitDiffStatOutput, nil
+// TurnSnapshot returns configured branch and turn measurements and records its fetch.
+func (f *FakeBackend) TurnSnapshot(ctx context.Context, id runtime.ID, previous []runtime.FetchedBranch) ([]runtime.TurnRepository, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fetches = append(f.fetches, runtime.FetchOpts{})
+	if f.FetchErr != nil {
+		return nil, f.FetchErr
+	}
+	out := slices.Clone(f.TurnSnapshotValue)
+	for i := range out {
+		if len(out) == 1 && len(out[i].Branches) == 0 {
+			out[i].Branches = slices.Clone(f.FetchedBranches)
+		}
+		if len(previous) == 0 {
+			out[i].TurnDiff = nil
+		}
+	}
+	return out, f.TurnSnapshotErr
 }
 
 // FileDiff implements runtime.Repository.

@@ -266,6 +266,8 @@ func (b *modelFetchBackend) SetModelInventory(inventory agent.ModelInventory) {
 var _ testRuntimeBackend = (*modelRefreshRuntime)(nil)
 
 type modelRefreshRuntime struct {
+	runtimetest.FakeBackend
+
 	launches    int
 	connects    int
 	purges      int
@@ -287,10 +289,6 @@ func (r *modelRefreshRuntime) Connect(_ context.Context, id runtime.ID, _ *runti
 }
 
 func (*modelRefreshRuntime) Diff(_ context.Context, _ runtime.ID, _ int, _ ...string) (string, error) {
-	return "", nil
-}
-
-func (*modelRefreshRuntime) CommitDiffStat(_ context.Context, _ runtime.ID, _ int, _, _ string) (string, error) {
 	return "", nil
 }
 

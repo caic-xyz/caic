@@ -1011,6 +1011,7 @@ func (m *DiffStatMessage) Type() string { return messageTypeDiffStat }
 // RepoState is the compact git state of one task repository: exactly what the
 // task card and detail header render, without per-file details or history.
 type RepoState struct {
+	Stale            bool   `json:"stale,omitempty"` // A failed probe retained the last known data.
 	RepoIndex        int    `json:"repo_index"`
 	Branch           string `json:"branch"`
 	Operation        string `json:"operation,omitempty"` // runtime.RepositoryOperation while a merge/rebase is in progress.

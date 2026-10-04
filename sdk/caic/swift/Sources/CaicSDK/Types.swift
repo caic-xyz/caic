@@ -1015,6 +1015,8 @@ public struct DiffFileStat: Codable {
 
 /// GitRepositoryState summarizes the compact Git state of one task repository.
 public struct GitRepositoryState: Codable {
+    /// Last known data retained after a failed refresh.
+    public let stale: Bool?
     public let name: String
     public let branch: String
     public let ahead: Int
