@@ -487,7 +487,8 @@ type WarningCategory string
 
 // Supported warning categories.
 const (
-	WarningCategoryCIPollFailed WarningCategory = "ci_poll_failed"
+	WarningCategoryCIPollFailed         WarningCategory = "ci_poll_failed"
+	WarningCategoryRuntimeRestoreFailed WarningCategory = "runtime_restore_failed"
 )
 
 // WarningDetail describes a failed operation on a repository.

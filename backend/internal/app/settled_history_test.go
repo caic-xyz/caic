@@ -3,10 +3,12 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,7 +87,8 @@ func newSettledHistoryTestManager(t *testing.T, logStore *taskslog.Store) *taskm
 func TestRunSettledHistory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	log := slog.New(slog.DiscardHandler)
+	var diagnostics bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&diagnostics, nil))
 	logStore := taskslog.NewStore(log, dir)
 	taskMgr := newSettledHistoryTestManager(t, logStore)
 
@@ -101,9 +104,16 @@ func TestRunSettledHistory(t *testing.T) {
 	if _, err := logStore.Compress(staleCompressed, nil, taskslog.StatePurged); err != nil {
 		t.Fatal(err)
 	}
+	corruptPath := filepath.Join(dir, ksid.NewID().String()+".jsonl")
+	if err := os.WriteFile(corruptPath, []byte("corrupt historical task log"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := runSettledHistory(t.Context(), log, logStore, taskMgr); err != nil {
 		t.Fatal(err)
+	}
+	if got := strings.Count(diagnostics.String(), `"level":"ERROR","msg":"skipping unreadable task log"`); got != 1 {
+		t.Fatalf("corrupt history produced %d ERROR logs, want one: %s", got, diagnostics.String())
 	}
 
 	// A recent terminal plain log is settled by the pass and registered through

@@ -4,7 +4,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,16 +15,51 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 )
 
 func TestWarningStore(t *testing.T) {
 	t.Parallel()
-	t.Run("Update", func(t *testing.T) {
+	t.Run("UpdateRuntimeRestore", func(t *testing.T) {
+		t.Parallel()
+		router := newTestRouter(t, nil)
+		w := NewWarningStore(router.taskMgr)
+		if err := w.UpdateCI("a", ci.WarningCategoryCIPollFailed, "private CI failure", []ci.WarningDetail{{Repo: "private", Error: "timeout"}}); err != nil {
+			t.Fatal(err)
+		}
+		w.UpdateRuntimeRestore(&taskmgr.ImportError{Failed: 2, Err: errors.New("private runtime diagnostics")})
+		for _, owner := range []string{"", "b"} {
+			got := w.Since(owner, 0)
+			if len(got) != 1 || got[0].Category != "runtime_restore_failed" || len(got[0].Details) != 0 {
+				t.Fatalf("public warnings for %q = %+v", owner, got)
+			}
+			if got[0].Message != "2 tasks could not be restored." {
+				t.Fatalf("runtime failure was not translated with the exact count: %+v", got)
+			}
+			data, err := json.Marshal(&got[0].Warning)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), `"details":[]`) || strings.Contains(string(data), "private runtime diagnostics") {
+				t.Fatalf("public warning JSON = %s", data)
+			}
+			w.UpdateRuntimeRestore(&taskmgr.ImportError{Failed: 2, Err: errors.New("private runtime diagnostics")})
+			if next := w.Since(owner, got[0].seq); len(next) != 0 {
+				t.Fatalf("unchanged public warning was republished: %+v", next)
+			}
+		}
+		if got := w.Since("a", 0); len(got) != 2 {
+			t.Fatalf("own account and public warnings = %+v", got)
+		}
+	})
+	t.Run("UpdateCI", func(t *testing.T) {
 		t.Parallel()
 		router := newTestRouter(t, nil)
 		w := NewWarningStore(router.taskMgr)
 		details := []ci.WarningDetail{{Repo: "a", Error: "rate limit"}}
-		w.Update("a", ci.WarningCategoryCIPollFailed, "original", details)
+		if err := w.UpdateCI("a", ci.WarningCategoryCIPollFailed, "original", details); err != nil {
+			t.Fatal(err)
+		}
 		first := w.Since("a", 0)
 		if len(first) != 1 || first[0].ID == "" {
 			t.Fatalf("first episode = %+v", first)
@@ -32,27 +69,52 @@ func TestWarningStore(t *testing.T) {
 		if got := w.Since("a", 0); got[0].Details[0].Error != "rate limit" {
 			t.Fatalf("details were not isolated: %+v", got)
 		}
-		w.Update("a", ci.WarningCategoryCIPollFailed, "original", []ci.WarningDetail{{Repo: "a", Error: "rate limit"}})
+		if err := w.UpdateCI("a", ci.WarningCategoryCIPollFailed, "original", []ci.WarningDetail{{Repo: "a", Error: "rate limit"}}); err != nil {
+			t.Fatal(err)
+		}
 		if got := w.Since("a", first[0].seq); len(got) != 0 {
 			t.Fatalf("unchanged warning was republished: %+v", got)
 		}
-		w.Update("a", ci.WarningCategoryCIPollFailed, "translated", []ci.WarningDetail{{Repo: "b", Error: "timeout"}})
+		if err := w.UpdateCI("a", ci.WarningCategoryCIPollFailed, "translated", []ci.WarningDetail{{Repo: "b", Error: "timeout"}}); err != nil {
+			t.Fatal(err)
+		}
 		updated := w.Since("a", first[0].seq)
 		if len(updated) != 1 || updated[0].ID != first[0].ID || updated[0].Message != "translated" || updated[0].Details[0].Repo != "b" {
 			t.Fatalf("update did not retain episode identity: %+v", updated)
 		}
-		w.Update("b", ci.WarningCategoryCIPollFailed, "other account", []ci.WarningDetail{{Repo: "private", Error: "denied"}})
+		if err := w.UpdateCI("b", ci.WarningCategoryCIPollFailed, "other account", []ci.WarningDetail{{Repo: "private", Error: "denied"}}); err != nil {
+			t.Fatal(err)
+		}
 		if got := w.Since("a", 0); len(got) != 1 || got[0].Message != "translated" {
 			t.Fatalf("account warnings mixed: %+v", got)
 		}
-		w.Resolve("a", ci.WarningCategoryCIPollFailed)
+		if err := w.ResolveCI("a", ci.WarningCategoryCIPollFailed); err != nil {
+			t.Fatal(err)
+		}
 		if got := w.Since("a", 0); len(got) != 0 {
 			t.Fatalf("recovered warning remains replayable: %+v", got)
 		}
-		w.Update("a", ci.WarningCategoryCIPollFailed, "new outage", details)
+		if err := w.UpdateCI("a", ci.WarningCategoryCIPollFailed, "new outage", details); err != nil {
+			t.Fatal(err)
+		}
 		if got := w.Since("a", 0); len(got) != 1 || got[0].ID == first[0].ID {
 			t.Fatalf("new outage did not get a new ID: %+v", got)
 		}
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			before := w.Since("a", 0)
+			for _, category := range []ci.WarningCategory{"", "runtime_restore_failed", "unknown"} {
+				if err := w.UpdateCI("a", category, "invalid", nil); err == nil {
+					t.Fatalf("accepted unsupported CI category %q", category)
+				}
+				if err := w.ResolveCI("a", category); err == nil {
+					t.Fatalf("accepted recovery for unsupported CI category %q", category)
+				}
+			}
+			if got := w.Since("a", 0); len(got) != 1 || got[0].ID != before[0].ID || got[0].seq != before[0].seq {
+				t.Fatalf("invalid category mutated a published warning: %+v", got)
+			}
+		})
 	})
 	t.Run("concurrent updates and reads", func(t *testing.T) {
 		t.Parallel()
@@ -61,7 +123,9 @@ func TestWarningStore(t *testing.T) {
 		var wg sync.WaitGroup
 		for range 20 {
 			wg.Go(func() {
-				w.Update("a", ci.WarningCategoryCIPollFailed, "failed", []ci.WarningDetail{{Repo: "a", Error: "timeout"}})
+				if err := w.UpdateCI("a", ci.WarningCategoryCIPollFailed, "failed", []ci.WarningDetail{{Repo: "a", Error: "timeout"}}); err != nil {
+					t.Error(err)
+				}
 				w.Since("a", 0)
 			})
 		}
@@ -74,8 +138,12 @@ func TestWarningStore(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t, nil)
 		w := s.taskHandlers.warnings
-		w.Update("", ci.WarningCategoryCIPollFailed, "CI unavailable", []ci.WarningDetail{{Repo: "a", Error: "timeout"}})
-		w.Update("other-account", ci.WarningCategoryCIPollFailed, "private alert", []ci.WarningDetail{{Repo: "private", Error: "denied"}})
+		if err := w.UpdateCI("", ci.WarningCategoryCIPollFailed, "CI unavailable", []ci.WarningDetail{{Repo: "a", Error: "timeout"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.UpdateCI("other-account", ci.WarningCategoryCIPollFailed, "private alert", []ci.WarningDetail{{Repo: "private", Error: "denied"}}); err != nil {
+			t.Fatal(err)
+		}
 		var id string
 		for range 2 {
 			r := connectTaskListStream(t, s)
@@ -108,20 +176,20 @@ func (b *pollingWarningBackend) ListActiveRepos() []ci.RepoInfo { return b.repos
 func (b *pollingWarningBackend) ForgeForInfo(context.Context, *ci.RepoInfo) forge.Forge {
 	return b.client
 }
-func (b *pollingWarningBackend) UpdateWarning(ctx context.Context, category ci.WarningCategory, message string, details []ci.WarningDetail) {
+func (b *pollingWarningBackend) UpdateWarning(ctx context.Context, category ci.WarningCategory, message string, details []ci.WarningDetail) error {
 	ownerID := ""
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	b.warnings.Update(ownerID, category, message, details)
+	return b.warnings.UpdateCI(ownerID, category, message, details)
 }
 
-func (b *pollingWarningBackend) ResolveWarning(ctx context.Context, category ci.WarningCategory) {
+func (b *pollingWarningBackend) ResolveWarning(ctx context.Context, category ci.WarningCategory) error {
 	ownerID := ""
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	b.warnings.Resolve(ownerID, category)
+	return b.warnings.ResolveCI(ownerID, category)
 }
 
 type pollingWarningForge struct {

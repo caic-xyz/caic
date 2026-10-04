@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -29,7 +31,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/ksid"
 )
 
 // testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
@@ -77,10 +78,11 @@ func (b *testCIBackend) SetRepoCIStatusIfChanged(relPath, sha string, result for
 }
 
 func (b *testCIBackend) NotifyTaskChange() { b.taskMgr.NotifyTaskChange() }
-func (b *testCIBackend) UpdateWarning(context.Context, ci.WarningCategory, string, []ci.WarningDetail) {
+func (b *testCIBackend) UpdateWarning(context.Context, ci.WarningCategory, string, []ci.WarningDetail) error {
+	return nil
 }
-func (b *testCIBackend) ResolveWarning(context.Context, ci.WarningCategory) {}
-func (b *testCIBackend) Prefs() *preferences.Store                          { return b.prefs }
+func (b *testCIBackend) ResolveWarning(context.Context, ci.WarningCategory) error { return nil }
+func (b *testCIBackend) Prefs() *preferences.Store                                { return b.prefs }
 
 // stubAppClient implements githubAppClient for tests.
 type stubAppClient struct {

@@ -3,6 +3,33 @@ import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../help
 import type { Harness, UserResp, Warning } from "../../sdk/caic/ts/v1/types.gen";
 import { validateTaskListEvent } from "../../sdk/caic/ts/v1/validate.gen";
 
+test("runtime restoration warning shows the exact count and can be dismissed", async ({ page }) => {
+  const warning: Warning = {
+    id: "restore-outage-1",
+    category: "runtime_restore_failed",
+    message: "2 tasks could not be restored.",
+    details: [],
+  };
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/auth/me", (route) =>
+    route.fulfill({
+      json: { id: "restore-test", provider: "github", username: "restore-test" } satisfies UserResp,
+    }),
+  );
+  await page.route("**/api/caic/v1/tasks/events", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify({ kind: "status", status: { loading: false, error: "" } })}\n\ndata: ${JSON.stringify({ kind: "snapshot", snapshot: [] })}\n\ndata: ${JSON.stringify({ kind: "warning", warning })}\n\n`,
+    }),
+  );
+  await page.goto("/");
+  await expect(page.getByText(warning.message)).toBeVisible();
+  await page.getByRole("button", { name: "Dismiss warning" }).click();
+  await expect(page.getByText(warning.message)).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) => {
   const err = await api
     .createTask({ harness: "claude" } as unknown as Parameters<typeof api.createTask>[0])

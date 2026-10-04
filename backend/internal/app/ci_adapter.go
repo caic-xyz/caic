@@ -5,6 +5,8 @@ package app
 import (
 	"context"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -16,7 +18,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
-	"github.com/maruel/ksid"
 )
 
 type ciTaskCreator interface {
@@ -40,21 +41,21 @@ func (a *ciAdapter) NotifyTaskChange() {
 }
 
 // UpdateWarning coalesces an authenticated account's warning by category.
-func (a *ciAdapter) UpdateWarning(ctx context.Context, category ci.WarningCategory, message string, details []ci.WarningDetail) {
+func (a *ciAdapter) UpdateWarning(ctx context.Context, category ci.WarningCategory, message string, details []ci.WarningDetail) error {
 	ownerID := ""
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	a.warnings.Update(ownerID, category, message, details)
+	return a.warnings.UpdateCI(ownerID, category, message, details)
 }
 
 // ResolveWarning marks recovery for an authenticated account's warning.
-func (a *ciAdapter) ResolveWarning(ctx context.Context, category ci.WarningCategory) {
+func (a *ciAdapter) ResolveWarning(ctx context.Context, category ci.WarningCategory) error {
 	ownerID := ""
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	a.warnings.Resolve(ownerID, category)
+	return a.warnings.ResolveCI(ownerID, category)
 }
 
 // GitHubApp returns the GitHub App client for forge operations.

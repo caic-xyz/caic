@@ -1151,6 +1151,10 @@ sealed interface WarningCategory {
         override val value = "ci_poll_failed"
     }
     @Serializable
+    data object RuntimeRestoreFailed : WarningCategory {
+        override val value = "runtime_restore_failed"
+    }
+    @Serializable
     data class Other(override val value: String) : WarningCategory
 }
 
@@ -1161,6 +1165,7 @@ object WarningCategorySerializer : KSerializer<WarningCategory> {
         val v = decoder.decodeString()
         return when (v) {
             "ci_poll_failed" -> WarningCategory.CIPollFailed
+            "runtime_restore_failed" -> WarningCategory.RuntimeRestoreFailed
             else -> WarningCategory.Other(v)
         }
     }

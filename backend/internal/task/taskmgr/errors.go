@@ -1,4 +1,4 @@
-// Typed errors for the taskmgr package, mapped to HTTP status codes by the server.
+// Typed errors for task restoration and lifecycle operations in the taskmgr package.
 
 package taskmgr
 
@@ -6,6 +6,19 @@ import (
 	"errors"
 	"fmt"
 )
+
+// ImportError reports how many runtime instances failed task restoration.
+// Instances skipped because they do not belong to caic are not failures.
+type ImportError struct {
+	Failed int
+	Err    error
+}
+
+// Error returns the underlying restoration diagnostics.
+func (e *ImportError) Error() string { return e.Err.Error() }
+
+// Unwrap exposes the underlying restoration errors.
+func (e *ImportError) Unwrap() error { return e.Err }
 
 // Code identifies a specific task-manager error within its broader ErrorKind.
 type Code string

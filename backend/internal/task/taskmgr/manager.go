@@ -582,7 +582,8 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 	entry.SetMonitorBranch(branch)
 }
 
-// ImportInstances registers preexisting runtime instances as tasks.
+// ImportInstances registers preexisting runtime instances as tasks. Failures
+// return an ImportError counting affected instances alongside successful entries.
 func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Instance, allLogs []*taskslog.LoadedTask) ([]*Entry, error) {
 	defer m.completeRuntimeImport(ctx)
 	if instances == nil {
@@ -644,6 +645,7 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var entries []*Entry
+	failed := len(rejected)
 	for range min(maxConcurrentTaskImports, len(jobs)) {
 		wg.Go(func() {
 			for job := range jobsCh {
@@ -651,6 +653,7 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 				mu.Lock()
 				if err != nil {
 					errs = append(errs, err)
+					failed++
 				}
 				if entry != nil {
 					entries = append(entries, entry)
@@ -661,7 +664,10 @@ func (m *Manager) ImportInstances(ctx context.Context, instances []runtime.Insta
 	}
 	wg.Wait()
 
-	return entries, errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		return entries, &ImportError{Failed: failed, Err: err}
+	}
+	return entries, nil
 }
 
 func primaryBranchForImport(checkout *repo.Checkout, c *runtime.Instance) (string, bool) {

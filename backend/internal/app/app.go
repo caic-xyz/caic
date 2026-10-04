@@ -436,7 +436,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		region := trace.StartRegion(ctx, "load-live-task-logs")
 		liveLogs, loadErr := loadRuntimeTaskLogs(ctx, logStore, runtimes, instanceRes.instances)
 		if loadErr != nil {
-			appLog.WarnContext(ctx, "load live task logs failed; affected instances will not be imported", "err", loadErr)
+			appLog.ErrorContext(ctx, "load live task logs failed; affected instances will not be imported", "err", loadErr)
 		}
 		region.End()
 		region = trace.StartRegion(ctx, "import-runtime-instances")
@@ -446,6 +446,9 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		}
 		region.End()
 		appLog.InfoContext(ctx, "restored runtime tasks", "n", len(imported), "dur", time.Since(started))
+		if failure, ok := errors.AsType[*taskmgr.ImportError](importErr); ok && ctx.Err() == nil {
+			warnings.UpdateRuntimeRestore(failure)
+		}
 		importWiring := &importedTaskWiring{
 			log:       log.With("cmp", "import-ci"),
 			authStore: authStore,
@@ -492,7 +495,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 				appLog.ErrorContext(ctx, "settled history pass failed", "err", err)
 			}
 		}
-		taskMgr.CompleteSettledLoad(errors.Join(loadErr, importErr, historyErr))
+		taskMgr.CompleteSettledLoad(historyErr)
 
 		if err := usageRollup.Backfill(ctx, logStore.UsageRows(ctx, taskMgr)); err != nil {
 			if ctx.Err() != nil {
@@ -693,6 +696,8 @@ func initRuntimeSystem(ctx context.Context, log *slog.Logger, cfg *server.Config
 // trimmed before decode by the retention cutoff, the per-repo cap, and the
 // header cache. It returns an error only for a pass that could not register
 // its history; the caller logs it and reports it to the task-list stream.
+// Individual unreadable historical logs are logged and skipped; they never
+// publish a runtime restoration warning or fail the history pass.
 // Compression failures are logged but non-fatal so a partially compressable
 // set still loads, and a valid partial subset is always kept. It checks ctx
 // between phases, so a shutdown interrupts the pass at the next phase boundary

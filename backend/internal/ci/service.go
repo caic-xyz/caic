@@ -302,9 +302,13 @@ func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
 	// Empty/no-access rounds and canceled rounds do not prove recovery.
 	if len(details) > 0 {
 		slices.SortFunc(details, func(a, b WarningDetail) int { return strings.Compare(a.Repo, b.Repo) })
-		svc.backend.UpdateWarning(ctx, WarningCategoryCIPollFailed, "CI polling failed. CI status may be out of date.", details)
+		if err := svc.backend.UpdateWarning(ctx, WarningCategoryCIPollFailed, "CI polling failed. CI status may be out of date.", details); err != nil {
+			svc.log.ErrorContext(ctx, "publish CI warning", "err", err)
+		}
 	} else if healthy && ctx.Err() == nil {
-		svc.backend.ResolveWarning(ctx, WarningCategoryCIPollFailed)
+		if err := svc.backend.ResolveWarning(ctx, WarningCategoryCIPollFailed); err != nil {
+			svc.log.ErrorContext(ctx, "resolve CI warning", "err", err)
+		}
 	}
 }
 

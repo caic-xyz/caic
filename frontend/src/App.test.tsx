@@ -564,6 +564,28 @@ describe("App connection word settled states", () => {
   const word = () => screen.getByTestId("new-task-button");
   const status = () => document.getElementById("connection-status");
 
+  it("shows the counted restoration warning while remaining connected after history loads", async () => {
+    renderApp();
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [] });
+    dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
+    dispatchSSE({
+      kind: "warning",
+      warning: {
+        id: "restore-1",
+        category: "runtime_restore_failed",
+        message: "2 existing tasks could not be restored.",
+        details: [],
+      },
+    });
+    dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
+    await waitFor(() => expect(screen.getByText("2 existing tasks could not be restored.")).toBeInTheDocument());
+    expect(word().getAttribute("data-status")).toBe("connected");
+    expect(status()).toHaveTextContent("Connected");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss warning" }));
+    expect(screen.queryByText("2 existing tasks could not be restored.")).not.toBeInTheDocument();
+  });
+
   it("exposes connected status on the caic button", async () => {
     renderApp();
     expect(word().getAttribute("data-status")).toBe("connected");

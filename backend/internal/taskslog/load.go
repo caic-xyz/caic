@@ -1680,7 +1680,15 @@ func readOnlyLogPaths(logDir string) ([]string, error) {
 	return paths, nil
 }
 
-func loadLogsFromPaths(log *slog.Logger, paths []string, strict, cacheHeader bool) ([]*LoadedTask, error) {
+type logLoadMode uint8
+
+const (
+	logLoadRequired logLoadMode = iota
+	logLoadHistory
+	logLoadSettlement
+)
+
+func loadLogsFromPaths(log *slog.Logger, paths []string, mode logLoadMode, cacheHeader bool) ([]*LoadedTask, error) {
 	// Parse headers concurrently, but retain only a bounded number of scanner
 	// buffers and decompressor/file handles when a cache has many old logs.
 	type result struct {
@@ -1709,8 +1717,17 @@ func loadLogsFromPaths(log *slog.Logger, paths []string, strict, cacheHeader boo
 	var errs []error
 	for i, r := range results {
 		if r.err != nil {
-			if strict {
+			switch mode {
+			case logLoadRequired:
 				errs = append(errs, fmt.Errorf("load task log %s: %w", paths[i], r.err))
+			case logLoadHistory:
+				// Historical logs are best-effort. Keep failures in the server
+				// logs without making a usable task list fail for an old task.
+				log.Error("skipping unreadable task log", "path", paths[i], "err", r.err)
+			case logLoadSettlement:
+				// The subsequent history scan owns ERROR reporting. Settlement
+				// also scans old logs that are outside history's retention cutoff.
+				log.Debug("skipping unreadable task log during settlement", "path", paths[i], "err", r.err)
 			}
 			continue
 		}

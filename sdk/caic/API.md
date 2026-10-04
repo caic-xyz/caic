@@ -443,6 +443,7 @@ WarningCategory identifies a warning independently of translated display text.
 | Value | Description |
 |-------|-------------|
 | `ci_poll_failed` |  |
+| `runtime_restore_failed` |  |
 
 ### VoiceGatewayMetadata
 

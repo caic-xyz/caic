@@ -637,6 +637,7 @@ public struct WarningCategory: Codable, Equatable, Hashable {
     public init(_ value: String) { self.value = value }
 
     public static let CIPollFailed = WarningCategory("ci_poll_failed")
+    public static let RuntimeRestoreFailed = WarningCategory("runtime_restore_failed")
 
     public static func other(_ value: String) -> WarningCategory { WarningCategory(value) }
 

@@ -601,12 +601,7 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 
 		// Replay active alerts on connect, then emit diagnostic updates by revision.
 		for _, warn := range newWarnings {
-			info, err := apiconv.Warning(&warn.Warning)
-			if err != nil {
-				h.log.WarnContext(ctx, "convert warning", "err", err)
-				return
-			}
-			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "warning", Warning: &info}); err != nil {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "warning", Warning: &warn.Warning}); err != nil {
 				h.log.WarnContext(ctx, "marshal warning", "err", err)
 				return
 			}

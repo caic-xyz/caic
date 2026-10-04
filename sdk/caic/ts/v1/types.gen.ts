@@ -800,11 +800,13 @@ export const VoiceGatewayModeEmbedded = "embedded";
 export const VoiceGatewayModeExternal = "external";
 
 export type WarningCategory =
-  | "ci_poll_failed";
+  | "ci_poll_failed"
+  | "runtime_restore_failed";
 /**
  * Supported values.
  */
 export const WarningCategoryCIPollFailed = "ci_poll_failed";
+export const WarningCategoryRuntimeRestoreFailed = "runtime_restore_failed";
 
 /** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];

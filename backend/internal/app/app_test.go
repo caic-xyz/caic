@@ -3,11 +3,15 @@
 package app
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -21,9 +25,132 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
+
+type missingLogSystem struct {
+	runtimetest.FakeSystem
+
+	taskID string
+}
+
+func (s *missingLogSystem) List(context.Context) ([]runtime.Instance, error) {
+	return []runtime.Instance{{ID: runtime.NewID(s.Name(), "md-agent-missing-log")}}, nil
+}
+
+func (s *missingLogSystem) Metadata(_ context.Context, _ runtime.ID, key runtime.MetadataKey) (string, error) {
+	if key == runtime.MetadataTaskID {
+		return s.taskID, nil
+	}
+	return "", nil
+}
+
+func TestRuntimeRestoreMissingLog(t *testing.T) {
+	t.Parallel()
+	cfg := closeSpyConfig(t, "")
+	cfg.LLM.Disable = true
+	id := ksid.NewID().String()
+	cfg.Runtime.System = &missingLogSystem{taskID: id}
+	// A corrupt purged history must not increase the runtime warning count or
+	// turn a usable task list into a history error.
+	dir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	corruptPath := filepath.Join(dir, ksid.NewID().String()+".jsonl.zst")
+	if err := os.WriteFile(corruptPath, []byte("corrupt compressed purged task log"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	a, err := New(t.Context(), slog.New(slog.NewJSONHandler(&logs, nil)), t.TempDir(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := errors.Join(a.taskMgr.Close(), a.metricsLog.Close()); err != nil {
+			t.Error(err)
+		}
+		for _, c := range a.providerClosers {
+			if err := c.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err := a.backgroundTasks[0](t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if loading, loadErr := a.taskMgr.SettledStatus(); loading || loadErr != "" {
+		t.Fatalf("successful history load reported runtime import failure: loading=%v error=%q", loading, loadErr)
+	}
+	if !strings.Contains(logs.String(), `"level":"ERROR","msg":"load live task logs failed; affected instances will not be imported"`) {
+		t.Fatalf("missing runtime log failure was not logged at error level: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), `"level":"ERROR","msg":"skipping unreadable task log"`) || !strings.Contains(logs.String(), corruptPath) {
+		t.Fatalf("corrupt purged task log was not logged at error level: %s", logs.String())
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- a.Server.Serve(ctx, ln) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+			t.Error(err)
+		}
+	})
+	var warningID string
+	for range 2 {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/api/caic/v1/tasks/events", http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		scanner := bufio.NewScanner(resp.Body)
+		var warning *v1.Warning
+		for scanner.Scan() {
+			payload, ok := strings.CutPrefix(scanner.Text(), "data: ")
+			if !ok {
+				continue
+			}
+			var ev v1.TaskListEvent
+			if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+				t.Fatal(err)
+			}
+			if ev.Kind == "status" && (ev.Status.Loading || ev.Status.Error != "") {
+				t.Fatalf("history status = %+v", ev.Status)
+			}
+			if ev.Kind == "warning" {
+				warning = ev.Warning
+				break
+			}
+		}
+		if warning == nil || warning.Category != "runtime_restore_failed" || warning.ID == "" {
+			t.Fatalf("runtime restoration warning = %+v, stream error = %v", warning, scanner.Err())
+		}
+		if warning.Message != "1 task could not be restored." {
+			t.Fatalf("warning does not identify the failed task count: %+v", warning)
+		}
+		if warningID != "" && warning.ID != warningID {
+			t.Fatalf("reconnection changed warning identity: %q != %q", warning.ID, warningID)
+		}
+		warningID = warning.ID
+		if strings.Contains(warning.Message, id) || len(warning.Details) != 0 {
+			t.Fatalf("public warning exposes task diagnostics: %+v", warning)
+		}
+	}
+}
 
 type slowImportSystem struct {
 	runtimetest.FakeSystem

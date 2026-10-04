@@ -4120,6 +4120,29 @@ func TestManager(t *testing.T) {
 
 	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
+		t.Run("counts_missing_logs_without_counting_non_caic_instances", func(t *testing.T) {
+			t.Parallel()
+			info := &runtimetest.FakeInfo{Meta: map[string]string{
+				"md-agent-missing-one\x00caic.id": ksid.NewID().String(),
+				"md-agent-missing-two\x00caic.id": ksid.NewID().String(),
+			}}
+			m := newTestManager(t, Config{
+				ServerCtx: t.Context(),
+				Runtimes:  newTestRuntime(t, &runtimetest.FakeBackend{}, info),
+			})
+			instances := []runtime.Instance{
+				{ID: runtime.NewID("test-runtime", "md-agent-missing-one")},
+				{ID: runtime.NewID("test-runtime", "md-agent-missing-two")},
+				{ID: runtime.NewID("test-runtime", "md-agent-unowned")},
+			}
+			entries, err := m.ImportInstances(t.Context(), instances, nil)
+			if len(entries) != 0 {
+				t.Fatalf("imported missing logs: %+v", entries)
+			}
+			if failure, ok := errors.AsType[*ImportError](err); !ok || failure.Failed != 2 {
+				t.Fatalf("missing log restoration count = %v, want two failed instances", err)
+			}
+		})
 		t.Run("bounds_concurrent_imports", func(t *testing.T) {
 			t.Parallel()
 			const taskCount = maxConcurrentTaskImports + 3
@@ -4344,6 +4367,9 @@ func TestManager(t *testing.T) {
 			adopted, err := m.ImportInstances(t.Context(), instances, nil)
 			if err == nil || !strings.Contains(err.Error(), "duplicate runtime task ID") {
 				t.Fatalf("AdoptInstances error = %v, want duplicate-task-ID error", err)
+			}
+			if failure, ok := errors.AsType[*ImportError](err); !ok || failure.Failed != 2 {
+				t.Fatalf("duplicate runtime restoration count = %v, want two failed instances", err)
 			}
 			if adopted != nil || m.Len() != 0 {
 				t.Fatalf("duplicate adoption mutated manager: adopted=%#v len=%d", adopted, m.Len())

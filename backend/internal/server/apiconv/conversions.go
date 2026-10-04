@@ -9,7 +9,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -17,22 +16,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
-
-// Warning converts a categorized warning to its API representation.
-func Warning(w *ci.Warning) (v1.Warning, error) {
-	var category v1.WarningCategory
-	switch w.Category {
-	case ci.WarningCategoryCIPollFailed:
-		category = v1.WarningCategoryCIPollFailed
-	default:
-		return v1.Warning{}, fmt.Errorf("unsupported warning category %q", w.Category)
-	}
-	details := make([]v1.WarningDetail, len(w.Details))
-	for i, d := range w.Details {
-		details[i] = v1.WarningDetail{Repo: d.Repo, Error: d.Error}
-	}
-	return v1.Warning{ID: w.ID, Category: category, Message: w.Message, Details: details}, nil
-}
 
 // PromptToAgent converts v1.Prompt to agent.Prompt at the API boundary.
 func PromptToAgent(p v1.Prompt) agent.Prompt {

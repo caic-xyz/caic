@@ -5,6 +5,8 @@ package ci
 import (
 	"context"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -13,7 +15,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
-	"github.com/maruel/ksid"
 )
 
 // GitHubAppClient provides forge operations scoped to a GitHub App installation.
@@ -33,26 +34,16 @@ type RepoInfo struct {
 	ForgeRepo  string
 }
 
-// WarningCategory identifies an alert independently of its display text.
+// WarningCategory identifies a CI failure independently of its display text.
 type WarningCategory string
 
-// Supported warning categories.
-const (
-	WarningCategoryCIPollFailed WarningCategory = "ci_poll_failed"
-)
+// WarningCategoryCIPollFailed identifies a failed CI polling round.
+const WarningCategoryCIPollFailed WarningCategory = "ci_poll_failed"
 
-// WarningDetail describes a failed operation on a repository.
+// WarningDetail describes a failed CI operation on a repository.
 type WarningDetail struct {
 	Repo  string
 	Error string
-}
-
-// Warning is one failure episode. Updates retain ID until recovery.
-type Warning struct {
-	ID       string
-	Category WarningCategory
-	Message  string
-	Details  []WarningDetail
 }
 
 // TaskEntry is an abstract task handle for CI monitoring.
@@ -82,8 +73,8 @@ type Backend interface {
 
 	// Notifications.
 	NotifyTaskChange()
-	UpdateWarning(ctx context.Context, category WarningCategory, message string, details []WarningDetail)
-	ResolveWarning(ctx context.Context, category WarningCategory)
+	UpdateWarning(ctx context.Context, category WarningCategory, message string, details []WarningDetail) error
+	ResolveWarning(ctx context.Context, category WarningCategory) error
 
 	// Preferences.
 	Prefs() *preferences.Store

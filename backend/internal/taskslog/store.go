@@ -91,7 +91,7 @@ func (s *Store) LoadUnsettled() ([]*LoadedTask, error) {
 	if err != nil {
 		return nil, err
 	}
-	return loadLogsFromPaths(s.log, paths, false, true)
+	return loadLogsFromPaths(s.log, paths, logLoadHistory, true)
 }
 
 // LoadSettled scans LogDir for compressed (settled) task logs and loads their
@@ -101,6 +101,8 @@ func (s *Store) LoadUnsettled() ([]*LoadedTask, error) {
 // source stays authoritative after an interrupted compression. Logs last
 // modified before the Store's age cutoff are skipped before decode, which
 // keeps cold start cheap as terminal history grows.
+// Unreadable historical logs are logged at ERROR and skipped without failing
+// the scan; runtime restoration uses the strict LoadForTaskIDs path instead.
 func (s *Store) LoadSettled() ([]*LoadedTask, error) {
 	paths, err := logPaths(s.log, s.LogDir, nil, true, s.cutoff)
 	if err != nil {
@@ -109,7 +111,7 @@ func (s *Store) LoadSettled() ([]*LoadedTask, error) {
 	if s.maxSettledPerRepo > 0 {
 		paths = capSettledPaths(s.log, paths, s.maxSettledPerRepo)
 	}
-	return loadLogsFromPaths(s.log, paths, false, true)
+	return loadLogsFromPaths(s.log, paths, logLoadHistory, true)
 }
 
 // LoadAllReadOnly loads every retained plain or compressed task log without
@@ -124,7 +126,7 @@ func (s *Store) LoadAllReadOnly() ([]*LoadedTask, error) {
 	// A path that vanishes or becomes unreadable after ReadDir is unresolved
 	// historical input, not a harmless omission: callers must retry instead of
 	// treating the one-pass scan as complete and writing their sentinel.
-	return loadLogsFromPaths(s.log, paths, true, false)
+	return loadLogsFromPaths(s.log, paths, logLoadRequired, false)
 }
 
 // LoadForTaskIDs loads metadata for plain logs whose parsed filename task ID
@@ -156,7 +158,7 @@ func (s *Store) LoadForTaskIDs(taskIDs []string) ([]*LoadedTask, error) {
 	}
 	slices.Sort(missing)
 
-	tasks, loadErr := loadLogsFromPaths(s.log, paths, true, true)
+	tasks, loadErr := loadLogsFromPaths(s.log, paths, logLoadRequired, true)
 	if len(missing) > 0 {
 		loadErr = errors.Join(loadErr, fmt.Errorf("missing task logs for IDs: %s", strings.Join(missing, ", ")))
 	}
@@ -350,7 +352,7 @@ func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
 	if err != nil {
 		return err
 	}
-	logs, err := loadLogsFromPaths(s.log, paths, false, false)
+	logs, err := loadLogsFromPaths(s.log, paths, logLoadSettlement, false)
 	if err != nil {
 		return err
 	}

@@ -38,6 +38,15 @@ describe("validateTaskListEvent settled status", () => {
 });
 
 describe("validateTaskListEvent structured warnings", () => {
+  it("preserves public runtime restoration warnings", () => {
+    const ev = validateTaskListEvent(
+      wire(
+        '{"kind":"warning","warning":{"id":"restore-1","category":"runtime_restore_failed","message":"Some existing tasks could not be restored.","details":[]}}',
+      ),
+    );
+    expect(ev.warning?.category).toBe("runtime_restore_failed");
+    expect(ev.warning?.details).toEqual([]);
+  });
   it("preserves identity, category, translated text, and repository diagnostics", () => {
     const ev = validateTaskListEvent(
       wire(
