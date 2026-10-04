@@ -9,6 +9,33 @@ linters) and `make test` (the unit tests). After changes to the built assets,
 `make build` regenerates the tracked `backend/frontend/dist/*.br` files; CI
 fails if the build leaves the worktree dirty.
 
+## Test Local Go Mode Changes
+
+Use a temporary link to test unreleased `~/src/gomode` frontend changes:
+
+```bash
+cd ~/src/gomode
+pnpm install
+cd ~/src/caic
+pnpm link ../gomode
+make frontend-dev
+```
+
+The link uses local TypeScript source, including uncommitted edits. Go Mode
+needs no separate frontend build. Keep Vite's `solid-js` deduplication enabled
+so the linked package uses the host's Solid runtime.
+
+Restore the pinned dependency before committing or running release validation:
+
+```bash
+cd ~/src/caic
+pnpm unlink @maruel/gomode
+```
+
+pnpm 12 updates `pnpm-workspace.yaml` and `pnpm-lock.yaml` when linking.
+Do not commit the local override. Check `git diff` after unlinking and preserve
+unrelated dependency edits. Use `go.work` separately when testing Go changes.
+
 ## Testing
 
 Unit tests run via `tsx --test`. Assertions and mocks
