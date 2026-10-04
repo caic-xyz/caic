@@ -186,7 +186,7 @@ func newUsageStores(t *testing.T) (usageDir string, logStore *taskslog.Store, ro
 	dir := t.TempDir()
 	usageDir = filepath.Join(dir, "usagedb")
 	var err error
-	rollup, err = usagedb.New(usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
+	rollup, err = usagedb.New(t.Context(), usagedb.Config{Log: slog.New(slog.DiscardHandler), Dir: usageDir})
 	if err != nil {
 		t.Fatal(err)
 	}

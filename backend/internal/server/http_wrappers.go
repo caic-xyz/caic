@@ -1,4 +1,4 @@
-// Generic HTTP handler wrappers: decode JSON bodies, validate typed inputs, and encode JSON responses or structured errors.
+// Generic HTTP handler wrappers: bound and decode JSON bodies, validate typed inputs, and encode JSON responses or structured errors.
 
 package server
 
@@ -124,28 +124,41 @@ func toDTO(err error) error {
 	return &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 }
 
-// readAndDecodeBody reads the request body and decodes JSON into input. It
-// skips decoding for EmptyReq. Unknown JSON fields are rejected. Returns false
-// if an error was written to the response.
+// maxJSONRequestBytes bounds decompressed JSON, including base64 images. The
+// existing 20 MiB image allowance needs about 27 MiB of canonical JSON payload,
+// leaving room for text and metadata within this 32 MiB request limit.
+const maxJSONRequestBytes = 32 << 20
+
+// readAndDecodeBody decodes a bounded request into input, rejecting unknown
+// fields. Go's JSON decoder buffers a complete value; decoding directly avoids
+// a second whole-body copy, but memory remains proportional to this size cap.
+// EmptyReq ignores bodies. Other requests allow a truly empty body and ignore
+// bytes after the first JSON value, while checking the entire body for errors.
 func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In) bool {
 	if _, isEmpty := any(input).(*api.EmptyReq); isEmpty {
 		return true
 	}
-	body, err := io.ReadAll(r.Body)
-	if err2 := r.Body.Close(); err == nil {
-		err = err2
-	}
-	if err != nil {
-		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "failed to read request body"})
+	body := http.MaxBytesReader(w, r.Body, maxJSONRequestBytes)
+	reader := requestBodyReader{ctx: r.Context(), r: body}
+	d := json.NewDecoder(&reader)
+	d.DisallowUnknownFields()
+	decodeErr := d.Decode(input)
+	// Drain the remainder without parsing it: historical callers accept trailing
+	// bytes, but a size overflow or late transport/checksum error must fail.
+	_, drainErr := io.Copy(io.Discard, &reader)
+	readErr := errors.Join(reader.err, drainErr, body.Close(), r.Context().Err())
+	if readErr != nil {
+		status := http.StatusBadRequest
+		message := "failed to read request body"
+		if _, ok := errors.AsType[*http.MaxBytesError](readErr); ok {
+			status = http.StatusRequestEntityTooLarge
+			message = "request body exceeds 32 MiB limit"
+		}
+		writeError(r.Context(), w, &api.Error{Status: status, Code: api.CodeBadRequest, Message: message})
 		return false
 	}
-	if len(body) == 0 {
-		return true
-	}
-	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
-	if err := d.Decode(input); err != nil {
-		httpLogger(r.Context()).ErrorContext(r.Context(), "failed to decode request body", "err", err)
+	if decodeErr != nil && (decodeErr != io.EOF || reader.n != 0) {
+		httpLogger(r.Context()).ErrorContext(r.Context(), "failed to decode request body", "err", fmt.Sprintf("%T", decodeErr), "offset", d.InputOffset())
 		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "invalid request body"})
 		return false
 	}
@@ -308,4 +321,29 @@ func httpLogger(ctx context.Context) *slog.Logger {
 		panic("HTTP logger missing from request context")
 	}
 	return log
+}
+
+// requestBodyReader counts bytes to distinguish empty bodies from whitespace
+// and preserves read errors that json.Decoder can mask after a complete value.
+type requestBodyReader struct {
+	ctx context.Context
+	r   io.Reader
+	n   int64
+	err error
+}
+
+func (r *requestBodyReader) Read(p []byte) (int, error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	if err := r.ctx.Err(); err != nil {
+		r.err = err
+		return 0, err
+	}
+	n, err := r.r.Read(p)
+	r.n += int64(n)
+	if err != nil && err != io.EOF {
+		r.err = err
+	}
+	return n, err
 }

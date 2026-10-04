@@ -1,4 +1,4 @@
-// Benchmarks sealing a past usage day with zstd compression.
+// Benchmarks usage-day compression and streaming restart recovery.
 
 package usagedb
 
@@ -40,7 +40,7 @@ func BenchmarkCompressOldDays(b *testing.B) {
 		if err := os.WriteFile(filepath.Join(dir, day+".jsonl"), fixture.Bytes(), 0o600); err != nil {
 			b.Fatal(err)
 		}
-		s, err := New(Config{Log: testLogger(), Dir: dir})
+		s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -60,4 +60,44 @@ func BenchmarkCompressOldDays(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(compressedBytes)/float64(fixture.Len()), "compressed/raw")
+}
+
+func BenchmarkUsageDayRecovery(b *testing.B) {
+	for _, n := range []int{1000, 100000} {
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.StopTimer()
+			const day = "2030-02-05"
+			dir := b.TempDir()
+			f, err := os.Create(filepath.Join(dir, day+".jsonl")) //nolint:gosec // benchmark fixture inside b.TempDir().
+			if err != nil {
+				b.Fatal(err)
+			}
+			enc := json.NewEncoder(f)
+			row := UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Harness: "claude", Output: 1000}
+			for range n {
+				if err := enc.Encode(row); err != nil {
+					b.Fatal(err)
+				}
+			}
+			info, err := f.Stat()
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				b.Fatal(err)
+			}
+			b.SetBytes(info.Size())
+			b.ReportAllocs()
+			b.StartTimer()
+			for range b.N {
+				s, err := New(b.Context(), Config{Log: testLogger(), Dir: dir})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := s.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

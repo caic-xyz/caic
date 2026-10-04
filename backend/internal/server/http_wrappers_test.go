@@ -3,9 +3,13 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -440,3 +444,218 @@ func TestComputeTaskPatch(t *testing.T) {
 		}
 	})
 }
+
+func TestReadAndDecodeBody(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, body := range []string{"", `{}`, `{"instructions":"hello"}`, `{"instructions":"hello"}garbage`, `{"instructions":"hello"}{"ignored":true}`} {
+			t.Run(body, func(t *testing.T) {
+				t.Parallel()
+				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", strings.NewReader(body))
+				var in v1.CompactReq
+				if !readAndDecodeBody(httptest.NewRecorder(), req, &in) {
+					t.Fatal("decode failed")
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, body := range []string{" ", `{`, `{"unknown":true}`} {
+			t.Run(body, func(t *testing.T) {
+				t.Parallel()
+				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", strings.NewReader(body))
+				w := httptest.NewRecorder()
+				var in v1.CompactReq
+				if readAndDecodeBody(w, req, &in) || w.Code != 400 {
+					t.Fatalf("accepted invalid body: %d", w.Code)
+				}
+			})
+		}
+	})
+	t.Run("safeDecodeDiagnostics", func(t *testing.T) {
+		t.Parallel()
+		var logs bytes.Buffer
+		ctx := context.WithValue(t.Context(), httpLoggerKey{}, slog.New(slog.NewJSONHandler(&logs, nil)))
+		fieldName := "private-request-field"
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(`{"`+fieldName+`":true}`))
+		var in v1.CompactReq
+		w := httptest.NewRecorder()
+		if readAndDecodeBody(w, req, &in) {
+			t.Fatal("unknown field accepted")
+		}
+		if strings.Contains(logs.String(), fieldName) || strings.Contains(w.Body.String(), fieldName) {
+			t.Fatal("raw input leaked in diagnostics")
+		}
+		if !strings.Contains(logs.String(), "offset") {
+			t.Fatal("missing safe decode diagnostic")
+		}
+	})
+	t.Run("oversizedValue", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", io.MultiReader(strings.NewReader(`{"instructions":"`), io.LimitReader(zeroSpaceReader{}, 33554432), strings.NewReader(`"}`)))
+		var in v1.CompactReq
+		w := httptest.NewRecorder()
+		if readAndDecodeBody(w, req, &in) || w.Code != 413 {
+			t.Fatalf("oversized JSON value accepted: %d", w.Code)
+		}
+	})
+
+	t.Run("boundary", func(t *testing.T) {
+		t.Parallel()
+		for _, n := range []int{33554431, 33554432, 33554433} {
+			for _, known := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%d/known=%t", n, known), func(t *testing.T) {
+					t.Parallel()
+					req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", io.MultiReader(strings.NewReader(`{}`), io.LimitReader(zeroSpaceReader{}, int64(n-2))))
+					if known {
+						req.ContentLength = int64(n)
+					}
+					w := httptest.NewRecorder()
+					var in v1.CompactReq
+					ok := readAndDecodeBody(w, req, &in)
+					if n > 33554432 {
+						if ok || w.Code != 413 {
+							t.Fatalf("oversized body accepted: %d", w.Code)
+						}
+						var response api.ErrorResponse
+						if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+							t.Fatal(err)
+						}
+						if response.Error.Code != api.CodeBadRequest {
+							t.Fatalf("error code: %s", response.Error.Code)
+						}
+					} else if !ok {
+						t.Fatalf("boundary rejected: %d", w.Code)
+					}
+				})
+			}
+		}
+	})
+	t.Run("nearMaximumImages", func(t *testing.T) {
+		t.Parallel()
+		// Two canonical base64 payloads total just under the existing 20 MiB decoded allowance.
+		data := strings.Repeat("A", 13981012)
+		body := `{"initialPrompt":{"images":[{"mediaType":"image/png","data":"` + data + `"},{"mediaType":"image/png","data":"` + data + `"}]},"harness":"claude"}`
+		var in v1.CreateTaskReq
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", strings.NewReader(body))
+		if !readAndDecodeBody(httptest.NewRecorder(), req, &in) {
+			t.Fatal("maximum canonical images rejected")
+		}
+		if err := in.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("bodyFailures", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name     string
+			reader   io.Reader
+			closeErr error
+			canceled bool
+		}{
+			{name: "lateReadError", reader: &bodyErrorReader{data: []byte(`{}`), err: io.ErrUnexpectedEOF}},
+			{name: "readAfterObject", reader: io.MultiReader(strings.NewReader(`{}`), &bodyErrorReader{err: io.ErrUnexpectedEOF})},
+			{name: "closeError", reader: strings.NewReader(`{}`), closeErr: io.ErrClosedPipe},
+			{name: "readBeforeDecode", reader: &bodyErrorReader{data: []byte(`invalid`), err: io.ErrUnexpectedEOF}},
+			{name: "canceled", reader: strings.NewReader(`{}`), canceled: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				ctx, cancel := context.WithCancel(testHTTPContext(t))
+				t.Cleanup(cancel)
+				if tc.canceled {
+					cancel()
+				}
+				body := &requestTestBody{Reader: tc.reader, closeErr: tc.closeErr}
+				req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", body)
+				w := httptest.NewRecorder()
+				var in v1.CompactReq
+				if readAndDecodeBody(w, req, &in) || w.Code != 400 {
+					t.Fatalf("failure accepted: %d", w.Code)
+				}
+				if response := decodeError(t, w); response.Message != "failed to read request body" {
+					t.Fatalf("message: %s", response.Message)
+				}
+			})
+		}
+	})
+	t.Run("emptyReqIgnoresBody", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", &bodyErrorReader{err: io.ErrUnexpectedEOF})
+		if !readAndDecodeBody(httptest.NewRecorder(), req, &api.EmptyReq{}) {
+			t.Fatal("EmptyReq behavior changed")
+		}
+	})
+	t.Run("compressed", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			size    int64
+			corrupt bool
+			status  int
+		}{
+			{name: "valid", size: 2, status: 200},
+			{name: "decompressionBomb", size: 33554433, status: 413},
+			{name: "lateChecksumError", size: 65536, corrupt: true, status: 400},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				var compressed bytes.Buffer
+				gz := gzip.NewWriter(&compressed)
+				if _, err := gz.Write([]byte(`{}`)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.Copy(gz, io.LimitReader(zeroSpaceReader{}, tc.size-2)); err != nil {
+					t.Fatal(err)
+				}
+				if err := gz.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if tc.corrupt {
+					compressed.Bytes()[compressed.Len()-8] ^= 1
+				}
+				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodPost, "/", &compressed)
+				req.Header.Set("Content-Encoding", "gzip")
+				w := httptest.NewRecorder()
+				h := decompressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var in v1.CompactReq
+					_ = readAndDecodeBody(w, r, &in)
+				}))
+				h.ServeHTTP(w, req)
+				if w.Code != tc.status {
+					t.Fatalf("status = %d, want %d", w.Code, tc.status)
+				}
+			})
+		}
+	})
+}
+
+type zeroSpaceReader struct{}
+
+func (zeroSpaceReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = ' '
+	}
+	return len(p), nil
+}
+
+type bodyErrorReader struct {
+	data []byte
+	err  error
+}
+
+func (r *bodyErrorReader) Read(p []byte) (int, error) {
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, r.err
+}
+
+type requestTestBody struct {
+	io.Reader
+
+	closeErr error
+}
+
+func (r *requestTestBody) Close() error { return r.closeErr }

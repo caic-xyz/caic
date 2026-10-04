@@ -15,7 +15,12 @@ test("task-card cost tooltip stays open after the first touch tap", async ({ bro
   try {
     const page = await context.newPage();
     await page.goto(`/task/@${task.id}`);
-    const cost = page.locator(`[data-task-id="${task.id}"]`).getByTestId("task-card-cost").getByRole("button");
+    const card = page.locator(`[data-task-id="${task.id}"]`);
+    // Card activation normalizes a bare task URL. Finish that navigation before
+    // opening the tooltip, which correctly dismisses on navigation or scrolling.
+    await card.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/task/@${task.id}\\+[^/]+$`));
+    const cost = card.getByTestId("task-card-cost").getByRole("button");
     await cost.tap();
     await expect(page.getByText(/API-equivalent cost/)).toBeVisible();
     await cost.tap();

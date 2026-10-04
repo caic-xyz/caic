@@ -191,7 +191,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 	if err != nil {
 		return "", "", nil, fmt.Errorf("task manager: %w", err)
 	}
-	usageRollup, err := usagedb.New(usagedb.Config{Log: stateLog, Dir: filepath.Join(stateDir, "usagedb")})
+	usageRollup, err := usagedb.New(ctx, usagedb.Config{Log: stateLog, Dir: filepath.Join(stateDir, "usagedb")})
 	if err != nil {
 		return "", "", nil, fmt.Errorf("usage rollup: %w", err)
 	}

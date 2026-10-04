@@ -3,10 +3,16 @@
 package repo
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
@@ -199,6 +205,143 @@ func TestCheckSafety(t *testing.T) {
 		if len(issues) != 0 {
 			t.Errorf("got %d issues, want 0: %+v", len(issues), issues)
 		}
+	})
+	t.Run("Streaming", func(t *testing.T) {
+		t.Parallel()
+		t.Run("LongLineAndRedactedLogs", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "checkout", "-b", "topic")
+			key := "AK" + "IAIOSFODNN7EXAMPLE"
+			data := strings.Repeat("x", 128<<10) + key + "\n" + key + "\n"
+			if err := os.WriteFile(filepath.Join(clone, "large.txt"), []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "fixture")
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, nil))
+			issues, err := CheckSafety(t.Context(), log, clone, "topic", "main", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(issues) != 1 || issues[0].File != "large.txt" {
+				t.Fatalf("issues: %+v", issues)
+			}
+			if strings.Contains(logs.String(), key) {
+				t.Fatal("credential leaked into log")
+			}
+		})
+		t.Run("OversizedLine", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "checkout", "-b", "topic")
+			if err := os.WriteFile(filepath.Join(clone, "large.txt"), []byte(strings.Repeat("x", 2<<20)+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "fixture")
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "topic", "main", nil)
+			if err == nil || !strings.Contains(err.Error(), "1 MiB") || len(issues) != 0 {
+				t.Fatalf("issues=%v, err=%v", issues, err)
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("scan did not release its producer promptly: %v", ctx.Err())
+			}
+		})
+		t.Run("LineBoundary", func(t *testing.T) {
+			t.Parallel()
+			for _, length := range []int{(1 << 20) - 1, 1 << 20} {
+				t.Run(fmt.Sprintf("AddedContent%d", length), func(t *testing.T) {
+					t.Parallel()
+					clone := initTestRepo(t, "main")
+					runGit(t, clone, "checkout", "-b", "topic")
+					if err := os.WriteFile(filepath.Join(clone, "boundary.txt"), []byte(strings.Repeat("x", length)+"\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					runGit(t, clone, "add", ".")
+					runGit(t, clone, "commit", "-m", "fixture")
+					_, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "topic", "main", nil)
+					// The added-line '+' counts toward the documented diff-line bound.
+					if length < 1<<20 && err != nil {
+						t.Fatal(err)
+					}
+					if length == 1<<20 && (err == nil || !strings.Contains(err.Error(), "1 MiB")) {
+						t.Fatalf("oversized line: %v", err)
+					}
+				})
+			}
+		})
+
+		t.Run("CommandError", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			issues, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "missing", "main", nil)
+			if err == nil || !strings.Contains(err.Error(), "git diff for secret scan") || len(issues) != 0 {
+				t.Fatalf("issues=%v, err=%v", issues, err)
+			}
+		})
+		t.Run("CancelInheritedPipe", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "checkout", "-b", "topic")
+			if err := os.WriteFile(filepath.Join(clone, "changed.txt"), []byte("change\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "fixture")
+			script := filepath.Join(t.TempDir(), "diff.sh")
+			if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 3\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "config", "diff.external", "sh "+script)
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
+			start := time.Now()
+			_, err := CheckSafety(ctx, logtest.Logger(t), clone, "topic", "main", nil)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %v", err)
+			}
+			if time.Since(start) > 2*time.Second {
+				t.Fatal("cancelled scan waited for inherited stdout")
+			}
+		})
+		t.Run("ErrorRedaction", func(t *testing.T) {
+			t.Parallel()
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "checkout", "-b", "topic")
+			if err := os.WriteFile(filepath.Join(clone, "changed.txt"), []byte("change\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "fixture")
+			script := filepath.Join(t.TempDir(), "diff.sh")
+			credential := "AK" + "IAIOSFODNN7EXAMPLE"
+			source := "private-source-canary"
+			content := "#!/bin/sh\nhead -c 1048576 /dev/zero | tr '\\0' x >&2\nprintf '" + credential + " " + source + "\\n' >&2\nexit 1\n"
+			if err := os.WriteFile(script, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "config", "diff.external", "sh "+script)
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, nil))
+			_, err := CheckSafety(t.Context(), log, clone, "topic", "main", nil)
+			if err == nil {
+				t.Fatal("command unexpectedly succeeded")
+			}
+			msg := err.Error()
+			log.ErrorContext(t.Context(), "sync failed", "err", err)
+			if !strings.Contains(msg, "git diff for secret scan") || !strings.Contains(msg, "exit status") {
+				t.Fatal("error lost operation or command status")
+			}
+			for _, value := range []string{credential, source} {
+				if strings.Contains(msg, value) || strings.Contains(logs.String(), value) {
+					t.Fatal("command source or credential leaked through error")
+				}
+			}
+		})
 	})
 }
 

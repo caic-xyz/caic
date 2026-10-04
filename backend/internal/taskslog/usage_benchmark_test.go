@@ -52,7 +52,7 @@ func BenchmarkUsageBackfill(b *testing.B) {
 	b.ReportAllocs()
 	b.StartTimer()
 	for i := range b.N {
-		rollup, err := usagedb.New(usagedb.Config{
+		rollup, err := usagedb.New(b.Context(), usagedb.Config{
 			Log: slog.New(slog.DiscardHandler),
 			Dir: filepath.Join(dir, "rollups", strconv.Itoa(i)),
 		})

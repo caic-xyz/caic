@@ -1,10 +1,11 @@
-// Precompressed static file handler for embedded frontend assets.
+// Serves embedded precompressed assets and caches streamed transcoded variants.
 
 package server
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -248,47 +249,48 @@ func transcode(cache *sync.Map, dist fs.FS, clean, enc string) ([]byte, error) {
 	return entry.data, entry.err
 }
 
-// doTranscode performs the actual decompress-then-recompress.
-func doTranscode(dist fs.FS, clean, enc string) ([]byte, error) {
+// doTranscode streams Brotli decoding into the cached target representation.
+// Identity deliberately retains the decoded asset; compressed variants retain
+// only encoded output in addition to bounded codec and copy working memory.
+func doTranscode(dist fs.FS, clean, enc string) (data []byte, err error) {
 	f, err := dist.Open(clean + ".br")
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-
-	raw, err := io.ReadAll(brotli.NewReader(f))
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			data = nil
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	source := brotli.NewReader(f)
+	if enc == "identity" {
+		data, err = io.ReadAll(source)
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+	var buf bytes.Buffer
+	var w io.WriteCloser
+	switch enc {
+	case "zstd":
+		w, err = zstd.NewWriter(&buf, zstd.WithEncoderLevel(zstd.SpeedBestCompression))
+	case "gzip":
+		w, err = gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	default:
+		return nil, fmt.Errorf("unsupported static encoding %q", enc)
+	}
 	if err != nil {
 		return nil, err
 	}
-
-	if enc == "identity" {
-		return raw, nil
-	}
-
-	var buf bytes.Buffer
-	switch enc {
-	case "zstd":
-		w, err := zstd.NewWriter(&buf, zstd.WithEncoderLevel(zstd.SpeedBestCompression))
-		if err != nil {
-			return nil, err
-		}
-		if _, err := w.Write(raw); err != nil {
-			return nil, err
-		}
-		if err := w.Close(); err != nil {
-			return nil, err
-		}
-	case "gzip":
-		w, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := w.Write(raw); err != nil {
-			return nil, err
-		}
-		if err := w.Close(); err != nil {
-			return nil, err
-		}
+	// Hide zstd's ReaderFrom: it stores source errors in encoder state, which
+	// makes Close skip waiting for pending async writes. Copying through Write
+	// keeps source errors separate so Close always finishes the encoded output.
+	// The copy uses a bounded 64 KiB buffer; codec windows are separate.
+	_, copyErr := io.CopyBuffer(struct{ io.Writer }{w}, source, make([]byte, 64<<10))
+	if err := errors.Join(copyErr, w.Close()); err != nil {
+		return nil, err
 	}
 	return buf.Bytes(), nil
 }

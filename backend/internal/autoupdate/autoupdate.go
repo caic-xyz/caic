@@ -4,7 +4,7 @@ package autoupdate
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -211,7 +211,7 @@ func CheckAndUpdate(ctx context.Context, gh *github.Client) error {
 // downloadAndInstall downloads the correct archive, streams it through a
 // SHA-256 hash, extracts the binary to a temp file, verifies the checksum,
 // and renames over the running executable only if the checksum matches.
-func downloadAndInstall(ctx context.Context, gh *github.Client, rel *github.Release) error {
+func downloadAndInstall(ctx context.Context, gh *github.Client, rel *github.Release) (err error) {
 	// Find matching archive asset.
 	osName, archName := platformStrings()
 	var archiveAsset *github.ReleaseAsset
@@ -227,21 +227,11 @@ func downloadAndInstall(ctx context.Context, gh *github.Client, rel *github.Rele
 		return fmt.Errorf("no release asset for %s/%s", osName, archName)
 	}
 
-	// Download checksums (small file, read fully).
+	// Parse checksums incrementally, retaining only the matching digest.
 	wantSum, err := downloadExpectedChecksum(ctx, gh, rel, archiveAsset.Name)
 	if err != nil {
 		return err
 	}
-
-	// Stream the archive through a SHA-256 hasher while extracting.
-	body, err := gh.DownloadAsset(ctx, archiveAsset.DownloadURL)
-	if err != nil {
-		return fmt.Errorf("download archive: %w", err)
-	}
-	defer func() { _ = body.Close() }()
-
-	h := sha256.New()
-	reader := io.TeeReader(body, h)
 
 	binaryName := "caic"
 	if runtime.GOOS == "windows" {
@@ -262,16 +252,20 @@ func downloadAndInstall(ctx context.Context, gh *github.Client, rel *github.Rele
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }() // cleanup on error or checksum mismatch
+	defer func() {
+		if e := os.Remove(tmpPath); e != nil && !errors.Is(e, os.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove extracted binary: %w", e))
+		}
+	}()
 
-	if strings.HasSuffix(archiveAsset.Name, ".zip") {
-		err = extractZipToFile(reader, binaryName, tmp)
-	} else {
-		err = extractTarGzToFile(reader, binaryName, tmp)
+	// Every downloaded byte passes through the hasher before installation.
+	body, err := gh.DownloadAsset(ctx, archiveAsset.DownloadURL)
+	if err != nil {
+		return errors.Join(fmt.Errorf("download archive: %w", err), tmp.Close())
 	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
+	h := sha256.New()
+	err = extractDownloadedArchive(body, h, archiveAsset.Name, binaryName, tmp)
+	err = errors.Join(err, tmp.Close())
 	if err != nil {
 		return fmt.Errorf("extract binary: %w", err)
 	}
@@ -294,7 +288,7 @@ func downloadAndInstall(ctx context.Context, gh *github.Client, rel *github.Rele
 
 // downloadExpectedChecksum fetches checksums.txt from the release and returns
 // the expected SHA-256 for assetName. Returns "" if no checksums asset exists.
-func downloadExpectedChecksum(ctx context.Context, gh *github.Client, rel *github.Release, assetName string) (string, error) {
+func downloadExpectedChecksum(ctx context.Context, gh *github.Client, rel *github.Release, assetName string) (sum string, err error) {
 	var checksumsAsset *github.ReleaseAsset
 	for i := range rel.Assets {
 		a := &rel.Assets[i]
@@ -310,27 +304,49 @@ func downloadExpectedChecksum(ctx context.Context, gh *github.Client, rel *githu
 	if err != nil {
 		return "", fmt.Errorf("download checksums: %w", err)
 	}
-	data, err := io.ReadAll(body)
-	_ = body.Close()
-	if err != nil {
-		return "", fmt.Errorf("read checksums: %w", err)
-	}
-	for line := range strings.SplitSeq(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[1] == assetName {
-			return fields[0], nil
-		}
-	}
-	return "", fmt.Errorf("asset %q not found in checksums", assetName)
+	defer func() { err = errors.Join(err, body.Close()) }()
+	return expectedChecksum(body, assetName)
 }
 
-// extractTarGzToFile extracts a named file from a tar.gz stream into dst.
-func extractTarGzToFile(r io.Reader, name string, dst *os.File) error {
+// expectedChecksum scans through EOF so errors after a matching row still fail.
+// Release checksum records are short; a 64 KiB line limit bounds malformed input.
+func expectedChecksum(r io.Reader, assetName string) (string, error) {
+	sc := bufio.NewScanner(r)
+	var sum string
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if sum == "" && len(fields) == 2 && fields[1] == assetName {
+			sum = fields[0]
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("read checksums: %w", err)
+	}
+	if sum == "" {
+		return "", fmt.Errorf("asset %q not found in checksums", assetName)
+	}
+	return sum, nil
+}
+
+// extractDownloadedArchive closes the body before its caller can install the
+// binary. Extraction must consume the complete download to verify its digest.
+func extractDownloadedArchive(body io.ReadCloser, h io.Writer, archiveName, binaryName string, dst io.Writer) (err error) {
+	defer func() { err = errors.Join(err, body.Close()) }()
+	r := io.TeeReader(body, h)
+	if strings.HasSuffix(archiveName, ".zip") {
+		return extractZipToFile(r, binaryName, dst)
+	}
+	return extractTarGzToFile(r, binaryName, dst)
+}
+
+// extractTarGzToFile extracts a named file and consumes the remaining gzip stream
+// to validate its footer and include the complete download in an upstream hash.
+func extractTarGzToFile(r io.Reader, name string, dst io.Writer) (err error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = gz.Close() }()
+	defer func() { err = errors.Join(err, gz.Close()) }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -341,21 +357,39 @@ func extractTarGzToFile(r io.Reader, name string, dst *os.File) error {
 			return err
 		}
 		if filepath.Base(hdr.Name) == name && hdr.Typeflag == tar.TypeReg {
-			_, err = io.Copy(dst, io.LimitReader(tr, maxBinarySize))
+			if hdr.Size > maxBinarySize {
+				return fmt.Errorf("binary exceeds %d bytes", maxBinarySize)
+			}
+			if err := copyBinary(dst, tr); err != nil {
+				return err
+			}
+			// A tar EOF does not consume the gzip footer or trailing tar members.
+			if _, err := io.Copy(io.Discard, gz); err != nil {
+				return err
+			}
+			_, err := io.Copy(io.Discard, r)
 			return err
 		}
 	}
 	return fmt.Errorf("%q not found in archive", name)
 }
 
-// extractZipToFile extracts a named file from a zip stream into dst.
-// Zip requires random access, so the stream is buffered into memory.
-func extractZipToFile(r io.Reader, name string, dst *os.File) error {
-	data, err := io.ReadAll(r)
+// extractZipToFile spools the download to disk for ZIP random access. Working
+// memory does not grow with payload size; ZIP directory metadata remains in RAM.
+func extractZipToFile(r io.Reader, name string, dst io.Writer) (err error) {
+	spool, err := os.CreateTemp("", "caic-update-archive-*")
 	if err != nil {
 		return err
 	}
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	defer func() {
+		err = errors.Join(err, spool.Close())
+		err = errors.Join(err, os.Remove(spool.Name()))
+	}()
+	size, err := io.CopyBuffer(spool, r, make([]byte, 64<<10))
+	if err != nil {
+		return err
+	}
+	zr, err := zip.NewReader(spool, size)
 	if err != nil {
 		return err
 	}
@@ -363,15 +397,25 @@ func extractZipToFile(r io.Reader, name string, dst *os.File) error {
 		if filepath.Base(f.Name) != name {
 			continue
 		}
+		if f.UncompressedSize64 > maxBinarySize {
+			return fmt.Errorf("binary exceeds %d bytes", maxBinarySize)
+		}
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(dst, io.LimitReader(rc, maxBinarySize))
-		_ = rc.Close()
-		return err
+		return errors.Join(copyBinary(dst, rc), rc.Close())
 	}
 	return fmt.Errorf("%q not found in archive", name)
+}
+
+// copyBinary detects overflow instead of silently accepting a truncated binary.
+func copyBinary(dst io.Writer, src io.Reader) error {
+	n, err := io.CopyBuffer(dst, io.LimitReader(src, maxBinarySize+1), make([]byte, 64<<10))
+	if n > maxBinarySize {
+		return errors.Join(fmt.Errorf("binary exceeds %d bytes", maxBinarySize), err)
+	}
+	return err
 }
 
 // executablePath returns the resolved path to the running binary.

@@ -143,7 +143,7 @@ func TestStoreBackfill(t *testing.T) {
 
 func newStore(t *testing.T) (string, *usagedb.Store) {
 	dir := t.TempDir()
-	store, err := usagedb.New(usagedb.Config{Log: testLogger(), Dir: dir})
+	store, err := usagedb.New(t.Context(), usagedb.Config{Log: testLogger(), Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

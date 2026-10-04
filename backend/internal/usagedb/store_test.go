@@ -3,7 +3,9 @@
 package usagedb
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,7 +17,7 @@ import (
 )
 
 func newTestStore(t *testing.T, dir string) *Store {
-	s, err := New(Config{Log: testLogger(), Dir: dir})
+	s, err := New(t.Context(), Config{Log: testLogger(), Dir: dir})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestObserve(t *testing.T) {
 		}
 
 		// The recovered dedupe state must suppress an unchanged status.
-		s2, err := New(Config{Log: testLogger(), Dir: dir})
+		s2, err := New(t.Context(), Config{Log: testLogger(), Dir: dir})
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -394,7 +396,7 @@ func TestDays(t *testing.T) {
 			t.Fatalf("Close: %v", err)
 		}
 
-		s2, err := New(Config{Log: testLogger(), Dir: dir})
+		s2, err := New(t.Context(), Config{Log: testLogger(), Dir: dir})
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -491,6 +493,23 @@ func TestDays(t *testing.T) {
 		days := s.Days()
 		if len(days) != 1 || days[0].Tokens.Output != 5 {
 			t.Errorf("days = %+v, want only the complete row", days)
+		}
+	})
+}
+
+func TestNew(t *testing.T) {
+	t.Parallel()
+	t.Run("canceled recovery returns no store", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "2026-02-05.jsonl"), []byte(`{"kind":"usage","day":"2026-02-05","output_tokens":7}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		s, err := New(ctx, Config{Log: testLogger(), Dir: dir})
+		if s != nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("New canceled = %v, %v", s, err)
 		}
 	})
 }

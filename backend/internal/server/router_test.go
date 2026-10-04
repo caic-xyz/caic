@@ -196,7 +196,7 @@ func newTestTaskManager(t testing.TB, cfg taskmgr.Config) *taskmgr.Manager { //n
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func newTestUsageRollup(t testing.TB) *usagedb.Store {
-	rollup, err := usagedb.New(usagedb.Config{Log: testLogger(), Dir: t.TempDir()})
+	rollup, err := usagedb.New(t.Context(), usagedb.Config{Log: testLogger(), Dir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("usagedb.New: %v", err)
 	}

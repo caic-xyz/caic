@@ -4,15 +4,19 @@ package usagedb
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const backfillSentinel = ".backfill.done"
@@ -126,7 +130,7 @@ func writeBackfillSentinelTemp(dir string) (string, error) {
 	return path, nil
 }
 
-func backfillDayCosts(s *Store, name string, estimate func(*UsageRow) (float64, bool)) error {
+func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(*UsageRow) (float64, bool)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -140,67 +144,96 @@ func backfillDayCosts(s *Store, name string, estimate func(*UsageRow) (float64, 
 			return fmt.Errorf("stat plain usage day for %s: %w", name, err)
 		}
 	}
-	data, err := readDayFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // a late append restored this compressed day
-		}
-		return fmt.Errorf("read usage rollup day %s for missing cost: %w", name, err)
-	}
-	lines := bytes.Split(data, []byte{'\n'})
-	var changed []UsageRow
-	for i, line := range lines {
-		var row UsageRow
-		if len(line) == 0 || json.Unmarshal(line, &row) != nil || row.Kind != rowKindUsage || row.CostUSD != 0 || row.CostEstimated {
-			continue
-		}
-		if _, reported := s.reportedCostTasks[row.TaskID]; reported {
-			continue
-		}
-		if pending := s.pending[row.TaskID]; pending != nil && pending.costInFlight != 0 {
-			continue // a failed append still owns cost movement for this task
-		}
-		cost, ok := estimate(&row)
-		if !ok || cost <= 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
-			continue
-		}
-		row.CostUSD = cost
-		row.CostEstimated = true
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(line, &fields); err != nil {
-			return fmt.Errorf("decode usage fields for %s: %w", name, err)
-		}
-		fields["cost_usd"], err = json.Marshal(cost)
-		if err != nil {
-			return fmt.Errorf("encode estimated usage cost for %s: %w", name, err)
-		}
-		fields["cost_estimated"] = json.RawMessage("true")
-		encoded, err := json.Marshal(fields)
-		if err != nil {
-			return fmt.Errorf("encode estimated usage cost for %s: %w", name, err)
-		}
-		lines[i] = encoded
-		changed = append(changed, row)
-	}
-	if len(changed) == 0 {
-		return nil
-	}
 	staged, err := os.CreateTemp(s.dir, ".usage-cost-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create usage cost staging file for %s: %w", name, err)
 	}
 	stagedPath := staged.Name()
 	defer func() { _ = os.Remove(stagedPath) }()
-	if err := writeDayBytes(staged, path, bytes.Join(lines, []byte{'\n'})); err != nil {
-		_ = staged.Close()
-		return fmt.Errorf("write usage cost staging file for %s: %w", name, err)
+	var out io.Writer = staged
+	var enc *zstd.Encoder
+	if strings.HasSuffix(path, compressedDaySuffix) {
+		enc, err = zstd.NewWriter(staged, zstd.WithEncoderConcurrency(1))
+		if err != nil {
+			return errors.Join(err, staged.Close())
+		}
+		out = enc
 	}
-	if err := staged.Sync(); err != nil {
-		_ = staged.Close()
-		return fmt.Errorf("sync usage cost staging file for %s: %w", name, err)
+	changes := newRecoveryState()
+	changed := false
+	transform := func(line []byte) ([]byte, error) {
+		var row UsageRow
+		decoded := json.Unmarshal(line, &row) == nil
+		if !decoded {
+			return line, nil
+		}
+		if row.Kind != rowKindUsage || row.CostUSD != 0 || row.CostEstimated {
+			return line, nil
+		}
+		if _, reported := s.reportedCostTasks[row.TaskID]; reported {
+			return line, nil
+		}
+		if pending := s.pending[row.TaskID]; pending != nil && pending.costInFlight != 0 {
+			return line, nil // a failed append still owns cost movement for this task
+		}
+		cost, ok := estimate(&row)
+		if !ok || cost <= 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+			return line, nil
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(line, &fields); err != nil {
+			return nil, fmt.Errorf("decode usage fields for %s: %w", name, err)
+		}
+		costBytes, err := json.Marshal(cost)
+		if err != nil {
+			return nil, fmt.Errorf("encode estimated usage cost for %s: %w", name, err)
+		}
+		fields["cost_usd"] = costBytes
+		fields["cost_estimated"] = json.RawMessage("true")
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			return nil, fmt.Errorf("encode estimated usage cost for %s: %w", name, err)
+		}
+		changed = true
+		changes.addUsageRow(&UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost})
+		changes.flushedCost[row.TaskID] += cost
+		if bytes.HasSuffix(line, []byte{'\n'}) {
+			encoded = append(encoded, '\n')
+		}
+		return encoded, nil
 	}
-	if err := staged.Close(); err != nil {
-		return fmt.Errorf("close usage cost staging file for %s: %w", name, err)
+	for line, readErr := range dayRecords(ctx, path) {
+		if readErr != nil {
+			err = readErr
+			break
+		}
+		var encoded []byte
+		encoded, err = transform(line)
+		if err != nil {
+			break
+		}
+		if _, err = out.Write(encoded); err != nil {
+			break
+		}
+	}
+	if enc != nil {
+		err = errors.Join(err, enc.Close())
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil && changed {
+		err = staged.Sync()
+	}
+	err = errors.Join(err, staged.Close())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stage missing usage costs for %s: %w", name, err)
+	}
+	if !changed {
+		return nil
 	}
 	day := strings.TrimSuffix(strings.TrimSuffix(name, ".zstd"), ".jsonl")
 	if f := s.files[day]; f != nil {
@@ -212,19 +245,6 @@ func backfillDayCosts(s *Store, name string, estimate func(*UsageRow) (float64, 
 	if err := os.Rename(stagedPath, path); err != nil {
 		return fmt.Errorf("publish estimated usage costs for %s: %w", day, err)
 	}
-	for i := range changed {
-		row := &changed[i]
-		d := s.dayAggregate(row.Day)
-		d.CostUSD += row.CostUSD
-		if row.TaskID != "" {
-			s.flushedCost[row.TaskID] += row.CostUSD
-		}
-		if row.Model != "" {
-			d.modelBucket(row.Model).CostUSD += row.CostUSD
-		}
-		if row.Harness != "" {
-			d.harnessBucket(row.Harness).CostUSD += row.CostUSD
-		}
-	}
+	s.mergeRecoveryState(changes)
 	return nil
 }

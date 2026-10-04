@@ -433,7 +433,7 @@ func TestTaskRollupResume(t *testing.T) {
 }
 
 func newRollupStore(t *testing.T, dir string) *usagedb.Store {
-	s, err := usagedb.New(usagedb.Config{Log: testLogger(), Dir: dir})
+	s, err := usagedb.New(t.Context(), usagedb.Config{Log: testLogger(), Dir: dir})
 	if err != nil {
 		t.Fatalf("usagedb.New: %v", err)
 	}

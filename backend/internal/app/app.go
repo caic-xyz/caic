@@ -83,7 +83,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 	if err := cleanupLegacyReplayArtifacts(logStore.LogDir); err != nil {
 		return nil, fmt.Errorf("remove legacy replay artifacts: %w", err)
 	}
-	usageRollup, err := usagedb.New(usagedb.Config{
+	usageRollup, err := usagedb.New(ctx, usagedb.Config{
 		Log: log.With("cmp", "usagedb"),
 		Dir: filepath.Join(cfg.Dirs.CacheDir, "usagedb"),
 	})

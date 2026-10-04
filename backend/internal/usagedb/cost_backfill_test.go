@@ -3,6 +3,7 @@
 package usagedb
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -47,7 +48,7 @@ func TestBackfillMissingCosts(t *testing.T) {
 		s.Observe(meta, &Event{At: at, Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
 		compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
 		s.Observe(meta, &Event{At: at.Add(time.Hour), Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
-		if err := backfillDayCosts(s, "2026-02-05.jsonl.zstd", func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+		if err := backfillDayCosts(t.Context(), s, "2026-02-05.jsonl.zstd", func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 			t.Fatalf("vanished compressed candidate: %v", err)
 		}
 		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
@@ -167,6 +168,61 @@ func TestBackfillMissingCosts(t *testing.T) {
 		rows := readRows(t, s.dir, "2026-02-05")
 		if len(rows) != 1 || rows[0].CostUSD != 0 || rows[0].CostEstimated {
 			t.Errorf("row with cost in flight was estimated: %+v", rows)
+		}
+	})
+	t.Run("cancellation discards staged costs and bytes", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "2026-02-05.jsonl")
+		original := []byte(strings.Repeat(`{"kind":"usage","day":"2026-02-05","task_id":"same","model":"priced"}`+"\n", 10))
+		if err := os.WriteFile(path, original, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := newTestStore(t, dir)
+		ctx, cancel := context.WithCancel(t.Context())
+		err := s.BackfillMissingCosts(ctx, func(*UsageRow) (float64, bool) { cancel(); return .1, true })
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("repair error=%v", err)
+		}
+		got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, original) || s.Days()[0].CostUSD != 0 || s.flushedCost["same"] != 0 {
+			t.Fatal("canceled repair published changes")
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("staging files remain: %v", entries)
+		}
+	})
+	t.Run("long unknown fields and unchanged records survive", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "2026-02-05.jsonl")
+		padding := strings.Repeat("x", 150000)
+		prefix := "  malformed \r\n\n"
+		original := []byte(prefix + `{"kind":"usage","day":"2026-02-05","task_id":"same","model":"priced","harness":"claude","future":"` + padding + `"}`)
+		if err := os.WriteFile(path, original, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := newTestStore(t, dir)
+		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return .25, true }); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(got, []byte(prefix)) || !bytes.Contains(got, []byte(`"future":"`+padding+`"`)) || bytes.HasSuffix(got, []byte{'\n'}) {
+			t.Fatal("records or terminal newline changed")
+		}
+		snapshot := s.Days()[0]
+		if snapshot.Harnesses["claude"].Models["priced"].CostUSD != .25 {
+			t.Fatalf("cross bucket cost=%v", snapshot.Harnesses["claude"].Models["priced"].CostUSD)
 		}
 	})
 }

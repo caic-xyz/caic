@@ -1,10 +1,13 @@
-// Usage-day compression keeps old JSONL days compact and restorable for late writes.
+// Usage-day compression and record iteration keep old days compact and avoid whole-day buffers.
 
 package usagedb
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"io"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,36 +57,74 @@ func writeCompressedDay(path string) (stagedPath string, err error) {
 	return pathToClean, nil
 }
 
-func readDayFile(path string) (data []byte, err error) {
-	f, err := os.Open(path) //nolint:gosec // validated day filename inside the configured rollup directory.
-	if err != nil {
-		return nil, err
+// dayRecords yields records with their original newline, including an unterminated
+// final record. Working memory is the largest record, a 64 KiB read buffer, and
+// zstd decoder state; existing durable rows have no size limit. Records live until the next
+// iteration. File and decoder resources are released when iteration stops.
+func dayRecords(ctx context.Context, path string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		f, err := os.Open(path) //nolint:gosec // validated day filename inside the configured rollup directory.
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		var in io.Reader = f
+		var dec *zstd.Decoder
+		if strings.HasSuffix(path, compressedDaySuffix) {
+			dec, err = zstd.NewReader(f, zstd.WithDecoderConcurrency(1))
+			if err != nil {
+				yield(nil, errors.Join(err, f.Close()))
+				return
+			}
+			in = dec
+		}
+		closed := false
+		closeInput := func() error {
+			if dec != nil {
+				dec.Close()
+			}
+			closed = true
+			return f.Close()
+		}
+		defer func() {
+			if !closed {
+				_ = closeInput()
+			}
+		}()
+		r := bufio.NewReaderSize(in, 64<<10)
+		for {
+			if err := ctx.Err(); err != nil {
+				yield(nil, errors.Join(err, closeInput()))
+				return
+			}
+			row, err := r.ReadSlice('\n')
+			if errors.Is(err, bufio.ErrBufferFull) {
+				large := append([]byte(nil), row...)
+				for errors.Is(err, bufio.ErrBufferFull) {
+					if err := ctx.Err(); err != nil {
+						yield(nil, errors.Join(err, closeInput()))
+						return
+					}
+					row, err = r.ReadSlice('\n')
+					large = append(large, row...)
+				}
+				row = large
+			}
+			if err != nil && !errors.Is(err, io.EOF) {
+				yield(nil, errors.Join(err, closeInput()))
+				return
+			}
+			if len(row) != 0 && !yield(row, nil) {
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				if err := closeInput(); err != nil {
+					yield(nil, err)
+				}
+				return
+			}
+		}
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-	if !strings.HasSuffix(path, compressedDaySuffix) {
-		return io.ReadAll(f)
-	}
-	dec, err := zstd.NewReader(f)
-	if err != nil {
-		return nil, err
-	}
-	defer dec.Close()
-	return io.ReadAll(dec)
-}
-
-func writeDayBytes(f *os.File, path string, data []byte) error {
-	if !strings.HasSuffix(path, compressedDaySuffix) {
-		_, err := f.Write(data)
-		return err
-	}
-	enc, err := zstd.NewWriter(f, zstd.WithEncoderConcurrency(1))
-	if err != nil {
-		return err
-	}
-	if _, err := enc.Write(data); err != nil {
-		return errors.Join(err, enc.Close())
-	}
-	return enc.Close()
 }
 
 // syncDayDir makes a newly published copy durable before its old copy is

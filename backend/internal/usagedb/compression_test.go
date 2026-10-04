@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/maruel/ksid"
 )
 
@@ -107,9 +109,12 @@ func TestCompressOldDays(t *testing.T) {
 		}
 		compressOldDaysForTest(t, s, now)
 		compressed := filepath.Join(dir, oldDay+".jsonl.zstd")
-		data, err := readDayFile(compressed)
-		if err != nil {
-			t.Fatal(err)
+		var data []byte
+		for row, err := range dayRecords(t.Context(), compressed) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			data = append(data, row...)
 		}
 		if !bytes.Equal(data, original) {
 			t.Fatal("compressed day did not round trip byte for byte")
@@ -137,4 +142,65 @@ func compressOldDaysForTest(t *testing.T, s *Store, now time.Time) {
 	if err != nil || !ran {
 		t.Fatalf("compress old days = %v/%v, want completed", ran, err)
 	}
+}
+
+func TestDayRecords(t *testing.T) {
+	t.Parallel()
+	t.Run("corruption never publishes earlier records", func(t *testing.T) {
+		t.Parallel()
+		for _, truncated := range []bool{false, true} {
+			name := "corrupt"
+			if truncated {
+				name = "truncated"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				path := filepath.Join(dir, "2026-02-05.jsonl.zstd")
+				enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+				if err != nil {
+					t.Fatal(err)
+				}
+				row := []byte(`{"kind":"usage","day":"2026-02-05","task_id":"bad","ts":123,"model":"priced","cost_usd":0,"output_tokens":10}` + "\n" + `{"kind":"quota","day":"2026-02-05","provider":"bad","status":"blocked"}` + "\n")
+				data := enc.EncodeAll(bytes.Repeat(row, 2000), nil)
+				if err := enc.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if truncated {
+					data = data[:len(data)-2]
+				} else {
+					data = append(data, []byte("not a zstd frame")...)
+				}
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				good := []byte(`{"kind":"usage","day":"2026-02-04","task_id":"good","cost_usd":2,"output_tokens":3}` + "\n")
+				if err := os.WriteFile(filepath.Join(dir, "2026-02-04.jsonl"), good, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				s := newTestStore(t, dir)
+				days := s.Days()
+				if len(days) != 1 || days[0].CostUSD != 2 || days[0].Tokens.Output != 3 || s.watermarks["bad"] != (time.Time{}) || s.flushedCost["bad"] != 0 || len(s.lastQuota) != 0 || len(s.reportedCostTasks) != 1 {
+					t.Fatalf("partial recovery published: days=%+v, watermarks=%v, costs=%v, quotas=%v", days, s.watermarks, s.flushedCost, s.lastQuota)
+				}
+				if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return .25, true }); err == nil {
+					t.Fatal("corrupt repair reported success")
+				}
+				got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, data) {
+					t.Fatal("corrupt source replaced")
+				}
+				entries, err := os.ReadDir(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(entries) != 2 {
+					t.Fatalf("staging files remain: %v", entries)
+				}
+			})
+		}
+	})
 }

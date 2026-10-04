@@ -7,6 +7,7 @@
 package usagedb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -66,7 +67,8 @@ type Store struct {
 
 // New opens the rollup store: it recovers aggregates and watermarks from any
 // existing plain or compressed day files and starts background maintenance.
-func New(cfg Config) (*Store, error) {
+// Cancellation aborts construction without starting background workers.
+func New(ctx context.Context, cfg Config) (*Store, error) {
 	if cfg.Log == nil {
 		return nil, errors.New("usage rollup logger is required")
 	}
@@ -91,7 +93,10 @@ func New(cfg Config) (*Store, error) {
 		flushDone:         make(chan struct{}),
 		compressionDone:   make(chan struct{}),
 	}
-	s.recover()
+	s.recover(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	go s.flushLoop()
 	go s.compressionLoop()
 	return s, nil
@@ -320,7 +325,7 @@ func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*UsageRo
 		if entry.IsDir() || !dayFileRe.MatchString(entry.Name()) {
 			continue
 		}
-		if err := backfillDayCosts(s, entry.Name(), estimate); err != nil {
+		if err := backfillDayCosts(ctx, s, entry.Name(), estimate); err != nil {
 			return err
 		}
 	}
@@ -331,13 +336,16 @@ func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*UsageRo
 // files. A plain copy wins if compression stopped after publishing its zstd
 // copy but before removing the plain file. Row-level corruption is tolerated:
 // malformed lines are skipped with a warning.
-func (s *Store) recover() {
+func (s *Store) recover(ctx context.Context) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		s.log.Warn("scan usage rollup directory", "dir", s.dir, "err", err)
 		return
 	}
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			return
+		}
 		name := e.Name()
 		if e.IsDir() || !dayFileRe.MatchString(name) {
 			continue
@@ -351,34 +359,35 @@ func (s *Store) recover() {
 				continue
 			}
 		}
-		data, err := readDayFile(filepath.Join(s.dir, name))
-		if err != nil {
-			s.log.Warn("read usage rollup day file", "file", name, "err", err)
-			continue
-		}
-		for line := range strings.SplitSeq(string(data), "\n") {
-			if strings.TrimSpace(line) == "" {
+		staged := newRecoveryState()
+		var readErr error
+		for line, err := range dayRecords(ctx, filepath.Join(s.dir, name)) {
+			if err != nil {
+				readErr = err
+				break
+			}
+
+			if len(bytes.TrimSpace(line)) == 0 {
 				continue
 			}
 			var probe struct {
 				Kind string `json:"kind"`
 			}
-			if err := json.Unmarshal([]byte(line), &probe); err != nil {
+			if err := json.Unmarshal(line, &probe); err != nil {
 				s.log.Warn("skip malformed usage rollup line", "file", name, "err", err)
 				continue
 			}
 			switch probe.Kind {
 			case rowKindUsage:
 				var row UsageRow
-				if err := json.Unmarshal([]byte(line), &row); err != nil {
+				if err := json.Unmarshal(line, &row); err != nil {
 					s.log.Warn("skip malformed usage rollup row", "file", name, "err", err)
 					continue
 				}
-				s.applyUsageRow(&row)
-				s.recoverRowState(&row)
+				staged.addUsageRow(&row)
 			case rowKindQuota:
 				var row QuotaRow
-				if err := json.Unmarshal([]byte(line), &row); err != nil {
+				if err := json.Unmarshal(line, &row); err != nil {
 					s.log.Warn("skip malformed quota rollup row", "file", name, "err", err)
 					continue
 				}
@@ -386,7 +395,7 @@ func (s *Store) recover() {
 				// provider window so a restart does not rewrite an unchanged
 				// status as a fresh "change". Files arrive in sorted day
 				// order and rows in append order, so the last one wins.
-				s.lastQuota[quotaKey{provider: row.Provider, window: row.Window}] = quotaSeen{
+				staged.lastQuota[quotaKey{provider: row.Provider, window: row.Window}] = quotaSeen{
 					status:        row.Status,
 					utilizationPc: int(row.Utilization * 100),
 					resets:        row.ResetsAt,
@@ -395,6 +404,11 @@ func (s *Store) recover() {
 				s.log.Warn("skip unknown usage rollup row kind", "file", name, "kind", probe.Kind)
 			}
 		}
+		if readErr != nil {
+			s.log.Warn("read usage rollup day file", "file", name, "err", readErr)
+			continue
+		}
+		s.mergeRecoveryState(staged)
 	}
 }
 
@@ -402,6 +416,38 @@ func (s *Store) recover() {
 // caller holds s.mu.
 func (s *Store) applyUsageRow(row *UsageRow) {
 	foldUsageRow(s.dayAggregate(row.Day), row)
+}
+
+// mergeRecoveryState installs only fully read durable contributions. The caller
+// holds s.mu or is constructing the store before background workers start.
+func (s *Store) mergeRecoveryState(staged *recoveryState) {
+	for day, from := range staged.days {
+		to := s.dayAggregate(day)
+		mergeBucket(&to.bucket, &from.bucket)
+		for key, b := range from.models {
+			mergeBucket(to.modelBucket(key), b)
+		}
+		for key, b := range from.harnesses {
+			mergeBucket(to.harnessBucket(key), b)
+		}
+		for key, b := range from.crosses {
+			mergeBucket(to.crossBucket(key.harness, key.model), b)
+		}
+		mergeTaskSets(to.repos, from.repos)
+		mergeTaskSets(to.skills, from.skills)
+	}
+	for id, at := range staged.watermarks {
+		if at.After(s.watermarks[id]) {
+			s.watermarks[id] = at
+		}
+	}
+	for id, cost := range staged.flushedCost {
+		if id != "" {
+			s.flushedCost[id] += cost
+		}
+	}
+	maps.Copy(s.reportedCostTasks, staged.reportedCostTasks)
+	maps.Copy(s.lastQuota, staged.lastQuota)
 }
 
 // foldUsageRow adds row to one day's aggregate.
@@ -439,24 +485,6 @@ func foldUsageRow(day *dayAggregate, row *UsageRow) {
 		b := day.crossBucket(row.Harness, row.Model)
 		b.fold(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
-	}
-}
-
-// recoverRowState rebuilds the resume bookkeeping from one recovered usage
-// row: the per-task flush watermark and the cost total already reflected in
-// flushed rows. The caller holds s.mu.
-func (s *Store) recoverRowState(row *UsageRow) {
-	if row.TaskID == "" {
-		return
-	}
-	if row.Ts > 0 {
-		if at := row.Ts.AsTime(); at.After(s.watermarks[row.TaskID]) {
-			s.watermarks[row.TaskID] = at
-		}
-	}
-	s.flushedCost[row.TaskID] += row.CostUSD
-	if row.CostUSD != 0 && !row.CostEstimated {
-		s.reportedCostTasks[row.TaskID] = struct{}{}
 	}
 }
 
@@ -1224,4 +1252,73 @@ func newHarnessRollup(harness string, b *bucket, crosses map[crossKey]*bucket) H
 		out.Models[key.model] = newModelRollup(cross)
 	}
 	return out
+}
+
+// recoveryState holds aggregate contributions until a whole day reads successfully.
+// Required metadata grows with task and aggregate cardinality, never row count.
+type recoveryState struct {
+	days              map[string]*dayAggregate
+	watermarks        map[string]time.Time
+	flushedCost       map[string]float64
+	reportedCostTasks map[string]struct{}
+	lastQuota         map[quotaKey]quotaSeen
+}
+
+// newRecoveryState stages aggregates and resume metadata, never individual rows.
+// Its memory depends on aggregate/task cardinality, not the number of records.
+func newRecoveryState() *recoveryState {
+	return &recoveryState{
+		days: make(map[string]*dayAggregate), watermarks: make(map[string]time.Time),
+		flushedCost: make(map[string]float64), reportedCostTasks: make(map[string]struct{}),
+		lastQuota: make(map[quotaKey]quotaSeen),
+	}
+}
+
+// addUsageRow folds a durable row and rebuilds the resume bookkeeping from one recovered usage
+// row: the per-task flush watermark and the cost total already reflected in
+// flushed rows. The caller holds s.mu.
+func (s *recoveryState) addUsageRow(row *UsageRow) {
+	day := s.days[row.Day]
+	if day == nil {
+		day = newDayAggregate()
+		s.days[row.Day] = day
+	}
+	foldUsageRow(day, row)
+	if row.TaskID == "" {
+		return
+	}
+	if row.Ts > 0 {
+		if at := row.Ts.AsTime(); at.After(s.watermarks[row.TaskID]) {
+			s.watermarks[row.TaskID] = at
+		}
+	}
+	s.flushedCost[row.TaskID] += row.CostUSD
+	if row.CostUSD != 0 && !row.CostEstimated {
+		s.reportedCostTasks[row.TaskID] = struct{}{}
+	}
+}
+
+func mergeBucket(to, from *bucket) {
+	to.fold(&from.Delta)
+	if len(from.skillTasks) != 0 {
+		if to.skillTasks == nil {
+			to.skillTasks = make(map[string]map[string]struct{})
+		}
+		mergeTaskSets(to.skillTasks, from.skillTasks)
+	}
+	if len(from.repoTasks) != 0 {
+		if to.repoTasks == nil {
+			to.repoTasks = make(map[string]map[string]struct{})
+		}
+		mergeTaskSets(to.repoTasks, from.repoTasks)
+	}
+}
+
+func mergeTaskSets(to, from map[string]map[string]struct{}) {
+	for key, set := range from {
+		if to[key] == nil {
+			to[key] = make(map[string]struct{})
+		}
+		maps.Copy(to[key], set)
+	}
 }

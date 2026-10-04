@@ -1,4 +1,4 @@
-// Validates task preconditions to prevent unsafe or unintended agent runs.
+// Validates task preconditions and incrementally scans Git diffs for unsafe content.
 
 package repo
 
@@ -8,11 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -46,7 +49,7 @@ type secretPattern struct {
 
 // CheckSafety scans the diff for large binary files and potential secrets.
 // It returns any issues found. A non-nil error indicates a git command failure,
-// not a safety problem.
+// or incomplete secret scan, not a safety problem.
 func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseBranch string, ds agent.DiffStat) ([]SafetyIssue, error) {
 	if log == nil {
 		return nil, errors.New("safety logger is required")
@@ -96,34 +99,62 @@ func gitCatFileSize(ctx context.Context, log *slog.Logger, dir, branch, path str
 // scanDiffForSecrets runs git diff and scans added lines for secret patterns.
 func scanDiffForSecrets(ctx context.Context, log *slog.Logger, dir, branch, baseBranch string) ([]SafetyIssue, error) {
 	log.InfoContext(ctx, "git diff for secrets", "branch", branch, "baseBranch", baseBranch)
-	cmd := exec.CommandContext(ctx, "git", "diff", "origin/"+baseBranch+"..."+branch) //nolint:gosec // branch names are from internal git state.
+	// Cancel the producer on scan failure, and always reap it before returning.
+	commandCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, "git", "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "origin/"+baseBranch+"..."+branch) //nolint:gosec // branch names are from internal git state.
 	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git diff for secret scan: %w: %s", err, stderr.String())
+	cmd.WaitDelay = time.Second
+	// A configured diff helper can emit credentials or source on stderr.
+	// Drain it without retaining bytes that could escape through returned errors.
+	cmd.Stderr = io.Discard
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git diff stdout: %w", err)
 	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git diff for secret scan: %w", err)
+	}
+	// An external diff helper can inherit stdout after Git is killed. Closing
+	// the read side on cancellation releases a blocked scan in that case.
+	stopClose := context.AfterFunc(ctx, func() {
+		if err := stdout.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			log.DebugContext(ctx, "close cancelled secret scan", "err", err)
+		}
+	})
+	defer stopClose()
 
 	var issues []SafetyIssue
 	seen := make(map[string]struct{}) // dedupe by file+kind
 	var currentFile string
 
-	scanner := bufio.NewScanner(&stdout)
+	// Regexps consume one complete line. Bound that working set at 1 MiB;
+	// larger lines fail the scan rather than silently omitting subsequent secrets.
+	const maxLineSize = 1 << 20
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64<<10), maxLineSize+2)
 	for scanner.Scan() {
-		line := scanner.Text()
+		if err := ctx.Err(); err != nil {
+			cancel()
+			return nil, errors.Join(err, cmd.Wait())
+		}
+		line := scanner.Bytes()
+		if len(line) > maxLineSize {
+			cancel()
+			return nil, errors.Join(errors.New("secret scan diff line exceeds 1 MiB"), cmd.Wait())
+		}
 		// Track current file from diff headers.
-		if after, ok := strings.CutPrefix(line, "+++ b/"); ok {
-			currentFile = after
+		if after, ok := bytes.CutPrefix(line, []byte("+++ b/")); ok {
+			currentFile = string(after)
 			continue
 		}
 		// Only scan added lines.
-		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+		if !bytes.HasPrefix(line, []byte("+")) || bytes.HasPrefix(line, []byte("+++")) {
 			continue
 		}
 		added := line[1:]
 		for _, sp := range secretPatterns {
-			if !sp.re.MatchString(added) {
+			if !sp.re.Match(added) {
 				continue
 			}
 			key := currentFile + ":" + sp.desc
@@ -131,13 +162,25 @@ func scanDiffForSecrets(ctx context.Context, log *slog.Logger, dir, branch, base
 				continue
 			}
 			seen[key] = struct{}{}
-			log.WarnContext(ctx, "secret pattern matched", "file", currentFile, "pattern", sp.desc, "line", added)
+			log.WarnContext(ctx, "secret pattern matched", "file", currentFile, "pattern", sp.desc)
 			issues = append(issues, SafetyIssue{
 				File:   currentFile,
 				Kind:   "secret",
 				Detail: fmt.Sprintf("possible %s detected", sp.desc),
 			})
 		}
+	}
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		cancel()
+		scanErr = fmt.Errorf("secret scan diff line (maximum 1 MiB): %w", scanErr)
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		waitErr = fmt.Errorf("git diff for secret scan: %w", waitErr)
+	}
+	if err := errors.Join(scanErr, waitErr, ctx.Err()); err != nil {
+		return nil, err
 	}
 	return issues, nil
 }
