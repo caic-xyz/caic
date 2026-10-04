@@ -21,6 +21,7 @@ import CloudDoneIcon from "@material-symbols/svg-400/outlined/cloud_done.svg?sol
 import CloudOffIcon from "@material-symbols/svg-400/outlined/cloud_off.svg?solid";
 import CloudUploadIcon from "@material-symbols/svg-400/outlined/cloud_upload.svg?solid";
 import EditNoteIcon from "@material-symbols/svg-400/outlined/edit_note.svg?solid";
+import ErrorIcon from "@material-symbols/svg-400/outlined/error.svg?solid";
 import type { AppStore } from "../AppState";
 import Button from "./Button";
 import SettingsMappings, { containerSortPath } from "./SettingsMappings";
@@ -68,7 +69,7 @@ interface SettingsFormProps {
   updating: Accessor<boolean>;
   updateStatus: Accessor<string>;
   refreshingHarness: Accessor<Harness | null>;
-  modelRefreshStatus: Accessor<string>;
+  modelRefreshStatus: AppStore["modelRefreshStatus"];
   saveSettings: (overrides?: SettingsOverrides) => Promise<void>;
   triggerServerUpdate: () => Promise<void>;
   refreshAvailableModels: (harness: Harness) => Promise<void>;
@@ -486,9 +487,19 @@ export default function SettingsForm(props: SettingsFormProps) {
               </For>
             </div>
             <Show when={props.modelRefreshStatus()}>
-              <p class={styles.settingsDescription} role="status" aria-label="Model reload status">
-                {props.modelRefreshStatus()}
-              </p>
+              {(status) => (
+                <p
+                  class={styles.modelRefreshFeedback}
+                  data-state={status().state}
+                  role={status().state === "error" ? "alert" : "status"}
+                  aria-label="Model reload status"
+                >
+                  <Show when={status().state === "error"}>
+                    <ErrorIcon aria-hidden="true" />
+                  </Show>
+                  {status().message}
+                </p>
+              )}
             </Show>
           </section>
           <section class={styles.settingsSection} aria-labelledby="settings-version">

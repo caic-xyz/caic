@@ -159,7 +159,10 @@ function createAppStore() {
   const [versionCheckError, setVersionCheckError] = createSignal("");
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
   const [refreshingHarness, setRefreshingHarness] = createSignal<Harness | null>(null);
-  const [modelRefreshStatus, setModelRefreshStatus] = createSignal("");
+  const [modelRefreshStatus, setModelRefreshStatus] = createSignal<{
+    state: "error" | "success";
+    message: string;
+  } | null>(null);
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
   let latestSettingsSave = 0;
@@ -1304,14 +1307,14 @@ function createAppStore() {
 
   async function refreshAvailableModels(harness: Harness) {
     setRefreshingHarness(harness);
-    setModelRefreshStatus("");
+    setModelRefreshStatus(null);
     try {
       const refreshed = await api.refreshHarness(harness, {});
       setHarnesses((prev) => prev.map((info) => (info.name === harness ? refreshed : info)));
       if (selectedHarness() === harness) selectHarness(harness);
-      setModelRefreshStatus(`${harness} models refreshed.`);
+      setModelRefreshStatus({ state: "success", message: `${harness} models refreshed.` });
     } catch (e: unknown) {
-      setModelRefreshStatus(e instanceof Error ? e.message : "Could not refresh models");
+      setModelRefreshStatus({ state: "error", message: e instanceof Error ? e.message : "Could not refresh models" });
     } finally {
       setRefreshingHarness(null);
     }

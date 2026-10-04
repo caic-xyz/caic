@@ -5,6 +5,7 @@
 import { test, expect, createTaskAPI, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot } from "../visual";
 import type { Locator } from "@playwright/test";
+import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 import path from "path";
 
 async function requiredBox(locator: Locator) {
@@ -82,6 +83,15 @@ test("generate settings screenshots", async ({ page }) => {
   await captureScreenshot(page, "mobile", "settings-server-mobile.png");
   await page.setViewportSize({ width: 1600, height: 900 });
   await captureScreenshot(page, "desktop", "settings-server.png");
+  const failure = { error: { code: "INTERNAL_ERROR", message: "Model provider unavailable." } } satisfies ErrorResponse;
+  await page.route("**/server/harnesses/pi/refresh", (route) => route.fulfill({ status: 503, json: failure }), {
+    times: 1,
+  });
+  await reloadModels.getByRole("button", { name: "pi", exact: true }).click();
+  await expect(reloadModels.getByRole("alert", { name: "Model reload status" })).toHaveText(failure.error.message);
+  await captureScreenshot(page, "desktop", "settings-server-error.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "settings-server-error-mobile.png");
   convertPngsToWebp(screenshotDir("desktop"));
   convertPngsToWebp(screenshotDir("mobile"));
 });

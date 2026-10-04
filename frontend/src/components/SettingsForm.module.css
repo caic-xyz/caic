@@ -160,6 +160,26 @@
   gap: 0.5rem;
 }
 
+.modelRefreshFeedback {
+  display: flex;
+  gap: 0.4rem;
+  align-items: start;
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.modelRefreshFeedback[data-state="error"] {
+  color: var(--color-error);
+}
+
+.modelRefreshFeedback svg {
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: currentcolor;
+}
+
 .oauthGrantList {
   display: grid;
   gap: 0.75rem;

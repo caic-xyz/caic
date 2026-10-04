@@ -37,18 +37,24 @@ test("server model reload shows progress, success, and recoverable failure", asy
     .poll(async () => (await api.listHarnesses()).find((h) => h.name === "codex")?.models.map((m) => m.id))
     .toContain("fake-model-fast");
   await page.screenshot({ path: testInfo.outputPath("server-success-desktop.png") });
+  const successColor = await status.evaluate((element) => getComputedStyle(element).color);
   const failure = { error: { code: "INTERNAL_ERROR", message: "Model provider unavailable." } } satisfies ErrorResponse;
   await page.route("**/server/harnesses/pi/refresh", (route) => route.fulfill({ status: 503, json: failure }), {
     times: 1,
   });
   await pi.click();
-  await expect(status).toHaveText(failure.error.message);
+  const error = models.getByRole("alert", { name: "Model reload status" });
+  await expect(error).toHaveText(failure.error.message);
+  await expect(error.locator("svg[aria-hidden=true]")).toBeVisible();
+  expect(await error.evaluate((element) => getComputedStyle(element).color)).not.toBe(successColor);
   await expect(codex).toBeEnabled();
   await expect(pi).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath("server-failure-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("server-failure-mobile.png") });
   await pi.click();
   await expect(status).toHaveText("pi models refreshed.");
+  await expect(error).toHaveCount(0);
   await expect(pi).toBeEnabled();
 });
 
