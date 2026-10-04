@@ -668,8 +668,11 @@ func (r *Lifecycle) reconnectImportedSession() {
 		tlog.Debug("auto-reconnect succeeded")
 		t.SetVNCPort(r.manager.Runtimes.VNCPort(r.ctx, t.RuntimeInstanceID()))
 		if checkout := r.agentRuntime.Checkout; checkout != nil && (t.GetState() == taskslog.StateWaiting || t.GetState() == taskslog.StateAsking || t.GetState() == taskslog.StateHasPlan) {
-			if ds := checkout.BranchDiffStat(r.ctx, r.manager.log, r.manager.Runtimes, t); len(ds) > 0 {
-				t.SetLiveDiffStat(ds)
+			snapshot, err := checkout.BranchDiffStat(r.ctx, r.manager.log, r.manager.Runtimes, t)
+			if err != nil {
+				tlog.Warn("restore branch diff stat failed", "err", err)
+			} else {
+				t.SetLiveRepositorySummary(&snapshot)
 			}
 		}
 		r.manager.NotifyTaskChange()

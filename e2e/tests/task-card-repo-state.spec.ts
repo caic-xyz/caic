@@ -1,6 +1,7 @@
-// E2E tests task-card repository-state summaries for single and mapped repositories.
+// E2E tests task-card repository-state summaries and refreshes without agent activity.
 
 import { expect, test, waitForTaskState } from "../helpers";
+import type { TaskListEvent } from "../../sdk/caic/ts/v1/types.gen";
 
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
   const repos = await api.listRepos();
@@ -14,6 +15,13 @@ test("task-card cost tooltip stays open after the first touch tap", async ({ bro
   const context = await browser.newContext({ baseURL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   try {
     const page = await context.newPage();
+    // Keep other workers' task insertions from moving the touch target between
+    // Playwright's hit testing and dispatch, which can retry and toggle twice.
+    const snapshot = { kind: "snapshot", snapshot: [await api.getTask(task.id)] } satisfies TaskListEvent;
+    await page.route(
+      (url) => url.pathname === "/api/caic/v1/tasks/events",
+      (route) => route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(snapshot)}\n\n` }),
+    );
     await page.goto(`/task/@${task.id}`);
     const card = page.locator(`[data-task-id="${task.id}"]`);
     // Card activation normalizes a bare task URL. Finish that navigation before
@@ -121,9 +129,17 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
     // Return to the list on mobile, where task detail replaces the sidebar.
     await page.goto("/");
     await expect(multiStateRows.nth(1)).toBeVisible();
-    const cost = await multiCard.getByTestId("task-card-cost").boundingBox();
-    const badge = await multiCard.getByTestId("state-badge").boundingBox();
-    expect(Math.abs(cost!.y + cost!.height / 2 - badge!.y - badge!.height / 2)).toBeLessThan(1);
+    // Other workers can insert tasks and move this card between separate reads.
+    // Measure both elements in one frame and allow the layout to settle.
+    await expect
+      .poll(() =>
+        multiCard.evaluate((card) => {
+          const cost = card.querySelector('[data-testid="task-card-cost"]')!.getBoundingClientRect();
+          const badge = card.querySelector('[data-testid="state-badge"]')!.getBoundingClientRect();
+          return Math.abs(cost.y + cost.height / 2 - badge.y - badge.height / 2);
+        }),
+      )
+      .toBeLessThan(1);
     const rhythm = await multiCard.evaluate((card) => {
       const rows = Array.from(card.querySelectorAll('[data-testid="task-card-repo-state"]'));
       const group = card.querySelector('[data-testid="task-card-repo-states"]')!.parentElement!;
@@ -166,4 +182,23 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   const emptyRowHeight = (await multiStateRows.nth(1).boundingBox())!.height;
   const summaryRowHeight = (await singleCard.getByTestId("task-card-repo-state").boundingBox())!.height;
   expect(Math.abs(emptyRowHeight - summaryRowHeight)).toBeLessThan(1);
+});
+
+test("opening the diff refreshes a waiting task card without another turn", async ({ page, api, uniquePrompt }) => {
+  const repos = await api.listRepos();
+  const task = await api.createTask({
+    initialPrompt: { text: uniquePrompt("Refresh repository summary") },
+    repos: [{ name: repos[0].path }],
+    harness: "claude",
+  });
+  await waitForTaskState(api, task.id, "waiting");
+  await page.goto(`/task/@${task.id}`);
+  const card = page.locator(`[data-task-id="${task.id}"]`);
+  const summary = card.getByRole("img", {
+    name: "2 changed files, 12 additions, 2 deletions, 1 uncommitted file, 1 commit ahead of upstream",
+  });
+  await expect(summary).toHaveCount(0);
+  await page.goto(`/task/@${task.id}/diff`);
+  await expect(summary).toBeVisible();
+  await expect(card.getByTestId("state-badge")).toHaveText("waiting");
 });

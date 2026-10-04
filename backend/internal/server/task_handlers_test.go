@@ -1,4 +1,4 @@
-// Tests task HTTP handler preconditions, lazy diffs, and ahead/behind commit metadata.
+// Tests task HTTP handler preconditions, lazy diffs, commit metadata, and card-summary refreshes.
 
 package server
 
@@ -13,6 +13,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -249,5 +250,64 @@ func TestTaskHandlersHandoff(t *testing.T) {
 		if !strings.Contains(resp.Prompt, want) {
 			t.Errorf("prompt does not contain %q:\n%s", want, resp.Prompt)
 		}
+	}
+}
+
+func TestGitReadsRefreshTaskSummary(t *testing.T) {
+	t.Parallel()
+	for _, endpoint := range []string{"diff/index", "diff", "repo-status"} {
+		t.Run(endpoint, func(t *testing.T) {
+			t.Parallel()
+			s, backend, taskID := newTaskDiffTestRouter(t)
+			mgr := testTaskHandlers(s).taskSvc.taskMgr
+			entry, _ := mgr.GetEntry(taskID)
+			tk := entry.Task()
+			tk.SetLiveRepositorySummary(&repo.GitSnapshot{
+				Read:       repo.NewGitRead(tk.RuntimeInstanceID()),
+				DiffStat:   agent.DiffStat{{Path: "stale.go", LinesAdded: 273, LinesDeleted: 108}},
+				RepoStates: []agent.RepoState{{Branch: "caic-1", Ahead: 1, ChangedFiles: 20}},
+			})
+			backend.RepositoryStatusValue = runtime.RepositoryStatus{
+				Branch: "caic-1", Behind: 2,
+				DiffStat: []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 4, LinesDeleted: 1}},
+			}
+			read := func() {
+				w := httptest.NewRecorder()
+				r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+taskID.String()+"/"+endpoint, nil)
+				testTaskHandlers(s).routes().ServeHTTP(w, r)
+				if w.Code != http.StatusOK {
+					t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+				}
+			}
+			changed := mgr.Changed()
+			read()
+			select {
+			case <-changed:
+			default:
+				t.Fatal("summary update did not notify task-list subscribers")
+			}
+			snap := tk.Snapshot()
+			if len(snap.DiffStat) != 1 || snap.DiffStat[0].Path != "fresh.go" || len(snap.RepoStates) != 1 || snap.RepoStates[0].Behind != 2 || snap.RepoStates[0].LinesAdded != 4 || snap.RepoStates[0].Ahead != 0 {
+				t.Fatalf("fresh snapshot = %+v, %+v", snap.DiffStat, snap.RepoStates)
+			}
+			changed = mgr.Changed()
+			read()
+			select {
+			case <-changed:
+				t.Fatal("unchanged snapshot notified subscribers again")
+			default:
+			}
+			backend.RepositoryStatusValue = runtime.RepositoryStatus{Branch: "caic-1"}
+			read()
+			select {
+			case <-changed:
+			default:
+				t.Fatal("empty snapshot did not notify subscribers")
+			}
+			snap = tk.Snapshot()
+			if len(snap.DiffStat) != 0 || len(snap.RepoStates) != 1 || snap.RepoStates[0] != (agent.RepoState{Branch: "caic-1"}) {
+				t.Fatalf("clean snapshot kept stale stats: %+v, %+v", snap.DiffStat, snap.RepoStates)
+			}
+		})
 	}
 }

@@ -1,4 +1,4 @@
-// Checkout owns local git state and serializes branch operations across tasks.
+// Checkout serializes Git operations and returns snapshots ordered by probe completion.
 
 package repo
 
@@ -195,7 +195,8 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 	fetchCancel()
 	// Per-repo diff failures are already logged; the stat only feeds the
 	// result report, so the sync proceeds regardless.
-	ds, _ := w.DiffStat(ctx, log, runtimes, id, repos)
+	snapshot, _ := w.DiffStat(ctx, log, runtimes, id, repos)
+	ds := snapshot.DiffStat
 	region.End()
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch: %w", err)
@@ -255,7 +256,8 @@ func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes
 	fetchCancel()
 	// Per-repo diff failures are already logged; the stat only feeds the
 	// result report, so the sync proceeds regardless.
-	ds, _ := w.DiffStat(ctx, log, runtimes, id, repos)
+	snapshot, _ := w.DiffStat(ctx, log, runtimes, id, repos)
+	ds := snapshot.DiffStat
 	region.End()
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch: %w", err)
@@ -342,12 +344,13 @@ func (w *Checkout) FileDiff(ctx context.Context, runtimes *runtime.Router, t Tas
 	return runtimes.FileDiff(ctx, id, repoIdx, commit, path, originalPath)
 }
 
-// RepositoryStatuses returns branch, upstream commit, and working-tree status
-// for every repository in the task runtime.
-func (w *Checkout) RepositoryStatuses(ctx context.Context, _ *slog.Logger, runtimes *runtime.Router, t TaskView) ([]runtime.RepositoryStatus, error) {
+// RepositoryStatuses reads branch, upstream commits, and working-tree status
+// for every task repository. The returned snapshot is stamped under branchMu;
+// callers can publish it later without overwriting a newer applied snapshot.
+func (w *Checkout) RepositoryStatuses(ctx context.Context, runtimes *runtime.Router, t TaskView) (GitSnapshot, error) {
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
-		return nil, err
+		return GitSnapshot{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
@@ -357,10 +360,11 @@ func (w *Checkout) RepositoryStatuses(ctx context.Context, _ *slog.Logger, runti
 	for i := range repos {
 		statuses[i], err = runtimes.RepositoryStatus(ctx, id, i)
 		if err != nil {
-			return nil, fmt.Errorf("git status for %s: %w", repos[i].ContainerPath, err)
+			return GitSnapshot{}, fmt.Errorf("git status for %s: %w", repos[i].ContainerPath, err)
 		}
 	}
-	return statuses, nil
+	stats, states := summarizeRepositoryStatuses(repos, statuses)
+	return GitSnapshot{Read: NewGitRead(id), DiffStat: stats, RepoStates: states, Statuses: statuses}, nil
 }
 
 // BranchDiffStat returns the per-repo branch diff stat (md diff --numstat)
@@ -368,19 +372,12 @@ func (w *Checkout) RepositoryStatuses(ctx context.Context, _ *slog.Logger, runti
 // uncommitted changes, this captures the full branch diff relative to the
 // base. Used by task-manager import to restore the diff stat after server
 // restart.
-func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView) agent.DiffStat {
-	log = log.With("repo", w.RelPath)
+func (w *Checkout) BranchDiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView) (GitSnapshot, error) {
 	id, repos, err := w.taskRuntime(t)
 	if err != nil {
-		log.Warn("resolve task runtime for branch diff stat failed", "err", err)
-		return nil
+		return GitSnapshot{}, err
 	}
-	ds, err := w.DiffStat(ctx, log, runtimes, id, repos)
-	if err != nil {
-		log.Warn("branch diff stat failed", "err", err)
-		return nil
-	}
-	return ds
+	return w.DiffStat(ctx, log, runtimes, id, repos)
 }
 
 // DeleteUnmodifiedTaskBranches deletes generated task branches that never diverged from their base.
@@ -521,21 +518,22 @@ func (w *Checkout) FetchAndCreateBranch(ctx context.Context, log *slog.Logger, t
 	return nil
 }
 
-// DiffStat returns the combined per-repo diff stat (git diff --numstat)
-// computed in the instance. It returns an error if any repo's diff fails.
-func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, error) {
+// DiffStat reads combined per-repository numstat. Its snapshot is stamped after
+// the probe under branchMu, even when an error accompanies partial statistics.
+func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (GitSnapshot, error) {
 	log = log.With("repo", w.RelPath)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	return w.diffStatLocked(ctx, log, runtimes, id, repos)
+	stats, err := w.diffStatLocked(ctx, log, runtimes, id, repos)
+	return GitSnapshot{Read: NewGitRead(id), DiffStat: stats}, err
 }
 
-// DiffStatAndRepoStates returns the combined per-repo branch diff stat plus a
-// compact per-repo git state, from one log-free status probe per repository.
-// It returns an error if any repo's probe fails. Holds branchMu during diff.
-func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, []agent.RepoState, error) {
+// DiffStatAndRepoStates reads branch statistics and compact repository state
+// with one log-free probe per repository. The snapshot carries completion order
+// and can contain partial results when some probes fail.
+func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (GitSnapshot, error) {
 	log = log.With("repo", w.RelPath)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
 	defer cancel()
@@ -552,46 +550,67 @@ func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, 
 			errs = append(errs, err)
 			continue
 		}
-		for j := range status.DiffStat {
-			stat := status.DiffStat[j]
-			path := stat.Path
-			if len(repos) > 1 {
-				path = diffRepoPrefix(repo) + "/" + path
-			}
-			result = append(result, agent.DiffFileStat{
-				Path:         path,
-				LinesAdded:   stat.LinesAdded,
-				LinesDeleted: stat.LinesDeleted,
-				Binary:       stat.Binary,
-				OldSize:      stat.OldSize,
-				NewSize:      stat.NewSize,
-			})
+		stat, state := repositorySummary(repo, i, len(repos), &status)
+		result = append(result, stat...)
+		states = append(states, state)
+	}
+	return GitSnapshot{Read: NewGitRead(id), DiffStat: result, RepoStates: states}, errors.Join(errs...)
+}
+
+// summarizeRepositoryStatuses derives card statistics from the same snapshots
+// used by the diff view. Repos and statuses must have matching lengths.
+func summarizeRepositoryStatuses(repos []runtime.Repo, statuses []runtime.RepositoryStatus) (agent.DiffStat, []agent.RepoState) {
+	var result agent.DiffStat
+	states := make([]agent.RepoState, len(statuses))
+	for i := range statuses {
+		stat, state := repositorySummary(&repos[i], i, len(repos), &statuses[i])
+		result = append(result, stat...)
+		states[i] = state
+	}
+	return result, states
+}
+
+func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.RepositoryStatus) (agent.DiffStat, agent.RepoState) {
+	result := make(agent.DiffStat, 0, len(status.DiffStat))
+	for j := range status.DiffStat {
+		stat := status.DiffStat[j]
+		path := stat.Path
+		if repoCount > 1 {
+			path = diffRepoPrefix(repo) + "/" + path
 		}
-		added, deleted := 0, 0
-		for _, stat := range status.DiffStat {
-			added += stat.LinesAdded
-			deleted += stat.LinesDeleted
-		}
-		conflicts := 0
-		for _, file := range status.Uncommitted {
-			if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
-				conflicts++
-			}
-		}
-		states = append(states, agent.RepoState{
-			RepoIndex:        i,
-			Branch:           status.Branch,
-			Operation:        string(status.Operation),
-			Ahead:            status.Ahead,
-			Behind:           status.Behind,
-			ChangedFiles:     len(status.DiffStat),
-			LinesAdded:       added,
-			LinesDeleted:     deleted,
-			UncommittedFiles: len(status.Uncommitted),
-			Conflicts:        conflicts,
+		result = append(result, agent.DiffFileStat{
+			Path:         path,
+			LinesAdded:   stat.LinesAdded,
+			LinesDeleted: stat.LinesDeleted,
+			Binary:       stat.Binary,
+			OldSize:      stat.OldSize,
+			NewSize:      stat.NewSize,
 		})
 	}
-	return result, states, errors.Join(errs...)
+	added, deleted := 0, 0
+	for _, stat := range status.DiffStat {
+		added += stat.LinesAdded
+		deleted += stat.LinesDeleted
+	}
+	conflicts := 0
+	for _, file := range status.Uncommitted {
+		if file.IndexStatus == "U" || file.WorktreeStatus == "U" {
+			conflicts++
+		}
+	}
+	state := agent.RepoState{
+		RepoIndex:        i,
+		Branch:           status.Branch,
+		Operation:        string(status.Operation),
+		Ahead:            status.Ahead,
+		Behind:           status.Behind,
+		ChangedFiles:     len(status.DiffStat),
+		LinesAdded:       added,
+		LinesDeleted:     deleted,
+		UncommittedFiles: len(status.Uncommitted),
+		Conflicts:        conflicts,
+	}
+	return result, state
 }
 
 // taskRuntime resolves the runtime instance and repos for a task.

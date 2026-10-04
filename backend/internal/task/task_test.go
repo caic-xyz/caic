@@ -27,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	quotausage "github.com/caic-xyz/caic/backend/internal/usage"
@@ -1518,9 +1519,12 @@ func TestTask(t *testing.T) {
 			if len(got) != 0 {
 				t.Fatalf("LiveDiffStat = %+v, want empty (relay reported no uncommitted changes)", got)
 			}
-			// After adoption, the caller should compute the host-side
-			// diff stat and set it.
-			tk.SetLiveDiffStat(agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}})
+			// Adoption restores the branch diff from a fresh host snapshot.
+			tk.SetRuntimeConnectionInfo("test-runtime:adopted", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetLiveRepositorySummary(&repo.GitSnapshot{
+				Read:     repo.NewGitRead(tk.RuntimeInstanceID()),
+				DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}},
+			})
 			got = tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "main.go" {
 				t.Errorf("LiveDiffStat after set = %+v, want main.go", got)
@@ -4094,4 +4098,27 @@ func TestPricedCost(t *testing.T) {
 			t.Errorf("costUSD = %v, want 0.15", costUSD)
 		}
 	})
+}
+
+func TestRepositorySummaryRejectsReplacedInstance(t *testing.T) {
+	t.Parallel()
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+	tk.SetRuntimeConnectionInfo("test-runtime:new", runtime.ConnectionTarget{}, "", "", 0)
+	current := agent.DiffStat{{Path: "current.go", LinesAdded: 1}}
+	tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: current}}, false)
+	for _, id := range []runtime.ID{"test-runtime:old", ""} {
+		if tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(id), RepoStates: []agent.RepoState{{Branch: "stale"}}}) {
+			t.Fatal("accepted a summary from a replaced or removed instance")
+		}
+	}
+	read := repo.NewGitRead("test-runtime:old")
+	changed, _ := tk.addParsedMessageWithGitRead(agent.TimedMessage{Message: &agent.DiffStatMessage{
+		DiffStat: agent.DiffStat{{Path: "old.go"}}, Repos: []agent.RepoState{{Branch: "old"}},
+	}}, false, &read)
+	if changed {
+		t.Fatal("delayed post-tool probe updated the task summary")
+	}
+	if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, current) {
+		t.Fatalf("current stats overwritten: %+v", got)
+	}
 }

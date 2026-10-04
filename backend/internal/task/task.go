@@ -1,4 +1,4 @@
-// Package task orchestrates one coding agent task end to end.
+// Package task orchestrates coding-agent state and applies Git snapshots in read order.
 //
 // It owns branch creation, instance lifecycle, agent execution, resource
 // history, and git integration.
@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -199,6 +200,7 @@ type Task struct {
 	lastAPIUsage   agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
 	cacheExpiresAt time.Time      // When the prompt cache from the last API call expires.
 	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
+	lastGitRead    repo.GitRead   // Rejects deferred snapshots older than the applied Git state.
 	liveRepoStates []agent.RepoState
 	// Compact per-repo git state, updated by the backend's post-tool probe.
 	diffCreated   bool   // True after any non-empty diff was reported for the task.
@@ -318,6 +320,9 @@ func (t *Task) RuntimeConnectionTarget() runtime.ConnectionTarget {
 func (t *Task) SetRuntimeConnectionInfo(id runtime.ID, target runtime.ConnectionTarget, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.runtimeInstanceID != id {
+		t.lastGitRead = repo.NewGitRead(id)
+	}
 	t.runtimeInstanceID = id
 	t.runtimeConnection = target
 	t.TailscaleFQDN = tailscaleFQDN
@@ -616,30 +621,28 @@ func (t *Task) MarkDiffCreated() {
 	t.diffCreated = true
 }
 
-// SetLiveDiffStat overwrites the live diff stat. Used by task import to set
-// the host-side branch diff after SeedTimeline, because the relay's
-// diff_watcher only tracks uncommitted changes (git diff HEAD) which
-// becomes empty after the agent commits.
-func (t *Task) SetLiveDiffStat(ds agent.DiffStat) {
+// SetLiveRepositorySummary applies a completed host Git snapshot atomically.
+// It rejects replaced-instance and out-of-order reads, including delayed
+// identical reads, and reports whether task-list subscribers need an update.
+func (t *Task) SetLiveRepositorySummary(snapshot *repo.GitSnapshot) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.setLiveDiffStatLocked(ds)
-}
-
-// SetLiveRepoStates overwrites the compact per-repo Git state. Used by task
-// import and revive to restore the card summary, because an adopted session
-// only publishes states from the post-tool probe that follows it.
-func (t *Task) SetLiveRepoStates(states []agent.RepoState) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.setLiveRepoStatesLocked(states)
+	if !t.acceptGitReadLocked(snapshot.Read) {
+		return false
+	}
+	if slices.Equal(t.liveDiffStat, snapshot.DiffStat) && (len(snapshot.RepoStates) == 0 || slices.Equal(t.liveRepoStates, snapshot.RepoStates)) {
+		return false
+	}
+	t.setLiveDiffStatLocked(snapshot.DiffStat)
+	t.setLiveRepoStatesLocked(snapshot.RepoStates)
+	return true
 }
 
 // SetPR stores the forge owner, repo, and PR/MR number. Does not change task state.
-func (t *Task) SetPR(owner, repo string, pr int) {
+func (t *Task) SetPR(owner, repoName string, pr int) {
 	t.mu.Lock()
 	t.forgeOwner = owner
-	t.forgeRepo = repo
+	t.forgeRepo = repoName
 	t.forgePR = pr
 	t.forgePRState = forge.PRStateOpen
 	t.mu.Unlock()
@@ -932,6 +935,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	if t.timelineLenLocked() > 0 {
 		panic(fmt.Sprintf("task %s: SeedTimeline on a timeline that already holds %d messages", t.ID, t.timelineLenLocked()))
 	}
+	t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
 	view := timelineEntries{prefix: prefix, suffix: suffix}
 	compactFinalizedDeltas(view)
 	t.timelinePrefix = prefix
@@ -1740,6 +1744,15 @@ func (t *Task) latestCommitSnapshot() *agent.TurnCommitSnapshotMessage {
 	return nil
 }
 
+// acceptGitReadLocked advances the applied read only for the current instance.
+func (t *Task) acceptGitReadLocked(read repo.GitRead) bool {
+	if read.InstanceID == "" || read.InstanceID != t.runtimeInstanceID || !read.NewerThan(t.lastGitRead) {
+		return false
+	}
+	t.lastGitRead = read
+	return true
+}
+
 func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 	t.liveDiffStat = ds
 	if len(ds) > 0 {
@@ -1819,8 +1832,19 @@ func (t *Task) addMessage(_ context.Context, m agent.Message, skipTitleGen bool)
 // addParsedMessage records one physical relay record while task state and
 // subscribers consume its Message.
 func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (stateChanged, generateTitle bool) {
+	return t.addParsedMessageWithGitRead(parsed, skipTitleGen, nil)
+}
+
+// addParsedMessageWithGitRead applies host statistics only when their snapshot
+// is newer. Stale compact controls are dropped; result payloads and lifecycle
+// remain recorded even when their live statistics have been superseded.
+func (t *Task) addParsedMessageWithGitRead(parsed agent.TimedMessage, skipTitleGen bool, read *repo.GitRead) (stateChanged, generateTitle bool) {
 	m := parsed.Message
 	t.mu.Lock()
+	if _, compact := m.(*agent.DiffStatMessage); compact && read != nil && !t.acceptGitReadLocked(*read) {
+		t.mu.Unlock()
+		return false, false
+	}
 	initialState := t.state
 	// A compaction boundary rewrites the summary's live context fill, so the
 	// task list must refresh even though the task state is unchanged.
@@ -1947,6 +1971,9 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	}
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
+		if read == nil {
+			t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
+		}
 		t.setLiveDiffStatLocked(ds.DiffStat)
 		t.setLiveRepoStatesLocked(ds.Repos)
 		// Diff data refreshes without a state change, but the task-list stream
@@ -1974,7 +2001,11 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 	}
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok {
-		if len(rm.DiffStat) > 0 {
+		current := read == nil || t.acceptGitReadLocked(*read)
+		if current && len(rm.DiffStat) > 0 {
+			if read == nil {
+				t.lastGitRead = repo.NewGitRead(t.runtimeInstanceID)
+			}
 			t.setLiveDiffStatLocked(rm.DiffStat)
 		}
 		t.liveUsage.InputTokens += rm.Usage.InputTokens

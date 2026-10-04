@@ -2074,14 +2074,12 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	// post-reconnect refresh below. Without this restore an adopted task's card
 	// stays blank until its next mutating tool call.
 	if checkout != nil {
-		if ds, states, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, t.RuntimeInstanceID(), t.RuntimeRepos()); err == nil {
-			if len(ds) > 0 {
-				t.SetLiveDiffStat(ds)
-			}
-			if len(states) > 0 {
-				t.SetLiveRepoStates(states)
-			}
-		} else {
+		instanceID := t.RuntimeInstanceID()
+		snapshot, err := checkout.DiffStatAndRepoStates(ctx, m.log, m.Runtimes, instanceID, t.RuntimeRepos())
+		if err == nil {
+			t.SetLiveRepositorySummary(&snapshot)
+		}
+		if err != nil {
 			m.log.WarnContext(ctx, "adopt", "msg", "restore diff stat failed", "task", t.ID, "err", err)
 		}
 	}

@@ -1,4 +1,4 @@
-// Tests and benchmarks for AgentRuntime task setup, sessions, and lifecycle.
+// Tests AgentRuntime task setup, sessions, lifecycle, and Git-summary ordering.
 
 package task
 
@@ -316,6 +316,25 @@ func caic0BranchExists(t *testing.T, dir string) bool {
 	}
 	t.Fatalf("git rev-parse caic-0: %v", err)
 	return false
+}
+
+type resultFetchBackend struct {
+	*runtimetest.FakeBackend
+
+	onFetch func()
+	onDiff  func()
+}
+
+func (b *resultFetchBackend) Diff(ctx context.Context, id runtime.ID, repoIdx int, args ...string) (string, error) {
+	if b.onDiff != nil {
+		b.onDiff()
+	}
+	return b.FakeBackend.Diff(ctx, id, repoIdx, args...)
+}
+
+func (b *resultFetchBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
+	b.onFetch()
+	return b.FakeBackend.Fetch(ctx, id, opts)
 }
 
 func TestRunner(t *testing.T) {
@@ -1002,7 +1021,7 @@ func TestRunner(t *testing.T) {
 			})
 			// Replace the one-shot revival probe with stale state. The next
 			// live Bash result must publish an authoritative probe again.
-			tk.SetLiveRepoStates([]agent.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}})
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{Repos: []agent.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}}}}, false)
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: "rebase", Name: "Bash", Input: json.RawMessage(`{}`)}}
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{ToolUseID: "rebase"}}
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result", Result: "rebased"}}
@@ -1749,6 +1768,159 @@ func testRunnerSessions(t *testing.T) {
 			<-done
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"}, false)
 		})
+		t.Run("GitSnapshotsRejectDeferredPublication", func(t *testing.T) {
+			t.Parallel()
+			backend := testContainer()
+			checkout := newTestCheckout(t, "", "/repo", backend)
+			runtimes := newTestRuntimeRouter(t, backend)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
+			tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetState(taskslog.StateRunning)
+			full, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			compact, err := checkout.DiffStatAndRepoStates(t.Context(), logtest.Logger(t), runtimes, tk.RuntimeInstanceID(), tk.RuntimeRepos())
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := checkout.DiffStat(t.Context(), logtest.Logger(t), runtimes, tk.RuntimeInstanceID(), tk.RuntimeRepos())
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend.RepositoryStatusValue = runtime.RepositoryStatus{
+				Branch: "caic-0", Behind: 2, DiffStat: []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 9}},
+			}
+			latest, err := checkout.RepositoryStatuses(t.Context(), runtimes, tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tk.SetLiveRepositorySummary(&latest) {
+				t.Fatal("fresh summary was not applied")
+			}
+			for _, older := range []*repo.GitSnapshot{&full, &compact} {
+				if tk.SetLiveRepositorySummary(older) {
+					t.Fatal("older full or compact snapshot replaced the newer summary")
+				}
+			}
+			changed, _ := tk.addParsedMessageWithGitRead(agent.TimedMessage{Message: &agent.DiffStatMessage{
+				DiffStat: compact.DiffStat, Repos: compact.RepoStates,
+			}}, false, &compact.Read)
+			if changed || len(tk.timeline) != 0 {
+				t.Fatal("stale compact control was recorded or applied")
+			}
+			rm := &agent.ResultMessage{MessageType: "result", NumTurns: 1, DiffStat: result.DiffStat}
+			tk.addParsedMessageWithGitRead(agent.TimedMessage{Message: rm}, false, &result.Read)
+			snap := tk.Snapshot()
+			if len(snap.DiffStat) != 1 || snap.DiffStat[0].Path != "fresh.go" || len(snap.RepoStates) != 1 || snap.RepoStates[0].Behind != 2 {
+				t.Fatalf("deferred publication changed the newest summary: %+v, %+v", snap.DiffStat, snap.RepoStates)
+			}
+			if len(tk.timeline) != 1 || snap.State != taskslog.StateWaiting || rm.DiffStat[0].Path != "main.go" {
+				t.Fatal("stale result lost its recorded payload or lifecycle")
+			}
+			// A later relay refresh supersedes already completed host probes.
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: agent.DiffStat{{Path: "restored.go", LinesAdded: 1}}}}, false)
+			if tk.SetLiveRepositorySummary(&latest) || tk.LiveDiffStat()[0].Path != "restored.go" {
+				t.Fatal("completed snapshot overwrote a later relay refresh")
+			}
+		})
+		t.Run("ResultDiffUsesCompletedProbeOrder", func(t *testing.T) {
+			t.Parallel()
+			for _, replaced := range []bool{false, true} {
+				t.Run(fmt.Sprintf("instance replaced %v", replaced), func(t *testing.T) {
+					t.Parallel()
+					backend := &resultFetchBackend{FakeBackend: testContainer(), onFetch: func() {}}
+					r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", backend), "", nil)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
+					tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
+					tk.SetState(taskslog.StateRunning)
+					prior := agent.DiffStat{{Path: "prior.go", LinesAdded: 4}}
+					backend.onDiff = func() {
+						// A summary change before this RPC finishes must not invalidate the
+						// completed result read. A changed instance still invalidates it.
+						tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: prior}}, false)
+						if replaced {
+							tk.SetRuntimeConnectionInfo("test-runtime:replacement", runtime.ConnectionTarget{}, "", "", 0)
+						}
+					}
+					msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1}
+					msgCh <- agent.TimedMessage{Message: result}
+					close(msgCh)
+					select {
+					case <-done:
+					case <-time.After(time.Second):
+						t.Fatal("result dispatch did not finish")
+					}
+					want := agent.DiffStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}}
+					if replaced {
+						want = prior
+					}
+					if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, want) {
+						t.Errorf("live stats = %+v, want %+v", got, want)
+					}
+					if len(result.DiffStat) != 1 || result.DiffStat[0].Path != "main.go" {
+						t.Errorf("recorded result stats lost: %+v", result.DiffStat)
+					}
+				})
+			}
+		})
+		t.Run("ResultDiffPreservesNewerRepositorySummary", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct{ clean, unchanged bool }{{}, {clean: true}, {unchanged: true}, {clean: true, unchanged: true}} {
+				t.Run(fmt.Sprintf("clean %v unchanged %v", tc.clean, tc.unchanged), func(t *testing.T) {
+					t.Parallel()
+					backend := &resultFetchBackend{FakeBackend: testContainer()}
+					backend.RepositoryStatusValue = runtime.RepositoryStatus{Branch: "caic-0", Behind: 2}
+					want := agent.DiffStat{{Path: "fresh.go", LinesAdded: 9}}
+					if tc.clean {
+						want = nil
+					} else {
+						backend.RepositoryStatusValue.DiffStat = []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 9}}
+					}
+					r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", backend), "", nil)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
+					tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
+					tk.SetState(taskslog.StateRunning)
+					// Fetch happens after the result's diff read, before result ingestion.
+					// A /diff read here must remain the live summary after ingestion.
+					backend.onFetch = func() {
+						snapshot, err := r.Checkout.RepositoryStatuses(t.Context(), r.Runtimes, tk)
+						if err == nil {
+							tk.SetLiveRepositorySummary(&snapshot)
+						}
+						if err != nil {
+							t.Errorf("fresh status read failed: %v", err)
+						}
+					}
+					if tc.unchanged {
+						backend.onFetch()
+					}
+					msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1}
+					msgCh <- agent.TimedMessage{Message: result}
+					close(msgCh)
+					select {
+					case <-done:
+					case <-time.After(time.Second):
+						t.Fatal("result dispatch did not finish")
+					}
+					if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, want) {
+						t.Errorf("live stats = %+v, want newer snapshot %+v", got, want)
+					}
+					if len(result.DiffStat) != 1 || result.DiffStat[0].Path != "main.go" {
+						t.Errorf("turn statistics were lost: %+v", result.DiffStat)
+					}
+					snap := tk.Snapshot()
+					if snap.State != taskslog.StateWaiting || len(snap.RepoStates) != 1 || snap.RepoStates[0].Behind != 2 {
+						t.Errorf("result lifecycle or newer repo state lost: %v, %+v", snap.State, snap.RepoStates)
+					}
+				})
+			}
+		})
 		t.Run("ResultMessageRecordsDiffStatAndCommitSnapshot", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
@@ -1796,6 +1968,10 @@ func testRunnerSessions(t *testing.T) {
 			case <-timeout:
 				t.Fatal("timed out waiting for message")
 			}
+			if got := tk.LiveDiffStat(); len(got) != 1 || got[0].Path != "main.go" {
+				t.Errorf("result did not update live stats without a newer read: %+v", got)
+			}
+
 			wantCommits := []agent.RepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
@@ -1968,8 +2144,14 @@ func testRunnerSessions(t *testing.T) {
 				t.Parallel()
 				r := newRuntime(t, testContainer())
 				tk := newTask(t)
+				notifications := 0
+				r.NotifyTaskChange = func() { notifications++ }
 
 				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos)
+
+				if notifications != 1 {
+					t.Fatalf("task-list notifications = %d, want 1", notifications)
+				}
 
 				if len(tk.timeline) != 1 {
 					t.Fatalf("timeline = %d messages, want the one DiffStatMessage", len(tk.timeline))

@@ -1,4 +1,4 @@
-// AgentRuntime owns runtime and coding-agent sessions for a task.
+// AgentRuntime owns task sessions and guards live Git summaries against delayed results.
 
 package task
 
@@ -355,12 +355,12 @@ func (r *AgentRuntime) Cleanup(ctx context.Context, t *Task, reason taskslog.Sta
 	// the host branch's own commit count says nothing about it.
 	branchConfirmedEmpty := false
 	if reason == taskslog.StatePurged && !t.DiffCreated() && name != "" && r.Checkout != nil {
-		ds, err := r.branchDiffStat(ctx, t)
+		snapshot, err := r.Checkout.BranchDiffStat(ctx, r.Log, r.Runtimes, t)
 		switch {
 		case err != nil:
 			tlog.WarnContext(ctx, "verify empty task branch failed", "err", err)
-		case len(ds) > 0:
-			t.SetLiveDiffStat(ds)
+		case len(snapshot.DiffStat) > 0:
+			t.SetLiveRepositorySummary(&snapshot)
 		default:
 			branchConfirmedEmpty = true
 		}
@@ -658,13 +658,9 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	// 4. Restore diff stat and per-repo states before returning. Subsequent
 	// mutating tool results refresh them through normal message dispatch.
 	if r.Checkout != nil {
-		if ds, states, err := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, instanceID, t.RuntimeRepos()); err == nil {
-			if len(ds) > 0 {
-				t.SetLiveDiffStat(ds)
-			}
-			if len(states) > 0 {
-				t.SetLiveRepoStates(states)
-			}
+		snapshot, err := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, instanceID, t.RuntimeRepos())
+		if err == nil {
+			t.SetLiveRepositorySummary(&snapshot)
 		}
 	}
 	tlog.Info("agent ready after revive", "state", t.GetState())
@@ -832,22 +828,6 @@ func (r *AgentRuntime) compressLog(log agent.LogSink, t *Task, res *taskslog.Res
 	}
 	r.LogPath.Set(path)
 	return nil
-}
-
-func (r *AgentRuntime) branchDiffStat(ctx context.Context, t *Task) (agent.DiffStat, error) {
-	if r.Checkout == nil {
-		return nil, nil
-	}
-	id := t.RuntimeInstanceID()
-	if id == "" {
-		return nil, errors.New("task has no runtime instance")
-	}
-	repos := t.RuntimeRepos()
-	if len(repos) > 0 && repos[0].GitRoot == "" {
-		repos[0].GitRoot = r.Checkout.Dir
-	}
-	r.Log.InfoContext(ctx, "branch diff stat for purge verification", "repo", r.Checkout.RelPath, "repos", len(repos))
-	return r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, id, repos)
 }
 
 // setup creates the reserved task branch before launching the runtime, then
@@ -1208,6 +1188,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 			m := parsed.Message
 			emitToolDiff := false
 			var commitSnapshot *agent.TurnCommitSnapshotMessage
+			var resultRead *repo.GitRead
 			switch msg := m.(type) {
 			case *agent.ToolUseMessage:
 				if _, ok := mutatingTools[msg.Name]; ok {
@@ -1223,15 +1204,16 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 					// TODO: Consolidate these result-time branch and turn measurements
 					// into one runtime operation. They currently require two Git diffs
 					// and two container-reference synchronizations per repository.
-					ds, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
-					msg.DiffStat = ds
+					snapshot, _ := r.Checkout.DiffStat(ctx, r.Log, r.Runtimes, instanceID, allRepos)
+					resultRead = &snapshot.Read
+					msg.DiffStat = snapshot.DiffStat
 					commits := r.fetchTurnCommits(ctx, instanceID)
 					if len(commits) > 0 {
 						commitSnapshot = agent.NewTurnCommitSnapshotMessage(commits, false, r.turnChangeStat(ctx, instanceID, allRepos, t.latestCommitSnapshot(), commits))
 					}
 				}
 			}
-			stateChanged, generateTitle := t.addParsedMessage(parsed, skipTitleGen)
+			stateChanged, generateTitle := t.addParsedMessageWithGitRead(parsed, skipTitleGen, resultRead)
 			if commitSnapshot != nil {
 				r.persistCommitSnapshot(ctx, t, commitSnapshot, instanceID)
 				t.addMessage(ctx, commitSnapshot, false)
@@ -1353,15 +1335,16 @@ func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runti
 	if r.Checkout == nil {
 		return
 	}
-	ds, repoStates, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, id, repos)
-	if len(ds) == 0 && len(repoStates) == 0 {
+	snapshot, _ := r.Checkout.DiffStatAndRepoStates(ctx, r.Log, r.Runtimes, id, repos)
+	if len(snapshot.DiffStat) == 0 && len(snapshot.RepoStates) == 0 {
 		return
 	}
-	t.addMessage(ctx, &agent.DiffStatMessage{
-		MessageType: "caic_diff_stat",
-		DiffStat:    ds,
-		Repos:       repoStates,
-	}, false)
+	changed, _ := t.addParsedMessageWithGitRead(agent.TimedMessage{Message: &agent.DiffStatMessage{
+		MessageType: "caic_diff_stat", DiffStat: snapshot.DiffStat, Repos: snapshot.RepoStates,
+	}}, false, &snapshot.Read)
+	if changed {
+		r.NotifyTaskChange()
+	}
 }
 
 // runtimeDir returns the working directory path inside a runtime instance.
