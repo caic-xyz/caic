@@ -12,10 +12,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
@@ -75,6 +77,30 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeConfigDir)) }()
 	cfg.Dirs.ConfigDir = fakeConfigDir
+	// Seed real preference storage so browser reloads and edits use the same
+	// settings path as production, including default and explicit mount targets.
+	prefs, err := preferences.Open(filepath.Join(fakeConfigDir, "preferences.json"))
+	if err != nil {
+		return fmt.Errorf("open fake preferences: %w", err)
+	}
+	if err := prefs.Update("default", func(p *preferences.Preferences) {
+		p.Settings.BaseImage = "ghcr.io/caic-xyz/md-user:latest"
+		p.Settings.PurgeDelay = 30 * time.Minute
+		p.Settings.AutoFixOnCIFailure = true
+		p.Settings.WellKnownCaches = map[string]bool{"go-mod": true, "npm": true, "pip": true}
+		p.Settings.CacheMappings = []preferences.CacheMapping{
+			{HostPath: "~/.cache/huggingface", Enabled: true},
+			{HostPath: "/srv/caic/cache/uv", ContainerPath: "~/.cache/uv", Enabled: true},
+			{HostPath: "~/.gradle", Enabled: false},
+		}
+		p.Settings.CustomMounts = []preferences.MountMapping{
+			{HostPath: "~/Documents/reference", ContainerPath: "/reference", Enabled: true, ReadOnly: true},
+			{HostPath: "~/.config/git", Enabled: true, ReadOnly: true},
+			{HostPath: "~/datasets", Enabled: false},
+		}
+	}); err != nil {
+		return fmt.Errorf("seed fake preferences: %w", err)
+	}
 	fakeLogsDir, err := os.MkdirTemp("", "caic-e2e-logs-*")
 	if err != nil {
 		return err

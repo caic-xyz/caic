@@ -35,33 +35,20 @@ async function stabilizeWidget(locator: Locator) {
 
 test.describe.configure({ mode: "serial" });
 
-test("generate documentation screenshots", async ({ page, api }) => {
-  // AVIF encoding via ffmpeg is slow; the default 60s is too tight.
-  test.setTimeout(120_000);
+test("generate settings screenshots", async ({ page }) => {
   await prepareVisualPage(page);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/");
-
-  // Wait for repos to load.
-  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
-
-  // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
-  await api.updatePreferences({
-    settings: {
-      autoFixOnCIFailure: false,
-      autoFixOnPROpen: false,
-      purgeDelay: 15_000_000_000,
-      customMounts: [
-        { hostPath: "~/.claude", containerPath: "", enabled: true, readOnly: false },
-        { hostPath: "~/.cache/huggingface", containerPath: "", enabled: true, readOnly: false },
-      ],
-    },
-  });
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/settings");
+  await expect(page.getByRole("region", { name: "Container", exact: true })).toBeVisible();
+  await captureScreenshot(page, "desktop", "settings-general.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "settings-general-mobile.png");
+  // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/settings?section=storage");
   const mountRows = page.getByTestId("custom-mount-row");
-  await expect(mountRows).toHaveCount(2);
-  for (let i = 0; i < 2; i++) {
+  await expect(mountRows).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
     const row = mountRows.nth(i);
     const hostInput = await requiredBox(row.getByLabel("Host path"));
     const arrow = await requiredBox(row.getByTestId("mapping-arrow"));
@@ -83,9 +70,23 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
+  await page.getByRole("region", { name: "Custom mounts", exact: true }).scrollIntoViewIfNeeded();
   await captureScreenshot(page, "desktop", "settings-mounts.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("region", { name: "Custom mounts", exact: true }).scrollIntoViewIfNeeded();
+  await captureScreenshot(page, "mobile", "settings-mounts-mobile.png");
+  convertPngsToWebp(screenshotDir("desktop"));
+  convertPngsToWebp(screenshotDir("mobile"));
+});
+
+test("generate documentation screenshots", async ({ page, api }) => {
+  // AVIF encoding via ffmpeg is slow; the default 60s is too tight.
+  test.setTimeout(120_000);
+  await prepareVisualPage(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
+
+  // Wait for repos to load.
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Create tasks that will reach different states for a populated task list.
@@ -401,8 +402,10 @@ test("generate documentation screenshots", async ({ page, api }) => {
   for (let i = 1; i <= 8; i++) {
     const id = await createTaskAPI(api, `Scroll gradient demo task ${String(i).padStart(2, "0")}`);
     scrollTaskIds.push(id);
+    // Branch allocation happens during async setup. Settle it before creating
+    // the next fixture so visible branch numbers follow creation order.
+    await waitForTaskState(api, id, "waiting", 30_000);
   }
-  await Promise.all(scrollTaskIds.map((id) => waitForTaskState(api, id, "waiting", 30_000)));
   await waitForCISettle(api, scrollTaskIds);
 
   await page.goto("/");
@@ -445,7 +448,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   });
   await expect.poll(async () => mobileAppShell.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   await expect
-    .poll(async () => mobileAppShell.locator(":scope > header").evaluate((el) => el.getBoundingClientRect().bottom))
+    .poll(async () => mobileAppShell.getByRole("banner").evaluate((el) => el.getBoundingClientRect().bottom))
     .toBeLessThanOrEqual(0);
   await captureScreenshot(page, "mobile", "task-list-scrolled-mobile.png");
 

@@ -28,6 +28,8 @@ export default function SettingsPage() {
         customMounts={s.customMounts}
         setCustomMounts={s.setCustomMounts}
         settingsError={s.settingsError}
+        settingsSaveState={s.settingsSaveState}
+        markSettingsDraft={s.markSettingsDraft}
         autoFixCI={s.autoFixCI}
         setAutoFixCI={s.setAutoFixCI}
         autoFixPR={s.autoFixPR}

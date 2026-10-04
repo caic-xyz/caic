@@ -98,6 +98,8 @@
   --color-on-inverse-hover-strong: rgb(255 255 255 / 15%);
 
   /* Text scale (dark → light) */
+  --color-text-primary: #1f2328;
+  --color-text-placeholder: #767676;
   --color-text-secondary: #555;
   --color-text-tertiary: #666;
   --color-text-meta: #777;

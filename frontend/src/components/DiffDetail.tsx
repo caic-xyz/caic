@@ -468,7 +468,12 @@ function FileDiffRow(props: FileDiffRowProps) {
                   Retry
                 </button>
                 <Show when={loading()}>
-                  <span class={styles.diffLoading} role="status" aria-live="polite">
+                  <span
+                    class={styles.diffLoading}
+                    role="status"
+                    aria-label={`Diff status for ${pathLabel()}`}
+                    aria-live="polite"
+                  >
                     Retrying file diff...
                   </span>
                 </Show>
@@ -476,7 +481,12 @@ function FileDiffRow(props: FileDiffRowProps) {
             )}
           </Show>
           <Show when={loading() && !loadError()}>
-            <p class={styles.diffLoading} role="status" aria-live="polite">
+            <p
+              class={styles.diffLoading}
+              role="status"
+              aria-label={`Diff status for ${pathLabel()}`}
+              aria-live="polite"
+            >
               {diff() === null ? "Loading file diff..." : "Updating file diff..."}
             </p>
           </Show>

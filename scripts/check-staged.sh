@@ -59,7 +59,7 @@ while IFS= read -r -d '' file; do
   # an ignored path to eslint only adds a "File ignored because of a matching ignore pattern"
   # warning, so leave such files out of the list.
   case "$file" in
-  backend/* | sdk/* | frontend/dist/* | frontend/public/*)
+  backend/* | frontend/dist/* | frontend/public/* | sdk/* | test-results/* | visual-screenshots-failures/*)
     ;;
   *.js | *.mjs | *.ts | *.tsx)
     eslint_files+=("$file")

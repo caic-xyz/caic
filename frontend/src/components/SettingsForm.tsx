@@ -1,6 +1,7 @@
-// SettingsForm renders the application settings controls.
+// SettingsForm presents autosaved container, storage, automation, and server settings.
 
-import { For, Index, Show, type Accessor, type Setter } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
+import { createEffect, createMemo, For, Match, onCleanup, Show, Switch, type Accessor, type Setter } from "solid-js";
 
 import type {
   CacheMappingResp,
@@ -16,19 +17,19 @@ import type {
   VersionResp,
   WellKnownCachesResp,
 } from "@sdk/types.gen";
+import CloudDoneIcon from "@material-symbols/svg-400/outlined/cloud_done.svg?solid";
+import CloudOffIcon from "@material-symbols/svg-400/outlined/cloud_off.svg?solid";
+import CloudUploadIcon from "@material-symbols/svg-400/outlined/cloud_upload.svg?solid";
+import EditNoteIcon from "@material-symbols/svg-400/outlined/edit_note.svg?solid";
+import type { AppStore } from "../AppState";
 import Button from "./Button";
+import SettingsMappings, { containerSortPath } from "./SettingsMappings";
 
 import { formatDuration, parseDuration } from "../duration";
 
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
-
-function defaultContainerPath(hostPath: string, resolvedContainerPath?: string): string {
-  if (!resolvedContainerPath) return "";
-  if (hostPath === "~" || hostPath.startsWith("~/")) return hostPath;
-  return resolvedContainerPath;
-}
 
 interface SettingsFormProps {
   selectedImage: Accessor<string>;
@@ -50,6 +51,8 @@ interface SettingsFormProps {
   customMounts: Accessor<MountMappingResp[]>;
   setCustomMounts: Setter<MountMappingResp[]>;
   settingsError: Accessor<string>;
+  settingsSaveState: AppStore["settingsSaveState"];
+  markSettingsDraft: AppStore["markSettingsDraft"];
   autoFixCI: Accessor<boolean>;
   setAutoFixCI: Setter<boolean>;
   autoFixPR: Accessor<boolean>;
@@ -72,6 +75,27 @@ interface SettingsFormProps {
 }
 
 export default function SettingsForm(props: SettingsFormProps) {
+  const [search] = useSearchParams();
+  const section = () => (search.section === "storage" || search.section === "server" ? search.section : "general");
+  const drafts = new Set<HTMLInputElement>();
+  // Track DOM drafts too: invalid durations and unblurred fields are not yet
+  // represented in the preference payload. Section changes discard those DOM drafts.
+  createEffect(() => {
+    section();
+    drafts.clear();
+    props.markSettingsDraft(false);
+  });
+  onCleanup(() => props.markSettingsDraft(false));
+  const saveLabel = () =>
+    props.settingsError()
+      ? "Settings not saved"
+      : props.settingsSaveState() === "dirty"
+        ? "Unsaved settings"
+        : props.settingsSaveState() === "saving"
+          ? "Saving settings…"
+          : props.settingsSaveState() === "saved"
+            ? "Settings saved"
+            : "";
   const refreshableHarnesses = () => props.harnesses().filter((harness) => harness.supportsModelRefresh);
   const formatBytes = (bytes: number): string => {
     if (bytes <= 0) return "0 B";
@@ -92,366 +116,241 @@ export default function SettingsForm(props: SettingsFormProps) {
     if (Number.isNaN(date.getTime())) return "Unknown";
     return date.toLocaleString();
   };
-  const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
-    props.setCacheMappings((prev) =>
-      prev.map((mapping, i) => (i === index ? { ...mapping, ...update, resolvedContainerPath: undefined } : mapping)),
-    );
-  };
-  const updateCustomMount = (index: number, update: Partial<MountMappingResp>) => {
-    props.setCustomMounts((prev) =>
-      prev.map((mount, i) => (i === index ? { ...mount, ...update, resolvedContainerPath: undefined } : mount)),
-    );
-  };
+  const caches = createMemo(() =>
+    [...props.wellKnownCachesList()].sort((a, b) => {
+      const firstPath = (mounts: string[]) => mounts.map(containerSortPath).sort()[0] ?? "";
+      const left = firstPath(a.mounts);
+      const right = firstPath(b.mounts);
+      return left < right ? -1 : left > right ? 1 : a.name.localeCompare(b.name);
+    }),
+  );
 
   return (
     <div class={styles.settingsPage}>
-      <div class={styles.settingsPanel}>
-        <h2 class={styles.settingsPanelTitle}>Settings</h2>
+      <div
+        class={styles.settingsPanel}
+        data-section={section()}
+        onInput={(event) => {
+          const input = event.target;
+          if (input instanceof HTMLInputElement && (input.type === "text" || input.type === "number")) {
+            drafts.add(input);
+            props.markSettingsDraft(true);
+          }
+        }}
+        onFocusOut={(event) => {
+          const input = event.target;
+          if (input instanceof HTMLInputElement && input.validity.valid && drafts.delete(input)) {
+            props.markSettingsDraft(drafts.size > 0);
+          }
+        }}
+      >
+        <div class={styles.settingsHeader}>
+          <h2 class={styles.settingsPanelTitle}>Settings</h2>
+          <span
+            class={styles.saveStatus}
+            role="status"
+            aria-label="Settings save status"
+            title={saveLabel()}
+            data-state={props.settingsError() ? "error" : props.settingsSaveState()}
+          >
+            <Switch>
+              <Match when={props.settingsError()}>
+                <CloudOffIcon aria-hidden="true" />
+              </Match>
+              <Match when={props.settingsSaveState() === "saving"}>
+                <CloudUploadIcon aria-hidden="true" />
+              </Match>
+              <Match when={props.settingsSaveState() === "dirty"}>
+                <EditNoteIcon aria-hidden="true" />
+              </Match>
+              <Match when={props.settingsSaveState() === "saved"}>
+                <CloudDoneIcon aria-hidden="true" />
+              </Match>
+            </Switch>
+            <span class={styles.saveMessage}>{saveLabel()}</span>
+          </span>
+        </div>
+        <nav class={styles.sectionNav} aria-label="Settings sections">
+          <a href="/settings" aria-current={section() === "general" ? "page" : undefined}>
+            General
+          </a>
+          <a href="/settings?section=storage" aria-current={section() === "storage" ? "page" : undefined}>
+            Storage
+          </a>
+          <a href="/settings?section=server" aria-current={section() === "server" ? "page" : undefined}>
+            Server
+          </a>
+        </nav>
         <Show when={props.settingsError()}>
           <p class={styles.settingsError} role="alert">
             {props.settingsError()}
           </p>
         </Show>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Container</h3>
-          <label class={styles.settingsLabel}>
-            Docker image
-            <input
-              type="text"
-              class={styles.settingsInput}
-              placeholder="ghcr.io/caic-xyz/md-user:latest"
-              value={props.selectedImage() || ""}
-              onChange={(e) => props.setSelectedImage(e.currentTarget.value)}
-              onBlur={() => {
-                void props.saveSettings();
-              }}
-            />
-          </label>
-          <Show when={props.runtimes().length > 1}>
+        <Show when={section() === "general"}>
+          <section class={styles.settingsSection} aria-labelledby="settings-container">
+            <h3 id="settings-container" class={styles.settingsSectionTitle}>
+              Container
+            </h3>
             <label class={styles.settingsLabel}>
-              Default runtime
-              <select
+              Docker image
+              <input
+                type="text"
                 class={styles.settingsInput}
-                value={props.selectedRuntimeName()}
-                onChange={(e) => {
-                  const runtimeName = e.currentTarget.value;
-                  props.setSelectedRuntimeName(runtimeName);
-                  void props.saveSettings({ runtimeName });
+                placeholder="ghcr.io/caic-xyz/md-user:latest"
+                value={props.selectedImage() || ""}
+                onChange={(e) => props.setSelectedImage(e.currentTarget.value)}
+                onBlur={(e) => {
+                  if (drafts.has(e.currentTarget)) void props.saveSettings();
                 }}
-              >
-                <For each={props.runtimes()}>
-                  {(rt) => (
-                    <option value={rt.name} selected={rt.name === props.selectedRuntimeName()}>
-                      {rt.name}
-                    </option>
-                  )}
-                </For>
-              </select>
+              />
             </label>
-          </Show>
-          <For each={props.runtimes()}>
-            {(rt) => (
-              <fieldset class={styles.runtimeSettings}>
-                <legend>{rt.name}</legend>
-                <label class={styles.settingsLabel}>
-                  CPU architecture
-                  <select
-                    class={styles.settingsInput}
-                    value={props.runtimeSettings()[rt.name]?.containerPlatform ?? ""}
-                    onChange={(e) => {
-                      props.updateRuntimeSettings(rt.name, { containerPlatform: e.currentTarget.value as Platform });
-                      void props.saveSettings();
-                    }}
-                  >
-                    <option value="">Native</option>
-                    <option value="linux/amd64">linux/amd64</option>
-                    <option value="linux/arm64">linux/arm64</option>
-                  </select>
-                </label>
-                <label class={styles.settingsLabel}>
-                  CPU cores
-                  <input
-                    type="number"
-                    class={styles.settingsInput}
-                    placeholder="Default"
-                    min="0"
-                    step="1"
-                    value={props.runtimeSettings()[rt.name]?.maxCPUs || ""}
-                    onChange={(e) =>
-                      props.updateRuntimeSettings(rt.name, { maxCPUs: parseInt(e.currentTarget.value, 10) || 0 })
-                    }
-                    onBlur={() => {
-                      void props.saveSettings();
-                    }}
-                  />
-                </label>
-                <p class={styles.settingsDescription}>
-                  Maximum CPU cores for each {rt.name} container (0 = automatic).
-                </p>
-              </fieldset>
-            )}
-          </For>
-        </div>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
-          <div class={styles.cacheGrid}>
-            <For each={props.wellKnownCachesList()}>
-              {(cache) => {
-                const state = () => props.wellKnownCaches()[cache.name];
-                const isEnabled = () => state() === true;
-                return (
-                  <label
-                    class={styles.cacheCheckbox}
-                    data-state={isEnabled() ? "enabled" : "disabled"}
-                    title={cache.description}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isEnabled()}
+            <Show when={props.runtimes().length > 1}>
+              <label class={styles.settingsLabel}>
+                Default runtime
+                <select
+                  class={styles.settingsInput}
+                  value={props.selectedRuntimeName()}
+                  onChange={(e) => {
+                    const runtimeName = e.currentTarget.value;
+                    props.setSelectedRuntimeName(runtimeName);
+                    void props.saveSettings({ runtimeName });
+                  }}
+                >
+                  <For each={props.runtimes()}>
+                    {(rt) => (
+                      <option value={rt.name} selected={rt.name === props.selectedRuntimeName()}>
+                        {rt.name}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </label>
+            </Show>
+            <For each={props.runtimes()}>
+              {(rt) => (
+                <fieldset class={styles.runtimeSettings}>
+                  <legend>{rt.name}</legend>
+                  <label class={styles.settingsLabel}>
+                    CPU architecture
+                    <select
+                      class={styles.settingsInput}
+                      value={props.runtimeSettings()[rt.name]?.containerPlatform ?? ""}
                       onChange={(e) => {
-                        const newCaches = { ...props.wellKnownCaches() };
-                        newCaches[cache.name] = e.currentTarget.checked;
-                        props.setWellKnownCaches(newCaches);
-                        void props.saveSettings({
-                          wellKnownCaches: newCaches as Record<string, boolean>,
-                        });
+                        props.updateRuntimeSettings(rt.name, { containerPlatform: e.currentTarget.value as Platform });
+                        void props.saveSettings();
+                      }}
+                    >
+                      <option value="">Native</option>
+                      <option value="linux/amd64">linux/amd64</option>
+                      <option value="linux/arm64">linux/arm64</option>
+                    </select>
+                  </label>
+                  <label class={`${styles.settingsLabel} ${styles.shortField}`}>
+                    CPU cores
+                    <input
+                      type="number"
+                      class={styles.settingsInput}
+                      placeholder="Automatic"
+                      min="0"
+                      step="1"
+                      value={props.runtimeSettings()[rt.name]?.maxCPUs || ""}
+                      onChange={(e) =>
+                        props.updateRuntimeSettings(rt.name, { maxCPUs: parseInt(e.currentTarget.value, 10) || 0 })
+                      }
+                      onBlur={(e) => {
+                        if (drafts.has(e.currentTarget)) void props.saveSettings();
                       }}
                     />
-                    <span class={styles.cacheName}>{cache.name}</span>
-                    <span class={styles.cacheSize} data-testid="cache-size">
-                      {cacheSizeLabel(cache.name)}
-                    </span>
                   </label>
-                );
-              }}
+                </fieldset>
+              )}
             </For>
-          </div>
-        </div>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Custom caches</h3>
-          <p class={styles.settingsDescription}>
-            Persistent host directories mounted into each container for tool caches. Leave the container path blank to
-            use the same <code>~</code> path.
-          </p>
-          <Index each={props.cacheMappings()}>
-            {(mapping, index) => (
-              <div
-                class={styles.cacheMappingRow}
-                data-state={mapping().enabled ? "enabled" : "disabled"}
-                data-testid="cache-mapping-row"
-              >
-                <label class={styles.cacheMappingToggle} title="Enable custom cache">
-                  <input
-                    type="checkbox"
-                    checked={mapping().enabled}
-                    onChange={(e) => {
-                      const enabled = e.currentTarget.checked;
-                      const newMappings = props
-                        .cacheMappings()
-                        .map((item, i) => (i === index ? { ...item, enabled } : item));
-                      props.setCacheMappings(newMappings);
-                      void props.saveSettings({ cacheMappings: newMappings });
-                    }}
-                  />
-                  <span class={styles.visuallyHidden}>Enable custom cache</span>
-                </label>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
-                <input
-                  type="text"
-                  class={`${styles.settingsInput} ${styles.mappingHostInput}`}
-                  aria-label="Host path"
-                  placeholder="~/.cache/tool"
-                  value={mapping().hostPath}
-                  onInput={(e) =>
-                    updateCacheMapping(index, {
-                      hostPath: e.currentTarget.value,
-                    })
-                  }
-                  onBlur={() => {
-                    void props.saveSettings();
-                  }}
-                />
-                <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">
-                  →
-                </span>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
-                <input
-                  type="text"
-                  class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
-                  aria-label="Container path"
-                  placeholder={
-                    defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath) || "Container path"
-                  }
-                  value={mapping().containerPath}
-                  onInput={(e) =>
-                    updateCacheMapping(index, {
-                      containerPath: e.currentTarget.value,
-                    })
-                  }
-                  onBlur={() => {
-                    void props.saveSettings();
-                  }}
-                />
-                <Show
-                  when={
-                    mapping().containerPath === "" &&
-                    defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)
-                  }
-                >
-                  <span class={styles.mappingPathHint}>
-                    Uses {defaultContainerPath(mapping().hostPath, mapping().resolvedContainerPath)} by default
-                  </span>
-                </Show>
-                <button
-                  type="button"
-                  class={styles.cacheMappingRemove}
-                  onClick={() => {
-                    const newMappings = props.cacheMappings().filter((_, i) => i !== index);
-                    props.setCacheMappings(newMappings);
-                    void props.saveSettings({ cacheMappings: newMappings });
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            )}
-          </Index>
-          <button
-            type="button"
-            class={styles.settingsButton}
-            onClick={() => {
-              props.setCacheMappings([...props.cacheMappings(), { hostPath: "", containerPath: "", enabled: true }]);
-            }}
-          >
-            + Add mapping
-          </button>
-        </div>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Custom mounts</h3>
-          <p class={styles.settingsDescription}>
-            Additional host directories mounted into each container. Leave the container path blank to use the same{" "}
-            <code>~</code> path.
-          </p>
-          <Index each={props.customMounts()}>
-            {(mount, index) => (
-              <div
-                class={styles.cacheMappingRow}
-                data-state={mount().enabled ? "enabled" : "disabled"}
-                data-testid="custom-mount-row"
-              >
-                <label class={styles.cacheMappingToggle} title="Enable custom mount">
-                  <input
-                    type="checkbox"
-                    checked={mount().enabled}
-                    onChange={(e) => {
-                      const enabled = e.currentTarget.checked;
-                      const newMounts = props
-                        .customMounts()
-                        .map((item, i) => (i === index ? { ...item, enabled } : item));
-                      props.setCustomMounts(newMounts);
-                      void props.saveSettings({ customMounts: newMounts });
-                    }}
-                  />
-                  <span class={styles.visuallyHidden}>Enable custom mount</span>
-                </label>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingHostLabel}`}>Host path</span>
-                <input
-                  type="text"
-                  class={`${styles.settingsInput} ${styles.mappingHostInput}`}
-                  aria-label="Host path"
-                  placeholder="~/Documents"
-                  value={mount().hostPath}
-                  onInput={(e) =>
-                    updateCustomMount(index, {
-                      hostPath: e.currentTarget.value,
-                    })
-                  }
-                  onBlur={() => {
-                    void props.saveSettings();
-                  }}
-                />
-                <span class={styles.cacheMappingArrow} data-testid="mapping-arrow">
-                  →
-                </span>
-                <span class={`${styles.mappingPathLabel} ${styles.mappingContainerLabel}`}>Container path</span>
-                <input
-                  type="text"
-                  class={`${styles.settingsInput} ${styles.mappingContainerInput}`}
-                  aria-label="Container path"
-                  placeholder={
-                    defaultContainerPath(mount().hostPath, mount().resolvedContainerPath) || "Container path"
-                  }
-                  value={mount().containerPath}
-                  onInput={(e) =>
-                    updateCustomMount(index, {
-                      containerPath: e.currentTarget.value,
-                    })
-                  }
-                  onBlur={() => {
-                    void props.saveSettings();
-                  }}
-                />
-                <Show
-                  when={
-                    mount().containerPath === "" &&
-                    defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)
-                  }
-                >
-                  <span class={styles.mappingPathHint}>
-                    Uses {defaultContainerPath(mount().hostPath, mount().resolvedContainerPath)} by default
-                  </span>
-                </Show>
-                <label class={styles.mountOptionToggle} title="Mount read-only" data-testid="mount-read-only">
-                  <input
-                    type="checkbox"
-                    checked={mount().readOnly ?? false}
-                    onChange={(e) => {
-                      const readOnly = e.currentTarget.checked;
-                      const newMounts = props
-                        .customMounts()
-                        .map((item, i) => (i === index ? { ...item, readOnly } : item));
-                      props.setCustomMounts(newMounts);
-                      void props.saveSettings({ customMounts: newMounts });
-                    }}
-                  />
-                  Read only
-                </label>
-                <button
-                  type="button"
-                  class={styles.cacheMappingRemove}
-                  onClick={() => {
-                    const newMounts = props.customMounts().filter((_, i) => i !== index);
-                    props.setCustomMounts(newMounts);
-                    void props.saveSettings({ customMounts: newMounts });
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            )}
-          </Index>
-          <button
-            type="button"
-            class={styles.settingsButton}
-            onClick={() => {
-              props.setCustomMounts([
-                ...props.customMounts(),
-                {
-                  hostPath: "",
-                  containerPath: "",
-                  enabled: true,
-                  readOnly: false,
-                },
-              ]);
-            }}
-          >
-            + Add mount
-          </button>
-        </div>
-        <Show when={props.mcpOAuthAvailable()}>
-          <div class={styles.settingsSection}>
-            <h3 class={styles.settingsSectionTitle}>MCP clients</h3>
-            <p class={styles.settingsDescription}>Remote clients authorized to access caic through MCP OAuth.</p>
+          </section>
+        </Show>
+        <Show when={section() === "storage"}>
+          <section class={styles.settingsSection} aria-labelledby="settings-well-known-caches">
+            <h3 id="settings-well-known-caches" class={styles.settingsSectionTitle}>
+              Well-known caches
+            </h3>
+            <div class={styles.cacheGrid}>
+              <For each={caches()}>
+                {(cache) => {
+                  const state = () => props.wellKnownCaches()[cache.name];
+                  const isEnabled = () => state() === true;
+                  return (
+                    <label
+                      class={styles.cacheCheckbox}
+                      data-state={isEnabled() ? "enabled" : "disabled"}
+                      title={cache.description}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={cache.name}
+                        checked={isEnabled()}
+                        onChange={(e) => {
+                          const newCaches = { ...props.wellKnownCaches() };
+                          newCaches[cache.name] = e.currentTarget.checked;
+                          props.setWellKnownCaches(newCaches);
+                          void props.saveSettings({
+                            wellKnownCaches: newCaches as Record<string, boolean>,
+                          });
+                        }}
+                      />
+                      <span class={styles.cacheInfo}>
+                        <span class={styles.cacheName}>{cache.name}</span>
+                        <span class={styles.cachePath}>
+                          {[...cache.mounts]
+                            .sort((a, b) => containerSortPath(a).localeCompare(containerSortPath(b)))
+                            .map((path) => path.replace(/^\/home\/user(?=\/|$)/, "~"))
+                            .join(" · ")}
+                        </span>
+                      </span>
+                      <span class={styles.cacheSize} data-testid="cache-size">
+                        {cacheSizeLabel(cache.name)}
+                      </span>
+                    </label>
+                  );
+                }}
+              </For>
+            </div>
+          </section>
+          <section class={styles.settingsSection} aria-labelledby="settings-custom-caches">
+            <h3 id="settings-custom-caches" class={styles.settingsSectionTitle}>
+              Custom caches
+            </h3>
+            <p class={styles.settingsDescription}>Directories copied into the container</p>
+            <SettingsMappings
+              isDirty={(input) => drafts.has(input)}
+              items={props.cacheMappings()}
+              mounts={false}
+              setItems={props.setCacheMappings}
+              save={(cacheMappings) => {
+                void props.saveSettings({ cacheMappings });
+              }}
+            />
+          </section>
+          <section class={styles.settingsSection} aria-labelledby="settings-custom-mounts">
+            <h3 id="settings-custom-mounts" class={styles.settingsSectionTitle}>
+              Custom mounts
+            </h3>
+            <p class={styles.settingsDescription}>Directories directly available to the container</p>
+            <SettingsMappings
+              isDirty={(input) => drafts.has(input)}
+              items={props.customMounts()}
+              mounts={true}
+              setItems={props.setCustomMounts}
+              save={(customMounts) => {
+                void props.saveSettings({ customMounts });
+              }}
+            />
+          </section>
+        </Show>
+        <Show when={section() === "server" && props.mcpOAuthAvailable()}>
+          <section class={styles.settingsSection} aria-labelledby="settings-mcp-clients">
+            <h3 id="settings-mcp-clients" class={styles.settingsSectionTitle}>
+              MCP clients
+            </h3>
+            <p class={styles.settingsDescription}>Clients with access to caic.</p>
             <Show
               when={!props.oauthGrantError()}
               fallback={
@@ -500,155 +399,155 @@ export default function SettingsForm(props: SettingsFormProps) {
                 </div>
               </Show>
             </Show>
-          </div>
+          </section>
         </Show>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Automation</h3>
-          <label class={styles.settingsLabel}>
-            Purge delay
-            <input
-              type="text"
-              class={styles.settingsInput}
-              value={formatDuration(props.purgeDelay())}
-              aria-describedby="purge-delay-description"
-              onInput={(e) => {
-                e.currentTarget.setCustomValidity(
-                  parseDuration(e.currentTarget.value) === null ? "Enter a duration such as 1m31s." : "",
-                );
-              }}
-              onChange={(e) => {
-                const delay = parseDuration(e.currentTarget.value);
-                if (delay === null) {
-                  e.currentTarget.reportValidity();
-                  return;
-                }
-                e.currentTarget.setCustomValidity("");
-                e.currentTarget.value = formatDuration(delay);
-                props.setPurgeDelay(delay);
-                void props.saveSettings({ purgeDelay: delay });
-              }}
-            />
-          </label>
-          <p id="purge-delay-description" class={styles.settingsDescription}>
-            How long a task remains stopped and revivable before deletion. Use duration syntax such as 1m31s; allowed
-            range is 10s–24h.
-          </p>
-          <label class={styles.settingsLabel}>
-            <input
-              type="checkbox"
-              checked={props.autoFixCI()}
-              onChange={(e) => {
-                const val = e.currentTarget.checked;
-                props.setAutoFixCI(val);
-                void props.saveSettings({ autoFixOnCIFailure: val });
-              }}
-            />
-            Auto-fix CI failures
-          </label>
-          <p class={styles.settingsDescription}>
-            When CI fails on a PR and the agent has finished, automatically start a new task to fix it.
-          </p>
-          <label class={styles.settingsLabel}>
-            <input
-              type="checkbox"
-              checked={props.autoFixPR()}
-              onChange={(e) => {
-                const val = e.currentTarget.checked;
-                props.setAutoFixPR(val);
-                void props.saveSettings({ autoFixOnPROpen: val });
-              }}
-            />
-            Auto-fix PRs
-          </label>
-          <p class={styles.settingsDescription}>
-            When a pull request is opened or reopened, automatically start a task to review and fix it.
-          </p>
-        </div>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Models</h3>
-          <p class={styles.settingsDescription}>
-            Reload a coding agent’s model list. Refreshing OpenCode also refreshes its models.dev cache.
-          </p>
-          <div class={styles.modelRefreshActions}>
-            <For
-              each={refreshableHarnesses()}
-              fallback={<p class={styles.settingsDescription}>No installed coding agents support model refresh.</p>}
-            >
-              {(harness) => (
-                <Button
-                  type="button"
-                  variant="gray"
-                  disabled={props.refreshingHarness() !== null}
-                  loading={props.refreshingHarness() === harness.name}
-                  onClick={() => {
-                    void props.refreshAvailableModels(harness.name);
-                  }}
-                >
-                  Refresh {harness.name} models
-                </Button>
-              )}
-            </For>
-          </div>
-          <Show when={props.modelRefreshStatus()}>
-            <p class={styles.settingsDescription} role="status">
-              {props.modelRefreshStatus()}
+        <Show when={section() === "general"}>
+          <section class={styles.settingsSection} aria-labelledby="settings-automation">
+            <h3 id="settings-automation" class={styles.settingsSectionTitle}>
+              Automation
+            </h3>
+            <label class={`${styles.settingsLabel} ${styles.shortField}`}>
+              Purge delay
+              <input
+                type="text"
+                class={styles.settingsInput}
+                value={formatDuration(props.purgeDelay())}
+                aria-describedby="purge-delay-description"
+                onInput={(e) => {
+                  e.currentTarget.setCustomValidity(
+                    parseDuration(e.currentTarget.value) === null ? "Enter a duration such as 1m31s." : "",
+                  );
+                }}
+                onChange={(e) => {
+                  const delay = parseDuration(e.currentTarget.value);
+                  if (delay === null) {
+                    e.currentTarget.reportValidity();
+                    return;
+                  }
+                  e.currentTarget.setCustomValidity("");
+                  e.currentTarget.value = formatDuration(delay);
+                  props.setPurgeDelay(delay);
+                  void props.saveSettings({ purgeDelay: delay });
+                }}
+              />
+            </label>
+            <p id="purge-delay-description" class={styles.settingsDescription}>
+              10s–24h before deletion.
             </p>
-          </Show>
-        </div>
-        <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Version</h3>
-          <Show
-            when={props.versionInfo()}
-            fallback={
-              <Show
-                when={props.checkingUpdate()}
-                fallback={
-                  <Show when={props.versionCheckError()}>
-                    <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
-                      Check failed: {props.versionCheckError()}
-                    </p>
-                  </Show>
-                }
+            <label class={styles.automationOption}>
+              <input
+                type="checkbox"
+                checked={props.autoFixCI()}
+                onChange={(e) => {
+                  const val = e.currentTarget.checked;
+                  props.setAutoFixCI(val);
+                  void props.saveSettings({ autoFixOnCIFailure: val });
+                }}
+              />
+              Auto-fix CI failures
+            </label>
+            <label class={styles.automationOption}>
+              <input
+                type="checkbox"
+                checked={props.autoFixPR()}
+                onChange={(e) => {
+                  const val = e.currentTarget.checked;
+                  props.setAutoFixPR(val);
+                  void props.saveSettings({ autoFixOnPROpen: val });
+                }}
+              />
+              Review and fix new PRs
+            </label>
+          </section>
+        </Show>
+        <Show when={section() === "server"}>
+          <section class={styles.settingsSection} aria-labelledby="settings-models">
+            <h3 id="settings-models" class={styles.settingsSectionTitle}>
+              Reload models
+            </h3>
+            <div class={styles.modelRefreshActions}>
+              <For
+                each={refreshableHarnesses()}
+                fallback={<p class={styles.settingsDescription}>No installed coding agents support model refresh.</p>}
               >
-                <p class={styles.settingsDescription}>Checking for updates…</p>
-              </Show>
-            }
-          >
-            {(v) => (
-              <>
-                <p class={styles.settingsDescription}>
-                  Current: <strong>caic v{v().current}</strong>
-                  <Show when={v().latest}>
-                    {" — "}
-                    <Show when={v().updateAvailable} fallback={<>latest: v{v().latest} (up to date)</>}>
-                      latest: <strong>v{v().latest}</strong> (update available)
-                    </Show>
-                  </Show>
-                </p>
-                <Show when={v().checkError}>
-                  <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
-                    Check failed: {v().checkError}
-                  </p>
-                </Show>
-                <Show when={v().autoUpdateEnabled && v().updateAvailable}>
-                  <button
+                {(harness) => (
+                  <Button
                     type="button"
-                    class={styles.settingsButton}
-                    disabled={props.updating()}
+                    variant="gray"
+                    disabled={props.refreshingHarness() !== null}
+                    loading={props.refreshingHarness() === harness.name}
                     onClick={() => {
-                      void props.triggerServerUpdate();
+                      void props.refreshAvailableModels(harness.name);
                     }}
                   >
-                    {props.updating() ? "Updating…" : "Update now"}
-                  </button>
+                    {harness.name}
+                  </Button>
+                )}
+              </For>
+            </div>
+            <Show when={props.modelRefreshStatus()}>
+              <p class={styles.settingsDescription} role="status" aria-label="Model reload status">
+                {props.modelRefreshStatus()}
+              </p>
+            </Show>
+          </section>
+          <section class={styles.settingsSection} aria-labelledby="settings-version">
+            <h3 id="settings-version" class={styles.settingsSectionTitle}>
+              Version
+            </h3>
+            <Show
+              when={props.versionInfo()}
+              fallback={
+                <Show
+                  when={props.checkingUpdate()}
+                  fallback={
+                    <Show when={props.versionCheckError()}>
+                      <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
+                        Check failed: {props.versionCheckError()}
+                      </p>
+                    </Show>
+                  }
+                >
+                  <p class={styles.settingsDescription}>Checking for updates…</p>
                 </Show>
-                <Show when={props.updateStatus()}>
-                  <p class={styles.settingsDescription}>{props.updateStatus()}</p>
-                </Show>
-              </>
-            )}
-          </Show>
-        </div>
+              }
+            >
+              {(v) => (
+                <>
+                  <p class={styles.settingsDescription}>
+                    <strong>{v().current ? `caic v${v().current}` : "caic development build"}</strong>
+                    <Show when={v().latest}>
+                      {" — "}
+                      <Show when={v().updateAvailable} fallback={<>latest: v{v().latest} (up to date)</>}>
+                        latest: <strong>v{v().latest}</strong> (update available)
+                      </Show>
+                    </Show>
+                  </p>
+                  <Show when={v().checkError}>
+                    <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
+                      Check failed: {v().checkError}
+                    </p>
+                  </Show>
+                  <Show when={v().autoUpdateEnabled && v().updateAvailable}>
+                    <button
+                      type="button"
+                      class={styles.settingsButton}
+                      disabled={props.updating()}
+                      onClick={() => {
+                        void props.triggerServerUpdate();
+                      }}
+                    >
+                      {props.updating() ? "Updating…" : "Update now"}
+                    </button>
+                  </Show>
+                  <Show when={props.updateStatus()}>
+                    <p class={styles.settingsDescription}>{props.updateStatus()}</p>
+                  </Show>
+                </>
+              )}
+            </Show>
+          </section>
+        </Show>
       </div>
     </div>
   );

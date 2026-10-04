@@ -1,5 +1,6 @@
 // End-to-end tests for repository-diff mobile layout and patch retry focus.
-import { createTaskAPI, expect, test } from "../helpers";
+import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
+import type { ErrorResponse, FileDiffResp, TaskDiffIndexResp } from "../../sdk/caic/ts/v1/types.gen";
 
 test("long diff paths use middle elision on mobile", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -40,7 +41,7 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
               ],
             },
           ],
-        },
+        } satisfies TaskDiffIndexResp,
       });
     },
   );
@@ -84,16 +85,17 @@ test("long diff paths use middle elision on mobile", async ({ page, api }) => {
 
 test("file patch retry preserves keyboard focus", async ({ page, api }) => {
   const id = await createTaskAPI(api, "Retry a file diff");
+  await waitForTaskState(api, id, "waiting");
   const path = "frontend/src/retry.ts";
+  let holdIndex = false;
+  const indexGate = Promise.withResolvers<void>();
   let attempt = 0;
-  let finishRetry: () => void = () => undefined;
-  const retryGate = new Promise<void>((resolve) => {
-    finishRetry = resolve;
-  });
+  const retryGate = Promise.withResolvers<void>();
 
   await page.route(
     (url) => url.pathname === `/api/caic/v1/tasks/${id}/diff/index`,
     async (route) => {
+      if (holdIndex) await indexGate.promise;
       await route.fulfill({
         json: {
           repositories: [
@@ -116,7 +118,7 @@ test("file patch retry preserves keyboard focus", async ({ page, api }) => {
               ],
             },
           ],
-        },
+        } satisfies TaskDiffIndexResp,
       });
     },
   );
@@ -132,33 +134,41 @@ test("file patch retry preserves keyboard focus", async ({ page, api }) => {
               code: "INTERNAL_ERROR",
               message: "patch unavailable",
             },
-          },
+          } satisfies ErrorResponse,
         });
         return;
       }
 
-      await retryGate;
+      await retryGate.promise;
       await route.fulfill({
-        json: { diff: "@@ -1 +1 @@\n-old\n+retried" },
+        json: { diff: "@@ -1 +1 @@\n-old\n+retried" } satisfies FileDiffResp,
       });
     },
   );
 
-  await page.goto(`/task/@${id}/diff`);
-  const row = page.getByRole("button", { name: path });
-  await row.click();
-  const retry = page.getByRole("button", { name: `Retry diff for ${path}` });
-  await expect(retry).toBeVisible();
-  await retry.focus();
-  await retry.press("Enter");
+  try {
+    await page.goto(`/task/@${id}/diff`);
+    const row = page.getByRole("button", { name: path });
+    await row.click();
+    const retry = page.getByRole("button", { name: `Retry diff for ${path}` });
+    await expect(retry).toBeVisible();
+    // Hold a real background refresh during the retry to exercise both statuses.
+    holdIndex = true;
+    await api.sendInput(id, { prompt: { text: "continue" } });
+    await expect(page.getByRole("status").filter({ hasText: "Updating diff..." })).toBeVisible();
+    await retry.focus();
+    await retry.press("Enter");
 
-  await expect(retry).toHaveAttribute("aria-disabled", "true");
-  await expect(retry).toBeFocused();
-  await expect(page.getByRole("status")).toHaveText("Retrying file diff...");
+    await expect(retry).toHaveAttribute("aria-disabled", "true");
+    await expect(retry).toBeFocused();
+    await expect(page.getByRole("status", { name: `Diff status for ${path}` })).toHaveText("Retrying file diff...");
 
-  finishRetry();
-  await expect(page.getByText("+retried")).toBeVisible();
-  await expect(row).toBeFocused();
-  // A background index refresh may also reload this expanded row.
-  expect(attempt).toBeGreaterThanOrEqual(2);
+    retryGate.resolve();
+    await expect(page.getByText("+retried")).toBeVisible();
+    await expect(row).toBeFocused();
+    expect(attempt).toBe(2);
+  } finally {
+    retryGate.resolve();
+    indexGate.resolve();
+  }
 });

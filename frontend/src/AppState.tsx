@@ -149,6 +149,9 @@ function createAppStore() {
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
   const [settingsError, setSettingsError] = createSignal("");
+  const [settingsSavePhase, setSettingsSavePhase] = createSignal<"idle" | "saving" | "saved">("idle");
+  const [settingsDraftDirty, setSettingsDraftDirty] = createSignal(false);
+  const settingsSaveState = () => (settingsDraftDirty() ? "dirty" : settingsSavePhase());
   const [oauthGrants, setOAuthGrants] = createSignal<OAuthGrantResp[]>([]);
   const [oauthGrantError, setOAuthGrantError] = createSignal("");
   const [revokingOAuthGrantID, setRevokingOAuthGrantID] = createSignal<string | null>(null);
@@ -160,6 +163,7 @@ function createAppStore() {
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
   let latestSettingsSave = 0;
+  let settingsEditRevision = 0;
   let settingsSaveQueue = Promise.resolve();
 
   createEffect(() => {
@@ -1237,18 +1241,31 @@ function createAppStore() {
     }
   }
 
+  function markSettingsDraft(dirty: boolean) {
+    if (dirty) settingsEditRevision++;
+    setSettingsDraftDirty(dirty);
+  }
+
   function saveSettings(
     overrides: Partial<Parameters<typeof api.updatePreferences>[0]["settings"]> = {},
   ): Promise<void> {
     const saveID = ++latestSettingsSave;
+    const editRevision = settingsEditRevision;
     const settings = currentSettings(overrides);
     setSettingsError("");
+    setSettingsSavePhase("saving");
     settingsSaveQueue = settingsSaveQueue.then(async () => {
       try {
         const preferences = await api.updatePreferences(settings);
-        if (saveID === latestSettingsSave) applyResolvedContainerPaths(preferences.settings);
+        if (saveID === latestSettingsSave) {
+          if (editRevision === settingsEditRevision) applyResolvedContainerPaths(preferences.settings);
+          setSettingsSavePhase("saved");
+        }
       } catch (e: unknown) {
-        if (saveID === latestSettingsSave) setSettingsError(e instanceof Error ? e.message : "Could not save settings");
+        if (saveID === latestSettingsSave) {
+          setSettingsError(e instanceof Error ? e.message : "Could not save settings");
+          setSettingsSavePhase("idle");
+        }
       }
     });
     return settingsSaveQueue;
@@ -1477,6 +1494,8 @@ function createAppStore() {
     customMounts,
     setCustomMounts,
     settingsError,
+    settingsSaveState,
+    markSettingsDraft,
     autoFixCI,
     setAutoFixCI,
     autoFixPR,

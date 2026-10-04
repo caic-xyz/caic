@@ -2133,13 +2133,73 @@ describe("App repo chips: No repository", () => {
       supportsCompact: true,
       supportsModelRefresh: true,
     } as unknown as HarnessInfo);
-    renderApp("/settings");
+    renderApp("/settings?section=server");
     await waitFor(() => expect(api.listHarnesses).toHaveBeenCalledOnce());
 
-    await user.click(await screen.findByRole("button", { name: "Refresh opencode models" }));
+    await user.click(await screen.findByRole("button", { name: "opencode" }));
 
     await waitFor(() => expect(api.refreshHarness).toHaveBeenCalledWith("opencode", {}));
-    expect(await screen.findByRole("status")).toHaveTextContent("opencode models refreshed.");
+    expect(await screen.findByRole("status", { name: "Model reload status" })).toHaveTextContent(
+      "opencode models refreshed.",
+    );
+  });
+
+  it("reports saving until queued edits settle, then reports failure and retry", async () => {
+    const user = userEvent.setup();
+    const first = Promise.withResolvers<PreferencesResp>();
+    const second = Promise.withResolvers<PreferencesResp>();
+    const retry = Promise.withResolvers<PreferencesResp>();
+    vi.mocked(api.updatePreferences)
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+      .mockImplementationOnce(() => retry.promise);
+    renderApp("/settings");
+    await screen.findByDisplayValue("15s");
+    const status = screen.getByRole("status", { name: "Settings save status" });
+    expect(status.querySelector("svg")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("textbox", { name: "Docker image" }));
+    await user.tab();
+    expect(api.updatePreferences).not.toHaveBeenCalled();
+    expect(status.querySelector("svg")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Auto-fix CI failures" }));
+    await user.click(screen.getByRole("checkbox", { name: "Review and fix new PRs" }));
+    expect(status).toHaveTextContent("Saving settings…");
+    const original = await api.getPreferences();
+    first.resolve(original);
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledTimes(2));
+    expect(status).toHaveTextContent("Saving settings…");
+    second.reject(new Error("Settings storage unavailable"));
+    await waitFor(() => expect(status).toHaveTextContent("Settings not saved"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Settings storage unavailable");
+    await user.click(screen.getByRole("checkbox", { name: "Auto-fix CI failures" }));
+    expect(status).toHaveTextContent("Saving settings…");
+    retry.resolve(original);
+    await waitFor(() => expect(status).toHaveTextContent("Settings saved"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps local drafts unsaved when earlier requests complete", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<PreferencesResp>();
+    vi.mocked(api.updatePreferences).mockImplementationOnce(() => pending.promise);
+    renderApp("/settings");
+    const input = await screen.findByRole("textbox", { name: "Purge delay" });
+    await waitFor(() => expect(input).toHaveValue("15s"));
+    const status = screen.getByRole("status", { name: "Settings save status" });
+    await user.click(screen.getByRole("checkbox", { name: "Auto-fix CI failures" }));
+    await user.clear(input);
+    await user.type(input, "30m");
+    expect(status).toHaveTextContent("Unsaved settings");
+    pending.resolve(await api.getPreferences());
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledOnce());
+    expect(status).toHaveTextContent("Unsaved settings");
+    await user.tab();
+    await waitFor(() => expect(status).toHaveTextContent("Settings saved"));
+    await user.clear(input);
+    await user.type(input, "invalid");
+    await user.click(screen.getByRole("checkbox", { name: "Review and fix new PRs" }));
+    await waitFor(() => expect(api.updatePreferences).toHaveBeenCalledTimes(3));
+    expect(status).toHaveTextContent("Unsaved settings");
   });
 
   it("saves the task purge delay", async () => {
@@ -2174,7 +2234,7 @@ describe("App repo chips: No repository", () => {
       voiceGateway: { mode: "disabled" },
     });
 
-    renderApp("/settings");
+    renderApp("/settings?section=server");
 
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
     expect(api.listOAuthGrants).not.toHaveBeenCalled();
@@ -2193,7 +2253,7 @@ describe("App repo chips: No repository", () => {
       voiceGateway: { mode: "disabled" },
     });
 
-    renderApp("/settings");
+    renderApp("/settings?section=server");
 
     await waitFor(() => expect(api.listOAuthGrants).toHaveBeenCalledOnce());
     expect(screen.getByRole("heading", { name: "MCP clients" })).toBeInTheDocument();
@@ -2219,7 +2279,7 @@ describe("App repo chips: No repository", () => {
       },
     } as unknown as PreferencesResp);
 
-    renderApp("/settings");
+    renderApp("/settings?section=storage");
 
     await screen.findByDisplayValue("/host/data");
     await user.click(screen.getByRole("checkbox", { name: "Read only" }));
@@ -2266,25 +2326,23 @@ describe("App repo chips: No repository", () => {
       },
     } as unknown as PreferencesResp);
 
-    renderApp("/settings");
+    renderApp("/settings?section=storage");
 
     await screen.findByDisplayValue("~/.cache/example");
     expect(screen.getAllByLabelText("Container path")[0]).toHaveAttribute("placeholder", "~/.cache/example");
-    expect(screen.getByText("Uses ~/.cache/example by default")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Container path")[1]).toHaveAttribute("placeholder", "~/Documents");
-    expect(screen.getByText("Uses ~/Documents by default")).toBeInTheDocument();
   });
 
   it("keeps a customized container path when the host path changes", async () => {
     const user = userEvent.setup();
-    renderApp("/settings");
+    renderApp("/settings?section=storage");
 
     const cacheSection = screen.getByRole("heading", {
       name: "Custom caches",
     }).parentElement;
     if (!cacheSection) throw new Error("Custom caches section is missing");
     const caches = within(cacheSection);
-    await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
+    await user.click(caches.getByRole("button", { name: "Add cache" }));
     await user.type(caches.getByLabelText("Host path"), "~/.cache/example");
     await user.clear(caches.getByLabelText("Container path"));
     await user.type(caches.getByLabelText("Container path"), "/var/cache/example");
@@ -2296,14 +2354,14 @@ describe("App repo chips: No repository", () => {
 
   it("leaves the container path blank for a non-home host path", async () => {
     const user = userEvent.setup();
-    renderApp("/settings");
+    renderApp("/settings?section=storage");
 
     const mountSection = screen.getByRole("heading", {
       name: "Custom mounts",
     }).parentElement;
     if (!mountSection) throw new Error("Custom mounts section is missing");
     const mounts = within(mountSection);
-    await user.click(mounts.getByRole("button", { name: "+ Add mount" }));
+    await user.click(mounts.getByRole("button", { name: "Add mount" }));
     await user.type(mounts.getByLabelText("Host path"), "/srv/shared");
 
     expect(mounts.getByLabelText("Container path")).toHaveAttribute("placeholder", "Container path");
@@ -2318,14 +2376,14 @@ describe("App repo chips: No repository", () => {
     vi.mocked(api.updatePreferences).mockRejectedValueOnce(
       new Error("cacheMappings[0]: host path must be absolute or home-relative"),
     );
-    renderApp("/settings");
+    renderApp("/settings?section=storage");
 
     const cacheSection = screen.getByRole("heading", {
       name: "Custom caches",
     }).parentElement;
     if (!cacheSection) throw new Error("Custom caches section is missing");
     const caches = within(cacheSection);
-    await user.click(caches.getByRole("button", { name: "+ Add mapping" }));
+    await user.click(caches.getByRole("button", { name: "Add cache" }));
     await user.type(caches.getByLabelText("Host path"), "cache");
     await user.tab();
 
@@ -2994,6 +3052,7 @@ describe("SSE test harness", () => {
 });
 
 it("edits CPU settings independently for each runtime", async () => {
+  const user = userEvent.setup();
   const config: Config = {
     displayName: "test",
     tailscaleAvailable: false,
@@ -3025,12 +3084,11 @@ it("edits CPU settings independently for each runtime", async () => {
   const podman = await screen.findByRole("group", { name: "podman" });
   await waitFor(() => expect(within(docker).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(4));
   expect(within(podman).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(2);
-  fireEvent.change(within(docker).getByRole("combobox", { name: "CPU architecture" }), {
-    target: { value: "linux/arm64" },
-  });
+  await user.selectOptions(within(docker).getByRole("combobox", { name: "CPU architecture" }), "linux/arm64");
   const cores = within(docker).getByRole("spinbutton", { name: "CPU cores" });
-  fireEvent.change(cores, { target: { value: "6" } });
-  fireEvent.blur(cores);
+  await user.clear(cores);
+  await user.type(cores, "6");
+  await user.tab();
   await waitFor(() =>
     expect(api.updatePreferences).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -3044,7 +3102,7 @@ it("edits CPU settings independently for each runtime", async () => {
     ),
   );
   expect(within(podman).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(2);
-  fireEvent.change(within(podman).getByRole("combobox", { name: "CPU architecture" }), { target: { value: "" } });
+  await user.selectOptions(within(podman).getByRole("combobox", { name: "CPU architecture" }), "");
   await waitFor(() =>
     expect(api.updatePreferences).toHaveBeenLastCalledWith(
       expect.objectContaining({

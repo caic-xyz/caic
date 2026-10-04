@@ -100,6 +100,15 @@ export default tseslint.config(
   },
   // scripts/check-staged.sh mirrors these roots so its eslint invocation never receives an
   // ignored path (which would only print an ignore warning). Keep the two lists in sync.
-  { ignores: ["backend/**", "sdk/**", "frontend/dist/**", "frontend/public/**"] },
+  {
+    ignores: [
+      "backend/**",
+      "frontend/dist/**",
+      "frontend/public/**",
+      "sdk/**",
+      "test-results/**",
+      "visual-screenshots-failures/**",
+    ],
+  },
   prettier,
 );
