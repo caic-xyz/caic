@@ -36,7 +36,7 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("capabilities", func(t *testing.T) {
 		t.Parallel()
-		if b.Harness() != harness.Antigravity || b.SupportsImages() || b.SupportsCompact() || b.QuotaProvider() != "" {
+		if b.Harness() != harness.Antigravity || b.SupportsImages() || b.SupportsCompact() || b.QuotaProvider() != agent.QuotaProviderAntigravity {
 			t.Fatal("unexpected backend capabilities")
 		}
 	})

@@ -617,7 +617,7 @@ func TestProviderQuota(t *testing.T) {
 		AuthKind:    v1.ProviderAuthKindOAuth,
 		FetchStatus: v1.ProviderFetchStatusFresh,
 		RateLimits: []v1.QuotaRateLimit{
-			{Window: "5h", Utilization: 0.425, ResetsAt: resetsAt},
+			{Label: "5h", Window: "5h", Utilization: 0.425, ResetsAt: resetsAt},
 		},
 		Balance: v1.QuotaBalance{
 			Currency:     "USD",
@@ -636,6 +636,44 @@ func TestProviderQuota(t *testing.T) {
 	if _, err := ProviderQuota(&usage.ProviderQuota{Provider: agent.QuotaProvider("other"), AuthKind: usage.AuthKindOAuth}, now); err == nil {
 		t.Error("ProviderQuota(other provider) error = nil, want error")
 	}
+
+	t.Run("WindowLabel", func(t *testing.T) {
+		t.Parallel()
+		got, err := ProviderQuota(&usage.ProviderQuota{
+			Provider:   agent.QuotaProviderAntigravity,
+			AuthKind:   usage.AuthKindOAuth,
+			RateLimits: []usage.QuotaRateLimit{{Label: "7d", Window: "gemini-weekly", Utilization: 0.1}},
+		}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.RateLimits) != 1 || got.RateLimits[0].Label != "7d" || got.RateLimits[0].Window != "gemini-weekly" {
+			t.Fatalf("rate limits = %#v", got.RateLimits)
+		}
+	})
+
+	t.Run("UnassessedWindows", func(t *testing.T) {
+		t.Parallel()
+		got, err := ProviderQuota(&usage.ProviderQuota{
+			Provider:  agent.QuotaProviderAntigravity,
+			AuthKind:  usage.AuthKindOAuth,
+			FetchedAt: now,
+			UnassessedWindows: []usage.UnassessedQuotaWindow{
+				{Group: "Claude and GPT models", Window: "3p-monthly"},
+				{Group: "Future model pool"},
+			},
+		}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []v1.UnassessedQuotaWindow{
+			{Group: "Claude and GPT models", Window: "3p-monthly"},
+			{Group: "Future model pool"},
+		}
+		if !reflect.DeepEqual(got.UnassessedWindows, want) || len(got.RateLimits) != 0 {
+			t.Fatalf("unassessed quota conversion = %#v", got)
+		}
+	})
 
 	t.Run("PricingPhase", func(t *testing.T) {
 		t.Parallel()
@@ -686,6 +724,7 @@ func TestQuotaProvider(t *testing.T) {
 	}{
 		{name: "empty", in: "", want: ""},
 		{name: "known", in: agent.QuotaProviderClaudeCode, want: v1.QuotaProviderClaudeCode},
+		{name: "antigravity", in: agent.QuotaProviderAntigravity, want: v1.QuotaProviderAntigravity},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

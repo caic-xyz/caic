@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -719,9 +719,18 @@ export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
 export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {
   const obj = asObject(raw, "QuotaRateLimit");
   return {
+    label: asString(obj["label"], "QuotaRateLimit.label"),
     window: asString(obj["window"], "QuotaRateLimit.window"),
     utilization: asNumber(obj["utilization"], "QuotaRateLimit.utilization"),
     resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "QuotaRateLimit.resetsAt") as ISOTimestamp),
+  };
+}
+
+export function validateUnassessedQuotaWindow(raw: ValidatorInput): UnassessedQuotaWindow {
+  const obj = asObject(raw, "UnassessedQuotaWindow");
+  return {
+    group: asString(obj["group"], "UnassessedQuotaWindow.group"),
+    window: (obj["window"] === undefined || obj["window"] === null ? undefined : asString(obj["window"], "UnassessedQuotaWindow.window")),
   };
 }
 
@@ -749,6 +758,7 @@ export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
     usageUrl: asString(obj["usageUrl"], "ProviderQuota.usageUrl"),
     fetchStatus: (asString(obj["fetchStatus"], "ProviderQuota.fetchStatus") as ProviderFetchStatus),
     rateLimits: (obj["rateLimits"] === undefined || obj["rateLimits"] === null ? undefined : validateArray(obj["rateLimits"], "ProviderQuota.rateLimits", validateQuotaRateLimit) as QuotaRateLimit[]),
+    unassessedWindows: (obj["unassessedWindows"] === undefined || obj["unassessedWindows"] === null ? undefined : validateArray(obj["unassessedWindows"], "ProviderQuota.unassessedWindows", validateUnassessedQuotaWindow) as UnassessedQuotaWindow[]),
     balance: (obj["balance"] === undefined || obj["balance"] === null ? undefined : validateQuotaBalance(obj["balance"])),
     pricingPhase: (obj["pricingPhase"] === undefined || obj["pricingPhase"] === null ? undefined : asString(obj["pricingPhase"], "ProviderQuota.pricingPhase")),
     pricingTransitionAt: (obj["pricingTransitionAt"] === undefined || obj["pricingTransitionAt"] === null ? undefined : asString(obj["pricingTransitionAt"], "ProviderQuota.pricingTransitionAt") as ISOTimestamp),

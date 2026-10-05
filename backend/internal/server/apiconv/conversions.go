@@ -217,11 +217,22 @@ func ProviderQuota(q *usage.ProviderQuota, now time.Time) (v1.ProviderQuota, err
 		},
 	}
 	for i := range q.RateLimits {
+		label := q.RateLimits[i].Label
+		if label == "" {
+			label = q.RateLimits[i].Window
+		}
 		out.RateLimits[i] = v1.QuotaRateLimit{
+			Label:       label,
 			Window:      q.RateLimits[i].Window,
 			Utilization: q.RateLimits[i].Utilization,
 			ResetsAt:    q.RateLimits[i].ResetsAt,
 		}
+	}
+	for i := range q.UnassessedWindows {
+		out.UnassessedWindows = append(out.UnassessedWindows, v1.UnassessedQuotaWindow{
+			Group:  q.UnassessedWindows[i].Group,
+			Window: q.UnassessedWindows[i].Window,
+		})
 	}
 	if phase, transition := usage.PricingPhaseFor(q.Provider, now); phase != "" {
 		out.PricingPhase = string(phase)
@@ -334,6 +345,8 @@ func QuotaProvider(p agent.QuotaProvider) (v1.QuotaProvider, error) {
 		return v1.QuotaProviderAlibaba, nil
 	case agent.QuotaProviderAnthropic:
 		return v1.QuotaProviderAnthropic, nil
+	case agent.QuotaProviderAntigravity:
+		return v1.QuotaProviderAntigravity, nil
 	case agent.QuotaProviderCerebras:
 		return v1.QuotaProviderCerebras, nil
 	case agent.QuotaProviderClaudeCode:

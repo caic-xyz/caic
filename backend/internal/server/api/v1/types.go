@@ -50,20 +50,21 @@ type QuotaProvider string
 
 // Supported quota providers.
 const (
-	QuotaProviderAlibaba    QuotaProvider = "alibaba"
-	QuotaProviderAnthropic  QuotaProvider = "anthropic"
-	QuotaProviderCerebras   QuotaProvider = "cerebras"
-	QuotaProviderClaudeCode QuotaProvider = "claudecode"
-	QuotaProviderCodex      QuotaProvider = "codex"
-	QuotaProviderDeepSeek   QuotaProvider = "deepseek"
-	QuotaProviderGemini     QuotaProvider = "gemini"
-	QuotaProviderGrok       QuotaProvider = "grok"
-	QuotaProviderGroq       QuotaProvider = "groq"
-	QuotaProviderOpenRouter QuotaProvider = "openrouter"
-	QuotaProviderRunInfra   QuotaProvider = "runinfra"
-	QuotaProviderTypeSafe   QuotaProvider = "typesafe"
-	QuotaProviderXiaomi     QuotaProvider = "xiaomi"
-	QuotaProviderZai        QuotaProvider = "zai"
+	QuotaProviderAlibaba     QuotaProvider = "alibaba"
+	QuotaProviderAnthropic   QuotaProvider = "anthropic"
+	QuotaProviderAntigravity QuotaProvider = "antigravity"
+	QuotaProviderCerebras    QuotaProvider = "cerebras"
+	QuotaProviderClaudeCode  QuotaProvider = "claudecode"
+	QuotaProviderCodex       QuotaProvider = "codex"
+	QuotaProviderDeepSeek    QuotaProvider = "deepseek"
+	QuotaProviderGemini      QuotaProvider = "gemini"
+	QuotaProviderGrok        QuotaProvider = "grok"
+	QuotaProviderGroq        QuotaProvider = "groq"
+	QuotaProviderOpenRouter  QuotaProvider = "openrouter"
+	QuotaProviderRunInfra    QuotaProvider = "runinfra"
+	QuotaProviderTypeSafe    QuotaProvider = "typesafe"
+	QuotaProviderXiaomi      QuotaProvider = "xiaomi"
+	QuotaProviderZai         QuotaProvider = "zai"
 )
 
 // HarnessInfo is the JSON representation of an available harness.
@@ -797,9 +798,16 @@ type SyncResp struct {
 
 // QuotaRateLimit is a single rate-limit window snapshot from any provider.
 type QuotaRateLimit struct {
+	Label       string    `json:"label"`             // Display label; does not identify the bucket.
 	Window      string    `json:"window"`            // "5h", "7d", "primary", "secondary", "rpm", "tpd", …
 	Utilization float64   `json:"utilization"`       // 0.0–1.0
 	ResetsAt    time.Time `json:"resetsAt,omitzero"` // zero when unknown
+}
+
+// UnassessedQuotaWindow identifies a reported bucket with unknown utilization.
+type UnassessedQuotaWindow struct {
+	Group  string `json:"group"`            // Native model-pool name.
+	Window string `json:"window,omitempty"` // Native bucket ID, when reported.
 }
 
 // QuotaBalance is a balance/credit snapshot from any provider. When the
@@ -828,6 +836,8 @@ type ProviderQuota struct {
 	FetchStatus ProviderFetchStatus `json:"fetchStatus"`
 
 	RateLimits []QuotaRateLimit `json:"rateLimits,omitzero"`
+	// UnassessedWindows do not carry a utilization fraction or prove capacity.
+	UnassessedWindows []UnassessedQuotaWindow `json:"unassessedWindows,omitzero"`
 	// Balance is the provider's money snapshot. Some providers, such as
 	// Anthropic, report it as "extra usage" on top of the subscription
 	// instead of a prepaid wallet balance.

@@ -26,7 +26,7 @@ function usage(
     resetsAt?: string;
     fetchStatus?: "fresh" | "stale" | "error";
   }>,
-): UsageResp {
+) {
   return {
     local: { windows: [] },
     providers: groups.map((group) => ({
@@ -38,13 +38,14 @@ function usage(
       fetchStatus: group.fetchStatus ?? "fresh",
       rateLimits: [
         {
+          label: "primary",
           window: "primary",
           utilization: group.utilization,
           ...(group.resetsAt ? { resetsAt: group.resetsAt as ISOTimestamp } : {}),
         },
       ],
     })),
-  };
+  } satisfies UsageResp;
 }
 
 describe("quotaRecoveryTargets", () => {
@@ -69,6 +70,33 @@ describe("quotaRecoveryTargets", () => {
       "Same exhausted quota",
     ]);
   });
+
+  for (const [gemini, thirdParty] of [
+    [1, 0],
+    [0, 1],
+    [0, 0],
+    [1, 1],
+  ]) {
+    it(`does not infer Antigravity harness capacity without a model (${gemini}, ${thirdParty})`, () => {
+      const data = usage([{ provider: "antigravity", utilization: 0 }]);
+      data.providers[0].rateLimits = [
+        { label: "7d", window: "gemini-weekly", utilization: gemini },
+        { label: "5h", window: "gemini-5h", utilization: gemini },
+        { label: "3p-7d", window: "3p-weekly", utilization: thirdParty },
+        { label: "3p-5h", window: "3p-5h", utilization: thirdParty },
+      ];
+      const [target] = quotaRecoveryTargets(
+        [harness("antigravity", "antigravity")],
+        data,
+        "antigravity",
+        "antigravity",
+        now,
+      );
+      expect(target.status).toBe("unknown");
+      expect(target.label).toBe("Quota status unknown");
+      expect(target.recommended).toBe(false);
+    });
+  }
 
   it("keeps unknown candidates selectable without describing them as available", () => {
     const targets = quotaRecoveryTargets(

@@ -28,7 +28,7 @@ type Backend struct {
 
 // New creates an Antigravity backend with its cached model inventory.
 func New(cacheDir string, envVars []string) *Backend {
-	b := &Backend{HarnessID: harness.Antigravity}
+	b := &Backend{HarnessID: harness.Antigravity, QuotaProviderID: agent.QuotaProviderAntigravity}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Antigravity, envVars))
 	return b
 }

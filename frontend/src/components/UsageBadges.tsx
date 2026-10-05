@@ -65,12 +65,12 @@ function RateLimitBadge(props: { rl: Accessor<QuotaRateLimit>; now: Accessor<num
   const percent = () => Math.round(props.rl().utilization * 100);
   const tip = () => {
     const reset = formatReset(props.rl().resetsAt, props.now());
-    return reset ? `${props.label} ${props.rl().window}: ${percent()}% — Resets ${reset}` : undefined;
+    return `${props.label} ${props.rl().window}: ${percent()}%${reset ? ` — Resets ${reset}` : ""}`;
   };
   return (
     <Tooltip text={tip()}>
       <span class={`${styles.badge} ${pctColor(props.rl().utilization)}`} data-testid="usage-badge">
-        {props.rl().window} {percent()}%
+        {props.rl().label} {percent()}%
       </span>
     </Tooltip>
   );

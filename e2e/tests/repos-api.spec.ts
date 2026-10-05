@@ -26,7 +26,7 @@ test("list harnesses returns quota groups for known fake harnesses", async ({ ap
   expect(harnesses.length).toBeGreaterThan(0);
   const agy = harnesses.find((h) => h.name === "antigravity");
   expect(agy?.models.map((m) => m.id)).toContain("fake-model");
-  expect(agy?.quotaGroup).toBeUndefined();
+  expect(agy?.quotaGroup).toBe("antigravity");
   expect(agy?.supportsImages).toBe(false);
   expect(agy?.supportsCompact).toBe(false);
   const claude = harnesses.find((h) => h.name === "claude");

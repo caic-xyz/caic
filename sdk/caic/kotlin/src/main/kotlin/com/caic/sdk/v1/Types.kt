@@ -918,6 +918,10 @@ sealed interface QuotaProvider {
         override val value = "anthropic"
     }
     @Serializable
+    data object Antigravity : QuotaProvider {
+        override val value = "antigravity"
+    }
+    @Serializable
     data object Cerebras : QuotaProvider {
         override val value = "cerebras"
     }
@@ -977,6 +981,7 @@ object QuotaProviderSerializer : KSerializer<QuotaProvider> {
         return when (v) {
             "alibaba" -> QuotaProvider.Alibaba
             "anthropic" -> QuotaProvider.Anthropic
+            "antigravity" -> QuotaProvider.Antigravity
             "cerebras" -> QuotaProvider.Cerebras
             "claudecode" -> QuotaProvider.ClaudeCode
             "codex" -> QuotaProvider.Codex
@@ -2587,12 +2592,23 @@ data class TaskListEvent(
 /** QuotaRateLimit is a single rate-limit window snapshot from any provider. */
 @Serializable
 data class QuotaRateLimit(
+    /** Display label; does not identify the bucket. */
+    val label: String,
     /** "5h", "7d", "primary", "secondary", "rpm", "tpd", … */
     val window: String,
     /** 0.0–1.0 */
     val utilization: Double,
     /** zero when unknown */
     val resetsAt: Instant? = null,
+)
+
+/** UnassessedQuotaWindow identifies a reported bucket with unknown utilization. */
+@Serializable
+data class UnassessedQuotaWindow(
+    /** Native model-pool name. */
+    val group: String,
+    /** Native bucket ID, when reported. */
+    val window: String? = null,
 )
 
 /**
@@ -2633,6 +2649,8 @@ data class ProviderQuota(
     val usageUrl: String,
     val fetchStatus: ProviderFetchStatus,
     val rateLimits: List<QuotaRateLimit>? = null,
+    /** UnassessedWindows do not carry a utilization fraction or prove capacity. */
+    val unassessedWindows: List<UnassessedQuotaWindow>? = null,
     /**
      * Balance is the provider's money snapshot. Some providers, such as
      * Anthropic, report it as "extra usage" on top of the subscription

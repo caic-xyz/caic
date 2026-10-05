@@ -31,7 +31,7 @@ func fakeAgentBackends() agent.Backends {
 	claude := smoketest.NewFakeBackend()
 	agy := smoketest.NewFakeBackend()
 	agy.HarnessID = harness.Antigravity
-	agy.QuotaProviderID = ""
+	agy.QuotaProviderID = agent.QuotaProviderAntigravity
 	agy.Images = false
 	agy.Compact = false
 	backends := agent.Backends{

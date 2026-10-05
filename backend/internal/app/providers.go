@@ -38,7 +38,7 @@ func estimateUsageRowCost(pricer usage.ModelPricer, row *data.UsageRow, at time.
 	var known bool
 	switch harness.Name(row.Harness) {
 	case harness.Antigravity:
-		return 0, false // No verified quota provider or API-equivalent pricing.
+		return 0, false // Subscription quota does not establish API-equivalent pricing.
 	case harness.Claude:
 		provider, known = agent.QuotaProviderAnthropic, true
 	case harness.Codex:
@@ -64,6 +64,9 @@ func detectProviders(ctx context.Context, log *slog.Logger, coreEnv map[string]s
 		fetchers = append(fetchers, f)
 	}
 	if f := usage.NewCodexFetcher(ctx); f != nil {
+		fetchers = append(fetchers, f)
+	}
+	if f := usage.NewAntigravityFetcher(); f != nil {
 		fetchers = append(fetchers, f)
 	}
 

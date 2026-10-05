@@ -22,7 +22,7 @@ func TestFakeAgentBackends(t *testing.T) {
 		harness  harness.Name
 		provider agent.QuotaProvider
 	}{
-		{harness: harness.Antigravity, provider: ""},
+		{harness: harness.Antigravity, provider: agent.QuotaProviderAntigravity},
 		{harness: harness.Claude, provider: agent.QuotaProviderClaudeCode},
 		{harness: harness.Codex, provider: agent.QuotaProviderCodex},
 		{harness: harness.Pi, provider: ""},

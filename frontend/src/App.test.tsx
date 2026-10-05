@@ -2831,7 +2831,7 @@ describe("App repo chips: No repository", () => {
             authKind: "oauth",
             usageUrl: "",
             fetchStatus: "fresh",
-            rateLimits: [{ window: "primary", utilization: 0.25 }],
+            rateLimits: [{ label: "primary", window: "primary", utilization: 0.25 }],
           },
         ],
       });
@@ -2960,7 +2960,7 @@ describe("App repo chips: No repository", () => {
           authKind: "oauth",
           usageUrl: "",
           fetchStatus,
-          rateLimits: [{ window: "primary", utilization: 0.25 }],
+          rateLimits: [{ label: "primary", window: "primary", utilization: 0.25 }],
         },
       ],
     });

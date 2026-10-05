@@ -692,7 +692,7 @@ func QuotaProviderForModel(model string) QuotaProvider {
 // Valid reports whether p is a supported quota provider.
 func (p QuotaProvider) Valid() bool {
 	switch p {
-	case QuotaProviderAlibaba, QuotaProviderAnthropic, QuotaProviderCerebras,
+	case QuotaProviderAlibaba, QuotaProviderAnthropic, QuotaProviderAntigravity, QuotaProviderCerebras,
 		QuotaProviderClaudeCode, QuotaProviderCodex, QuotaProviderDeepSeek,
 		QuotaProviderGemini, QuotaProviderGrok, QuotaProviderGroq,
 		QuotaProviderOpenRouter, QuotaProviderRunInfra, QuotaProviderTypeSafe,
@@ -704,6 +704,8 @@ func (p QuotaProvider) Valid() bool {
 }
 
 const (
+	// QuotaProviderAntigravity identifies the Antigravity OAuth subscription.
+	QuotaProviderAntigravity QuotaProvider = "antigravity"
 	// QuotaProviderAnthropic identifies direct Anthropic API usage.
 	QuotaProviderAnthropic QuotaProvider = "anthropic"
 	// QuotaProviderClaudeCode identifies a Claude Code OAuth subscription.
@@ -741,6 +743,8 @@ func (p QuotaProvider) String() string {
 		return "Alibaba"
 	case QuotaProviderAnthropic:
 		return "Anthropic"
+	case QuotaProviderAntigravity:
+		return "Antigravity"
 	case QuotaProviderCerebras:
 		return "Cerebras"
 	case QuotaProviderClaudeCode:

@@ -529,6 +529,7 @@ public struct QuotaProvider: Codable, Equatable, Hashable {
 
     public static let Alibaba = QuotaProvider("alibaba")
     public static let Anthropic = QuotaProvider("anthropic")
+    public static let Antigravity = QuotaProvider("antigravity")
     public static let Cerebras = QuotaProvider("cerebras")
     public static let ClaudeCode = QuotaProvider("claudecode")
     public static let Codex = QuotaProvider("codex")
@@ -1945,12 +1946,22 @@ public struct TaskListEvent: Codable {
 
 /// QuotaRateLimit is a single rate-limit window snapshot from any provider.
 public struct QuotaRateLimit: Codable {
+    /// Display label; does not identify the bucket.
+    public let label: String
     /// "5h", "7d", "primary", "secondary", "rpm", "tpd", …
     public let window: String
     /// 0.0–1.0
     public let utilization: Double
     /// zero when unknown
     public let resetsAt: ISOTimestamp?
+}
+
+/// UnassessedQuotaWindow identifies a reported bucket with unknown utilization.
+public struct UnassessedQuotaWindow: Codable {
+    /// Native model-pool name.
+    public let group: String
+    /// Native bucket ID, when reported.
+    public let window: String?
 }
 
 /// QuotaBalance is a balance/credit snapshot from any provider. When the
@@ -1987,6 +1998,8 @@ public struct ProviderQuota: Codable {
     public let usageUrl: String
     public let fetchStatus: ProviderFetchStatus
     public let rateLimits: [QuotaRateLimit]?
+    /// UnassessedWindows do not carry a utilization fraction or prove capacity.
+    public let unassessedWindows: [UnassessedQuotaWindow]?
     /// Balance is the provider's money snapshot. Some providers, such as
     /// Anthropic, report it as "extra usage" on top of the subscription
     /// instead of a prepaid wallet balance.

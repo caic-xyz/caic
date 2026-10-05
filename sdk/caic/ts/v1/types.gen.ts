@@ -727,6 +727,7 @@ export const ProviderFetchStatusUnknown = "unknown";
 export type QuotaProvider =
   | "alibaba"
   | "anthropic"
+  | "antigravity"
   | "cerebras"
   | "claudecode"
   | "codex"
@@ -744,6 +745,7 @@ export type QuotaProvider =
  */
 export const QuotaProviderAlibaba = "alibaba";
 export const QuotaProviderAnthropic = "anthropic";
+export const QuotaProviderAntigravity = "antigravity";
 export const QuotaProviderCerebras = "cerebras";
 export const QuotaProviderClaudeCode = "claudecode";
 export const QuotaProviderCodex = "codex";
@@ -1774,12 +1776,22 @@ export interface TaskListEvent {
 
 /** QuotaRateLimit is a single rate-limit window snapshot from any provider. */
 export interface QuotaRateLimit {
+  /** Display label; does not identify the bucket. */
+  label: string;
   /** "5h", "7d", "primary", "secondary", "rpm", "tpd", … */
   window: string;
   /** 0.0–1.0 */
   utilization: number /* float64 */;
   /** zero when unknown */
   resetsAt?: ISOTimestamp;
+}
+
+/** UnassessedQuotaWindow identifies a reported bucket with unknown utilization. */
+export interface UnassessedQuotaWindow {
+  /** Native model-pool name. */
+  group: string;
+  /** Native bucket ID, when reported. */
+  window?: string;
 }
 
 /**
@@ -1818,6 +1830,8 @@ export interface ProviderQuota {
   usageUrl: string;
   fetchStatus: ProviderFetchStatus;
   rateLimits?: QuotaRateLimit[];
+  /** UnassessedWindows do not carry a utilization fraction or prove capacity. */
+  unassessedWindows?: UnassessedQuotaWindow[];
   /**
    * Balance is the provider's money snapshot. Some providers, such as
    * Anthropic, report it as "extra usage" on top of the subscription

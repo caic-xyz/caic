@@ -52,9 +52,17 @@ type ProviderFetcher interface {
 
 // QuotaRateLimit is a rate-limit window reported by a provider.
 type QuotaRateLimit struct {
+	Label       string // Optional display label; the API defaults it to Window.
 	Window      string
 	Utilization float64 // Fraction of the window used in [0, 1].
 	ResetsAt    time.Time
+}
+
+// UnassessedQuotaWindow retains a reported bucket whose utilization is unknown.
+// Group is the provider's native pool name; Window is its bucket ID, if present.
+type UnassessedQuotaWindow struct {
+	Group  string
+	Window string
 }
 
 // QuotaBalance is a balance or credit snapshot reported by a provider. When
@@ -84,6 +92,8 @@ type ProviderQuota struct {
 	FetchError bool
 
 	RateLimits []QuotaRateLimit
+	// UnassessedWindows cannot establish capacity; amounts are not fractions.
+	UnassessedWindows []UnassessedQuotaWindow
 	// Balance is the provider's money snapshot. Some providers, such as
 	// Anthropic, report it as "extra usage" on top of the subscription
 	// instead of a prepaid wallet balance.
@@ -211,6 +221,7 @@ func cloneProviderQuotas(providers []ProviderQuota) []ProviderQuota {
 	copy(cloned, providers)
 	for i := range cloned {
 		cloned[i].RateLimits = slices.Clone(cloned[i].RateLimits)
+		cloned[i].UnassessedWindows = slices.Clone(cloned[i].UnassessedWindows)
 	}
 	return cloned
 }

@@ -20,7 +20,7 @@ import styles from "./UsageBadges.module.css";
 const [now] = createSignal(Date.now());
 
 function makeRateLimit(window: string, utilization: number, resetsAt?: ISOTimestamp) {
-  return { window, utilization, resetsAt };
+  return { label: window, window, utilization, resetsAt };
 }
 
 function makeBalance(total: number, currency = "USD", granted?: number, toppedUp?: number) {
@@ -124,6 +124,46 @@ describe("UsageBadges", () => {
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
       expect(getBadge(container)?.className).toContain(styles.red);
     });
+
+    it("renders server-provided quota labels", () => {
+      const limits = [
+        { label: "7d", window: "gemini-weekly", utilization: 0.1 },
+        { label: "5h", window: "gemini-5h", utilization: 0.1 },
+        { label: "3p-7d", window: "3p-weekly", utilization: 0.1 },
+        { label: "3p-5h", window: "3p-5h", utilization: 0.1 },
+      ];
+      const [usage] = createSignal(
+        makeUsage([makeProvider({ provider: "antigravity", label: "Antigravity", rateLimits: limits })]),
+      );
+      const { getAllByTestId } = render(() => <UsageBadges usage={usage} now={now} />);
+      expect(getAllByTestId("usage-badge").map((badge) => badge.textContent)).toEqual([
+        "7d 10%",
+        "5h 10%",
+        "3p-7d 10%",
+        "3p-5h 10%",
+      ]);
+    });
+
+    for (const resetsAt of [undefined, new Date(Date.now() + 60_000).toISOString() as ISOTimestamp]) {
+      it(`keeps the full bucket ID in the tooltip ${resetsAt ? "with" : "without"} a reset time`, () => {
+        const [usage] = createSignal(
+          makeUsage([
+            makeProvider({
+              provider: "antigravity",
+              label: "Antigravity",
+              rateLimits: [{ label: "7d", window: "gemini-weekly", utilization: 0.1, resetsAt }],
+            }),
+          ]),
+        );
+        const { getByTestId } = render(() => <UsageBadges usage={usage} now={now} />);
+        const wrapper = getByTestId("usage-badge").parentElement;
+        expect(wrapper).not.toBeNull();
+        wrapper?.dispatchEvent(new MouseEvent("mouseenter"));
+        expect(document.body.textContent).toContain("Antigravity gemini-weekly: 10%");
+        expect(document.body.textContent?.includes("Resets")).toBe(resetsAt !== undefined);
+        wrapper?.dispatchEvent(new MouseEvent("mouseleave"));
+      });
+    }
 
     it("shows window label and percentage", () => {
       const u = makeUsage([makeProvider({ rateLimits: [makeRateLimit("7d", 0.12)] })]);

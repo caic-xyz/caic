@@ -53,6 +53,8 @@ test("desktop quota recovery continues in a fork and preserves the source", asyn
     "claude — Same exhausted quota",
   ]);
   await expect(harnessSelect).toHaveValue("codex");
+  await harnessSelect.selectOption("antigravity");
+  await expect(page.getByTestId("fork-target-status")).toContainText("Quota status unknown");
   await harnessSelect.selectOption("pi");
   await expect(page.getByTestId("fork-target-status")).toContainText("Quota status unknown");
   await harnessSelect.selectOption("codex");

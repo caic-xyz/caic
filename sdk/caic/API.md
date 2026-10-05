@@ -385,6 +385,7 @@ QuotaProvider identifies a monitored quota source.
 |-------|-------------|
 | `alibaba` |  |
 | `anthropic` |  |
+| `antigravity` |  |
 | `cerebras` |  |
 | `claudecode` |  |
 | `codex` |  |
@@ -1948,9 +1949,19 @@ QuotaRateLimit is a single rate-limit window snapshot from any provider.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `label` | `string` | Display label; does not identify the bucket. | yes |
 | `window` | `string` | "5h", "7d", "primary", "secondary", "rpm", "tpd", … | yes |
 | `utilization` | `float64` | 0.0–1.0 | yes |
 | `resetsAt` | `ISOTimestamp` | zero when unknown |  |
+
+### UnassessedQuotaWindow
+
+UnassessedQuotaWindow identifies a reported bucket with unknown utilization.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `group` | `string` | Native model-pool name. | yes |
+| `window` | `string` | Native bucket ID, when reported. |  |
 
 ### QuotaBalance
 
@@ -1982,6 +1993,7 @@ ProviderQuota is the quota data for one provider.
 | `usageUrl` | `string` | link to provider's usage/billing page | yes |
 | `fetchStatus` | `ProviderFetchStatus` |  | yes |
 | `rateLimits` | `QuotaRateLimit[]` |  |  |
+| `unassessedWindows` | `UnassessedQuotaWindow[]` | UnassessedWindows do not carry a utilization fraction or prove capacity. |  |
 | `balance` | `QuotaBalance` | Balance is the provider's money snapshot. Some providers, such as
 Anthropic, report it as "extra usage" on top of the subscription
 instead of a prepaid wallet balance. |  |

@@ -27,7 +27,9 @@ export function quotaRecoveryTargets(
   now: number,
 ): QuotaTarget[] {
   const candidates = harnesses.map((harness, originalIndex): Candidate => {
-    const sameExhaustedGroup = exhaustedGroup !== undefined && harness.quotaGroup === exhaustedGroup;
+    // Antigravity has independent model pools. A harness choice has no selected model.
+    const sameExhaustedGroup =
+      exhaustedGroup !== undefined && exhaustedGroup !== "antigravity" && harness.quotaGroup === exhaustedGroup;
     return {
       harness,
       status: sameExhaustedGroup ? "exhausted" : quotaGroupStatus(harness.quotaGroup, usage, now),
@@ -58,7 +60,8 @@ export function quotaRecoveryTargets(
 }
 
 function quotaGroupStatus(group: QuotaProvider | undefined, usage: UsageResp | null, now: number): QuotaTargetStatus {
-  if (group === undefined) return "unknown";
+  // Without a selected Antigravity model, no single pool establishes viability.
+  if (group === undefined || group === "antigravity") return "unknown";
   const provider = usage?.providers?.find((candidate) => candidate.provider === group);
   if (provider?.fetchStatus !== "fresh") return "unknown";
   const limits = provider.rateLimits;

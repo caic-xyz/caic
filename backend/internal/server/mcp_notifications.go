@@ -48,16 +48,29 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	owner := notificationOwner(ctx)
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
+	unknownTaskIDs := make(map[string]struct{})
 	for i := range tasks {
 		task := &tasks[i]
-		if task.State == v1.TaskStateWaiting && taskQuotaBlocked(task, &usage, now) {
+		if task.State != v1.TaskStateWaiting {
+			continue
+		}
+		blocked, known := taskQuotaBlocked(task, &usage, now)
+		if blocked {
 			blockedTaskIDs[task.ID.String()] = struct{}{}
+		} else if !known {
+			unknownTaskIDs[task.ID.String()] = struct{}{}
 		}
 	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	previouslyBlocked := f.blockedTaskIDs[owner]
+	// Unknown quota neither proves recovery nor erases a prior blocked observation.
+	for id := range unknownTaskIDs {
+		if wasBlocked(previouslyBlocked, id) {
+			blockedTaskIDs[id] = struct{}{}
+		}
+	}
 	previousStates := f.states[owner]
 	if previousStates == nil {
 		previousStates = make(map[string]observedTaskState, len(tasks))
@@ -130,9 +143,12 @@ func isBlocked(taskIDs map[string]struct{}, id string) bool {
 	return ok
 }
 
-func taskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) bool {
+func taskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) (blocked, known bool) {
 	if task.RateLimit.Blocked && task.RateLimit.ResetsAt.After(now) {
-		return true
+		return true, true
+	}
+	if task.Harness == v1.HarnessAntigravity {
+		return antigravityTaskQuotaBlocked(task, usage, now)
 	}
 	for i := range usage.Providers {
 		provider := &usage.Providers[i]
@@ -141,11 +157,67 @@ func taskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) bool {
 		}
 		for _, limit := range provider.RateLimits {
 			if limit.Utilization >= 1 && limit.ResetsAt.After(now) {
-				return true
+				return true, true
 			}
 		}
 	}
-	return false
+	return false, true
+}
+
+// agy /usage separates Gemini from Claude/GPT-OSS. These are the verified pool
+// IDs and model families; unknown models or new bucket IDs do not prove recovery.
+func antigravityTaskQuotaBlocked(task *v1.Task, usage *v1.UsageResp, now time.Time) (blocked, known bool) {
+	model := task.ReportedModel
+	if model == "" {
+		model = task.RequestedModel
+	}
+	var pool string
+	switch {
+	case strings.HasPrefix(model, "gemini-"):
+		pool = "gemini"
+	case strings.HasPrefix(model, "claude-"), strings.HasPrefix(model, "gpt-oss-"):
+		pool = "3p"
+	default:
+		return false, false
+	}
+	for i := range usage.Providers {
+		provider := &usage.Providers[i]
+		if provider.Provider != v1.QuotaProviderAntigravity || provider.FetchStatus != v1.ProviderFetchStatusFresh {
+			continue
+		}
+		var weekly, fiveHour, expired, unknown bool
+		for _, window := range provider.UnassessedWindows {
+			switch window.Window {
+			case "gemini-weekly", "gemini-5h":
+				unknown = unknown || pool == "gemini"
+			case "3p-weekly", "3p-5h":
+				unknown = unknown || pool == "3p"
+			default:
+				unknown = true // A new or missing ID cannot rule out a matching pool limit.
+			}
+		}
+		for _, limit := range provider.RateLimits {
+			switch limit.Window {
+			case pool + "-weekly":
+				weekly = true
+			case pool + "-5h":
+				fiveHour = true
+			case "gemini-weekly", "gemini-5h", "3p-weekly", "3p-5h":
+				continue // A verified bucket in the other pool.
+			default:
+				unknown = true
+				continue
+			}
+			if limit.Utilization >= 1 {
+				if limit.ResetsAt.IsZero() || limit.ResetsAt.After(now) {
+					return true, true
+				}
+				expired = true
+			}
+		}
+		return false, weekly && fiveHour && !expired && !unknown
+	}
+	return false, false
 }
 
 func taskUsesProvider(task *v1.Task, provider agent.QuotaProvider) bool {
@@ -157,7 +229,7 @@ func taskUsesProvider(task *v1.Task, provider agent.QuotaProvider) bool {
 	case v1.HarnessCodex:
 		addProviderCandidate(candidates, agent.QuotaProviderCodex)
 	case v1.HarnessAntigravity:
-		// Antigravity has no monitored quota provider.
+		return provider == agent.QuotaProviderAntigravity
 	case v1.HarnessOpenCode, v1.HarnessPi:
 		// These harnesses select the billing provider through the task model.
 	}
