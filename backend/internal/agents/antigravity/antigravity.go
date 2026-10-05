@@ -230,6 +230,9 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 			st.started = true
 		}
 		if s.State == antigravity.StepDone {
+			if s.ToolInfo.Output != "" {
+				msgs = append(msgs, &agent.ToolOutputDeltaMessage{ToolUseID: id, Delta: s.ToolInfo.Output})
+			}
 			msgs = append(msgs, &agent.ToolResultMessage{ToolUseID: id, DurationMs: int64(s.DurationSeconds * 1000), Error: s.ToolInfo.Error.Message})
 		}
 	case antigravity.StepSystemMessage:
@@ -250,10 +253,11 @@ func (w *wireFormat) parseStep(s *antigravity.StepUpdatePayload) []agent.Message
 }
 
 func convertUsage(u *antigravity.JSONUsage) agent.Usage {
-	// agy input_tokens is the full prompt count; cached tokens are a subset.
-	// Neutral input fields are disjoint, and output includes thinking tokens.
+	// agy reports uncached input and cached input separately. The recorded
+	// cached-tools fixture has cache_read_tokens greater than input_tokens;
+	// subtracting cache reads produces negative input. Output includes thinking.
 	return agent.Usage{
-		InputTokens:           int(u.InputTokens - u.CacheReadTokens),
+		InputTokens:           int(u.InputTokens),
 		CacheReadInputTokens:  int(u.CacheReadTokens),
 		OutputTokens:          int(u.OutputTokens),
 		ReasoningOutputTokens: int(u.ThinkingTokens),

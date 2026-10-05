@@ -151,6 +151,80 @@ func TestWireFormat(t *testing.T) {
 				t.Fatalf("text = %q, result = %+v", text, result)
 			}
 		})
+		t.Run("recorded cached usage and tool output", func(t *testing.T) {
+			t.Parallel()
+			// Session IDs and workspace paths are sanitized in this recording.
+			// Retain native cached usage, command output, task
+			// status, scheduling, streamed text, and conversation-wide result.
+			f, err := os.Open("testdata/cached-tools.ndjson")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := f.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			w := New("", nil).NewWire()
+			sc := bufio.NewScanner(f)
+			uses := make(map[string]string)
+			outputs := make(map[string]string)
+			var calls []agent.Usage
+			var result *agent.ResultMessage
+			var text strings.Builder
+			for sc.Scan() {
+				msgs, err := w.ParseMessage(sc.Bytes())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, msg := range msgs {
+					switch m := msg.(type) {
+					case *agent.InitMessage:
+						if m.ReportedModel != "" || m.SessionID != "session" {
+							t.Fatalf("init = %+v, want unknown model", m)
+						}
+					case *agent.UsageMessage:
+						if m.ReportedModel != "" {
+							t.Fatalf("invented model: %q", m.ReportedModel)
+						}
+						calls = append(calls, m.Usage)
+					case *agent.ToolUseMessage:
+						uses[m.ToolUseID] = m.Name
+					case *agent.ToolOutputDeltaMessage:
+						if uses[m.ToolUseID] == "" {
+							t.Fatalf("output before invocation: %+v", m)
+						}
+						outputs[m.ToolUseID] += m.Delta
+					case *agent.ToolResultMessage:
+						if m.Error != "" {
+							t.Fatalf("output text invented a native error: %+v", m)
+						}
+						if outputs[m.ToolUseID] == "" {
+							t.Fatalf("completion lost output: %+v", m)
+						}
+					case *agent.TextDeltaMessage:
+						text.WriteString(m.Text)
+					case *agent.ResultMessage:
+						result = m
+					}
+				}
+			}
+			if err := sc.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if len(calls) != 2 || calls[0].InputTokens != 3157 || calls[0].CacheReadInputTokens != 16275 {
+				t.Fatalf("cached usage = %+v", calls)
+			}
+			if result == nil || result.IsError || result.Usage.InputTokens != 7897 || result.Usage.CacheReadInputTokens != 191461 || result.Usage.OutputTokens != 1127 || result.Usage.ReasoningOutputTokens != 452 {
+				t.Fatalf("turn result = %+v", result)
+			}
+			if len(uses) != 4 || len(outputs) != 4 || !strings.Contains(outputs["session:12"], "undefined: typesafe.Questions") || !strings.Contains(outputs["session:160"], "Status: RUNNING") || !strings.Contains(outputs["session:162"], "Timer cancelled early") {
+				t.Fatalf("tool output lost: uses=%v outputs=%v", uses, outputs)
+			}
+			if !strings.Contains(text.String(), "Updated `github.com/maruel/genai`") || !strings.Contains(text.String(), "make verify") {
+				t.Fatalf("streamed text lost: %q", text.String())
+			}
+		})
 		t.Run("turn usage and tool correlation", func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
@@ -185,11 +259,35 @@ func TestWireFormat(t *testing.T) {
 			if len(uses) != 1 || len(results) != 1 || uses[0].ToolUseID != results[0].ToolUseID || results[0].DurationMs != 250 || results[0].Error != "not found" {
 				t.Fatalf("tools = %+v, results = %+v", uses, results)
 			}
-			if len(turns) != 2 || turns[0].Usage.InputTokens != 40 || turns[0].Usage.CacheReadInputTokens != 60 || turns[0].Usage.OutputTokens != 20 || turns[0].DurationMs != 0 || turns[0].NumTurns != 0 {
+			if len(turns) != 2 || turns[0].Usage.InputTokens != 100 || turns[0].Usage.CacheReadInputTokens != 60 || turns[0].Usage.OutputTokens != 20 || turns[0].DurationMs != 0 || turns[0].NumTurns != 0 {
 				t.Fatalf("turns = %+v", turns)
 			}
 			if !turns[1].IsError || !strings.Contains(turns[1].Result, "quota exhausted") || turns[1].Usage != (agent.Usage{}) {
 				t.Fatalf("second result = %+v", turns[1])
+			}
+		})
+		t.Run("tool output completes once", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			line := []byte(`{"event":"step_update","step_update":{"conversation_id":"s","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"output":"build failed\n","error":{"type":"error","message":"command failed"}}}}`)
+			msgs, err := w.ParseMessage(line)
+			if err != nil || len(msgs) != 3 {
+				t.Fatalf("completion = %v, %v", msgs, err)
+			}
+			use, ok := msgs[0].(*agent.ToolUseMessage)
+			if !ok {
+				t.Fatalf("first message = %T, want invocation", msgs[0])
+			}
+			out, ok := msgs[1].(*agent.ToolOutputDeltaMessage)
+			if !ok || out.ToolUseID != use.ToolUseID || out.Delta != "build failed\n" {
+				t.Fatalf("output = %+v", msgs[1])
+			}
+			result, ok := msgs[2].(*agent.ToolResultMessage)
+			if !ok || result.ToolUseID != use.ToolUseID || result.Error != "command failed" {
+				t.Fatalf("result = %+v", msgs[2])
+			}
+			if msgs, err := w.ParseMessage(line); err != nil || len(msgs) != 0 {
+				t.Fatalf("duplicate completion = %v, %v", msgs, err)
 			}
 		})
 		t.Run("response finalization preserves tool order", func(t *testing.T) {

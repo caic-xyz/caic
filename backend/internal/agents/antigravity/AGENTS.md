@@ -9,6 +9,10 @@ Use `github.com/maruel/genai/providers/antigravity` for wire DTOs. The DTOs and
 The session ID and temporary workspace path are sanitized. It pins init,
 streamed text, DONE-step usage, and the terminal result.
 
+Use `testdata/cached-tools.ndjson` when changing usage or tool-output parsing.
+It is a minimized recording with sanitized session IDs and workspace paths.
+Its init event omits the model. Keep that absence intact.
+
 Keep native subagent mapping disabled until recorded lifecycle evidence pins
 its semantics. agy does not expose thinking text in this protocol.
 
