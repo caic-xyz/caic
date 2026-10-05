@@ -244,7 +244,10 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
   expect(requests[1].initialPrompt.images).toHaveLength(2);
   const urls = await page.evaluate(() => ({ created: window.draftProbe.created, revoked: window.draftProbe.revoked }));
   expect(urls.revoked).toEqual(urls.created);
+  // Task creation returns before startup finishes; purge requires an active task.
+  await waitForTaskState(api, created.id, "waiting");
   await api.purgeTask(created.id);
+  await waitForTaskState(api, created.id, "purged");
 });
 
 test("UI: task switching cancels conversion, retains the original draft, and releases previews on removal", async ({
@@ -315,5 +318,7 @@ test("UI: unavailable attachment policy keeps text-only task creation working", 
   await form.getByTestId("submit-task").click();
   const created = validateTask(await (await createdResponse).json());
   await expect(page.getByTestId("task-detail-form")).toBeVisible();
+  await waitForTaskState(api, created.id, "waiting");
   await api.purgeTask(created.id);
+  await waitForTaskState(api, created.id, "purged");
 });
