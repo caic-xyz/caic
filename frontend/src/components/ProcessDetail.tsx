@@ -1,4 +1,4 @@
-// Full-page process tree viewer for a task's container.
+// Continuous process trees with true-depth indentation, clickable names, and aligned actions.
 // Processes are displayed as a tree grouped by parent/child PID relationships.
 // The tree is built and flattened iteratively, and subtrees below
 // AUTO_COLLAPSE_DEPTH start collapsed, so an unusually deep or cyclic process
@@ -9,7 +9,6 @@ import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup }
 import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
-import ExpandIcon from "@material-symbols/svg-400/outlined/expand.svg?solid";
 
 import type { ProcessInfo } from "@sdk/types.gen";
 
@@ -25,11 +24,19 @@ const AUTO_COLLAPSE_DEPTH = 25;
 // CollapseMode is the tree-wide collapse override selected by the toolbar.
 type CollapseMode = "default" | "expanded" | "collapsed";
 
-// ProcessNode extends ProcessInfo with children and depth for tree rendering.
+// ProcessContinuation shares an ancestor's still-open sibling lane between descendants.
+interface ProcessContinuation {
+  column: number;
+  parent: ProcessContinuation | null;
+}
+
+// ProcessNode extends ProcessInfo with hierarchy and shared graph continuation lanes.
 export interface ProcessNode extends ProcessInfo {
   children: ProcessNode[];
   // depth is the node's distance from its root, assigned by buildTree.
   depth: number;
+  lastChild: boolean;
+  continuations: ProcessContinuation | null;
 }
 
 // resolvedParents returns the effective parent PID for every process. The
@@ -70,14 +77,19 @@ function resolvedParents(byPID: ReadonlyMap<number, ProcessNode>): Map<number, n
   return parent;
 }
 
-// assignDepths labels every node with its distance from a root. Iterative so a
-// deep chain cannot overflow the call stack.
-function assignDepths(roots: ProcessNode[]): void {
+// assignTreeLayout labels actual depths and shares ancestor lanes without copying
+// ever-longer prefixes. Only rendered rows enumerate these persistent links.
+function assignTreeLayout(roots: ProcessNode[]): void {
   const queue: ProcessNode[] = [...roots];
   for (let i = 0; i < queue.length; i++) {
     const node = queue[i];
-    for (const child of node.children) {
+    const continuations =
+      node.depth > 0 && !node.lastChild ? { column: node.depth - 1, parent: node.continuations } : node.continuations;
+    for (let j = 0; j < node.children.length; j++) {
+      const child = node.children[j];
       child.depth = node.depth + 1;
+      child.lastChild = j === node.children.length - 1;
+      child.continuations = continuations;
       queue.push(child);
     }
   }
@@ -89,7 +101,7 @@ function assignDepths(roots: ProcessNode[]): void {
 export function buildTree(procs: ProcessInfo[]): ProcessNode[] {
   const byPID = new Map<number, ProcessNode>();
   for (const proc of procs) {
-    byPID.set(proc.pid, { ...proc, children: [], depth: 0 });
+    byPID.set(proc.pid, { ...proc, children: [], depth: 0, lastChild: true, continuations: null });
   }
   const parent = resolvedParents(byPID);
   const roots: ProcessNode[] = [];
@@ -102,7 +114,7 @@ export function buildTree(procs: ProcessInfo[]): ProcessNode[] {
       roots.push(node);
     }
   }
-  assignDepths(roots);
+  assignTreeLayout(roots);
   return roots;
 }
 
@@ -157,29 +169,72 @@ interface RowProps {
   onToggle: (node: ProcessNode) => void;
   signallingPid: () => number | null;
   now: () => number;
+  todayOnly: boolean;
   onSignal: (pid: number, sig: "SIGTERM" | "SIGKILL") => void;
 }
 
 function ProcessRow(props: RowProps) {
   const hasChildren = () => props.node.children.length > 0;
-  const indent = () => props.node.depth * 10;
+  const name = () => {
+    const executable = props.node.command.trim().split(/\s+/, 1)[0];
+    return executable.slice(executable.lastIndexOf("/") + 1);
+  };
+
+  const continuationColumns = () => {
+    const columns: number[] = [];
+    for (let lane = props.node.continuations; lane !== null; lane = lane.parent) {
+      columns.push(lane.column);
+    }
+    return columns;
+  };
 
   return (
     <tr>
-      <td class={`${styles.td} ${styles.actions}`}>
+      <td class={`${styles.td} ${styles.processCell}`} style={{ "--tree-depth": `${props.node.depth}` }}>
+        <span class={styles.treeLines} data-testid="process-graph" aria-hidden="true">
+          <For each={continuationColumns()}>
+            {(column) => (
+              <span class={`${styles.treeLane} ${styles.treeStem}`} style={{ "--tree-column": `${column}` }} />
+            )}
+          </For>
+          <Show when={props.node.depth > 0}>
+            <span
+              class={`${styles.treeLane} ${styles.treeStem} ${styles.treeBranch}`}
+              data-testid="process-parent-lane"
+              classList={{ [styles.treeEnd]: props.node.lastChild }}
+              style={{ "--tree-column": `${props.node.depth - 1}` }}
+            />
+          </Show>
+          <Show when={hasChildren() && !props.collapsed}>
+            <span
+              class={`${styles.treeLane} ${styles.treeStem} ${styles.treeChildStem}`}
+              data-testid="process-child-lane"
+              style={{ "--tree-column": `${props.node.depth}` }}
+            />
+          </Show>
+        </span>
+        <div class={styles.processName}>
+          <Show when={props.node.depth > 0}>
+            <span class={styles.treeSpace} aria-hidden="true" />
+          </Show>
+          <Show when={hasChildren()} fallback={<span>{name()}</span>}>
+            <button
+              class={styles.processToggle}
+              onClick={() => props.onToggle(props.node)}
+              aria-expanded={!props.collapsed}
+              aria-label={`${props.collapsed ? "Expand" : "Collapse"} ${name()} children (PID ${props.node.pid})`}
+              title={props.collapsed ? "Expand children" : "Collapse children"}
+            >
+              <span>{name()}</span>
+              <span class={styles.disclosure} classList={{ [styles.expanded]: !props.collapsed }} aria-hidden="true">
+                <ChevronRightIcon width={12} height={12} />
+              </span>
+            </button>
+          </Show>
+        </div>
+      </td>
+      <td class={styles.td}>
         <div class={styles.actionsRow}>
-          <span class={styles.treeToggle} style={{ "--tree-indent": `${indent()}px` }}>
-            <Show when={hasChildren()}>
-              <button
-                class={styles.toggleBtn}
-                onClick={() => props.onToggle(props.node)}
-                aria-expanded={!props.collapsed}
-                title={props.collapsed ? "Expand children" : "Collapse children"}
-              >
-                {props.collapsed ? <ChevronRightIcon width={12} height={12} /> : <ExpandIcon width={12} height={12} />}
-              </button>
-            </Show>
-          </span>
           <button
             class={styles.signalBtn}
             onClick={() => props.onSignal(props.node.pid, "SIGTERM")}
@@ -214,9 +269,13 @@ function ProcessRow(props: RowProps) {
       <td class={styles.td}>{props.node.mem.toFixed(1)}</td>
       <td class={styles.td}>{formatBytes(props.node.rssBytes)}</td>
       <td class={styles.td}>{formatElapsed(props.node.cpuTime / 1_000_000)}</td>
-      <td class={styles.td}>{formatTime(props.node.startedAt)}</td>
+      <td class={styles.td} title={formatTime(props.node.startedAt)}>
+        {props.todayOnly ? new Date(props.node.startedAt).toLocaleTimeString() : formatTime(props.node.startedAt)}
+      </td>
       <td class={styles.td}>{formatElapsed(props.now() - new Date(props.node.startedAt).getTime())}</td>
-      <td class={`${styles.td} ${styles.cmd}`}>{props.node.command}</td>
+      <td class={styles.td}>
+        <div class={styles.cmd}>{props.node.command}</div>
+      </td>
     </tr>
   );
 }
@@ -237,6 +296,11 @@ export default function ProcessDetail(props: Props) {
   });
 
   const total = () => processes()?.length ?? 0;
+  const today = createMemo(() => new Date(now()).toDateString());
+  const todayOnly = createMemo(() => {
+    const date = today();
+    return processes()?.every((proc) => new Date(proc.startedAt).toDateString() === date) ?? false;
+  });
 
   // isCollapsed resolves a node's collapse state: an explicit per-node override
   // wins, then the toolbar mode, then the depth-based default.
@@ -352,7 +416,8 @@ export default function ProcessDetail(props: Props) {
                 <table class={styles.table}>
                   <thead>
                     <tr>
-                      <th class={`${styles.th} ${styles.actionsHdr}`}>ACTIONS</th>
+                      <th class={styles.th}>PROCESS</th>
+                      <th class={styles.th}>ACTIONS</th>
                       <th class={styles.th}>PID</th>
                       <th class={styles.th}>PGRP</th>
                       <th class={styles.th}>USER</th>
@@ -381,6 +446,7 @@ export default function ProcessDetail(props: Props) {
                           onToggle={toggleCollapsed}
                           signallingPid={signallingPid}
                           now={now}
+                          todayOnly={todayOnly()}
                           onSignal={handleSignal}
                         />
                       )}

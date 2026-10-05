@@ -1,4 +1,4 @@
-/* Styles for the full-page ProcessDetail component with tree view. */
+/* Styles for continuous depth-indented process trees, subtle row rules, and bottom-aligned headers. */
 
 .container {
   display: flex;
@@ -98,6 +98,8 @@
 }
 
 .table {
+  --process-rule-color: color-mix(in srgb, var(--color-border-light) 40%, transparent);
+
   width: 100%;
   font-size: 0.8rem;
   border-collapse: collapse;
@@ -106,15 +108,17 @@
 .th {
   position: sticky;
   top: 0;
+  z-index: 1;
   padding: 0.3rem 0.4rem;
   font-size: 0.7rem;
   font-weight: 600;
+  vertical-align: bottom;
   color: var(--color-text-tertiary);
   text-align: left;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   background: var(--color-bg-elevated);
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--process-rule-color);
 }
 
 .td {
@@ -123,18 +127,15 @@
   vertical-align: baseline;
   color: var(--color-text-secondary);
   white-space: nowrap;
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--process-rule-color);
 }
 
 .cmd {
-  min-width: 300px;
-  max-width: 700px;
+  width: max-content;
+  min-width: 700px;
+  max-width: 1400px;
   word-break: break-all;
   white-space: normal;
-}
-
-.actionsHdr {
-  white-space: nowrap;
 }
 
 .state {
@@ -151,31 +152,95 @@
   align-items: center;
 }
 
-.treeToggle {
-  --tree-indent: 0;
+.processCell {
+  --tree-depth: 0;
+  --tree-width: calc(var(--tree-depth) * 1ch);
+  --tree-junction-y: calc(1px + 0.2rem + 0.625em);
 
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: flex-end;
-  width: var(--tree-indent);
-  min-width: var(--tree-indent);
+  position: relative;
 }
 
-.toggleBtn {
+.processName {
   display: flex;
+  gap: 0.125rem;
+  align-items: center;
+  font-family: monospace;
+  line-height: 1.25;
+}
+
+.treeSpace {
+  flex-shrink: 0;
+  width: var(--tree-width);
+}
+
+.treeLines {
+  position: absolute;
+  inset: -1px auto -1px 0.4rem;
+  width: var(--tree-width);
+  font-family: monospace;
+  pointer-events: none;
+}
+
+.treeLane {
+  --tree-column: 0;
+
+  position: absolute;
+  inset: 0 auto 0 calc(var(--tree-column) * 1ch);
+  width: 1ch;
+}
+
+.treeStem::before {
+  position: absolute;
+  inset: 0 auto 0 50%;
+  content: "";
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.treeEnd::before {
+  bottom: auto;
+  height: var(--tree-junction-y);
+}
+
+.treeChildStem::before {
+  top: calc(var(--tree-junction-y) + 0.625em);
+}
+
+.treeBranch::after {
+  position: absolute;
+  inset: var(--tree-junction-y) 0 auto 50%;
+  content: "";
+  border-top: 1px solid var(--color-border-medium);
+}
+
+.processToggle {
+  display: inline-flex;
+  gap: 0.125rem;
   align-items: center;
   padding: 0;
-  color: var(--color-text-tertiary);
+  font: inherit;
+  color: inherit;
   cursor: pointer;
   background: none;
   border: none;
   border-radius: var(--radius-sm);
-  transition: color 0.15s;
 }
 
-.toggleBtn:hover {
-  color: var(--color-text-secondary);
+.processToggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.processToggle:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
+.disclosure {
+  display: flex;
+  color: var(--color-text-tertiary);
+}
+
+.expanded {
+  transform: rotate(90deg);
 }
 
 .signalBtn {
