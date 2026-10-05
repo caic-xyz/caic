@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -32,7 +33,7 @@ func newBackfillStaging(dir string) *backfillStaging {
 	return &backfillStaging{dir: dir, days: make(map[string]*backfillDay)}
 }
 
-func (s *backfillStaging) append(row *UsageRow) error {
+func (s *backfillStaging) append(row *data.UsageRow) error {
 	day := s.days[row.Day]
 	if day == nil {
 		file, err := os.CreateTemp(s.dir, ".usage-backfill-*.tmp")
@@ -49,11 +50,11 @@ func (s *backfillStaging) append(row *UsageRow) error {
 		}
 		s.days[row.Day] = day
 	}
-	data, err := json.Marshal(row)
+	encoded, err := json.Marshal(row)
 	if err != nil {
 		return fmt.Errorf("encode usage backfill row: %w", err)
 	}
-	if _, err := day.file.Write(append(data, '\n')); err != nil {
+	if _, err := day.file.Write(append(encoded, '\n')); err != nil {
 		return fmt.Errorf("write usage backfill staging file: %w", err)
 	}
 	foldUsageRow(day.aggregate, row)
@@ -130,7 +131,7 @@ func writeBackfillSentinelTemp(dir string) (string, error) {
 	return path, nil
 }
 
-func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(*UsageRow) (float64, bool)) error {
+func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(*data.UsageRow) (float64, bool)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -162,7 +163,7 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 	changes := newRecoveryState()
 	changed := false
 	transform := func(line []byte) ([]byte, error) {
-		var row UsageRow
+		var row data.UsageRow
 		decoded := json.Unmarshal(line, &row) == nil
 		if !decoded {
 			return line, nil
@@ -195,7 +196,7 @@ func backfillDayCosts(ctx context.Context, s *Store, name string, estimate func(
 			return nil, fmt.Errorf("encode estimated usage cost for %s: %w", name, err)
 		}
 		changed = true
-		changes.addUsageRow(&UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost})
+		changes.addUsageRow(&data.UsageRow{Day: row.Day, Model: row.Model, Harness: row.Harness, CostUSD: cost})
 		changes.flushedCost[row.TaskID] += cost
 		if bytes.HasSuffix(line, []byte{'\n'}) {
 			encoded = append(encoded, '\n')

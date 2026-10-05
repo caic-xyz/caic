@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/ksid"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	"github.com/maruel/ksid"
 )
 
 // rollupSpy records every RollupSink call so the forwarding subtests can
@@ -247,7 +247,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			&agent.UsageMessage{ReportedModel: "claude-opus", ModelDerived: true, Usage: agent.Usage{InputTokens: 10, CacheCreationInputTokens: 400, CacheReadInputTokens: 900, OutputTokens: 50}},
 			&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 42, CacheCreationInputTokens: 8191, CacheReadInputTokens: 87823, OutputTokens: 746, CacheTTLSeconds: 3600}, NumTurns: 1},
 		}
-		var total usagedb.TokenBuckets
+		var total data.TokenBuckets
 		for _, m := range claude {
 			e, ok := rollupEvent(m, at, at, false, "claude-opus", 0, harness.Claude)
 			if !ok {
@@ -258,7 +258,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 			total.CacheRead += e.Delta.CacheRead
 			total.Output += e.Delta.Output
 		}
-		want := usagedb.TokenBuckets{Input: 42, CacheWrite1h: 8191, CacheRead: 87823, Output: 746}
+		want := data.TokenBuckets{Input: 42, CacheWrite1h: 8191, CacheRead: 87823, Output: 746}
 		if total != want {
 			t.Errorf("claude tokens = %+v, want %+v (result total counted once)", total, want)
 		}
@@ -270,13 +270,13 @@ func TestTaskRollupTranslation(t *testing.T) {
 			t.Fatalf("pi usage tokens = %+v, ok = %v", e.Delta.TokenBuckets, ok)
 		}
 		e, ok = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 100, OutputTokens: 30}, NumTurns: 1}, at, at, false, "zai/glm-5.3", 0, harness.Pi)
-		if !ok || e.Delta.TokenBuckets != (usagedb.TokenBuckets{}) {
+		if !ok || e.Delta.TokenBuckets != (data.TokenBuckets{}) {
 			t.Errorf("pi result must carry no tokens, got %+v", e.Delta.TokenBuckets)
 		}
 
 		// OpenCode has no per-call records; its result is the only source.
 		e, _ = rollupEvent(&agent.ResultMessage{MessageType: "result", Usage: agent.Usage{InputTokens: 7, OutputTokens: 9}, NumTurns: 1}, at, at, false, "m", 0, harness.OpenCode)
-		if e.Delta.TokenBuckets != (usagedb.TokenBuckets{Input: 7, Output: 9}) {
+		if e.Delta.TokenBuckets != (data.TokenBuckets{Input: 7, Output: 9}) {
 			t.Errorf("opencode result tokens = %+v", e.Delta.TokenBuckets)
 		}
 	})
@@ -301,7 +301,7 @@ func TestTaskRollupTranslation(t *testing.T) {
 				if !ok {
 					t.Fatal("usage message must translate")
 				}
-				want := usagedb.TokenBuckets{Input: 10, CacheWrite5m: tc.want5m, CacheWrite1h: tc.want1h, CacheRead: 900, Output: 50}
+				want := data.TokenBuckets{Input: 10, CacheWrite5m: tc.want5m, CacheWrite1h: tc.want1h, CacheRead: 900, Output: 50}
 				if e.Delta.TokenBuckets != want {
 					t.Errorf("tokens = %+v, want %+v", e.Delta.TokenBuckets, want)
 				}
@@ -441,17 +441,17 @@ func newRollupStore(t *testing.T, dir string) *usagedb.Store {
 }
 
 // readUsageRows parses every usage row in the store's day file for day.
-func readUsageRows(t *testing.T, dir, day string) []usagedb.UsageRow {
-	data, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
+func readUsageRows(t *testing.T, dir, day string) []data.UsageRow {
+	raw, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
 	if err != nil {
 		t.Fatalf("read day file %s: %v", day, err)
 	}
-	var rows []usagedb.UsageRow
-	for line := range strings.SplitSeq(string(data), "\n") {
+	var rows []data.UsageRow
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row usagedb.UsageRow
+		var row data.UsageRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("parse row: %v", err)
 		}

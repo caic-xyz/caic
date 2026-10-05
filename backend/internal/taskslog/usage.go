@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 const usageDayFormat = "2006-01-02"
@@ -34,24 +35,24 @@ type usageLogPath struct {
 	startedAt time.Time
 }
 
-func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.Seq2[usagedb.UsageRow, error] {
-	return func(yield func(usagedb.UsageRow, error) bool) {
+func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.Seq2[data.UsageRow, error] {
+	return func(yield func(data.UsageRow, error) bool) {
 		if resolver == nil {
-			yield(usagedb.UsageRow{}, errors.New("native wire resolver is required"))
+			yield(data.UsageRow{}, errors.New("native wire resolver is required"))
 			return
 		}
 		if err := ctx.Err(); err != nil {
-			yield(usagedb.UsageRow{}, err)
+			yield(data.UsageRow{}, err)
 			return
 		}
 		paths, err := usageLogPaths(ctx, s)
 		if err != nil {
-			yield(usagedb.UsageRow{}, fmt.Errorf("load retained task logs: %w", err))
+			yield(data.UsageRow{}, fmt.Errorf("load retained task logs: %w", err))
 			return
 		}
 		for start := 0; start < len(paths); start += maxParallelLogHeaderLoads {
 			if err := ctx.Err(); err != nil {
-				yield(usagedb.UsageRow{}, err)
+				yield(data.UsageRow{}, err)
 				return
 			}
 			end := min(start+maxParallelLogHeaderLoads, len(paths))
@@ -69,7 +70,7 @@ func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.S
 			wg.Wait()
 			for i, result := range results {
 				if err := ctx.Err(); err != nil {
-					yield(usagedb.UsageRow{}, err)
+					yield(data.UsageRow{}, err)
 					return
 				}
 				if result.err != nil {
@@ -89,7 +90,7 @@ func storeUsageRows(s *Store, ctx context.Context, resolver WireResolver) iter.S
 			}
 		}
 		if err := ctx.Err(); err != nil {
-			yield(usagedb.UsageRow{}, err)
+			yield(data.UsageRow{}, err)
 		}
 	}
 }
@@ -156,8 +157,8 @@ func loadUsageStartedAt(path string) (startedAt time.Time, retErr error) {
 	return meta.StartedAt, nil
 }
 
-func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageRow, error] {
-	return func(yield func(usagedb.UsageRow, error) bool) {
+func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow, error] {
+	return func(yield func(data.UsageRow, error) bool) {
 		if lt.LogVersion != agent.LogVersionV2 && lt.LogVersion != agent.LogVersionV3 || lt.TaskID == "" {
 			return
 		}
@@ -165,7 +166,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 			day   string
 			model string
 		}
-		buckets := make(map[key]*usagedb.UsageRow)
+		buckets := make(map[key]*data.UsageRow)
 		model := lt.ReportedModel
 		if model == "" {
 			model = lt.RequestedModel
@@ -188,7 +189,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 				toolTimings.Start(m.ToolUseID, m.Name, at)
 			case *agent.ToolResultMessage:
 				if name, ms, measured := toolTimings.Finish(m.ToolUseID, at, m.DurationMs); measured {
-					delta.ToolTimings = map[string]usagedb.ToolTiming{name: {Count: 1, DurationMs: ms}}
+					delta.ToolTimings = map[string]data.ToolTiming{name: {Count: 1, DurationMs: ms}}
 					ok = true
 				}
 			}
@@ -199,7 +200,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 			k := key{day: day, model: model}
 			row := buckets[k]
 			if row == nil {
-				row = &usagedb.UsageRow{
+				row = &data.UsageRow{
 					Kind:    "usage",
 					Day:     day,
 					TaskID:  lt.TaskID,
@@ -210,13 +211,13 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[usagedb.UsageR
 				buckets[k] = row
 			}
 			row.Add(&delta)
-			if ts := usagedb.NewTime(at); ts > row.Ts {
+			if ts := data.NewTime(at); ts > row.Ts {
 				row.Ts = ts
 			}
 		}
 		for timed, err := range lt.StreamMessages(ctx) {
 			if err != nil {
-				yield(usagedb.UsageRow{}, err)
+				yield(data.UsageRow{}, err)
 				return
 			}
 			if timed.ProducerTime.IsZero() {
@@ -268,8 +269,8 @@ func usageClaudeModel(current string, m agent.Message) string {
 
 // usageDelta mirrors the durable, non-priced part of live rollup
 // translation; see LoadedTask.UsageRows for the fields it cannot reconstruct.
-func usageDelta(m agent.Message, h harness.Name) (usagedb.Delta, bool) {
-	var d usagedb.Delta
+func usageDelta(m agent.Message, h harness.Name) (data.Delta, bool) {
+	var d data.Delta
 	switch m := m.(type) {
 	case *agent.UsageMessage:
 		if h == harness.Pi {
@@ -289,12 +290,12 @@ func usageDelta(m agent.Message, h harness.Name) (usagedb.Delta, bool) {
 		d.ContextWindow = m.ContextWindow
 	case *agent.SystemMessage:
 		if m.Subtype != "compact_boundary" {
-			return usagedb.Delta{}, false
+			return data.Delta{}, false
 		}
 		d.Compactions = 1
 	case *agent.SkillReadMessage:
 		if m.Skill == "" {
-			return usagedb.Delta{}, false
+			return data.Delta{}, false
 		}
 		d.SkillReads = map[string]int{m.Skill: 1}
 	case *agent.ToolUseMessage:
@@ -305,13 +306,13 @@ func usageDelta(m agent.Message, h harness.Name) (usagedb.Delta, bool) {
 			d.SpawnsBackground = 1
 		}
 	default:
-		return usagedb.Delta{}, false
+		return data.Delta{}, false
 	}
 	return d, true
 }
 
-func usageTokens(u agent.Usage) usagedb.TokenBuckets {
-	b := usagedb.TokenBuckets{
+func usageTokens(u agent.Usage) data.TokenBuckets {
+	b := data.TokenBuckets{
 		Input:     int64(u.InputTokens),
 		Output:    int64(u.OutputTokens),
 		CacheRead: int64(u.CacheReadInputTokens),

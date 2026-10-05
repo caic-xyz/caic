@@ -10,14 +10,16 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 func BenchmarkBackfillMissingCosts(b *testing.B) {
 	const day = "2026-02-05"
 	var fixture bytes.Buffer
 	for i := range 1000 {
-		row := UsageRow{Kind: rowKindUsage, Day: day, TaskID: strconv.Itoa(i), Model: "priced", Output: 1000}
-		if err := json.NewEncoder(&fixture).Encode(row); err != nil {
+		row := data.UsageRow{Kind: rowKindUsage, Day: day, TaskID: strconv.Itoa(i), Model: "priced", Output: 1000}
+		if err := json.NewEncoder(&fixture).Encode(&row); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -38,7 +40,7 @@ func BenchmarkBackfillMissingCosts(b *testing.B) {
 			b.Fatal(err)
 		}
 		b.StartTimer()
-		if err := s.BackfillMissingCosts(b.Context(), func(*UsageRow) (float64, bool) { return 0.01, true }); err != nil {
+		if err := s.BackfillMissingCosts(b.Context(), func(*data.UsageRow) (float64, bool) { return 0.01, true }); err != nil {
 			b.Fatal(err)
 		}
 		b.StopTimer()
@@ -65,9 +67,9 @@ func BenchmarkBackfillMissingCostsLiveHeap(b *testing.B) {
 					b.Fatal(err)
 				}
 				enc := json.NewEncoder(f)
-				row := UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Output: 1000}
+				row := data.UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Output: 1000}
 				for range n {
-					if err := enc.Encode(row); err != nil {
+					if err := enc.Encode(&row); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -84,7 +86,7 @@ func BenchmarkBackfillMissingCostsLiveHeap(b *testing.B) {
 				peak := before.HeapAlloc
 				calls := 0
 				b.StartTimer()
-				err = s.BackfillMissingCosts(b.Context(), func(*UsageRow) (float64, bool) {
+				err = s.BackfillMissingCosts(b.Context(), func(*data.UsageRow) (float64, bool) {
 					calls++
 					if calls == 1 || calls%1024 == 0 || calls == n {
 						runtime.GC()

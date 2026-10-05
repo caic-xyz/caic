@@ -5,6 +5,7 @@ package usagedb
 import (
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/ksid"
 )
 
@@ -12,12 +13,12 @@ import (
 // iteration: tokens, tool calls and timings, skill reads, repos, and model
 // plus harness attribution for a batch of distinct tasks.
 func BenchmarkFoldUsageRow(b *testing.B) {
-	rows := make([]*UsageRow, 0, 8)
+	rows := make([]*data.UsageRow, 0, 8)
 	for i := range 8 {
-		rows = append(rows, &UsageRow{
+		rows = append(rows, &data.UsageRow{
 			Kind:    rowKindUsage,
 			Day:     "2026-02-05",
-			Ts:      NewTime(atUTC(5, 10, 0, i)),
+			Ts:      data.NewTime(atUTC(5, 10, 0, i)),
 			TaskID:  ksid.NewID().String(),
 			Harness: "claude",
 			Repos:   []string{"github/caic", "github/sdk"},
@@ -28,7 +29,7 @@ func BenchmarkFoldUsageRow(b *testing.B) {
 			WallMs:      3000,
 			SkillReads:  map[string]int{"code-review": 1},
 			ToolCalls:   map[string]int{"Edit": 2, "Read": 3},
-			ToolTimings: map[string]ToolTiming{"Edit": {Count: 2, DurationMs: 250}},
+			ToolTimings: map[string]data.ToolTiming{"Edit": {Count: 2, DurationMs: 250}},
 			Spawns:      1,
 			CostUSD:     0.05,
 		})

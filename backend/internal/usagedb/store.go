@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -132,7 +133,7 @@ func (s *Store) Observe(meta TaskMeta, e *Event) {
 	if e.ToolResultID != "" {
 		if t := s.toolTimings[id]; t != nil {
 			if name, ms, ok := t.Finish(e.ToolResultID, e.ToolProducerTime, e.ToolNativeDurationMs); ok {
-				e.Delta.ToolTimings = map[string]ToolTiming{name: {Count: 1, DurationMs: ms}}
+				e.Delta.ToolTimings = map[string]data.ToolTiming{name: {Count: 1, DurationMs: ms}}
 			}
 			if len(t.pending) == 0 {
 				delete(s.toolTimings, id)
@@ -252,7 +253,7 @@ func (s *Store) Days() []DayRollup {
 // parsing. Staging happens outside the writer lock. Before publishing a staged
 // day, it flushes matching live pending buckets so their later turn-boundary
 // flush cannot repeat records already found by the historical scan.
-func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[UsageRow, error]) error {
+func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[data.UsageRow, error]) error {
 	s.backfillMu.Lock()
 	defer s.backfillMu.Unlock()
 
@@ -308,7 +309,7 @@ func (s *Store) Backfill(ctx context.Context, rows iter.Seq2[UsageRow, error]) e
 // read-only and valid only for the duration of the call. Rechecking on every
 // startup lets a newly published model price fill rows a prior pass could not
 // price.
-func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*UsageRow) (float64, bool)) error {
+func (s *Store) BackfillMissingCosts(ctx context.Context, estimate func(*data.UsageRow) (float64, bool)) error {
 	s.backfillMu.Lock()
 	defer s.backfillMu.Unlock()
 	if estimate == nil {
@@ -370,23 +371,21 @@ func (s *Store) recover(ctx context.Context) {
 			if len(bytes.TrimSpace(line)) == 0 {
 				continue
 			}
-			var probe struct {
-				Kind string `json:"kind"`
-			}
+			var probe data.RowKind
 			if err := json.Unmarshal(line, &probe); err != nil {
 				s.log.Warn("skip malformed usage rollup line", "file", name, "err", err)
 				continue
 			}
 			switch probe.Kind {
 			case rowKindUsage:
-				var row UsageRow
+				var row data.UsageRow
 				if err := json.Unmarshal(line, &row); err != nil {
 					s.log.Warn("skip malformed usage rollup row", "file", name, "err", err)
 					continue
 				}
 				staged.addUsageRow(&row)
 			case rowKindQuota:
-				var row QuotaRow
+				var row data.QuotaRow
 				if err := json.Unmarshal(line, &row); err != nil {
 					s.log.Warn("skip malformed quota rollup row", "file", name, "err", err)
 					continue
@@ -414,7 +413,7 @@ func (s *Store) recover(ctx context.Context) {
 
 // applyUsageRow folds one flushed usage row into the per-day aggregates. The
 // caller holds s.mu.
-func (s *Store) applyUsageRow(row *UsageRow) {
+func (s *Store) applyUsageRow(row *data.UsageRow) {
 	foldUsageRow(s.dayAggregate(row.Day), row)
 }
 
@@ -451,8 +450,8 @@ func (s *Store) mergeRecoveryState(staged *recoveryState) {
 }
 
 // foldUsageRow adds row to one day's aggregate.
-func foldUsageRow(day *dayAggregate, row *UsageRow) {
-	day.fold(&row.Delta)
+func foldUsageRow(day *dayAggregate, row *data.UsageRow) {
+	day.Add(&row.Delta)
 	if row.TaskID != "" {
 		for _, repo := range row.Repos {
 			if day.repos[repo] == nil {
@@ -473,17 +472,17 @@ func foldUsageRow(day *dayAggregate, row *UsageRow) {
 	}
 	if row.Model != "" {
 		b := day.modelBucket(row.Model)
-		b.fold(&row.Delta)
+		b.Add(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 	if row.Harness != "" {
 		b := day.harnessBucket(row.Harness)
-		b.fold(&row.Delta)
+		b.Add(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 	if row.Harness != "" && row.Model != "" {
 		b := day.crossBucket(row.Harness, row.Model)
-		b.fold(&row.Delta)
+		b.Add(&row.Delta)
 		b.noteTasks(row.TaskID, row.Repos, row.SkillReads)
 	}
 }
@@ -510,9 +509,9 @@ func newDayAggregate() *dayAggregate {
 // recordQuotaLocked writes a quota row when the window's observed state
 // changes. The caller holds s.mu.
 func (s *Store) recordQuotaLocked(c *QuotaChange) {
-	var resets Time
+	var resets data.Time
 	if !c.ResetsAt.IsZero() {
-		resets = NewTime(c.ResetsAt)
+		resets = data.NewTime(c.ResetsAt)
 	}
 	seen := quotaSeen{
 		status:        c.Status,
@@ -524,10 +523,10 @@ func (s *Store) recordQuotaLocked(c *QuotaChange) {
 		return
 	}
 	day := c.At.UTC().Format(dayFormat)
-	if err := s.appendRowLocked(day, &QuotaRow{
+	if err := s.appendRowLocked(day, &data.QuotaRow{
 		Kind:        rowKindQuota,
 		Day:         day,
-		Ts:          NewTime(c.At),
+		Ts:          data.NewTime(c.At),
 		Provider:    c.Provider,
 		Window:      c.Window,
 		Status:      c.Status,
@@ -578,7 +577,7 @@ func (s *Store) flushTaskLocked(id string) {
 	dayWatermark := time.Time{}
 	for _, key := range keys {
 		b := p.buckets[key]
-		row := UsageRow{
+		row := data.UsageRow{
 			Kind:    rowKindUsage,
 			Day:     key.day,
 			Ts:      b.ts,
@@ -617,12 +616,12 @@ func (s *Store) flushTaskLocked(id string) {
 // returned, never fatal: the caller keeps the delta pending so aggregates only
 // ever reflect rows on disk. The caller holds s.mu.
 func (s *Store) appendRowLocked(day string, row any) error {
-	data, err := json.Marshal(row)
+	encoded, err := json.Marshal(row)
 	if err != nil {
 		s.log.Warn("encode usage rollup row", "err", err)
 		return err
 	}
-	data = append(data, '\n')
+	encoded = append(encoded, '\n')
 	f, ok := s.files[day]
 	if !ok {
 		target := filepath.Join(s.dir, day+".jsonl")
@@ -636,7 +635,7 @@ func (s *Store) appendRowLocked(day string, row any) error {
 				s.log.Warn("stat compressed usage rollup day", "day", day, "err", compressedErr)
 				return compressedErr
 			} else {
-				if err := writeFirstRowLocked(s.dir, target, data); err != nil {
+				if err := writeFirstRowLocked(s.dir, target, encoded); err != nil {
 					s.log.Warn("create usage rollup day file", "day", day, "err", err)
 					return err
 				}
@@ -662,7 +661,7 @@ func (s *Store) appendRowLocked(day string, row any) error {
 		}
 		s.files[day] = f
 	}
-	if _, err := f.Write(data); err != nil {
+	if _, err := f.Write(encoded); err != nil {
 		s.log.Warn("append usage rollup row", "day", day, "err", err)
 		return err
 	}
@@ -671,7 +670,7 @@ func (s *Store) appendRowLocked(day string, row any) error {
 
 // writeFirstRowLocked atomically creates target with its first complete JSONL
 // row. The caller holds s.mu.
-func writeFirstRowLocked(dir, target string, data []byte) error {
+func writeFirstRowLocked(dir, target string, encoded []byte) error {
 	f, err := os.CreateTemp(dir, ".usage-first-row-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create usage rollup staging file: %w", err)
@@ -683,7 +682,7 @@ func writeFirstRowLocked(dir, target string, data []byte) error {
 			_ = os.Remove(path)
 		}
 	}()
-	if _, err := f.Write(data); err != nil {
+	if _, err := f.Write(encoded); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("write usage rollup staging file: %w", err)
 	}
@@ -1057,10 +1056,10 @@ func (p *taskPending) fold(e *Event, synthetic bool) {
 	if synthetic {
 		b.synthetic = true
 	}
-	if ts := NewTime(e.At); ts > b.ts {
+	if ts := data.NewTime(e.At); ts > b.ts {
 		b.ts = ts
 	}
-	b.fold(&e.Delta)
+	b.Add(&e.Delta)
 	p.costUSD = e.CostUSD
 }
 
@@ -1084,9 +1083,9 @@ type bucketKey struct {
 // had no producer time (timestamp-less adopted replay): their rows can never
 // advance the task watermark.
 type bucket struct {
-	Delta
+	data.Delta
 
-	ts        Time // newest producer time folded into the group
+	ts        data.Time // newest producer time folded into the group
 	synthetic bool
 
 	// Distinct-task sets for skill reads and repo touches, tracked only by
@@ -1183,8 +1182,8 @@ type quotaKey struct {
 // written only when this state changes.
 type quotaSeen struct {
 	status        string
-	utilizationPc int  // utilization rounded to hundredths
-	resets        Time // 0 = unknown
+	utilizationPc int       // utilization rounded to hundredths
+	resets        data.Time // 0 = unknown
 }
 
 func cloneCounts(m map[string]int) map[string]int {
@@ -1277,7 +1276,7 @@ func newRecoveryState() *recoveryState {
 // addUsageRow folds a durable row and rebuilds the resume bookkeeping from one recovered usage
 // row: the per-task flush watermark and the cost total already reflected in
 // flushed rows. The caller holds s.mu.
-func (s *recoveryState) addUsageRow(row *UsageRow) {
+func (s *recoveryState) addUsageRow(row *data.UsageRow) {
 	day := s.days[row.Day]
 	if day == nil {
 		day = newDayAggregate()
@@ -1299,7 +1298,7 @@ func (s *recoveryState) addUsageRow(row *UsageRow) {
 }
 
 func mergeBucket(to, from *bucket) {
-	to.fold(&from.Delta)
+	to.Add(&from.Delta)
 	if len(from.skillTasks) != 0 {
 		if to.skillTasks == nil {
 			to.skillTasks = make(map[string]map[string]struct{})

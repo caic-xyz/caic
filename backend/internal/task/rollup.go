@@ -11,6 +11,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 // RollupSink consumes task messages for the cross-task usage rollup. Tasks
@@ -116,8 +117,8 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 // buckets. Cache writes land in the one-hour bucket when the harness
 // reported a 3600s effective TTL, else in the five-minute bucket (unknown
 // TTLs included).
-func rollupTokens(u agent.Usage) usagedb.TokenBuckets {
-	b := usagedb.TokenBuckets{
+func rollupTokens(u agent.Usage) data.TokenBuckets {
+	b := data.TokenBuckets{
 		Input:     int64(u.InputTokens),
 		Output:    int64(u.OutputTokens),
 		CacheRead: int64(u.CacheReadInputTokens),

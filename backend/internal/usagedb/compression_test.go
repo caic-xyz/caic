@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/klauspost/compress/zstd"
-
 	"github.com/maruel/ksid"
 )
 
@@ -26,7 +26,7 @@ func TestCompressOldDays(t *testing.T) {
 	t.Run("busy backfill skips maintenance without delaying flush", func(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t, t.TempDir())
-		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
 		s.backfillMu.Lock()
 		ran, err := s.tryCompressOldDays(now)
 		s.backfillMu.Unlock()
@@ -50,8 +50,8 @@ func TestCompressOldDays(t *testing.T) {
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, &Event{At: old, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
-		s.Observe(meta, &Event{At: recent, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
+		s.Observe(meta, &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+		s.Observe(meta, &Event{At: recent, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
 		compressOldDaysForTest(t, s, now)
 		if _, err := os.Stat(filepath.Join(dir, oldDay+".jsonl.zstd")); err != nil {
 			t.Fatalf("compressed old day: %v", err)
@@ -62,7 +62,7 @@ func TestCompressOldDays(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, recentDay+".jsonl")); err != nil {
 			t.Fatalf("recent day should stay plain: %v", err)
 		}
-		s.Observe(meta, &Event{At: old.Add(time.Hour), Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 3}}})
+		s.Observe(meta, &Event{At: old.Add(time.Hour), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 3}}})
 		if _, err := os.Stat(filepath.Join(dir, oldDay+".jsonl.zstd")); !os.IsNotExist(err) {
 			t.Fatalf("compressed copy still present after late write: %v", err)
 		}
@@ -82,10 +82,10 @@ func TestCompressOldDays(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
-		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
 		compressOldDaysForTest(t, s, now)
-		if err := s.Backfill(t.Context(), func(yield func(UsageRow, error) bool) {
-			yield(UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "historical", Model: "m", Output: 10}, nil)
+		if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) {
+			yield(data.UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "historical", Model: "m", Output: 10}, nil)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestCompressOldDays(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
-		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: old, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
 		plain := filepath.Join(dir, oldDay+".jsonl")
 		original, err := os.ReadFile(plain) //nolint:gosec // test fixture path built from t.TempDir().
 		if err != nil {
@@ -109,22 +109,22 @@ func TestCompressOldDays(t *testing.T) {
 		}
 		compressOldDaysForTest(t, s, now)
 		compressed := filepath.Join(dir, oldDay+".jsonl.zstd")
-		var data []byte
+		var raw []byte
 		for row, err := range dayRecords(t.Context(), compressed) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			data = append(data, row...)
+			raw = append(raw, row...)
 		}
-		if !bytes.Equal(data, original) {
+		if !bytes.Equal(raw, original) {
 			t.Fatal("compressed day did not round trip byte for byte")
 		}
-		late, err := json.Marshal(UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "late", Model: "m", Output: 3})
+		late, err := json.Marshal(data.UsageRow{Kind: rowKindUsage, Day: oldDay, TaskID: "late", Model: "m", Output: 3})
 		if err != nil {
 			t.Fatal(err)
 		}
-		data = append(data, append(late, '\n')...)
-		if err := os.WriteFile(plain, data, 0o600); err != nil {
+		raw = append(raw, append(late, '\n')...)
+		if err := os.WriteFile(plain, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.Close(); err != nil {
@@ -162,16 +162,16 @@ func TestDayRecords(t *testing.T) {
 					t.Fatal(err)
 				}
 				row := []byte(`{"kind":"usage","day":"2026-02-05","task_id":"bad","ts":123,"model":"priced","cost_usd":0,"output_tokens":10}` + "\n" + `{"kind":"quota","day":"2026-02-05","provider":"bad","status":"blocked"}` + "\n")
-				data := enc.EncodeAll(bytes.Repeat(row, 2000), nil)
+				compressed := enc.EncodeAll(bytes.Repeat(row, 2000), nil)
 				if err := enc.Close(); err != nil {
 					t.Fatal(err)
 				}
 				if truncated {
-					data = data[:len(data)-2]
+					compressed = compressed[:len(compressed)-2]
 				} else {
-					data = append(data, []byte("not a zstd frame")...)
+					compressed = append(compressed, []byte("not a zstd frame")...)
 				}
-				if err := os.WriteFile(path, data, 0o600); err != nil {
+				if err := os.WriteFile(path, compressed, 0o600); err != nil {
 					t.Fatal(err)
 				}
 				good := []byte(`{"kind":"usage","day":"2026-02-04","task_id":"good","cost_usd":2,"output_tokens":3}` + "\n")
@@ -183,14 +183,14 @@ func TestDayRecords(t *testing.T) {
 				if len(days) != 1 || days[0].CostUSD != 2 || days[0].Tokens.Output != 3 || s.watermarks["bad"] != (time.Time{}) || s.flushedCost["bad"] != 0 || len(s.lastQuota) != 0 || len(s.reportedCostTasks) != 1 {
 					t.Fatalf("partial recovery published: days=%+v, watermarks=%v, costs=%v, quotas=%v", days, s.watermarks, s.flushedCost, s.lastQuota)
 				}
-				if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return .25, true }); err == nil {
+				if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return .25, true }); err == nil {
 					t.Fatal("corrupt repair reported success")
 				}
 				got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !bytes.Equal(got, data) {
+				if !bytes.Equal(got, compressed) {
 					t.Fatal("corrupt source replaced")
 				}
 				entries, err := os.ReadDir(dir)

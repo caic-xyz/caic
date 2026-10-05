@@ -17,12 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md"
-	"github.com/caic-xyz/md/git"
-	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/caic-xyz/caic/backend/internal/agent/backends"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
@@ -41,11 +35,17 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/caic-xyz/caic/metricsdb"
+	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/git"
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/voicegateway"
 	"github.com/maruel/gomode/voicegateway/voicertc"
+	"golang.org/x/sync/errgroup"
 )
 
 const repoDiscoveryDepth = 3
@@ -519,7 +519,7 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 		// day cannot block the rollup writer on a provider request.
 		currentPrices := usage.NewPricer(nil)
 		pricingAt := time.Now().UTC()
-		if err := usageRollup.BackfillMissingCosts(ctx, func(row *usagedb.UsageRow) (float64, bool) {
+		if err := usageRollup.BackfillMissingCosts(ctx, func(row *data.UsageRow) (float64, bool) {
 			return estimateUsageRowCost(currentPrices, row, pricingAt)
 		}); err != nil && ctx.Err() == nil {
 			appLog.ErrorContext(ctx, "usage rollup cost backfill failed", "err", err)

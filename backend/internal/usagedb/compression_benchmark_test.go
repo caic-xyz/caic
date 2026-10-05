@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 func BenchmarkCompressOldDays(b *testing.B) {
@@ -17,13 +19,13 @@ func BenchmarkCompressOldDays(b *testing.B) {
 	now := time.Date(2026, time.February, 10, 12, 0, 0, 0, time.UTC)
 	var fixture bytes.Buffer
 	for i := range 1000 {
-		row := UsageRow{
+		row := data.UsageRow{
 			Kind: rowKindUsage, Day: day, TaskID: strconv.Itoa(i),
 			Model: "model-" + strconv.Itoa(i%17),
-			Ts:    Time(1_770_000_000_000 + int64(i)*1_000),
+			Ts:    data.Time(1_770_000_000_000 + int64(i)*1_000),
 			Input: int64(i * 3), CacheRead: int64(i * 7), Output: int64(i + 1),
 		}
-		if err := json.NewEncoder(&fixture).Encode(row); err != nil {
+		if err := json.NewEncoder(&fixture).Encode(&row); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -73,9 +75,9 @@ func BenchmarkUsageDayRecovery(b *testing.B) {
 				b.Fatal(err)
 			}
 			enc := json.NewEncoder(f)
-			row := UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Harness: "claude", Output: 1000}
+			row := data.UsageRow{Kind: rowKindUsage, Day: day, TaskID: "same", Model: "priced", Harness: "claude", Output: 1000}
 			for range n {
-				if err := enc.Encode(row); err != nil {
+				if err := enc.Encode(&row); err != nil {
 					b.Fatal(err)
 				}
 			}

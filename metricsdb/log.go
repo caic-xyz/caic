@@ -34,54 +34,25 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/metrics"
+	v2 "github.com/caic-xyz/caic/metricsdb/data/v2"
 )
 
 const (
-	dirMode       = 0o700
-	fileMode      = 0o600
-	dayLayout     = "2006-01-02"
-	jsonlSuffix   = ".jsonl"
-	zstdSuffix    = ".jsonl.zstd"
-	tempSuffix    = ".tmp"
-	retentionDays = 90
-	formatVersion = 2
+	dirMode        = 0o700
+	fileMode       = 0o600
+	dayLayout      = "2006-01-02"
+	jsonlSuffix    = ".jsonl"
+	zstdSuffix     = ".jsonl.zstd"
+	tempSuffix     = ".tmp"
+	retentionDays  = 90
+	currentVersion = 2
 )
-
-// record is one measurement as written to the log.
-type record struct {
-	Time    time.Time         `json:"time"`
-	Name    string            `json:"name"`
-	Outcome metrics.Outcome   `json:"outcome"`
-	Kind    metrics.Kind      `json:"kind"`
-	Unit    metrics.Unit      `json:"unit"`
-	Amount  float64           `json:"amount"`
-	Attrs   map[string]string `json:"attrs,omitempty"`
-}
-
-// resource names the process that owns a directory of metric files.
-type resource struct {
-	Service string `json:"service"`
-	Version string `json:"version,omitempty"`
-	Host    string `json:"host,omitempty"`
-}
-
-func (r resource) id() string {
-	sum := sha256.Sum256([]byte(r.Service + "\x00" + r.Version + "\x00" + r.Host))
-	return hex.EncodeToString(sum[:])
-}
-
-// fileHeader identifies the resource and format of one daily metric file.
-type fileHeader struct {
-	Type     string   `json:"type"`
-	Version  int      `json:"version"`
-	Resource resource `json:"resource"`
-}
 
 // Log appends observations to per-day JSONL files. It implements
 // metrics.Recorder and is safe for concurrent use.
 type Log struct {
 	dir      string
-	resource resource
+	resource v2.Resource
 	log      *slog.Logger
 	now      func() time.Time
 
@@ -105,12 +76,12 @@ func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 	if res.ServiceName == "" {
 		return nil, errors.New("service name is required")
 	}
-	r := resource{Service: res.ServiceName, Version: res.ServiceVersion, Host: res.Host}
-	if err := os.MkdirAll(filepath.Join(dir, r.id()), dirMode); err != nil {
+	r := v2.Resource{Service: res.ServiceName, Version: res.ServiceVersion, Host: res.Host}
+	if err := os.MkdirAll(filepath.Join(dir, resourceID(r)), dirMode); err != nil {
 		return nil, fmt.Errorf("create metrics directory: %w", err)
 	}
 	l := &Log{
-		dir:      filepath.Join(dir, r.id()),
+		dir:      filepath.Join(dir, resourceID(r)),
 		resource: r,
 		log:      log.With("cmp", "metricsdb"),
 		now:      time.Now,
@@ -124,12 +95,12 @@ func NewLog(log *slog.Logger, dir string, res metrics.Resource) (*Log, error) {
 // Record appends one measurement. It implements metrics.Recorder.
 func (l *Log) Record(ctx context.Context, name string, outcome metrics.Outcome, m metrics.Measurement, attrs ...metrics.Attr) {
 	now := l.now()
-	line, err := json.Marshal(record{
+	line, err := json.Marshal(v2.Record{
 		Time:    now,
 		Name:    name,
-		Outcome: outcome,
-		Kind:    m.Kind,
-		Unit:    m.Unit,
+		Outcome: v2.Outcome(outcome),
+		Kind:    v2.Kind(m.Kind),
+		Unit:    v2.Unit(m.Unit),
 		Amount:  m.Amount,
 		Attrs:   metrics.DedupAttrs(attrs),
 	})
@@ -205,7 +176,7 @@ func (l *Log) restoreFile(ctx context.Context, dst *metrics.Store, path string) 
 		in = dec
 	}
 	jsonDec := json.NewDecoder(in)
-	var h fileHeader
+	var h v2.FileHeader
 	if err := jsonDec.Decode(&h); err != nil {
 		return fmt.Errorf("decode header %s: %w", filepath.Base(path), err)
 	}
@@ -216,7 +187,7 @@ func (l *Log) restoreFile(ctx context.Context, dst *metrics.Store, path string) 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var r record
+		var r v2.Record
 		if err := jsonDec.Decode(&r); errors.Is(err, io.EOF) {
 			return nil
 		} else if err != nil {
@@ -230,7 +201,7 @@ func (l *Log) restoreFile(ctx context.Context, dst *metrics.Store, path string) 
 			attrs = append(attrs, metrics.Attr{Key: key, Value: value})
 		}
 		slices.SortFunc(attrs, func(a, b metrics.Attr) int { return strings.Compare(a.Key, b.Key) })
-		dst.Restore(r.Time, r.Name, r.Outcome, metrics.Measurement{Kind: r.Kind, Unit: r.Unit, Amount: r.Amount}, attrs...)
+		dst.Restore(r.Time, r.Name, metrics.Outcome(r.Outcome), metrics.Measurement{Kind: metrics.Kind(r.Kind), Unit: metrics.Unit(r.Unit), Amount: r.Amount}, attrs...)
 	}
 }
 
@@ -283,8 +254,8 @@ func (l *Log) rollLocked(ctx context.Context, day string) error {
 	return nil
 }
 
-func (l *Log) header() fileHeader {
-	return fileHeader{Type: "metrics", Version: formatVersion, Resource: l.resource}
+func (l *Log) header() v2.FileHeader {
+	return v2.FileHeader{Type: "metrics", Version: currentVersion, Resource: l.resource}
 }
 
 func (l *Log) validateHeader(path string) (err error) {
@@ -293,7 +264,7 @@ func (l *Log) validateHeader(path string) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, f.Close()) }()
-	var h fileHeader
+	var h v2.FileHeader
 	if err := json.NewDecoder(f).Decode(&h); err != nil {
 		return err
 	}
@@ -442,4 +413,10 @@ func writeCompressed(src, dst string) error {
 		return errors.Join(err, out.Close())
 	}
 	return out.Close()
+}
+
+// resourceID names a resource directory by its stable identity hash.
+func resourceID(r v2.Resource) string {
+	sum := sha256.Sum256([]byte(r.Service + "\x00" + r.Version + "\x00" + r.Host))
+	return hex.EncodeToString(sum[:])
 }

@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
-
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 func TestStoreUsageRows(t *testing.T) {
@@ -108,11 +108,11 @@ func TestStoreUsageRows(t *testing.T) {
 			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"ok"}]}}`,
 		)
 		path := filepath.Join(logStore.LogDir, id+".jsonl")
-		data, err := os.ReadFile(path) //nolint:gosec // test fixture path is built from t.TempDir().
+		raw, err := os.ReadFile(path) //nolint:gosec // test fixture path is built from t.TempDir().
 		if err != nil {
 			t.Fatal(err)
 		}
-		lines := strings.Split(string(data), "\n")
+		lines := strings.Split(string(raw), "\n")
 		lines[2] = strings.Replace(lines[2], fmt.Sprintf(`"ts":%d.000`, at.Unix()), fmt.Sprintf(`"ts":%d.500`, at.Unix()+2), 1)
 		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil { //nolint:gosec // test fixture path is built from t.TempDir().
 			t.Fatal(err)
@@ -121,7 +121,7 @@ func TestStoreUsageRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		days := rollup.Days()
-		if len(days) != 1 || days[0].Tools["Read"] != 1 || days[0].ToolTimings["Read"] != (usagedb.ToolTiming{Count: 1, DurationMs: 2500}) {
+		if len(days) != 1 || days[0].Tools["Read"] != 1 || days[0].ToolTimings["Read"] != (data.ToolTiming{Count: 1, DurationMs: 2500}) {
 			t.Errorf("backfilled tool totals = %+v", days)
 		}
 	})
@@ -241,19 +241,19 @@ func writeUsageLog(t *testing.T, dir, id string, version agent.LogVersion, at, s
 			t.Fatal(err)
 		}
 	}
-	data := make([]byte, 0, len(header)+128)
-	data = append(data, header...)
-	data = append(data, '\n')
+	encodedLog := make([]byte, 0, len(header)+128)
+	encodedLog = append(encodedLog, header...)
+	encodedLog = append(encodedLog, '\n')
 	records := append(slices.Clone(extra), `{"type":"result","duration_api_ms":3,"duration_ms":7,"num_turns":1,"usage":{"output_tokens":7}}`)
 	for _, native := range records {
 		if version == agent.LogVersionV1 {
-			data = append(data, native...)
+			encodedLog = append(encodedLog, native...)
 		} else {
-			data = append(data, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
+			encodedLog = append(encodedLog, fmt.Sprintf(`{"t":"agent","ts":%d.%03d,"msg":%s}`, at.Unix(), at.Nanosecond()/int(time.Millisecond), native)...)
 		}
-		data = append(data, '\n')
+		encodedLog = append(encodedLog, '\n')
 	}
-	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), encodedLog, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

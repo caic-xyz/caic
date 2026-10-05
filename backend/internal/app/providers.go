@@ -9,9 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -19,7 +16,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
 )
 
 // usageFetchers returns cfg.UsageFetchers when non-nil (fake/e2e), otherwise
@@ -34,7 +33,7 @@ func usageFetchers(ctx context.Context, log *slog.Logger, cfg *server.Config) []
 // estimateUsageRowCost selects today's API-equivalent model price for a
 // historical row. Claude and Codex report unprefixed IDs; OpenCode and Pi
 // carry the billing provider in their model IDs. Antigravity pricing is unknown.
-func estimateUsageRowCost(pricer usage.ModelPricer, row *usagedb.UsageRow, at time.Time) (float64, bool) {
+func estimateUsageRowCost(pricer usage.ModelPricer, row *data.UsageRow, at time.Time) (float64, bool) {
 	var provider agent.QuotaProvider
 	var known bool
 	switch harness.Name(row.Harness) {

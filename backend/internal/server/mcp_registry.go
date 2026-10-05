@@ -21,6 +21,8 @@ import (
 
 	"github.com/caic-xyz/md/git"
 	"github.com/invopop/jsonschema"
+	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/oauth"
 	"github.com/maruel/ksid"
 	orderedmap "github.com/pb33f/ordered-map/v2"
 
@@ -31,12 +33,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
+	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
 	taskpkg "github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	providerusage "github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
-	"github.com/maruel/gomode/mcp"
-	"github.com/maruel/gomode/oauth"
 )
 
 const caicVoiceSystemInstruction = `You are a voice assistant for caic, a system for managing AI coding agents.
@@ -192,7 +193,7 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 			continue
 		}
 		if authResult, ok := m.authorizeTool(ctx, name); !ok {
-			m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
+			m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
 			return mcp.RawToolResult{Meta: mcp.MetaObject{
 				"mcp/www_authenticate":   []string{mcpScopeChallenge(requiredScopeForTool(name))},
 				mcp.ToolErrorCodeMetaKey: string(api.CodeUnauthorized),
@@ -212,7 +213,7 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 			status, outcome = "tool_error", metrics.OutcomeError
 		}
 		m.metrics.Record(ctx, "mcp.tool."+name, outcome, metrics.Duration(time.Since(start)))
-		m.audit.record(ctx, &auditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
+		m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
 		return res, err
 	}
 	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", name)
@@ -257,7 +258,7 @@ func (m *mcpRegistry) ResourceTemplates(context.Context) ([]mcp.ResourceTemplate
 
 func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
 	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
-		m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
+		m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
 	}
 	switch {
@@ -1904,7 +1905,7 @@ func (m *mcpRegistry) resourceJSON(ctx context.Context, uri string, value any) (
 	if err != nil {
 		status = "error"
 	}
-	m.audit.record(ctx, &auditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: status})
+	m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: "allow", Status: status})
 	return result, err
 }
 

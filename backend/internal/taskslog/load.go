@@ -25,7 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
@@ -1276,7 +1276,7 @@ func (lt *LoadedTask) BackwardMessages(ctx context.Context) iter.Seq2[agent.Time
 // Costs and quota snapshots require live task state, so reconstruction leaves
 // both absent. Legacy v1 and task-ID-less logs yield no rows. A non-nil error
 // is yielded at most once and terminates the sequence.
-func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[usagedb.UsageRow, error] {
+func (lt *LoadedTask) UsageRows(ctx context.Context) iter.Seq2[data.UsageRow, error] {
 	return taskUsageRows(lt, ctx)
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caic-xyz/caic/metrics"
+	v2 "github.com/caic-xyz/caic/metricsdb/data/v2"
 )
 
 func testResource() metrics.Resource {
@@ -104,6 +105,35 @@ func TestNewLog(t *testing.T) {
 func TestLog(t *testing.T) {
 	t.Parallel()
 
+	t.Run("restores historical v2 and appends to its header", func(t *testing.T) {
+		t.Parallel()
+		const historical = `{"type":"metrics","version":2,"resource":{"service":"caic","version":"1.2.3","host":"host-1"}}` + "\n" + `{"time":"2026-09-21T10:00:00.123456789Z","name":"repo.diff","outcome":"error","kind":"histogram","unit":"s","amount":0.25,"attrs":{"repo":"caic"}}` + "\n"
+		at := time.Date(2026, 9, 21, 10, 0, 0, 123456789, time.UTC)
+		log := newTestLog(t, t.TempDir(), at)
+		t.Cleanup(func() { _ = log.Close() })
+		path := dayPath(log, "2026-09-21")
+		if err := os.WriteFile(path, []byte(historical), fileMode); err != nil {
+			t.Fatal(err)
+		}
+		store := metrics.NewStore(testResource())
+		if err := log.Restore(t.Context(), store); err != nil {
+			t.Fatal(err)
+		}
+		got := store.Snapshot()
+		if len(got) != 1 || got[0].Name != "repo.diff" || got[0].Outcome != metrics.OutcomeError || got[0].Kind != metrics.KindHistogram || got[0].Unit != metrics.UnitSeconds || got[0].Sum != .25 {
+			t.Fatalf("historical metrics = %+v", got)
+		}
+		log.Record(t.Context(), "container.launch", metrics.OutcomeOK, metrics.Count(1))
+		raw, err := os.ReadFile(path) //nolint:gosec // Temporary fixture directory.
+		if err != nil {
+			t.Fatal(err)
+		}
+		const added = `{"time":"2026-09-21T10:00:00.123456789Z","name":"container.launch","outcome":"ok","kind":"counter","unit":"1","amount":1}` + "\n"
+		if string(raw) != historical+added {
+			t.Fatalf("historical append = %s", raw)
+		}
+	})
+
 	t.Run("writes one metadata header followed by each observation", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -124,7 +154,7 @@ func TestLog(t *testing.T) {
 		if lines[0] != wantHeader {
 			t.Fatalf("header = %s, want %s", lines[0], wantHeader)
 		}
-		var header fileHeader
+		var header v2.FileHeader
 		if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
 			t.Fatalf("decode header: %v", err)
 		}
@@ -136,16 +166,16 @@ func TestLog(t *testing.T) {
 		if lines[1] != wantLine {
 			t.Fatalf("first observation = %s, want %s", lines[1], wantLine)
 		}
-		var got record
+		var got v2.Record
 		if err := json.Unmarshal([]byte(lines[1]), &got); err != nil {
 			t.Fatalf("decode first observation: %v", err)
 		}
-		want := record{
+		want := v2.Record{
 			Time:    day,
 			Name:    "container.launch",
-			Outcome: metrics.OutcomeOK,
-			Kind:    metrics.KindHistogram,
-			Unit:    metrics.UnitSeconds,
+			Outcome: v2.Outcome(metrics.OutcomeOK),
+			Kind:    v2.Kind(metrics.KindHistogram),
+			Unit:    v2.Unit(metrics.UnitSeconds),
 			Amount:  metrics.Duration(1500 * time.Millisecond).Amount,
 			Attrs:   map[string]string{"container.runtime": "podman"},
 		}
@@ -157,11 +187,11 @@ func TestLog(t *testing.T) {
 			t.Fatalf("record = %+v, want %+v", got, want)
 		}
 
-		var second record
+		var second v2.Record
 		if err := json.Unmarshal([]byte(lines[2]), &second); err != nil {
 			t.Fatalf("decode second line: %v", err)
 		}
-		if second.Name != "repo.diff" || second.Outcome != metrics.OutcomeError || second.Attrs != nil {
+		if second.Name != "repo.diff" || second.Outcome != v2.Outcome(metrics.OutcomeError) || second.Attrs != nil {
 			t.Fatalf("second record = %+v, want an attribute-free repo.diff error", second)
 		}
 	})
@@ -181,18 +211,18 @@ func TestLog(t *testing.T) {
 		if len(lines) != 3 {
 			t.Fatalf("lines = %d, want 3", len(lines))
 		}
-		var size record
+		var size v2.Record
 		if err := json.Unmarshal([]byte(lines[1]), &size); err != nil {
 			t.Fatalf("decode size: %v", err)
 		}
-		if size.Kind != metrics.KindHistogram || size.Unit != metrics.UnitBytes || size.Amount != 4096 {
+		if size.Kind != v2.Kind(metrics.KindHistogram) || size.Unit != v2.Unit(metrics.UnitBytes) || size.Amount != 4096 {
 			t.Fatalf("size record = %+v, want a 4096 byte histogram", size)
 		}
-		var gauge record
+		var gauge v2.Record
 		if err := json.Unmarshal([]byte(lines[2]), &gauge); err != nil {
 			t.Fatalf("decode gauge: %v", err)
 		}
-		if gauge.Kind != metrics.KindGauge || gauge.Unit != metrics.UnitCount || gauge.Amount != 3 {
+		if gauge.Kind != v2.Kind(metrics.KindGauge) || gauge.Unit != v2.Unit(metrics.UnitCount) || gauge.Amount != 3 {
 			t.Fatalf("gauge record = %+v, want a gauge at 3", gauge)
 		}
 	})
@@ -226,7 +256,7 @@ func TestLog(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		day := time.Now().UTC().AddDate(0, 0, -10).Format(dayLayout)
-		resourceDir := filepath.Join(dir, (resource{Service: "caic", Version: "1.2.3", Host: "host-1"}).id())
+		resourceDir := filepath.Join(dir, resourceID(v2.Resource{Service: "caic", Version: "1.2.3", Host: "host-1"}))
 		if err := os.MkdirAll(resourceDir, dirMode); err != nil {
 			t.Fatalf("create resource directory: %v", err)
 		}
@@ -258,7 +288,7 @@ func TestLog(t *testing.T) {
 		dir := t.TempDir()
 		expired := time.Now().UTC().AddDate(0, 0, -100).Format(dayLayout)
 		recent := time.Now().UTC().AddDate(0, 0, -10).Format(dayLayout)
-		resourceDir := filepath.Join(dir, (resource{Service: "caic", Version: "1.2.3", Host: "host-1"}).id())
+		resourceDir := filepath.Join(dir, resourceID(v2.Resource{Service: "caic", Version: "1.2.3", Host: "host-1"}))
 		if err := os.MkdirAll(resourceDir, dirMode); err != nil {
 			t.Fatalf("create resource directory: %v", err)
 		}
@@ -292,7 +322,7 @@ func TestLog(t *testing.T) {
 		dir := t.TempDir()
 		now := time.Now().UTC()
 		expired := now.AddDate(0, 0, -100).Format(dayLayout)
-		resourceDir := filepath.Join(dir, (resource{Service: "caic", Version: "1.2.3", Host: "host-1"}).id())
+		resourceDir := filepath.Join(dir, resourceID(v2.Resource{Service: "caic", Version: "1.2.3", Host: "host-1"}))
 		if err := os.MkdirAll(resourceDir, dirMode); err != nil {
 			t.Fatalf("create resource directory: %v", err)
 		}
@@ -367,10 +397,10 @@ func TestLog(t *testing.T) {
 	t.Run("rejects a mismatched metadata header", func(t *testing.T) {
 		t.Parallel()
 		log := newTestLog(t, t.TempDir(), time.Time{})
-		header, err := json.Marshal(fileHeader{
+		header, err := json.Marshal(v2.FileHeader{
 			Type:     "metrics",
-			Version:  formatVersion,
-			Resource: resource{Service: "caic-voice-gateway"},
+			Version:  currentVersion,
+			Resource: v2.Resource{Service: "caic-voice-gateway"},
 		})
 		if err != nil {
 			t.Fatalf("marshal header: %v", err)

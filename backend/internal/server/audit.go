@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
 )
 
 type auditStore struct {
@@ -21,12 +22,12 @@ type auditStore struct {
 	path string
 
 	mu     sync.Mutex
-	events []auditEvent
+	events []audit.Event
 }
 
 // RecordOAuth records an OAuth audit event.
 func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, decision, status string, args any) {
-	a.record(ctx, &auditEvent{
+	a.record(ctx, &audit.Event{
 		UserID:    userID,
 		Operation: operation,
 		Name:      name,
@@ -36,7 +37,7 @@ func (a *auditStore) RecordOAuth(ctx context.Context, userID, operation, name, d
 	})
 }
 
-func (a *auditStore) record(ctx context.Context, e *auditEvent) {
+func (a *auditStore) record(ctx context.Context, e *audit.Event) {
 	if a == nil || e == nil {
 		return
 	}
@@ -61,13 +62,13 @@ func (a *auditStore) record(ctx context.Context, e *auditEvent) {
 	a.log.InfoContext(ctx, "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
 }
 
-func (a *auditStore) snapshot() []auditEvent {
+func (a *auditStore) snapshot() []audit.Event {
 	if a == nil {
 		return nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := make([]auditEvent, len(a.events))
+	out := make([]audit.Event, len(a.events))
 	copy(out, a.events)
 	return out
 }
@@ -98,7 +99,7 @@ func auditValueSummary(v any) string {
 	return auditArgsSummary(data)
 }
 
-func (a *auditStore) persistLocked(e *auditEvent) error {
+func (a *auditStore) persistLocked(e *audit.Event) error {
 	if a.path == "" {
 		return nil
 	}
@@ -122,16 +123,4 @@ func (a *auditStore) persistLocked(e *auditEvent) error {
 		return err
 	}
 	return f.Close()
-}
-
-type auditEvent struct {
-	Time      time.Time `json:"time"`
-	UserID    string    `json:"userID,omitempty"`
-	Subject   string    `json:"subject,omitempty"`
-	Scopes    []string  `json:"scopes,omitempty"`
-	Operation string    `json:"operation"`
-	Name      string    `json:"name"`
-	Args      string    `json:"args,omitempty"`
-	Decision  string    `json:"decision"`
-	Status    string    `json:"status,omitempty"`
 }

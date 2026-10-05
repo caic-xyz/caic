@@ -11,13 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers"
-
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
 )
 
 type pingProviderSpy struct {
@@ -78,20 +77,20 @@ func TestEstimateUsageRowCost(t *testing.T) {
 		name    string
 		harness string
 		model   string
-		tokens  usagedb.TokenBuckets
+		tokens  data.TokenBuckets
 		want    float64
 		priced  bool
 	}{
-		{"Claude unprefixed and one-hour cache", "claude", "claude-opus-5-5", usagedb.TokenBuckets{Input: 1_000_000, CacheWrite1h: 1_000_000, Output: 1_000_000}, 32, true},
-		{"Codex unprefixed", "codex", "gpt-6-sol", usagedb.TokenBuckets{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.2, true},
-		{"OpenCode prefixed", "opencode", "openai/gpt-6-luna", usagedb.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 0.6, true},
-		{"Pi prefixed", "pi", "anthropic/claude-opus-5-5", usagedb.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
-		{"unknown harness", "new", "gpt-6-sol", usagedb.TokenBuckets{Input: 1_000_000}, 0, false},
-		{"unknown model", "codex", "unpriced", usagedb.TokenBuckets{Input: 1_000_000}, 0, false},
+		{"Claude unprefixed and one-hour cache", "claude", "claude-opus-5-5", data.TokenBuckets{Input: 1_000_000, CacheWrite1h: 1_000_000, Output: 1_000_000}, 32, true},
+		{"Codex unprefixed", "codex", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.2, true},
+		{"OpenCode prefixed", "opencode", "openai/gpt-6-luna", data.TokenBuckets{Input: 1_000_000, Output: 1_000_000}, 0.6, true},
+		{"Pi prefixed", "pi", "anthropic/claude-opus-5-5", data.TokenBuckets{CacheRead: 1_000_000}, 0.2, true},
+		{"unknown harness", "new", "gpt-6-sol", data.TokenBuckets{Input: 1_000_000}, 0, false},
+		{"unknown model", "codex", "unpriced", data.TokenBuckets{Input: 1_000_000}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			row := usagedb.UsageRow{Harness: tc.harness, Model: tc.model, TokenBuckets: tc.tokens}
+			row := data.UsageRow{Harness: tc.harness, Model: tc.model, TokenBuckets: tc.tokens}
 			got, ok := estimateUsageRowCost(pricer, &row, at)
 			if ok != tc.priced || math.Abs(got-tc.want) > 1e-9 {
 				t.Errorf("estimated cost = %v/%v, want %v/%v", got, ok, tc.want, tc.priced)

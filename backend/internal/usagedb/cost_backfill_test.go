@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/ksid"
 )
 
@@ -23,9 +24,9 @@ func TestBackfillMissingCosts(t *testing.T) {
 		dir := t.TempDir()
 		s := newTestStore(t, dir)
 		at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
-		s.Observe(testMeta(ksid.NewID()), &Event{At: at, Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		s.Observe(testMeta(ksid.NewID()), &Event{At: at, Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
 		compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
-		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+		if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "2026-02-05.jsonl")); !os.IsNotExist(err) {
@@ -45,13 +46,13 @@ func TestBackfillMissingCosts(t *testing.T) {
 		s := newTestStore(t, dir)
 		at := time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC)
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, &Event{At: at, Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		s.Observe(meta, &Event{At: at, Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
 		compressOldDaysForTest(t, s, at.AddDate(0, 0, 5))
-		s.Observe(meta, &Event{At: at.Add(time.Hour), Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
-		if err := backfillDayCosts(t.Context(), s, "2026-02-05.jsonl.zstd", func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+		s.Observe(meta, &Event{At: at.Add(time.Hour), Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
+		if err := backfillDayCosts(t.Context(), s, "2026-02-05.jsonl.zstd", func(*data.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 			t.Fatalf("vanished compressed candidate: %v", err)
 		}
-		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.25, true }); err != nil {
+		if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.25, true }); err != nil {
 			t.Fatal(err)
 		}
 		if got := s.Days()[0].CostUSD; got != 0.5 {
@@ -64,9 +65,9 @@ func TestBackfillMissingCosts(t *testing.T) {
 		s := newTestStore(t, dir)
 		missing := testMeta(ksid.NewID())
 		reported := testMeta(ksid.NewID())
-		s.Observe(missing, &Event{At: atUTC(5, 10, 0, 0), Model: "missing", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
-		s.Observe(reported, &Event{At: atUTC(5, 10, 0, 0), Model: "reported", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
-		s.Observe(reported, &Event{At: atUTC(5, 10, 0, 1), Model: "reported", CostUSD: 0.4, TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 20}}})
+		s.Observe(missing, &Event{At: atUTC(5, 10, 0, 0), Model: "missing", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+		s.Observe(reported, &Event{At: atUTC(5, 10, 0, 0), Model: "reported", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
+		s.Observe(reported, &Event{At: atUTC(5, 10, 0, 1), Model: "reported", CostUSD: 0.4, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 20}}})
 		s.ObserveQuota(&QuotaChange{At: atUTC(5, 10, 0, 2), Provider: "codex", Window: "5h", Status: "available"})
 		day := "2026-02-05"
 		path := filepath.Join(dir, day+".jsonl")
@@ -74,7 +75,7 @@ func TestBackfillMissingCosts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		estimate := func(row *UsageRow) (float64, bool) {
+		estimate := func(row *data.UsageRow) (float64, bool) {
 			if row.Model == "missing" {
 				return 0.25, true
 			}
@@ -87,13 +88,13 @@ func TestBackfillMissingCosts(t *testing.T) {
 		if len(rows) != 3 || rows[0].CostUSD != 0.25 || !rows[0].CostEstimated || rows[1].CostUSD != 0 || rows[1].CostEstimated || rows[2].CostUSD != 0.4 || rows[2].CostEstimated {
 			t.Fatalf("rows after cost backfill = %+v", rows)
 		}
-		if quotas := readQuotaRows(t, dir, day); len(quotas) != 1 {
+		if quotas := readQuotaRows(t, dir); len(quotas) != 1 {
 			t.Errorf("quota rows after cost backfill = %+v", quotas)
 		}
 		if got := s.Days()[0]; got.CostUSD != 0.65 || got.Models["missing"].CostUSD != 0.25 || got.Harnesses["claude"].CostUSD != 0.65 {
 			t.Errorf("day totals after cost backfill = %+v", got)
 		}
-		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 1, true }); err != nil {
+		if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 1, true }); err != nil {
 			t.Fatal(err)
 		}
 		after, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
@@ -113,7 +114,7 @@ func TestBackfillMissingCosts(t *testing.T) {
 		if got := reopened.Days()[0].CostUSD; got != 0.65 {
 			t.Errorf("recovered day cost = %v, want 0.65", got)
 		}
-		reopened.Observe(missing, &Event{At: atUTC(5, 10, 0, 3), Model: "missing", CostUSD: 0.35, TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 2}}})
+		reopened.Observe(missing, &Event{At: atUTC(5, 10, 0, 3), Model: "missing", CostUSD: 0.35, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 2}}})
 		rows = readRows(t, dir, day)
 		if len(rows) != 4 || math.Abs(rows[3].CostUSD-0.1) > 1e-9 || rows[3].CostEstimated {
 			t.Errorf("next live cost movement = %+v", rows)
@@ -141,15 +142,15 @@ func TestBackfillMissingCosts(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := newTestStore(t, dir)
-		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.1, true }); err != nil {
+		if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.1, true }); err != nil {
 			t.Fatal(err)
 		}
-		data, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
+		raw, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(data), `"future_field":{"nested":true}`) || !strings.HasSuffix(string(data), `{"kind":"usage","day":"2026-02-05","task_id":"bad","cost_usd":`) {
-			t.Errorf("cost backfill lost unrelated fields or truncated tail: %s", data)
+		if !strings.Contains(string(raw), `"future_field":{"nested":true}`) || !strings.HasSuffix(string(raw), `{"kind":"usage","day":"2026-02-05","task_id":"bad","cost_usd":`) {
+			t.Errorf("cost backfill lost unrelated fields or truncated tail: %s", raw)
 		}
 	})
 
@@ -157,12 +158,12 @@ func TestBackfillMissingCosts(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t, t.TempDir())
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "priced", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
-		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.2, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "priced", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "priced", CostUSD: 0.2, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
 		s.mu.Lock()
 		s.pending[meta.TaskID.String()].costInFlight = 0.2 // Simulate cost assigned to a bucket whose append failed.
 		s.mu.Unlock()
-		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return 0.1, true }); err != nil {
+		if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return 0.1, true }); err != nil {
 			t.Fatal(err)
 		}
 		rows := readRows(t, s.dir, "2026-02-05")
@@ -180,7 +181,7 @@ func TestBackfillMissingCosts(t *testing.T) {
 		}
 		s := newTestStore(t, dir)
 		ctx, cancel := context.WithCancel(t.Context())
-		err := s.BackfillMissingCosts(ctx, func(*UsageRow) (float64, bool) { cancel(); return .1, true })
+		err := s.BackfillMissingCosts(ctx, func(*data.UsageRow) (float64, bool) { cancel(); return .1, true })
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("repair error=%v", err)
 		}
@@ -210,7 +211,7 @@ func TestBackfillMissingCosts(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := newTestStore(t, dir)
-		if err := s.BackfillMissingCosts(t.Context(), func(*UsageRow) (float64, bool) { return .25, true }); err != nil {
+		if err := s.BackfillMissingCosts(t.Context(), func(*data.UsageRow) (float64, bool) { return .25, true }); err != nil {
 			t.Fatal(err)
 		}
 		got, err := os.ReadFile(path) //nolint:gosec // test fixture path built from t.TempDir().

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/ksid"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	"github.com/maruel/ksid"
 )
 
 type quotaUpdateWriter struct {
@@ -27,9 +27,9 @@ type quotaUpdateWriter struct {
 	events       int
 }
 
-func (w *quotaUpdateWriter) Write(data []byte) (int, error) {
-	n, err := w.ResponseRecorder.Write(data)
-	if !bytes.Contains(data, []byte("event: message")) {
+func (w *quotaUpdateWriter) Write(raw []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(raw)
+	if !bytes.Contains(raw, []byte("event: message")) {
 		return n, err
 	}
 	w.events++
@@ -48,9 +48,9 @@ type cancelAfterEventWriter struct {
 	cancel context.CancelFunc
 }
 
-func (w *cancelAfterEventWriter) Write(data []byte) (int, error) {
-	n, err := w.ResponseRecorder.Write(data)
-	if bytes.Contains(data, []byte("event: message")) {
+func (w *cancelAfterEventWriter) Write(raw []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(raw)
+	if bytes.Contains(raw, []byte("event: message")) {
 		w.cancel()
 	}
 	return n, err
@@ -152,11 +152,11 @@ func TestUsageHandlersHandleGetDashboard(t *testing.T) {
 		Model:        "claude-opus",
 		CostUSD:      0.12,
 		TurnBoundary: true,
-		Delta: usagedb.Delta{
-			TokenBuckets: usagedb.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheRead: 30, Output: 40, Reasoning: 5},
+		Delta: data.Delta{
+			TokenBuckets: data.TokenBuckets{Input: 10, CacheWrite1h: 20, CacheRead: 30, Output: 40, Reasoning: 5},
 			Turns:        1,
 			ToolCalls:    map[string]int{"Read": 2},
-			ToolTimings:  map[string]usagedb.ToolTiming{"Read": {Count: 1, DurationMs: 1250}},
+			ToolTimings:  map[string]data.ToolTiming{"Read": {Count: 1, DurationMs: 1250}},
 			SkillReads:   map[string]int{"review": 2},
 		},
 	})
@@ -241,7 +241,7 @@ func BenchmarkUsageHandlersHandleGetDashboard(b *testing.B) {
 		At:           time.Date(2026, time.February, 5, 10, 0, 0, 0, time.UTC),
 		Model:        "claude-opus",
 		TurnBoundary: true,
-		Delta:        usagedb.Delta{TokenBuckets: usagedb.TokenBuckets{Input: 100, Output: 50}, Turns: 1},
+		Delta:        data.Delta{TokenBuckets: data.TokenBuckets{Input: 100, Output: 50}, Turns: 1},
 	})
 	h := s.buildAPIHandler()
 	b.ReportAllocs()

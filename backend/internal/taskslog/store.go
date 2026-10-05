@@ -19,10 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
+	"github.com/klauspost/compress/zstd"
 )
 
 // SettledRetention bounds how far back a task log's mtime can be and still
@@ -428,7 +427,7 @@ func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
 // supplies a fresh native wire for each physical log's validated harness.
 // Per-log read or parse failures are logged and skipped; a non-nil error is
 // yielded only for source-wide failures and terminates the sequence.
-func (s *Store) UsageRows(ctx context.Context, resolver WireResolver) iter.Seq2[usagedb.UsageRow, error] {
+func (s *Store) UsageRows(ctx context.Context, resolver WireResolver) iter.Seq2[data.UsageRow, error] {
 	return storeUsageRows(s, ctx, resolver)
 }
 

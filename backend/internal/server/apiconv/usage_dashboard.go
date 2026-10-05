@@ -7,6 +7,7 @@ import (
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 )
 
 // UsageDashboard converts sorted durable-rollup day snapshots to the public
@@ -44,7 +45,7 @@ func usageDashboardDay(day *usagedb.DayRollup) v1.UsageDashboardDay {
 	}
 }
 
-func usageDashboardToolTimings(timings map[string]usagedb.ToolTiming) []v1.UsageDashboardToolTiming {
+func usageDashboardToolTimings(timings map[string]data.ToolTiming) []v1.UsageDashboardToolTiming {
 	names := sortedNames(timings)
 	out := make([]v1.UsageDashboardToolTiming, len(names))
 	for i, name := range names {
@@ -54,7 +55,7 @@ func usageDashboardToolTimings(timings map[string]usagedb.ToolTiming) []v1.Usage
 	return out
 }
 
-func usageDashboardTokens(tokens usagedb.TokenBuckets) v1.UsageDashboardTokens {
+func usageDashboardTokens(tokens data.TokenBuckets) v1.UsageDashboardTokens {
 	return v1.UsageDashboardTokens{
 		Input:        tokens.Input,
 		CacheWrite5m: tokens.CacheWrite5m,

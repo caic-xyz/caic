@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
 	"github.com/maruel/ksid"
 )
 
@@ -42,22 +43,22 @@ func atUTC(day, h, mi, sec int) time.Time {
 	return time.Date(2026, time.February, day, h, mi, sec, 0, time.UTC)
 }
 
-func testEvent(day, h, mi, sec int, model string, d *Delta) *Event {
+func testEvent(day, h, mi, sec int, model string, d *data.Delta) *Event {
 	return &Event{At: atUTC(day, h, mi, sec), Model: model, Delta: *d}
 }
 
 // readRows parses every usage row in the day file for day.
-func readRows(t *testing.T, dir, day string) []UsageRow {
-	data, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
+func readRows(t *testing.T, dir, day string) []data.UsageRow {
+	raw, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
 	if err != nil {
 		t.Fatalf("read day file %s: %v", day, err)
 	}
-	var rows []UsageRow
-	for line := range strings.SplitSeq(string(data), "\n") {
+	var rows []data.UsageRow
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row UsageRow
+		var row data.UsageRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("parse row: %v", err)
 		}
@@ -68,18 +69,18 @@ func readRows(t *testing.T, dir, day string) []UsageRow {
 	return rows
 }
 
-// readQuotaRows parses every quota row in the day file for day.
-func readQuotaRows(t *testing.T, dir, day string) []QuotaRow {
-	data, err := os.ReadFile(filepath.Join(dir, day+".jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
+// readQuotaRows parses the quota rows in the February 5 fixture day.
+func readQuotaRows(t *testing.T, dir string) []data.QuotaRow {
+	raw, err := os.ReadFile(filepath.Join(dir, "2026-02-05.jsonl")) //nolint:gosec // test fixture path built from t.TempDir().
 	if err != nil {
-		t.Fatalf("read day file %s: %v", day, err)
+		t.Fatalf("read quota day file: %v", err)
 	}
-	var rows []QuotaRow
-	for line := range strings.SplitSeq(string(data), "\n") {
+	var rows []data.QuotaRow
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var row QuotaRow
+		var row data.QuotaRow
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("parse row: %v", err)
 		}
@@ -100,8 +101,8 @@ func TestObserve(t *testing.T) {
 		meta := testMeta(id)
 		at := atUTC(5, 10, 0, 0)
 
-		s.Observe(meta, &Event{At: at, Model: "claude-opus", CostUSD: 0.01, Delta: Delta{
-			TokenBuckets:  TokenBuckets{Input: 10, CacheWrite1h: 400, CacheRead: 900, Output: 50},
+		s.Observe(meta, &Event{At: at, Model: "claude-opus", CostUSD: 0.01, Delta: data.Delta{
+			TokenBuckets:  data.TokenBuckets{Input: 10, CacheWrite1h: 400, CacheRead: 900, Output: 50},
 			ContextWindow: 200000,
 			ToolCalls:     map[string]int{"Edit": 1},
 			SkillReads:    map[string]int{"code-review": 1},
@@ -109,8 +110,8 @@ func TestObserve(t *testing.T) {
 		}})
 		s.Observe(meta, &Event{
 			At: at.Add(5 * time.Second), Model: "claude-opus", CostUSD: 0.02, TurnBoundary: true,
-			Delta: Delta{
-				TokenBuckets:  TokenBuckets{Input: 5, Output: 20},
+			Delta: data.Delta{
+				TokenBuckets:  data.TokenBuckets{Input: 5, Output: 20},
 				Turns:         1,
 				APIMs:         1500,
 				WallMs:        4000,
@@ -158,8 +159,8 @@ func TestObserve(t *testing.T) {
 		at := atUTC(5, 10, 0, 0)
 		// The store derives cost movement from consecutive snapshots; a
 		// regression in the snapshot must not inflate the movement.
-		s.Observe(meta, &Event{At: at, Model: "m", CostUSD: 0.10, Delta: Delta{TokenBuckets: TokenBuckets{Output: 1}}})
-		s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", CostUSD: 0.10, Delta: Delta{TokenBuckets: TokenBuckets{Output: 1}}})
+		s.Observe(meta, &Event{At: at, Model: "m", CostUSD: 0.10, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 1}}})
+		s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", CostUSD: 0.10, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 1}}})
 		s.flushTaskLocked(meta.TaskID.String())
 		rows := readRows(t, s.dir, "2026-02-05")
 		if len(rows) != 1 || rows[0].CostUSD != 0.10 {
@@ -171,8 +172,8 @@ func TestObserve(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t, t.TempDir())
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, testEvent(5, 23, 59, 59, "m", &Delta{Output: 10}))
-		s.Observe(meta, &Event{At: atUTC(6, 0, 0, 1), Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}, Turns: 1}})
+		s.Observe(meta, testEvent(5, 23, 59, 59, "m", &data.Delta{Output: 10}))
+		s.Observe(meta, &Event{At: atUTC(6, 0, 0, 1), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
 
 		if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 || rows[0].Output != 10 {
 			t.Errorf("day1 rows = %+v", rows)
@@ -192,8 +193,8 @@ func TestObserve(t *testing.T) {
 		s := newTestStore(t, t.TempDir())
 		meta := testMeta(ksid.NewID())
 		current := atUTC(6, 0, 0, 1)
-		s.Observe(meta, &Event{At: current, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
-		s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}, Turns: 1}})
+		s.Observe(meta, &Event{At: current, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
 
 		if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 || rows[0].Output != 5 {
 			t.Errorf("regressed-day rows = %+v, want one retained row", rows)
@@ -204,7 +205,7 @@ func TestObserve(t *testing.T) {
 
 		// A historical replay before the watermark remains a duplicate and is
 		// skipped, preserving restart-resume behavior.
-		s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Replayed: true, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 23, 59, 59), Replayed: true, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
 		if rows := readRows(t, s.dir, "2026-02-05"); len(rows) != 1 {
 			t.Errorf("rows after replay = %+v, want no duplicate", rows)
 		}
@@ -214,8 +215,8 @@ func TestObserve(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t, t.TempDir())
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.10, TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
-		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.10, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}}})
 		id := meta.TaskID.String()
 		if s.pending[id] == nil || s.watermarks[id].IsZero() {
 			t.Fatalf("task bookkeeping missing before discard")
@@ -238,7 +239,7 @@ func TestObserve(t *testing.T) {
 		}
 		s := newTestStore(t, dir)
 		meta := testMeta(ksid.NewID())
-		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.50, TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m", CostUSD: 0.50, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
 		if len(s.pending[meta.TaskID.String()].buckets) != 1 {
 			t.Fatalf("failed delta must stay pending")
 		}
@@ -248,7 +249,7 @@ func TestObserve(t *testing.T) {
 		if err := os.Remove(dayDir); err != nil {
 			t.Fatal(err)
 		}
-		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", CostUSD: 0.50, TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: atUTC(5, 10, 0, 1), Model: "m", CostUSD: 0.50, TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
 		rows := readRows(t, s.dir, "2026-02-05")
 		if len(rows) != 1 {
 			t.Fatalf("rows = %d, want 1", len(rows))
@@ -266,7 +267,7 @@ func TestObserve(t *testing.T) {
 		s := newTestStore(t, t.TempDir())
 		meta := testMeta(ksid.NewID())
 		at := atUTC(5, 10, 0, 0)
-		s.Observe(meta, &Event{At: at, Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}, Turns: 1}})
+		s.Observe(meta, &Event{At: at, Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}, Turns: 1}})
 		if days := s.Days(); days[0].Tokens.Output != 10 {
 			t.Fatalf("days = %+v, want the flushed row", days)
 		}
@@ -275,7 +276,7 @@ func TestObserve(t *testing.T) {
 		// disk, and the delta must stay pending for the next flush.
 		day := "2026-02-05"
 		_ = s.files[day].Close()
-		s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", TurnBoundary: true, Delta: Delta{TokenBuckets: TokenBuckets{Output: 5}, Turns: 1}})
+		s.Observe(meta, &Event{At: at.Add(time.Second), Model: "m", TurnBoundary: true, Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 5}, Turns: 1}})
 		if days := s.Days(); days[0].Tokens.Output != 10 {
 			t.Errorf("days after failed append = %+v, want unchanged (aggregate matches disk)", days)
 		}
@@ -290,7 +291,7 @@ func TestObserve(t *testing.T) {
 		s := newTestStore(t, dir)
 		meta := testMeta(ksid.NewID())
 		at := atUTC(5, 10, 0, 0)
-		s.Observe(meta, &Event{At: at, Model: "m", Delta: Delta{TokenBuckets: TokenBuckets{Output: 10}}})
+		s.Observe(meta, &Event{At: at, Model: "m", Delta: data.Delta{TokenBuckets: data.TokenBuckets{Output: 10}}})
 		//nolint:gosec // t.TempDir needs execute permission for this controlled directory test.
 		if err := os.Chmod(dir, 0o500); err != nil {
 			t.Fatal(err)
@@ -313,8 +314,8 @@ func TestObserve(t *testing.T) {
 		if len(s.pending[meta.TaskID.String()].buckets) != 1 {
 			t.Fatal("failed first append did not retain the pending bucket")
 		}
-		row := UsageRow{Kind: rowKindUsage, Day: day, Ts: NewTime(at), TaskID: meta.TaskID.String(), Model: "m", Output: 10}
-		if err := s.Backfill(t.Context(), func(yield func(UsageRow, error) bool) { yield(row, nil) }); err != nil {
+		row := data.UsageRow{Kind: rowKindUsage, Day: day, Ts: data.NewTime(at), TaskID: meta.TaskID.String(), Model: "m", Output: 10}
+		if err := s.Backfill(t.Context(), func(yield func(data.UsageRow, error) bool) { yield(row, nil) }); err != nil {
 			t.Fatal(err)
 		}
 		rows := readRows(t, dir, day)
@@ -343,7 +344,7 @@ func TestObserve(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = s2.Close() })
 		s2.ObserveQuota(&change)
-		if quotas := readQuotaRows(t, dir, "2026-02-05"); len(quotas) != 1 {
+		if quotas := readQuotaRows(t, dir); len(quotas) != 1 {
 			t.Errorf("quota rows after restart = %d, want 1 (unchanged status not rewritten)", len(quotas))
 		}
 	})
@@ -360,7 +361,7 @@ func TestObserve(t *testing.T) {
 		s.ObserveQuota(change("allowed", 0.104)) // rounding: skipped
 		s.ObserveQuota(change("allowed_warning", 0.50))
 
-		quotas := readQuotaRows(t, s.dir, "2026-02-05")
+		quotas := readQuotaRows(t, s.dir)
 		if len(quotas) != 2 {
 			t.Fatalf("quota rows = %d, want 2 (first + status change)", len(quotas))
 		}
@@ -385,8 +386,8 @@ func TestDays(t *testing.T) {
 		for range 2 {
 			meta := testMeta(ksid.NewID())
 			at := atUTC(5, 10, 0, 0)
-			s1.Observe(meta, &Event{At: at, Model: "m1", CostUSD: 0.10, Delta: Delta{
-				TokenBuckets: TokenBuckets{Output: 10},
+			s1.Observe(meta, &Event{At: at, Model: "m1", CostUSD: 0.10, Delta: data.Delta{
+				TokenBuckets: data.TokenBuckets{Output: 10},
 				ToolCalls:    map[string]int{"Edit": 1},
 				SkillReads:   map[string]int{"code-review": 1},
 			}})
@@ -444,13 +445,13 @@ func TestDays(t *testing.T) {
 		s := newTestStore(t, t.TempDir())
 		meta := testMeta(ksid.NewID())
 		for range 5 {
-			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: Delta{
+			s.Observe(meta, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: data.Delta{
 				SkillReads: map[string]int{"code-quality": 3},
 			}})
 			s.flushTaskLocked(meta.TaskID.String())
 		}
 		other := testMeta(ksid.NewID())
-		s.Observe(other, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: Delta{
+		s.Observe(other, &Event{At: atUTC(5, 10, 0, 0), Model: "m1", Delta: data.Delta{
 			SkillReads: map[string]int{"code-quality": 1, "review": 1},
 		}})
 		s.flushTaskLocked(other.TaskID.String())
@@ -479,13 +480,13 @@ func TestDays(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		day := "2026-02-05"
-		row := UsageRow{Kind: rowKindUsage, Day: day, Ts: 1000, TaskID: "t1", Output: 5}
-		data, err := json.Marshal(row)
+		row := data.UsageRow{Kind: rowKindUsage, Day: day, Ts: 1000, TaskID: "t1", Output: 5}
+		encoded, err := json.Marshal(&row)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// A complete row followed by a half-written one (simulated crash).
-		content := string(data) + "\n" + `{"kind":"usage","task_id":"t2","out`
+		content := string(encoded) + "\n" + `{"kind":"usage","task_id":"t2","out`
 		if err := os.WriteFile(filepath.Join(dir, day+".jsonl"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
