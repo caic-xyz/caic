@@ -39,7 +39,7 @@ func TestCodexFetcherGet(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	f := &CodexFetcher{
-		baseFetcher: newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "https://chatgpt.com/codex/cloud/settings/analytics"),
+		baseFetcher: newBaseFetcher(agent.QuotaProviderCodex, AuthKindOAuth, "https://chatgpt.com/settings/usage?tab=overview"),
 		client:      &http.Client{Transport: redirectTransport{server.URL}},
 		token:       "token",
 	}
