@@ -15,8 +15,8 @@ interface Props {
 
 const navigationShortcutsAfterModelSettings = [
   { keys: "/", action: "Focus the current prompt" },
-  { keys: "↓ / Shift + ↓", action: "Select the next task" },
-  { keys: "↑ / Shift + ↑", action: "Select the previous task" },
+  { keys: "↓ / Page Down", action: "Select the next task" },
+  { keys: "↑ / Page Up", action: "Select the previous task" },
   { keys: "Tab", action: "Move from a task card to its prompt" },
   { keys: "Shift + Tab", action: "Return from a prompt to its task card" },
   { keys: "Esc", action: "Close a dialog, otherwise focus the new-task prompt" },
@@ -24,7 +24,7 @@ const navigationShortcutsAfterModelSettings = [
 ];
 
 const promptShortcuts = [
-  { keys: "Shift + ↑ / ↓", action: "Switch tasks and keep typing" },
+  { keys: "Page Up / Page Down", action: "Switch tasks and keep typing" },
   { keys: "Esc", action: "Focus the new-task prompt" },
 ];
 
@@ -154,18 +154,22 @@ export default function KeyboardShortcuts(props: Props) {
         focusNewTaskControl("[data-testid='prompt-input']");
         return;
       }
-      if (focusedCard && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      if (
+        focusedCard &&
+        !event.shiftKey &&
+        (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "PageDown" || event.key === "PageUp")
+      ) {
         event.preventDefault();
-        navigateTask(event.key === "ArrowDown" ? 1 : -1, false, focusedCard.dataset.taskId);
+        navigateTask(event.key === "ArrowDown" || event.key === "PageDown" ? 1 : -1, false, focusedCard.dataset.taskId);
         return;
       }
       if (
-        event.shiftKey &&
+        !event.shiftKey &&
         (taskPrompt || !isEditing(target)) &&
-        (event.key === "ArrowDown" || event.key === "ArrowUp")
+        (event.key === "PageDown" || event.key === "PageUp")
       ) {
         event.preventDefault();
-        navigateTask(event.key === "ArrowDown" ? 1 : -1, true);
+        navigateTask(event.key === "PageDown" ? 1 : -1, true);
         return;
       }
       if (event.key === "Tab" && !event.shiftKey && focusedCard) {

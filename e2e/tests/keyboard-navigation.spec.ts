@@ -1,6 +1,6 @@
 // End-to-end keyboard-only navigation through repository selection, task creation, and task focus.
 
-import { test, expect, fillContentEditable, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, fillContentEditable, waitForTaskState } from "../helpers";
 
 test("completes the primary task flow using only the keyboard", async ({ page, api, uniquePrompt }) => {
   await page.goto("/");
@@ -109,4 +109,34 @@ test("Ctrl+Enter submits from a focused feature toggle without toggling it", asy
   await expect(toggle).toBeFocused();
   await page.keyboard.press("Control+Enter");
   await expect(page).toHaveURL(/\/task\//);
+});
+
+test("Page Up and Page Down switch tasks while preserving prompt drafts", async ({ page, api, uniquePrompt }) => {
+  const secondId = await createTaskAPI(api, uniquePrompt("page navigation second"));
+  const firstId = await createTaskAPI(api, uniquePrompt("page navigation first"));
+  await waitForTaskState(api, firstId, "waiting", 30_000);
+  await waitForTaskState(api, secondId, "waiting", 30_000);
+  await page.goto(`/task/@${firstId}`);
+  const prompt = page.getByTestId("task-detail-prompt");
+  await expect(prompt).toBeFocused();
+  await prompt.pressSequentially("draft for the first task");
+
+  await prompt.press("PageDown");
+  await expect(page).toHaveURL(new RegExp(`/task/@${secondId}\\+`));
+  await expect(prompt).toBeFocused();
+  await expect(prompt).toHaveText("");
+  await prompt.pressSequentially("draft for the second task");
+
+  await prompt.press("PageUp");
+  await expect(page).toHaveURL(new RegExp(`/task/@${firstId}\\+`));
+  await expect(prompt).toBeFocused();
+  await expect(prompt).toHaveText("draft for the first task");
+
+  await prompt.press("Shift+Tab");
+  await expect(page.locator(`[data-task-id="${firstId}"]`)).toBeFocused();
+  await page.keyboard.press("PageDown");
+  await expect(page.locator(`[data-task-id="${secondId}"]`)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(prompt).toBeFocused();
+  await expect(prompt).toHaveText("draft for the second task");
 });

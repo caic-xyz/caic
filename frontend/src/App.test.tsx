@@ -1215,7 +1215,7 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Model" })).toHaveFocus());
   });
 
-  it("navigates tasks with Shift+ArrowDown while editing the prompt", async () => {
+  it("navigates tasks with PageDown while editing the prompt", async () => {
     const user = userEvent.setup();
     const task = makeTask();
     const { history } = renderApp();
@@ -1224,13 +1224,13 @@ describe("App keyboard shortcuts", () => {
     const prompt = screen.getByTestId("prompt-input");
     prompt.focus();
 
-    await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+    await user.keyboard("{PageDown}");
 
     await waitFor(() => expect(history.get()).toContain("@task1+"));
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
   });
 
-  it("navigates with shifted arrows after clicking task-detail content", async () => {
+  it("navigates with PageDown after clicking task-detail content", async () => {
     const user = userEvent.setup();
     const task = makeTask();
     vi.mocked(api.getTask).mockResolvedValue(task);
@@ -1241,12 +1241,12 @@ describe("App keyboard shortcuts", () => {
 
     await user.click(screen.getByTestId("task-detail-form"));
     expect(screen.getByTestId("task-detail-prompt")).not.toHaveFocus();
-    await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+    await user.keyboard("{PageDown}");
 
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
   });
 
-  it("navigates from focused task cards with shifted and unshifted arrows", async () => {
+  it("navigates from focused task cards with page keys and arrows", async () => {
     const user = userEvent.setup();
     const first = makeTask({ id: "first", title: "first task" });
     const second = makeTask({ id: "second", title: "second task" });
@@ -1266,11 +1266,11 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(history.get()).toContain(`@${secondId}+`));
     await waitFor(() => expect(document.querySelector(`[data-task-id='${secondId}']`)).toHaveFocus());
 
-    await user.keyboard("{Shift>}{ArrowUp}{/Shift}");
+    await user.keyboard("{PageUp}");
     await waitFor(() => expect(history.get()).toContain(`@${firstId}+`));
     await waitFor(() => expect(document.querySelector(`[data-task-id='${firstId}']`)).toHaveFocus());
 
-    await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
+    await user.keyboard("{PageDown}");
     await waitFor(() => expect(history.get()).toContain(`@${secondId}+`));
     await waitFor(() => expect(document.querySelector(`[data-task-id='${secondId}']`)).toHaveFocus());
     await user.keyboard("{ArrowUp}");
