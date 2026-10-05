@@ -1,4 +1,4 @@
-// Tests for State validation, decoding, and Result JSON round-tripping.
+// Tests for task State validation and decoding.
 
 package taskslog
 

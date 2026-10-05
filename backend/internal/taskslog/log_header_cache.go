@@ -32,6 +32,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	v6 "github.com/caic-xyz/caic/backend/internal/taskslog/data/headercache/v6"
 )
 
 const (
@@ -40,26 +42,15 @@ const (
 	// for a task log.
 	headerCacheExt = ".header.json"
 
-	// headerCacheVersion guards the marshaled shape. Bump it whenever the
-	// LoadedTask fields that survive JSON marshaling change, so entries written
+	// currentVersion guards the marshaled shape. Bump it whenever the
+	// persisted v6 schema changes, so entries written
 	// by older binaries fall back to a full scan instead of misreading.
-	headerCacheVersion = 6
+	currentVersion = 6
 
 	// headerCacheMaxBytes is the largest entry the reader will accept. A valid
 	// entry is a few kilobytes; anything larger is treated as corrupt.
 	headerCacheMaxBytes = 1 << 20
 )
-
-// headerCache is the on-disk cache of one loadLogHeader result. Task is the
-// LoadedTask projection directly (its JSON form omits message history and
-// runtime state), so a new LoadedTask field is picked up automatically in new
-// entries.
-type headerCache struct {
-	Version      int         `json:"version"`
-	LogSize      int64       `json:"log_size"`
-	LogMTimeNano int64       `json:"log_mtime_unix_nano"`
-	Task         *LoadedTask `json:"task"`
-}
 
 // reapHeaderCaches removes header cache entries whose log no longer exists in
 // either form. Caches are keyed beside their log, but a log can leave the
@@ -117,19 +108,41 @@ func readHeaderCache(path string) (*LoadedTask, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var entry headerCache
+	// Override state fields with the behavioral type during decoding. This
+	// preserves its rejection of explicit null/unknown states, while omitted
+	// states retain their historical zero value.
+	var entry struct {
+		v6.Entry
+
+		Task *struct {
+			v6.Task
+
+			State  State `json:"state"`
+			Result *struct {
+				v6.Result
+
+				State State `json:"state"`
+			} `json:"result"`
+		} `json:"task"`
+	}
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return nil, false
 	}
-	if entry.Task == nil || entry.Version != headerCacheVersion {
+	if entry.Task == nil || entry.Version != currentVersion {
 		return nil, false
 	}
 	if entry.LogSize != info.Size() || entry.LogMTimeNano != info.ModTime().UnixNano() {
 		return nil, false
 	}
-	entry.Task.path = path
-	entry.Task.LogSize = info.Size()
-	return entry.Task, true
+	entry.Task.Task.State = string(entry.Task.State)
+	if entry.Task.Result != nil {
+		entry.Task.Result.Result.State = string(entry.Task.Result.State)
+		entry.Task.LastTrailer = &entry.Task.Result.Result
+	}
+	task := headerTaskFromData(&entry.Task.Task)
+	task.path = path
+	task.LogSize = info.Size()
+	return task, true
 }
 
 // writeHeaderCache stores the header beside the log so the next load skips the
@@ -141,11 +154,11 @@ func writeHeaderCache(path string, lt *LoadedTask) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(headerCache{
-		Version:      headerCacheVersion,
+	data, err := json.Marshal(v6.Entry{
+		Version:      currentVersion,
 		LogSize:      info.Size(),
 		LogMTimeNano: info.ModTime().UnixNano(),
-		Task:         lt,
+		Task:         headerTaskToData(lt),
 	})
 	if err != nil {
 		return err

@@ -1,10 +1,15 @@
-// Tests the task-log header cache and pins its marshaled shape.
+// Tests historical v6 header-cache snapshots, exact disk shapes, and corrupt-cache recovery.
 
 package taskslog
 
 import (
+	"bytes"
 	"encoding/json"
-	"slices"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,90 +18,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-// pinnedHeaderCacheKeys is the exact set of JSON keys a marshaled header cache
-// entry can contain, keyed by object path. The cache guards compatibility with
-// a schema version, not a field set: a key added to LoadedTask or a type it
-// embeds (RepoMount, Result, agent.DiffStat, agent.Usage, runtime mounts)
-// without bumping headerCacheVersion would be silently zero-valued in entries
-// written by older binaries — and for compressed terminal history those
-// entries are never invalidated, so the stale read persists for the life of
-// the log. This test pins the real marshaled schema of a fully populated
-// LoadedTask (custom MarshalJSON included), so the key and the version bump
-// must land together.
-var pinnedHeaderCacheKeys = []string{
-	"agent_version",
-	"base_image",
-	"cache_mounts",
-	"cache_mounts[0].container_path",
-	"cache_mounts[0].description",
-	"cache_mounts[0].host_path",
-	"cache_mounts[0].name",
-	"cache_mounts[0].read_only",
-	"cache_mounts[0].shallow",
-	"caic_mcp",
-	"container_platform",
-	"diff_created",
-	"display",
-	"effort",
-	"forge_issue",
-	"forge_owner",
-	"forge_pr",
-	"forge_repo",
-	"forked_from_task_id",
-	"github_token",
-	"harness",
-	"last_state_update_at",
-	"log_size",
-	"log_version",
-	"max_cpus",
-	"model",
-	"mounts",
-	"mounts[0].container_path",
-	"mounts[0].host_path",
-	"mounts[0].read_only",
-	"owner_id",
-	"parent_task_id",
-	"prompt",
-	"reported_effort",
-	"reported_model",
-	"repos",
-	"repos[0].base_branch",
-	"repos[0].branch",
-	"repos[0].container_path",
-	"repos[0].git_root",
-	"repos[0].name",
-	"result",
-	"result.agent_result",
-	"result.cost_usd",
-	"result.diff_stat",
-	"result.diff_stat[0].added",
-	"result.diff_stat[0].binary",
-	"result.diff_stat[0].deleted",
-	"result.diff_stat[0].path",
-	"result.duration",
-	"result.error",
-	"result.num_turns",
-	"result.state",
-	"result.usage",
-	"result.usage.cache_creation_input_tokens",
-	"result.usage.cache_read_input_tokens",
-	"result.usage.input_tokens",
-	"result.usage.output_tokens",
-	"result.usage.reasoning_output_tokens",
-	"runtime_name",
-	"session_id",
-	"started_at",
-	"state",
-	"sudo",
-	"tailscale",
-	"task_id",
-	"title",
-	"usb",
-}
-
 // pinnedHeaderCacheFixture is a fully populated LoadedTask: every slice
 // non-empty and every struct field set, so the marshaled form exercises the
-// complete key set pinned above.
+// complete historical snapshot shape.
 func pinnedHeaderCacheFixture() *LoadedTask {
 	diffStat := agent.DiffStat{{Path: "file", LinesAdded: 1, LinesDeleted: 1, Binary: true}}
 	return &LoadedTask{
@@ -112,8 +36,8 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 		}},
 		LogVersion:        2,
 		Harness:           harness.Claude,
-		StartedAt:         time.Now().UTC(),
-		LastStateUpdateAt: time.Now().UTC(),
+		StartedAt:         time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
+		LastStateUpdateAt: time.Date(2026, 1, 1, 0, 0, 0, 123000000, time.UTC),
 		State:             StatePurged,
 		ForgeIssue:        1,
 		OwnerID:           "user-1",
@@ -166,55 +90,130 @@ func pinnedHeaderCacheFixture() *LoadedTask {
 	}
 }
 
-// pinError is a non-nil error so Result.MarshalJSON's error key is exercised by
-// the pinned fixture.
+// pinError exercises the v6 snapshot's error-text projection in the fixture.
 type pinError struct{}
 
 func (pinError) Error() string { return "pin" }
 
-// collectJSONKeys returns the object keys that the JSON value at path
-// contributes: for an object, each key as path+"."+k (or k at the root); for
-// an array, the keys of its first element under path+"[0]"; for scalars and
-// null, none.
-func collectJSONKeys(raw json.RawMessage, path string) []string {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		keys := make([]string, 0, len(obj))
-		for k, v := range obj {
-			full := k
-			if path != "" {
-				full = path + "." + k
-			}
-			keys = append(keys, full)
-			keys = append(keys, collectJSONKeys(v, full)...)
-		}
-		return keys
-	}
-	var arr []json.RawMessage
-	if err := json.Unmarshal(raw, &arr); err == nil && len(arr) > 0 {
-		return collectJSONKeys(arr[0], path+"[0]")
-	}
-	return nil
-}
+// historicalHeaderTask is the complete task shape written by v6 before data
+// extraction. Keep this literal independent of data and runtime declarations.
+const historicalHeaderTask = `{"task_id":"task","prompt":"prompt","title":"title","repos":[{"name":"repo","base_branch":"main","branch":"caic-0","git_root":"/git","container_path":"/work"}],"log_version":2,"harness":"claude","started_at":"2026-01-01T00:00:00.123Z","last_state_update_at":"2026-01-01T00:00:00.123Z","state":"purged","forge_issue":1,"owner_id":"user-1","forked_from_task_id":"fork","parent_task_id":"parent","caic_mcp":true,"forge_owner":"owner","forge_repo":"repo","forge_pr":1,"tailscale":true,"usb":true,"display":true,"sudo":true,"github_token":true,"runtime_name":"runtime","base_image":"image","container_platform":"platform","max_cpus":1,"cache_mounts":[{"name":"cache","description":"desc","host_path":"/host","container_path":"/container","read_only":true,"shallow":true}],"mounts":[{"host_path":"/host","container_path":"/container","read_only":true}],"model":"model","effort":"effort","reported_model":"reported-model","reported_effort":"reported-effort","session_id":"session","agent_version":"version","log_size":1,"diff_created":true,"result":{"state":"purged","diff_stat":[{"path":"file","added":1,"deleted":1,"binary":true}],"cost_usd":1,"duration":1000000000,"num_turns":1,"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"reasoning_output_tokens":1},"agent_result":"result","error":"pin"}}`
 
-func TestHeaderCachePinsLoadedTaskFields(t *testing.T) {
+func TestHeaderCache(t *testing.T) {
 	t.Parallel()
-	data, err := json.Marshal(pinnedHeaderCacheFixture())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var root json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		t.Fatal(err)
-	}
-	keys := collectJSONKeys(root, "")
-	slices.Sort(keys)
-	if len(keys) != len(pinnedHeaderCacheKeys) {
-		t.Fatalf("LoadedTask marshaled key set changed (got %d keys: %v); update pinnedHeaderCacheKeys and bump headerCacheVersion", len(keys), keys)
-	}
-	for i := range keys {
-		if keys[i] != pinnedHeaderCacheKeys[i] {
-			t.Fatalf("LoadedTask marshaled key set changed: got %v, want pinned %v; update pinnedHeaderCacheKeys and bump headerCacheVersion", keys, pinnedHeaderCacheKeys)
+	t.Run("HistoricalSnapshot", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
 		}
-	}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"version":6,"log_size":1,"log_mtime_unix_nano":%d,"task":%s}`, info.ModTime().UnixNano(), historicalHeaderTask)
+		if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := readHeaderCache(path)
+		if !ok {
+			t.Fatal("historical v6 cache missed")
+		}
+		if got.path != path || got.LastTrailer.Err == nil || got.LastTrailer.Err.Error() != "pin" {
+			t.Fatalf("restored snapshot = %+v", got)
+		}
+		if !bytes.Equal(inventoryJSON(t, got), []byte(historicalHeaderTask)) {
+			t.Fatalf("restored shape = %s", inventoryJSON(t, got))
+		}
+		if err := writeHeaderCache(path, pinnedHeaderCacheFixture()); err != nil {
+			t.Fatal(err)
+		}
+		emitted, err := os.ReadFile(logHeaderCachePath(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want, actual any
+		if err := json.Unmarshal([]byte(body), &want); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(emitted, &actual); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(actual, want) {
+			t.Fatalf("emitted cache = %s, want %s", emitted, body)
+		}
+	})
+	t.Run("OptionalFieldsAndCollections", func(t *testing.T) {
+		t.Parallel()
+		fixture := pinnedHeaderCacheFixture()
+		fixture.Repos = []RepoMount{}
+		fixture.CacheMounts = nil
+		fixture.Mounts = []runtime.Mount{}
+		fixture.LastTrailer.DiffStat = agent.DiffStat{{Path: "binary", OldSize: 42, NewSize: 84}}
+		fixture.LastTrailer.DiskUsedBytes = new(int64(0))
+		fixture.LastTrailer.Usage.CacheTTLSeconds = 300
+		fixture.LastTrailer.StartupFailure = &agent.StartupFailure{Harness: "claude", Phase: "start", Cause: "broken"}
+		raw := inventoryJSON(t, fixture)
+		for _, fragment := range []string{`"repos":[]`, `"cache_mounts":null`, `"mounts":[]`, `"oldSize":42`, `"newSize":84`, `"disk_used_bytes":0`, `"cache_ttl_seconds":300`, `"startup_failure":{"harness":"claude","phase":"start","cause":"broken"}`} {
+			if !bytes.Contains(raw, []byte(fragment)) {
+				t.Fatalf("shape missing %s: %s", fragment, raw)
+			}
+		}
+		path := filepath.Join(t.TempDir(), "task.jsonl")
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeHeaderCache(path, fixture); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := readHeaderCache(path)
+		if !ok || !bytes.Equal(inventoryJSON(t, got), raw) {
+			t.Fatal("optional and collection fields did not round-trip")
+		}
+	})
+	t.Run("StateValidation", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, body string
+			valid      bool
+		}{
+			{"omitted", `{}`, true},
+			{"unknown", `{"state":"future"}`, false},
+			{"empty", `{"state":""}`, false},
+			{"null", `{"state":null}`, false},
+			{"result_unknown", `{"state":"purged","result":{"state":"future"}}`, false},
+			{"result_null", `{"state":"purged","result":{"state":null}}`, false},
+			{"result_omitted", `{"state":"purged","result":{}}`, true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				path := filepath.Join(t.TempDir(), "task.jsonl")
+				writeLogFile(t, filepath.Dir(path), filepath.Base(path), `{"type":"caic_meta","version":1,"harness":"claude","prompt":"rebuild","repos":[]}`, `{"type":"caic_result","state":"purged"}`)
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := fmt.Sprintf(`{"version":6,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+				if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := readHeaderCache(path); ok != tc.valid {
+					t.Fatalf("cache accepted = %t, want %t", ok, tc.valid)
+				}
+				if !tc.valid {
+					got, err := loadLogHeader(testLogger(), path, true)
+					if err != nil || got.Prompt != "rebuild" {
+						t.Fatalf("rebuild = %+v, %v", got, err)
+					}
+					raw, err := os.ReadFile(logHeaderCachePath(path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.Contains(string(raw), `"future"`) {
+						t.Fatal("corrupt snapshot survived rebuild")
+					}
+				}
+			})
+		}
+	})
 }

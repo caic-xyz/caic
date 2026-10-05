@@ -505,7 +505,7 @@ func TestDecodeDiscriminatorProbe(t *testing.T) {
 // inventoryJSON renders LoadedTask's JSON projection for testing comparison,
 // sidestepping time.Time DeepEqual location sensitivity.
 func inventoryJSON(t *testing.T, lt *LoadedTask) []byte {
-	data, err := json.Marshal(lt)
+	data, err := json.Marshal(headerTaskToData(lt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +657,7 @@ func TestLoadLogHeader(t *testing.T) {
 			body []byte
 		}{
 			{"CorruptJSON", []byte(`{"version":1,`)},
-			{"WrongVersion", []byte(mustJSON(t, headerCache{Version: 999, Task: &LoadedTask{TaskID: "forged"}}))},
+			{"WrongVersion", []byte(`{"version":999,"task":{"task_id":"forged"}}`)},
 			{"Oversized", oversized},
 		}
 		for _, tc := range cases {

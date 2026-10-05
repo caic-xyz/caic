@@ -20,21 +20,18 @@ independent of runtime and API types, while preserving existing file formats.
   retain opaque native JSON. External formats, opaque bytes, generated source,
   and in-memory caches do not require new disk schemas.
 
-## Phase 1 — task-history: Explicit versioned task-log and header contracts
+## Phase 1 — task-history: Explicit versioned physical task-log contracts
 
 - **Scope:** Extract caic-owned [task-log records](../backend/internal/agent/types.go)
-  into `taskslog/data/v1`, `/v2`, and `/v3`, and the
-  [header-cache snapshot](../backend/internal/taskslog/log_header_cache.go)
-  into `taskslog/data/headercache/v6`. Replace direct serialization of agent
-  messages and `LoadedTask` with explicit projections. Cover Go writers,
+  into `taskslog/data/v1`, `/v2`, and `/v3`. Replace direct serialization of agent
+  messages with explicit projections. Cover Go writers,
   Python relays, replay loaders, and log-validation tooling; keep parsing,
   state application, and task `State`/`Result` behavior outside data packages.
 - **Preserve:** V1 field order where contractual, strict v2/v3 decoding,
   canonical envelope bytes, timestamp precision, record-size bounds,
   generation-local relay offsets, pending actions, and restart adoption.
 - **Verify:** Historical fixtures for all three log versions restore tasks and
-  results; Go and relay fixtures agree on physical records. Existing v6 caches
-  load without a version bump and rebuild correctly when invalid. Run agent,
+  results; Go and relay fixtures agree on physical records. Run agent,
   taskslog, task/taskmgr, relay, and check-agent-logs tooling tests. Compare
   focused parse/adoption benchmarks before and after.
 

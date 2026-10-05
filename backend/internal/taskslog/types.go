@@ -1,10 +1,9 @@
-// Task-log data types persist task state, results, and repository mounts.
+// Task lifecycle states, completion results, and repository mounts.
 
 package taskslog
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -78,66 +77,31 @@ const (
 // restoration should read this summary without decoding message bodies; logs
 // that predate required fields may fall back to a full history fold.
 //
-// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
+// Persistence uses explicit projections to versioned data schemas.
 type Result struct {
-	State    State          `json:"state"`
-	DiffStat agent.DiffStat `json:"diff_stat"`
+	State    State
+	DiffStat agent.DiffStat
 	// DiskUsedBytes is the final measured writable-layer size. Nil means the
 	// runtime could not provide a measurement.
-	DiskUsedBytes  *int64                `json:"disk_used_bytes,omitempty"`
-	CostUSD        float64               `json:"cost_usd"`
-	Duration       time.Duration         `json:"duration"`
-	NumTurns       int                   `json:"num_turns"`
-	Usage          agent.Usage           `json:"usage"`
-	AgentResult    string                `json:"agent_result"`
-	StartupFailure *agent.StartupFailure `json:"startup_failure,omitempty"`
-	Err            error                 `json:"-"`
+	DiskUsedBytes  *int64
+	CostUSD        float64
+	Duration       time.Duration
+	NumTurns       int
+	Usage          agent.Usage
+	AgentResult    string
+	StartupFailure *agent.StartupFailure
+	Err            error
 }
-
-// MarshalJSON preserves Result's error text in rebuildable task metadata.
-func (r *Result) MarshalJSON() ([]byte, error) {
-	if r == nil {
-		return []byte("null"), nil
-	}
-	errText := ""
-	if r.Err != nil {
-		errText = r.Err.Error()
-	}
-	return json.Marshal(struct {
-		persistedResult
-
-		Error string `json:"error,omitempty"`
-	}{persistedResult: persistedResult(*r), Error: errText})
-}
-
-// UnmarshalJSON restores Result's persisted error text from task metadata.
-func (r *Result) UnmarshalJSON(data []byte) error {
-	var decoded struct {
-		persistedResult
-
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*r = Result(decoded.persistedResult)
-	if decoded.Error != "" {
-		r.Err = errors.New(decoded.Error)
-	}
-	return nil
-}
-
-type persistedResult Result
 
 // RepoMount describes one repository in a task.
 //
-// Is serialized as task metadata to disk. Is not used for HTTP wire protocol.
+// Persistence uses explicit projections to versioned data schemas.
 type RepoMount struct {
-	Name          string `json:"name"`           // relative path, e.g. "github/caic"
-	BaseBranch    string `json:"base_branch"`    // branch to fork from; empty = checkout default
-	Branch        string `json:"branch"`         // allocated branch, e.g. "caic-0"
-	GitRoot       string `json:"git_root"`       // absolute host path; empty in purged-task entries
-	ContainerPath string `json:"container_path"` // path inside the runtime instance
+	Name          string // relative path, e.g. "github/caic"
+	BaseBranch    string // branch to fork from; empty = checkout default
+	Branch        string // allocated branch, e.g. "caic-0"
+	GitRoot       string // absolute host path; empty in purged-task entries
+	ContainerPath string // path inside the runtime instance
 }
 
 // RepoMountFromMeta converts a log metadata repository to a RepoMount.
