@@ -34,6 +34,8 @@ func PromptToAgent(p v1.Prompt) agent.Prompt {
 // Harness converts harness.Name to v1.Harness.
 func Harness(h harness.Name) (v1.Harness, error) {
 	switch h {
+	case harness.Antigravity:
+		return v1.HarnessAntigravity, nil
 	case harness.Claude:
 		return v1.HarnessClaude, nil
 	case harness.Codex:
@@ -50,6 +52,8 @@ func Harness(h harness.Name) (v1.Harness, error) {
 // ParseHarness converts a harness name string to v1.Harness.
 func ParseHarness(s string) (v1.Harness, error) {
 	switch s {
+	case string(harness.Antigravity):
+		return v1.HarnessAntigravity, nil
 	case string(harness.Claude):
 		return v1.HarnessClaude, nil
 	case string(harness.Codex):
@@ -66,6 +70,8 @@ func ParseHarness(s string) (v1.Harness, error) {
 // AgentHarness converts v1.Harness to harness.Name.
 func AgentHarness(h v1.Harness) (harness.Name, error) {
 	switch h {
+	case v1.HarnessAntigravity:
+		return harness.Antigravity, nil
 	case v1.HarnessClaude:
 		return harness.Claude, nil
 	case v1.HarnessCodex:

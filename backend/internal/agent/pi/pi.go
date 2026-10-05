@@ -141,7 +141,7 @@ func (b *Backend) start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	wire := &piWireFormat{nativeSubagents: nativeSubagents{calls: make(map[string]agent.NativeSubagent)}}
 
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID})
-	var relayArgs []string
+	relayArgs := []string{"--harness", "pi"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
 		args = append(args, "--extension", agent.PiCaicMCPExtensionPath)

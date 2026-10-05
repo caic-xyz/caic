@@ -61,6 +61,7 @@ PID_PATH = os.path.join(RELAY_DIR, "pid")
 CLAUDE_CODE_CAIC_MCP_CONFIG_PATH = os.path.join(RELAY_DIR, "caic-mcp.json")
 CAIC_MCP_SOCK_PATH = os.path.join(RELAY_DIR, "caic-mcp.sock")
 PI_CAIC_MCP_EXTENSION_PATH = os.path.join(RELAY_DIR, "caic-mcp.ts")
+ANTIGRAVITY_CAIC_MCP_DIR = os.path.join(RELAY_DIR, "antigravity-mcp")
 
 # Max size of a single read from subprocess stdout.
 BUF_SIZE = 65536
@@ -127,6 +128,46 @@ def _write_claude_code_caic_mcp_config() -> None:
         json.dump(config, f)
         f.write("\n")
     os.replace(temp_path, CLAUDE_CODE_CAIC_MCP_CONFIG_PATH)
+
+
+def _write_antigravity_caic_mcp_plugin() -> None:
+    """Use agy's supported --add-dir discovery without changing HOME or repos.
+
+    agy 1.2.17 discovers .agents/plugins in additional workspace directories.
+    A fresh plugin namespace avoids collisions in its shared ~/.gemini schema
+    cache. Only this auxiliary workspace is relay-owned; credential/history
+    storage and user customizations retain their normal paths.
+    """
+    os.mkdir(ANTIGRAVITY_CAIC_MCP_DIR, 0o700)
+    plugin_dir = os.path.join(ANTIGRAVITY_CAIC_MCP_DIR, ".agents", "plugins", "caic-task-" + uuid.uuid4().hex)
+    os.makedirs(plugin_dir, mode=0o700)
+    config = {
+        "mcpServers": {
+            "caic": {
+                "command": "python3",
+                "args": [os.path.abspath(sys.argv[0]), "caic-mcp"],
+                "env": {"CAIC_RELAY_DIR": RELAY_DIR},
+            }
+        }
+    }
+    for name, value in (("plugin.json", {"name": os.path.basename(plugin_dir)}), ("mcp_config.json", config)):
+        with open(os.path.join(plugin_dir, name), "x", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), 0o600)
+            json.dump(value, f)
+            f.write("\n")
+
+
+def _remove_caic_mcp_files() -> None:
+    """Remove relay-owned MCP configuration and bridge access for every harness."""
+    for path in (CAIC_MCP_SOCK_PATH, CLAUDE_CODE_CAIC_MCP_CONFIG_PATH, PI_CAIC_MCP_EXTENSION_PATH):
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+    try:
+        shutil.rmtree(ANTIGRAVITY_CAIC_MCP_DIR)
+    except FileNotFoundError:
+        pass
 
 
 def _write_pi_caic_mcp_extension() -> None:
@@ -420,19 +461,27 @@ class _Daemon:
             threading.Thread(target=self._handle_caic_mcp, args=(conn,), daemon=True).start()
 
     def _handle_caic_mcp(self, conn):
+        registered = False
         try:
             raw = _read_line(conn)
             req = json.loads(raw)
+            if not isinstance(req, dict):
+                raise ValueError("MCP request must be an object")
             request_id = req.get("id")
             method = req.get("method")
             name = req.get("name")
             arguments = req.get("arguments")
             if not isinstance(request_id, str) or not request_id or method not in ("tools/list", "tools/call"):
                 raise ValueError("invalid MCP request")
-            if method == "tools/call" and (not isinstance(name, str) or not isinstance(arguments, dict)):
+            if method == "tools/call" and (not isinstance(name, str) or not name or not isinstance(arguments, dict)):
                 raise ValueError("invalid MCP tool call")
             with self.caic_mcp_lock:
+                if self.shutdown_event.is_set():
+                    raise ValueError("task-scoped MCP is shutting down")
+                if request_id in self.caic_mcp_clients:
+                    raise ValueError("duplicate MCP request ID")
                 self.caic_mcp_clients[request_id] = conn
+                registered = True
             fields = {"id": request_id, "method": method}
             if method == "tools/call":
                 fields["name"] = name
@@ -440,6 +489,9 @@ class _Daemon:
             self.publish_control("mcp_request", fields, to_client=True)
             return
         except (json.JSONDecodeError, OSError, ValueError) as error:
+            if registered:
+                with self.caic_mcp_lock:
+                    self.caic_mcp_clients.pop(request_id, None)
             try:
                 conn.sendall((json.dumps({"error": str(error)}) + "\n").encode())
             except OSError:
@@ -461,6 +513,15 @@ class _Daemon:
             pass
         conn.close()
         return True
+
+    def close_caic_mcp_clients(self):
+        """Release waiting task-MCP clients when their relay is torn down."""
+        self.shutdown_event.set()
+        with self.caic_mcp_lock:
+            clients = list(self.caic_mcp_clients.values())
+            self.caic_mcp_clients.clear()
+        for conn in clients:
+            conn.close()
 
     def publish_records(self, *records, to_client):
         """Publish complete records in identical file/client order."""
@@ -778,7 +839,27 @@ class _Daemon:
         self.shutdown_event.set()
 
 
-def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
+def _configure_caic_mcp(harness: str, cmd_args: list[str]) -> list[str]:
+    """Prepare only the selected harness's integration before process startup.
+
+    Codex receives its MCP command through backend-generated CLI options.
+    OpenCode receives it through ACP session creation/loading. The relay
+    owns their bridges but needs no additional configuration.
+    """
+    match harness:
+        case "antigravity":
+            _write_antigravity_caic_mcp_plugin()
+            return [*cmd_args, "--add-dir", ANTIGRAVITY_CAIC_MCP_DIR]
+        case "claude":
+            _write_claude_code_caic_mcp_config()
+        case "codex" | "opencode":
+            pass
+        case "pi":
+            _write_pi_caic_mcp_extension()
+    return cmd_args
+
+
+def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, harness, caic_mcp):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -802,7 +883,9 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
         a stripped_env event after the first subprocess output.
       shutdown_grace: Seconds to wait after SIGINT before escalating to
         SIGTERM, then SIGKILL.
-      caic_mcp: Start the local CAIC MCP bridge before the harness.
+      harness: Harness identity, independent of optional integrations.
+      caic_mcp: Enable task MCP for the selected harness.
+        All integrations share the same bridge lifetime and cleanup.
 
     Failure modes handled:
       - SSH drops: client disconnects, subprocess keeps running. Next
@@ -827,10 +910,7 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
         os.unlink(SOCK_PATH)
     except FileNotFoundError:
         pass
-    try:
-        os.unlink(CAIC_MCP_SOCK_PATH)
-    except FileNotFoundError:
-        pass
+    _remove_caic_mcp_files()
 
     # Fork to become a daemon.
     pid = os.fork()
@@ -937,17 +1017,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
 
     try:
         if caic_mcp:
-            _write_claude_code_caic_mcp_config()
-            _write_pi_caic_mcp_extension()
-            try:
-                opencode_config = json.loads(env.get("OPENCODE_CONFIG_CONTENT", "{}"))
-            except json.JSONDecodeError:
-                opencode_config = {}
-            opencode_config.setdefault("mcp", {})["caic"] = {
-                "type": "local",
-                "command": ["python3", os.path.abspath(sys.argv[0]), "caic-mcp"],
-            }
-            env["OPENCODE_CONFIG_CONTENT"] = json.dumps(opencode_config)
+            cmd_args = _configure_caic_mcp(harness, cmd_args)
+        d.cmd_args = list(cmd_args)
         proc = subprocess.Popen(
             _oom_adjusted_command(cmd_args),
             cwd=work_dir,
@@ -963,6 +1034,10 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
         d.set_client(None, "subprocess_start_failed")
         output_file.close()
         srv.close()
+        if caic_mcp_srv is not None:
+            caic_mcp_srv.close()
+        d.close_caic_mcp_clients()
+        _remove_caic_mcp_files()
         try:
             os.unlink(SOCK_PATH)
         except FileNotFoundError:
@@ -1040,10 +1115,8 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, caic_mcp):
         os.unlink(SOCK_PATH)
     except FileNotFoundError:
         pass
-    try:
-        os.unlink(CAIC_MCP_SOCK_PATH)
-    except FileNotFoundError:
-        pass
+    d.close_caic_mcp_clients()
+    _remove_caic_mcp_files()
     try:
         os.unlink(PID_PATH)
     except FileNotFoundError:
@@ -1178,9 +1251,10 @@ def caic_mcp():
     for line in sys.stdin:
         message = {}
         try:
-            message = json.loads(line)
-            if not isinstance(message, dict):
+            parsed = json.loads(line)
+            if not isinstance(parsed, dict):
                 raise ValueError("MCP request must be an object")
+            message = parsed
             method = message.get("method")
             message_id = message.get("id")
             if method == "initialize":
@@ -1222,6 +1296,14 @@ def caic_mcp():
                 else:
                     result = response["result"]
             else:
+                if message_id is not None:
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": message_id,
+                        "error": {"code": -32601, "message": "method not found"},
+                    }
+                    sys.stdout.write(json.dumps(response) + "\n")
+                    sys.stdout.flush()
                 continue
             sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message_id, "result": result}) + "\n")
         except (json.JSONDecodeError, OSError, ValueError, KeyError) as error:
@@ -1241,6 +1323,7 @@ def main() -> int:
     sa = sub.add_parser("serve-attach")
     sa.add_argument("--dir", required=True, dest="work_dir")
     sa.add_argument("--no-log-stdin", action="store_true")
+    sa.add_argument("--harness", choices=("antigravity", "claude", "codex", "opencode", "pi"))
     sa.add_argument("--caic-mcp", action="store_true")
     sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
     sa.add_argument(
@@ -1262,12 +1345,15 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.mode == "serve-attach":
+        if args.caic_mcp and args.harness is None:
+            parser.error("--caic-mcp requires --harness")
         serve(
             args.cmd,
             args.work_dir,
             log_stdin=not args.no_log_stdin,
             strip_env=args.strip_env,
             shutdown_grace=args.shutdown_grace,
+            harness=args.harness,
             caic_mcp=args.caic_mcp,
         )
     elif args.mode == "attach":

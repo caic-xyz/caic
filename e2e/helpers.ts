@@ -87,7 +87,7 @@ export async function createTaskAPI(api: APIClient, prompt: string): Promise<str
   const resp = await api.createTask({
     initialPrompt: { text: prompt },
     repos: [{ name: repos[0].path }],
-    harness: harnesses[0].name,
+    harness: "claude",
   });
   expect(resp.id).toBeTruthy();
   return resp.id;

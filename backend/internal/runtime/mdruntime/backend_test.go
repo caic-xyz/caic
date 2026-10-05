@@ -744,6 +744,33 @@ func TestBackend(t *testing.T) {
 		}
 	})
 
+	t.Run("Antigravity state", func(t *testing.T) {
+		t.Parallel()
+		const dir = "/home/user/.gemini"
+		src := &fakeMDContainer{
+			agentMounts: []md.Mount{{HostPath: dir, ContainerPath: dir}},
+			forkResult:  &fakeMDContainer{name: "agy-fork"},
+		}
+		b := newTestBackend(&fakeMDClient{getResult: src})
+		opts, err := b.mdStartOpts(src, &runtime.StartOptions{Harness: harness.Antigravity})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(src.agentPaths) != 1 || src.agentPaths[0].ReadOnly ||
+			!slices.Equal(src.agentPaths[0].HomePaths, []string{".gemini"}) {
+			t.Fatalf("Antigravity paths = %+v, want writable .gemini directory", src.agentPaths)
+		}
+		if len(opts.Mounts) != 1 || opts.Mounts[0].ContainerPath != dir || opts.Mounts[0].ReadOnly {
+			t.Fatalf("start mounts = %+v, want writable .gemini directory", opts.Mounts)
+		}
+		if _, _, err := b.Fork(t.Context(), "docker:src", &runtime.ForkOptions{Harness: harness.Antigravity}); err != nil {
+			t.Fatal(err)
+		}
+		if len(src.forkOpts.Mounts) != 1 || src.forkOpts.Mounts[0].ContainerPath != dir || src.forkOpts.Mounts[0].ReadOnly {
+			t.Fatalf("fork mounts = %+v, want writable .gemini directory", src.forkOpts.Mounts)
+		}
+	})
+
 	t.Run("CPU limits", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {

@@ -1,4 +1,4 @@
-// Package antigravity implements an experimental agent.Backend for the agy CLI's stream-json protocol.
+// Package antigravity implements agy stream-json sessions with relay-owned task MCP.
 package antigravity
 
 import (
@@ -19,9 +19,9 @@ import (
 	"github.com/maruel/genai/providers/antigravity"
 )
 
-// Backend implements agent.Backend for agy. It is not in the default registry:
-// container installation, credential mounting, and task MCP integration still
-// need live verification. agy 1.2.14 accepts text input only.
+// Backend implements agent.Backend for agy. Task MCP uses a relay-owned plugin
+// workspace without changing shared ~/.gemini settings. agy accepts text input
+// only.
 type Backend struct {
 	agent.Base
 }
@@ -33,24 +33,27 @@ func New(cacheDir string, envVars []string) *Backend {
 	return b
 }
 
-// Start launches agy through the shared relay. Task MCP is not supported yet.
+// Start launches agy through the shared relay and its task-local MCP plugin.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	if len(opts.InitialPrompt.Images) != 0 {
 		return nil, errors.New("antigravity: image input is not supported")
 	}
+	relayArgs := []string{"--harness", "antigravity"}
 	if opts.MCP != nil {
-		return nil, errors.New("antigravity: task MCP integration is not supported yet")
+		relayArgs = append(relayArgs, "--caic-mcp")
 	}
-	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{
+	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, b.AgentArgs(agent.HarnessArgs{
 		Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID,
-	}), b.NewWire())
+	}))
+	if err != nil {
+		return nil, err
+	}
+	c := agent.NewMCPConn(ctx, opts.Logger, rp.Stdin, opts.Log, b.NewWire(), opts.MCP)
+	return agent.StartSession(ctx, rp, c, opts)
 }
 
 // AttachRelay reconnects to a running agy process through the shared relay.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	if opts.MCP != nil {
-		return nil, errors.New("antigravity: task MCP integration is not supported yet")
-	}
 	return agent.AttachRelaySession(ctx, opts, b.NewWire(), nil)
 }
 

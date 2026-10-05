@@ -1165,10 +1165,11 @@ func (b *Backend) forgetContainer(name string) {
 
 // harnessMap maps caic harnesses to their md equivalents.
 var harnessMap = map[harness.Name]md.Harness{
-	harness.Claude:   md.HarnessClaude,
-	harness.Codex:    md.HarnessCodex,
-	harness.OpenCode: md.HarnessOpencode,
-	harness.Pi:       md.HarnessPi,
+	harness.Antigravity: md.HarnessAntigravity,
+	harness.Claude:      md.HarnessClaude,
+	harness.Codex:       md.HarnessCodex,
+	harness.OpenCode:    md.HarnessOpencode,
+	harness.Pi:          md.HarnessPi,
 }
 
 // baseExtraEnv returns the ~/.env entries every instance gets: the editor

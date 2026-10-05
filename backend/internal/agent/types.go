@@ -900,7 +900,15 @@ func (m *ExitMessage) ExitError() string {
 	return fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
 }
 
-// LogVersion identifies a physical task-log format.
+// LogVersion identifies a physical task-log format, not a relay implementation
+// or live protocol version. Each format owns independent data types under
+// taskslog/data/vN; historical records convert at the read boundary.
+//
+// Change the version when record bytes or meanings cannot fit the existing
+// contract without breaking supported readers or replay. Preserve historical
+// readers. Reading support does not imply writing or continuation support;
+// ValidateWritable defines that boundary separately. Internal type renames,
+// refactoring, and coordinated relay launch changes do not change this version.
 type LogVersion int
 
 // Validate rejects unsupported task-log versions.

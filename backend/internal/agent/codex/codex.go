@@ -82,7 +82,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// }
 
 	codexArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
-	var relayArgs []string
+	relayArgs := []string{"--harness", "codex"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
 		codexArgs = append(codexArgs,

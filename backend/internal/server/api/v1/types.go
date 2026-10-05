@@ -38,10 +38,11 @@ type Harness string
 
 // Supported agent harnesses.
 const (
-	HarnessClaude   Harness = "claude"
-	HarnessCodex    Harness = "codex"
-	HarnessOpenCode Harness = "opencode"
-	HarnessPi       Harness = "pi"
+	HarnessAntigravity Harness = "antigravity"
+	HarnessClaude      Harness = "claude"
+	HarnessCodex       Harness = "codex"
+	HarnessOpenCode    Harness = "opencode"
+	HarnessPi          Harness = "pi"
 )
 
 // QuotaProvider identifies a monitored quota source.

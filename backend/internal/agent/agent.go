@@ -454,7 +454,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 			return nil, fmt.Errorf("warm relay history: %w", err)
 		}
 	}
-	c := NewConn(ctx, opts.Logger, stdin, opts.Log, wire)
+	c := NewMCPConn(ctx, opts.Logger, stdin, opts.Log, wire, opts.MCP)
 	if wrap != nil {
 		c, err = wrap(c)
 		if err != nil {

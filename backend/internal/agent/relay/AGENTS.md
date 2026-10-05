@@ -6,6 +6,11 @@ the Go binary.
 
 ## Relay versions
 
+Apply the compatibility policy beside [`ScriptV2`](embed.go) before changing
+relay contracts. Version physical logs, live protocol, and launch CLI
+independently. Do not create a new frozen script because a refactor is large.
+Use [`LogVersion`](../types.go) for physical task-log version rules.
+
 `relay_v2.py` is the maintained relay. It implements canonical v2 framing and is
 deployed for writable v2 and v3 logs. Fix relay behavior here and cover it in
 `test_relay_v2.py`.

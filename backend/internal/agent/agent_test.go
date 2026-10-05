@@ -21,6 +21,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/maruel/gomode/mcp"
+	"github.com/maruel/gomode/mcp/mcptest"
 )
 
 // testWire implements WireFormat for testing.
@@ -164,6 +165,55 @@ func (*testLogSink) Close() error { return nil }
 // physical task-log format, matching what a live relay writes.
 func appendRelayNativeRecord(log LogSink, version LogVersion, data []byte) error {
 	return appendNativeRecord(log, version, logRecordAgent, data)
+}
+
+type mcpTestStdin struct{ bytes.Buffer }
+
+func (*mcpTestStdin) Close() error { return nil }
+
+func TestNewMCPConn(t *testing.T) {
+	t.Parallel()
+	request := `{"t":"mcp_request","id":"same-id","method":"tools/call","name":"echo","arguments":{}}` + "\n"
+	t.Run("task routing and retry", func(t *testing.T) {
+		t.Parallel()
+		for _, task := range []string{"first", "second"} {
+			registry := &mcptest.FakeRegistry{CallErr: errors.New("retry this task")}
+			var stdin mcpTestStdin
+			sink := &testLogSink{Version: LogVersionV3}
+			c := NewMCPConn(t.Context(), testLogger(), &stdin, sink, testWire{}, registry)
+			messages := make(chan TimedMessage, 1)
+			if err := c.ReadMessages(strings.NewReader(request), messages); err != nil {
+				t.Fatal(err)
+			}
+			var response MCPResponseEnvelope
+			if err := json.Unmarshal(stdin.Bytes(), &response); err != nil || response.ID != "same-id" || response.Error != "retry this task" {
+				t.Fatalf("failed call = %+v, %v", response, err)
+			}
+			stdin.Reset()
+			registry.CallErr = nil
+			registry.CallResult = &mcp.RawToolResult{Structured: mcp.TextOutput{Result: task}}
+			if err := c.ReadMessages(strings.NewReader(request), messages); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdin.String(), `"result":"`+task+`"`) || strings.Contains(stdin.String(), `"error"`) {
+				t.Fatalf("retried task call = %s", stdin.String())
+			}
+			if len(messages) != 0 || strings.Contains(sink.String(), `"t":"input"`) {
+				t.Fatal("MCP controls were forwarded as agent messages or logged as user inputs")
+			}
+		}
+	})
+	t.Run("unavailable registry", func(t *testing.T) {
+		t.Parallel()
+		var stdin mcpTestStdin
+		c := NewMCPConn(t.Context(), testLogger(), &stdin, &testLogSink{Version: LogVersionV3}, testWire{}, nil)
+		if err := c.ReadMessages(strings.NewReader(request), make(chan TimedMessage, 1)); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(stdin.String(), "task-scoped MCP is unavailable") {
+			t.Fatalf("unavailable result = %s", stdin.String())
+		}
+	})
 }
 
 func TestMCPToolResultResponse(t *testing.T) {

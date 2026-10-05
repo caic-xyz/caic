@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"reflect"
@@ -41,8 +42,8 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("Start", func(t *testing.T) {
 		t.Parallel()
-		if _, err := b.Start(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}}); err == nil {
-			t.Fatal("task MCP must fail before launch")
+		if _, err := b.Start(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}, Logger: slog.Default(), Dir: "/tmp"}); err == nil || !strings.Contains(err.Error(), "missing SSH host") {
+			t.Fatalf("task MCP start target validation = %v", err)
 		}
 		// An empty target would fail relay launch. The image error must precede
 		// any launch so rejection cannot leave an orphaned remote process.
@@ -52,8 +53,8 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("AttachRelay", func(t *testing.T) {
 		t.Parallel()
-		if _, err := b.AttachRelay(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}}); err == nil {
-			t.Fatal("task MCP must fail before attach")
+		if _, err := b.AttachRelay(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}}); err == nil || !strings.Contains(err.Error(), "missing SSH host") {
+			t.Fatalf("task MCP attach target validation = %v", err)
 		}
 	})
 	t.Run("FetchModelInventory", func(t *testing.T) {

@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/andybalholm/brotli v1.2.6
 	github.com/buger/jsonparser v1.6.1
-	github.com/caic-xyz/md v0.18.5-0.20261004024425-fe4326c68630
+	github.com/caic-xyz/md v0.18.5-0.20261005172546-934ad68eb109
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/huin/goupnp v1.3.0

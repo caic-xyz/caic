@@ -291,7 +291,7 @@ def _cleanup(relay_dir: str) -> None:
 
 
 def test_harness_caic_mcp_integrations() -> None:
-    """The v2 relay writes local Claude Code, OpenCode, and Pi integrations."""
+    """Each harness receives only its integration and shares teardown semantics."""
     relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
     config_path = os.path.join(relay_dir, "caic-mcp.json")
     extension_path = os.path.join(relay_dir, "caic-mcp.ts")
@@ -299,74 +299,107 @@ def test_harness_caic_mcp_integrations() -> None:
     env = _make_env(relay_dir)
 
     try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                str(RELAY_PY),
-                "serve-attach",
-                "--dir",
-                relay_dir,
-                "--caic-mcp",
-                "--",
-                "sh",
-                "-c",
-                "printf '%s' \"$OPENCODE_CONFIG_CONTENT\" > opencode-config.json; cat",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-        )
-
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if os.path.exists(config_path) and os.path.exists(opencode_path):
-                break
-            time.sleep(0.05)
-        else:
-            raise AssertionError("relay did not write CAIC MCP config")
-
-        with open(config_path, encoding="utf-8") as config_file:
-            config = json.load(config_file)
-        assert config == {
-            "mcpServers": {
-                "caic": {
-                    "type": "stdio",
-                    "command": "python3",
-                    "args": [str(RELAY_PY), "caic-mcp"],
-                }
-            }
-        }
-        assert os.stat(config_path).st_mode & 0o777 == 0o600
-        with open(extension_path, encoding="utf-8") as extension_file:
-            extension = extension_file.read()
-        assert 'method: "tools/list"' in extension
-        assert "for (const tool of tools)" in extension
-        assert 'name: "task_create"' not in extension
-        assert "socketPath" in extension
-        assert os.stat(extension_path).st_mode & 0o777 == 0o600
-        with open(opencode_path, encoding="utf-8") as opencode_file:
-            opencode_config = json.load(opencode_file)
-        assert opencode_config == {
-            "mcp": {
-                "caic": {
-                    "type": "local",
-                    "command": ["python3", str(RELAY_PY), "caic-mcp"],
-                }
-            }
-        }
-
-        assert proc.stdin is not None
-        proc.stdin.write(b"\x00\n")
-        proc.stdin.flush()
-        proc.stdin.close()
-        proc.wait(timeout=15)
+        for harness in ("claude", "codex", "opencode", "pi"):
+            env["OPENCODE_CONFIG_CONTENT"] = '{"model":"existing" /* user comment */, "mcp":{"user":{}},}'
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(RELAY_PY),
+                    "serve-attach",
+                    "--dir",
+                    relay_dir,
+                    "--harness",
+                    harness,
+                    "--caic-mcp",
+                    "--",
+                    "sh",
+                    "-c",
+                    "printf '%s' \"$OPENCODE_CONFIG_CONTENT\" > opencode-config.json; echo ready; cat",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            try:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    if b"ready" in line:
+                        break
+                else:
+                    raise AssertionError("harness did not start")
+                assert os.path.exists(config_path) == (harness == "claude")
+                assert os.path.exists(extension_path) == (harness == "pi")
+                if harness == "claude":
+                    config = json.loads(Path(config_path).read_text())
+                    server = config["mcpServers"]["caic"]
+                    assert server["command"] == "python3"
+                    assert server["args"] == [str(RELAY_PY), "caic-mcp"]
+                    assert os.stat(config_path).st_mode & 0o777 == 0o600
+                if harness == "pi":
+                    extension = Path(extension_path).read_text()
+                    assert 'method: "tools/list"' in extension
+                    assert "for (const tool of tools)" in extension
+                    assert 'name: "task_create"' not in extension
+                    assert "socketPath" in extension
+                    assert os.stat(extension_path).st_mode & 0o777 == 0o600
+                assert Path(opencode_path).read_text() == env["OPENCODE_CONFIG_CONTENT"]
+                assert proc.stdin is not None
+                proc.stdin.write(b"\x00\n")
+                proc.stdin.flush()
+                proc.stdin.close()
+                proc.wait(timeout=15)
+                deadline = time.monotonic() + 5
+                owned_paths = (config_path, extension_path, os.path.join(relay_dir, "caic-mcp.sock"))
+                while any(os.path.exists(path) for path in owned_paths):
+                    assert time.monotonic() < deadline, "MCP teardown did not finish"
+                    time.sleep(0.05)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=15)
     finally:
-        try:
-            proc.kill()
-        except OSError:
-            pass
         _cleanup(relay_dir)
+
+
+def test_harness_without_caic_mcp() -> None:
+    """Harness identity alone starts the process without task-MCP integration."""
+    with tempfile.TemporaryDirectory(prefix="caic-harness-test-") as root:
+        for harness in ("antigravity", "claude", "codex", "opencode", "pi"):
+            relay_dir = os.path.join(root, harness)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(RELAY_PY),
+                    "serve-attach",
+                    "--dir",
+                    root,
+                    "--harness",
+                    harness,
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import json, os, sys; "
+                    "print(json.dumps(dict(args=sys.argv[1:], files=os.listdir(os.environ['CAIC_RELAY_DIR']))))",
+                ],
+                input=b"",
+                capture_output=True,
+                env=_make_env(relay_dir),
+                timeout=15,
+            )
+            records = _decode_records(result.stdout)
+            messages = [record["msg"] for record in records if record["t"] == "agent"]
+            assert len(messages) == 1, (result.stdout, result.stderr)
+            assert messages[0]["args"] == []
+            assert not any(name.startswith("caic-mcp") or name == "antigravity-mcp" for name in messages[0]["files"])
+        result = subprocess.run(
+            [sys.executable, str(RELAY_PY), "serve-attach", "--dir", root, "--caic-mcp", "--", "true"],
+            capture_output=True,
+            env=_make_env(os.path.join(root, "invalid")),
+            timeout=5,
+        )
+        assert result.returncode == 2
+        assert b"--caic-mcp requires --harness" in result.stderr
 
 
 def _new_daemon(relay: ModuleType, *, chunks: tuple[bytes, ...] = (), log_stdin: bool = True):
@@ -410,6 +443,40 @@ def test_caic_mcp_bridge() -> None:
         assert json.loads(relay._read_line(local)) == {"id": "request-1", "result": {"content": []}}
     finally:
         local.close()
+
+
+def test_caic_mcp_request_isolation() -> None:
+    """Request IDs cannot replace another client or cross relay lifetimes."""
+    relay = _load_relay()
+    first, _proc, _output, _client = _new_daemon(relay)
+    second, _proc, _output, _client = _new_daemon(relay)
+    raw = b'{"id":"same-id","method":"tools/call","name":"echo","arguments":{}}\n'
+    local_first = RecordingSocket((raw,))
+    local_second = RecordingSocket((raw,))
+    first._handle_caic_mcp(local_first)
+    duplicate = RecordingSocket((raw,))
+    first._handle_caic_mcp(duplicate)
+    assert duplicate.closed and "duplicate" in json.loads(duplicate.sent)["error"]
+    assert not local_first.closed
+    assert not second.respond_caic_mcp({"id": "same-id", "result": "wrong task"})
+    second._handle_caic_mcp(local_second)
+    assert first.respond_caic_mcp({"id": "same-id", "result": "first task"})
+    assert second.respond_caic_mcp({"id": "same-id", "result": "second task"})
+    assert json.loads(local_first.sent)["result"] == "first task"
+    assert json.loads(local_second.sent)["result"] == "second task"
+    pending = RecordingSocket((raw,))
+    first._handle_caic_mcp(pending)
+    first.close_caic_mcp_clients()
+    assert pending.closed and not first.caic_mcp_clients
+    assert not first.respond_caic_mcp({"id": "same-id", "result": "stale"})
+    stopped = RecordingSocket((raw,))
+    first._handle_caic_mcp(stopped)
+    assert stopped.closed and "shutting down" in json.loads(stopped.sent)["error"]
+    for value in ([], {}, {"id": "invalid", "method": "tools/call", "name": "", "arguments": {}}):
+        bad = RecordingSocket(((json.dumps(value) + "\n").encode(),))
+        second._handle_caic_mcp(bad)
+        assert bad.closed and "error" in json.loads(bad.sent)
+    assert not second.caic_mcp_clients
 
 
 def test_caic_mcp_stdio_server() -> None:
@@ -887,6 +954,118 @@ def test_exit_and_stripped_environment_controls() -> None:
         _cleanup(relay_dir)
 
 
+def test_antigravity_mcp_lifecycle() -> None:
+    """Auxiliary plugins preserve HOME/worktrees and are removed on exit/retry."""
+    with tempfile.TemporaryDirectory(prefix="caic-agy-mcp-test-") as root:
+        relay_dir = os.path.join(root, "relay")
+        work_dir = os.path.join(root, "work")
+        home = os.path.join(root, "home")
+        os.makedirs(work_dir)
+        os.makedirs(os.path.join(home, ".gemini", "config"))
+        settings = Path(home, ".gemini", "config", "mcp_config.json")
+        settings.write_text("user settings must survive", encoding="utf-8")
+        env = {**_make_env(relay_dir), "HOME": home}
+        auxiliary = Path(relay_dir, "antigravity-mcp")
+        names = []
+        for fail in (False, True, False):
+            command = (
+                ["caic-test-missing-executable"]
+                if fail
+                else [
+                    sys.executable,
+                    "-u",
+                    "-c",
+                    "import json, os, sys; "
+                    "data = dict(home=os.environ['HOME'], cwd=os.getcwd(), args=sys.argv[1:]); "
+                    "print(json.dumps(data), flush=True); sys.stdin.read()",
+                ]
+            )
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(RELAY_PY),
+                    "serve-attach",
+                    "--dir",
+                    work_dir,
+                    "--harness",
+                    "antigravity",
+                    "--caic-mcp",
+                    "--",
+                    *command,
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            try:
+                if fail:
+                    out, err = proc.communicate(timeout=10)
+                    records = _decode_records(out)
+                    exits = [record for record in records if record["t"] == "exit"]
+                    assert exits and exits[0]["exit_code"] != 0, (out, err)
+                else:
+                    assert proc.stdout is not None
+                    while True:
+                        record = json.loads(proc.stdout.readline())
+                        if record["t"] == "agent":
+                            break
+                    assert record["msg"] == {"home": home, "cwd": work_dir, "args": ["--add-dir", str(auxiliary)]}
+                    plugins = list((auxiliary / ".agents" / "plugins").iterdir())
+                    assert len(plugins) == 1
+                    plugin = plugins[0]
+                    names.append(plugin.name)
+                    assert json.loads((plugin / "plugin.json").read_text())["name"] == plugin.name
+                    config = json.loads((plugin / "mcp_config.json").read_text())
+                    assert config["mcpServers"]["caic"] == {
+                        "command": "python3",
+                        "args": [str(RELAY_PY), "caic-mcp"],
+                        "env": {"CAIC_RELAY_DIR": relay_dir},
+                    }
+                    assert auxiliary.stat().st_mode & 0o777 == 0o700
+                    assert (plugin / "mcp_config.json").stat().st_mode & 0o777 == 0o600
+                    assert not list(Path(work_dir).iterdir())
+                    assert settings.read_text() == "user settings must survive"
+                    proc.communicate(b"\x00\n", timeout=15)
+                deadline = time.monotonic() + 5
+                while auxiliary.exists() or os.path.exists(os.path.join(relay_dir, "caic-mcp.sock")):
+                    assert time.monotonic() < deadline, "task MCP config/access survived teardown"
+                    time.sleep(0.02)
+                assert settings.read_text() == "user settings must survive"
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+        assert len(set(names)) == 2, "retry reused a shared schema-cache namespace"
+
+
+def test_caic_mcp_stdio_errors() -> None:
+    """Unknown requests receive protocol errors; bad JSON does not kill retries."""
+    messages = [
+        "[]",
+        "{",
+        '{"jsonrpc":"2.0","id":7,"method":"server/discover"}',
+        '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"x","arguments":[]}}',
+        '{"jsonrpc":"2.0","method":"unknown-notification"}',
+        '{"jsonrpc":"2.0","id":9,"method":"initialize"}',
+    ]
+    proc = subprocess.run(
+        [sys.executable, str(RELAY_PY), "caic-mcp"],
+        input="\n".join(messages) + "\n",
+        text=True,
+        capture_output=True,
+        timeout=5,
+    )
+    assert proc.returncode == 0, proc.stderr
+    responses = [json.loads(line) for line in proc.stdout.splitlines()]
+    assert len(responses) == 5, responses
+    assert responses[0]["id"] is None and responses[0]["error"]["code"] == -32602
+    assert responses[1]["id"] is None and responses[1]["error"]["code"] == -32602
+    assert responses[2]["id"] == 7 and responses[2]["error"]["code"] == -32601
+    assert responses[3]["id"] == 8 and responses[3]["error"]["code"] == -32602
+    assert responses[4]["id"] == 9 and "result" in responses[4]
+
+
 def test_parse_numstat() -> None:
     relay = _load_relay()
     result = relay._parse_numstat("10\t3\tsrc/main.go\n-\t-\timage.png\n")
@@ -933,9 +1112,13 @@ def main() -> int:
         test_real_relay_output_superset_no_stdin_echo_and_attach_offset,
         test_exit_and_stripped_environment_controls,
         test_harness_caic_mcp_integrations,
+        test_harness_without_caic_mcp,
         test_oom_adjusted_command,
         test_caic_mcp_bridge,
+        test_caic_mcp_request_isolation,
         test_caic_mcp_stdio_server,
+        test_caic_mcp_stdio_errors,
+        test_antigravity_mcp_lifecycle,
         test_parse_numstat,
     )
     failed: list[str] = []

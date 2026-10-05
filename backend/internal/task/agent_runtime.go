@@ -91,6 +91,18 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 	// Remember the state inferred from restored messages so we don't
 	// blindly override it to StateRunning for an idle relay.
 	prevState := t.GetState()
+	opts := &agent.Options{
+		Logger:             r.Log,
+		Target:             t.RuntimeConnectionTarget(),
+		RelayOffset:        t.RelayOffsetValue(),
+		WarmHistory:        true,
+		ResumeSessionID:    sessionID,
+		Effort:             t.RequestedEffort,
+		PendingUserActions: t.PendingUserActions(),
+	}
+	if err := r.configureTaskMCP(t, opts); err != nil {
+		return nil, fmt.Errorf("reconnect: %w", err)
+	}
 
 	// Reconnect resumes an existing session, so append only after Reopen
 	// validates the existing file's authoritative header. A missing or corrupt
@@ -114,18 +126,9 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 	if prevState != taskslog.StateWaiting && prevState != taskslog.StateAsking {
 		t.SetState(taskslog.StateRunning)
 	}
-	target := t.RuntimeConnectionTarget()
-	session, err := r.Backends[t.Harness].AttachRelay(ctx, &agent.Options{
-		Logger:             r.Log,
-		Target:             target,
-		RelayOffset:        t.RelayOffsetValue(),
-		WarmHistory:        true,
-		ResumeSessionID:    sessionID,
-		Effort:             t.RequestedEffort,
-		PendingUserActions: t.PendingUserActions(),
-		MsgCh:              msgCh,
-		Log:                log,
-	})
+	opts.MsgCh = msgCh
+	opts.Log = log
+	session, err := r.Backends[t.Harness].AttachRelay(ctx, opts)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone

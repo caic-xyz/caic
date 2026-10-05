@@ -15,13 +15,14 @@ func TestFakeAgentBackends(t *testing.T) {
 	t.Parallel()
 
 	backends := fakeAgentBackends()
-	if len(backends) != 3 {
-		t.Fatalf("fake backend count = %d, want 3", len(backends))
+	if len(backends) != 4 {
+		t.Fatalf("fake backend count = %d, want 4", len(backends))
 	}
 	for _, test := range []struct {
 		harness  harness.Name
 		provider agent.QuotaProvider
 	}{
+		{harness: harness.Antigravity, provider: ""},
 		{harness: harness.Claude, provider: agent.QuotaProviderClaudeCode},
 		{harness: harness.Codex, provider: agent.QuotaProviderCodex},
 		{harness: harness.Pi, provider: ""},

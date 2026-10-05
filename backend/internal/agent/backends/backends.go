@@ -8,14 +8,16 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
+	"github.com/caic-xyz/caic/backend/internal/agents/antigravity"
 )
 
 // Default returns the standard caic agent backend set.
 func Default(cacheDir string, harnessEnv map[string][]string) agent.Backends {
 	return agent.Backends{
-		harness.Claude:   claudecode.New(),
-		harness.Codex:    codex.New(cacheDir, harnessEnv[string(harness.Codex)]),
-		harness.OpenCode: opencode.New(cacheDir, harnessEnv[string(harness.OpenCode)]),
-		harness.Pi:       pi.New(cacheDir, harnessEnv[string(harness.Pi)]),
+		harness.Antigravity: antigravity.New(cacheDir, harnessEnv[string(harness.Antigravity)]),
+		harness.Claude:      claudecode.New(),
+		harness.Codex:       codex.New(cacheDir, harnessEnv[string(harness.Codex)]),
+		harness.OpenCode:    opencode.New(cacheDir, harnessEnv[string(harness.OpenCode)]),
+		harness.Pi:          pi.New(cacheDir, harnessEnv[string(harness.Pi)]),
 	}
 }

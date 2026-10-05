@@ -63,7 +63,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
 	}
 	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
-	var relayArgs []string
+	relayArgs := []string{"--harness", "claude"}
 	if opts.MCP != nil {
 		args = append(args, "--mcp-config", agent.ClaudeCodeCaicMCPConfigPath)
 		relayArgs = append(relayArgs, "--caic-mcp")

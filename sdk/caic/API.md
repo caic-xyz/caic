@@ -319,6 +319,7 @@ Values must match harness.Name constants.
 
 | Value | Description |
 |-------|-------------|
+| `antigravity` |  |
 | `claude` |  |
 | `codex` |  |
 | `opencode` |  |

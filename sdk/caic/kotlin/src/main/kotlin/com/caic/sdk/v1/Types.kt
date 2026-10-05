@@ -697,6 +697,10 @@ object GitOperationSerializer : KSerializer<GitOperation> {
 sealed interface Harness {
     val value: String
     @Serializable
+    data object Antigravity : Harness {
+        override val value = "antigravity"
+    }
+    @Serializable
     data object Claude : Harness {
         override val value = "claude"
     }
@@ -722,6 +726,7 @@ object HarnessSerializer : KSerializer<Harness> {
     override fun deserialize(decoder: Decoder): Harness {
         val v = decoder.decodeString()
         return when (v) {
+            "antigravity" -> Harness.Antigravity
             "claude" -> Harness.Claude
             "codex" -> Harness.Codex
             "opencode" -> Harness.OpenCode

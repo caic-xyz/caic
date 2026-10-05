@@ -14,8 +14,9 @@ its semantics. agy does not expose thinking text in this protocol.
 
 ## Integration boundary
 
-The backend is experimental and is not in `backends.Default`. Verify container
-installation, credential mounting, and task MCP before adding it to that set.
+The backend is selectable through `backends.Default`.
+Track remaining normal task-lifecycle verification in
+[`PLAN_ANTIGRAVITY.md`](../../../docs/PLAN_ANTIGRAVITY.md).
 Use the existing relay and preserve v3 input provenance. Do not alter the frozen
 v1 relay.
 

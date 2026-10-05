@@ -11,7 +11,8 @@ test("server model reload shows progress, success, and recoverable failure", asy
   const pi = models.getByRole("button", { name: "pi", exact: true });
   await expect(codex).toBeVisible();
   await expect(pi).toBeVisible();
-  await expect(models.getByRole("button")).toHaveCount(2);
+  await expect(models.getByRole("button", { name: "antigravity", exact: true })).toBeVisible();
+  await expect(models.getByRole("button")).toHaveCount(3);
   await page.screenshot({ path: testInfo.outputPath("server-ready-desktop.png") });
   const gate = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();

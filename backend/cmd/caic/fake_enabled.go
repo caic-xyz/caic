@@ -29,7 +29,15 @@ const visualFixturesEnv = "CAIC_E2E_VISUALS"
 
 func fakeAgentBackends() agent.Backends {
 	claude := smoketest.NewFakeBackend()
-	backends := agent.Backends{harness.Claude: claude}
+	agy := smoketest.NewFakeBackend()
+	agy.HarnessID = harness.Antigravity
+	agy.QuotaProviderID = ""
+	agy.Images = false
+	agy.Compact = false
+	backends := agent.Backends{
+		harness.Antigravity: &fakeModelBackend{FakeBackend: agy},
+		harness.Claude:      claude,
+	}
 	codex := smoketest.NewFakeBackend()
 	codex.HarnessID = harness.Codex
 	codex.QuotaProviderID = agent.QuotaProviderCodex

@@ -653,6 +653,7 @@ export const GitOperationRevert = "revert";
 export const GitOperationBisect = "bisect";
 
 export type Harness =
+  | "antigravity"
   | "claude"
   | "codex"
   | "opencode"
@@ -660,6 +661,7 @@ export type Harness =
 /**
  * Supported values.
  */
+export const HarnessAntigravity = "antigravity";
 export const HarnessClaude = "claude";
 export const HarnessCodex = "codex";
 export const HarnessOpenCode = "opencode";

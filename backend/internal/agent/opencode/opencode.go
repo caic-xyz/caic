@@ -1,5 +1,5 @@
-// Package opencode implements agent.Backend for OpenCode via ACP
-// (Agent Client Protocol): JSON-RPC 2.0 over stdin/stdout.
+// Package opencode implements agent.Backend for OpenCode via ACP with task-scoped MCP.
+// ACP (Agent Client Protocol) uses JSON-RPC 2.0 over stdin/stdout.
 package opencode
 
 import (
@@ -69,7 +69,7 @@ func (b *Backend) SetModelInventory(inventory agent.ModelInventory) {
 // before returning a Session.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	ocArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
-	var relayArgs []string
+	relayArgs := []string{"--harness", "opencode"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
 	}
@@ -507,10 +507,20 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		}
 	}
 
-	// 2. Create or resume session.
+	// 2. Create or resume session. Use ACP's native MCP registration so user
+	// configuration, including inline JSONC, stays untouched.
+	servers := []opencode.MCPServer{}
+	if opts.MCP != nil {
+		servers = append(servers, opencode.MCPServer{
+			Name:    "caic",
+			Command: "python3",
+			Args:    []string{agent.RelayScriptPath, "caic-mcp"},
+			Env:     []opencode.EnvVariable{{Name: "CAIC_RELAY_DIR", Value: agent.RelayDir}},
+		})
+	}
 	var sessionReq opencode.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
-		params, err := marshalParams(opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []opencode.MCPServer{}})
+		params, err := marshalParams(opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: servers})
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal session/load params: %w", err)
 		}
@@ -521,7 +531,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 			Params:  params,
 		}
 	} else {
-		params, err := marshalParams(opencode.SessionNewParams{Cwd: opts.Dir, McpServers: []opencode.MCPServer{}})
+		params, err := marshalParams(opencode.SessionNewParams{Cwd: opts.Dir, McpServers: servers})
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal session/new params: %w", err)
 		}

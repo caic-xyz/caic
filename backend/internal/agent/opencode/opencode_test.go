@@ -1,4 +1,4 @@
-// Tests OpenCode backend model discovery and ACP capability handling.
+// Tests OpenCode model discovery, ACP capabilities, and task MCP registration.
 
 package opencode
 
@@ -18,6 +18,7 @@ import (
 	"time"
 
 	genaiopencode "github.com/maruel/genai/providers/opencode"
+	"github.com/maruel/gomode/mcp/mcptest"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
@@ -89,6 +90,57 @@ func v2Records(native string) string {
 
 func TestHandshake(t *testing.T) {
 	t.Parallel()
+
+	for _, resume := range []string{"", "session-1"} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("task_mcp/resume=%s/enabled=%t", resume, enabled), func(t *testing.T) {
+				t.Parallel()
+				var stdin bytes.Buffer
+				stdout := bufio.NewReader(strings.NewReader(v2Records(
+					`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n" +
+						`{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}`)))
+				opts := &agent.Options{Dir: "/workspace", ResumeSessionID: resume, Log: &agenttest.LogSink{Version: agent.LogVersionV3}}
+				if enabled {
+					opts.MCP = &mcptest.FakeRegistry{}
+				}
+				if _, _, err := handshake(t.Context(), &stdin, stdout, opts); err != nil {
+					t.Fatal(err)
+				}
+				lines := strings.Split(strings.TrimSpace(stdin.String()), "\n")
+				var request genaiopencode.JSONRPCRequest
+				if err := json.Unmarshal([]byte(lines[1]), &request); err != nil {
+					t.Fatal(err)
+				}
+				wantMethod := genaiopencode.MethodSessionNew
+				if resume != "" {
+					wantMethod = genaiopencode.MethodSessionLoad
+				}
+				if request.Method != wantMethod {
+					t.Fatalf("method = %s, want %s", request.Method, wantMethod)
+				}
+				var params genaiopencode.SessionLoadParams
+				if err := json.Unmarshal(request.Params, &params); err != nil {
+					t.Fatal(err)
+				}
+				if !enabled {
+					if len(params.McpServers) != 0 {
+						t.Fatalf("disabled task has servers: %v", params.McpServers)
+					}
+					return
+				}
+				if len(params.McpServers) != 1 {
+					t.Fatalf("servers = %v, want one", params.McpServers)
+				}
+				server := params.McpServers[0]
+				if server.Name != "caic" || server.Command != "python3" || !slices.Equal(server.Args, []string{"/tmp/caic-relay/relay.py", "caic-mcp"}) {
+					t.Fatalf("invalid bridge command: %v", server)
+				}
+				if len(server.Env) != 1 || server.Env[0].Name != "CAIC_RELAY_DIR" || server.Env[0].Value != "/tmp/caic-relay" {
+					t.Fatalf("invalid bridge environment: %v", server.Env)
+				}
+			})
+		}
+	}
 
 	t.Run("selects model and effort through ACP configuration", func(t *testing.T) {
 		t.Parallel()

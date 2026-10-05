@@ -156,6 +156,8 @@ func taskUsesProvider(task *v1.Task, provider agent.QuotaProvider) bool {
 		addProviderCandidate(candidates, agent.QuotaProviderClaudeCode)
 	case v1.HarnessCodex:
 		addProviderCandidate(candidates, agent.QuotaProviderCodex)
+	case v1.HarnessAntigravity:
+		// Antigravity has no monitored quota provider.
 	case v1.HarnessOpenCode, v1.HarnessPi:
 		// These harnesses select the billing provider through the task model.
 	}

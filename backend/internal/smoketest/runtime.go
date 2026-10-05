@@ -40,7 +40,7 @@ func InitRepo(ctx context.Context, tmpDir string) (string, error) {
 // harness model discovery during smoke and e2e tests.
 func InitHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
+	for _, h := range []harness.Name{harness.Antigravity, harness.Codex, harness.OpenCode, harness.Pi} {
 		cache.SetModelInventory(h, agent.ModelInventory{Models: []agent.Model{{ID: "fake-model", ContextWindow: 200_000}}}, "")
 	}
 	return nil

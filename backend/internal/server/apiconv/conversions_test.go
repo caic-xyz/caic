@@ -36,6 +36,7 @@ func TestAgentHarness(t *testing.T) {
 		harness v1.Harness
 		want    harness.Name
 	}{
+		{v1.HarnessAntigravity, harness.Antigravity},
 		{v1.HarnessClaude, harness.Claude},
 		{v1.HarnessCodex, harness.Codex},
 		{v1.HarnessOpenCode, harness.OpenCode},
@@ -207,6 +208,7 @@ func TestHarness(t *testing.T) {
 		harness harness.Name
 		want    v1.Harness
 	}{
+		{harness.Antigravity, v1.HarnessAntigravity},
 		{harness.Claude, v1.HarnessClaude},
 		{harness.Codex, v1.HarnessCodex},
 		{harness.OpenCode, v1.HarnessOpenCode},
@@ -232,6 +234,7 @@ func TestParseHarness(t *testing.T) {
 		name string
 		want v1.Harness
 	}{
+		{string(harness.Antigravity), v1.HarnessAntigravity},
 		{string(harness.Claude), v1.HarnessClaude},
 		{string(harness.Codex), v1.HarnessCodex},
 		{string(harness.OpenCode), v1.HarnessOpenCode},
