@@ -85,7 +85,7 @@ function connectionStatusLabel(status: ConnectionStatus, settledError: string): 
     case "settled-error":
       return settledError;
     case "settled-loading":
-      return "Loading history…";
+      return "Restoring tasks…";
     case "connected":
       return "Connected";
   }

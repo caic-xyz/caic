@@ -353,7 +353,9 @@ function FileDiffRow(props: FileDiffRowProps) {
   const [loading, setLoading] = createSignal(false);
   let loadedVersion = -1;
   let pendingVersion = -1;
+  let disposed = false;
   onCleanup(() => {
+    disposed = true;
     if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
   });
   const pathLabel = () => (props.originalPath ? `${props.originalPath} → ${props.path}` : props.path);
@@ -368,7 +370,9 @@ function FileDiffRow(props: FileDiffRowProps) {
     const retryWasFocused = document.activeElement === retryButton;
     setLoading(true);
     try {
-      setDiff(await props.loadDiff());
+      const value = await props.loadDiff();
+      if (disposed || !props.expanded) return;
+      setDiff(value);
       // A background index refresh can start this load before the user reaches
       // the retry control, so re-check focus before removing that control
       // instead of trusting only the snapshot taken before the await.
@@ -378,17 +382,18 @@ function FileDiffRow(props: FileDiffRowProps) {
         if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
         focusFrame = requestAnimationFrame(() => {
           focusFrame = undefined;
-          if (toggleButton?.isConnected) toggleButton.focus();
+          if (!disposed && props.expanded && toggleButton?.isConnected) toggleButton.focus();
         });
       }
     } catch (err: unknown) {
+      if (disposed || !props.expanded) return;
       if (!props.onLoadError(err)) {
         setLoadError(err instanceof Error ? err.message : "Unknown error");
       }
     } finally {
       loadedVersion = version;
-      setLoading(false);
-      if (pendingVersion > loadedVersion) {
+      if (!disposed) setLoading(false);
+      if (!disposed && pendingVersion > loadedVersion) {
         if (props.expanded) void load(pendingVersion, false);
       }
     }
@@ -401,7 +406,10 @@ function FileDiffRow(props: FileDiffRowProps) {
   createEffect(() => {
     const expanded = props.expanded;
     const version = props.indexVersion;
-    if (!expanded) return;
+    if (!expanded) {
+      setDiff(null);
+      return;
+    }
     untrack(() => void load(version, false));
   });
 

@@ -1,4 +1,4 @@
-// Application state store for task data, settings, SSE, categorized warnings, actions, and account-scoped caches.
+// Application state store for SSE-owned task membership, selected REST detail, settings, warnings, actions, caches, and Blob image drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
 import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
@@ -13,7 +13,7 @@ import type {
   Task,
   TaskState,
   UsageResp,
-  ImageData as APIImageData,
+  ImageConstraints,
   CacheMappingResp,
   CacheSize,
   OAuthGrantResp,
@@ -38,6 +38,7 @@ import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
 import { api } from "./api";
+import { ImageDraftOwner, imagesToAPI, type DraftImage } from "./images";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -101,10 +102,22 @@ function createAppStore() {
     return true;
   };
 
-  const [prompt, setPrompt] = createSignal("");
+  const [prompt, setPromptValue] = createSignal("");
+  let promptRevision = 0;
+  const setPrompt = (value: string) => {
+    promptRevision++;
+    setPromptValue(value);
+  };
   const [tasks, setTasks] = createSignal<Task[]>([]);
+  // Only SSE introduces list membership. REST detail is bounded to the selected
+  // route and cannot enable task image drafts before the stream introduces it.
+  const [detailTask, setDetailTask] = createSignal<Task | null>(null);
+  const [taskStreamReady, setTaskStreamReady] = createSignal(false);
+  const [taskSnapshotComplete, setTaskSnapshotComplete] = createSignal(false);
+  let taskStreamGeneration = 0;
+  let taskMembership = new Set<string>();
   const [tasksLoading, setTasksLoading] = createSignal(true);
-  // Settled (compressed) history pass state, driven by the task-list stream.
+  // Runtime and history restoration state, driven by the task-list stream.
   const [settledLoading, setSettledLoading] = createSignal(false);
   const [settledError, setSettledError] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
@@ -205,15 +218,43 @@ function createAppStore() {
   const [cloneError, setCloneError] = createSignal("");
 
   // Images attached to the new-task prompt.
-  const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
+  const [imageConstraints, setImageConstraints] = createSignal<ImageConstraints | null>(null);
+  const imageOwner = new ImageDraftOwner(imageConstraints);
+  const accountController = new AbortController();
+  const inputConversions = new Map<string, AbortController>();
+  const dispatchedInputs = new Set<string>();
+  const inputRevisions = new Map<string, number>();
+  const [pendingImages, setPendingImages] = createSignal<DraftImage[]>([]);
+  const [pendingImageGeneration, setPendingImageGeneration] = createSignal(0);
+  const [inputImageGenerations, setInputImageGenerations] = createSignal<Map<string, number>>(new Map());
+  onCleanup(() => {
+    accountController.abort();
+    for (const controller of inputConversions.values()) controller.abort();
+    imageOwner.dispose();
+  });
+  const addPendingImages = (blobs: Blob[]) => setPendingImages(imageOwner.adopt(pendingImages(), blobs));
+  const removePendingImages = (images: readonly DraftImage[]) => {
+    const removed = new Set(images);
+    imageOwner.release(images);
+    setPendingImages((current) => current.filter((img) => !removed.has(img)));
+  };
 
   // Per-task input drafts survive task switching.
   const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
 
   // Per-task image drafts survive task switching.
-  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(new Map());
+  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, DraftImage[]>>(new Map());
 
   function removeTaskDrafts(id: string) {
+    inputConversions.get(id)?.abort();
+    inputConversions.delete(id);
+    inputRevisions.delete(id);
+    imageOwner.release(inputImageDrafts().get(id) ?? []);
+    setInputImageGenerations((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
     setInputDrafts((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Map(prev);
@@ -310,6 +351,7 @@ function createAppStore() {
   };
 
   const applyServerConfig = (config: Config) => {
+    setImageConstraints(config.imageConstraints);
     const availableRuntimes = config.runtimes ?? [];
     setRuntimes(availableRuntimes);
     if (availableRuntimes.length > 0 && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
@@ -326,20 +368,28 @@ function createAppStore() {
     document.title = `${displayName} — caic`;
   };
 
-  async function refreshServerConfig() {
+  async function refreshServerConfig(currentStream: () => boolean) {
     try {
-      applyServerConfig(await api.getConfig());
+      const config = await api.getConfig();
+      if (currentStream()) applyServerConfig(config);
     } catch {
-      setVoiceGatewayAvailable(false);
+      if (currentStream()) setVoiceGatewayAvailable(false);
     }
   }
 
   const selectedId = (): string | null => taskIdFromPath(location.pathname);
   const selectedTask = (): Task | null => {
     const id = selectedId();
-    return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
+    return id !== null ? (taskById(id) ?? null) : null;
   };
-  const taskById = (id: string): Task | undefined => tasks().find((t) => t.id === id);
+  const taskById = (id: string): Task | undefined =>
+    tasks().find((t) => t.id === id) ??
+    (selectedId() === id && detailTask()?.id === id ? (detailTask() ?? undefined) : undefined);
+  const taskIntroduced = (id: string) => tasks().some((task) => task.id === id);
+  createEffect(() => {
+    const id = selectedId();
+    if (detailTask()?.id !== id) setDetailTask(null);
+  });
 
   function tasksInSidebarOrder(): Task[] {
     const byId = new Map(tasks().map((t) => [t.id, t]));
@@ -389,7 +439,7 @@ function createAppStore() {
 
   // Insert or replace an authoritative task-list SSE update by ID, keeping
   // the id-sorted order.
-  const upsertTask = (t: Task) =>
+  const upsertTask = (t: Task) => {
     setTasks((prev) => {
       const idx = prev.findIndex((p) => p.id === t.id);
       if (idx >= 0) {
@@ -399,14 +449,7 @@ function createAppStore() {
       }
       return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
     });
-
-  // Seed a newly-created task only when task-list SSE has not arrived first.
-  // The request response may otherwise overwrite a newer state transition.
-  const seedTask = (t: Task) =>
-    setTasks((prev) => {
-      if (prev.some((existing) => existing.id === t.id)) return prev;
-      return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
-    });
+  };
 
   type EffortPreferences = Record<string, Record<string, string>>;
 
@@ -568,28 +611,25 @@ function createAppStore() {
   });
 
   function dismissSelectedTaskOnNotFound(id: string, err: unknown): boolean {
-    if ((err as { status?: number }).status !== 404) return false;
+    if ((err as { status?: number }).status !== 404 || !taskSnapshotComplete()) return false;
+    if (!taskMembership.has(id)) removeTaskDrafts(id);
+    if (detailTask()?.id === id) setDetailTask(null);
     if (selectedId() === id) navigate("/", { replace: true });
     return true;
   }
 
-  // Ensure the task named by the URL exists and is in the store. When it is not
-  // (deep link, back button, another client), fetch it as a REST resource: a 404
-  // is an authoritative "gone" → home; a 200 seeds the store so the detail view
-  // renders with real state. Tasks this client created are already seeded via
-  // upsertTask before navigation, so this is a no-op for fresh create/fork.
-  // Deletion of the viewed task is handled authoritatively by the SSE "delete"
-  // event above.
-  // Task-list events received after a recovery GET begins are newer than its
-  // response. Queue patches to replay their transitions in order; a snapshot
-  // that includes the task or a complete upsert supersedes the GET and updates
-  // the task directly.
+  // Wait for the stream snapshot before REST recovery. A GET can fill metadata
+  // for an SSE-introduced unknown patch, or the one selected detail fallback;
+  // it never manufactures list membership. Stream replacements invalidate all
+  // outstanding recoveries, and later SSE boundaries supersede stale results.
   const taskRecoveries = new Map<string, TaskRecovery>();
   const queueTaskUpdate = (id: string, update: PendingTaskUpdate) => {
     taskRecoveries.get(id)?.updates.push(update);
   };
   const ensureTask = async (id: string) => {
-    if (taskRecoveries.has(id)) return;
+    if (!taskStreamReady() || taskRecoveries.has(id)) return;
+    if (!taskSnapshotComplete() && !taskMembership.has(id)) return;
+    const streamGeneration = taskStreamGeneration;
     const recovery: TaskRecovery = { updates: [] };
     taskRecoveries.set(id, recovery);
     try {
@@ -603,7 +643,12 @@ function createAppStore() {
       // A newer snapshot or upsert supplied the complete task while this GET
       // was in flight. Its response is now stale, and later patches were
       // applied directly after that authoritative event.
-      if (taskRecoveries.get(id) !== recovery) return;
+      if (
+        accountController.signal.aborted ||
+        taskStreamGeneration !== streamGeneration ||
+        taskRecoveries.get(id) !== recovery
+      )
+        return;
 
       const updates = recovery.updates;
       let replayFrom = 0;
@@ -611,7 +656,8 @@ function createAppStore() {
         if (update.kind !== "patch") replayFrom = index + 1;
       }
       if (task && replayFrom === 0) {
-        applyAuthoritativeTask(task);
+        if (taskMembership.has(id)) applyAuthoritativeTask(task);
+        else if (selectedId() === id) setDetailTask(task);
       }
       for (const update of updates.slice(replayFrom)) {
         if (update.kind === "patch") applyTaskPatch(id, update.patch);
@@ -628,7 +674,7 @@ function createAppStore() {
   };
   createEffect(() => {
     const id = selectedId();
-    if (id !== null && selectedTask() === null) void ensureTask(id);
+    if (taskStreamReady() && taskSnapshotComplete() && id !== null && selectedTask() === null) void ensureTask(id);
   });
 
   // Repos available to add (not already selected).
@@ -734,33 +780,56 @@ function createAppStore() {
     }
 
     function connectTasks() {
+      const streamGeneration = ++taskStreamGeneration;
+      setTaskStreamReady(false);
+      setTaskSnapshotComplete(false);
+      taskRecoveries.clear();
+      setDetailTask(null);
+      const currentStream = () =>
+        active && !accountController.signal.aborted && streamGeneration === taskStreamGeneration;
       taskES = api.globalTaskEvents({
         onMessage: (event) => {
+          if (!currentStream()) return;
           if (event.kind === "snapshot" && event.snapshot) {
-            const snapshotByID = new Map(event.snapshot.map((task) => [task.id, task]));
-            for (const task of event.snapshot) {
+            const snapshot = event.snapshot;
+            const snapshotByID = new Map(snapshot.map((task) => [task.id, task]));
+            const complete = event.complete === true;
+            const retained = complete ? [] : tasks().filter((task) => !snapshotByID.has(task.id));
+            for (const task of snapshot) {
               const previous = tasks().find((candidate) => candidate.id === task.id);
               updateTaskDiffCache(previous, task);
             }
             for (const id of taskRecoveries.keys()) {
-              if (snapshotByID.has(id)) {
-                // The snapshot is newer than the recovery GET and contains a
-                // complete task. Let later patches update it in place.
-                taskRecoveries.delete(id);
+              if (snapshotByID.has(id)) taskRecoveries.delete(id);
+              else if (complete && taskMembership.has(id)) queueTaskUpdate(id, { kind: "delete" });
+            }
+            batch(() => {
+              if (complete) {
+                for (const id of taskMembership) {
+                  if (!snapshotByID.has(id)) {
+                    removeTaskDrafts(id);
+                    evictTaskDiff(id);
+                    if (detailTask()?.id === id) setDetailTask(null);
+                    if (selectedId() === id) navigate("/", { replace: true });
+                  }
+                }
+                taskMembership = new Set(snapshotByID.keys());
               } else {
-                queueTaskUpdate(id, { kind: "delete" });
+                for (const id of snapshotByID.keys()) taskMembership.add(id);
               }
-            }
-            prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
-            const nextIDs = new Set(event.snapshot.map((task) => task.id));
-            for (const task of tasks()) {
-              if (!nextIDs.has(task.id)) evictTaskDiff(task.id);
-            }
-            setTasks(event.snapshot);
-            setTasksLoading(false);
-            notifyQuotaRecoveries(event.snapshot);
+              const reconciled = [...snapshot, ...retained];
+              prevStates = new Map(reconciled.map((task) => [task.id, task.state]));
+              setTasks(reconciled);
+              if (detailTask() && snapshotByID.has(detailTask()?.id ?? "")) setDetailTask(null);
+              setTasksLoading(false);
+              setTaskSnapshotComplete(complete);
+              setTaskStreamReady(true);
+              notifyQuotaRecoveries(reconciled);
+            });
           } else if (event.kind === "upsert" && event.upsert) {
             const task = event.upsert;
+            taskMembership.add(task.id);
+            if (detailTask()?.id === task.id) setDetailTask(null);
             // A complete upsert supersedes a recovery GET. Removing its entry
             // also makes later patches update this task in place.
             taskRecoveries.delete(task.id);
@@ -769,6 +838,7 @@ function createAppStore() {
             const patch = event.patch as Record<string, unknown>;
             const id = patch["id"] as string;
             if (!id) return;
+            taskMembership.add(id);
             if (taskRecoveries.has(id)) {
               queueTaskUpdate(id, { kind: "patch", patch });
               return;
@@ -779,6 +849,8 @@ function createAppStore() {
             }
             applyTaskPatch(id, patch);
           } else if (event.kind === "delete" && event.delete) {
+            taskMembership.delete(event.delete);
+            if (detailTask()?.id === event.delete) setDetailTask(null);
             // Authoritative removal: if the deleted task is the one being viewed,
             // leave its now-dead detail route.
             if (event.delete === selectedId()) navigate("/", { replace: true });
@@ -798,25 +870,28 @@ function createAppStore() {
           } else if (event.kind === "warning" && event.warning) {
             showServerWarning(event.warning);
           } else if (event.kind === "status") {
-            // Settled-history pass state: emitted on connect and on every
+            // Runtime/history restoration state: emitted on connect and on every
             // transition (in-progress -> completed | failed).
             setSettledLoading(!!event.status?.loading);
             setSettledError(event.status?.error ?? "");
           }
         },
         onError: (err) => {
+          if (!currentStream()) return;
           const msg = err instanceof Error ? err.message : String(err);
           showWarning(`Task list event error: ${msg}`);
         },
       });
       taskES.addEventListener("open", () => {
+        if (!currentStream()) return;
         onOpen();
-        void refreshServerConfig();
+        void refreshServerConfig(currentStream);
         taskDelay = 500;
         // Check if frontend was rebuilt while disconnected.
         fetch("/index.html")
           .then((r) => r.text())
           .then((html) => {
+            if (!currentStream()) return;
             const m = html.match(/<script[^>]+src="([^"]*\/assets\/[^"]+)"/);
             if (m && initialScriptSrc && !initialScriptSrc.endsWith(m[1])) {
               window.location.reload();
@@ -825,6 +900,12 @@ function createAppStore() {
           .catch(() => {});
       });
       taskES.onerror = () => {
+        if (!currentStream()) return;
+        taskStreamGeneration++;
+        setTaskStreamReady(false);
+        setTaskSnapshotComplete(false);
+        taskRecoveries.clear();
+        setDetailTask(null);
         taskES?.close();
         taskES = null;
         setConnected(false);
@@ -864,6 +945,12 @@ function createAppStore() {
     }
 
     function closeAll() {
+      generation++;
+      taskStreamGeneration++;
+      setTaskStreamReady(false);
+      setTaskSnapshotComplete(false);
+      taskRecoveries.clear();
+      setDetailTask(null);
       taskES?.close();
       taskES = null;
       usageES?.close();
@@ -1144,7 +1231,7 @@ function createAppStore() {
         sudo: forkSudo(),
         gitHubToken: forkGitHubToken(),
       });
-      seedTask(resp);
+      accountController.signal.throwIfAborted();
       navigate(
         taskPath(
           resp.id,
@@ -1153,20 +1240,24 @@ function createAppStore() {
           text,
         ),
       );
-    } catch {
-      // Fork failed — no state to clean up.
+    } catch (err) {
+      if (!accountController.signal.aborted)
+        showWarning(`Task fork failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
   }
 
   async function submitTask() {
     const p = prompt().trim();
     const imgs = pendingImages();
+    const revision = promptRevision;
     const selRepos = selectedRepos();
-    if (!p && imgs.length === 0) return;
+    if (submitting() || (!p && imgs.length === 0)) return;
     notifications.requestNotificationPermission({
       enabled: hostMode.browserNotificationsEnabled(),
     });
     setSubmitting(true);
+    // Pending captures are outside this snapshot; captures started afterwards belong to the next draft.
+    setPendingImageGeneration((value) => value + 1);
     {
       // Optimistic reorder: move the primary repo to the front of the recent list.
       const primary = selRepos[0]?.path;
@@ -1197,10 +1288,12 @@ function createAppStore() {
               ...(r.branch ? { baseBranch: r.branch } : {}),
             }))
           : undefined;
+      const images = await imagesToAPI(imgs, accountController.signal);
+      accountController.signal.throwIfAborted();
       const data = await api.createTask({
         initialPrompt: {
           text: p,
-          ...(imgs.length > 0 ? { images: imgs } : {}),
+          ...(images.length > 0 ? { images } : {}),
         },
         repos: repoSpecs,
         harness: harness as Harness,
@@ -1214,12 +1307,15 @@ function createAppStore() {
         ...(ght ? { gitHubToken: true } : {}),
         ...(mcp ? { caicMCP: true } : {}),
       });
+      accountController.signal.throwIfAborted();
       setPrefModel(harness, model);
       setPrefEffort(harness, model, effort);
-      setPrompt("");
-      setPendingImages([]);
-      seedTask(data);
+      if (promptRevision === revision) setPrompt("");
+      removePendingImages(imgs);
       navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));
+    } catch (err) {
+      if (!accountController.signal.aborted)
+        showWarning(`Task creation failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setSubmitting(false);
     }
@@ -1326,39 +1422,81 @@ function createAppStore() {
     navigate(found ? taskPathForTask(found) : `/task/@${id}`);
   };
   const fixCI = (repoPath: string) => {
-    void api.botFixCI({ repo: repoPath }).then((data) => {
-      seedTask(data);
-      navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
-    });
+    void api
+      .botFixCI({ repo: repoPath })
+      .then((data) => {
+        if (!accountController.signal.aborted) navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
+      })
+      .catch((err: unknown) => {
+        if (!accountController.signal.aborted)
+          showWarning(`CI task creation failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      });
   };
 
   // Per-task input/image drafts, keyed by task ID.
   const inputDraft = (id: string) => inputDrafts().get(id) ?? "";
-  const setInputDraft = (id: string, v: string) =>
+  const setInputDraft = (id: string, v: string) => {
+    inputRevisions.set(id, (inputRevisions.get(id) ?? 0) + 1);
     setInputDrafts((prev) => {
-      if (v === "") {
-        if (!prev.has(id)) return prev;
-        const withoutDraft = new Map(prev);
-        withoutDraft.delete(id);
-        return withoutDraft;
-      }
       const next = new Map(prev);
-      next.set(id, v);
+      if (v) next.set(id, v);
+      else next.delete(id);
       return next;
     });
+  };
   const inputImages = (id: string) => inputImageDrafts().get(id) ?? [];
-  const setInputImages = (id: string, imgs: APIImageData[]) =>
+  const inputImageGeneration = (id: string) => inputImageGenerations().get(id) ?? 0;
+  const addInputImages = (id: string, blobs: Blob[]) => {
+    if (!taskMembership.has(id)) throw new Error("Waiting for task updates before attaching images.");
+    const images = imageOwner.adopt(inputImages(id), blobs);
+    setInputImageDrafts((prev) => new Map(prev).set(id, images));
+  };
+  const removeInputImages = (id: string, images: readonly DraftImage[]) => {
+    const removed = new Set(images);
+    imageOwner.release(images);
     setInputImageDrafts((prev) => {
-      if (imgs.length === 0) {
-        if (!prev.has(id)) return prev;
-        const withoutDraft = new Map(prev);
-        withoutDraft.delete(id);
-        return withoutDraft;
-      }
       const next = new Map(prev);
-      next.set(id, imgs);
+      const remaining = (prev.get(id) ?? []).filter((img) => !removed.has(img));
+      if (remaining.length) next.set(id, remaining);
+      else next.delete(id);
       return next;
     });
+  };
+  const cancelInputConversion = (id: string) => {
+    if (!dispatchedInputs.has(id)) inputConversions.get(id)?.abort();
+  };
+  async function sendTaskInput(id: string) {
+    if (inputConversions.has(id)) {
+      if (!accountController.signal.aborted) showWarning("A message is already being sent to this task.");
+      return;
+    }
+    const text = inputDraft(id).trim();
+    const drafts = inputImages(id);
+    const revision = inputRevisions.get(id) ?? 0;
+    const controller = new AbortController();
+    inputConversions.set(id, controller);
+    setInputImageGenerations((prev) => new Map(prev).set(id, inputImageGeneration(id) + 1));
+    try {
+      const signal = AbortSignal.any([controller.signal, accountController.signal]);
+      const images = await imagesToAPI(drafts, signal);
+      signal.throwIfAborted();
+      // Route changes cancel conversion; a dispatched request still owns its original task.
+      dispatchedInputs.add(id);
+      await api.sendInput(id, { prompt: { text, ...(images.length ? { images } : {}) } });
+      signal.throwIfAborted();
+      if ((inputRevisions.get(id) ?? 0) === revision) setInputDraft(id, "");
+      removeInputImages(id, drafts);
+    } catch (err) {
+      // The account owns dispatched requests and their failures across route changes.
+      // Deliberate cancellation or account disposal does not report a send failure.
+      if (!accountController.signal.aborted && !controller.signal.aborted) {
+        showWarning(`Message send failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
+    } finally {
+      dispatchedInputs.delete(id);
+      if (inputConversions.get(id) === controller) inputConversions.delete(id);
+    }
+  }
 
   return {
     navigate,
@@ -1372,6 +1510,7 @@ function createAppStore() {
     selectedId,
     selectedTask,
     taskById,
+    taskIntroduced,
     dismissSelectedTaskOnNotFound,
     claimInitialTaskFocus,
     // new-task form
@@ -1391,7 +1530,10 @@ function createAppStore() {
     setSelectedRuntimeName: selectRuntimeName,
     harnessSupportsImages,
     pendingImages,
-    setPendingImages,
+    addPendingImages,
+    removePendingImages,
+    imageConstraints,
+    pendingImageGeneration,
     availableRecent,
     availableRest,
     getPrefModel,
@@ -1436,7 +1578,11 @@ function createAppStore() {
     inputDraft,
     setInputDraft,
     inputImages,
-    setInputImages,
+    addInputImages,
+    removeInputImages,
+    inputImageGeneration,
+    sendTaskInput,
+    cancelInputConversion,
     // warnings
     warnings,
     showWarning,

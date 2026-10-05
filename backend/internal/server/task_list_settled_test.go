@@ -1,18 +1,25 @@
-// Tests for the settled-history status carried by the task-list SSE stream.
+// Tests task-list restoration status, complete snapshots, and registered membership during DTO failures.
 
 package server
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
+	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/maruel/ksid"
 )
 
 // readNextTaskListEvent blocks until one SSE event with a data payload is
@@ -93,10 +100,10 @@ func connectTaskListStream(t *testing.T, s *testRouter) *bufio.Reader {
 	return head
 }
 
-// TestTaskListEventsSettledStatus verifies the settled pass state is emitted as
+// TestTaskListEventsRestorationStatus verifies the settled pass state is emitted as
 // a status event on connect (before the snapshot), that the snapshot does not
 // carry status, and that a status event is emitted on the completion transition.
-func TestTaskListEventsSettledStatus(t *testing.T) {
+func TestTaskListEventsRestorationStatus(t *testing.T) {
 	t.Parallel()
 	check := func(t *testing.T, finish error, wantErr string) {
 		s := newTestRouter(t, nil)
@@ -122,7 +129,7 @@ func TestTaskListEventsSettledStatus(t *testing.T) {
 			t.Fatalf("third event = %+v, want kind repos", repos)
 		}
 
-		s.taskMgr.CompleteSettledLoad(finish)
+		s.taskMgr.CompleteRestoration(finish)
 		ev := readNextTaskListEvent(t, r)
 		if ev.Kind != "status" || ev.Status == nil || ev.Status.Loading || ev.Status.Error != wantErr {
 			t.Fatalf("status = %+v, want settled status with error %q", ev, wantErr)
@@ -137,4 +144,102 @@ func TestTaskListEventsSettledStatus(t *testing.T) {
 		t.Parallel()
 		check(t, errors.New("load purged tasks: boom"), "load purged tasks: boom")
 	})
+}
+
+func TestTaskListCompleteSnapshotAfterRestoration(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	r := connectTaskListStream(t, s)
+	readNextTaskListEvent(t, r) // restoration status
+	initial := readNextTaskListEvent(t, r)
+	if initial.Kind != "snapshot" || initial.Complete == nil || *initial.Complete {
+		t.Fatalf("initial snapshot = %+v, want explicit incomplete", initial)
+	}
+	readNextTaskListEvent(t, r) // repositories
+	s.taskMgr.CompleteRestoration(nil)
+	status := readNextTaskListEvent(t, r)
+	if status.Kind != "status" || status.Status == nil || status.Status.Loading {
+		t.Fatalf("completion status = %+v", status)
+	}
+	complete := readNextTaskListEvent(t, r)
+	if complete.Kind != "snapshot" || complete.Complete == nil || !*complete.Complete || complete.Snapshot == nil {
+		t.Fatalf("completed snapshot = %+v", complete)
+	}
+}
+
+func TestTaskListDTOFailurePreservesMembership(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "private prompt"}, harness.Claude)
+	insertTestTask(s, tk.ID, tk)
+	s.taskMgr.CompleteRestoration(nil)
+	r := connectTaskListStream(t, s)
+	readNextTaskListEvent(t, r)
+	initial := readNextTaskListEvent(t, r)
+	if initial.Kind != "snapshot" || len(initial.Snapshot) != 1 || initial.Complete == nil || !*initial.Complete {
+		t.Fatalf("initial snapshot = %+v", initial)
+	}
+	readNextTaskListEvent(t, r)
+	tk.SetState(taskslog.State("invalid-state"))
+	out, _, membership := testTaskHandlers(s).taskSvc.taskListSnapshotWithReplay(testHTTPContext(t), map[string]uint64{})
+	if len(out) != 0 {
+		t.Fatalf("failed DTO count = %d", len(out))
+	}
+	if !slices.Contains(membership, tk.ID.String()) {
+		t.Fatal("DTO failure erased authorized registered membership")
+	}
+	s.taskMgr.NotifyTaskChange()
+	// A warning is a deterministic barrier after the task-diff pass. The stream
+	// must not synthesize a delete before it despite the failed conversion.
+	testTaskHandlers(s).warnings.UpdateRuntimeRestore(&taskmgr.ImportError{Failed: 1, Err: errors.New("barrier")})
+	for {
+		event := readNextTaskListEvent(t, r)
+		if event.Kind == "delete" {
+			t.Fatal("DTO failure produced a false deletion")
+		}
+		if event.Kind == "warning" {
+			break
+		}
+	}
+	tk.SetState(taskslog.StateWaiting)
+	s.taskMgr.NotifyTaskChange()
+	for {
+		event := readNextTaskListEvent(t, r)
+		if event.Kind == "snapshot" {
+			if event.Complete == nil || !*event.Complete || len(event.Snapshot) != 1 {
+				t.Fatalf("recovered snapshot = %+v", event)
+			}
+			break
+		}
+	}
+}
+
+func TestTaskListIncompleteDTOOnConnect(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "private prompt"}, harness.Claude)
+	tk.SetState(taskslog.State("invalid-state"))
+	insertTestTask(s, tk.ID, tk)
+	s.taskMgr.CompleteRestoration(nil)
+	ctx, cancel := context.WithCancel(testHTTPContext(t))
+	cancel()
+	w := httptest.NewRecorder()
+	testTaskHandlers(s).handleTaskListEvents(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/events", nil))
+	for line := range strings.SplitSeq(w.Body.String(), "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var event v1.TaskListEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Kind == "snapshot" {
+			if event.Complete == nil || *event.Complete || len(event.Snapshot) != 0 {
+				t.Fatalf("failed conversion snapshot = %+v", event)
+			}
+			return
+		}
+	}
+	t.Fatal("missing snapshot")
 }

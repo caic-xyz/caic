@@ -93,6 +93,21 @@ func TestTaskListEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("successful restoration status stays explicit", func(t *testing.T) {
+		t.Parallel()
+		data, err := json.Marshal(TaskListEvent{Kind: "status", Status: &TaskListRestorationStatus{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var event map[string]json.RawMessage
+		if err := json.Unmarshal(data, &event); err != nil {
+			t.Fatal(err)
+		}
+		if string(event["status"]) != `{"loading":false,"error":""}` {
+			t.Fatalf("success status = %s", event["status"])
+		}
+	})
+
 	t.Run("nilOmitted", func(t *testing.T) {
 		t.Parallel()
 		// Non-snapshot events have zero-valued (nil) snapshot/repos, which
@@ -109,7 +124,7 @@ func TestTaskListEvent(t *testing.T) {
 		if err := json.Unmarshal(data, &raw); err != nil {
 			t.Fatal(err)
 		}
-		for _, f := range []string{"snapshot", "upsert", "patch", "repos", "warning"} {
+		for _, f := range []string{"snapshot", "upsert", "patch", "repos", "warning", "status"} {
 			if _, ok := raw[f]; ok {
 				t.Errorf("%q field should be omitted but is present", f)
 			}

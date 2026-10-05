@@ -121,8 +121,16 @@ type RuntimeInfo struct {
 	Name string `json:"name"`
 }
 
+// ImageConstraints describes decoded-byte budgets and supported image MIME types.
+type ImageConstraints struct {
+	AllowedMediaTypes   []string `json:"allowedMediaTypes"`
+	MaxImageBytes       int      `json:"maxImageBytes"`
+	MaxPromptImageBytes int      `json:"maxPromptImageBytes"`
+}
+
 // Config reports server capabilities to the frontend.
 type Config struct {
+	ImageConstraints     ImageConstraints     `json:"imageConstraints"`
 	Version              string               `json:"version,omitempty"`
 	DisplayName          string               `json:"displayName"`
 	TailscaleAvailable   bool                 `json:"tailscaleAvailable"`
@@ -450,14 +458,17 @@ type TaskInfoObservedRuntime struct {
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.
-// kind=="snapshot": Snapshot holds the full list on initial connect.
+// kind=="snapshot": Snapshot carries task data on connect and when restoration becomes complete.
+// Complete is present on snapshots only: false preserves prior membership and drafts;
+// true certifies omissions after successful runtime/history restoration and DTO conversion.
 // kind=="upsert":   Upsert holds a newly created task.
 // kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 // kind=="delete":   Delete holds the string ID of the removed task.
 // kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
 // kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
-// kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
+// kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
 type TaskListEvent struct {
+	Complete *bool                      `json:"complete,omitempty"`
 	Kind     string                     `json:"kind"`
 	Snapshot []Task                     `json:"snapshot,omitzero"`
 	Upsert   *Task                      `json:"upsert,omitempty"`
@@ -465,7 +476,7 @@ type TaskListEvent struct {
 	Delete   string                     `json:"delete,omitempty"`
 	Repos    []Repo                     `json:"repos,omitzero"`
 	Warning  *Warning                   `json:"warning,omitempty"`
-	Status   *TaskListSettledStatus     `json:"status,omitzero"`
+	Status   *TaskListRestorationStatus `json:"status,omitempty"`
 }
 
 // MarshalJSON preserves the discriminated-union contract for empty snapshot
@@ -506,11 +517,10 @@ type Warning struct {
 	Details  []WarningDetail `json:"details"`
 }
 
-// TaskListSettledStatus carries the background task-history load pass state
-// on kind=="status" events. Loading is true while the pass scans and
-// compresses logs; Error is non-empty when the pass could not register its
-// history.
-type TaskListSettledStatus struct {
+// TaskListRestorationStatus carries background runtime/history restoration
+// state on kind=="status" events. Loading is true until both stages finish;
+// Error is non-empty when any stage leaves task membership incomplete.
+type TaskListRestorationStatus struct {
 	Loading bool   `json:"loading"`
 	Error   string `json:"error"`
 }

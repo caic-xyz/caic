@@ -1,4 +1,4 @@
-// CI check-run evaluation and failure summary building.
+// CI check-run evaluation and complete, bounded failure prompts with linked diagnostic excerpts.
 
 package ci
 
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/maruel/genai"
 
@@ -50,83 +51,166 @@ func InterimCIStatus(runs []forge.CheckRun) forge.CIStatus {
 	return forge.CIStatusPending
 }
 
-// FailureSummary builds the agent-facing text summary for a CI failure result.
-// It fetches the log for each failing check, optionally summarises large logs
-// via the LLM provider, and formats the result with job URLs and log excerpts.
-// provider may be nil (LLM summarisation is skipped).
-func FailureSummary(ctx context.Context, log *slog.Logger, f forge.Forge, provider genai.Provider, result forgecache.Result) string {
+// maxFailurePromptBytes includes metadata, excerpts, omission notices and footer.
+// Per-job logs are limited separately by forge.MaxLogExcerptBytes.
+const maxFailurePromptBytes = 256 << 10
+
+// repairWrapperBytes reserves PR metadata and instructions before collecting
+// excerpts. ForPR bounds branch and URL metadata to fit this allowance.
+const repairWrapperBytes = 8 << 10
+
+// FailurePrompt owns an agent-facing CI failure summary and its repair wrappers.
+// Its private text is constructed only by FailureSummary, which reserves space
+// for bounded repair metadata so direct and wrapped prompts fit 256 KiB.
+type FailurePrompt struct{ text string }
+
+// FailureSummary builds a bounded agent-facing failure prompt one job at a time.
+// Full logs remain available through job links. When the aggregate budget is
+// exhausted, remaining checks are counted explicitly rather than fetched and
+// retained. LLM failure and oversized responses follow the same excerpt budget.
+func FailureSummary(ctx context.Context, log *slog.Logger, f forge.Forge, provider genai.Provider, result forgecache.Result) FailurePrompt {
 	if log == nil {
 		panic("logger is required")
 	}
-	logs := enrichFailingChecks(ctx, log, f, provider, result.Checks)
-
-	var sb strings.Builder
-	numFailed := 0
+	failed := 0
 	for i := range result.Checks {
 		if result.Checks[i].Conclusion.IsFailed() {
-			numFailed++
+			failed++
 		}
 	}
-	fmt.Fprintf(&sb, "%s CI: %d check(s) failed:\n", f.Name(), numFailed)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s CI: %d check(s) failed:\n", failureMetadata(f.Name(), 128), failed)
+	included := 0
+	// Leave enough room for an omitted-check count, cancellation and instruction.
+	const footerBudget = 256
 	for i := range result.Checks {
 		c := &result.Checks[i]
 		if !c.Conclusion.IsFailed() {
 			continue
 		}
-		// Header: job name, conclusion, optional job labels, optional URL.
-		header := fmt.Sprintf("- %s (%s)", c.Name, c.Conclusion)
-		if len(c.Labels) > 0 {
-			header += fmt.Sprintf(" [%s]", strings.Join(c.Labels, ", "))
+		if ctx.Err() != nil {
+			sb.WriteString("\n[CI log acquisition canceled; remaining checks omitted.]\n")
+			break
 		}
-		if jobURL := f.CIJobURL(c.Owner, c.Repo, c.RunID, c.JobID); jobURL != "" {
-			header += ": " + jobURL
+		if sb.Len()+8192 > maxFailurePromptBytes-repairWrapperBytes-footerBudget {
+			break
 		}
-		sb.WriteString(header + "\n")
-		if logText := logs[c.JobID]; logText != "" {
-			fmt.Fprintf(&sb, "  Log:\n  ```\n%s\n  ```\n", logText)
-		}
-	}
-	sb.WriteString("\nPlease fix the failures above.")
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-// enrichFailingChecks fetches the log and job labels for each failing
-// check. Labels are stored on the Check (mutating the slice in place); logs
-// are returned keyed by JobID. The LLM provider (may be nil) is used to
-// summarise logs that exceed 16 KB.
-func enrichFailingChecks(ctx context.Context, log *slog.Logger, f forge.Forge, provider genai.Provider, checks []forge.Check) map[int64]string {
-	const summarizeAbove = 16_000   // ask LLM to summarize logs larger than this
-	const summaryMaxChars = 100_000 // truncate input to LLM
-	logs := make(map[int64]string)
-	for i := range checks {
-		c := &checks[i]
-		if !c.Conclusion.IsFailed() || c.JobID == 0 {
-			continue
-		}
-		// Fetch job labels (best-effort).
-		if len(c.Labels) == 0 {
-			if labels, err := f.GetJobLabels(ctx, c.Owner, c.Repo, c.JobID); err == nil {
+		if c.JobID != 0 && len(c.Labels) == 0 {
+			labels, err := f.GetJobLabels(ctx, c.Owner, c.Repo, c.JobID)
+			if err == nil {
 				c.Labels = labels
 			} else {
-				log.WarnContext(ctx, "enrichFailingChecks: get labels", "job", c.JobID, "check", c.Name, "err", err)
+				log.WarnContext(ctx, "CI job labels unavailable", "job", c.JobID, "err", err)
 			}
 		}
-		// Fetch log.
-		logText, err := f.GetJobLog(ctx, c.Owner, c.Repo, c.JobID, true)
-		if err != nil {
-			log.WarnContext(ctx, "enrichFailingChecks: get log", "job", c.JobID, "check", c.Name, "err", err)
-			continue
+		header := failureCheckHeader(f, c)
+		allowance := min(forge.MaxLogExcerptBytes, maxFailurePromptBytes-repairWrapperBytes-footerBudget-sb.Len()-len(header)-32)
+		if allowance < 128 {
+			break
 		}
-		// Summarize with LLM when the log is still large.
-		if provider != nil && len(logText) > summarizeAbove {
-			if summary := summarizeCILog(ctx, log, provider, c.Name, logText, summaryMaxChars); summary != "" {
-				logs[c.JobID] = summary
-				continue
+		text := "(job log unavailable)"
+		if c.JobID != 0 {
+			fetched, err := f.GetJobLog(ctx, c.Owner, c.Repo, c.JobID, true)
+			if err != nil {
+				log.WarnContext(ctx, "CI job log unavailable", "job", c.JobID, "err", err)
+				text = "(job log unavailable: " + failureMetadata(err.Error(), 1024) + ")"
+			} else {
+				text = forge.LimitLogExcerpt(fetched, forge.MaxLogExcerptBytes)
+				if provider != nil && len(text) > 16_000 {
+					if summary := summarizeCILog(ctx, log, provider, c.Name, text); summary != "" {
+						text = "[Summary of bounded log excerpt; open job link for complete log.]\n" + summary
+					}
+				}
 			}
 		}
-		logs[c.JobID] = logText
+		sb.WriteString(header)
+		fmt.Fprintf(&sb, "  Log:\n  ```\n%s\n  ```\n", forge.LimitLogExcerpt(text, allowance))
+		included++
 	}
-	return logs
+	if omitted := failed - included; omitted > 0 {
+		fmt.Fprintf(&sb, "\n[%d remaining failing check(s) omitted from this prompt; consult the forge CI results.]\n", omitted)
+	}
+	sb.WriteString("\nPlease fix the failures above.")
+	return FailurePrompt{text: sb.String()}
+}
+
+// String returns the failure prompt for direct injection or default-branch repair.
+func (p FailurePrompt) String() string { return p.text }
+
+// ForPR adds PR repair instructions for manual and automatic repair tasks.
+//
+// It bounds metadata within the reserved wrapper allowance, preserving PR links
+// when they fit and marking omitted links or abbreviated branch names. The
+// bounded, independently owned summary remains intact.
+func (p FailurePrompt) ForPR(prURL string, number int, branch string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "CI failed on PR #%d", number)
+	if len(prURL) > 4096 {
+		sb.WriteString(" [PR link omitted: too long]")
+	} else if prURL != "" {
+		fmt.Fprintf(&sb, " (%s)", failureMetadata(prURL, 4096))
+	}
+	fmt.Fprintf(&sb, ". Please fix the failing CI checks on branch %q", failureMetadata(branch, 512))
+	if len(branch) > 512 {
+		sb.WriteString(" [branch name abbreviated]")
+	}
+	sb.WriteString(" and push the fix:\n\n")
+	sb.WriteString(p.text)
+	return sb.String()
+}
+
+func failureCheckHeader(f forge.Forge, c *forge.Check) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "- %s (%s), job %d", failureMetadata(c.Name, 1024), failureMetadata(string(c.Conclusion), 128), c.JobID)
+	if len(c.Labels) > 0 {
+		sb.WriteString(" [")
+		used := 0
+		for i, label := range c.Labels {
+			if used >= 1021 {
+				sb.WriteString("; additional labels omitted")
+				break
+			}
+			if i > 0 {
+				sb.WriteString(", ")
+				used += 2
+			}
+			part := failureMetadata(label, 1024-used)
+			sb.WriteString(part)
+			used += len(part)
+		}
+		sb.WriteByte(']')
+	}
+	url := f.CIJobURL(c.Owner, c.Repo, c.RunID, c.JobID)
+	if len(url) > 4096 {
+		sb.WriteString(": [job link omitted: too long]")
+	} else if url != "" {
+		sb.WriteString(": ")
+		sb.WriteString(failureMetadata(url, 4096))
+	}
+	sb.WriteByte('\n')
+	return sb.String()
+}
+
+// failureMetadata bounds untrusted check metadata before allocating formatting
+// buffers. Excerpts have their own notice policy; metadata uses an ellipsis.
+func failureMetadata(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n < 3 {
+		return strings.Repeat(".", min(len(s), n))
+	}
+	omitted := len(s) > n
+	s = s[:min(len(s), n)]
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if omitted || len(s) > n {
+		s = s[:min(len(s), n-3)]
+		for !utf8.ValidString(s) {
+			s = s[:len(s)-1]
+		}
+		s += "…"
+	}
+	return strings.Clone(s)
 }
 
 const ciLogSummaryPrompt = `You are a CI log analyst. Extract only the meaningful error information from the CI log below.
@@ -136,11 +220,8 @@ Return plain text, no markdown.`
 
 // summarizeCILog asks the LLM to extract the meaningful error from a large CI log.
 // Returns empty string on failure so the caller can fall back to the raw log.
-func summarizeCILog(ctx context.Context, log *slog.Logger, provider genai.Provider, checkName, logText string, maxChars int) string {
-	if len(logText) > maxChars {
-		logText = logText[len(logText)-maxChars:]
-	}
-	input := fmt.Sprintf("CI check %q failed. Log:\n%s", checkName, logText)
+func summarizeCILog(ctx context.Context, log *slog.Logger, provider genai.Provider, checkName, logText string) string {
+	input := fmt.Sprintf("CI check %q failed. Log:\n%s", failureMetadata(checkName, 1024), logText)
 	res, err := provider.GenSync(ctx,
 		genai.Messages{genai.NewTextMessage(input)},
 		&genai.GenOptionText{SystemPrompt: ciLogSummaryPrompt},
@@ -149,5 +230,5 @@ func summarizeCILog(ctx context.Context, log *slog.Logger, provider genai.Provid
 		log.WarnContext(ctx, "summarizeCILog: LLM call failed", "check", checkName, "err", err)
 		return ""
 	}
-	return res.String()
+	return forge.LimitLogExcerpt(res.String(), forge.MaxLogExcerptBytes)
 }

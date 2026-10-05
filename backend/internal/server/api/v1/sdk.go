@@ -65,7 +65,9 @@ func SDKAPI() apispec.Config[api.ErrorCode] {
 				DocType:   "Record<string, JSONValue>",
 			},
 		},
-		Discriminated: []string{"EventMessage", "TaskListEvent"},
+		// TaskListEvent has optional snapshot metadata as well as kind payloads.
+		// Validate all present fields; kind-only dispatch would discard complete.
+		Discriminated: []string{"EventMessage"},
 		ErrorCodes: []apispec.ErrorCodeSpec[api.ErrorCode]{
 			{Code: api.CodeBadRequest, Status: 400},
 			{Code: api.CodeUnknownHarness, Status: 400},

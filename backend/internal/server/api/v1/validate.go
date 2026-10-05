@@ -5,8 +5,11 @@ package v1
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
@@ -23,6 +26,11 @@ const (
 	maxImageBytes       = 10 << 20
 	maxPromptImageBytes = 20 << 20
 )
+
+// ImageUploadConstraints reports the validation-owned upload policy to clients.
+func ImageUploadConstraints() ImageConstraints {
+	return ImageConstraints{AllowedMediaTypes: slices.Sorted(maps.Keys(allowedImageTypes)), MaxImageBytes: maxImageBytes, MaxPromptImageBytes: maxPromptImageBytes}
+}
 
 // pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
 var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
@@ -63,8 +71,8 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 	return nil
 }
 
-// validateImages checks that each ImageData entry has a valid media type,
-// valid base64 payload, and bounded decoded size.
+// validateImages checks media types, nonempty payloads, and padding-aware decoded
+// size estimates. It does not decode or validate image contents or base64 syntax.
 func validateImages(images []ImageData) error {
 	var total int
 	for _, img := range images {
@@ -77,10 +85,18 @@ func validateImages(images []ImageData) error {
 		if img.Data == "" {
 			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image data is required"}
 		}
-		if base64.StdEncoding.DecodedLen(len(img.Data)) > maxImageBytes {
+		size := base64.StdEncoding.DecodedLen(len(img.Data))
+		if len(img.Data) >= 4 && len(img.Data)%4 == 0 {
+			if strings.HasSuffix(img.Data, "==") {
+				size -= 2
+			} else if strings.HasSuffix(img.Data, "=") {
+				size--
+			}
+		}
+		if size > maxImageBytes {
 			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image data too large"}
 		}
-		total += base64.StdEncoding.DecodedLen(len(img.Data))
+		total += size
 		if total > maxPromptImageBytes {
 			return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image data total too large"}
 		}

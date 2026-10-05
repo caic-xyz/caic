@@ -23,13 +23,15 @@ export default function TaskInfoPage() {
         };
         return (
           <DetailPane>
-            <TaskInfo
-              taskId={taskId}
-              repo={t()?.repos?.[0]?.name ?? ""}
-              branch={t()?.repos?.[0]?.branch ?? ""}
-              taskPath={tp()}
-              onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
-            />
+            <Show when={t()}>
+              <TaskInfo
+                taskId={taskId}
+                repo={t()?.repos?.[0]?.name ?? ""}
+                branch={t()?.repos?.[0]?.branch ?? ""}
+                taskPath={tp()}
+                onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
+              />
+            </Show>
           </DetailPane>
         );
       }}

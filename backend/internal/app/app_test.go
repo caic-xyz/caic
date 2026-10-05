@@ -55,7 +55,7 @@ func TestRuntimeRestoreMissingLog(t *testing.T) {
 	id := ksid.NewID().String()
 	cfg.Runtime.System = &missingLogSystem{taskID: id}
 	// A corrupt purged history must not increase the runtime warning count or
-	// turn a usable task list into a history error.
+	// obscure the live-runtime restoration error.
 	dir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -82,8 +82,11 @@ func TestRuntimeRestoreMissingLog(t *testing.T) {
 	if err := a.backgroundTasks[0](t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if loading, loadErr := a.taskMgr.SettledStatus(); loading || loadErr != "" {
-		t.Fatalf("successful history load reported runtime import failure: loading=%v error=%q", loading, loadErr)
+	if loading, loadErr := a.taskMgr.RestorationStatus(); loading || !strings.Contains(loadErr, id) {
+		t.Fatalf("runtime restoration failure missing: loading=%v error=%q", loading, loadErr)
+	}
+	if a.taskMgr.TaskListComplete() {
+		t.Fatal("failed live-runtime restoration certified absence")
 	}
 	if !strings.Contains(logs.String(), `"level":"ERROR","msg":"load live task logs failed; affected instances will not be imported"`) {
 		t.Fatalf("missing runtime log failure was not logged at error level: %s", logs.String())
@@ -129,8 +132,11 @@ func TestRuntimeRestoreMissingLog(t *testing.T) {
 			if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 				t.Fatal(err)
 			}
-			if ev.Kind == "status" && (ev.Status.Loading || ev.Status.Error != "") {
-				t.Fatalf("history status = %+v", ev.Status)
+			if ev.Kind == "status" && (ev.Status == nil || ev.Status.Loading || !strings.Contains(ev.Status.Error, id)) {
+				t.Fatalf("restoration status = %+v", ev.Status)
+			}
+			if ev.Kind == "snapshot" && (ev.Complete == nil || *ev.Complete) {
+				t.Fatal("failed runtime restoration emitted complete snapshot")
 			}
 			if ev.Kind == "warning" {
 				warning = ev.Warning
@@ -252,7 +258,7 @@ func TestStartupReadiness(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("HTTP status = %d", resp.StatusCode)
 	}
-	if loading, _ := a.taskMgr.SettledStatus(); !loading {
+	if loading, _ := a.taskMgr.RestorationStatus(); !loading {
 		t.Fatal("history completed before runtime restoration")
 	}
 	taskURL := "http://" + ln.Addr().String() + "/api/caic/v1/tasks/" + ksid.NewID().String()

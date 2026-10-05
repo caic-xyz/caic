@@ -1403,6 +1403,29 @@ func TestNew(t *testing.T) {
 func TestManager(t *testing.T) {
 	t.Parallel()
 
+	t.Run("TaskListComplete", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		t.Cleanup(func() {
+			if err := m.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := m.Start(&fakeTaskMCPScoper{}); err != nil {
+			t.Fatal(err)
+		}
+		m.CompleteRestoration(nil)
+		if m.TaskListComplete() {
+			t.Fatal("runtime import fence certified missing tasks")
+		}
+		if _, err := m.ImportInstances(t.Context(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !m.TaskListComplete() {
+			t.Fatal("completed runtime import did not certify membership")
+		}
+	})
+
 	t.Run("Start", func(t *testing.T) {
 		t.Run("valid_scopes_enabled_task", func(t *testing.T) {
 			t.Parallel()
@@ -6552,9 +6575,9 @@ func TestErrTaskNotFound(t *testing.T) {
 	})
 }
 
-// TestSettledLoadState verifies the background settled-history pass state
+// TestRestorationState verifies the background runtime/history restoration state
 // machine exposed to the task-list stream.
-func TestSettledLoadState(t *testing.T) {
+func TestRestorationState(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, Config{ServerCtx: t.Context()})
 	t.Cleanup(func() {
@@ -6563,36 +6586,46 @@ func TestSettledLoadState(t *testing.T) {
 		}
 	})
 
+	if m.TaskListComplete() {
+		t.Fatal("fresh manager certified task-list absence")
+	}
+
 	// A fresh Manager has not completed a pass, so it reports loading.
-	if loading, err := m.SettledStatus(); !loading || err != "" {
-		t.Fatalf("initial SettledStatus = (%v, %q), want (true, \"\")", loading, err)
+	if loading, err := m.RestorationStatus(); !loading || err != "" {
+		t.Fatalf("initial RestorationStatus = (%v, %q), want (true, \"\")", loading, err)
 	}
 
-	m.CompleteSettledLoad(errors.New("prior failure"))
-	if loading, _ := m.SettledStatus(); loading {
-		t.Fatal("after CompleteSettledLoad: SettledLoading = true, want false")
+	m.CompleteRestoration(errors.New("prior failure"))
+	if m.TaskListComplete() {
+		t.Fatal("failed restoration certified task-list absence")
 	}
-	if _, got := m.SettledStatus(); got != "prior failure" {
-		t.Fatalf("after CompleteSettledLoad(err): SettledError = %q, want %q", got, "prior failure")
+	if loading, _ := m.RestorationStatus(); loading {
+		t.Fatal("after CompleteRestoration: SettledLoading = true, want false")
+	}
+	if _, got := m.RestorationStatus(); got != "prior failure" {
+		t.Fatalf("after CompleteRestoration(err): SettledError = %q, want %q", got, "prior failure")
 	}
 
-	m.CompleteSettledLoad(nil)
-	if loading, _ := m.SettledStatus(); loading {
-		t.Fatal("after clean CompleteSettledLoad: SettledLoading = true, want false")
+	m.CompleteRestoration(nil)
+	if !m.TaskListComplete() {
+		t.Fatal("successful restoration did not certify membership")
 	}
-	if _, got := m.SettledStatus(); got != "" {
-		t.Fatalf("after clean CompleteSettledLoad: SettledError = %q, want empty", got)
+	if loading, _ := m.RestorationStatus(); loading {
+		t.Fatal("after clean CompleteRestoration: SettledLoading = true, want false")
+	}
+	if _, got := m.RestorationStatus(); got != "" {
+		t.Fatalf("after clean CompleteRestoration: SettledError = %q, want empty", got)
 	}
 
 	// A clean completion clears a prior error, so the state cannot report a
 	// stale failure across a retry or second pass.
-	m.CompleteSettledLoad(errors.New("stale failure"))
-	if _, got := m.SettledStatus(); got != "stale failure" {
-		t.Fatalf("CompleteSettledLoad(err): SettledError = %q, want %q", got, "stale failure")
+	m.CompleteRestoration(errors.New("stale failure"))
+	if _, got := m.RestorationStatus(); got != "stale failure" {
+		t.Fatalf("CompleteRestoration(err): SettledError = %q, want %q", got, "stale failure")
 	}
-	m.CompleteSettledLoad(nil)
-	if _, got := m.SettledStatus(); got != "" {
-		t.Fatalf("CompleteSettledLoad(nil) after failure: SettledError = %q, want empty", got)
+	m.CompleteRestoration(nil)
+	if _, got := m.RestorationStatus(); got != "" {
+		t.Fatalf("CompleteRestoration(nil) after failure: SettledError = %q, want empty", got)
 	}
 }
 

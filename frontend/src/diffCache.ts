@@ -1,4 +1,4 @@
-// Shared bounded task-diff cache: deduplicates index and patch loads, supports stale refresh, and evicts deleted tasks.
+// Shared task-diff cache with estimated reusable-payload budgets: deduplicates index and patch loads, supports stale refresh, and evicts deleted tasks.
 
 import type { FileDiffResp, TaskDiffIndexResp } from "@sdk/types.gen";
 import { api } from "./api";
@@ -26,9 +26,12 @@ interface IndexEntry extends DiffIndexSnapshot {
   request: Promise<TaskDiffIndexResp> | null;
   used: number;
   validatedAt: number;
+  payloadBytes: number;
 }
 
 interface PatchEntry {
+  // Null until settlement; pending requests remain available for coalescing.
+  payloadBytes: number | null;
   selector: FileDiffSelector;
   request: Promise<string>;
   used: number;
@@ -42,6 +45,7 @@ interface DiffCacheOptions {
   loadIndex: (taskId: string) => Promise<TaskDiffIndexResp>;
   loadPatch: (selector: FileDiffSelector) => Promise<FileDiffResp>;
   maxPatchCharacters: number;
+  maxRetainedBytes: number;
 }
 
 export class DiffCache {
@@ -74,10 +78,10 @@ export class DiffCache {
   subscribe(taskId: string, listener: () => void): () => void {
     const entry = this.indexEntry(taskId);
     entry.listeners.add(listener);
-    this.pruneIndexes();
+    this.prune();
     return () => {
       entry.listeners.delete(listener);
-      this.pruneIndexes();
+      this.prune();
     };
   }
 
@@ -97,6 +101,7 @@ export class DiffCache {
       .then((data) => {
         if (entry.evictionEpoch === evictionEpoch) {
           entry.data = data;
+          entry.payloadBytes = estimatePayloadBytes(data);
           entry.error = null;
           entry.version++;
           this.dropWorkingPatches(taskId);
@@ -117,7 +122,7 @@ export class DiffCache {
         entry.request = null;
         this.touch(entry);
         this.emit(entry);
-        this.pruneIndexes();
+        this.prune();
         if (entry.generation !== generation && entry.listeners.size) {
           void this.loadIndex(taskId).catch(() => undefined);
         }
@@ -148,6 +153,7 @@ export class DiffCache {
 
     const entry: PatchEntry = {
       selector,
+      payloadBytes: null,
       request: Promise.resolve(""),
       used: ++this.used,
       generation,
@@ -155,8 +161,10 @@ export class DiffCache {
     entry.request = this.options
       .loadPatch(selector)
       .then((response) => {
-        if (response.diff.length > this.options.maxPatchCharacters && this.patches.get(key) === entry) {
-          this.patches.delete(key);
+        if (this.patches.get(key) === entry) {
+          entry.payloadBytes = response.diff.length * 2;
+          if (response.diff.length > this.options.maxPatchCharacters) this.patches.delete(key);
+          this.prune();
         }
         return response.diff;
       })
@@ -165,7 +173,7 @@ export class DiffCache {
         throw error;
       });
     this.patches.set(key, entry);
-    this.prunePatches();
+    this.prune();
     return entry.request;
   }
 
@@ -183,6 +191,7 @@ export class DiffCache {
     const entry = this.indexes.get(taskId);
     if (entry?.listeners.size) {
       entry.data = null;
+      entry.payloadBytes = 0;
       entry.error = null;
       entry.evictionEpoch++;
       entry.generation++;
@@ -224,6 +233,7 @@ export class DiffCache {
       stale: true,
       used: ++this.used,
       validatedAt: 0,
+      payloadBytes: 0,
       version: 0,
     };
     this.indexes.set(taskId, entry);
@@ -238,21 +248,57 @@ export class DiffCache {
     entry.used = ++this.used;
   }
 
-  private pruneIndexes(): void {
-    while (this.indexes.size > this.options.indexLimit) {
-      const candidate = [...this.indexes.entries()]
-        .filter(([, entry]) => entry.listeners.size === 0 && !entry.request)
-        .sort((a, b) => a[1].used - b[1].used)[0];
-      if (!candidate) return;
-      this.indexes.delete(candidate[0]);
+  // Active indexes own the currently displayed metadata and remain pinned.
+  // Their estimate participates in the budget, but an oversized active view
+  // can exceed it. All reusable payloads then go, and unsubscribe releases an
+  // oversized index. This is not a bound on live views or pending responses.
+  private prune(): void {
+    let retained = 0;
+    for (const entry of this.indexes.values()) retained += entry.payloadBytes;
+    for (const entry of this.patches.values()) retained += entry.payloadBytes ?? 0;
+    if (
+      retained <= this.options.maxRetainedBytes &&
+      this.indexes.size <= this.options.indexLimit &&
+      this.patches.size <= this.options.patchLimit
+    )
+      return;
+    const indexes = [...this.indexes.entries()]
+      .filter(([, entry]) => entry.listeners.size === 0 && !entry.request)
+      .sort((a, b) => a[1].used - b[1].used);
+    for (const [key, entry] of indexes) {
+      if (entry.payloadBytes > this.options.maxRetainedBytes || this.indexes.size > this.options.indexLimit) {
+        this.indexes.delete(key);
+        retained -= entry.payloadBytes;
+      }
     }
-  }
-
-  private prunePatches(): void {
-    while (this.patches.size > this.options.patchLimit) {
-      const candidate = [...this.patches.entries()].sort((a, b) => a[1].used - b[1].used)[0];
-      if (!candidate) return;
-      this.patches.delete(candidate[0]);
+    const patches = [...this.patches.entries()]
+      .filter(([, entry]) => entry.payloadBytes !== null)
+      .sort((a, b) => a[1].used - b[1].used);
+    for (const [key, entry] of patches) {
+      if (this.patches.size <= this.options.patchLimit) break;
+      this.patches.delete(key);
+      retained -= entry.payloadBytes ?? 0;
+    }
+    const candidates = [
+      ...indexes
+        .filter(([key]) => this.indexes.has(key))
+        .map(([key, entry]) => ({
+          used: entry.used,
+          bytes: entry.payloadBytes,
+          remove: () => this.indexes.delete(key),
+        })),
+      ...patches
+        .filter(([key]) => this.patches.has(key))
+        .map(([key, entry]) => ({
+          used: entry.used,
+          bytes: entry.payloadBytes ?? 0,
+          remove: () => this.patches.delete(key),
+        })),
+    ].sort((a, b) => a.used - b.used);
+    for (const entry of candidates) {
+      if (retained <= this.options.maxRetainedBytes) break;
+      entry.remove();
+      retained -= entry.bytes;
     }
   }
 
@@ -261,6 +307,22 @@ export class DiffCache {
       if (patch.selector.taskId === taskId && patch.selector.commit === "") this.patches.delete(key);
     }
   }
+}
+
+// estimatePayloadBytes counts UTF-16 string code units and scalar payloads,
+// without serializing the index into a second complete string. It is a
+// conservative string estimate, not measured heap: engine string storage,
+// object overhead, and shared references vary.
+function estimatePayloadBytes(value: unknown): number {
+  if (typeof value === "string") return value.length * 2;
+  if (typeof value === "number" || typeof value === "boolean") return 8;
+  if (Array.isArray(value)) return value.reduce<number>((sum, item: unknown) => sum + estimatePayloadBytes(item), 0);
+  if (value !== null && typeof value === "object") {
+    let bytes = 0;
+    for (const item of Object.values(value)) bytes += estimatePayloadBytes(item);
+    return bytes;
+  }
+  return 0;
 }
 
 function patchKey(selector: FileDiffSelector): string {
@@ -275,6 +337,7 @@ export const taskDiffCache = new DiffCache({
   // methods through it instead of capturing the function references at import time.
   loadIndex: (taskId) => api.getTaskDiffIndex(taskId),
   maxPatchCharacters: 1_000_000,
+  maxRetainedBytes: 16 << 20,
   loadPatch: (selector) =>
     api.getTaskFileDiff(selector.taskId, selector.repository, selector.commit, selector.path, selector.originalPath),
 });

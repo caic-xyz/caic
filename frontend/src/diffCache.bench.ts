@@ -20,6 +20,7 @@ bench(
         loads++;
         return index;
       },
+      maxRetainedBytes: 16 << 20,
       maxPatchCharacters: 1_000_000,
       loadPatch: async () => ({ diff: "patch" }),
     });
@@ -50,6 +51,7 @@ bench(
       indexLimit: 64,
       patchLimit: 64,
       loadIndex: async () => index,
+      maxRetainedBytes: 16 << 20,
       maxPatchCharacters: 1_000_000,
       loadPatch: async () => ({ diff: "patch" }),
     });
@@ -64,6 +66,32 @@ bench(
     );
     cache.clear();
     if (cache.snapshot("task-0").data !== null) throw new Error("account cache was not cleared");
+  },
+  { time: 1_000, warmupTime: 200 },
+);
+
+bench(
+  "loads eighty distinct file patches within the payload budget",
+  async () => {
+    const cache = new DiffCache({
+      freshnessMs: 1_500,
+      indexLimit: 20,
+      patchLimit: 100,
+      maxPatchCharacters: 1_000_000,
+      maxRetainedBytes: 16 << 20,
+      loadIndex: async () => index,
+      loadPatch: async () => ({ diff: "bounded-payload".repeat(320) }),
+    });
+    await cache.loadIndex("task");
+    for (let file = 0; file < 80; file++) {
+      await cache.loadPatch({
+        taskId: "task",
+        repository: "0",
+        commit: "immutable",
+        path: `file-${file}`,
+        originalPath: "",
+      });
+    }
   },
   { time: 1_000, warmupTime: 200 },
 );

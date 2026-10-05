@@ -164,9 +164,9 @@ type Forge interface {
 	// Name returns the forge name for display (e.g. "GitHub", "GitLab").
 	Name() string
 	// GetJobLog fetches the log for a CI job, capped at 100 MB. When
-	// failingOnly is true, the returned log is trimmed to the content of
-	// the failing step(s) if the forge's log format supports step-level
-	// markers; otherwise the full log is returned.
+	// failingOnly is true, a bounded excerpt prefers failing steps when
+	// supported, retaining diagnostic and head/tail context otherwise.
+	// False preserves full retrieval up to the existing download cap.
 	GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error)
 	// GetJobLabels returns the job labels for a CI job (e.g.
 	// ["ubuntu-latest"]). Returns nil without error when the forge does

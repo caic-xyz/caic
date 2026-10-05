@@ -66,6 +66,7 @@ func (h *serverHandlers) getConfig(ctx context.Context, _ *api.EmptyReq) (*v1.Co
 	}
 	displayName, _, _ = strings.Cut(displayName, ".")
 	cfg := &v1.Config{
+		ImageConstraints:     v1.ImageUploadConstraints(),
 		Version:              autoupdate.Version,
 		DisplayName:          displayName,
 		TailscaleAvailable:   h.tailscaleAvailable,

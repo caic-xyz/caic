@@ -28,6 +28,7 @@ describe("DiffCache", () => {
       indexLimit: 2,
       loadIndex,
       loadPatch,
+      maxRetainedBytes: 16 << 20,
       maxPatchCharacters: 1_000,
       patchLimit: 2,
     });
@@ -233,6 +234,109 @@ describe("DiffCache", () => {
     await oldRequest;
     expect(cache.snapshot("task-1").data).toBeNull();
     unsubscribe();
+  });
+
+  it("budgets index and patch payloads together using shared LRU order", async () => {
+    cache = new DiffCache({
+      freshnessMs: 1_000,
+      indexLimit: 10,
+      patchLimit: 10,
+      maxPatchCharacters: 1_000,
+      maxRetainedBytes: 128,
+      loadIndex,
+      loadPatch,
+    });
+    loadIndex.mockResolvedValue({
+      repositories: [
+        { name: "index-metadata-".repeat(3), branch: "main", ahead: 0, behind: 0, commits: [], uncommitted: [] },
+      ],
+    });
+    loadPatch.mockResolvedValue({ diff: "unique-patch-body-".repeat(3) });
+    await cache.loadIndex("indexed");
+    await cache.loadPatch(selector("patched", "one"));
+    expect(cache.snapshot("indexed").data).toBeNull();
+    await cache.loadPatch(selector("patched", "one"));
+    expect(loadPatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an oversized active index visible but releases it on unsubscribe", async () => {
+    cache = new DiffCache({
+      freshnessMs: 1_000,
+      indexLimit: 10,
+      patchLimit: 10,
+      maxPatchCharacters: 1_000,
+      maxRetainedBytes: 128,
+      loadIndex,
+      loadPatch,
+    });
+    const large: TaskDiffIndexResp = {
+      repositories: [
+        { name: "oversized-metadata-".repeat(20), branch: "main", ahead: 0, behind: 0, commits: [], uncommitted: [] },
+      ],
+    };
+    loadIndex.mockResolvedValue(large);
+    loadPatch.mockResolvedValue({ diff: "patch" });
+    await cache.loadPatch(selector("reusable", "one"));
+    const unsubscribe = cache.subscribe("active", () => undefined);
+    await cache.loadIndex("active");
+    expect(cache.snapshot("active").data).toBe(large);
+    await cache.loadPatch(selector("reusable", "one"));
+    expect(loadPatch).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    expect(cache.snapshot("active").data).toBeNull();
+    await cache.loadIndex("active");
+    expect(cache.snapshot("active").data).toBeNull();
+    expect(loadIndex).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases an oversized index settling after its last subscriber leaves", async () => {
+    cache = new DiffCache({
+      freshnessMs: 1_000,
+      indexLimit: 10,
+      patchLimit: 10,
+      maxPatchCharacters: 1_000,
+      maxRetainedBytes: 128,
+      loadIndex,
+      loadPatch,
+    });
+    const pending = Promise.withResolvers<TaskDiffIndexResp>();
+    loadIndex.mockReturnValueOnce(pending.promise);
+    const unsubscribe = cache.subscribe("task", () => undefined);
+    const load = cache.loadIndex("task");
+    unsubscribe();
+    expect(cache.loadIndex("task")).toBe(load);
+    pending.resolve({
+      repositories: [
+        { name: "oversized-metadata-".repeat(20), branch: "main", ahead: 0, behind: 0, commits: [], uncommitted: [] },
+      ],
+    });
+    await load;
+    expect(cache.snapshot("task").data).toBeNull();
+    expect(loadIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces pending requests even when their settled payload cannot be retained", async () => {
+    const first = Promise.withResolvers<FileDiffResp>();
+    loadPatch.mockReturnValueOnce(first.promise).mockResolvedValue({ diff: "x".repeat(1_001) });
+    const one = cache.loadPatch(selector("task", "large"));
+    const two = cache.loadPatch(selector("task", "large"));
+    expect(one).toBe(two);
+    first.resolve({ diff: "x".repeat(1_001) });
+    await one;
+    await cache.loadPatch(selector("task", "large"));
+    expect(loadPatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not repopulate cleared cache retention from a late patch", async () => {
+    const old = Promise.withResolvers<FileDiffResp>();
+    loadPatch.mockReturnValueOnce(old.promise).mockResolvedValue({ diff: "new-account" });
+    const oldLoad = cache.loadPatch(selector("task", "commit"));
+    cache.clear();
+    await cache.loadPatch(selector("task", "commit"));
+    old.resolve({ diff: "old-account" });
+    await oldLoad;
+    expect(await cache.loadPatch(selector("task", "commit"))).toBe("new-account");
+    expect(loadPatch).toHaveBeenCalledTimes(2);
   });
 
   it("does not retain oversized patches", async () => {

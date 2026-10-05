@@ -46,7 +46,7 @@ type ciHandlers struct {
 
 // handleGetCILog fetches the log for a specific CI job by jobID.
 // The jobID is a required query parameter; the caller knows it from the
-// task's ciChecks field. The log is capped at ~8 KB (tail).
+// task's ciChecks field. Full logs retain the forge download cap (100 MiB).
 func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	entry, err := taskEntryFromRequest(r, h.taskMgr)
 	if err != nil {
@@ -153,7 +153,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Task, 
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	taskID, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: checkout.RelPath, Prompt: summary, OwnerID: ownerID})
+	taskID, err := h.taskClient.CreateTask(ctx, task.CreateRequest{Repo: checkout.RelPath, Prompt: summary.String(), OwnerID: ownerID})
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
@@ -215,11 +215,7 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	summary := ci.FailureSummary(ctx, h.log, f, h.provider, result)
 
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
-	prompt := fmt.Sprintf("CI failed on PR #%d", snap.ForgePR)
-	if prURL != "" {
-		prompt += fmt.Sprintf(" (%s)", prURL)
-	}
-	prompt += fmt.Sprintf(". Please fix the failing CI checks on branch %q and push the fix:\n\n%s", primary.Branch, summary)
+	prompt := summary.ForPR(prURL, snap.ForgePR, primary.Branch)
 
 	if err := t.SendInput(ctx, agent.Prompt{Text: prompt}); err != nil {
 		return nil, fmt.Errorf("send input: %w", err)

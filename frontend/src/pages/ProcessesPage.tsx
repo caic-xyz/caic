@@ -23,13 +23,15 @@ export default function ProcessesPage() {
         };
         return (
           <DetailPane>
-            <ProcessDetail
-              taskId={taskId}
-              repo={t()?.repos?.[0]?.name ?? ""}
-              branch={t()?.repos?.[0]?.branch ?? ""}
-              taskPath={tp()}
-              onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
-            />
+            <Show when={t()}>
+              <ProcessDetail
+                taskId={taskId}
+                repo={t()?.repos?.[0]?.name ?? ""}
+                branch={t()?.repos?.[0]?.branch ?? ""}
+                taskPath={tp()}
+                onTaskRefreshError={s.dismissSelectedTaskOnNotFound}
+              />
+            </Show>
           </DetailPane>
         );
       }}

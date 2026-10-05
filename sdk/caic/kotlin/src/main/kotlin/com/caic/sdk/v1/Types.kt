@@ -1173,6 +1173,14 @@ object WarningCategorySerializer : KSerializer<WarningCategory> {
 
 typealias DiffStat = List<DiffFileStat>
 
+/** ImageConstraints describes decoded-byte budgets and supported image MIME types. */
+@Serializable
+data class ImageConstraints(
+    val allowedMediaTypes: List<String>,
+    val maxImageBytes: Int,
+    val maxPromptImageBytes: Int,
+)
+
 /** VoiceGatewayMetadata reports structured voice gateway support. */
 @Serializable
 data class VoiceGatewayMetadata(
@@ -1189,6 +1197,7 @@ data class RuntimeInfo(val name: String)
 /** Config reports server capabilities to the frontend. */
 @Serializable
 data class Config(
+    val imageConstraints: ImageConstraints,
     val version: String? = null,
     val displayName: String,
     val tailscaleAvailable: Boolean,
@@ -2488,26 +2497,28 @@ data class Warning(
 )
 
 /**
- * TaskListSettledStatus carries the background task-history load pass state
- * on kind=="status" events. Loading is true while the pass scans and
- * compresses logs; Error is non-empty when the pass could not register its
- * history.
+ * TaskListRestorationStatus carries background runtime/history restoration
+ * state on kind=="status" events. Loading is true until both stages finish;
+ * Error is non-empty when any stage leaves task membership incomplete.
  */
 @Serializable
-data class TaskListSettledStatus(val loading: Boolean, val error: String)
+data class TaskListRestorationStatus(val loading: Boolean, val error: String)
 
 /**
  * TaskListEvent is a discriminated-union event for the task list SSE stream.
- * kind=="snapshot": Snapshot holds the full list on initial connect.
+ * kind=="snapshot": Snapshot carries task data on connect and when restoration becomes complete.
+ * Complete is present on snapshots only: false preserves prior membership and drafts;
+ * true certifies omissions after successful runtime/history restoration and DTO conversion.
  * kind=="upsert":   Upsert holds a newly created task.
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
  * kind=="delete":   Delete holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
  * kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
- * kind=="status":   Status holds the settled-history pass state, emitted on connect and again whenever the pass transitions (in-progress -> completed | failed).
+ * kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
  */
 @Serializable
 data class TaskListEvent(
+    val complete: Boolean? = null,
     val kind: String,
     val snapshot: List<Task>? = null,
     val upsert: Task? = null,
@@ -2515,7 +2526,7 @@ data class TaskListEvent(
     val delete: String? = null,
     val repos: List<Repo>? = null,
     val warning: Warning? = null,
-    val status: TaskListSettledStatus? = null,
+    val status: TaskListRestorationStatus? = null,
 )
 
 /** QuotaRateLimit is a single rate-limit window snapshot from any provider. */

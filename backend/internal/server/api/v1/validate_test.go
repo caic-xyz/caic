@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -315,5 +316,39 @@ func assertBadRequest(t *testing.T, err error, wantMsg string) {
 	}
 	if apiErr.Error() != wantMsg {
 		t.Errorf("message = %q, want %q", apiErr.Error(), wantMsg)
+	}
+}
+
+func TestValidateImagesBoundaries(t *testing.T) {
+	t.Parallel()
+	image := func(n int) ImageData {
+		return ImageData{MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(make([]byte, n))}
+	}
+	for _, n := range []int{10<<20 - 1, 10 << 20, 10<<20 + 1} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			t.Parallel()
+			err := (&InputReq{Prompt: Prompt{Images: []ImageData{image(n)}}}).Validate()
+			if n <= 10<<20 {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				assertBadRequest(t, err, "image data too large")
+			}
+		})
+	}
+	for _, delta := range []int{-1, 0, 1} {
+		t.Run("aggregate"+strconv.Itoa(delta), func(t *testing.T) {
+			t.Parallel()
+			n := 10<<20 - 1
+			err := (&InputReq{Prompt: Prompt{Images: []ImageData{image(n), image(n), image(2 + delta)}}}).Validate()
+			if delta <= 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				assertBadRequest(t, err, "image data total too large")
+			}
+		})
 	}
 }

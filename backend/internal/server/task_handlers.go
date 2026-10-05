@@ -453,14 +453,22 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	var prevSettledLoading bool
 	var prevSettledError string
 	first := true
+	prevComplete := false
 
 	for {
 		// Subscribe before reading the snapshot. If a task changes while the
 		// snapshot is being assembled, this channel remains closed and the next
 		// loop emits the newer state instead of missing the transition.
 		ch := h.taskMgr.Changed()
-		settledLoading, settledError := h.taskMgr.SettledStatus()
-		out, replays := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq)
+		settledLoading, settledError := h.taskMgr.RestorationStatus()
+		complete := h.taskMgr.TaskListComplete()
+		out, replays, membership := h.taskSvc.taskListSnapshotWithReplay(ctx, prevStateSeq)
+		currentIDs := make(map[string]struct{}, len(membership))
+		for _, id := range membership {
+			currentIDs[id] = struct{}{}
+		}
+		complete = complete && len(out) == len(membership)
+		wasFirst := first
 		repoList := repoListFromSnapshot(h.log, h.checkouts.Checkouts(), h.repoStatus)
 		newWarnings := h.warnings.Since(ownerID, lastWarnSeq)
 
@@ -471,15 +479,15 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		}
 
 		if first {
-			// Establish the settled-history pass state before the snapshot so the
+			// Establish the runtime/history restoration state before the snapshot so the
 			// client's connection indicator and empty-list handling are correct on
 			// the first paint. The snapshot is a different union variant and cannot
 			// carry the status payload, so it arrives as its own event.
-			if err := emitSettledStatusEvent(stream, settledLoading, settledError); err != nil {
+			if err := emitRestorationStatusEvent(stream, settledLoading, settledError); err != nil {
 				h.log.WarnContext(ctx, "marshal settled status", "err", err)
 				return
 			}
-			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out, Complete: &complete}); err != nil {
 				h.log.WarnContext(ctx, "marshal task list snapshot", "err", err)
 				return
 			}
@@ -504,21 +512,19 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			prevSettledError = settledError
 			first = false
 		} else {
-			// Emit a status event when the settled-history pass transitions
+			// Emit a status event when runtime/history restoration transitions
 			// (in-progress -> completed | failed).
 			if settledLoading != prevSettledLoading || settledError != prevSettledError {
 				prevSettledLoading = settledLoading
 				prevSettledError = settledError
-				if err := emitSettledStatusEvent(stream, settledLoading, settledError); err != nil {
+				if err := emitRestorationStatusEvent(stream, settledLoading, settledError); err != nil {
 					h.log.WarnContext(ctx, "marshal settled status", "err", err)
 					return
 				}
 			}
 			// Emit upserts/patches for new or changed tasks.
-			currentIDs := make(map[string]struct{}, len(out))
 			for i := range out {
 				id := out[i].ID.String()
-				currentIDs[id] = struct{}{}
 				data, err := json.Marshal(&out[i])
 				if err != nil {
 					h.log.WarnContext(ctx, "marshal task", "task", id, "err", err)
@@ -600,6 +606,17 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 				}
 			}
 		}
+
+		// Keep rendering partial data during restoration. Once absence becomes
+		// authoritative, a fresh full snapshot cleans missed disconnect deletes,
+		// including tasks that never produced a delta on this connection.
+		if !wasFirst && complete && !prevComplete {
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "snapshot", Snapshot: out, Complete: &complete}); err != nil {
+				h.log.WarnContext(ctx, "marshal complete task-list snapshot", "err", err)
+				return
+			}
+		}
+		prevComplete = complete
 
 		// Replay active alerts on connect, then emit diagnostic updates by revision.
 		for _, warn := range newWarnings {
@@ -961,14 +978,14 @@ func shouldReplayHistoryFromDisk(state taskslog.State, lt *taskslog.LoadedTask) 
 	return state == taskslog.StateStopped && lt != nil && lt.LogPath() != ""
 }
 
-// emitSettledStatusEvent sends a kind=="status" event carrying the settled-
-// history pass state (loading flag and error). It is the only event that can
+// emitRestorationStatusEvent sends a kind=="status" event carrying runtime/history
+// restoration state (loading flag and error). It is the only event that can
 // carry the status variant, so the initial state and every transition go
 // through it.
-func emitSettledStatusEvent(stream *sse.Stream, loading bool, errStr string) error {
+func emitRestorationStatusEvent(stream *sse.Stream, loading bool, errStr string) error {
 	return emitTaskListEvent(stream, &v1.TaskListEvent{
 		Kind:   "status",
-		Status: &v1.TaskListSettledStatus{Loading: loading, Error: errStr},
+		Status: &v1.TaskListRestorationStatus{Loading: loading, Error: errStr},
 	})
 }
 

@@ -203,9 +203,11 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 
 	ciStatus := forge.CIStatusSuccess
 	var summary string
+	var failure FailurePrompt
 	if result.Status == forge.CIStatusFailure {
 		ciStatus = forge.CIStatusFailure
-		summary = FailureSummary(ctx, svc.log, f, svc.provider, result)
+		failure = FailureSummary(ctx, svc.log, f, svc.provider, result)
+		summary = failure.String()
 	} else {
 		// CI passed — attempt a squash merge.
 		snap := t.Snapshot()
@@ -236,7 +238,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 		if result.Status == forge.CIStatusFailure {
 			snap := t.Snapshot()
 			if snap.ForgePR > 0 {
-				svc.maybeAutoFix(ctx, t, f, summary)
+				svc.maybeAutoFix(ctx, t, f, failure)
 			}
 		}
 	}
@@ -389,7 +391,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 // maybeAutoFix creates a new task to fix CI failures when auto-fix is enabled
 // in the task owner's preferences. It is called when the original task's agent
 // session is no longer active and cannot receive CI failure input directly.
-func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forge, ciSummary string) {
+func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forge, ciSummary FailurePrompt) {
 	ownerID := t.OwnerID
 	if ownerID == "" {
 		ownerID = "default"
@@ -409,11 +411,7 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 	}
 	snap := t.Snapshot()
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
-	prompt := fmt.Sprintf("CI failed on PR #%d", snap.ForgePR)
-	if prURL != "" {
-		prompt += fmt.Sprintf(" (%s)", prURL)
-	}
-	prompt += fmt.Sprintf(". Please fix the failing CI checks on branch %q and push the fix:\n\n%s", primary.Branch, ciSummary)
+	prompt := ciSummary.ForPR(prURL, snap.ForgePR, primary.Branch)
 	svc.log.InfoContext(ctx, "creating auto-fix task", "repo", primary.Name, "pr", snap.ForgePR, "branch", primary.Branch)
 	if _, err := svc.backend.CreateTask(ctx, task.CreateRequest{Repo: repo.RelPath, Prompt: prompt, OwnerID: t.OwnerID}); err != nil {
 		svc.log.WarnContext(ctx, "create auto-fix task", "repo", primary.Name, "err", err)

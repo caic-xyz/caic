@@ -5,12 +5,17 @@ import { expect, vi } from "@tests/expect";
 import { render, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { ImageData as APIImageData } from "@sdk/types.gen";
+import type { DraftImage } from "../images";
+const imageConstraints = {
+  allowedMediaTypes: ["image/png", "image/jpeg"],
+  maxImageBytes: 10485760,
+  maxPromptImageBytes: 20971520,
+};
 
 import PromptInput from "./PromptInput";
 import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 
-const fakeImage: APIImageData = { mediaType: "image/png", data: "iVBOR" };
+const fakeImage: DraftImage = { id: "test", blob: new Blob(["image"], { type: "image/png" }), previewURL: "blob:test" };
 
 function renderPromptWithCamera(onSubmit: () => void) {
   return render(() => (
@@ -25,7 +30,10 @@ function renderPromptWithCamera(onSubmit: () => void) {
         value="take a photo"
         onInput={() => {}}
         images={[]}
-        onImagesChange={() => {}}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
         supportsImages={true}
         sendButton={<button type="submit">Send</button>}
       />
@@ -36,7 +44,16 @@ function renderPromptWithCamera(onSubmit: () => void) {
 describe("PromptInput", () => {
   it("renders textarea with placeholder", () => {
     const { getByRole } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} placeholder="Describe a task..." />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        placeholder="Describe a task..."
+      />
     ));
     expect(getByRole("textbox")).toHaveAttribute("data-placeholder", "Describe a task...");
   });
@@ -45,7 +62,16 @@ describe("PromptInput", () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     const { getByRole } = render(() => (
-      <PromptInput value="" onInput={() => {}} onSubmit={onSubmit} images={[]} onImagesChange={() => {}} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        onSubmit={onSubmit}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+      />
     ));
     getByRole("textbox").focus();
     await user.keyboard("{Enter}");
@@ -112,21 +138,47 @@ describe("PromptInput", () => {
 
   it("shows attach button when supportsImages is true", () => {
     const { getByRole } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     expect(getByRole("button", { name: "Attach images" })).toBeInTheDocument();
   });
 
   it("hides attach button when supportsImages is false", () => {
     const { queryByRole } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={false} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={false}
+      />
     ));
     expect(queryByRole("button", { name: "Attach images" })).not.toBeInTheDocument();
   });
 
   it("shows image preview when images is non-empty", () => {
     const { getAllByAltText } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[fakeImage]} onImagesChange={() => {}} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[fakeImage]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+      />
     ));
     expect(getAllByAltText("attached")).toHaveLength(1);
   });
@@ -135,15 +187,31 @@ describe("PromptInput", () => {
     const user = userEvent.setup();
     const onImagesChange = vi.fn();
     const { getByRole } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[fakeImage]} onImagesChange={onImagesChange} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[fakeImage]}
+        onAddImages={onImagesChange}
+        onRemoveImage={onImagesChange}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+      />
     ));
     await user.click(getByRole("button", { name: "Remove" }));
-    expect(onImagesChange).toHaveBeenCalledWith([]);
+    expect(onImagesChange).toHaveBeenCalledWith(fakeImage);
   });
 
   it("renders children alongside textarea", () => {
     const { getByText } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}}>
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+      >
         <button>Send</button>
       </PromptInput>
     ));
@@ -152,7 +220,16 @@ describe("PromptInput", () => {
 
   it("adds dragOver class on dragover and removes on dragleave", () => {
     const { container } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     const wrapper = container.firstElementChild as HTMLElement;
     fireEvent.dragOver(wrapper, { dataTransfer: { files: [] } });
@@ -165,7 +242,16 @@ describe("PromptInput", () => {
   it("calls onImagesChange on drop with image files", async () => {
     const onImagesChange = vi.fn();
     const { container } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={onImagesChange} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={onImagesChange}
+        onRemoveImage={onImagesChange}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     const wrapper = container.firstElementChild as HTMLElement;
     const file = new File(["fake"], "test.png", { type: "image/png" });
@@ -175,15 +261,24 @@ describe("PromptInput", () => {
     fireEvent.drop(wrapper, { dataTransfer });
     // Wait for async file processing.
     await vi.waitFor(() => expect(onImagesChange).toHaveBeenCalled());
-    const imgs = onImagesChange.mock.calls[0][0] as APIImageData[];
+    const imgs = onImagesChange.mock.calls[0][0] as Blob[];
     expect(imgs).toHaveLength(1);
-    expect(imgs[0].mediaType).toBe("image/png");
+    expect(imgs[0].type).toBe("image/png");
   });
 
   it("calls onImagesChange on paste with image data", async () => {
     const onImagesChange = vi.fn();
     const { getByRole } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={onImagesChange} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={onImagesChange}
+        onRemoveImage={onImagesChange}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     const textarea = getByRole("textbox");
     const file = new File(["fake"], "paste.png", { type: "image/png" });
@@ -193,15 +288,24 @@ describe("PromptInput", () => {
     };
     fireEvent.paste(textarea, { clipboardData });
     await vi.waitFor(() => expect(onImagesChange).toHaveBeenCalled());
-    const imgs = onImagesChange.mock.calls[0][0] as APIImageData[];
+    const imgs = onImagesChange.mock.calls[0][0] as Blob[];
     expect(imgs).toHaveLength(1);
-    expect(imgs[0].mediaType).toBe("image/png");
+    expect(imgs[0].type).toBe("image/png");
   });
 
   it("opens attach menu on attach button click", async () => {
     const user = userEvent.setup();
     const { getByRole, getByText, queryByText } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     expect(queryByText("Take photo")).not.toBeInTheDocument();
     await user.click(getByRole("button", { name: "Attach images" }));
@@ -213,7 +317,16 @@ describe("PromptInput", () => {
   it("closes attach menu and opens file picker on Choose file", async () => {
     const user = userEvent.setup();
     const { getByRole, getByText, queryByText } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     await user.click(getByRole("button", { name: "Attach images" }));
     const fileInput = document.querySelector("input[type=file]") as HTMLInputElement;
@@ -227,7 +340,16 @@ describe("PromptInput", () => {
   it("toggles attach menu closed on second click", async () => {
     const user = userEvent.setup();
     const { getByRole, getByText, queryByText } = render(() => (
-      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+      <PromptInput
+        value=""
+        onInput={() => {}}
+        images={[]}
+        onAddImages={() => {}}
+        onRemoveImage={() => {}}
+        imageConstraints={imageConstraints}
+        imageGeneration={0}
+        supportsImages={true}
+      />
     ));
     await user.click(getByRole("button", { name: "Attach images" }));
     expect(getByText("Take photo")).toBeInTheDocument();

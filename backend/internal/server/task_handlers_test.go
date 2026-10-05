@@ -1,4 +1,4 @@
-// Tests task HTTP handler preconditions, lazy diffs, commit metadata, and card-summary refreshes.
+// Tests task HTTP preconditions, lazy diffs, commit metadata, and card-summary refreshes.
 
 package server
 

@@ -155,10 +155,10 @@ type Manager struct {
 	changed       chan struct{} // closed on mutation, replaced under mu
 	changeVersion uint64        // incremented with changed under mu
 
-	// Guarded by settledMu. Tracks the background settled-history pass so the
+	// Guarded by settledMu. Tracks background runtime/history restoration so the
 	// task-list stream can report it (loading -> completed | failed). The zero
 	// value means no pass has completed, so a fresh Manager reports loading
-	// until CompleteSettledLoad runs.
+	// until CompleteRestoration runs.
 	settledMu        sync.Mutex
 	settledCompleted bool
 	settledError     string
@@ -357,13 +357,11 @@ func (m *Manager) ChangeSnapshot() (version uint64, changed <-chan struct{}) {
 	return m.changeVersion, m.changed
 }
 
-// CompleteSettledLoad records the outcome of the settled-history pass and
-// notifies task-list watchers so they can emit the status transition. err is
-// nil on a clean pass; a non-nil err keeps the valid partial subset already
-// registered and surfaces as the pass error. A clean completion clears any
-// previously recorded error so the state always reflects the pass that just
-// ran.
-func (m *Manager) CompleteSettledLoad(err error) {
+// CompleteRestoration records the outcome after runtime and history restoration.
+// A non-nil error leaves the registered partial subset usable, but prevents a
+// task-list snapshot from certifying absence. Callers include errors from each
+// restoration stage; a successful subsequent pass clears the previous error.
+func (m *Manager) CompleteRestoration(err error) {
 	m.settledMu.Lock()
 	m.settledCompleted = true
 	if err != nil {
@@ -375,14 +373,25 @@ func (m *Manager) CompleteSettledLoad(err error) {
 	m.NotifyTaskChange()
 }
 
-// SettledStatus reports the background task-history load pass state atomically:
-// loading is true until CompleteSettledLoad runs, and error is non-empty only
+// RestorationStatus reports the background task-restoration state atomically:
+// loading is true until CompleteRestoration runs, and error is non-empty only
 // after a failed pass. Both fields are read under one lock so a concurrent
-// CompleteSettledLoad cannot interleave between two separate reads.
-func (m *Manager) SettledStatus() (loading bool, err string) {
+// CompleteRestoration cannot interleave between two separate reads.
+func (m *Manager) RestorationStatus() (loading bool, err string) {
 	m.settledMu.Lock()
 	defer m.settledMu.Unlock()
 	return !m.settledCompleted, m.settledError
+}
+
+// TaskListComplete reports whether task-list absence is authoritative. Runtime
+// import must have released its startup fence and all restoration stages must
+// have completed successfully. Read before assembling the task-list snapshot.
+func (m *Manager) TaskListComplete() bool {
+	m.eventMu.Lock()
+	importing := m.importing
+	m.eventMu.Unlock()
+	loading, err := m.RestorationStatus()
+	return !importing && !loading && err == ""
 }
 
 // RegisteredLogPaths returns the set of cleaned log paths currently owned by

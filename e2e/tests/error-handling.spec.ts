@@ -126,8 +126,8 @@ test("navigating to a nonexistent task redirects home", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
-  // The detail route resolves the task as a REST resource; a 404 is
-  // authoritative and sends us home (no dependence on the list snapshot).
+  // After the initial complete list snapshot, selected-detail recovery
+  // resolves the REST resource; a confirmed 404 sends us home.
   await page.goto("/task/@nonexistent-id+bogus");
   await expect(page).toHaveURL(/\/$/, { timeout: 10_000 });
   await expect(page.getByTestId("prompt-input")).toBeVisible();

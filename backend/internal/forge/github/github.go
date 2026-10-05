@@ -208,9 +208,9 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]f
 }
 
 // GetJobLog fetches the log for a GitHub Actions job, capped at 100 MB. When
-// failingOnly is true, the log is trimmed to only the steps that contain
-// ##[error] markers; if no such steps are found the full log is returned.
-func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error) {
+// failingOnly is true, bounded excerpts prefer steps containing ##[error]
+// markers and otherwise retain head/tail context. Full retrieval stays capped.
+func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (log string, err error) {
 	apiURL := fmt.Sprintf("%s/repos/%s/%s/actions/jobs/%d/logs", c.apiBase(), owner, repo, jobID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -225,7 +225,9 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 	if err != nil {
 		return "", err
 	}
-	_ = resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		return "", err
+	}
 	if resp.StatusCode != http.StatusFound {
 		return "", fmt.Errorf("github get job log: expected redirect, got status %d", resp.StatusCode)
 	}
@@ -242,19 +244,18 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = blobResp.Body.Close() }()
+	defer func() { err = errors.Join(err, blobResp.Body.Close()) }()
 	if blobResp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(blobResp.Body)
+		data, readErr := io.ReadAll(io.LimitReader(blobResp.Body, 4096))
+		if readErr != nil {
+			return "", readErr
+		}
 		return "", fmt.Errorf("github get job log: status %d: %s", blobResp.StatusCode, data)
 	}
-	log, err := forge.ReadLog(blobResp.Body)
-	if err != nil {
-		return "", err
-	}
 	if failingOnly {
-		log = extractGitHubSteps(log)
+		return forge.ReadLogExcerpt(ctx, blobResp.Body, true)
 	}
-	return log, nil
+	return forge.ReadLog(blobResp.Body)
 }
 
 // GetJobLabels returns the job labels for a GitHub Actions job by fetching
@@ -523,59 +524,4 @@ func truncateGitHubErrorHTML(message string) string {
 		return message
 	}
 	return string(runes[:maxGitHubErrorHTMLLength]) + "…"
-}
-
-// extractGitHubSteps returns the content of ##[group]…##[endgroup] sections
-// that contain at least one ##[error] line. Falls back to rawLog when no
-// groups or no errors are found.
-func extractGitHubSteps(rawLog string) string {
-	type section struct {
-		header string
-		body   string
-		hasErr bool
-	}
-	var sections []section
-	var cur *section
-	for line := range strings.SplitSeq(rawLog, "\n") {
-		stripped := stripTimestamp(line)
-		switch {
-		case strings.HasPrefix(stripped, "##[group]"):
-			sections = append(sections, section{header: strings.TrimPrefix(stripped, "##[group]")})
-			cur = &sections[len(sections)-1]
-		case strings.HasPrefix(stripped, "##[endgroup]"):
-			cur = nil
-		default:
-			if cur != nil {
-				cur.body += line + "\n"
-				if strings.HasPrefix(stripped, "##[error]") {
-					cur.hasErr = true
-				}
-			}
-		}
-	}
-	// Collect sections that have errors.
-	var sb strings.Builder
-	for i := range sections {
-		if !sections[i].hasErr {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteByte('\n')
-		}
-		fmt.Fprintf(&sb, "Step: %s\n%s", sections[i].header, sections[i].body)
-	}
-	if sb.Len() == 0 {
-		return rawLog
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-// stripTimestamp removes the leading ISO-8601 timestamp that GitHub Actions
-// prepends to each log line (e.g. "2024-01-01T00:00:00.1234567Z ").
-func stripTimestamp(line string) string {
-	// Timestamps are exactly 28 chars: "YYYY-MM-DDTHH:MM:SS.fffffffZ "
-	if len(line) > 29 && line[4] == '-' && line[10] == 'T' && line[27] == 'Z' && line[28] == ' ' {
-		return line[29:]
-	}
-	return line
 }

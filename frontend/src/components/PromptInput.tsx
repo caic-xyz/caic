@@ -1,14 +1,14 @@
 // Reusable prompt input with image support: paste, drag & drop, attach button, and preview strip.
 
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, For, Show, type JSX } from "solid-js";
 import AttachIcon from "@material-symbols/svg-400/outlined/attach_file.svg?solid";
 import CameraIcon from "@material-symbols/svg-400/outlined/photo_camera.svg?solid";
 import ImageIcon from "@material-symbols/svg-400/outlined/image.svg?solid";
 import ScreenshotIcon from "@material-symbols/svg-400/outlined/screenshot_monitor.svg?solid";
 
-import type { ImageData as APIImageData } from "@sdk/types.gen";
+import type { ImageConstraints } from "@sdk/types.gen";
 
-import { captureScreen, fileToImageData, imagesFromClipboard } from "../images";
+import { captureScreen, imagesFromClipboard, type DraftImage } from "../images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import CameraCapture from "./CameraCapture";
@@ -28,8 +28,11 @@ interface Props {
   "data-testid"?: string;
   // Image support
   supportsImages?: boolean;
-  images: APIImageData[];
-  onImagesChange: (imgs: APIImageData[]) => void;
+  images: DraftImage[];
+  imageConstraints: ImageConstraints | null;
+  imageGeneration: number;
+  onAddImages: (blobs: Blob[]) => void;
+  onRemoveImage: (image: DraftImage) => void;
   /** Element rendered inside the text field (trailing icon, like Android). */
   sendButton?: JSX.Element;
   /** Elements rendered outside the text field row (action buttons). */
@@ -42,48 +45,65 @@ export default function PromptInput(props: Props) {
   const [menuFlipped, setMenuFlipped] = createSignal(false);
   const [cameraOpen, setCameraOpen] = createSignal(false);
 
+  const [imageError, setImageError] = createSignal("");
+  let captureController = new AbortController();
+  let active = true;
+  onCleanup(() => {
+    active = false;
+    captureController.abort();
+  });
+  createEffect(
+    on(
+      () => props.imageGeneration,
+      () => {
+        captureController.abort();
+        captureController = new AbortController();
+        setCameraOpen(false);
+      },
+      { defer: true },
+    ),
+  );
+
+  function adopt(blobs: Blob[]) {
+    if (!active || props.disabled || !props.supportsImages) return;
+    props.onAddImages(blobs);
+    setImageError("");
+  }
+
+  function addImages(blobs: Blob[]) {
+    if (!blobs.length) return;
+    try {
+      adopt(blobs);
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Could not attach images.");
+    }
+  }
+
   function handlePaste(e: ClipboardEvent) {
-    if (!props.supportsImages) return;
-    // eslint-disable-next-line solid/reactivity -- event handler registered via addEventListener
-    imagesFromClipboard(e).then((imgs) => {
-      if (imgs.length > 0) props.onImagesChange([...props.images, ...imgs]);
-    });
+    if (props.supportsImages) addImages(imagesFromClipboard(e));
   }
 
   function handleDragOver(e: DragEvent) {
-    if (!props.supportsImages) return;
+    if (!props.supportsImages || props.disabled || !props.imageConstraints) return;
     e.preventDefault();
     setDragging(true);
   }
 
   function handleDragLeave(e: DragEvent) {
-    // Only clear when leaving the wrapper, not child elements.
     const wrapper = e.currentTarget as HTMLElement;
-    if (wrapper.contains(e.relatedTarget as Node)) return;
-    setDragging(false);
+    if (!wrapper.contains(e.relatedTarget as Node)) setDragging(false);
   }
 
-  async function handleDrop(e: DragEvent) {
+  function handleDrop(e: DragEvent) {
     e.preventDefault();
     setDragging(false);
-    if (!props.supportsImages || !e.dataTransfer?.files.length) return;
-    const imgs = await Promise.all(Array.from(e.dataTransfer.files).map(fileToImageData));
-    const valid = imgs.filter((i): i is APIImageData => i !== null);
-    if (valid.length > 0) props.onImagesChange([...props.images, ...valid]);
+    if (e.dataTransfer?.files.length) addImages(Array.from(e.dataTransfer.files));
   }
 
   let fileInputRef!: HTMLInputElement;
-
-  async function handleFileChange() {
-    if (!fileInputRef.files?.length) return;
-    const imgs = await Promise.all(Array.from(fileInputRef.files).map(fileToImageData));
-    const valid = imgs.filter((i): i is APIImageData => i !== null);
-    if (valid.length > 0) props.onImagesChange([...props.images, ...valid]);
+  function handleFileChange() {
+    if (fileInputRef.files?.length) addImages(Array.from(fileInputRef.files));
     fileInputRef.value = "";
-  }
-
-  function removeImage(idx: number) {
-    props.onImagesChange(props.images.filter((_, i) => i !== idx));
   }
 
   function handleAttachClick() {
@@ -95,19 +115,29 @@ export default function PromptInput(props: Props) {
     fileInputRef.click();
   }
 
+  let cameraGeneration = 0;
   function handleTakePhoto() {
+    cameraGeneration = props.imageGeneration;
     setMenuOpen(false);
     setCameraOpen(true);
   }
 
   async function handleScreenshot() {
     setMenuOpen(false);
-    const img = await captureScreen();
-    if (img) props.onImagesChange([...props.images, img]);
+    const signal = captureController.signal;
+    const generation = props.imageGeneration;
+    try {
+      const img = await captureScreen(signal);
+      if (img && !signal.aborted && generation === props.imageGeneration) addImages([img]);
+    } catch (err) {
+      if (active && !signal.aborted)
+        setImageError(err instanceof Error ? err.message : "Could not capture the screen.");
+    }
   }
 
-  function handleCameraCapture(img: APIImageData) {
-    props.onImagesChange([...props.images, img]);
+  function handleCameraCapture(img: Blob) {
+    if (cameraGeneration !== props.imageGeneration) throw new Error("This attachment draft is closed.");
+    adopt([img]);
   }
 
   return (
@@ -143,7 +173,7 @@ export default function PromptInput(props: Props) {
               }}
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/gif,image/webp"
+              accept={props.imageConstraints?.allowedMediaTypes.join(",") ?? ""}
               class={styles.hiddenFileInput}
               onChange={handleFileChange}
             />
@@ -187,7 +217,12 @@ export default function PromptInput(props: Props) {
               <Button
                 type="button"
                 variant="gray"
-                disabled={props.disabled}
+                disabled={props.disabled || !props.imageConstraints}
+                title={
+                  props.imageConstraints
+                    ? "Attach images"
+                    : "Image attachments are unavailable until server limits load"
+                }
                 aria-label="Attach images"
                 onClick={handleAttachClick}
                 data-testid="attach-images"
@@ -202,13 +237,23 @@ export default function PromptInput(props: Props) {
       <Show when={props.children}>
         <div class={styles.actionRow}>{props.children}</div>
       </Show>
+      <Show when={imageError()}>
+        <p role="alert" class={styles.imageError}>
+          {imageError()}
+        </p>
+      </Show>
+      <Show when={props.supportsImages && !props.imageConstraints}>
+        <p role="status" class={styles.imageError}>
+          Image attachments are unavailable until server limits load.
+        </p>
+      </Show>
       <Show when={props.images.length > 0}>
         <div class={styles.imagePreviewRow}>
           <For each={props.images}>
-            {(img, idx) => (
+            {(img) => (
               <div class={styles.imageThumb}>
-                <img src={`data:${img.mediaType};base64,${img.data}`} alt="attached" />
-                <button class={styles.imageRemove} onClick={() => removeImage(idx())} aria-label="Remove">
+                <img src={img.previewURL} alt="attached" />
+                <button class={styles.imageRemove} onClick={() => props.onRemoveImage(img)} aria-label="Remove">
                   &times;
                 </button>
               </div>

@@ -140,7 +140,10 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           data-testid="prompt-input"
           supportsImages={s.harnessSupportsImages()}
           images={s.pendingImages()}
-          onImagesChange={s.setPendingImages}
+          imageConstraints={s.imageConstraints()}
+          imageGeneration={s.pendingImageGeneration()}
+          onAddImages={s.addPendingImages}
+          onRemoveImage={(image) => s.removePendingImages([image])}
           sendButton={
             <Button
               type="submit"

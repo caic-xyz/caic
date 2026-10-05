@@ -90,7 +90,7 @@ func (s *taskService) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Tas
 }
 
 func (s *taskService) taskListSnapshot(ctx context.Context) []v1.Task {
-	out, _ := s.taskListSnapshotWithReplay(ctx, nil)
+	out, _, _ := s.taskListSnapshotWithReplay(ctx, nil)
 	return out
 }
 
@@ -105,8 +105,10 @@ type taskStateReplay struct {
 // state transitions newer than its cursor, so a stream can replay short-lived
 // states a later snapshot would overwrite. It reads the history in the same
 // critical section as the DTO's state, so a replayed state is never newer than
-// the DTO reported alongside it. A nil cursors map skips the history.
-func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64) (tasks []v1.Task, replays map[string]taskStateReplay) {
+// the DTO reported alongside it. A nil cursors map skips the history. Authorized
+// registered membership is independent of conversion success, so a failed DTO
+// cannot turn an existing task into an apparent deletion.
+func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors map[string]uint64) (tasks []v1.Task, replays map[string]taskStateReplay, membership []string) {
 	access := taskAccessFromContext(ctx)
 	if cursors != nil {
 		replays = make(map[string]taskStateReplay)
@@ -115,12 +117,12 @@ func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors ma
 		if !access.canAccess(e.Task()) {
 			return true
 		}
+		id := e.Task().ID.String()
+		membership = append(membership, id)
 		var dto v1.Task
 		var replay taskStateReplay
-		var id string
 		var err error
 		if cursors != nil {
-			id = e.Task().ID.String()
 			dto, replay, err = taskDTOWithReplay(ctx, e, cursors[id], s.taskMgr, s.checkouts, s.authStore)
 		} else {
 			dto, err = taskDTO(ctx, e, s.taskMgr, s.checkouts, s.authStore)
@@ -143,7 +145,7 @@ func (s *taskService) taskListSnapshotWithReplay(ctx context.Context, cursors ma
 		}
 		return tasks[i].ID < tasks[j].ID
 	})
-	return tasks, replays
+	return tasks, replays, membership
 }
 
 func taskStateActive(state v1.TaskState) bool {

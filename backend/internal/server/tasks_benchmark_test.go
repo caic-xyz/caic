@@ -4,8 +4,10 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -73,7 +75,7 @@ func BenchmarkTaskListSnapshotWithReplay(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		out, replays := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors)
+		out, replays, _ := taskSvc.taskListSnapshotWithReplay(b.Context(), cursors)
 		if len(out) != 10 || len(replays) != 10 {
 			b.Fatalf("task count = %d, replay count = %d, want 10", len(out), len(replays))
 		}
@@ -400,4 +402,28 @@ func benchJSON(b *testing.B, v any) string {
 		b.Fatal(err)
 	}
 	return string(data)
+}
+
+func BenchmarkTaskListStreamInitialBatch(b *testing.B) {
+	for _, count := range []int{1, 100} {
+		b.Run(fmt.Sprintf("tasks_%d", count), func(b *testing.B) {
+			s := newTestRouter(b, nil)
+			for range count {
+				id := ksid.NewID()
+				insertTestTask(s, id, mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude))
+			}
+			s.taskMgr.CompleteRestoration(nil)
+			ctx, cancel := context.WithCancel(context.WithValue(b.Context(), httpLoggerKey{}, slog.New(slog.DiscardHandler)))
+			cancel()
+			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/events", nil)
+			handler := testTaskHandlers(s)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				w := httptest.NewRecorder()
+				handler.handleTaskListEvents(w, req)
+				b.ReportMetric(float64(w.Body.Len()), "wire-B/op")
+			}
+		})
+	}
 }

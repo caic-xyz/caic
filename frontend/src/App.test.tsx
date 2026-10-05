@@ -1,14 +1,23 @@
-// Tests app-shell task creation, repo selection, account isolation, structured warning replay, and harness preferences.
+// Tests app-shell task creation, account isolation, image draft ownership, warning replay, and preferences.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-import type { Config, Repo, PreferencesResp, HarnessInfo, Task, ISOTimestamp, UserResp, Warning } from "@sdk/types.gen";
+import type {
+  Config,
+  Repo,
+  PreferencesResp,
+  HarnessInfo,
+  Task,
+  ISOTimestamp,
+  UserResp,
+  Warning,
+  TaskListEvent,
+} from "@sdk/types.gen";
 
-// Minimal complete Task, matching what the backend now returns from createTask
-// so the app can seed its store and render the detail view immediately.
+// Structured HTTP errors preserve the transport status used by route recovery.
 function apiError(status: number): Error & { status: number } {
   return Object.assign(new Error(`HTTP ${status}`), { status });
 }
@@ -104,9 +113,13 @@ function requireLiveSubscription(listeners: unknown[], caller: string): void {
   }
 }
 
-function dispatchSSE(data: unknown) {
+let initialTaskSnapshot: Task[] | null = [];
+
+function dispatchSSE(data: TaskListEvent) {
   requireLiveSubscription(fakeESListeners, "dispatchSSE");
-  const payload = { data: JSON.stringify(data) };
+  const payload = {
+    data: JSON.stringify(data.kind === "snapshot" ? { ...data, complete: data.complete ?? true } : data),
+  };
   fakeESListeners.forEach((fn) => fn(payload));
 }
 
@@ -129,7 +142,7 @@ async function waitForTaskEventsSubscription() {
   await waitFor(() => expect(taskEventSubscriptions).toBeGreaterThan(0));
 }
 
-import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
+import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
 import { notifications } from "@maruel/gomode/web/notifications";
 import { executeFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
@@ -137,6 +150,8 @@ import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
 import { AuthProvider } from "./AuthContext";
+import { HostModeProvider } from "@maruel/gomode/web/HostMode";
+import { AppStateProvider, useAppState, type AppStore } from "./AppState";
 import { getVoiceTaskNumber, focusedVoiceTask } from "./voiceTaskState";
 import { installFetchRouter } from "@tests/fetch-router";
 
@@ -248,6 +263,7 @@ beforeEach(() => {
   fakeESListeners.length = 0;
   fakeUsageESListeners.length = 0;
   fakeESOpenListeners.length = 0;
+  initialTaskSnapshot = [];
   window.history.replaceState(null, "", "/");
   delete window.goModeHost;
   vi.mocked(api.globalTaskEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
@@ -255,6 +271,9 @@ beforeEach(() => {
     // Mirror the real client: parse the SSE payload before invoking the handler.
     es.addEventListener("message", (e: { data: string }) => handlers.onMessage(JSON.parse(e.data)));
     taskEventSubscriptions += 1;
+    const initial = initialTaskSnapshot;
+    if (initial !== null)
+      queueMicrotask(() => handlers.onMessage({ kind: "snapshot", snapshot: initial, complete: true }));
     return es;
   }) as unknown as typeof api.globalTaskEvents);
   vi.mocked(api.globalUsageEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
@@ -321,7 +340,7 @@ beforeEach(() => {
   vi.mocked(api.getTaskHandoff).mockResolvedValue({
     prompt: "Generated handoff prompt",
   });
-  vi.mocked(api.getTask).mockResolvedValue(makeTask());
+  vi.mocked(api.getTask).mockImplementation(async (id) => makeTask({ id }));
   vi.mocked(api.getTaskDiffIndex).mockResolvedValue({ repositories: [] });
   vi.mocked(api.getTaskProcesses).mockResolvedValue({ processes: [] });
   vi.mocked(api.getTaskInfo).mockResolvedValue({
@@ -404,6 +423,11 @@ it("destroys account A task and repo state before rendering confirmed account B"
   const accountBRepos = deferred<Repo[]>();
   vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockReturnValueOnce(accountBRepos.promise);
   vi.mocked(api.getConfig).mockResolvedValue({
+    imageConstraints: {
+      allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+      maxImageBytes: 10485760,
+      maxPromptImageBytes: 20971520,
+    },
     displayName: "caic",
     tailscaleAvailable: false,
     usbAvailable: false,
@@ -419,8 +443,18 @@ it("destroys account A task and repo state before rendering confirmed account B"
   const disconnectVoice = vi.spyOn(voiceSession, "disconnect");
   const injectVoiceText = vi.spyOn(voiceSession, "injectText");
 
+  vi.mocked(api.listHarnesses).mockResolvedValue([
+    { name: "claude", models: [], supportsImages: true, supportsCompact: false, supportsModelRefresh: false },
+  ]);
+  const createPreview = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:account-a");
+  const revokePreview = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
   renderApp();
   await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
+  const promptForm = screen.getByTestId("prompt-input").closest("form");
+  if (!promptForm) throw new Error("Prompt form missing");
+  await waitFor(() => expect(within(promptForm).getByTestId("attach-images")).toBeEnabled());
+  chooseDraftImage(promptForm, new File(["private image"], "private.png", { type: "image/png" }));
+  expect(createPreview).toHaveBeenCalledOnce();
   await waitForTaskEventsSubscription();
   dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ id: "a-task", title: "Account A task" })] });
   expect(await screen.findByText("Account A task")).toBeInTheDocument();
@@ -444,6 +478,7 @@ it("destroys account A task and repo state before rendering confirmed account B"
   await user.click(screen.getByTitle("account-a"));
   await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
   expect(screen.getByText("Checking your session…")).toBeInTheDocument();
+  expect(revokePreview).toHaveBeenCalledWith("blob:account-a");
   expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
   expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
   expect(screen.queryByText("CI polling failed. CI status may be out of date.")).not.toBeInTheDocument();
@@ -609,7 +644,7 @@ describe("App connection word settled states", () => {
     dispatchSSE({ kind: "status", status: { loading: true, error: "" } });
 
     await waitFor(() => expect(word().getAttribute("data-status")).toBe("settled-loading"));
-    expect(status()).toHaveTextContent("Loading history…");
+    expect(status()).toHaveTextContent("Restoring tasks…");
 
     dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
 
@@ -974,6 +1009,11 @@ describe("App keyboard shortcuts", () => {
   it("describes F4 when browser voice mode is available", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -1050,6 +1090,11 @@ describe("App keyboard shortcuts", () => {
   it("uses runtime as the F3 target when no harness or model selector is visible", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -1186,6 +1231,8 @@ describe("App keyboard shortcuts", () => {
     const task = makeTask();
     vi.mocked(api.getTask).mockResolvedValue(task);
     renderApp("/task/@task1+do-something");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask()] });
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
 
     await user.click(screen.getByTestId("task-detail-form"));
@@ -1379,6 +1426,8 @@ describe("App keyboard shortcuts", () => {
     const task = makeTask();
     vi.mocked(api.getTask).mockResolvedValue(task);
     const { history } = renderApp("/task/@task1+do-something");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [makeTask()] });
     const card = await waitFor(() => {
       const found = document.querySelector<HTMLElement>("[data-task-id='task1']");
       if (!found) throw new Error("Task card was not rendered");
@@ -1938,6 +1987,11 @@ describe("App repo chips: No repository", () => {
 
   it("does not mount browser voice when the server disables the voice gateway", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -1956,6 +2010,11 @@ describe("App repo chips: No repository", () => {
 
   it("refreshes browser voice availability when task events reconnect", async () => {
     const disabledConfig = {
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -1982,8 +2041,68 @@ describe("App repo chips: No repository", () => {
     await screen.findByTestId("voice-overlay");
   });
 
+  for (const completion of ["success", "failure"] as const) {
+    it(`ignores a retired connection's config ${completion} after the current config`, async () => {
+      enableImageDrafts();
+      const config: Config = {
+        displayName: "Initial config",
+        tailscaleAvailable: false,
+        usbAvailable: false,
+        displayAvailable: false,
+        sudoAvailable: false,
+        gitHubTokenAvailable: false,
+        mcpOAuthAvailable: false,
+        voiceGateway: { mode: "disabled" },
+        imageConstraints: { allowedMediaTypes: ["image/png"], maxImageBytes: 1024, maxPromptImageBytes: 2048 },
+      };
+      const retired = deferred<Config>();
+      const current = deferred<Config>();
+      vi.mocked(api.getConfig)
+        .mockResolvedValueOnce(config)
+        .mockReturnValueOnce(retired.promise)
+        .mockReturnValueOnce(current.promise);
+      const view = renderApp();
+      try {
+        await screen.findByTestId("prompt-input");
+        await waitForTaskEventsSubscription();
+        dispatchOpen();
+        await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2));
+        fireEvent(window, new Event("offline"));
+        fireEvent(window, new Event("online"));
+        await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+        dispatchOpen();
+        await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(3));
+        current.resolve({ ...config, displayName: "Current config", voiceGateway: { mode: "embedded" } });
+        await screen.findByTestId("voice-overlay");
+        if (completion === "success") {
+          retired.resolve({
+            ...config,
+            displayName: "Retired config",
+            imageConstraints: { allowedMediaTypes: ["image/png"], maxImageBytes: 1, maxPromptImageBytes: 2048 },
+          });
+          await retired.promise;
+        } else {
+          retired.reject(new Error("Retired config failure"));
+          await expect(retired.promise).rejects.toThrow("Retired config failure");
+        }
+        expect(document.title).toBe("Current config — caic");
+        expect(screen.getByTestId("voice-overlay")).toBeInTheDocument();
+        const form = screen.getByTestId("new-task-form");
+        chooseDraftImage(form, new File(["ok"], "current.png", { type: "image/png" }));
+        expect(within(form).getByRole("img", { name: "attached" })).toBeInTheDocument();
+      } finally {
+        view.unmount();
+      }
+    });
+  }
+
   it("keeps browser voice mounted outside Go Mode host mode when the server enables voice", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -2247,6 +2366,11 @@ describe("App repo chips: No repository", () => {
 
   it("does not request or show remote MCP grants when MCP OAuth is unavailable", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -2266,6 +2390,11 @@ describe("App repo chips: No repository", () => {
 
   it("loads and shows remote MCP grants when MCP OAuth is available", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
+      imageConstraints: {
+        allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+        maxImageBytes: 10485760,
+        maxPromptImageBytes: 20971520,
+      },
       displayName: "test",
       tailscaleAvailable: false,
       usbAvailable: false,
@@ -3077,6 +3206,11 @@ describe("SSE test harness", () => {
 it("edits CPU settings independently for each runtime", async () => {
   const user = userEvent.setup();
   const config: Config = {
+    imageConstraints: {
+      allowedMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+      maxImageBytes: 10485760,
+      maxPromptImageBytes: 20971520,
+    },
     displayName: "test",
     tailscaleAvailable: false,
     usbAvailable: false,
@@ -3147,4 +3281,482 @@ it("edits CPU settings independently for each runtime", async () => {
   const restored = await screen.findByRole("group", { name: "docker" });
   await waitFor(() => expect(within(restored).getByRole("spinbutton", { name: "CPU cores" })).toHaveValue(6));
   expect(within(restored).getByRole("combobox", { name: "CPU architecture" })).toHaveValue("linux/arm64");
+});
+
+function enableImageDrafts() {
+  vi.mocked(api.listHarnesses).mockResolvedValue([
+    { name: "claude", models: [], supportsImages: true, supportsCompact: false, supportsModelRefresh: false },
+  ]);
+  vi.mocked(api.getConfig).mockResolvedValue({
+    imageConstraints: {
+      allowedMediaTypes: ["image/png", "image/jpeg"],
+      maxImageBytes: 10485760,
+      maxPromptImageBytes: 20971520,
+    },
+    displayName: "test",
+    tailscaleAvailable: false,
+    usbAvailable: false,
+    displayAvailable: false,
+    sudoAvailable: false,
+    gitHubTokenAvailable: false,
+    mcpOAuthAvailable: false,
+    voiceGateway: { mode: "disabled" },
+  });
+  const create = vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:${crypto.randomUUID()}`);
+  const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  return { create, revoke };
+}
+
+function chooseDraftImage(form: HTMLElement, file: File) {
+  const input = form.querySelector("input[type=file]");
+  if (!input) throw new Error("Image chooser is missing");
+  fireEvent.change(input, { target: { files: [file] } });
+}
+
+function editDraft(el: HTMLElement, text: string) {
+  el.textContent = text;
+  fireEvent.input(el);
+}
+
+describe("account-owned image drafts", () => {
+  it("preserves edits and added images during conversion, sends the snapshot, and releases only submitted URLs", async () => {
+    const { create, revoke } = enableImageDrafts();
+    const read = deferred<ArrayBuffer>();
+    const file = new File(["first"], "first.png", { type: "image/png" });
+    const slice = vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
+    const request = deferred<Task>();
+    vi.mocked(api.createTask).mockReturnValue(request.promise);
+    const view = renderApp();
+    const prompt = await screen.findByTestId("prompt-input");
+    const form = prompt.closest("form");
+    if (!form) throw new Error("Prompt form missing");
+    await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+    editDraft(prompt, "first prompt");
+    chooseDraftImage(form, file);
+    fireEvent.click(within(form).getByTestId("submit-task"));
+    expect(slice).toHaveBeenCalledOnce();
+    expect(api.createTask).not.toHaveBeenCalled();
+    editDraft(prompt, "new prompt");
+    chooseDraftImage(form, new File(["second"], "second.png", { type: "image/png" }));
+    read.resolve(new TextEncoder().encode("first").buffer);
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createTask).mock.calls[0][0].initialPrompt).toEqual({
+      text: "first prompt",
+      images: [{ mediaType: "image/png", data: "Zmlyc3Q=" }],
+    });
+    request.resolve(makeTask());
+    await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
+    expect(prompt).toHaveTextContent("new prompt");
+    expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(1);
+    expect(revoke).toHaveBeenCalledWith(create.mock.results[0].value);
+    view.unmount();
+    expect(revoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains images and text after a failed send, retries the same wire bytes, and releases on success", async () => {
+    const { revoke } = enableImageDrafts();
+    vi.mocked(api.createTask).mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(makeTask());
+    const view = renderApp();
+    const prompt = await screen.findByTestId("prompt-input");
+    const form = prompt.closest("form");
+    if (!form) throw new Error("Prompt form missing");
+    await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+    editDraft(prompt, "retry prompt");
+    chooseDraftImage(form, new File(["image"], "image.png", { type: "image/png" }));
+    fireEvent.click(within(form).getByTestId("submit-task"));
+    await screen.findByText("Task creation failed: Offline");
+    expect(revoke).not.toHaveBeenCalled();
+    expect(prompt).toHaveTextContent("retry prompt");
+    expect(within(form).getByRole("img", { name: "attached" })).toBeInTheDocument();
+    fireEvent.click(within(form).getByTestId("submit-task"));
+    await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createTask).mock.calls[1][0].initialPrompt).toEqual(
+      vi.mocked(api.createTask).mock.calls[0][0].initialPrompt,
+    );
+    expect(prompt).toHaveTextContent("");
+    view.unmount();
+    expect(revoke).toHaveBeenCalledOnce();
+  });
+
+  it("cancels pending conversion on account-provider disposal before calling the API", async () => {
+    const { revoke } = enableImageDrafts();
+    const read = deferred<ArrayBuffer>();
+    const file = new File(["image"], "image.png", { type: "image/png" });
+    const slice = vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
+    const view = renderApp();
+    const prompt = await screen.findByTestId("prompt-input");
+    const form = prompt.closest("form");
+    if (!form) throw new Error("Prompt form missing");
+    await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+    chooseDraftImage(form, file);
+    fireEvent.click(within(form).getByTestId("submit-task"));
+    expect(slice).toHaveBeenCalledOnce();
+    view.unmount();
+    expect(revoke).toHaveBeenCalledOnce();
+    read.resolve(new ArrayBuffer(5));
+    await read.promise;
+    // The converter's continuation is registered before this continuation.
+    expect(api.createTask).not.toHaveBeenCalled();
+  });
+});
+
+it("preserves the task's newer text and attachments after sending its conversion snapshot", async () => {
+  const { create, revoke } = enableImageDrafts();
+  vi.mocked(api.getTask).mockResolvedValue(makeTask({ state: "waiting" }));
+  const sent = deferred<Awaited<ReturnType<typeof api.sendInput>>>();
+  vi.mocked(api.sendInput).mockReturnValue(sent.promise);
+  const read = deferred<ArrayBuffer>();
+  const file = new File(["first"], "first.png", { type: "image/png" });
+  const slice = vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
+  const view = renderApp("/task/@task1+task");
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ state: "waiting" })] });
+  const form = await screen.findByTestId("task-detail-form");
+  await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+  const prompt = within(form).getByRole("textbox");
+  editDraft(prompt, "original task prompt");
+  chooseDraftImage(form, file);
+  fireEvent.click(within(form).getByTestId("send-input"));
+  expect(slice).toHaveBeenCalledOnce();
+  editDraft(prompt, "next task prompt");
+  chooseDraftImage(form, new File(["second"], "second.png", { type: "image/png" }));
+  read.resolve(new TextEncoder().encode("first").buffer);
+  await waitFor(() =>
+    expect(api.sendInput).toHaveBeenCalledWith("task1", {
+      prompt: { text: "original task prompt", images: [{ mediaType: "image/png", data: "Zmlyc3Q=" }] },
+    }),
+  );
+  sent.resolve({ status: "ok" });
+  await waitFor(() => expect(revoke).toHaveBeenCalledWith(create.mock.results[0].value));
+  expect(prompt).toHaveTextContent("next task prompt");
+  expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(1);
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "delete", delete: "task1" });
+  expect(revoke).toHaveBeenCalledTimes(2);
+  view.unmount();
+  expect(revoke).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a screenshot started during conversion when the preceding submission succeeds", async () => {
+  const { revoke } = enableImageDrafts();
+  const devices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getDisplayMedia: async () => ({ getTracks: () => [{ stop: () => {} }] }) },
+  });
+  vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue();
+  vi.spyOn(window.HTMLVideoElement.prototype, "videoWidth", "get").mockReturnValue(100);
+  vi.spyOn(window.HTMLVideoElement.prototype, "videoHeight", "get").mockReturnValue(100);
+  vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage: () => {},
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => {
+    callback(0);
+    return 0;
+  });
+  let finishCapture!: BlobCallback;
+  const encode = vi.spyOn(window.HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => {
+    finishCapture = callback;
+  });
+  const read = deferred<ArrayBuffer>();
+  const file = new File(["first"], "first.png", { type: "image/png" });
+  vi.spyOn(file, "slice").mockReturnValue({ arrayBuffer: () => read.promise } as Blob);
+  const view = renderApp();
+  try {
+    const prompt = await screen.findByTestId("prompt-input");
+    const form = prompt.closest("form");
+    if (!form) throw new Error("Prompt form missing");
+    await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+    chooseDraftImage(form, file);
+    fireEvent.click(within(form).getByTestId("submit-task"));
+    fireEvent.click(within(form).getByTestId("attach-images"));
+    fireEvent.click(screen.getByTestId("screenshot-menu-item"));
+    await waitFor(() => expect(encode).toHaveBeenCalledOnce());
+    read.resolve(new TextEncoder().encode("first").buffer);
+    await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
+    finishCapture(new Blob(["next capture"], { type: "image/jpeg" }));
+    await waitFor(() => expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(1));
+  } finally {
+    view.unmount();
+    if (devices) Object.defineProperty(navigator, "mediaDevices", devices);
+    else Reflect.deleteProperty(navigator, "mediaDevices");
+  }
+});
+
+it("releases hidden task drafts omitted by a complete reconnect snapshot", async () => {
+  const { create, revoke } = enableImageDrafts();
+  const first = makeTask({ id: "task1", state: "waiting" });
+  const second = makeTask({ id: "task2", state: "waiting" });
+  vi.mocked(api.getTask).mockImplementation(async (id) => (id === first.id ? first : second));
+  const view = renderApp("/task/@task1+task");
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [first, second] });
+  const form = await screen.findByTestId("task-detail-form");
+  await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+  editDraft(within(form).getByRole("textbox"), "removed task draft");
+  chooseDraftImage(form, new File(["private image"], "private.png", { type: "image/png" }));
+  view.history.set({ value: "/task/@task2+task" });
+  await waitFor(() =>
+    expect(within(screen.getByTestId("task-detail-form")).getByRole("textbox")).toHaveTextContent(""),
+  );
+  dispatchSSE({ kind: "snapshot", snapshot: [second] });
+  await waitFor(() => expect(revoke).toHaveBeenCalledWith(create.mock.results[0].value));
+  dispatchSSE({ kind: "upsert", upsert: first });
+  view.history.set({ value: "/task/@task1+task" });
+  const restored = await screen.findByTestId("task-detail-form");
+  expect(within(restored).getByRole("textbox")).toHaveTextContent("");
+  expect(within(restored).queryByRole("img", { name: "attached" })).not.toBeInTheDocument();
+  view.unmount();
+  expect(revoke).toHaveBeenCalledOnce();
+});
+
+it("reports a dispatched message failure after navigation and retains the original task draft for retry", async () => {
+  const { revoke } = enableImageDrafts();
+  vi.mocked(api.getTask).mockResolvedValue(makeTask({ state: "waiting" }));
+  const sent = deferred<Awaited<ReturnType<typeof api.sendInput>>>();
+  vi.mocked(api.sendInput).mockReturnValueOnce(sent.promise).mockResolvedValueOnce({ status: "ok" });
+  const view = renderApp("/task/@task1+task");
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ state: "waiting" })] });
+  const form = await screen.findByTestId("task-detail-form");
+  await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+  editDraft(within(form).getByRole("textbox"), "retry original task");
+  chooseDraftImage(form, new File(["image"], "image.png", { type: "image/png" }));
+  fireEvent.click(within(form).getByTestId("send-input"));
+  await waitFor(() => expect(api.sendInput).toHaveBeenCalledOnce());
+  view.history.set({ value: "/" });
+  await waitFor(() => expect(screen.queryByTestId("task-detail-form")).not.toBeInTheDocument());
+  sent.reject(new Error("Connection interrupted"));
+  await screen.findByText("Message send failed: Connection interrupted");
+  expect(revoke).not.toHaveBeenCalled();
+  view.history.set({ value: "/task/@task1+task" });
+  const retry = await screen.findByTestId("task-detail-form");
+  expect(within(retry).getByRole("textbox")).toHaveTextContent("retry original task");
+  expect(within(retry).getByRole("img", { name: "attached" })).toBeInTheDocument();
+  fireEvent.click(within(retry).getByTestId("send-input"));
+  await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
+  expect(vi.mocked(api.sendInput).mock.calls[1]).toEqual(vi.mocked(api.sendInput).mock.calls[0]);
+  view.unmount();
+});
+
+it("suppresses an old account's dispatched message failure after provider disposal", async () => {
+  const { revoke } = enableImageDrafts();
+  vi.mocked(api.getTask).mockResolvedValue(makeTask({ state: "waiting" }));
+  const sent = deferred<Awaited<ReturnType<typeof api.sendInput>>>();
+  vi.mocked(api.sendInput).mockReturnValue(sent.promise);
+  const first = renderApp("/task/@task1+task");
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask({ state: "waiting" })] });
+  const form = await screen.findByTestId("task-detail-form");
+  await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+  chooseDraftImage(form, new File(["private"], "private.png", { type: "image/png" }));
+  fireEvent.click(within(form).getByTestId("send-input"));
+  await waitFor(() => expect(api.sendInput).toHaveBeenCalledOnce());
+  first.unmount();
+  expect(revoke).toHaveBeenCalledOnce();
+  const next = renderApp();
+  await screen.findByTestId("prompt-input");
+  sent.reject(new Error("Private old-account failure"));
+  await expect(sent.promise).rejects.toThrow("Private old-account failure");
+  expect(screen.queryByText(/Private old-account failure/)).not.toBeInTheDocument();
+  next.unmount();
+});
+
+it("waits for the initial task snapshot before loading a selected detail without adding list membership", async () => {
+  enableImageDrafts();
+  initialTaskSnapshot = null;
+  vi.mocked(api.getTask).mockResolvedValue(makeTask({ state: "waiting", title: "REST detail only" }));
+  const view = renderApp("/task/@task1+task");
+  try {
+    await waitForTaskEventsSubscription();
+    expect(api.getTask).not.toHaveBeenCalled();
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledOnce());
+    await screen.findByText("REST detail only");
+    expect(document.querySelector("[data-task-id='task1']")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("task-detail-form")).queryByTestId("attach-images")).not.toBeInTheDocument();
+  } finally {
+    view.unmount();
+  }
+});
+
+it("keeps a newly created task out of list membership and image admission until SSE introduces it", async () => {
+  enableImageDrafts();
+  initialTaskSnapshot = null;
+  const task = makeTask({ id: "fresh-task", state: "waiting", title: "Fresh task" });
+  vi.mocked(api.createTask).mockResolvedValue(task);
+  vi.mocked(api.getTask).mockResolvedValue(task);
+  const view = renderApp();
+  try {
+    await waitForTaskEventsSubscription();
+    editDraft(await screen.findByTestId("prompt-input"), "create before snapshot arrives");
+    fireEvent.click(screen.getByTestId("submit-task"));
+    await screen.findByTestId("task-detail-header");
+    expect(document.querySelector("[data-task-id='fresh-task']")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("task-detail-form")).not.toBeInTheDocument();
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledOnce());
+    await screen.findByText("Fresh task");
+    expect(within(screen.getByTestId("task-detail-form")).queryByTestId("attach-images")).not.toBeInTheDocument();
+    dispatchSSE({ kind: "upsert", upsert: task });
+    await waitFor(() =>
+      expect(within(screen.getByTestId("task-detail-form")).getByTestId("attach-images")).toBeEnabled(),
+    );
+    expect(document.querySelector("[data-task-id='fresh-task']")).toBeInTheDocument();
+  } finally {
+    view.unmount();
+  }
+});
+
+it("resolves a late creation response for an unseen deleted task through selected-detail 404 without reviving the list", async () => {
+  const created = deferred<Task>();
+  vi.mocked(api.createTask).mockReturnValue(created.promise);
+  vi.mocked(api.getTask).mockRejectedValueOnce(apiError(404));
+  const view = renderApp();
+  try {
+    await waitForTaskEventsSubscription();
+    editDraft(await screen.findByTestId("prompt-input"), "created and removed before SSE sees it");
+    fireEvent.click(screen.getByTestId("submit-task"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+    created.resolve(makeTask({ id: "unseen-deleted-task" }));
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledWith("unseen-deleted-task"));
+    await waitFor(() => expect(view.history.get()).toBe("/"));
+    expect(document.querySelector("[data-task-id='unseen-deleted-task']")).not.toBeInTheDocument();
+  } finally {
+    view.unmount();
+  }
+});
+
+it("preserves offline drafts through partial restoration, ignores the old connection, and prunes only a complete snapshot", async () => {
+  const { revoke } = enableImageDrafts();
+  const task = makeTask({ state: "waiting" });
+  const view = renderApp("/task/@task1+task");
+  try {
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const form = await screen.findByTestId("task-detail-form");
+    await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+    editDraft(within(form).getByRole("textbox"), "keep this offline draft");
+    chooseDraftImage(form, new File(["private"], "private.png", { type: "image/png" }));
+    const oldMessages = [...fakeESListeners];
+    initialTaskSnapshot = null;
+    fireEvent(window, new Event("offline"));
+    fireEvent(window, new Event("online"));
+    await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+    fakeESListeners.forEach((listener) =>
+      listener({ data: JSON.stringify({ kind: "snapshot", snapshot: [], complete: null }) }),
+    );
+    expect(revoke).not.toHaveBeenCalled();
+    expect(within(form).getByRole("img", { name: "attached" })).toBeInTheDocument();
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: false });
+    dispatchSSE({ kind: "status", status: { loading: false, error: "Runtime restoration incomplete" } });
+    oldMessages.forEach((listener) => listener({ data: JSON.stringify({ kind: "delete", delete: "task1" }) }));
+    expect(revoke).not.toHaveBeenCalled();
+    expect(within(form).getByRole("textbox")).toHaveTextContent("keep this offline draft");
+    expect(within(form).getByRole("img", { name: "attached" })).toBeInTheDocument();
+    expect(within(form).getByTestId("attach-images")).toBeEnabled();
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+    await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
+    await waitFor(() => expect(view.history.get()).toBe("/"));
+  } finally {
+    view.unmount();
+  }
+});
+
+it("rejects retired-connection REST recovery results after the replacement snapshot", async () => {
+  initialTaskSnapshot = null;
+  const retired = deferred<Task>();
+  const current = deferred<Task>();
+  vi.mocked(api.getTask).mockReturnValueOnce(retired.promise).mockReturnValueOnce(current.promise);
+  const view = renderApp("/task/@task1+task");
+  try {
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledOnce());
+    fireEvent(window, new Event("offline"));
+    fireEvent(window, new Event("online"));
+    await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+    expect(api.getTask).toHaveBeenCalledOnce();
+    dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledTimes(2));
+    current.resolve(makeTask({ state: "waiting", title: "Current detail" }));
+    await screen.findByText("Current detail");
+    retired.resolve(makeTask({ state: "waiting", title: "Retired detail" }));
+    await retired.promise;
+    expect(screen.queryByText("Retired detail")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-task-id='task1']")).not.toBeInTheDocument();
+  } finally {
+    view.unmount();
+  }
+});
+
+for (const completion of ["success", "404"] as const) {
+  it(`ignores a disposed account's selected-detail ${completion} completion`, async () => {
+    const retired = deferred<Task>();
+    vi.mocked(api.getTask)
+      .mockReturnValueOnce(retired.promise)
+      .mockResolvedValueOnce(makeTask({ state: "waiting", title: "Current account detail" }));
+    const first = renderApp("/task/@task1+task");
+    await waitFor(() => expect(api.getTask).toHaveBeenCalledOnce());
+    first.unmount();
+    const current = renderApp("/task/@task1+task");
+    try {
+      await screen.findByText("Current account detail");
+      if (completion === "success") {
+        retired.resolve(makeTask({ state: "waiting", title: "Old account detail" }));
+        await retired.promise;
+      } else {
+        retired.reject(apiError(404));
+        await expect(retired.promise).rejects.toThrow("HTTP 404");
+      }
+      expect(current.history.get()).toBe("/task/@task1+task");
+      expect(screen.queryByText("Old account detail")).not.toBeInTheDocument();
+      expect(document.querySelector("[data-task-id='task1']")).not.toBeInTheDocument();
+    } finally {
+      current.unmount();
+    }
+  });
+}
+
+it("rejects task image adoption at the owner boundary before SSE introduction and after deletion", async () => {
+  const { create, revoke } = enableImageDrafts();
+  const observed: { store: AppStore | null } = { store: null };
+  const view = render(() => (
+    <AuthProvider>
+      <MemoryRouter
+        root={(props) => (
+          <HostModeProvider>
+            <AppStateProvider>{props.children}</AppStateProvider>
+          </HostModeProvider>
+        )}
+      >
+        <Route
+          path="/"
+          component={() => {
+            observed.store = useAppState();
+            return <span>Draft owner ready</span>;
+          }}
+        />
+      </MemoryRouter>
+    </AuthProvider>
+  ));
+  try {
+    await waitForTaskEventsSubscription();
+    await waitFor(() => expect(observed.store?.imageConstraints()).not.toBeNull());
+    const store = observed.store;
+    if (!store) throw new Error("Draft owner not mounted");
+    const file = new File(["private"], "private.png", { type: "image/png" });
+    expect(() => store.addInputImages("task1", [file])).toThrow("Waiting for task updates");
+    expect(create).not.toHaveBeenCalled();
+    dispatchSSE({ kind: "upsert", upsert: makeTask({ state: "waiting" }) });
+    store.addInputImages("task1", [file]);
+    expect(create).toHaveBeenCalledOnce();
+    dispatchSSE({ kind: "delete", delete: "task1" });
+    expect(revoke).toHaveBeenCalledOnce();
+    expect(() => store.addInputImages("task1", [file])).toThrow("Waiting for task updates");
+    expect(create).toHaveBeenCalledOnce();
+  } finally {
+    view.unmount();
+  }
 });

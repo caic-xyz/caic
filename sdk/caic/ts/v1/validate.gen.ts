@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListSettledStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -693,44 +693,27 @@ export function validateWarning(raw: ValidatorInput): Warning {
   };
 }
 
-export function validateTaskListSettledStatus(raw: ValidatorInput): TaskListSettledStatus {
-  const obj = asObject(raw, "TaskListSettledStatus");
+export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskListRestorationStatus {
+  const obj = asObject(raw, "TaskListRestorationStatus");
   return {
-    loading: asBoolean(obj["loading"], "TaskListSettledStatus.loading"),
-    error: asString(obj["error"], "TaskListSettledStatus.error"),
+    loading: asBoolean(obj["loading"], "TaskListRestorationStatus.loading"),
+    error: asString(obj["error"], "TaskListRestorationStatus.error"),
   };
 }
 
 export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
   const obj = asObject(raw, "TaskListEvent");
-  const result: TaskListEvent = {
+  return {
+    complete: (obj["complete"] === undefined || obj["complete"] === null ? undefined : asBoolean(obj["complete"], "TaskListEvent.complete")),
     kind: asString(obj["kind"], "TaskListEvent.kind"),
+    snapshot: (obj["snapshot"] === undefined || obj["snapshot"] === null ? undefined : validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[]),
+    upsert: (obj["upsert"] === undefined || obj["upsert"] === null ? undefined : validateTask(obj["upsert"])),
+    patch: (obj["patch"] === undefined || obj["patch"] === null ? undefined : validateRecord(obj["patch"], "TaskListEvent.patch", (v) => v) as { [key: string]: any /* json.RawMessage */ }),
+    delete: (obj["delete"] === undefined || obj["delete"] === null ? undefined : asString(obj["delete"], "TaskListEvent.delete")),
+    repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[]),
+    warning: (obj["warning"] === undefined || obj["warning"] === null ? undefined : validateWarning(obj["warning"])),
+    status: (obj["status"] === undefined || obj["status"] === null ? undefined : validateTaskListRestorationStatus(obj["status"])),
   };
-  switch (result.kind) {
-    case "snapshot":
-      result.snapshot = validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[];
-      break;
-    case "upsert":
-      result.upsert = validateTask(obj["upsert"]);
-      break;
-    case "patch":
-      result.patch = validateRecord(obj["patch"], "TaskListEvent.patch", (v) => v) as { [key: string]: any /* json.RawMessage */ };
-      break;
-    case "delete":
-      result.delete = asString(obj["delete"], "TaskListEvent.delete");
-      break;
-    case "repos":
-      result.repos = validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[];
-      break;
-    case "warning":
-      result.warning = validateWarning(obj["warning"]);
-      break;
-    case "status":
-      result.status = validateTaskListSettledStatus(obj["status"]);
-      break;
-    // Unknown kinds pass through.
-  }
-  return result;
 }
 
 export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {

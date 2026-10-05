@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -289,9 +290,9 @@ func (c *Client) GetJobLabels(_ context.Context, _, _ string, _ int64) ([]string
 }
 
 // GetJobLog fetches the log for a GitLab CI job, capped at 100 MB.
-// failingOnly is accepted but has no effect: GitLab's plain-text trace API
-// does not include reliable step-level markers.
-func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, _ bool) (string, error) {
+// failingOnly selects bounded head/tail context: GitLab traces do not include
+// reliable step-level markers. Full retrieval keeps the existing download cap.
+func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (log string, err error) {
 	apiURL := fmt.Sprintf("%s/projects/%s/jobs/%d/trace", apiBase, projectID(owner, repo), jobID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -301,10 +302,16 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { err = errors.Join(err, resp.Body.Close()) }()
 	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return "", readErr
+		}
 		return "", fmt.Errorf("gitlab get job log: status %d: %s", resp.StatusCode, data)
+	}
+	if failingOnly {
+		return forge.ReadLogExcerpt(ctx, resp.Body, false)
 	}
 	return forge.ReadLog(resp.Body)
 }

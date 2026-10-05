@@ -31,7 +31,7 @@ import type {
   EventAsk,
   EventTextDelta,
   SafetyIssue,
-  ImageData as APIImageData,
+  ImageConstraints,
   SyncTarget,
   DiffFileStat,
   ForgeCheck,
@@ -42,6 +42,7 @@ import type {
   TaskRateLimit,
   GitRepositoryState,
 } from "@sdk/types.gen";
+import type { DraftImage } from "../images";
 import { SyncTargetDefault } from "@sdk/types.gen";
 
 import { useHostMode } from "@maruel/gomode/web/HostMode";
@@ -159,8 +160,13 @@ interface Props {
   onError: (message: string) => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
-  inputImages: APIImageData[];
-  onInputImages: (imgs: APIImageData[]) => void;
+  inputImages: DraftImage[];
+  imageConstraints: ImageConstraints | null;
+  imageGeneration: number;
+  onAddImages: (blobs: Blob[]) => void;
+  onRemoveImage: (image: DraftImage) => void;
+  onSendInput: () => Promise<void>;
+  onCancelInputConversion: () => void;
 }
 
 type CIStatus = "pending" | "success" | "failure";
@@ -669,26 +675,20 @@ export default function TaskDetail(props: Props) {
     return null;
   });
 
+  let inputActive = true;
+  onCleanup(() => {
+    inputActive = false;
+    props.onCancelInputConversion();
+  });
   async function sendInput() {
-    const text = props.inputDraft.trim();
-    const imgs = props.inputImages;
-    if (!text && imgs.length === 0) return;
-    notifications.requestNotificationPermission({
-      enabled: hostMode.browserNotificationsEnabled(),
-    });
+    if (sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)) return;
+    notifications.requestNotificationPermission({ enabled: hostMode.browserNotificationsEnabled() });
     setSending(true);
+    setActionError(null);
     try {
-      await api.sendInput(props.taskId, {
-        prompt: { text, ...(imgs.length > 0 ? { images: imgs } : {}) },
-      });
-      props.onInputDraft("");
-      props.onInputImages([]);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      setActionError(`send failed: ${msg}`);
-      setTimeout(() => setActionError(null), 5000);
+      await props.onSendInput();
     } finally {
-      setSending(false);
+      if (inputActive) setSending(false);
     }
   }
 
@@ -1383,7 +1383,10 @@ export default function TaskDetail(props: Props) {
               data-testid="task-detail-prompt"
               supportsImages={props.supportsImages}
               images={props.inputImages}
-              onImagesChange={props.onInputImages}
+              imageConstraints={props.imageConstraints}
+              imageGeneration={props.imageGeneration}
+              onAddImages={props.onAddImages}
+              onRemoveImage={props.onRemoveImage}
               sendButton={
                 <Button
                   type="submit"

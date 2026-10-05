@@ -3,10 +3,15 @@
 package github
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 // NewClientForTest creates a Client pointing at baseURL instead of api.github.com.
@@ -77,7 +82,7 @@ func TestGetDefaultBranchSHA(t *testing.T) {
 	}
 }
 
-func TestExtractGitHubSteps(t *testing.T) {
+func TestReadLogExcerpt(t *testing.T) {
 	t.Parallel()
 	t.Run("extracts failing step", func(t *testing.T) {
 		t.Parallel()
@@ -95,7 +100,10 @@ func TestExtractGitHubSteps(t *testing.T) {
 			"2024-01-01T00:00:09.0000000Z ##[endgroup]",
 		}, "\n")
 
-		result := extractGitHubSteps(log)
+		result, err := forge.ReadLogExcerpt(t.Context(), strings.NewReader(log), true)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		if !strings.Contains(result, "Run tests") {
 			t.Error("expected result to contain failing step name 'Run tests'")
@@ -122,7 +130,10 @@ func TestExtractGitHubSteps(t *testing.T) {
 			"2024-01-01T00:00:05.0000000Z ##[endgroup]",
 		}, "\n")
 
-		result := extractGitHubSteps(log)
+		result, err := forge.ReadLogExcerpt(t.Context(), strings.NewReader(log), true)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		if !strings.Contains(result, "Step: Lint") {
 			t.Error("expected 'Lint' step")
@@ -135,7 +146,10 @@ func TestExtractGitHubSteps(t *testing.T) {
 	t.Run("no groups returns raw log", func(t *testing.T) {
 		t.Parallel()
 		raw := "some plain log\nwithout groups"
-		result := extractGitHubSteps(raw)
+		result, err := forge.ReadLogExcerpt(t.Context(), strings.NewReader(raw), true)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if result != raw {
 			t.Errorf("expected raw log back, got %q", result)
 		}
@@ -148,7 +162,10 @@ func TestExtractGitHubSteps(t *testing.T) {
 			"2024-01-01T00:00:01.0000000Z compiling...",
 			"2024-01-01T00:00:02.0000000Z ##[endgroup]",
 		}, "\n")
-		result := extractGitHubSteps(log)
+		result, err := forge.ReadLogExcerpt(t.Context(), strings.NewReader(log), true)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if result != log {
 			t.Error("expected raw log when no errors found")
 		}
@@ -157,9 +174,50 @@ func TestExtractGitHubSteps(t *testing.T) {
 	t.Run("lines without timestamps", func(t *testing.T) {
 		t.Parallel()
 		log := "##[group]Build\n##[error]fail\n##[endgroup]"
-		result := extractGitHubSteps(log)
+		result, err := forge.ReadLogExcerpt(t.Context(), strings.NewReader(log), true)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !strings.Contains(result, "Step: Build") {
 			t.Error("expected step extraction to work without timestamps")
 		}
 	})
+}
+
+func TestJobExcerptDownloadFailures(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"late_read", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			started := make(chan struct{})
+			blob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", "200000")
+				_, _ = io.WriteString(w, strings.Repeat("noise\n", 12000))
+				if err := http.NewResponseController(w).Flush(); err != nil {
+					t.Error(err)
+					return
+				}
+				close(started)
+				if mode == "cancel" {
+					<-r.Context().Done()
+				}
+			}))
+			t.Cleanup(blob.Close)
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, blob.URL, http.StatusFound) }))
+			t.Cleanup(api.Close)
+			client := NewClientForTest("token", api.URL)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if mode == "cancel" {
+				go func() { <-started; cancel() }()
+			}
+			got, err := client.GetJobLog(ctx, "owner", "repo", 1, true)
+			if err == nil || got != "" {
+				t.Fatalf("partial download succeeded: %d bytes %v", len(got), err)
+			}
+			if mode == "cancel" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("lost cancellation: %v", err)
+			}
+		})
+	}
 }

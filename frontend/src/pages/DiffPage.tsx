@@ -23,7 +23,9 @@ export default function DiffPage() {
         };
         return (
           <DetailPane>
-            <DiffDetail taskId={taskId} taskPath={tp()} onTaskRefreshError={s.dismissSelectedTaskOnNotFound} />
+            <Show when={t()}>
+              <DiffDetail taskId={taskId} taskPath={tp()} onTaskRefreshError={s.dismissSelectedTaskOnNotFound} />
+            </Show>
           </DetailPane>
         );
       }}

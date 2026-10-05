@@ -151,3 +151,9 @@
 .menuItem svg {
   flex-shrink: 0;
 }
+
+.imageError {
+  margin: 0.25rem 0;
+  font-size: 0.85rem;
+  color: var(--color-danger);
+}

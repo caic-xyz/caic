@@ -495,7 +495,8 @@ func New(ctx context.Context, log *slog.Logger, rootDir string, cfg *server.Conf
 				appLog.ErrorContext(ctx, "settled history pass failed", "err", err)
 			}
 		}
-		taskMgr.CompleteSettledLoad(historyErr)
+		// Partial inventory, live logs, or import also leave membership incomplete.
+		taskMgr.CompleteRestoration(errors.Join(instanceRes.err, loadErr, importErr, historyErr))
 
 		if err := usageRollup.Backfill(ctx, logStore.UsageRows(ctx, taskMgr)); err != nil {
 			if ctx.Err() != nil {

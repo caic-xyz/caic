@@ -238,7 +238,7 @@ describe("DiffDetail", () => {
     fireEvent.click(row);
     fireEvent.click(row);
 
-    expect(screen.getByText("+loaded")).toBeInTheDocument();
+    expect(await screen.findByText("+loaded")).toBeInTheDocument();
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
   });
 
@@ -263,13 +263,13 @@ describe("DiffDetail", () => {
 
     taskDiffCache.invalidate("task-1");
     expect(screen.getByText("Updating diff...")).toBeInTheDocument();
-    expect(screen.getByText("+loaded")).toBeInTheDocument();
+    expect(await screen.findByText("+loaded")).toBeInTheDocument();
     expect(row).toHaveAttribute("aria-expanded", "true");
     resolveRefresh(refreshed);
 
     expect(await screen.findByText(/1 commit ahead · 2 behind/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "committed.go" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("+loaded")).toBeInTheDocument();
+    expect(await screen.findByText("+loaded")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "committed.go" })).toHaveFocus();
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
   });
@@ -351,12 +351,116 @@ describe("DiffDetail", () => {
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
   });
 
+  it("releases a collapsed oversized patch and reloads it on reopen", async () => {
+    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    getTaskFileDiffMock.mockResolvedValue({ diff: "@@ -0,0 +1 @@\n+" + "oversized".repeat(120_000) });
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    await waitFor(() => expect(row).toHaveAttribute("aria-expanded", "true"));
+    await waitFor(() => expect(screen.queryByText("Loading file diff...")).not.toBeInTheDocument());
+    fireEvent.click(row);
+    fireEvent.click(row);
+    await vi.waitFor(() => expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("coalesces collapse and reopen while the patch remains pending", async () => {
+    const pending = Promise.withResolvers<FileDiffResp>();
+    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    getTaskFileDiffMock.mockReturnValue(pending.promise);
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    fireEvent.click(row);
+    fireEvent.click(row);
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+    pending.resolve({ diff: "@@ -0,0 +1 @@\n+shared pending result" });
+    expect(await screen.findByText("+shared pending result")).toBeInTheDocument();
+  });
+
+  it("ignores an oversized patch settling while its row stays collapsed", async () => {
+    const pending = Promise.withResolvers<FileDiffResp>();
+    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    getTaskFileDiffMock.mockReturnValueOnce(pending.promise).mockResolvedValue({ diff: "@@ -0,0 +1 @@\n+fresh" });
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    const row = await screen.findByRole("button", { name: "committed.go" });
+    fireEvent.click(row);
+    const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+    const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+    fireEvent.click(row);
+    pending.resolve({ diff: "@@ -0,0 +1 @@\n+" + "oversized".repeat(120_000) });
+    await settled;
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    await userEvent.setup().click(row);
+    expect(await screen.findByText("+fresh")).toBeInTheDocument();
+    expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
+  });
+
+  for (const status of [404, 500]) {
+    it(`ignores a collapsed row's late ${status} rejection and handles a fresh expanded failure`, async () => {
+      const pending = Promise.withResolvers<FileDiffResp>();
+      const reopened = Promise.withResolvers<FileDiffResp>();
+      const onTaskRefreshError = vi.fn(() => status === 404);
+      getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+      getTaskFileDiffMock.mockReturnValueOnce(pending.promise).mockReturnValueOnce(reopened.promise);
+      renderWithRouter(() => (
+        <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />
+      ));
+      const row = await screen.findByRole("button", { name: "committed.go" });
+      fireEvent.click(row);
+      const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+      const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+      fireEvent.click(row);
+      pending.reject(Object.assign(new Error("obsolete collapsed failure"), { status }));
+      await expect(settled).rejects.toThrow("obsolete collapsed failure");
+      expect(onTaskRefreshError).not.toHaveBeenCalled();
+
+      fireEvent.click(row);
+      expect(getTaskFileDiffMock).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("obsolete collapsed failure")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading file diff...")).toBeInTheDocument();
+      const current = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+      const err = Object.assign(new Error("current expanded failure"), { status });
+      reopened.reject(err);
+      await expect(current).rejects.toThrow("current expanded failure");
+      expect(onTaskRefreshError).toHaveBeenCalledExactlyOnceWith("task-1", err);
+      if (status === 500) expect(screen.getByRole("alert")).toHaveTextContent("current expanded failure");
+      else expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  }
+
+  it("does not send a disposed row's late error to the current task view", async () => {
+    const pending = Promise.withResolvers<FileDiffResp>();
+    const onTaskRefreshError = vi.fn(() => true);
+    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    getTaskFileDiffMock
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ diff: "@@ -0,0 +1 @@\n+current account" });
+    const old = renderWithRouter(() => (
+      <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />
+    ));
+    fireEvent.click(await screen.findByRole("button", { name: "committed.go" }));
+    const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+    const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
+    old.unmount();
+    taskDiffCache.clear();
+    const err = Object.assign(new Error("old account task missing"), { status: 404 });
+    pending.reject(err);
+    await expect(settled).rejects.toThrow("old account task missing");
+    renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "committed.go" }));
+    expect(await screen.findByText("+current account")).toBeInTheDocument();
+    expect(onTaskRefreshError).not.toHaveBeenCalled();
+  });
+
   it("defers a queued working patch refresh while its row is collapsed", async () => {
     let resolveFirstPatch: (response: FileDiffResp) => void = () => undefined;
     const firstPatch = new Promise<FileDiffResp>((resolve) => {
       resolveFirstPatch = resolve;
     });
-    getTaskDiffIndexMock.mockResolvedValue(diffIndexFixture());
+    const refreshed = diffIndexFixture();
+    refreshed.repositories[0].behind = 2;
+    getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockResolvedValueOnce(refreshed);
     getTaskFileDiffMock.mockReturnValueOnce(firstPatch).mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
     renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", {
@@ -364,14 +468,15 @@ describe("DiffDetail", () => {
     });
     fireEvent.click(row);
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
+    const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+    const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
 
     taskDiffCache.invalidate("task-1");
-    await vi.waitFor(() => expect(getTaskDiffIndexMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/1 commit ahead · 2 behind/)).toBeInTheDocument();
     fireEvent.click(row);
     expect(row).toHaveAttribute("aria-expanded", "false");
     resolveFirstPatch({ diff: "@@ -1 +1 @@\n-old\n+obsolete" });
-    await firstPatch;
-    await Promise.resolve();
+    await settled;
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
 
     fireEvent.click(row);

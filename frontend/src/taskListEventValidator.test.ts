@@ -1,10 +1,4 @@
-// Guard for the TaskListEvent SDK validator: proves structured warnings and settled-history status.
-// variant survives validateTaskListEvent for a wire-format SSE payload. This is
-// the exact path globalTaskEvents runs on every event, which the component tests
-// bypass by mocking the api module. It fails if the status fields regress into
-// the generator's discriminator switch (for example by re-adding omitempty to a
-// non-kind field on the union), which is what made the feature inert on the real
-// client.
+// Guards wire-format task-list SDK validation for snapshot completeness, restoration status, and structured warnings.
 
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
@@ -13,7 +7,24 @@ import { validateTaskListEvent } from "@sdk/validate.gen";
 // Parse a raw wire payload the same way globalTaskEvents does before validation.
 const wire = (json: string): unknown => JSON.parse(json);
 
-describe("validateTaskListEvent settled status", () => {
+describe("validateTaskListEvent restoration and snapshot authority", () => {
+  for (const complete of [false, true]) {
+    it(`preserves snapshot complete=${complete}`, () => {
+      const ev = validateTaskListEvent({ kind: "snapshot", snapshot: [], complete });
+      expect(ev.snapshot).toEqual([]);
+      expect(ev.complete).toBe(complete);
+    });
+  }
+
+  it("normalizes null snapshot authority to absence", () => {
+    const ev = validateTaskListEvent({ kind: "snapshot", snapshot: [], complete: null });
+    expect(ev.complete).toBeUndefined();
+    expect(ev.snapshot).toEqual([]);
+  });
+
+  it("rejects malformed snapshot authority", () => {
+    expect(() => validateTaskListEvent({ kind: "snapshot", snapshot: [], complete: "yes" })).toThrow();
+  });
   it("preserves loading=true on a kind=status event", () => {
     const ev = validateTaskListEvent(wire('{"kind":"status","status":{"loading":true,"error":""}}'));
     expect(ev.kind).toBe("status");

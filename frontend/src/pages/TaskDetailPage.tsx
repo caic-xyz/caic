@@ -51,7 +51,9 @@ export default function TaskDetailPage() {
               repoStates={t()?.repoStates}
               vncPort={t()?.runtime.vncPort ?? 0}
               sudoPassword={t()?.runtime.sudoPassword}
-              supportsImages={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages}
+              supportsImages={
+                s.taskIntroduced(taskId) && s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsImages
+              }
               supportsCompact={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact}
               rateLimit={t()?.rateLimit}
               now={s.now()}
@@ -69,7 +71,12 @@ export default function TaskDetailPage() {
               inputDraft={s.inputDraft(taskId)}
               onInputDraft={(v) => s.setInputDraft(taskId, v)}
               inputImages={s.inputImages(taskId)}
-              onInputImages={(imgs) => s.setInputImages(taskId, imgs)}
+              imageConstraints={s.imageConstraints()}
+              imageGeneration={s.inputImageGeneration(taskId)}
+              onAddImages={(blobs) => s.addInputImages(taskId, blobs)}
+              onRemoveImage={(image) => s.removeInputImages(taskId, [image])}
+              onSendInput={() => s.sendTaskInput(taskId)}
+              onCancelInputConversion={() => s.cancelInputConversion(taskId)}
               onError={s.showWarning}
             />
           </DetailPane>
