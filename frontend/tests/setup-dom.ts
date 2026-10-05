@@ -26,6 +26,7 @@ const globalTarget = globalThis as unknown as Record<string, unknown>;
 for (const key of [
   "document",
   "HTMLElement",
+  "HTMLMediaElement",
   "HTMLInputElement",
   "HTMLSelectElement",
   "HTMLTextAreaElement",
