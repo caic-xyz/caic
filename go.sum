@@ -447,8 +447,8 @@ github.com/maratori/testpackage v1.1.2 h1:ffDSh+AgqluCLMXhM19f/cpvQAKygKAJXFl9aU
 github.com/maratori/testpackage v1.1.2/go.mod h1:8F24GdVDFW5Ew43Et02jamrVMNXLUNaOynhDssITGfc=
 github.com/maruel/apisdkgen v0.1.1 h1:YX9g0+QDiKDOpvbH0nTgabCVS1s/RGgsrOHN7VPAHAw=
 github.com/maruel/apisdkgen v0.1.1/go.mod h1:S4tV7GOUaW6aRhd8AQiN5WJkgLtl+DWWISNYwdpbugc=
-github.com/maruel/genai v0.9.0 h1:0dd3uTwVsMsEanG20tKrNDnxpCG9paDnV0UQZOi7h64=
-github.com/maruel/genai v0.9.0/go.mod h1:a4t2KAGNrtK8Fdz3BUevGwR/A4fy1ANugF10396DRGY=
+github.com/maruel/genai v0.10.1-0.20261005213654-fa61ce82810d h1:d0Vrh31g6+OAMlu9PsyJoMvhWjqCNr7pmtqXYuM7fJw=
+github.com/maruel/genai v0.10.1-0.20261005213654-fa61ce82810d/go.mod h1:SdPjQFSU81PxF8jB+kvN40X05ZO+XFGABoFWNxx3k6k=
 github.com/maruel/genaipy v0.1.2-0.20261004020438-2bdf98e17d98 h1:0WT4q1l7TMhhBrTQtysqsOlJGuV2L0hq2b6tXNW6WKA=
 github.com/maruel/genaipy v0.1.2-0.20261004020438-2bdf98e17d98/go.mod h1:vLYFfx1bcsBNCMD11yDaDuynbm/g5b1V/ss2sZmlYBs=
 github.com/maruel/gomode v0.1.2-0.20261004192239-bb554069d426 h1:fxisNp8+ykCh13/Buoxg9M/cTjpBVJCW8TP4tkBZcRE=
@@ -751,6 +751,8 @@ golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f h1:+lI8cDJ4uceLip
 golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f/go.mod h1:PqrXSW65cXDZH0k4IeUbhmg/bcAZDbzNz3byBpKCsXo=
 golang.org/x/image v0.0.0-20190227222117-0694c2d4d067/go.mod h1:kZ7UVZpmo3dzQBMxlp+ypCbDeSB+sBbTgSJuh5dn5js=
 golang.org/x/image v0.0.0-20190802002840-cff245a6509b/go.mod h1:FeLwcggjj3mMvU+oOTbSwawSJRM1uh48EjtB4UJZlP0=
+golang.org/x/image v0.43.0 h1:FLxcP4ec2350nTfOC8ysKtqYSIFbk/QGjw1ZHNP4tsY=
+golang.org/x/image v0.43.0/go.mod h1:rrpelvGFt+kLPAjPM4HeWPgrl0FtafueU//e5N0qk/Q=
 golang.org/x/lint v0.0.0-20181026193005-c67002cb31c3/go.mod h1:UVdnD1Gm6xHRNCYTkRU2/jEulfH38KcIWyp/GAMgvoE=
 golang.org/x/lint v0.0.0-20190227174305-5b3e6a55c961/go.mod h1:wehouNa3lNwaWXcvxsM5YxQ5yQlVC4a0KAMCusXpPoU=
 golang.org/x/lint v0.0.0-20190301231843-5614ed5bae6f/go.mod h1:UVdnD1Gm6xHRNCYTkRU2/jEulfH38KcIWyp/GAMgvoE=

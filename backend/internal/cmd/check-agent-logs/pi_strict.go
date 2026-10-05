@@ -119,8 +119,9 @@ type piEntryAppendedContentProbe struct {
 }
 
 type piSessionEntryContentProbe struct {
-	Content json.RawMessage `json:"content"`
-	Message json.RawMessage `json:"message"`
+	Content     json.RawMessage `json:"content"`
+	Message     json.RawMessage `json:"message"`
+	Replacement json.RawMessage `json:"replacement"`
 }
 
 func validatePiStrictResponse(data []byte) error {
@@ -224,6 +225,9 @@ func validatePiStrictSessionEntry(data json.RawMessage) error {
 		return err
 	}
 	if err := validatePiStrictAgentMessage(raw.Message); err != nil {
+		return err
+	}
+	if err := validatePiStrictAgentMessage(raw.Replacement); err != nil {
 		return err
 	}
 	return validatePiStrictContentBlockArray(raw.Content)

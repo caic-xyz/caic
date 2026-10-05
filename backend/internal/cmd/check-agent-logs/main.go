@@ -516,6 +516,12 @@ func checkCodex(data []byte) (string, error) {
 		dst = &codexdto.McpServerStatusUpdatedNotification{}
 	case codexdto.MethodAccountRateLimitsUpdated:
 		dst = &codexdto.AccountRateLimitsUpdatedNotification{}
+	case codexdto.MethodAccountUpdated:
+		dst = &codexdto.AccountUpdatedNotification{}
+	case codexdto.MethodDeprecationNotice:
+		dst = &codexdto.DeprecationNoticeNotification{}
+	case codexdto.MethodRemoteControlStatusChanged:
+		dst = &codexdto.RemoteControlStatusChangedNotification{}
 	case codexdto.MethodSkillsChanged:
 		dst = &codexdto.SkillsChangedNotification{}
 	case codexdto.MethodErrorNotification:
@@ -579,6 +585,8 @@ func checkPi(data []byte) (string, error) {
 		dst = &pidto.ToolExecEndEvent{}
 	case pidto.EventExtensionUI:
 		dst = &pidto.ExtensionUIRequest{}
+	case pidto.EventExtensionError:
+		dst = &pidto.ExtensionErrorEvent{}
 	case pidto.EventResponse:
 		dst = &pidto.Response{}
 	case pidto.CmdPrompt:

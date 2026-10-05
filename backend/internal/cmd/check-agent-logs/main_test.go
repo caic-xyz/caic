@@ -192,6 +192,18 @@ func TestCheckCodex(t *testing.T) {
 			data: `{"method":"account/rateLimits/updated","params":{"rateLimits":{}}}`,
 		},
 		{
+			name: "remote control status",
+			data: `{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"host","installationId":"installation","environmentId":null}}`,
+		},
+		{
+			name: "account updated",
+			data: `{"method":"account/updated","params":{"authMode":"chatgpt","planType":"prolite"}}`,
+		},
+		{
+			name: "deprecation notice",
+			data: `{"method":"deprecationNotice","params":{"summary":"Use pagination","details":null}}`,
+		},
+		{
 			name: "skills changed",
 			data: `{"method":"skills/changed","params":{}}`,
 		},
@@ -226,6 +238,7 @@ func TestCheckPi(t *testing.T) {
 		"compaction_end",
 		"compaction_start",
 		"entry_appended",
+		"extension_error",
 		"queue_update",
 		"summarization_retry_attempt_start",
 		"summarization_retry_finished",
@@ -248,6 +261,17 @@ func TestCheckPi(t *testing.T) {
 		invalid := []byte(`{"type":"message_start","message":{"role":"assistant","content":[{"type":"text","text":"hello","unexpected":true}]}}`)
 		if _, err := checkPi(invalid); err == nil || !strings.Contains(err.Error(), `json: unknown field "unexpected"`) {
 			t.Fatalf("checkPi error = %v, want strict content-block error", err)
+		}
+	})
+	t.Run("context replacement content", func(t *testing.T) {
+		t.Parallel()
+		valid := []byte(`{"type":"entry_appended","entry":{"type":"context_edit","targetId":"target","replacement":{"content":[{"type":"text","text":"replacement"}]}}}`)
+		if _, err := checkPi(valid); err != nil {
+			t.Fatal(err)
+		}
+		invalid := []byte(`{"type":"entry_appended","entry":{"type":"context_edit","targetId":"target","replacement":{"content":[{"type":"text","unexpected":true}]}}}`)
+		if _, err := checkPi(invalid); err == nil || !strings.Contains(err.Error(), `json: unknown field "unexpected"`) {
+			t.Fatalf("checkPi error = %v, want strict replacement content error", err)
 		}
 	})
 	t.Run("opaque tool arguments", func(t *testing.T) {
