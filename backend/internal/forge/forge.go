@@ -83,17 +83,17 @@ type CheckRun struct {
 // name, suitable for storage and cross-repo lookups. Use CheckFromRun to
 // construct from a forge API response.
 type Check struct {
-	Name        string             `json:"name"`
-	Owner       string             `json:"owner"`
-	Repo        string             `json:"repo"`
-	RunID       int64              `json:"runID"`
-	JobID       int64              `json:"jobID"`
-	Status      CheckRunStatus     `json:"status"`
-	Conclusion  CheckRunConclusion `json:"conclusion"`
-	Labels      []string           `json:"labels,omitempty"`
-	QueuedAt    time.Time          `json:"queuedAt,omitzero"`
-	StartedAt   time.Time          `json:"startedAt,omitzero"`
-	CompletedAt time.Time          `json:"completedAt,omitzero"`
+	Name        string
+	Owner       string
+	Repo        string
+	RunID       int64
+	JobID       int64
+	Status      CheckRunStatus
+	Conclusion  CheckRunConclusion
+	Labels      []string
+	QueuedAt    time.Time
+	StartedAt   time.Time
+	CompletedAt time.Time
 }
 
 // CheckFromRun creates a Check from a CheckRun and the repository coordinates.

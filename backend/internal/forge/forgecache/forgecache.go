@@ -8,19 +8,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgecache/data"
 )
 
 // Result is the cached outcome for a commit SHA.
 // Only written once all check-runs for that SHA have completed.
 type Result struct {
-	Status   forge.CIStatus `json:"status"`
-	Checks   []forge.Check  `json:"checks,omitempty"`
-	CachedAt time.Time      `json:"cachedAt"`
+	Status   forge.CIStatus
+	Checks   []forge.Check
+	CachedAt time.Time
 }
 
 // maxAge is the TTL for both cached results and notification records.
@@ -43,7 +45,9 @@ type Cache struct {
 
 // Open loads or creates a Cache backed by path. If path is empty, the cache
 // operates in-memory only (no persistence). Returns a functional empty cache
-// if the file does not exist or cannot be parsed.
+// if the file does not exist or cannot be parsed. Malformed files are logged
+// and discarded in full, including notification records; filesystem errors
+// other than missing files are returned.
 func Open(path string) (*Cache, error) {
 	c := &Cache{path: path, data: make(map[string]Result), notified: make(map[string]time.Time)}
 	if path == "" {
@@ -56,17 +60,18 @@ func Open(path string) (*Cache, error) {
 		}
 		return nil, fmt.Errorf("forgecache open %s: %w", path, err)
 	}
-	var f fileData
+	var f data.File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		// Corrupted — start fresh rather than failing startup.
-		return c, nil //nolint:nilerr // intentional: treat corrupt cache as empty
+		// Discard the complete file, including any partially decoded entries.
+		slog.Warn("discarding malformed CI cache", "path", path, "err", err)
+		return c, nil
 	}
 	cutoff := time.Now().Add(-maxAge)
 	for k, r := range f.Results {
 		if !r.CachedAt.IsZero() && r.CachedAt.Before(cutoff) {
 			continue
 		}
-		c.data[k] = r
+		c.data[k] = resultFromData(r)
 	}
 	for k, t := range f.Notified {
 		if !t.IsZero() && t.Before(cutoff) {
@@ -125,7 +130,11 @@ func cacheKey(owner, repo, sha string) string {
 
 // save writes the cache to disk atomically. Must be called with c.mu held.
 func (c *Cache) save() error {
-	raw, err := json.MarshalIndent(fileData{Results: c.data, Notified: c.notified}, "", "  ")
+	results := make(map[string]data.Result, len(c.data))
+	for k, r := range c.data {
+		results[k] = resultToData(r)
+	}
+	raw, err := json.MarshalIndent(data.File{Results: results, Notified: c.notified}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("forgecache marshal: %w", err)
 	}
@@ -141,8 +150,50 @@ func (c *Cache) save() error {
 	return nil
 }
 
-// fileData is the on-disk format.
-type fileData struct {
-	Results  map[string]Result    `json:"results"`
-	Notified map[string]time.Time `json:"notified,omitempty"`
+func resultFromData(r data.Result) Result {
+	var checks []forge.Check
+	if r.Checks != nil {
+		checks = make([]forge.Check, len(r.Checks))
+	}
+	for i := range r.Checks {
+		c := &r.Checks[i]
+		checks[i] = forge.Check{
+			Name:        c.Name,
+			Owner:       c.Owner,
+			Repo:        c.Repo,
+			RunID:       c.RunID,
+			JobID:       c.JobID,
+			Status:      forge.CheckRunStatus(c.Status),
+			Conclusion:  forge.CheckRunConclusion(c.Conclusion),
+			Labels:      c.Labels,
+			QueuedAt:    c.QueuedAt,
+			StartedAt:   c.StartedAt,
+			CompletedAt: c.CompletedAt,
+		}
+	}
+	return Result{Status: forge.CIStatus(r.Status), Checks: checks, CachedAt: r.CachedAt}
+}
+
+func resultToData(r Result) data.Result {
+	var checks []data.Check
+	if r.Checks != nil {
+		checks = make([]data.Check, len(r.Checks))
+	}
+	for i := range r.Checks {
+		c := &r.Checks[i]
+		checks[i] = data.Check{
+			Name:        c.Name,
+			Owner:       c.Owner,
+			Repo:        c.Repo,
+			RunID:       c.RunID,
+			JobID:       c.JobID,
+			Status:      data.CheckRunStatus(c.Status),
+			Conclusion:  data.CheckRunConclusion(c.Conclusion),
+			Labels:      c.Labels,
+			QueuedAt:    c.QueuedAt,
+			StartedAt:   c.StartedAt,
+			CompletedAt: c.CompletedAt,
+		}
+	}
+	return data.Result{Status: data.CIStatus(r.Status), Checks: checks, CachedAt: r.CachedAt}
 }

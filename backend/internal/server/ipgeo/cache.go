@@ -4,18 +4,20 @@ package ipgeo
 
 import (
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/server/ipgeo/data"
 )
 
 const originCacheMaxAge = 24 * time.Hour
 
 type originCacheEntry struct {
-	Updated  time.Time `json:"updated"`
-	Prefixes []string  `json:"prefixes"`
+	Updated  time.Time
+	Prefixes []string
 }
 
 type originCache struct {
@@ -25,6 +27,8 @@ type originCache struct {
 	data map[string]originCacheEntry
 }
 
+// openOriginCache discards malformed files atomically so a refetch can rebuild
+// them. Missing files are empty; other filesystem errors are returned.
 func openOriginCache(path string) (*originCache, error) {
 	c := &originCache{path: path, now: time.Now, data: make(map[string]originCacheEntry)}
 	raw, err := os.ReadFile(path) //nolint:gosec // path is derived from the server's cache directory, not user input.
@@ -34,8 +38,13 @@ func openOriginCache(path string) (*originCache, error) {
 		}
 		return c, err
 	}
-	if err := json.Unmarshal(raw, &c.data); err != nil {
-		return c, fmt.Errorf("decode %s: %w", path, err)
+	var disk map[string]data.Entry
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		slog.Warn("discarding malformed IP origin cache", "path", path, "err", err)
+		return c, nil
+	}
+	for k, e := range disk {
+		c.data[k] = originCacheEntry{Updated: e.Updated, Prefixes: e.Prefixes}
 	}
 	return c, nil
 }
@@ -83,13 +92,17 @@ func (c *originCache) set(name string, prefixes []netip.Prefix) error {
 }
 
 func (c *originCache) flushLocked() error {
-	data, err := json.MarshalIndent(c.data, "", "  ")
+	disk := make(map[string]data.Entry, len(c.data))
+	for k, e := range c.data {
+		disk[k] = data.Entry{Updated: e.Updated, Prefixes: e.Prefixes}
+	}
+	raw, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
+	raw = append(raw, '\n')
 	tmp := c.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, c.path)

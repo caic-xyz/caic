@@ -82,18 +82,18 @@ func (b Backends) ResolveWire(h harness.Name) (WireFormat, error) {
 // Values are protocol-agnostic strings because they are persisted in task
 // preferences and sent back to each harness as user selections.
 type Model struct {
-	ID            string   `json:"id"`
-	EffortOptions []string `json:"effortOptions"`
+	ID            string
+	EffortOptions []string
 	// ContextWindow is the model's context window size in tokens. It is 0 when
 	// the harness does not publish one; the runtime usage the agent reports then
 	// becomes the only source of the limit.
-	ContextWindow int `json:"contextWindow,omitempty"`
+	ContextWindow int
 }
 
 // ModelInventory is the immutable model and configuration data discovered for
 // a harness.
 type ModelInventory struct {
-	Models []Model `json:"models"`
+	Models []Model
 }
 
 // IDs returns the model IDs in inventory order.

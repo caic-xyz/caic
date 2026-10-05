@@ -20,20 +20,7 @@ independent of runtime and API types, while preserving existing file formats.
   retain opaque native JSON. External formats, opaque bytes, generated source,
   and in-memory caches do not require new disk schemas.
 
-## Phase 1 — caches: Independent discovery and CI cache schemas
-
-- **Scope:** Extract [harness inventories](../backend/internal/agent/cache.go),
-  [CI results and notification deduplication](../backend/internal/forge/forgecache/forgecache.go),
-  and [IP-origin caches](../backend/internal/server/ipgeo/cache.go), including
-  nested enums and records. Use `agent/data/harnesscache`, `forgecache/data`,
-  and `ipgeo/data`; convert at load/save boundaries.
-- **Preserve:** Freshness, API-key hashes, pruning, notification deduplication,
-  and each cache's current corrupt-file behavior.
-- **Verify:** Historical fixtures survive load/write/reload with cache-hit,
-  stale-entry, and notification-dedup coverage. Run focused agent, forgecache,
-  and ipgeo tests.
-
-## Phase 2 — task-history: Explicit versioned task-log and header contracts
+## Phase 1 — task-history: Explicit versioned task-log and header contracts
 
 - **Scope:** Extract caic-owned [task-log records](../backend/internal/agent/types.go)
   into `taskslog/data/v1`, `/v2`, and `/v3`, and the
@@ -51,7 +38,7 @@ independent of runtime and API types, while preserving existing file formats.
   taskslog, task/taskmgr, relay, and check-agent-logs tooling tests. Compare
   focused parse/adoption benchmarks before and after.
 
-## Phase 3 — durable-observations: Independent usage, metrics, and audit records
+## Phase 2 — durable-observations: Independent usage, metrics, and audit records
 
 - **Scope:** Extract [usage rows](../backend/internal/usagedb/usagedb.go) into
   `usagedb/data`, [metrics records](../metricsdb/log.go) into `metricsdb/data/v2`,
@@ -67,7 +54,7 @@ independent of runtime and API types, while preserving existing file formats.
   Run usagedb, metricsdb, and audit tests; compare focused usage-ingest and
   metric-append benchmarks before and after.
 
-## Phase 4 — oauth-owner: Complete the dependency-owned persistence boundary
+## Phase 3 — oauth-owner: Complete the dependency-owned persistence boundary
 
 - **Scope:** In gomode's `oauth/oauthserver/storage.go`, extract the OAuth
   store's supported versioned schemas and nested records. Keep migrations and

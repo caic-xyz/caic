@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/data/harnesscache"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 )
 
@@ -20,9 +23,9 @@ const cacheMaxAge = 24 * time.Hour
 
 // HarnessCacheEntry holds cached data for a single harness.
 type HarnessCacheEntry struct {
-	Inventory ModelInventory `json:"inventory"`
-	Updated   time.Time      `json:"updated"`
-	EnvHash   string         `json:"env_hash,omitempty"` // SHA-256 of *_API_KEY env vars from config.toml
+	Inventory ModelInventory
+	Updated   time.Time
+	EnvHash   string // SHA-256 of *_API_KEY env vars from config.toml
 }
 
 // HarnessCache is a thread-safe disk-backed cache for per-harness model
@@ -35,14 +38,29 @@ type HarnessCache struct {
 }
 
 // OpenHarnessCache loads the cache from path. A missing or corrupt file
-// starts with an empty cache — no error is returned.
+// starts with an empty usable cache. Malformed files and read errors other
+// than missing files are logged; no error is returned.
 func OpenHarnessCache(path string) *HarnessCache {
 	c := &HarnessCache{path: path, data: make(map[harness.Name]*HarnessCacheEntry)}
 	raw, err := os.ReadFile(path) //nolint:gosec // path is derived from the server's cache directory, not user input
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("failed to read harness cache", "path", path, "err", err)
+		}
 		return c
 	}
-	_ = json.Unmarshal(raw, &c.data)
+	var disk map[string]*harnesscache.Entry
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		slog.Warn("discarding malformed harness cache", "path", path, "err", err)
+		return c
+	}
+	for k, e := range disk {
+		if e == nil {
+			c.data[harness.Name(k)] = nil
+			continue
+		}
+		c.data[harness.Name(k)] = &HarnessCacheEntry{Inventory: inventoryFromData(e.Inventory), Updated: e.Updated, EnvHash: e.EnvHash}
+	}
 	return c
 }
 
@@ -105,7 +123,15 @@ func APIKeyHash(envVars []string) string {
 }
 
 func (c *HarnessCache) flush() {
-	data, err := json.MarshalIndent(c.data, "", "  ")
+	disk := make(map[string]*harnesscache.Entry, len(c.data))
+	for k, e := range c.data {
+		if e == nil {
+			disk[string(k)] = nil
+			continue
+		}
+		disk[string(k)] = &harnesscache.Entry{Inventory: inventoryToData(e.Inventory), Updated: e.Updated, EnvHash: e.EnvHash}
+	}
+	data, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return
 	}
@@ -125,4 +151,26 @@ func CachedModelInventory(cacheDir string, h harness.Name, envVars []string) Mod
 	}
 	inventory, _ := OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json")).ModelInventory(h, APIKeyHash(envVars))
 	return inventory
+}
+
+func inventoryFromData(i harnesscache.ModelInventory) ModelInventory {
+	var models []Model
+	if i.Models != nil {
+		models = make([]Model, len(i.Models))
+	}
+	for n, m := range i.Models {
+		models[n] = Model{ID: m.ID, EffortOptions: m.EffortOptions, ContextWindow: m.ContextWindow}
+	}
+	return ModelInventory{Models: models}
+}
+
+func inventoryToData(i ModelInventory) harnesscache.ModelInventory {
+	var models []harnesscache.Model
+	if i.Models != nil {
+		models = make([]harnesscache.Model, len(i.Models))
+	}
+	for n, m := range i.Models {
+		models[n] = harnesscache.Model{ID: m.ID, EffortOptions: m.EffortOptions, ContextWindow: m.ContextWindow}
+	}
+	return harnesscache.ModelInventory{Models: models}
 }
