@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -49,6 +50,18 @@ import (
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
+type endedStatsInfo struct {
+	runtimetest.FakeInfo
+}
+
+func (f *endedStatsInfo) WatchStats(ctx context.Context, ids []runtime.ID) (iter.Seq2[runtime.StatsSample, error], error) {
+	select {
+	case f.WatchStarted <- slices.Clone(ids):
+	case <-ctx.Done():
+	}
+	return func(func(runtime.StatsSample, error) bool) {}, nil
+}
 
 type testRuntimeInfo interface {
 	runtime.Monitor
@@ -6007,6 +6020,105 @@ func TestManager(t *testing.T) {
 				t.Fatal("timed out waiting for stats push")
 			case <-ticker.C:
 			}
+		}
+	})
+
+	t.Run("watchStatsChanges", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		started := make(chan []runtime.ID, 8)
+		fake := &runtimetest.FakeInfo{WatchStarted: started}
+		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+		id := runtime.NewID("test-runtime", "ctr-1")
+		tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetState(taskslog.StateRunning)
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			m.watchStats(ctx)
+		}()
+		t.Cleanup(func() { cancel(); <-done })
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for initial stats stream")
+		}
+
+		// Running and waiting tasks both retain their running container. Updates
+		// to either task's data must not reset the runtime's sampling interval.
+		tk.SetState(taskslog.StateWaiting)
+		m.NotifyTaskChange()
+		select {
+		case <-started:
+			t.Fatal("restarted stats stream without a container-set change")
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "y"}, "", "")
+		otherID := runtime.NewID("test-runtime", "ctr-2")
+		other.SetRuntimeConnectionInfo(otherID, runtime.ConnectionTarget{SSHHost: "ctr-2"}, "", "", 0)
+		other.SetState(taskslog.StateRunning)
+		m.Insert(other.ID, m.NewEntry(other, nil))
+		select {
+		case ids := <-started:
+			if !slices.Equal(ids, []runtime.ID{id, otherID}) {
+				t.Fatalf("watch ids = %v, want both containers in sorted order", ids)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("did not restart stats stream after adding a container")
+		}
+		other.SetState(taskslog.StateStopped)
+		m.NotifyTaskChange()
+		select {
+		case ids := <-started:
+			if !slices.Equal(ids, []runtime.ID{id}) {
+				t.Fatalf("watch ids = %v, want only the running container", ids)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("did not restart stats stream after stopping a container")
+		}
+	})
+
+	t.Run("watchStatsRetry", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		started := make(chan []runtime.ID)
+		fake := &endedStatsInfo{WatchStarted: started}
+		m := newTestManager(t, Config{ServerCtx: ctx, Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake)})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+		tk.SetState(taskslog.StateRunning)
+		m.Insert(tk.ID, m.NewEntry(tk, nil))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			m.watchStats(ctx)
+		}()
+		t.Cleanup(func() { cancel(); <-done })
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for initial stats stream")
+		}
+		m.NotifyTaskChange()
+		select {
+		case <-started:
+			t.Fatal("retried ended stats stream without the retry delay")
+		case <-time.After(100 * time.Millisecond):
+		}
+		tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-2"), runtime.ConnectionTarget{SSHHost: "ctr-2"}, "", "", 0)
+		m.NotifyTaskChange()
+		select {
+		case ids := <-started:
+			if !slices.Equal(ids, []runtime.ID{"test-runtime:ctr-2"}) {
+				t.Fatalf("watch ids = %v, want the replacement container", ids)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("container-set change did not bypass the retry delay")
 		}
 	})
 

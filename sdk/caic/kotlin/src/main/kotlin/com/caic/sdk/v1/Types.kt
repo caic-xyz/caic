@@ -2495,7 +2495,7 @@ data class ProcessInfo(
     val threads: Int,
     /** OpenFDs is the number of open file descriptors, if available. */
     @SerialName("openFDs") val openFDs: Int? = null,
-    /** CPU is the percentage of CPU capacity used at the time of inspection. */
+    /** CPU is the lifetime-average CPU percentage reported by ps (100% per core). */
     val cpu: Double,
     /** Mem is the percentage of physical memory used at the time of inspection. */
     val mem: Double,

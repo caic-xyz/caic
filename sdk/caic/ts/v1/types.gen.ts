@@ -1685,7 +1685,7 @@ export interface ProcessInfo {
   threads: number /* int */;
   /** OpenFDs is the number of open file descriptors, if available. */
   openFDs?: number /* int */;
-  /** CPU is the percentage of CPU capacity used at the time of inspection. */
+  /** CPU is the lifetime-average CPU percentage reported by ps (100% per core). */
   cpu: number /* float64 */;
   /** Mem is the percentage of physical memory used at the time of inspection. */
   mem: number /* float64 */;

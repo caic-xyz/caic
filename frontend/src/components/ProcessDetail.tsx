@@ -361,7 +361,9 @@ export default function ProcessDetail(props: Props) {
                       <th class={styles.th}>NI</th>
                       <th class={styles.th}>THREADS</th>
                       <th class={styles.th}>FDS</th>
-                      <th class={styles.th}>CPU</th>
+                      <th class={styles.th} title="CPU use averaged over the process lifetime; 100% equals one core">
+                        CPU AVG %
+                      </th>
                       <th class={styles.th}>MEM</th>
                       <th class={styles.th}>RSS</th>
                       <th class={styles.th}>CPU TIME</th>

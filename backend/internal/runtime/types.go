@@ -235,7 +235,7 @@ type ProcessInfo struct {
 	Threads int
 	// OpenFDs is the number of open file descriptors, or nil when unavailable.
 	OpenFDs *int
-	// CPU is the percentage of CPU capacity used at the time of inspection.
+	// CPU is the lifetime-average CPU percentage reported by ps (100% per core).
 	CPU float64
 	// Mem is the percentage of physical memory used at the time of inspection.
 	Mem float64

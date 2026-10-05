@@ -1256,12 +1256,21 @@ func (m *Manager) watchStats(ctx context.Context) {
 		changedDone := make(chan struct{})
 		go func() {
 			defer close(changedDone)
-			select {
-			case <-changed:
-				cancel()
-			case <-ctx.Done():
-				cancel()
-			case <-streamCtx.Done():
+			// Task data changes frequently without changing the sampled containers.
+			// Preserve the stream's CPU measurement interval across those updates.
+			ch := changed
+			for {
+				select {
+				case <-ch:
+					current, next := m.activeStatsIDs()
+					if !slices.Equal(ids, current) {
+						cancel()
+						return
+					}
+					ch = next
+				case <-streamCtx.Done():
+					return
+				}
 			}
 		}()
 
@@ -1270,7 +1279,7 @@ func (m *Manager) watchStats(ctx context.Context) {
 			cancel()
 			<-changedDone
 			m.log.WarnContext(ctx, "stats stream failed", "err", err)
-			if !waitStatsRetry(ctx, changed, retryDelay) {
+			if !m.waitStatsRetry(ctx, ids, retryDelay) {
 				return
 			}
 			continue
@@ -1284,12 +1293,15 @@ func (m *Manager) watchStats(ctx context.Context) {
 			}
 			m.pushStatsSample(&sample)
 		}
+		// Capture interruption before cleanup cancels the context. Otherwise an
+		// unexpected stream end would look interrupted and skip the retry delay.
+		interrupted := streamCtx.Err() != nil
 		cancel()
 		<-changedDone
 		if ctx.Err() != nil {
 			return
 		}
-		if streamCtx.Err() == nil && !waitStatsRetry(ctx, changed, retryDelay) {
+		if !interrupted && !m.waitStatsRetry(ctx, ids, retryDelay) {
 			return
 		}
 	}
@@ -1306,6 +1318,7 @@ func (m *Manager) activeStatsIDs() (ids []runtime.ID, changed <-chan struct{}) {
 		}
 		ids = append(ids, name)
 	}
+	slices.Sort(ids)
 	return ids, m.changed
 }
 
@@ -1423,16 +1436,25 @@ func waitStatsChange(ctx context.Context, changed <-chan struct{}) bool {
 	}
 }
 
-func waitStatsRetry(ctx context.Context, changed <-chan struct{}, d time.Duration) bool {
+// waitStatsRetry backs off after a failed or unexpectedly ended stats stream,
+// avoiding a tight runtime-command restart loop and repeated failure logs.
+// Container-set changes bypass the delay so sampling follows the new set;
+// ordinary task updates preserve the delay. It returns false on shutdown.
+func (m *Manager) waitStatsRetry(ctx context.Context, ids []runtime.ID, d time.Duration) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-changed:
-		return true
-	case <-timer.C:
-		return true
+	for {
+		current, changed := m.activeStatsIDs()
+		if !slices.Equal(ids, current) {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-changed:
+		case <-timer.C:
+			return true
+		}
 	}
 }
 

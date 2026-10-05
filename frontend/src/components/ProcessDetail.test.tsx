@@ -62,6 +62,10 @@ describe("ProcessDetail", () => {
 
     expect(await screen.findByText("1m 30s")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "CPU AVG %" })).toHaveAttribute(
+      "title",
+      "CPU use averaged over the process lifetime; 100% equals one core",
+    );
   });
 });
 
