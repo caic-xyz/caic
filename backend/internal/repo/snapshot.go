@@ -7,7 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -49,19 +50,19 @@ type GitSnapshot struct {
 	Read        GitRead
 	Target      GitTarget
 	FailedRepos []int // Repositories whose previous summary must be retained and marked stale.
-	DiffStat    agent.DiffStat
-	RepoStates  []agent.RepoState
+	DiffStat    v3.DiffStat
+	RepoStates  []v3.RepoState
 	Statuses    []runtime.RepositoryStatus
 }
 
 // Summary retains the last known files and state for failed repositories.
 // Successful repositories replace their data, including newly clean states.
-func (s *GitSnapshot) Summary(previous agent.DiffStat, states []agent.RepoState) (agent.DiffStat, []agent.RepoState) {
+func (s *GitSnapshot) Summary(previous v3.DiffStat, states []v3.RepoState) (v3.DiffStat, []v3.RepoState) {
 	if len(s.FailedRepos) == 0 {
 		return s.DiffStat, s.RepoStates
 	}
-	var stats agent.DiffStat
-	var merged []agent.RepoState
+	var stats v3.DiffStat
+	var merged []v3.RepoState
 	for i := range s.Target.Repos {
 		r := &s.Target.Repos[i]
 		prefix := ""
@@ -79,7 +80,7 @@ func (s *GitSnapshot) Summary(previous agent.DiffStat, states []agent.RepoState)
 				stats = append(stats, f)
 			}
 		}
-		state := agent.RepoState{RepoIndex: i, Branch: r.Branch}
+		state := v3.RepoState{RepoIndex: i, Branch: r.Branch}
 		candidates := s.RepoStates
 		if failed || len(s.RepoStates) == 0 {
 			candidates = states

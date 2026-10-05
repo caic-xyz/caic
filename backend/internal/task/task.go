@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
@@ -196,12 +198,12 @@ type Task struct {
 	liveNumTurns   int
 	liveDuration   time.Duration
 	liveUsage      agent.Usage
-	lastUsage      agent.Usage    // Most recent ResultMessage usage (active context).
-	lastAPIUsage   agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
-	cacheExpiresAt time.Time      // When the prompt cache from the last API call expires.
-	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
-	lastGitRead    repo.GitRead   // Rejects deferred snapshots older than the applied Git state.
-	liveRepoStates []agent.RepoState
+	lastUsage      agent.Usage  // Most recent ResultMessage usage (active context).
+	lastAPIUsage   agent.Usage  // Most recent per-API-call usage from AssistantMessage (context window fill).
+	cacheExpiresAt time.Time    // When the prompt cache from the last API call expires.
+	liveDiffStat   v3.DiffStat  // Updated by DiffStatMessage from relay.
+	lastGitRead    repo.GitRead // Rejects deferred snapshots older than the applied Git state.
+	liveRepoStates []v3.RepoState
 	// Compact per-repo git state, updated by the backend's post-tool probe.
 	diffCreated   bool   // True after any non-empty diff was reported for the task.
 	lastExitError string // Most recent non-zero relay exit diagnostic.
@@ -376,9 +378,9 @@ func (t *Task) LogFilename() string {
 // LogHeader builds the immutable metadata header for a new task-log segment.
 func (t *Task) LogHeader() *agent.MetaMessage {
 	repos := t.ReposSnapshot()
-	metaRepos := make([]agent.MetaRepo, len(repos))
+	metaRepos := make([]v3.MetaRepo, len(repos))
 	for i, r := range repos {
-		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, ContainerPath: r.ContainerPath}
+		metaRepos[i] = v3.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, ContainerPath: r.ContainerPath}
 	}
 	parentTaskID := ""
 	if t.ParentTaskID != 0 {
@@ -389,7 +391,7 @@ func (t *Task) LogHeader() *agent.MetaMessage {
 		Prompt:            t.InitialPrompt.Text,
 		Title:             t.Title(),
 		Repos:             metaRepos,
-		Harness:           t.Harness,
+		Harness:           string(t.Harness),
 		RequestedModel:    t.RequestedModel,
 		RequestedEffort:   t.RequestedEffort,
 		StartedAt:         t.StartedAt,
@@ -608,7 +610,7 @@ func (t *Task) LastExitError() string {
 }
 
 // LiveDiffStat returns the latest diff stat from the relay's periodic polling.
-func (t *Task) LiveDiffStat() agent.DiffStat {
+func (t *Task) LiveDiffStat() v3.DiffStat {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.liveDiffStat
@@ -750,8 +752,8 @@ type Snapshot struct {
 	LastUsage          agent.Usage
 	LastAPIUsage       agent.Usage
 	CacheExpiresAt     time.Time
-	DiffStat           agent.DiffStat
-	RepoStates         []agent.RepoState // Compact per-repo git state from the latest diff probe.
+	DiffStat           v3.DiffStat
+	RepoStates         []v3.RepoState // Compact per-repo git state from the latest diff probe.
 	DiskUsed           int64
 	DiskKnown          bool
 	ForgeOwner         string
@@ -900,7 +902,7 @@ func (t *Task) BackwardMessages() iter.Seq[agent.Message] {
 }
 
 // PendingUserActions returns current user-facing actions that still need input.
-func (t *Task) PendingUserActions() []agent.PendingUserAction {
+func (t *Task) PendingUserActions() []v3.PendingUserAction {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return pendingUserActionsFromMessages(t.timelineViewLocked())
@@ -1765,7 +1767,7 @@ func (t *Task) acceptGitReadLocked(read repo.GitRead) bool {
 	return true
 }
 
-func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
+func (t *Task) setLiveDiffStatLocked(ds v3.DiffStat) {
 	t.liveDiffStat = ds
 	if len(ds) > 0 {
 		t.diffCreated = true
@@ -1775,7 +1777,7 @@ func (t *Task) setLiveDiffStatLocked(ds agent.DiffStat) {
 // setLiveRepoStatesLocked overwrites the compact per-repo git state. An empty
 // update keeps the previous state: the relay watcher emits DiffStatMessages
 // without per-repo sections.
-func (t *Task) setLiveRepoStatesLocked(states []agent.RepoState) {
+func (t *Task) setLiveRepoStatesLocked(states []v3.RepoState) {
 	if len(states) == 0 {
 		return
 	}
@@ -2449,9 +2451,9 @@ type timelineSnapshotLease struct {
 // syntheticUserInput builds the UserInputMessage recorded in the task log for
 // a prompt that wasn't itself parsed from agent output.
 func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
-	var images []agent.ImageData
+	var images []v3.ImageData
 	if len(p.Images) > 0 {
-		images = make([]agent.ImageData, len(p.Images))
+		images = make([]v3.ImageData, len(p.Images))
 		copy(images, p.Images)
 	}
 	return &agent.UserInputMessage{
@@ -2627,12 +2629,12 @@ func lastTurnHasUnansweredAsk(entries timelineEntries) bool {
 // Today AskUserQuestion is the only pending action kind; adding a new kind
 // should add its close condition here instead of preserving provider-specific
 // control messages directly.
-func pendingUserActionsFromMessages(entries timelineEntries) []agent.PendingUserAction {
+func pendingUserActionsFromMessages(entries timelineEntries) []v3.PendingUserAction {
 	skipTrailingResult := lastAgentMessage(entries) != nil
 	answered := map[string]struct{}{}
 	restored := map[string]struct{}{}
-	pending := map[string]agent.PendingUserAction{}
-	var actions []agent.PendingUserAction
+	pending := map[string]v3.PendingUserAction{}
+	var actions []v3.PendingUserAction
 	for _, entry := range entries.Backward() {
 		switch m := entry.Message.(type) {
 		case *agent.AskMessage:

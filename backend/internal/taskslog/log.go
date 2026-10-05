@@ -48,7 +48,7 @@ func newTaskLogWriter(path string, flags int) (*taskLogWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &taskLogWriter{file: f, version: agent.LogVersionV1}, nil
+	return &taskLogWriter{file: f, version: agent.LogVersionV3}, nil
 }
 
 // LogVersion returns the physical record version owned by the task log.
@@ -60,6 +60,9 @@ func (w *taskLogWriter) AppendNative(data []byte) error {
 	defer w.mu.Unlock()
 	if w.closed {
 		return os.ErrClosed
+	}
+	if err := w.version.ValidateWritable(); err != nil {
+		return err
 	}
 	if len(data) == 0 || data[len(data)-1] != '\n' {
 		return errors.New("task log native record is not LF-terminated")

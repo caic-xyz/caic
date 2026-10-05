@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -124,7 +126,7 @@ func TestDiffStat(t *testing.T) {
 	if got := DiffStat(nil); got != nil {
 		t.Errorf("DiffStat(nil) = %#v, want nil", got)
 	}
-	diff := agent.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1, Binary: true, OldSize: 1024, NewSize: 4096}}
+	diff := logv3.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1, Binary: true, OldSize: 1024, NewSize: 4096}}
 	want := v1.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1, OldSize: 1024, NewSize: 4096}}
 	if got := DiffStat(diff); !reflect.DeepEqual(got, want) {
 		t.Errorf("DiffStat() = %#v, want %#v", got, want)
@@ -143,7 +145,7 @@ func TestRepoStates(t *testing.T) {
 	t.Run("fills repository names and drops unmatched indexes", func(t *testing.T) {
 		t.Parallel()
 		repos := []v1.TaskRepo{{Name: "caic"}, {Name: "genai"}}
-		states := []agent.RepoState{
+		states := []logv3.RepoState{
 			{RepoIndex: 0, Branch: "caic-3", Ahead: 2, Behind: 1, ChangedFiles: 4, LinesAdded: 10, LinesDeleted: 3, UncommittedFiles: 2, Conflicts: 1, Operation: "merge"},
 			{RepoIndex: 5, Branch: "orphan"},
 		}
@@ -166,7 +168,7 @@ func TestRepoStates(t *testing.T) {
 
 	t.Run("all indexes unmatched", func(t *testing.T) {
 		t.Parallel()
-		states := []agent.RepoState{{RepoIndex: 5, Branch: "orphan"}}
+		states := []logv3.RepoState{{RepoIndex: 5, Branch: "orphan"}}
 		if got := RepoStates(states, []v1.TaskRepo{{Name: "caic"}}); got != nil {
 			t.Errorf("RepoStates() = %#v, want nil", got)
 		}
@@ -283,7 +285,7 @@ func TestPromptToAgent(t *testing.T) {
 	}
 	want := agent.Prompt{
 		Text: "Explain this screenshot",
-		Images: []agent.ImageData{
+		Images: []logv3.ImageData{
 			{MediaType: "image/png", Data: "iVBORw0KGgo="},
 		},
 	}
@@ -520,7 +522,7 @@ func TestTask(t *testing.T) {
 			Snapshot: tk.Snapshot(),
 			Result: &taskslog.Result{
 				State: taskslog.StateFailed,
-				StartupFailure: &agent.StartupFailure{
+				StartupFailure: &logv3.StartupFailure{
 					Harness: "claude",
 					Phase:   "agent startup",
 					Cause:   "handshake rejected configuration",

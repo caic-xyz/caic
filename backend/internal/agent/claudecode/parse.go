@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -336,11 +338,11 @@ func parseControlRequest(line []byte) ([]agent.Message, error) {
 	}
 	return []agent.Message{&agent.PendingUserActionMessage{
 		MessageType: agent.PendingUserActionMessageType,
-		Action: agent.PendingUserAction{
+		Action: v3.PendingUserAction{
 			Kind:      agent.PendingUserActionAskUserQuestion,
 			RequestID: w.RequestID,
 			ToolUseID: can.ToolUseID,
-			Ask: agent.PendingAskAction{
+			Ask: v3.PendingAskAction{
 				Questions: askQuestionsFromClaude(input.Questions),
 			},
 		},
@@ -601,17 +603,17 @@ func parseEditInput(raw json.RawMessage) (string, []agent.TextReplacement, bool)
 	}}, true
 }
 
-func askQuestionsFromClaude(in []claudecode.AskUserQuestion) []agent.AskQuestion {
-	out := make([]agent.AskQuestion, len(in))
+func askQuestionsFromClaude(in []claudecode.AskUserQuestion) []v3.AskQuestion {
+	out := make([]v3.AskQuestion, len(in))
 	for i := range in {
-		out[i] = agent.AskQuestion{
+		out[i] = v3.AskQuestion{
 			Question:    in[i].Question,
 			Header:      in[i].Header,
 			MultiSelect: in[i].MultiSelect,
-			Options:     make([]agent.AskOption, len(in[i].Options)),
+			Options:     make([]v3.AskOption, len(in[i].Options)),
 		}
 		for j := range in[i].Options {
-			out[i].Options[j] = agent.AskOption{
+			out[i].Options[j] = v3.AskOption{
 				Label:       in[i].Options[j].Label,
 				Description: in[i].Options[j].Description,
 			}
@@ -704,7 +706,7 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 			ui.Text = b.Text
 		case "image":
 			if b.Source.Type != "" {
-				ui.Images = append(ui.Images, agent.ImageData{
+				ui.Images = append(ui.Images, v3.ImageData{
 					MediaType: b.Source.MediaType,
 					Data:      b.Source.Data,
 				})

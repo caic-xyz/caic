@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/maruel/gomode/mcp"
 )
@@ -77,6 +79,7 @@ func testParseFn(line []byte) ([]Message, error) {
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
+		m.MessageType = env.Type
 		return []Message{&m}, nil
 	case "assistant":
 		var w struct {
@@ -488,18 +491,9 @@ func TestWriteMetaSession(t *testing.T) {
 
 	t.Run("VersionWithoutSession", func(t *testing.T) {
 		t.Parallel()
-		buf := &testLogSink{Version: LogVersionV1}
-		if err := WriteMetaSession(buf, &InitMessage{ReportedModel: "m", ReportedEffort: "medium", Version: "1.2.3"}); err != nil {
-			t.Fatal(err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &raw); err != nil {
-			t.Fatal(err)
-		}
-		if raw["model"] != "m" || raw["reported_model"] != nil || raw["reported_effort"] != nil {
-			t.Fatalf("v1 session settings = %#v", raw)
-		}
-		got, err := DecodeV1MetaSessionMessage(bytes.TrimSpace(buf.Bytes()))
+		// Released v1 metadata omitted requested effort.
+		data := []byte(`{"type":"caic_session","session_id":"","model":"m","agent_version":"1.2.3"}`)
+		got, err := DecodeV1MetaSessionMessage(data)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -522,6 +516,19 @@ func TestWriteMetaSession(t *testing.T) {
 
 func TestMarshalLogMessage(t *testing.T) {
 	t.Parallel()
+	t.Run("ReadOnlyV1RejectsPhysicalWrites", func(t *testing.T) {
+		t.Parallel()
+		log := &testLogSink{Version: LogVersionV1}
+		if _, err := MarshalLogMessage(LogVersionV1, &MetaResultMessage{State: "purged"}); !errors.Is(err, ErrReadOnlyLog) {
+			t.Fatalf("v1 control: %v", err)
+		}
+		if err := AppendInputNativeRecord(log, LogVersionV1, []byte(`{"type":"user","text":"hello"}`)); !errors.Is(err, ErrReadOnlyLog) {
+			t.Fatalf("v1 native: %v", err)
+		}
+		if log.Len() != 0 {
+			t.Fatalf("read-only log mutated: %s", log.Bytes())
+		}
+	})
 	t.Run("V2RelayGenerationRoundTrip", func(t *testing.T) {
 		t.Parallel()
 		data, err := MarshalLogMessage(LogVersionV2, &RelayGenerationMessage{
@@ -567,24 +574,7 @@ func TestMarshalLogMessage(t *testing.T) {
 
 	t.Run("V1MetaPreservesLegacySettings", func(t *testing.T) {
 		t.Parallel()
-		data, err := MarshalLogMessage(LogVersionV1, &MetaMessage{
-			MessageType:     messageTypeMeta,
-			Version:         int(LogVersionV1),
-			Prompt:          "test",
-			Harness:         "codex",
-			RequestedModel:  "gpt-5.6",
-			RequestedEffort: "high",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if raw["model"] != "gpt-5.6" || raw["effort"] != "high" || raw["requested_model"] != nil || raw["requested_effort"] != nil {
-			t.Fatalf("v1 header settings = %#v", raw)
-		}
+		data := []byte(`{"type":"caic_meta","version":1,"prompt":"test","repos":[],"harness":"codex","model":"gpt-5.6","effort":"high"}`)
 		decoded, err := DecodeV1MetaMessage(data)
 		if err != nil {
 			t.Fatal(err)
@@ -597,7 +587,7 @@ func TestMarshalLogMessage(t *testing.T) {
 
 func TestTurnCommitSnapshotReplay(t *testing.T) {
 	t.Parallel()
-	commit := RepositoryCommit{
+	commit := v3.RepositoryCommit{
 		RepositoryPath: "/home/user/src/repo",
 		BranchName:     "caic-1",
 		CommitHash:     "1111111111111111111111111111111111111111",
@@ -605,9 +595,15 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 	for _, version := range []LogVersion{LogVersionV1, LogVersionV2} {
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
 			t.Parallel()
-			snapshot, err := MarshalLogMessage(version, NewTurnCommitSnapshotMessage([]RepositoryCommit{commit}, false, nil))
-			if err != nil {
-				t.Fatal(err)
+			var snapshot []byte
+			var err error
+			if version == LogVersionV1 {
+				snapshot = []byte(`{"type":"caic_turn_commit_snapshot","repository_commits":[{"repository_path":"/home/user/src/repo","branch_name":"caic-1","commit_hash":"1111111111111111111111111111111111111111"}]}`)
+			} else {
+				snapshot, err = MarshalLogMessage(version, NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{commit}, false, nil))
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			var messages []Message
 			err = DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(string(snapshot)+"\n"), func(parsed TimedMessage) {
@@ -625,14 +621,14 @@ func TestTurnCommitSnapshotReplay(t *testing.T) {
 			if !ok {
 				t.Fatalf("message = %T, want *TurnCommitSnapshotMessage", messages[0])
 			}
-			if !reflect.DeepEqual(got.RepositoryCommits, []RepositoryCommit{commit}) {
-				t.Fatalf("snapshot = %+v, want commits %+v", got, []RepositoryCommit{commit})
+			if !reflect.DeepEqual(got.RepositoryCommits, []v3.RepositoryCommit{commit}) {
+				t.Fatalf("snapshot = %+v, want commits %+v", got, []v3.RepositoryCommit{commit})
 			}
 		})
 	}
 }
 
-func TestMarshalMessagePreservesDurableReportedModel(t *testing.T) {
+func TestSemanticMessageReportedModelJSON(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -646,7 +642,7 @@ func TestMarshalMessagePreservesDurableReportedModel(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			data, err := MarshalMessage(tc.msg)
+			data, err := json.Marshal(tc.msg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -717,26 +713,6 @@ func TestReadMessages(t *testing.T) {
 		}
 		if _, ok := msgs[2].(*TextDeltaMessage); !ok {
 			t.Errorf("msgs[2] is %T, want *TextDeltaMessage", msgs[2])
-		}
-	})
-	t.Run("LogWriter", func(t *testing.T) {
-		t.Parallel()
-		lines := []string{
-			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
-			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
-		}
-		input := strings.Join(lines, "\n") + "\n"
-
-		buf := &testLogSink{Version: LogVersionV1}
-		if err := DefaultReadMessages(t.Context(), testLogger(), strings.NewReader(input), func(TimedMessage) {}, buf, LogVersionV1, testParseFn, nil); err != nil {
-			t.Fatal(err)
-		}
-
-		logged := buf.String()
-		for _, line := range lines {
-			if !strings.Contains(logged, line+"\n") {
-				t.Errorf("log missing line: %s", line)
-			}
 		}
 	})
 	t.Run("rejects unterminated physical records", func(t *testing.T) {
@@ -1389,7 +1365,7 @@ func TestLogRecordParser(t *testing.T) {
 		t.Parallel()
 		action := &PendingUserActionMessage{
 			MessageType: PendingUserActionMessageType,
-			Action: PendingUserAction{
+			Action: v3.PendingUserAction{
 				Kind: PendingUserActionAskUserQuestion, RequestID: "r1", ToolUseID: "t1",
 			},
 		}

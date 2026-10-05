@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	"github.com/caic-xyz/caic/metrics"
 )
 
@@ -29,10 +30,10 @@ import (
 // optional result trailer) with the given mtime and returns its path. An empty
 // state leaves the log non-terminal (running).
 func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Time) string {
-	meta, err := json.Marshal(agent.MetaMessage{
+	meta, err := json.Marshal(v1.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     int(agent.LogVersionV1),
-		Harness:     harness.Claude,
+		Harness:     string(harness.Claude),
 		Prompt:      "history",
 	})
 	if err != nil {
@@ -42,7 +43,7 @@ func writeSettledHistoryLog(t *testing.T, dir, name, state string, mtime time.Ti
 	data = append(data, meta...)
 	data = append(data, '\n')
 	if state != "" {
-		trailer, err := json.Marshal(agent.MetaResultMessage{
+		trailer, err := json.Marshal(v1.MetaResultMessage{
 			MessageType: "caic_result",
 			State:       state,
 		})

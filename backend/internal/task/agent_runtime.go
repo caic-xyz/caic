@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/md"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -216,19 +218,22 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer task.End()
 
-	if r.Checkout != nil {
-		t.SetState(taskslog.StateBranching)
-	}
 	// The Manager has already assigned every repo's branch name. The branch is
 	// created during setup, so the log can open with the durable, branch-derived
 	// filename and persist output from its first line.
 	log, err := r.openLog(t)
 	if err != nil {
+		if errors.Is(err, agent.ErrReadOnlyLog) {
+			return nil, err
+		}
 		startupErr := &StartupError{Harness: t.Harness, Phase: "task log setup", Err: err}
 		t.recordStartupFailure(ctx, startupErr)
 		return nil, startupErr
 	}
 
+	if r.Checkout != nil {
+		t.SetState(taskslog.StateBranching)
+	}
 	tStart := time.Now()
 	// 1. Create the branch, then start the instance.
 	r.Log.Info("setup task")
@@ -578,15 +583,16 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 	}
 	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
-	if state, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed, taskslog.StateProvisioning); !changed {
-		return nil, fmt.Errorf("cannot revive in state %s", state)
-	}
-	// Accepting revival clears a prior stop/purge intent before any runtime
-	// side effects. Interrupted revival remains recoverable on restart.
+	// Reject read-only history before changing task state or the instance.
 	intentLog, err := r.reopenLog(t)
 	if err != nil {
 		return nil, err
 	}
+	if state, changed := t.SetStateIfAny(taskslog.StateProvisioning, taskslog.StateStopped, taskslog.StateCrashed, taskslog.StateProvisioning); !changed {
+		return nil, errors.Join(fmt.Errorf("cannot revive in state %s", state), intentLog.Close())
+	}
+	// Accepting revival clears a prior stop/purge intent before any runtime
+	// side effects. Interrupted revival remains recoverable on restart.
 	if err := errors.Join(r.LogStore.WriteResultTrailer(intentLog, t.Title(), &taskslog.Result{State: taskslog.StateProvisioning}), intentLog.Close()); err != nil {
 		return nil, err
 	}
@@ -791,6 +797,11 @@ func (r *AgentRuntime) recordStoppedDiskUsage(ctx context.Context, t *Task, id r
 }
 
 func (r *AgentRuntime) openLog(t *Task) (agent.LogSink, error) {
+	// Retained history owns its filename and format, including archives.
+	// Never replace it with a newly created plain segment.
+	if r.LogPath.Get() != "" {
+		return r.reopenLog(t)
+	}
 	log, path, err := r.LogStore.Open(t.LogFilename(), t.LogHeader())
 	if err != nil {
 		return nil, err
@@ -1079,6 +1090,15 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 		return nil, fmt.Errorf("cannot %s in state %s", mode, state)
 	}
 
+	// Validate the retained log before closing the session or clearing history.
+	log, err := r.openLog(t)
+	if err != nil {
+		if !errors.Is(err, agent.ErrReadOnlyLog) {
+			t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
+		}
+		return nil, fmt.Errorf("open log: %w", err)
+	}
+
 	// Close current session and persist a context_cleared marker. The marker
 	// must be written before closing the old log so SeedTimeline can reset
 	// plan state on server restart.
@@ -1091,20 +1111,13 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 			err = errors.Join(err, oldH.Log.Close())
 			if err != nil {
 				t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
-				return nil, fmt.Errorf("write context cleared: %w", err)
+				return nil, errors.Join(fmt.Errorf("write context cleared: %w", err), log.Close())
 			}
 		}
 	}
 
 	// Clear in-memory messages.
 	t.ClearMessages(ctx)
-
-	// Open new log segment.
-	log, err := r.openLog(t)
-	if err != nil {
-		t.SetStateUnless(taskslog.StateFailed, taskslog.StatePurging, taskslog.StatePurged, taskslog.StateStopping, taskslog.StateStopped)
-		return nil, fmt.Errorf("open log: %w", err)
-	}
 
 	// Start new session.
 	t.SetState(taskslog.StateStarting)
@@ -1200,7 +1213,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 			case *agent.ResultMessage:
 				if r.Runtimes != nil && r.Checkout != nil {
 					previous := t.latestCommitSnapshot()
-					var baseline []agent.RepositoryCommit
+					var baseline []v3.RepositoryCommit
 					if previous != nil {
 						baseline = previous.RepositoryCommits
 					}
@@ -1241,7 +1254,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 //
 // A failure leaves the turn without a commit snapshot, so it is logged and
 // the turn still completes.
-func (r *AgentRuntime) fetchTurnCommits(ctx context.Context, id runtime.ID) []agent.RepositoryCommit {
+func (r *AgentRuntime) fetchTurnCommits(ctx context.Context, id runtime.ID) []v3.RepositoryCommit {
 	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.Checkout.GitTimeout)
 	defer cancel()
 	fetched, err := r.Runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{})
@@ -1249,9 +1262,9 @@ func (r *AgentRuntime) fetchTurnCommits(ctx context.Context, id runtime.ID) []ag
 		r.Log.WarnContext(ctx, "fetching turn commits failed", "id", id, "err", err)
 		return nil
 	}
-	commits := make([]agent.RepositoryCommit, len(fetched))
+	commits := make([]v3.RepositoryCommit, len(fetched))
 	for i, f := range fetched {
-		commits[i] = agent.RepositoryCommit{
+		commits[i] = v3.RepositoryCommit{
 			RepositoryPath: f.RepositoryPath,
 			BranchName:     f.BranchName,
 			CommitHash:     f.CommitHash,
@@ -1347,8 +1360,8 @@ func (e *StartupError) Error() string {
 func (e *StartupError) Unwrap() error { return e.Err }
 
 // Details returns the durable client-facing startup diagnostic.
-func (e *StartupError) Details() agent.StartupFailure {
-	return agent.StartupFailure{Harness: string(e.Harness), Phase: e.Phase, Cause: e.Err.Error()}
+func (e *StartupError) Details() v3.StartupFailure {
+	return v3.StartupFailure{Harness: string(e.Harness), Phase: e.Phase, Cause: e.Err.Error()}
 }
 
 type replaceSessionMode int

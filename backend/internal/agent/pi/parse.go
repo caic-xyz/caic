@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/buger/jsonparser"
 	"github.com/maruel/genai/providers/pi"
 
@@ -114,7 +116,7 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		}
 		ui := &agent.UserInputMessage{Text: cmd.Message}
 		for _, img := range cmd.Images {
-			ui.Images = append(ui.Images, agent.ImageData{
+			ui.Images = append(ui.Images, v3.ImageData{
 				MediaType: img.MimeType,
 				Data:      img.Data,
 			})

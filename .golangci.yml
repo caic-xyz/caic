@@ -118,7 +118,7 @@ linters:
     rules:
       # Independent persisted schemas and their explicit runtime projections
       # intentionally duplicate fields to keep each file contract independent.
-      - path: (^|/)(data(/|\.go$)|config_data\.go$)
+      - path: (^|/)(data(/|\.go$)|[^/]+_data\.go$)
         linters:
           - dupl
       - path: (.+)\.go$

@@ -3,17 +3,17 @@
 package task
 
 import (
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
-func metaCacheMountsFromRuntime(in []runtime.CacheMount) []agent.MetaCacheMount {
+func metaCacheMountsFromRuntime(in []runtime.CacheMount) []v3.MetaCacheMount {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]agent.MetaCacheMount, len(in))
+	out := make([]v3.MetaCacheMount, len(in))
 	for i, m := range in {
-		out[i] = agent.MetaCacheMount{
+		out[i] = v3.MetaCacheMount{
 			Name:          m.Name,
 			Description:   m.Description,
 			HostPath:      m.HostPath,
@@ -25,13 +25,13 @@ func metaCacheMountsFromRuntime(in []runtime.CacheMount) []agent.MetaCacheMount 
 	return out
 }
 
-func metaMountsFromRuntime(in []runtime.Mount) []agent.MetaMount {
+func metaMountsFromRuntime(in []runtime.Mount) []v3.MetaMount {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]agent.MetaMount, len(in))
+	out := make([]v3.MetaMount, len(in))
 	for i, m := range in {
-		out[i] = agent.MetaMount{
+		out[i] = v3.MetaMount{
 			HostPath:      m.HostPath,
 			ContainerPath: m.ContainerPath,
 			ReadOnly:      m.ReadOnly,

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/maruel/gomode/mcp"
+	v2 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v2"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 const (
@@ -53,32 +53,11 @@ const SystemSubtypeCompactBoundary = "compact_boundary"
 // so the context was left unchanged.
 const SystemSubtypeCompactError = "compact_error"
 
-// DiffFileStat describes changes to a single file.
-//
-// The added/deleted JSON keys are the relay wire contract, so the Go field names
-// are intentionally different from the JSON tags.
-type DiffFileStat struct {
-	Path         string `json:"path"`
-	LinesAdded   int    `json:"added"`
-	LinesDeleted int    `json:"deleted"`
-	Binary       bool   `json:"binary,omitempty"`
-	OldSize      int64  `json:"oldSize,omitempty"` // Byte size of the binary pre-image; zero for added paths.
-	NewSize      int64  `json:"newSize,omitempty"` // Byte size of the binary post-image; zero for deleted paths.
-}
-
 // MCPRequestMessage carries one task-local MCP request from the relay.
-type MCPRequestMessage struct {
-	ID        string          `json:"id"`
-	Method    mcp.Method      `json:"method"`
-	Name      string          `json:"name,omitempty"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
-}
+type MCPRequestMessage v3.MCPRequestMessage
 
 // Type implements Message.
 func (*MCPRequestMessage) Type() string { return messageTypeMCPRequest }
-
-// DiffStat summarises the changes in a branch relative to its base.
-type DiffStat []DiffFileStat
 
 // Message is the interface for all agent streaming messages.
 type Message interface {
@@ -149,21 +128,7 @@ func (m *InitMessage) Type() string { return "init" }
 //
 // Its JSON encoding is persisted in task logs. Keep JSON field names and their
 // meanings backward-compatible with logs written by released binaries.
-type SystemMessage struct {
-	MessageType   string `json:"type"`
-	Subtype       string `json:"subtype"`
-	SessionID     string `json:"session_id"`
-	UUID          string `json:"uuid"`
-	Detail        string `json:"detail,omitempty"` // Optional human-readable detail (e.g. model names for SystemSubtypeModelRerouted).
-	ReportedModel string `json:"model,omitempty"`  // Active model after SystemSubtypeModelRerouted; used to update task.reportedModel.
-	// ContextTokensBefore is the harness-reported context size before a
-	// SystemSubtypeCompactBoundary. Zero means the harness did not report it.
-	ContextTokensBefore int64 `json:"context_tokens_before,omitempty"`
-	// ContextTokensAfter is the harness's context size after a
-	// SystemSubtypeCompactBoundary, measured or estimated by the harness. Zero
-	// means the harness did not report it.
-	ContextTokensAfter int64 `json:"context_tokens_after,omitempty"`
-}
+type SystemMessage v3.SystemMessage
 
 // ContextCleared creates the persisted context-clear system marker.
 func ContextCleared() *SystemMessage {
@@ -174,10 +139,7 @@ func ContextCleared() *SystemMessage {
 func (m *SystemMessage) Type() string { return messageTypeSystem }
 
 // TextMessage is emitted when the agent produces text output.
-type TextMessage struct {
-	Text  string `json:"text"`
-	Phase string `json:"phase,omitempty"` // Codex only: "commentary" | "final_answer" | "".
-}
+type TextMessage v3.TextMessage
 
 // Type implements Message.
 func (m *TextMessage) Type() string { return messageTypeText }
@@ -313,8 +275,8 @@ func writePatchLines(b *strings.Builder, prefix byte, text string) {
 // AskMessage is emitted when the agent asks the user a question via the
 // AskUserQuestion tool.
 type AskMessage struct {
-	ToolUseID string        `json:"id"`
-	Questions []AskQuestion `json:"questions"`
+	ToolUseID string           `json:"id"`
+	Questions []v3.AskQuestion `json:"questions"`
 }
 
 // Type implements Message.
@@ -323,52 +285,21 @@ func (m *AskMessage) Type() string { return "ask" }
 // PendingUserActionMessageType identifies a persisted pending user action.
 const PendingUserActionMessageType = messageTypePendingUserAction
 
-// PendingUserActionKind identifies the user action caic is waiting for.
-type PendingUserActionKind string
-
 const (
 	// PendingUserActionAskUserQuestion means the agent invoked AskUserQuestion
 	// and caic still needs the user's answer.
-	PendingUserActionAskUserQuestion PendingUserActionKind = "ask_user_question"
+	PendingUserActionAskUserQuestion v3.PendingUserActionKind = "ask_user_question"
 )
-
-// PendingUserAction records one user-facing action that must be completed
-// before the agent can continue after a reconnect.
-//
-// This is intentionally user-facing state, not a generic backend control
-// protocol bucket. Permission auto-allow, keepalive, environment updates, and
-// other backend-only control messages should not be represented here.
-type PendingUserAction struct {
-	Kind PendingUserActionKind `json:"kind"`
-
-	// RequestID is the backend request ID needed to complete the action.
-	RequestID string `json:"request_id,omitempty"`
-
-	// ToolUseID is the user-visible tool call that created the action.
-	ToolUseID string `json:"tool_use_id,omitempty"`
-
-	Ask PendingAskAction `json:"ask,omitzero"`
-}
-
-// PendingAskAction is the payload for PendingUserActionAskUserQuestion. It
-// stores the rendered questions so reconnect can answer the original backend
-// control request without replaying provider-specific raw JSON.
-type PendingAskAction struct {
-	Questions []AskQuestion `json:"questions,omitzero"`
-}
 
 // PendingUserActionMessage persists a PendingUserAction in task history. It is
 // metadata for reconnect and should not be rendered as a chat message.
-type PendingUserActionMessage struct {
-	MessageType string            `json:"type"`
-	Action      PendingUserAction `json:"action"`
-}
+type PendingUserActionMessage v3.PendingUserActionMessage
 
 // Type implements Message.
 func (m *PendingUserActionMessage) Type() string { return PendingUserActionMessageType }
 
 // ClonePendingUserAction returns a deep copy of a.
-func ClonePendingUserAction(a PendingUserAction) PendingUserAction {
+func ClonePendingUserAction(a v3.PendingUserAction) v3.PendingUserAction {
 	a.Ask.Questions = cloneAskQuestions(a.Ask.Questions)
 	return a
 }
@@ -384,10 +315,7 @@ type TodoMessage struct {
 func (m *TodoMessage) Type() string { return "todo" }
 
 // UserInputMessage represents direct user text/image input (not a tool result).
-type UserInputMessage struct {
-	Text   string      `json:"text,omitempty"`
-	Images []ImageData `json:"images,omitempty"`
-}
+type UserInputMessage v3.UserInputMessage
 
 // Type implements Message.
 func (m *UserInputMessage) Type() string { return messageTypeUserInput }
@@ -432,28 +360,14 @@ type UsageMessage struct {
 // Type implements Message.
 func (m *UsageMessage) Type() string { return "usage" }
 
-// AskOption is a single option in an AskUserQuestion.
-type AskOption struct {
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-}
-
-// AskQuestion is a single question from AskUserQuestion.
-type AskQuestion struct {
-	Question    string      `json:"question"`
-	Header      string      `json:"header,omitempty"`
-	Options     []AskOption `json:"options"`
-	MultiSelect bool        `json:"multiSelect,omitempty"`
-}
-
-func cloneAskQuestions(qs []AskQuestion) []AskQuestion {
+func cloneAskQuestions(qs []v3.AskQuestion) []v3.AskQuestion {
 	if len(qs) == 0 {
 		return nil
 	}
-	out := make([]AskQuestion, len(qs))
+	out := make([]v3.AskQuestion, len(qs))
 	for i := range qs {
 		out[i] = qs[i]
-		out[i].Options = append([]AskOption(nil), qs[i].Options...)
+		out[i].Options = append([]v3.AskOption(nil), qs[i].Options...)
 	}
 	return out
 }
@@ -487,45 +401,16 @@ type Usage struct {
 	CacheTTLSeconds          int `json:"cache_ttl_seconds,omitempty"` // Effective cache TTL from last API call; 0 = unknown.
 }
 
-// RepositoryCommit identifies a committed repository branch tip recorded at a
-// turn boundary.
-type RepositoryCommit struct {
-	// RepositoryPath is the repository's absolute path inside the task runtime.
-	RepositoryPath string `json:"repository_path"`
-	// BranchName is the short local branch name, such as "main" or "caic-1".
-	BranchName string `json:"branch_name"`
-	// CommitHash is the full Git object ID of the branch tip.
-	CommitHash string `json:"commit_hash"`
-}
-
-// ChangeStat summarizes the net committed file changes between two repository snapshots.
-type ChangeStat struct {
-	Files        int `json:"files"`
-	LinesAdded   int `json:"added"`
-	LinesDeleted int `json:"deleted"`
-	BinaryFiles  int `json:"binary_files"`
-}
-
 // TurnCommitSnapshotMessage is a standalone durable record of the committed
 // repository branch tips fetched from a task runtime when a turn finishes.
-type TurnCommitSnapshotMessage struct {
-	MessageType string `json:"type"`
-	// Baseline marks the snapshot taken before a newly started agent session.
-	Baseline bool `json:"baseline,omitempty"`
-	// RepositoryCommits contains the immutable Git branch tips fetched from
-	// every repository in the task runtime at this boundary.
-	RepositoryCommits []RepositoryCommit `json:"repository_commits"`
-	// ChangeStat is the completed turn's net committed change since the prior
-	// snapshot. It is nil when no complete comparison was available.
-	ChangeStat *ChangeStat `json:"change_stat,omitempty"`
-}
+type TurnCommitSnapshotMessage v3.TurnCommitSnapshotMessage
 
 // NewTurnCommitSnapshotMessage creates a durable commit snapshot.
-func NewTurnCommitSnapshotMessage(commits []RepositoryCommit, baseline bool, changeStat *ChangeStat) *TurnCommitSnapshotMessage {
+func NewTurnCommitSnapshotMessage(commits []v3.RepositoryCommit, baseline bool, changeStat *v3.ChangeStat) *TurnCommitSnapshotMessage {
 	return &TurnCommitSnapshotMessage{
 		MessageType:       messageTypeTurnCommitSnapshot,
 		Baseline:          baseline,
-		RepositoryCommits: append([]RepositoryCommit(nil), commits...),
+		RepositoryCommits: append([]v3.RepositoryCommit(nil), commits...),
 		ChangeStat:        changeStat,
 	}
 }
@@ -551,9 +436,9 @@ type ResultMessage struct {
 	// ContextWindow is the active model's context window size in tokens. It is
 	// set by harnesses that report the window with the turn result (Claude Code)
 	// and is 0 when they do not.
-	ContextWindow int      `json:"context_window,omitempty"`
-	UUID          string   `json:"uuid"`
-	DiffStat      DiffStat `json:"diff_stat,omitzero"` // Set by caic after running container diff.
+	ContextWindow int         `json:"context_window,omitempty"`
+	UUID          string      `json:"uuid"`
+	DiffStat      v3.DiffStat `json:"diff_stat,omitzero"` // Set by caic after running container diff.
 }
 
 // Type implements Message.
@@ -977,10 +862,7 @@ type ParseErrorMessage struct {
 func (m *ParseErrorMessage) Type() string { return "parse_error" }
 
 // LogMessage is a provisioning/startup log line from the container backend.
-type LogMessage struct {
-	MessageType string `json:"type"`
-	Line        string `json:"line"`
-}
+type LogMessage v3.LogMessage
 
 // Type implements Message.
 func (m *LogMessage) Type() string { return messageTypeProvisioningLog }
@@ -988,10 +870,7 @@ func (m *LogMessage) Type() string { return messageTypeProvisioningLog }
 // StrippedEnvMessage is emitted by the relay when it strips environment
 // variables (e.g. ANTHROPIC_API_KEY) before spawning the agent subprocess.
 // The backend uses these values to re-inject them after auth completes.
-type StrippedEnvMessage struct {
-	MessageType string            `json:"type"`
-	Variables   map[string]string `json:"variables"`
-}
+type StrippedEnvMessage v3.StrippedEnvMessage
 
 // Type implements Message.
 func (m *StrippedEnvMessage) Type() string { return messageTypeStrippedEnv }
@@ -999,47 +878,16 @@ func (m *StrippedEnvMessage) Type() string { return messageTypeStrippedEnv }
 // DiffStatMessage is emitted periodically by the relay's diff watcher thread
 // and by the backend after mutating tool calls, with the current in-container
 // git diff stats.
-type DiffStatMessage struct {
-	MessageType string   `json:"type"`
-	DiffStat    DiffStat `json:"diff_stat"`
-	// Repos carries one compact git state per task repository, filled by the
-	// backend's post-tool probe. The relay watcher omits it.
-	Repos []RepoState `json:"repos,omitempty"`
-	Ts    float64     `json:"ts,omitempty"` // Unix epoch seconds (ms precision) when the relay emitted this record.
-}
+type DiffStatMessage v3.DiffStatMessage
 
 // Type implements Message.
 func (m *DiffStatMessage) Type() string { return messageTypeDiffStat }
-
-// RepoState is the compact git state of one task repository: exactly what the
-// task card and detail header render, without per-file details or history.
-type RepoState struct {
-	Stale            bool   `json:"stale,omitempty"` // A failed probe retained the last known data.
-	RepoIndex        int    `json:"repo_index"`
-	Branch           string `json:"branch"`
-	Operation        string `json:"operation,omitempty"` // runtime.RepositoryOperation while a merge/rebase is in progress.
-	Ahead            int    `json:"ahead"`
-	Behind           int    `json:"behind"`
-	ChangedFiles     int    `json:"changed_files"`
-	LinesAdded       int    `json:"added"`
-	LinesDeleted     int    `json:"deleted"`
-	UncommittedFiles int    `json:"uncommitted"`
-	Conflicts        int    `json:"conflicts"`
-}
 
 // ExitMessage is written by the relay to output.jsonl when the agent
 // subprocess exits, regardless of shutdown reason (crash, sentinel, EOF).
 // It carries the exit code, command, signal, stderr, and timestamp so the
 // backend can diagnose why a relay session ended without parsing relay.log.
-type ExitMessage struct {
-	MessageType     string   `json:"type"`
-	ExitCode        int      `json:"exit_code"`
-	Command         []string `json:"cmd,omitempty"`
-	Signal          int      `json:"signal,omitempty"`
-	Error           string   `json:"error,omitempty"`
-	StderrTruncated bool     `json:"stderr_truncated,omitempty"`
-	Ts              float64  `json:"ts,omitempty"`
-}
+type ExitMessage v3.ExitMessage
 
 // Type implements Message.
 func (m *ExitMessage) Type() string { return messageTypeExit }
@@ -1050,33 +898,6 @@ func (m *ExitMessage) ExitError() string {
 		return m.Error
 	}
 	return fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
-}
-
-// MetaRepo describes one repository entry in a MetaMessage.
-type MetaRepo struct {
-	Name          string `json:"name"`
-	BaseBranch    string `json:"base_branch,omitempty"`
-	Branch        string `json:"branch"`
-	ContainerPath string `json:"containerPath,omitempty"`
-}
-
-// MetaCacheMount describes one cache mount in a MetaMessage.
-type MetaCacheMount struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	HostPath    string `json:"hostPath,omitempty"`
-	// ContainerPath is the resolved target path in the runtime container.
-	ContainerPath string `json:"containerPath,omitempty"`
-	ReadOnly      bool   `json:"readOnly,omitempty"`
-	Shallow       bool   `json:"shallow,omitempty"`
-}
-
-// MetaMount describes one custom bind mount in a MetaMessage.
-type MetaMount struct {
-	HostPath string `json:"hostPath,omitempty"`
-	// ContainerPath is the resolved target path in the runtime container.
-	ContainerPath string `json:"containerPath,omitempty"`
-	ReadOnly      bool   `json:"readOnly,omitempty"`
 }
 
 // LogVersion identifies a physical task-log format.
@@ -1090,6 +911,20 @@ func (v LogVersion) Validate() error {
 	default:
 		return fmt.Errorf("unsupported log version %d", v)
 	}
+}
+
+// ErrReadOnlyLog reports that a historical v1 log cannot be continued or written.
+var ErrReadOnlyLog = errors.New("task log version 1 is read-only; continuation is unsupported")
+
+// ValidateWritable rejects historical read-only and unsupported log formats.
+func (v LogVersion) ValidateWritable() error {
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	if v == LogVersionV1 {
+		return ErrReadOnlyLog
+	}
+	return nil
 }
 
 const (
@@ -1106,33 +941,7 @@ const (
 //
 // Its serialized task-log schema must remain backward-readable; API DTOs may
 // evolve independently.
-type MetaMessage struct {
-	MessageType       string           `json:"type"`
-	Version           int              `json:"version"`
-	Prompt            string           `json:"prompt"`
-	Title             string           `json:"title,omitempty"`
-	Repos             []MetaRepo       `json:"repos"`
-	Harness           harness.Name     `json:"harness"`
-	RequestedModel    string           `json:"model,omitempty"`
-	RequestedEffort   string           `json:"effort,omitempty"`
-	StartedAt         time.Time        `json:"started_at"`
-	ForgeIssue        int              `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
-	OwnerID           string           `json:"owner_id,omitempty"`    // Human authorization principal; distinct from task lineage.
-	ForkedFromTaskID  string           `json:"forked_from_task_id,omitempty"`
-	ParentTaskID      string           `json:"parent_task_id,omitempty"` // Delegating task identity; empty for roots and ordinary forks.
-	CaicMCP           bool             `json:"caic_mcp,omitempty"`       // Enables task-scoped CAIC MCP delegation.
-	Tailscale         bool             `json:"tailscale,omitempty"`
-	USB               bool             `json:"usb,omitempty"`
-	Display           bool             `json:"display,omitempty"`
-	Sudo              bool             `json:"sudo,omitempty"`
-	GitHubToken       bool             `json:"gitHubToken,omitempty"`
-	RuntimeName       string           `json:"runtimeName,omitempty"`
-	BaseImage         string           `json:"baseImage,omitempty"`
-	ContainerPlatform string           `json:"containerPlatform,omitempty"`
-	MaxCPUs           int              `json:"maxCPUs,omitempty"`
-	CacheMounts       []MetaCacheMount `json:"cacheMounts,omitempty"`
-	Mounts            []MetaMount      `json:"mounts,omitempty"`
-}
+type MetaMessage v3.MetaMessage
 
 // Type implements Message.
 func (m *MetaMessage) Type() string { return messageTypeMeta }
@@ -1159,23 +968,14 @@ func (m *MetaMessage) Validate() error {
 //
 // Its serialized task-log schema must remain backward-readable; API DTOs may
 // evolve independently.
-type MetaSessionMessage struct {
-	MessageType    string `json:"type"`
-	SessionID      string `json:"session_id"`
-	ReportedModel  string `json:"model,omitempty"`
-	ReportedEffort string `json:"reported_effort,omitempty"`
-	AgentVersion   string `json:"agent_version,omitempty"`
-}
+type MetaSessionMessage v3.MetaSessionMessage
 
 // Type implements Message.
 func (m *MetaSessionMessage) Type() string { return messageTypeSession }
 
 // RelayGenerationMessage marks the durable-log boundary corresponding to a
 // newly created relay output file. It is excluded from the visible timeline.
-type RelayGenerationMessage struct {
-	MessageType string `json:"type"`
-	Generation  string `json:"generation"`
-}
+type RelayGenerationMessage v3.RelayGenerationMessage
 
 // Type implements Message.
 func (m *RelayGenerationMessage) Type() string { return messageTypeRelayGeneration }
@@ -1225,18 +1025,29 @@ func appendNativeRecord(log LogSink, version LogVersion, token logRecordType, da
 	if err := version.Validate(); err != nil {
 		return err
 	}
+	// Nonpersistent harness discovery still parses bare native v1 streams.
+	// Discard those inputs without constructing a historical physical record.
+	if _, ok := log.(DiscardLogSink); ok {
+		return nil
+	}
+	if err := version.ValidateWritable(); err != nil {
+		return err
+	}
 	data = bytes.TrimSuffix(data, []byte{'\n'})
 	if len(data) == 0 {
 		return nil
 	}
-	if version != LogVersionV1 {
-		ts := time.Now().UTC()
-		data = fmt.Appendf(nil, `{"t":"%s","ts":%d.%03d,"msg":%s}`, token, ts.Unix(), ts.Nanosecond()/int(time.Millisecond), data)
-		data = append(data, '\n')
+	ts := time.Now().UTC()
+	var err error
+	if version == LogVersionV2 {
+		data, err = (&v2.NativeRecord{Type: string(token), Time: ts, Message: data}).MarshalJSON()
 	} else {
-		data = append(data, '\n')
+		data, err = (&v3.NativeRecord{Type: string(token), Time: ts, Message: data}).MarshalJSON()
 	}
-	return log.AppendNative(data)
+	if err != nil {
+		return err
+	}
+	return log.AppendNative(append(data, '\n'))
 }
 
 // WriteMetaSession appends a caic_session control record for init metadata.
@@ -1254,102 +1065,39 @@ func WriteMetaSession(log LogSink, init *InitMessage) error {
 }
 
 // ModelInfoMessage records a harness-reported context window for replay.
-type ModelInfoMessage struct {
-	MessageType   string `json:"type"`
-	ContextWindow int64  `json:"context_window"`
-}
+type ModelInfoMessage v3.ModelInfoMessage
 
 // Type implements Message.
 func (m *ModelInfoMessage) Type() string { return messageTypeModelInfo }
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.
-type MetaResultMessage struct {
-	MessageType              string   `json:"type"`
-	State                    string   `json:"state"`
-	Title                    string   `json:"title,omitempty"`
-	CostUSD                  float64  `json:"cost_usd,omitempty"`
-	Duration                 float64  `json:"duration,omitempty"` // Seconds.
-	NumTurns                 int      `json:"num_turns,omitempty"`
-	InputTokens              int      `json:"input_tokens,omitempty"`
-	OutputTokens             int      `json:"output_tokens,omitempty"`
-	CacheCreationInputTokens int      `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int      `json:"cache_read_input_tokens,omitempty"`
-	ReasoningOutputTokens    int      `json:"reasoning_output_tokens,omitempty"`
-	DiffStat                 DiffStat `json:"diff_stat,omitzero"`
-	// TODO(2026-10-01): Make DiskUsedBytes an int64 value using -1 for
-	// unavailable measurements after legacy result records have aged out.
-	DiskUsedBytes  *int64          `json:"disk_used_bytes,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	AgentResult    string          `json:"agent_result,omitempty"`
-	StartupFailure *StartupFailure `json:"startup_failure,omitempty"`
-}
+type MetaResultMessage v3.MetaResultMessage
 
 // Type implements Message.
 func (m *MetaResultMessage) Type() string { return messageTypeResult }
 
-// StartupFailure identifies the failed task-start phase and original agent diagnostic.
-type StartupFailure struct {
-	Harness string `json:"harness"`
-	Phase   string `json:"phase"`
-	Cause   string `json:"cause"`
-}
-
 // MetaPRMessage is written to the JSONL log when a PR is created so that the
 // PR number can be restored on server restart.
-type MetaPRMessage struct {
-	MessageType string `json:"type"`
-	ForgeOwner  string `json:"forge_owner"`
-	ForgeRepo   string `json:"forge_repo"`
-	ForgePR     int    `json:"forge_pr"`
-}
+type MetaPRMessage v3.MetaPRMessage
 
 // Type implements Message.
 func (m *MetaPRMessage) Type() string { return messageTypePR }
 
-// MarshalMessage serializes a Message to JSON. For RawMessage, returns the
-// original bytes to preserve unknown fields. For typed messages, uses
-// json.Marshal.
-//
-// Typed message JSON is a durable task-log schema when written through a
-// LogSink. Keep JSON tags and their meanings backward-compatible with logs
-// written by released binaries; rename Go fields without renaming their tags.
-func MarshalMessage(m Message) ([]byte, error) {
-	if rm, ok := m.(*RawMessage); ok {
-		return rm.Raw, nil
-	}
-	return json.Marshal(m)
-}
-
 // MarshalLogMessage encodes one semantic backend control record for version.
 func MarshalLogMessage(version LogVersion, m Message) ([]byte, error) {
-	if err := version.Validate(); err != nil {
+	if err := version.ValidateWritable(); err != nil {
 		return nil, err
 	}
 	if _, ok := m.(*RawMessage); ok {
 		return nil, errors.New("raw messages must be appended as native records")
 	}
-	if version == LogVersionV1 {
-		return marshalV1LogMessage(m)
+	switch version {
+	case LogVersionV2:
+		return marshalV2Control(m)
+	default:
+		return marshalV3Control(m)
 	}
-	data, err := MarshalMessage(m)
-	if err != nil {
-		return data, err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return nil, err
-	}
-	delete(fields, "type")
-	token, err := v2ControlToken(m)
-	if err != nil {
-		return nil, err
-	}
-	fields["t"], err = json.Marshal(token)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(fields)
 }
 
 func v2ControlToken(m Message) (logRecordType, error) {

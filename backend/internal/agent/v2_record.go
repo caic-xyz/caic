@@ -144,20 +144,6 @@ const (
 	v2MaxUnixSeconds      = int64(^uint64(0)>>1) - 62_135_596_800
 )
 
-type v2MetaEnvelope struct {
-	MetaMessage
-
-	Type logRecordType `json:"t"`
-}
-
-func (m *v2MetaEnvelope) Validate() error {
-	if m.Type != logRecordMeta {
-		return fmt.Errorf("unexpected record type %q", m.Type)
-	}
-	m.MessageType = messageTypeMeta
-	return m.MetaMessage.Validate()
-}
-
 // parseV2Record validates and decodes one canonical v2 physical record.
 // Agent records use the zero-copy fast path; control records use the general
 // decoder and update parser state before the resulting messages are returned.
@@ -273,6 +259,13 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 	case logControlProvisioningLog:
 		return field == "line"
 	case logControlContextCleared:
+		// Released writers emitted the complete SystemMessage projection. Accept
+		// those established fields alongside the compact marker, so RestartSession
+		// history remains replayable; unrelated fields are still rejected.
+		switch field {
+		case "subtype", "session_id", "uuid", "detail", "model", "context_tokens_before", "context_tokens_after":
+			return true
+		}
 		return false
 	case logControlText:
 		switch field {
@@ -295,29 +288,7 @@ func v2ControlFieldAllowed(kind logControlKind, field string) bool {
 }
 
 func parseV2Control(p *LogRecordParser, kind logControlKind, token logRecordType, line []byte) ([]Message, error) {
-	if kind != logControlMeta {
-		return p.parseControl(kind, string(token), line)
-	}
-
-	var envelope v2MetaEnvelope
-	decoder := json.NewDecoder(bytes.NewReader(line))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&envelope); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", token, err)
-	}
-	if err := envelope.Validate(); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", token, err)
-	}
-	m := envelope.MetaMessage
-	if LogVersion(m.Version) != p.version {
-		return nil, fmt.Errorf(
-			"decode %s: header version %d does not match parser version %d",
-			token,
-			m.Version,
-			p.version,
-		)
-	}
-	return []Message{&m}, nil
+	return p.parseControl(kind, string(token), line)
 }
 
 func validateV2RecordBytes(line []byte) error {

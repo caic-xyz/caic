@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -74,11 +76,11 @@ func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
 	msg := &agent.AskMessage{
 		ToolUseID: "ask_1",
-		Questions: []agent.AskQuestion{
+		Questions: []logv3.AskQuestion{
 			{
 				Question: "Which approach?",
 				Header:   "Approach",
-				Options:  []agent.AskOption{{Label: "A"}, {Label: "B"}},
+				Options:  []logv3.AskOption{{Label: "A"}, {Label: "B"}},
 			},
 		},
 	}
@@ -196,7 +198,7 @@ func TestGenericConvertResult(t *testing.T) {
 		MessageType:  "result",
 		Subtype:      "success",
 		Result:       "done",
-		DiffStat:     agent.DiffStat{{Path: "a.go", LinesAdded: 10, LinesDeleted: 3}},
+		DiffStat:     logv3.DiffStat{{Path: "a.go", LinesAdded: 10, LinesDeleted: 3}},
 		TotalCostUSD: 0.05,
 		NumTurns:     3,
 		Usage:        agent.Usage{InputTokens: 100, OutputTokens: 50},

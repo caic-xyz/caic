@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"sync"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -20,10 +22,10 @@ import (
 type pendingControlAsk struct {
 	requestID string
 	toolUseID string
-	questions []agent.AskQuestion
+	questions []v3.AskQuestion
 }
 
-func pendingAskFromUserAction(action agent.PendingUserAction) pendingControlAsk {
+func pendingAskFromUserAction(action v3.PendingUserAction) pendingControlAsk {
 	cp := agent.ClonePendingUserAction(action)
 	return pendingControlAsk{
 		requestID: cp.RequestID,
@@ -186,7 +188,7 @@ func (c *controlConn) handleControlRequest(raw []byte) (bool, error) {
 // restorePendingActions restores user-facing actions captured before reconnect.
 // Claude Code currently supports only one AskUserQuestion action because it has
 // a single prompt channel and no action selector.
-func (c *controlConn) restorePendingActions(actions []agent.PendingUserAction) error {
+func (c *controlConn) restorePendingActions(actions []v3.PendingUserAction) error {
 	var restoredAsk pendingControlAsk
 	hasRestoredAsk := false
 	for _, action := range actions {
@@ -274,7 +276,7 @@ func rawObjectOrEmpty(m map[string]json.RawMessage) (json.RawMessage, error) {
 	return rawObject(m)
 }
 
-func askQuestionsToClaude(in []agent.AskQuestion) []claudecode.AskUserQuestion {
+func askQuestionsToClaude(in []v3.AskQuestion) []claudecode.AskUserQuestion {
 	out := make([]claudecode.AskUserQuestion, len(in))
 	for i := range in {
 		out[i] = claudecode.AskUserQuestion{

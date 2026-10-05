@@ -302,10 +302,10 @@ func validateRawLogAppend(f *os.File, path string, header *agent.MetaMessage) (a
 	if _, err := scanner.ReadHeader(); err != nil {
 		return 0, fmt.Errorf("validate task log for append: %w", err)
 	}
-	if scanner.authority.Harness != header.Harness {
+	if string(scanner.authority.Harness) != header.Harness {
 		return 0, fmt.Errorf("append task log: header harness %q does not match task harness %q", scanner.authority.Harness, header.Harness)
 	}
-	if err := scanner.authority.Version.Validate(); err != nil {
+	if err := scanner.authority.Version.ValidateWritable(); err != nil {
 		return 0, fmt.Errorf("validate task log for append: %w", err)
 	}
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {

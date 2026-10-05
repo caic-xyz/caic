@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
@@ -143,8 +145,8 @@ type toolUse struct {
 }
 
 type askMsg struct {
-	ID        string              `json:"id"`
-	Questions []agent.AskQuestion `json:"questions"`
+	ID        string           `json:"id"`
+	Questions []v3.AskQuestion `json:"questions"`
 }
 
 type widgetMsg struct {

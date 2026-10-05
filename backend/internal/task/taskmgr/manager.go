@@ -1826,6 +1826,9 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		return nil, fmt.Errorf("multiple task logs found for task %s", taskID)
 	}
 	lt := matchingLogs[0]
+	if err := lt.LogVersion.ValidateWritable(); err != nil {
+		return nil, fmt.Errorf("continue imported task %s: %w", taskID, err)
+	}
 	importLogPath := lt.LogPath()
 	lp := lt.Primary()
 	if branch == "" && relPath == "" {

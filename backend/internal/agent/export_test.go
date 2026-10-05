@@ -228,7 +228,7 @@ func TestRenderDiscussion(t *testing.T) {
 			t.Parallel()
 			meta := &MetaMessage{
 				Prompt:          "task",
-				Harness:         harness.Codex,
+				Harness:         string(harness.Codex),
 				RequestedModel:  "requested-model",
 				RequestedEffort: "low",
 			}
@@ -478,7 +478,7 @@ func TestRenderDiscussion(t *testing.T) {
 			meta := &MetaMessage{
 				Prompt:    "do something",
 				Title:     "My Task Title",
-				Harness:   harness.Pi,
+				Harness:   string(harness.Pi),
 				StartedAt: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
 			}
 			md := RenderDiscussion(meta, nil, nil, nil)

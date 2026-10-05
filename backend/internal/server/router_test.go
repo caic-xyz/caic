@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	logv1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -931,8 +933,8 @@ func TestTaskHistoryReaders(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		restoredID := ksid.NewID()
-		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "inspect history", Harness: harness.Claude,
+		meta := mustJSON(t, logv1.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "inspect history", Harness: string(harness.Claude),
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		toolUse := mustJSON(t, map[string]any{
@@ -944,7 +946,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		lastMessage := mustJSON(t, map[string]any{
 			"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "history result"}}},
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, restoredID.String()+".jsonl", meta, toolUse, lastMessage, trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{
@@ -1686,10 +1688,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Write 3 terminal task logs.
 		for i, state := range []string{"purged", "failed", "purged"} {
-			meta := mustJSON(t, agent.MetaMessage{
-				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-" + strings.Repeat("0", i+1)}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+			meta := mustJSON(t, logv1.MetaMessage{
+				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-" + strings.Repeat("0", i+1)}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
-			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: state, CostUSD: float64(i + 1)})
+			trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: state, CostUSD: float64(i + 1)})
 			writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
@@ -1737,17 +1739,17 @@ func TestLoadPurgedTasks(t *testing.T) {
 		logDir := t.TempDir()
 
 		// task 0: recent (purged)
-		meta0 := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "recent task", Harness: harness.Claude, StartedAt: time.Now().Add(-1 * time.Hour),
+		meta0 := mustJSON(t, logv1.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "recent task", Harness: string(harness.Claude), StartedAt: time.Now().Add(-1 * time.Hour),
 		})
-		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer0 := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "recent.jsonl", meta0, trailer0)
 
 		// task 1: old (purged, > 14 days)
-		meta1 := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: harness.Claude, StartedAt: time.Now().Add(-20 * 24 * time.Hour),
+		meta1 := mustJSON(t, logv1.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: string(harness.Claude), StartedAt: time.Now().Add(-20 * 24 * time.Hour),
 		})
-		trailer1 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer1 := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		oldPath := filepath.Join(logDir, "old.jsonl")
 		writeLogFile(t, logDir, "old.jsonl", meta1, trailer1)
 		// Set mtime to 15 days ago.
@@ -1778,19 +1780,19 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Write 7 tasks for repo "a" and 3 for repo "b".
 		for i := range 7 {
-			meta := mustJSON(t, agent.MetaMessage{
+			meta := mustJSON(t, logv1.MetaMessage{
 				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("a-%d", i),
-				Repos: []agent.MetaRepo{{Name: "a", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+				Repos: []logv1.MetaRepo{{Name: "a", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
-			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+			trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, logDir, fmt.Sprintf("a-%d.jsonl", i), meta, trailer)
 		}
 		for i := range 3 {
-			meta := mustJSON(t, agent.MetaMessage{
+			meta := mustJSON(t, logv1.MetaMessage{
 				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("b-%d", i),
-				Repos: []agent.MetaRepo{{Name: "b", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, i+10, 0, 0, 0, time.UTC),
+				Repos: []logv1.MetaRepo{{Name: "b", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, i+10, 0, 0, 0, time.UTC),
 			})
-			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+			trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, logDir, fmt.Sprintf("b-%d.jsonl", i), meta, trailer)
 		}
 
@@ -1826,9 +1828,9 @@ func TestLoadPurgedTasks(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -1838,7 +1840,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			MessageType: "result", Subtype: "success", Result: "done",
 			TotalCostUSD: 1.23, Usage: agent.Usage{OutputTokens: 16400}, DurationMs: 5000, NumTurns: 3,
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{
+		trailer := mustJSON(t, logv1.MetaResultMessage{
 			MessageType: "caic_result", State: "purged",
 			CostUSD: 1.23, Duration: 5, NumTurns: 3,
 		})
@@ -1883,9 +1885,9 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Trailer has zero cost (e.g. session exited without final ResultMessage),
 		// but the messages contain a ResultMessage with cost.
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -1895,7 +1897,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			MessageType: "result", Subtype: "success", Result: "done",
 			TotalCostUSD: 0.42, Usage: agent.Usage{OutputTokens: 5600}, DurationMs: 3000, NumTurns: 2,
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{
+		trailer := mustJSON(t, logv1.MetaResultMessage{
 			MessageType: "caic_result", State: "purged",
 			// CostUSD intentionally zero.
 		})
@@ -1934,25 +1936,25 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Two logs from different repos share the same branch name.
 		// Each must retain its own title and prompt.
-		metaA := mustJSON(t, agent.MetaMessage{
+		metaA := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1,
-			Prompt: "optimize genai provider", Repos: []agent.MetaRepo{{Name: "genai", Branch: "caic-0"}},
-			Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Prompt: "optimize genai provider", Repos: []logv1.MetaRepo{{Name: "genai", Branch: "caic-0"}},
+			Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			Title: "Skip Unnecessary MD Runtime Build",
 		})
-		trailerA := mustJSON(t, agent.MetaResultMessage{
+		trailerA := mustJSON(t, logv1.MetaResultMessage{
 			MessageType: "caic_result", State: "purged",
 			Title: "Optimize GenAI Provider",
 		})
 		writeLogFile(t, logDir, "a.jsonl", metaA, trailerA)
 
-		metaB := mustJSON(t, agent.MetaMessage{
+		metaB := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1,
-			Prompt: "skip docker rebuilds", Repos: []agent.MetaRepo{{Name: "md", Branch: "caic-0"}},
-			Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
+			Prompt: "skip docker rebuilds", Repos: []logv1.MetaRepo{{Name: "md", Branch: "caic-0"}},
+			Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
 			Title: "Skip Docker Rebuilds",
 		})
-		trailerB := mustJSON(t, agent.MetaResultMessage{
+		trailerB := mustJSON(t, logv1.MetaResultMessage{
 			MessageType: "caic_result", State: "purged",
 			Title: "Skip Unnecessary Docker Image Rebuilds",
 		})
@@ -2023,12 +2025,12 @@ func TestLoadPurgedTasks(t *testing.T) {
 		// Full parser traversal derives its metadata, while retained task messages
 		// remain bounded to the tail window.
 		logDir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "big pr task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude),
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
-		prMsg := mustJSON(t, agent.MetaPRMessage{
+		prMsg := mustJSON(t, logv1.MetaPRMessage{
 			MessageType: "caic_pr", ForgeOwner: "acme", ForgeRepo: "widget", ForgePR: 77,
 		})
 
@@ -2043,7 +2045,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		for range 80 { // 80 KiB of filler
 			lines = append(lines, filler)
 		}
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		lines = append(lines, trailer)
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
@@ -2085,14 +2087,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 				repoName = "repo-b"
 			}
 			stoppedAt := now.Add(-time.Duration(11-i) * time.Hour)
-			meta := mustJSON(t, agent.MetaMessage{
+			meta := mustJSON(t, logv1.MetaMessage{
 				MessageType: "caic_meta", Version: 1,
 				Prompt:    fmt.Sprintf("task %d", i),
-				Repos:     []agent.MetaRepo{{Name: repoName, Branch: fmt.Sprintf("caic-%d", i)}},
-				Harness:   harness.Claude,
+				Repos:     []logv1.MetaRepo{{Name: repoName, Branch: fmt.Sprintf("caic-%d", i)}},
+				Harness:   string(harness.Claude),
 				StartedAt: stoppedAt,
 			})
-			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+			trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			name := fmt.Sprintf("%02d.jsonl", i)
 			writeLogFile(t, logDir, name, meta, trailer)
 		}
@@ -2148,9 +2150,9 @@ func TestLoadPurgedTasks(t *testing.T) {
 		logDir := t.TempDir()
 
 		meta := func(prompt string) string {
-			return mustJSON(t, agent.MetaMessage{
-				MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: harness.Claude,
-				Repos:     []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
+			return mustJSON(t, logv1.MetaMessage{
+				MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: string(harness.Claude),
+				Repos:     []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}},
 				StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			})
 		}
@@ -2165,7 +2167,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "interrupted.jsonl", meta("interrupted task"))
 
 		// explicit trailer → "purged"
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
@@ -2195,13 +2197,13 @@ func TestLoadPurgedTasks(t *testing.T) {
 	t.Run("FeatureFlags", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude),
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			Tailscale: true, USB: true, Display: true,
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}, {ID: "m2"}}}}})
@@ -2234,9 +2236,9 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		logDir := t.TempDir()
 
 		// Write a purged task log with real agent messages.
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -2257,7 +2259,7 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		result := mustJSON(t, agent.ResultMessage{
 			MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1,
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{
+		trailer := mustJSON(t, logv1.MetaResultMessage{
 			MessageType: "caic_result", State: "purged", CostUSD: 0.05, Duration: 1,
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
@@ -2340,11 +2342,11 @@ func TestHandleTaskEventHistory(t *testing.T) {
 	t.Run("PurgedV1ParseFailureEmitsErrorWithoutReady", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		trailer := mustJSON(t, logv1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "task.jsonl", meta, `not-json`, trailer)
 
 		s := newTestRouter(t, map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}, WireFactory: claudecode.New().NewWire}})
@@ -2373,9 +2375,9 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		taskID := ksid.NewID()
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude),
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		path := filepath.Join(logDir, taskID.String()+".jsonl")
@@ -2420,8 +2422,8 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		taskID := ksid.NewID()
-		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug", Harness: harness.Claude,
+		meta := mustJSON(t, logv1.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug", Harness: string(harness.Claude),
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		message := mustJSON(t, map[string]any{
@@ -2488,9 +2490,9 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		logDir := t.TempDir()
 		taskID := ksid.NewID()
 
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		diskMsg := mustJSON(t, map[string]any{
 			"type": "assistant",
@@ -2578,9 +2580,9 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		logDir := t.TempDir()
 		taskID := ksid.NewID()
 
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -2637,9 +2639,9 @@ func TestHandleTaskEventHistory(t *testing.T) {
 
 		// Write a purged task log with stream events (text deltas) followed
 		// by the final assistant message, simulating --include-partial-messages output.
-		meta := mustJSON(t, agent.MetaMessage{
+		meta := mustJSON(t, logv1.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []logv1.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: string(harness.Claude), StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -2663,7 +2665,7 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		result := mustJSON(t, agent.ResultMessage{
 			MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, DurationMs: 200, NumTurns: 1,
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{
+		trailer := mustJSON(t, logv1.MetaResultMessage{
 			MessageType: "caic_result", State: "purged", CostUSD: 0.02, Duration: 0.2,
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)

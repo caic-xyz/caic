@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -19,11 +21,11 @@ import (
 
 // PromptToAgent converts v1.Prompt to agent.Prompt at the API boundary.
 func PromptToAgent(p v1.Prompt) agent.Prompt {
-	var images []agent.ImageData
+	var images []logv3.ImageData
 	if len(p.Images) > 0 {
-		images = make([]agent.ImageData, len(p.Images))
+		images = make([]logv3.ImageData, len(p.Images))
 		for i, img := range p.Images {
-			images[i] = agent.ImageData{MediaType: img.MediaType, Data: img.Data}
+			images[i] = logv3.ImageData{MediaType: img.MediaType, Data: img.Data}
 		}
 	}
 	return agent.Prompt{Text: p.Text, Images: images}
@@ -268,7 +270,7 @@ func BinarySize(binary bool, size int64) int64 {
 }
 
 // DiffStat converts an agent diff stat to an API DTO.
-func DiffStat(ds agent.DiffStat) v1.DiffStat {
+func DiffStat(ds logv3.DiffStat) v1.DiffStat {
 	if len(ds) == 0 {
 		return nil
 	}
@@ -288,7 +290,7 @@ func DiffStat(ds agent.DiffStat) v1.DiffStat {
 // RepoStates aligns compact per-repo git states with the task's repositories,
 // filling repository names by index. States without a matching repository are
 // dropped.
-func RepoStates(states []agent.RepoState, repos []v1.TaskRepo) []v1.GitRepositoryState {
+func RepoStates(states []logv3.RepoState, repos []v1.TaskRepo) []v1.GitRepositoryState {
 	if len(states) == 0 {
 		return nil
 	}

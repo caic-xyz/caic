@@ -17,6 +17,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	caicopencode "github.com/caic-xyz/caic/backend/internal/agent/opencode"
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 	"github.com/klauspost/compress/zstd"
 	antigravitydto "github.com/maruel/genai/providers/antigravity"
 	claudedto "github.com/maruel/genai/providers/claudecode"
@@ -688,9 +689,9 @@ func checkOpenCodeInjection(typ string, data []byte) (string, error) {
 	case "caic_init":
 		dst = &caicopencode.CaicInit{}
 	case "caic_diff_stat":
-		dst = &agent.DiffStatMessage{}
+		dst = &v1.DiffStatMessage{}
 	case "caic_exit":
-		dst = &agent.ExitMessage{}
+		dst = &v1.ExitMessage{}
 	default:
 		return "caic injection", fmt.Errorf("unrecognized OpenCode caic injection type %q; add its DTO and checker dispatch", typ)
 	}

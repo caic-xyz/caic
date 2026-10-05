@@ -22,6 +22,12 @@ import (
 	"testing"
 	"time"
 
+	logv2 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v2"
+
+	logv1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -1267,7 +1273,7 @@ func TestMergeLogAndRelayMessages(t *testing.T) {
 		t.Parallel()
 		before := &agent.TextMessage{Text: "before"}
 		result := &agent.ResultMessage{MessageType: "result", Result: "done"}
-		snapshot := agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+		snapshot := agent.NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{{
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
 			CommitHash:     "1111111111111111111111111111111111111111",
@@ -2377,7 +2383,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newManagerWithRepo(t)
 			_, err := m.Create(t.Context(), CreateParams{
-				Prompt:  agent.Prompt{Text: "hi", Images: []agent.ImageData{{}}},
+				Prompt:  agent.Prompt{Text: "hi", Images: []v3.ImageData{{}}},
 				Repos:   []CreateRepo{{Name: "my/repo"}},
 				Harness: "fake",
 			})
@@ -2705,16 +2711,16 @@ func TestManager(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
@@ -3333,10 +3339,10 @@ func TestManager(t *testing.T) {
 				return string(b)
 			}
 			lines := []string{
-				marshal(agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pi task", Harness: harness.Pi, StartedAt: time.Now().UTC()}),
-				marshal(agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "ses-1", AgentVersion: "pi 1.2.3"}),
+				marshal(logv1.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pi task", Harness: string(harness.Pi), StartedAt: time.Now().UTC()}),
+				`{"type":"caic_session","session_id":"ses-1","agent_version":"pi 1.2.3"}`,
 				`{"type":"text","text":"` + strings.Repeat("x", 70<<10) + `"}`,
-				marshal(agent.MetaResultMessage{MessageType: "caic_result", State: taskslog.StateStopped.String()}),
+				`{"type":"caic_result","state":"stopped"}`,
 			}
 			path := filepath.Join(dir, id.String()+"--.jsonl")
 			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
@@ -3994,7 +4000,7 @@ func TestManager(t *testing.T) {
 			tk.SetState(taskslog.StateWaiting)
 			e := m.NewEntry(tk, nil)
 			m.Insert(tk.ID, e)
-			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go", Images: []agent.ImageData{{}}})
+			err := e.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "go", Images: []v3.ImageData{{}}})
 			te, ok := errors.AsType[*Error](err)
 			if !ok || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
@@ -4311,6 +4317,65 @@ func TestManager(t *testing.T) {
 
 	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
+		t.Run("rejects_v1_import_and_revival_without_mutation", func(t *testing.T) {
+			t.Parallel()
+			for _, compressed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
+					t.Parallel()
+					id := ksid.NewID()
+					instanceID := runtime.NewID("test-runtime", "md-agent-read-only")
+					backend := &runtimetest.FakeBackend{}
+					info := &runtimetest.FakeInfo{Meta: map[string]string{"md-agent-read-only\x00caic.id": id.String()}}
+					dir := t.TempDir()
+					store := taskslog.NewStore(testLogger(), dir)
+					const history = `{"type":"caic_meta","version":1,"prompt":"historical","repos":[],"harness":"claude"}` + "\n" + `{"type":"caic_result","state":"stopped"}` + "\n"
+					path := filepath.Join(dir, id.String()+".jsonl")
+					if err := os.WriteFile(path, []byte(history), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if compressed {
+						var err error
+						path, err = store.Compress(path, nil, taskslog.StateStopped)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					before, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+					if err != nil {
+						t.Fatal(err)
+					}
+					logs, err := store.LoadUnsettled()
+					if err != nil || len(logs) != 1 {
+						t.Fatalf("historical load: %#v, %v", logs, err)
+					}
+					m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Runtimes: newTestRuntime(t, backend, info), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}}})
+					m.relay = fakeRelayReader{statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+						t.Error("probed rejected v1 relay")
+						return false, "", nil
+					}}
+					adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "running"}}, logs)
+					if !errors.Is(err, agent.ErrReadOnlyLog) || len(adopted) != 0 || m.Len() != 0 {
+						t.Fatalf("v1 import: %#v, %v", adopted, err)
+					}
+					tk := mustNewTask(t, id, agent.Prompt{Text: "historical"}, "", "")
+					tk.SetRuntimeConnectionInfo(instanceID, runtime.ConnectionTarget{SSHHost: "retained"}, "", "", 0)
+					tk.SetState(taskslog.StateStopped)
+					entry := m.NewEntry(tk, logs[0])
+					entry.Finish(&taskslog.Result{State: taskslog.StateStopped})
+					done := entry.Done()
+					if err := entry.Lifecycle.Revive(); !errors.Is(err, agent.ErrReadOnlyLog) {
+						t.Fatalf("v1 revival: %v", err)
+					}
+					if entry.Done() != done || tk.GetState() != taskslog.StateStopped || backend.Status(instanceID) != runtimetest.StatusAbsent {
+						t.Fatal("rejected v1 continuation mutated task or instance")
+					}
+					after, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+					if err != nil || !bytes.Equal(before, after) {
+						t.Fatalf("rejected v1 history changed: %v", err)
+					}
+				})
+			}
+		})
 		t.Run("reconnect_clears_historical_failure", func(t *testing.T) {
 			t.Parallel()
 			for _, mode := range []string{"attach_error", "early_exit", "healthy"} {
@@ -4671,7 +4736,7 @@ func TestManager(t *testing.T) {
 				ID:    runtime.NewID("test-runtime", "metadata-error"),
 				State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
-			}}, []*taskslog.LoadedTask{{
+			}}, []*taskslog.LoadedTask{{LogVersion: agent.LogVersionV3,
 				TaskID:  taskID.String(),
 				Harness: harness.Claude,
 				Repos:   []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
@@ -4704,7 +4769,7 @@ func TestManager(t *testing.T) {
 							{GitRoot: "/home/user/src/caic-xyz/md", Branch: "caic-0", ContainerPath: "/home/user/src/caic-xyz/md"},
 						},
 					},
-				}, []*taskslog.LoadedTask{{
+				}, []*taskslog.LoadedTask{{LogVersion: agent.LogVersionV3,
 					TaskID:  taskID.String(),
 					Harness: harness.Claude,
 					Repos:   []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-5"}},
@@ -4789,7 +4854,7 @@ func TestManager(t *testing.T) {
 			if len(snap.DiffStat) != 1 || snap.DiffStat[0].Path != "main.go" {
 				t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", snap.DiffStat)
 			}
-			want := []agent.RepoState{{
+			want := []v3.RepoState{{
 				RepoIndex:        0,
 				Branch:           "caic-6",
 				Ahead:            2,
@@ -4816,7 +4881,7 @@ func TestManager(t *testing.T) {
 			_, err := m.ImportInstances(t.Context(), []runtime.Instance{{
 				ID: runtime.NewID("test-runtime", "repo-only-match"), State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
-			}}, []*taskslog.LoadedTask{{
+			}}, []*taskslog.LoadedTask{{LogVersion: agent.LogVersionV3,
 				TaskID:  otherTaskID.String(),
 				Repos:   []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness: harness.Claude,
@@ -4839,7 +4904,7 @@ func TestManager(t *testing.T) {
 			_, err := m.ImportInstances(t.Context(), []runtime.Instance{{
 				ID: runtime.NewID("test-runtime", "unknown-harness"), State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-1", ContainerPath: "/home/user/src/repo/a"}},
-			}}, []*taskslog.LoadedTask{{
+			}}, []*taskslog.LoadedTask{{LogVersion: agent.LogVersionV3,
 				TaskID:  taskID.String(),
 				Repos:   []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness: "unknown",
@@ -4871,7 +4936,7 @@ func TestManager(t *testing.T) {
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
 			}
 
-			meta, err := json.Marshal(agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "semantic error", Harness: harness.Claude})
+			meta, err := json.Marshal(logv2.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "semantic error", Harness: string(harness.Claude)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4926,7 +4991,7 @@ func TestManager(t *testing.T) {
 			}}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
 
-			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "exited"}}, []*taskslog.LoadedTask{{
+			adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: "exited"}}, []*taskslog.LoadedTask{{LogVersion: agent.LogVersionV3,
 				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "test",
 			}})
 			if err != nil {
@@ -4957,7 +5022,7 @@ func TestManager(t *testing.T) {
 			})
 			backing := make([]agent.TimedMessage, 2)
 			backing[0].Message = &agent.TextMessage{Text: "durable"}
-			loaded := &taskslog.LoadedTask{
+			loaded := &taskslog.LoadedTask{LogVersion: agent.LogVersionV3,
 				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "test", Timeline: backing[:1],
 			}
 
@@ -5011,7 +5076,7 @@ func TestManager(t *testing.T) {
 				ID:    instanceID,
 				State: "exited",
 				Repos: []runtime.Repo{{GitRoot: "/home/user/src/repo/a", Branch: "caic-9", ContainerPath: "/home/user/src/repo/a"}},
-			}}, []*taskslog.LoadedTask{{
+			}}, []*taskslog.LoadedTask{{LogVersion: agent.LogVersionV3,
 				TaskID: taskID.String(), Harness: harness.Claude, Prompt: "restore diff",
 				Repos: []taskslog.RepoMount{{Name: "repo/a", BaseBranch: "main", Branch: "caic-9"}},
 			}})
@@ -5021,14 +5086,14 @@ func TestManager(t *testing.T) {
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
 			}
-			want := agent.DiffStat{
+			want := v3.DiffStat{
 				{Path: "frontend/src/App.tsx", LinesAdded: 10, LinesDeleted: 2},
 				{Path: "frontend/src/App.test.tsx", LinesAdded: 5, LinesDeleted: 1},
 			}
 			if got := adopted[0].Task().LiveDiffStat(); !slices.Equal(got, want) {
 				t.Fatalf("LiveDiffStat = %+v, want %+v", got, want)
 			}
-			wantStates := []agent.RepoState{{
+			wantStates := []v3.RepoState{{
 				RepoIndex:        0,
 				Branch:           "caic-9",
 				Ahead:            3,
@@ -5057,17 +5122,17 @@ func TestManager(t *testing.T) {
 			if err := os.MkdirAll(logDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
-			meta, err := json.Marshal(agent.MetaMessage{
+			meta, err := json.Marshal(logv2.MetaMessage{
 				MessageType:       "caic_meta",
-				Version:           1,
+				Version:           2,
 				Prompt:            "restore config",
-				Repos:             []agent.MetaRepo{{Name: "repo/a", Branch: "caic-9"}},
-				Harness:           harness.Claude,
+				Repos:             []logv2.MetaRepo{{Name: "repo/a", Branch: "caic-9"}},
+				Harness:           string(harness.Claude),
 				BaseImage:         "ghcr.io/caic/base:v1",
 				ContainerPlatform: "linux/amd64",
 				MaxCPUs:           5,
-				CacheMounts:       []agent.MetaCacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
-				Mounts:            []agent.MetaMount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
+				CacheMounts:       []logv2.MetaCacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm", ReadOnly: true}},
+				Mounts:            []logv2.MetaMount{{HostPath: "/host/work", ContainerPath: "/workspace/work", ReadOnly: true}},
 				ParentTaskID:      parentTaskID.String(),
 			})
 			if err != nil {
@@ -5128,17 +5193,17 @@ func TestManager(t *testing.T) {
 			if err := os.MkdirAll(logDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
-			meta, err := json.Marshal(agent.MetaMessage{
+			meta, err := json.Marshal(logv2.MetaMessage{
 				MessageType: "caic_meta",
-				Version:     1,
+				Version:     2,
 				Prompt:      "merge history",
-				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-12"}},
-				Harness:     harness.Claude,
+				Repos:       []logv2.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-12"}},
+				Harness:     string(harness.Claude),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			diskMsg := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"text","text":"before restart"}],"usage":{}},"session_id":"s","uuid":"u1"}`
+			diskMsg := `{"t":"agent","ts":1.000,"msg":{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"text","text":"before restart"}],"usage":{}},"session_id":"s","uuid":"u1"}}`
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+diskMsg+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -5200,8 +5265,8 @@ func TestManager(t *testing.T) {
 				MessageType: "caic_meta",
 				Version:     int(agent.LogVersionV2),
 				Prompt:      "persist relay history",
-				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-13"}},
-				Harness:     harness.Claude,
+				Repos:       []v3.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-13"}},
+				Harness:     string(harness.Claude),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -5307,7 +5372,7 @@ func TestManager(t *testing.T) {
 				MessageType: "caic_meta",
 				Version:     int(agent.LogVersionV2),
 				Prompt:      "recover legacy relay",
-				Repos:       []agent.MetaRepo{{Name: "repo/a", Branch: "caic-legacy"}},
+				Repos:       []v3.MetaRepo{{Name: "repo/a", Branch: "caic-legacy"}},
 				Harness:     "reconnect",
 			})
 			if err != nil {
@@ -5433,7 +5498,7 @@ func TestManager(t *testing.T) {
 						MessageType: "caic_meta",
 						Version:     int(tc.version),
 						Prompt:      "reject unverified relay",
-						Repos:       []agent.MetaRepo{{Name: "repo/a", Branch: "caic-reject"}},
+						Repos:       []v3.MetaRepo{{Name: "repo/a", Branch: "caic-reject"}},
 						Harness:     "reconnect",
 					})
 					if err != nil {
@@ -5522,16 +5587,16 @@ func TestManager(t *testing.T) {
 					return agent.ParsedTimeline{Messages: relayParsed(
 						&agent.AskMessage{
 							ToolUseID: "toolu-1",
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 						&agent.PendingUserActionMessage{
 							MessageType: agent.PendingUserActionMessageType,
-							Action: agent.PendingUserAction{
+							Action: v3.PendingUserAction{
 								Kind:      agent.PendingUserActionAskUserQuestion,
 								RequestID: "req-1",
 								ToolUseID: "toolu-1",
-								Ask: agent.PendingAskAction{
-									Questions: []agent.AskQuestion{{Question: "Which?"}},
+								Ask: v3.PendingAskAction{
+									Questions: []v3.AskQuestion{{Question: "Which?"}},
 								},
 							},
 						},
@@ -5558,7 +5623,7 @@ func TestManager(t *testing.T) {
 				}, []*taskslog.LoadedTask{{
 					TaskID:     taskID.String(),
 					Harness:    "reconnect",
-					LogVersion: agent.LogVersionV1,
+					LogVersion: agent.LogVersionV2,
 					Repos:      []taskslog.RepoMount{{Name: "repo/a", Branch: "caic-10"}},
 				}})
 			if err != nil {
@@ -5603,18 +5668,18 @@ func TestManager(t *testing.T) {
 			if err := os.MkdirAll(logDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
-			meta, err := json.Marshal(agent.MetaMessage{
+			meta, err := json.Marshal(logv2.MetaMessage{
 				MessageType: "caic_meta",
-				Version:     1,
+				Version:     2,
 				Prompt:      "dead relay task",
-				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-7"}},
-				Harness:     harness.Claude,
+				Repos:       []logv2.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-7"}},
+				Harness:     string(harness.Claude),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			logPath := filepath.Join(logDir, taskID.String()+".jsonl")
-			body := string(meta) + "\n" + `{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}` + "\n"
+			body := string(meta) + "\n" + `{"t":"exit","exit_code":2,"error":"Unknown option: --approve"}` + "\n"
 			if err := os.WriteFile(logPath, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -5655,7 +5720,7 @@ func TestManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(persisted), `"type":"caic_result"`) || !strings.Contains(string(persisted), `"state":"crashed"`) {
+			if !strings.Contains(string(persisted), `"t":"result"`) || !strings.Contains(string(persisted), `"state":"crashed"`) {
 				t.Fatalf("log missing crashed caic_result trailer:\n%s", persisted)
 			}
 		})
@@ -5668,12 +5733,29 @@ func TestManager(t *testing.T) {
 			}}
 			runtimeBackend := &runtimetest.FakeBackend{}
 			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, runtimeBackend, fake), Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{Inventory: agent.ModelInventory{Models: []agent.Model{{ID: "m1"}}}}}})
+			dir := t.TempDir()
+			m.logStore = taskslog.NewStore(testLogger(), dir)
+			name := taskID.String() + ".jsonl"
+			const header = `{"t":"caic_meta","version":2,"prompt":"dead tail","repos":[{"name":"caic-xyz/caic","branch":"caic-8"}],"harness":"claude"}`
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(header+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := m.logStore.LoadUnsettled()
+			if err != nil {
+				t.Fatal(err)
+			}
 			m.relay = fakeRelayReader{
 				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-					return agent.ParsedTimeline{Messages: relayParsed(&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"})}, 128, nil
+				readTailFn: func(_ context.Context, _ runtime.ConnectionTarget, parser *agent.LogRecordParser, _ int64) (agent.ParsedTimeline, int64, error) {
+					const record = `{"t":"exit","exit_code":2,"error":"Unknown option: --approve"}`
+					parsed, err := parser.ParseRecord([]byte(record))
+					if err != nil {
+						return agent.ParsedTimeline{}, 0, err
+					}
+					encoded := []byte(record + "\n")
+					return agent.ParsedTimeline{Messages: parsed.Messages, Encoded: encoded, RelayRecords: []agent.RelayRecordBoundary{{RelayEnd: int64(len(encoded)), MessageEnd: len(parsed.Messages), ByteEnd: len(encoded), Fingerprint: sha256.Sum256([]byte(record))}}}, int64(len(encoded)), nil
 				},
 				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
@@ -5691,12 +5773,7 @@ func TestManager(t *testing.T) {
 							ContainerPath: "/home/user/src/caic-xyz/caic",
 						}},
 					},
-				}, []*taskslog.LoadedTask{{
-					TaskID:     taskID.String(),
-					Harness:    harness.Claude,
-					LogVersion: agent.LogVersionV1,
-					Repos:      []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-8"}},
-				}})
+				}, logs)
 			if err != nil {
 				t.Fatalf("AdoptInstances: %v", err)
 			}
@@ -5749,7 +5826,7 @@ func TestManager(t *testing.T) {
 				}, []*taskslog.LoadedTask{{
 					TaskID:     taskID.String(),
 					Harness:    harness.Claude,
-					LogVersion: agent.LogVersionV1,
+					LogVersion: agent.LogVersionV2,
 					Repos:      []taskslog.RepoMount{{Name: "caic-xyz/caic", Branch: "caic-9"}},
 				}})
 			if err != nil {
@@ -5783,19 +5860,19 @@ func TestManager(t *testing.T) {
 			if err := os.MkdirAll(logDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
-			meta, err := json.Marshal(agent.MetaMessage{
+			meta, err := json.Marshal(logv2.MetaMessage{
 				MessageType: "caic_meta",
-				Version:     1,
+				Version:     2,
 				Prompt:      "clean task with stale crash trailer",
-				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-10"}},
-				Harness:     harness.Claude,
+				Repos:       []logv2.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-10"}},
+				Harness:     string(harness.Claude),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			result := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"num_turns":1,"result":"done"}`
-			staleExit := `{"type":"caic_exit","exit_code":2,"error":"stale crash"}`
-			staleTrailer := `{"type":"caic_result","state":"crashed","error":"agent session crashed"}`
+			result := `{"t":"agent","ts":1.000,"msg":{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"num_turns":1,"result":"done"}}`
+			staleExit := `{"t":"exit","exit_code":2,"error":"stale crash"}`
+			staleTrailer := `{"t":"result","state":"crashed","error":"agent session crashed"}`
 			logs := string(meta) + "\n" + result + "\n" + staleExit + "\n" + staleTrailer + "\n"
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(logs), 0o600); err != nil {
 				t.Fatal(err)
@@ -5846,17 +5923,17 @@ func TestManager(t *testing.T) {
 			if err := os.MkdirAll(logDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
-			meta, err := json.Marshal(agent.MetaMessage{
+			meta, err := json.Marshal(logv2.MetaMessage{
 				MessageType: "caic_meta",
-				Version:     1,
+				Version:     2,
 				Prompt:      "legacy codex task",
-				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-6"}},
-				Harness:     harness.Codex,
+				Repos:       []logv2.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-6"}},
+				Harness:     string(harness.Codex),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			init := `{"method":"thread/started","params":{"thread":{"id":"thread-from-started","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
+			init := `{"t":"agent","ts":1.000,"msg":{"method":"thread/started","params":{"thread":{"id":"thread-from-started","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}}`
 			if err := os.WriteFile(filepath.Join(logDir, taskID.String()+".jsonl"), []byte(string(meta)+"\n"+init+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -6635,19 +6712,16 @@ func TestRegisteredLogPaths(t *testing.T) {
 	logStore := taskslog.NewStore(testLogger(), dir)
 	m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: logStore})
 
-	meta, err := json.Marshal(agent.MetaMessage{
+	meta, err := json.Marshal(logv1.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     int(agent.LogVersionV1),
-		Harness:     harness.Claude,
+		Harness:     string(harness.Claude),
 		Prompt:      "history",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	trailer, err := json.Marshal(agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trailer := []byte(`{"type":"caic_result","state":"purged"}`)
 	path := filepath.Join(dir, "alpha.jsonl")
 	data := make([]byte, 0, len(meta)+len(trailer)+2)
 	data = append(data, meta...)

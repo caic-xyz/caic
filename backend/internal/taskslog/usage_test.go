@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -214,12 +216,12 @@ func writeUsageLog(t *testing.T, dir, id string, version agent.LogVersion, at, s
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	meta := agent.MetaMessage{
+	meta := v1.MetaMessage{
 		MessageType:    "caic_meta",
 		Version:        int(version),
 		Prompt:         "backfill",
-		Repos:          []agent.MetaRepo{{Name: "org/repo"}},
-		Harness:        harness.Claude,
+		Repos:          []v1.MetaRepo{{Name: "org/repo"}},
+		Harness:        string(harness.Claude),
 		RequestedModel: "claude-test",
 		StartedAt:      startedAt,
 	}

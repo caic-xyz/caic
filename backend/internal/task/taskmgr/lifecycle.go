@@ -174,6 +174,9 @@ func (r *Lifecycle) Stop(ctx context.Context) error {
 
 // Revive restarts a stopped or crashed task.
 func (r *Lifecycle) Revive() error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}
@@ -187,6 +190,9 @@ func (r *Lifecycle) Revive() error {
 
 // Restart starts a fresh agent session with prompt.
 func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	prevState, changed := t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan)
 	if !changed {
@@ -216,6 +222,9 @@ func (r *Lifecycle) Restart(ctx context.Context, prompt agent.Prompt) error {
 
 // ClearContext starts a fresh idle agent session.
 func (r *Lifecycle) ClearContext() error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	if _, changed := t.SetStateIfAny(taskslog.StateStarting, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan); !changed {
 		return conflict("task is not waiting or asking")
@@ -234,6 +243,9 @@ func (r *Lifecycle) ClearContext() error {
 
 // Compact asks the active agent session to compact its context.
 func (r *Lifecycle) Compact(ctx context.Context, instructions string) error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	if err := r.entry.Task().SendCompact(ctx, instructions); err != nil {
 		return conflictErr(err, "no active session to compact")
 	}
@@ -242,6 +254,9 @@ func (r *Lifecycle) Compact(ctx context.Context, instructions string) error {
 
 // SendInput forwards prompt to the agent session, reconnecting when needed.
 func (r *Lifecycle) SendInput(ctx context.Context, prompt agent.Prompt) error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	if len(prompt.Images) > 0 {
 		if b := r.manager.Backends[t.Harness]; b != nil && !b.SupportsImages() {
@@ -273,6 +288,9 @@ func (r *Lifecycle) SendInput(ctx context.Context, prompt agent.Prompt) error {
 
 // Start starts the runtime and agent session for a newly registered task.
 func (r *Lifecycle) Start(ctx context.Context, resolvedGitHubToken string) error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	t := r.entry.Task()
 	h, err := r.agentRuntime.Start(ctx, t, resolvedGitHubToken)
 	if err != nil {
@@ -494,6 +512,14 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	return &SyncResult{Status: status, Branch: branch, DiffStat: ds, SafetyIssues: issues}, nil
 }
 
+// checkContinuation rejects retained v1 tasks before lifecycle state changes.
+func (r *Lifecycle) checkContinuation() error {
+	if lt := r.entry.LoadedTask(); lt != nil && lt.LogVersion == agent.LogVersionV1 {
+		return conflictErr(agent.ErrReadOnlyLog, "cannot continue historical task")
+	}
+	return nil
+}
+
 func (r *Lifecycle) cancelScheduledPurge() {
 	r.purgeMu.Lock()
 	if r.purgeCancel != nil {
@@ -554,6 +580,9 @@ func (r *Lifecycle) scheduleImportedRecovery(expectedState taskslog.State) {
 // recoverImportedSession reserves the task before stopping the retained runtime,
 // so user input and manual revival cannot race startup recovery.
 func (r *Lifecycle) recoverImportedSession(expectedState taskslog.State) error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
 	if !r.operationMu.TryLock() {
 		return conflict("task lifecycle operation is in progress")
 	}

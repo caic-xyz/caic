@@ -3,6 +3,7 @@
 package taskmgr
 
 import (
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -108,6 +109,6 @@ const (
 type SyncResult struct {
 	Status       string // "synced", "empty", "blocked"
 	Branch       string
-	DiffStat     agent.DiffStat
+	DiffStat     v3.DiffStat
 	SafetyIssues []repo.SafetyIssue
 }

@@ -7,11 +7,12 @@ the Go binary.
 ## Relay versions
 
 `relay_v2.py` is the maintained relay. It implements canonical v2 framing and is
-deployed for every log version except v1. Fix relay behavior here and cover it in
+deployed for writable v2 and v3 logs. Fix relay behavior here and cover it in
 `test_relay_v2.py`.
 
 `relay.py` is a frozen historical artifact: the original v1 relay. It stays in
-the tree only so v1 log versions remain deployable and replayable. Do not edit
+the tree as historical protocol evidence; v1 logs are read-only and its relay
+is no longer embedded or deployed. Do not edit
 it, do not port fixes into it, and do not test it: it no longer changes, and
 `test_relay_v2.py` covers the maintained relay.
 
@@ -19,8 +20,7 @@ it, do not port fixes into it, and do not test it: it no longer changes, and
 
 Deployment and management from Go is in the parent `agent.go` (`RelayScript`,
 `DeployRelay`, `StartRelay`, `AttachRelaySession`, `ReadRelayOutput`, etc.).
-`RelayScript` selects `Script` for `LogVersionV1` and `ScriptV2` otherwise; both
-are deployed to the same container path.
+`RelayScript` rejects read-only v1 and selects `ScriptV2` for writable versions.
 
 ## Operational Modes
 

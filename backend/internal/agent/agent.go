@@ -59,19 +59,15 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/maruel/gomode/mcp"
 )
 
-// ImageData carries a single base64-encoded image for multi-modal input.
-type ImageData struct {
-	MediaType string `json:"media_type"` // e.g. "image/png", "image/jpeg"
-	Data      string `json:"data"`       // base64-encoded
-}
-
 // Prompt bundles user text with optional images for a single interaction.
 type Prompt struct {
-	Text   string      `json:"text"`
-	Images []ImageData `json:"images,omitempty,omitzero"`
+	Text   string         `json:"text"`
+	Images []v3.ImageData `json:"images,omitempty,omitzero"`
 }
 
 // Options configures an agent session launch.
@@ -93,7 +89,7 @@ type Options struct {
 	// input after AttachRelay reconnects. It must not contain backend-only
 	// protocol state such as keepalive, auto-allow, or environment control
 	// messages.
-	PendingUserActions []PendingUserAction
+	PendingUserActions []v3.PendingUserAction
 	MsgCh              chan<- TimedMessage // Receives parsed physical records from the agent.
 	Log                LogSink             // Non-nil task-owned physical task-log authority; use DiscardLogSink{Version: version} when persistence is unnecessary.
 	StripEnv           []string            // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
@@ -446,7 +442,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat, wra
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	if err := opts.Log.LogVersion().Validate(); err != nil {
+	if err := opts.Log.LogVersion().ValidateWritable(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
 	if opts.WarmHistory {
@@ -588,16 +584,6 @@ var v1LogControlKinds = map[string]logControlKind{
 	messageTypeProvisioningLogRecord: logControlProvisioningLog,
 }
 
-type modelInfoLogRecord struct {
-	ContextWindow int `json:"context_window"`
-}
-
-type legacyInitLogRecord struct {
-	SessionID string `json:"session_id"`
-	Model     string `json:"model"`
-	Version   string `json:"version"`
-}
-
 func (p *LogRecordParser) parseControl(kind logControlKind, token string, line []byte) ([]Message, error) {
 	switch kind {
 	case logControlMeta:
@@ -608,7 +594,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 			if err != nil {
 				return nil, fmt.Errorf("decode %s: %w", token, err)
 			}
-		} else if err := json.Unmarshal(line, &m); err != nil {
+		} else if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if err := m.Validate(); err != nil {
@@ -620,21 +606,21 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		return []Message{&m}, nil
 	case logControlDiffStat:
 		var m DiffStatMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeDiffStat
 		return []Message{&m}, nil
 	case logControlExit:
 		var m ExitMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeExit
 		return []Message{&m}, nil
 	case logControlStrippedEnv:
 		var m StrippedEnvMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeStrippedEnv
@@ -647,86 +633,96 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 			if err != nil {
 				return nil, fmt.Errorf("decode %s: %w", token, err)
 			}
-		} else if err := json.Unmarshal(line, &m); err != nil {
+		} else if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&InitMessage{SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion}}, nil
 	case logControlLegacyInit:
-		var m legacyInitLogRecord
+		var m v1.LegacyInit
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&InitMessage{SessionID: m.SessionID, ReportedModel: m.Model, Version: m.Version}}, nil
 	case logControlModelInfo:
-		var m modelInfoLogRecord
-		if err := json.Unmarshal(line, &m); err != nil {
+		var m ModelInfoMessage
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.ContextWindow > 0 {
-			p.contextWindow = m.ContextWindow
+			if int64(int(m.ContextWindow)) != m.ContextWindow {
+				return nil, fmt.Errorf("decode %s: context_window out of range", token)
+			}
+			p.contextWindow = int(m.ContextWindow)
 		}
 		return nil, nil
 	case logControlPR:
 		var m MetaPRMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypePR
 		return []Message{&m}, nil
 	case logControlResult:
 		var m MetaResultMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeResult
 		return []Message{&m}, nil
 	case logControlTurnCommitSnapshot:
 		var m TurnCommitSnapshotMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeTurnCommitSnapshot
 		return []Message{&m}, nil
 	case logControlPendingUserAction:
 		var m PendingUserActionMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = PendingUserActionMessageType
 		return []Message{&m}, nil
 	case logControlProvisioningLog:
 		var m LogMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		m.MessageType = messageTypeProvisioningLogRecord
 		return []Message{&m}, nil
 	case logControlContextCleared:
+		var m SystemMessage
+		if err := decodeLogControl(p.version, line, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", token, err)
+		}
+		if m.Subtype != "" && m.Subtype != messageSubtypeContextCleared {
+			return nil, fmt.Errorf("decode %s: unexpected subtype %q", token, m.Subtype)
+		}
 		return []Message{ContextCleared()}, nil
 	case logControlText:
 		var m TextMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&m}, nil
 	case logControlUserInput:
 		var m UserInputMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		return []Message{&m}, nil
 	case logControlMCPRequest:
 		var m MCPRequestMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		if m.ID == "" || (m.Method != mcp.MethodToolsList && (m.Method != mcp.MethodToolsCall || m.Name == "")) {
+		if m.ID == "" || (mcp.Method(m.Method) != mcp.MethodToolsList && (mcp.Method(m.Method) != mcp.MethodToolsCall || m.Name == "")) {
 			return nil, fmt.Errorf("decode %s: invalid MCP request", token)
 		}
 		return []Message{&m}, nil
 	case logControlRelayGeneration:
 		var m RelayGenerationMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
 		if m.Generation == "" {
@@ -839,11 +835,6 @@ func (r *RelayRecordReader) ReadRecord() (native []byte, controls []TimedMessage
 			continue
 		}
 		r.native = r.native[:0]
-		if r.parser.version == LogVersionV1 {
-			if writeErr := r.log.AppendNative(encoded); writeErr != nil {
-				return nil, nil, fmt.Errorf("write log: %w", writeErr)
-			}
-		}
 		parsed, parseErr := r.parser.ParseRecord(line)
 		if parseErr != nil {
 			return nil, nil, parseErr
@@ -906,8 +897,10 @@ func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 		if version != LogVersionV1 && err != nil {
 			return fmt.Errorf("parse v2 relay record: %w", err)
 		}
-		if writeErr := sink.AppendNative(record); writeErr != nil {
-			return fmt.Errorf("write log: %w", writeErr)
+		if version != LogVersionV1 {
+			if writeErr := sink.AppendNative(record); writeErr != nil {
+				return fmt.Errorf("write log: %w", writeErr)
+			}
 		}
 		if err != nil {
 			log.WarnContext(ctx, "unparseable message", "err", err, "line", string(line))
@@ -917,7 +910,7 @@ func DefaultReadMessages(ctx context.Context, log *slog.Logger, r io.Reader, dis
 		for _, msg := range parsed.Messages {
 			if request, ok := msg.Message.(*MCPRequestMessage); ok {
 				if handleMCP != nil {
-					if err := handleMCP(MCPRequest{ID: request.ID, Method: request.Method, Name: request.Name, Arguments: request.Arguments}); err != nil {
+					if err := handleMCP(MCPRequest{ID: request.ID, Method: mcp.Method(request.Method), Name: request.Name, Arguments: request.Arguments}); err != nil {
 						return fmt.Errorf("respond task-scoped MCP: %w", err)
 					}
 				}
@@ -944,19 +937,19 @@ const (
 	PiCaicMCPExtensionPath      = RelayDir + "/caic-mcp.ts"
 )
 
-// RelayScript selects the embedded script for a validated log version.
+// RelayScript returns the maintained script for a writable log version.
 func RelayScript(version LogVersion) ([]byte, error) {
-	if err := version.Validate(); err != nil {
+	if err := version.ValidateWritable(); err != nil {
 		return nil, err
 	}
-	if version != LogVersionV1 {
-		return relay.ScriptV2, nil
-	}
-	return relay.Script, nil
+	return relay.ScriptV2, nil
 }
 
 // DeployRelay uploads the selected relay script into the runtime target. Idempotent.
 func DeployRelay(ctx context.Context, target runtime.ConnectionTarget, version LogVersion) error {
+	if err := version.ValidateWritable(); err != nil {
+		return err
+	}
 	if target.SSHHost == "" {
 		return errors.New("agent connection target missing SSH host")
 	}
@@ -1158,7 +1151,7 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	}
 	tStart := time.Now()
 	version := opts.Log.LogVersion()
-	if err := version.Validate(); err != nil {
+	if err := version.ValidateWritable(); err != nil {
 		return nil, fmt.Errorf("relay log version: %w", err)
 	}
 	if err := DeployRelay(ctx, opts.Target, version); err != nil {

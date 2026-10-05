@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -19,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 )
 
 func mustNewTask(t testing.TB, id ksid.ID, prompt agent.Prompt) *task.Task {
@@ -89,7 +92,7 @@ func BenchmarkSeedTimeline(b *testing.B) {
 		appendMessage(&agent.TextMessage{Text: "Working on the next step."})
 		appendMessage(&agent.ToolUseMessage{ToolUseID: fmt.Sprintf("tool-%d", turn), Name: "Read", Input: json.RawMessage(`{"file_path":"/src/main.go"}`)})
 		appendMessage(&agent.ToolResultMessage{ToolUseID: fmt.Sprintf("tool-%d", turn)})
-		appendMessage(&agent.DiffStatMessage{MessageType: "diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1}}})
+		appendMessage(&agent.DiffStatMessage{MessageType: "diff_stat", DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 3, LinesDeleted: 1}}})
 		appendMessage(&agent.UsageMessage{Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheTTLSeconds: 300}, ContextWindow: 200000})
 		appendMessage(&agent.ResultMessage{MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, NumTurns: 1, DurationMs: 1200,
 			Usage: agent.Usage{InputTokens: 900, OutputTokens: 120, CacheReadInputTokens: 4000}})
@@ -139,18 +142,18 @@ func writeProductionAdoptionFixture(b *testing.B, path string) {
 		b.Fatal(err)
 	}
 	writer := bufio.NewWriterSize(file, 1<<20)
-	meta, err := json.Marshal(agent.MetaMessage{
+	meta, err := json.Marshal(v1.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     int(agent.LogVersionV1),
 		Prompt:      "benchmark adoption",
-		Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
-		Harness:     harness.Claude,
+		Repos:       []v1.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+		Harness:     string(harness.Claude),
 		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	session, err := json.Marshal(agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "benchmark-session", AgentVersion: "2.1.0"})
+	session, err := json.Marshal(v1.MetaSessionMessage{MessageType: "caic_session", SessionID: "benchmark-session", AgentVersion: "2.1.0"})
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -391,7 +393,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	}
 }
 
-func repositoryCommits(commits []agent.RepositoryCommit) []v1.EventRepositoryCommit {
+func repositoryCommits(commits []logv3.RepositoryCommit) []v1.EventRepositoryCommit {
 	if len(commits) == 0 {
 		return nil
 	}
@@ -406,7 +408,7 @@ func repositoryCommits(commits []agent.RepositoryCommit) []v1.EventRepositoryCom
 	return result
 }
 
-func changeStat(stat *agent.ChangeStat) *v1.EventChangeStat {
+func changeStat(stat *logv3.ChangeStat) *v1.EventChangeStat {
 	if stat == nil {
 		return nil
 	}
@@ -439,7 +441,7 @@ func (tt *ToolTimingTracker) rememberToolStart(toolUseID string, now time.Time) 
 }
 
 // AskQuestions converts agent ask questions to API DTOs.
-func AskQuestions(qs []agent.AskQuestion) []v1.AskQuestion {
+func AskQuestions(qs []logv3.AskQuestion) []v1.AskQuestion {
 	if len(qs) == 0 {
 		return nil
 	}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -80,7 +82,7 @@ const (
 // Persistence uses explicit projections to versioned data schemas.
 type Result struct {
 	State    State
-	DiffStat agent.DiffStat
+	DiffStat v3.DiffStat
 	// DiskUsedBytes is the final measured writable-layer size. Nil means the
 	// runtime could not provide a measurement.
 	DiskUsedBytes  *int64
@@ -89,7 +91,7 @@ type Result struct {
 	NumTurns       int
 	Usage          agent.Usage
 	AgentResult    string
-	StartupFailure *agent.StartupFailure
+	StartupFailure *v3.StartupFailure
 	Err            error
 }
 
@@ -105,7 +107,7 @@ type RepoMount struct {
 }
 
 // RepoMountFromMeta converts a log metadata repository to a RepoMount.
-func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
+func RepoMountFromMeta(m v3.MetaRepo, gitRoot string) RepoMount {
 	return RepoMount{Name: m.Name, BaseBranch: m.BaseBranch, Branch: m.Branch, ContainerPath: m.ContainerPath, GitRoot: gitRoot}
 }
 
@@ -114,7 +116,7 @@ func (r *RepoMount) ToRuntimeRepo() runtime.Repo {
 	return runtime.Repo{GitRoot: r.GitRoot, ContainerPath: r.ContainerPath, Branch: r.Branch, BaseBranch: r.BaseBranch}
 }
 
-func runtimeCacheMountsFromMeta(in []agent.MetaCacheMount) []runtime.CacheMount {
+func runtimeCacheMountsFromMeta(in []v3.MetaCacheMount) []runtime.CacheMount {
 	if len(in) == 0 {
 		return nil
 	}
@@ -125,7 +127,7 @@ func runtimeCacheMountsFromMeta(in []agent.MetaCacheMount) []runtime.CacheMount 
 	return out
 }
 
-func runtimeMountsFromMeta(in []agent.MetaMount) []runtime.Mount {
+func runtimeMountsFromMeta(in []v3.MetaMount) []runtime.Mount {
 	if len(in) == 0 {
 		return nil
 	}

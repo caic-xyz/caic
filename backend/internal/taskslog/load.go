@@ -135,7 +135,7 @@ func (s *physicalLogScanner) Scan() bool {
 			s.err = fmt.Errorf("%s: invalid log segment header: %w", s.src, err)
 			return false
 		}
-		if agent.LogVersion(meta.Version) != s.authority.Version || meta.Harness != s.authority.Harness {
+		if agent.LogVersion(meta.Version) != s.authority.Version || harness.Name(meta.Harness) != s.authority.Harness {
 			s.err = fmt.Errorf(
 				"%s: log segment authority changed from version %d harness %q to version %d harness %q",
 				s.src, s.authority.Version, s.authority.Harness, meta.Version, meta.Harness)
@@ -718,7 +718,7 @@ func decodeAuthorityMeta(line []byte) (agent.MetaMessage, logAuthority, error) {
 	if !ok {
 		return agent.MetaMessage{}, logAuthority{}, fmt.Errorf("metadata header message = %T, want *agent.MetaMessage", record.Messages[0].Message)
 	}
-	authority.Harness = meta.Harness
+	authority.Harness = harness.Name(meta.Harness)
 	return *meta, authority, nil
 }
 
@@ -964,7 +964,7 @@ func loadedTaskFromMeta(path, taskID string, meta *agent.MetaMessage, modified t
 		Title:             meta.Title,
 		Repos:             repos,
 		LogVersion:        agent.LogVersion(meta.Version),
-		Harness:           meta.Harness,
+		Harness:           harness.Name(meta.Harness),
 		RequestedModel:    meta.RequestedModel,
 		RequestedEffort:   meta.RequestedEffort,
 		StartedAt:         meta.StartedAt,

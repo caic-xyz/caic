@@ -5,6 +5,8 @@ package taskslog
 import (
 	"errors"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -167,7 +169,7 @@ func headerMountsFromData(in []v6.Mount) []runtime.Mount {
 	return out
 }
 
-func headerDiffStatToData(in []agent.DiffFileStat) []v6.DiffFileStat {
+func headerDiffStatToData(in []v3.DiffFileStat) []v6.DiffFileStat {
 	if in == nil {
 		return nil
 	}
@@ -178,13 +180,13 @@ func headerDiffStatToData(in []agent.DiffFileStat) []v6.DiffFileStat {
 	return out
 }
 
-func headerDiffStatFromData(in []v6.DiffFileStat) []agent.DiffFileStat {
+func headerDiffStatFromData(in []v6.DiffFileStat) []v3.DiffFileStat {
 	if in == nil {
 		return nil
 	}
-	out := make([]agent.DiffFileStat, len(in))
+	out := make([]v3.DiffFileStat, len(in))
 	for i := range in {
-		out[i] = agent.DiffFileStat(in[i])
+		out[i] = v3.DiffFileStat(in[i])
 	}
 	return out
 }
@@ -212,9 +214,9 @@ func headerResultFromData(r *v6.Result) *Result {
 	if r.Error != "" {
 		err = errors.New(r.Error)
 	}
-	var failure *agent.StartupFailure
+	var failure *v3.StartupFailure
 	if r.StartupFailure != nil {
-		failure = new(agent.StartupFailure(*r.StartupFailure))
+		failure = new(v3.StartupFailure(*r.StartupFailure))
 	}
 	return &Result{State: State(r.State), DiffStat: headerDiffStatFromData(r.DiffStat), DiskUsedBytes: r.DiskUsedBytes, CostUSD: r.CostUSD, Duration: r.Duration, NumTurns: r.NumTurns, Usage: agent.Usage(r.Usage), AgentResult: r.AgentResult, StartupFailure: failure, Err: err}
 }

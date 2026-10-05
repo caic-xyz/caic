@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/agenttest"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -44,7 +46,7 @@ func TestBackend(t *testing.T) {
 		}
 		// An empty target would fail relay launch. The image error must precede
 		// any launch so rejection cannot leave an orphaned remote process.
-		if _, err := b.Start(t.Context(), &agent.Options{InitialPrompt: agent.Prompt{Images: []agent.ImageData{{Data: "image"}}}}); err == nil || !strings.Contains(err.Error(), "image input is not supported") {
+		if _, err := b.Start(t.Context(), &agent.Options{InitialPrompt: agent.Prompt{Images: []v3.ImageData{{Data: "image"}}}}); err == nil || !strings.Contains(err.Error(), "image input is not supported") {
 			t.Fatalf("initial image rejection = %v", err)
 		}
 	})
@@ -100,7 +102,7 @@ func TestWireFormat(t *testing.T) {
 			w := New("", nil).NewWire()
 			log := &agenttest.LogSink{Version: agent.LogVersionV3}
 			var out bytes.Buffer
-			if err := w.WritePrompt(&out, agent.Prompt{Images: []agent.ImageData{{Data: "image"}}}, log); err == nil || out.Len() != 0 {
+			if err := w.WritePrompt(&out, agent.Prompt{Images: []v3.ImageData{{Data: "image"}}}, log); err == nil || out.Len() != 0 {
 				t.Fatal("images must fail without writing")
 			}
 			if err := w.WritePrompt(shortWriter{}, agent.Prompt{Text: "hello"}, log); !errors.Is(err, io.ErrShortWrite) {

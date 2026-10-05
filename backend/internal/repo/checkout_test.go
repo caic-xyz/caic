@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
@@ -315,14 +316,14 @@ func TestDiffStatAndRepoStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantDS := agent.DiffStat{
+		wantDS := v3.DiffStat{
 			{Path: "main.go", LinesAdded: 5, LinesDeleted: 1},
 			{Path: "logo.png", Binary: true, OldSize: 10, NewSize: 20},
 		}
 		if !slices.Equal(ds, wantDS) {
 			t.Errorf("DiffStat = %+v, want %+v", ds, wantDS)
 		}
-		wantStates := []agent.RepoState{{
+		wantStates := []v3.RepoState{{
 			RepoIndex:        0,
 			Branch:           "caic-3",
 			Ahead:            2,
@@ -384,7 +385,7 @@ func TestDiffStatAndRepoStates(t *testing.T) {
 		}
 		// The successful repository must still reach the card instead of the
 		// whole update being dropped.
-		if len(ds) != 2 || slices.ContainsFunc(ds, func(f agent.DiffFileStat) bool { return f.Path == "genai/main.go" }) {
+		if len(ds) != 2 || slices.ContainsFunc(ds, func(f v3.DiffFileStat) bool { return f.Path == "genai/main.go" }) {
 			t.Errorf("DiffStat = %+v, want only the first repository", ds)
 		}
 		if len(states) != 1 || states[0].RepoIndex != 0 {
@@ -467,7 +468,7 @@ func TestQueryRuntime(t *testing.T) {
 
 func TestExtractRepoDS(t *testing.T) {
 	t.Parallel()
-	ds := agent.DiffStat{
+	ds := v3.DiffStat{
 		{Path: "a/b/main.go", LinesAdded: 10, LinesDeleted: 3},
 		{Path: "a/b/util.go", LinesAdded: 5, LinesDeleted: 0},
 	}
@@ -648,7 +649,7 @@ func TestParseDiffNumstat(t *testing.T) {
 		if len(ds) != 2 {
 			t.Fatalf("files = %d, want 2", len(ds))
 		}
-		want := []agent.DiffFileStat{
+		want := []v3.DiffFileStat{
 			{Path: "src/main.go", LinesAdded: 10, LinesDeleted: 3},
 			{Path: "src/util.go", LinesAdded: 5, LinesDeleted: 0},
 		}

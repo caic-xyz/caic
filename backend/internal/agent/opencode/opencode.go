@@ -16,7 +16,10 @@ import (
 	"sync"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/opencode"
+	"github.com/maruel/gomode/mcp"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -262,7 +265,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 						case opencode.ContentText:
 							input.Text += content.Text
 						case opencode.ContentImage:
-							input.Images = append(input.Images, agent.ImageData{MediaType: content.MimeType, Data: content.Data})
+							input.Images = append(input.Images, v3.ImageData{MediaType: content.MimeType, Data: content.Data})
 						case opencode.ContentAudio, opencode.ContentResource, opencode.ContentResourceLink:
 							// UserInputMessage currently has no representation for these ACP content types.
 						}
@@ -723,7 +726,7 @@ func readJSONRPCResponse(ctx context.Context, r *agent.RelayRecordReader, handle
 					if handleMCP == nil {
 						continue
 					}
-					if err := handleMCP(agent.MCPRequest{ID: request.ID, Method: request.Method, Name: request.Name, Arguments: request.Arguments}); err != nil {
+					if err := handleMCP(agent.MCPRequest{ID: request.ID, Method: mcp.Method(request.Method), Name: request.Name, Arguments: request.Arguments}); err != nil {
 						ch <- result{nil, fmt.Errorf("respond task-scoped MCP: %w", err)}
 						return
 					}

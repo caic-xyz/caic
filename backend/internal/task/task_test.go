@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -242,8 +244,8 @@ func TestTask(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 		delta := &agent.TextDeltaMessage{Text: strings.Repeat("payload", 1024)}
-		diff := agent.DiffStat{{Path: "main.go", LinesAdded: 3}}
-		repos := []agent.RepoState{{RepoIndex: 0, Branch: "caic-test", ChangedFiles: 1}}
+		diff := v3.DiffStat{{Path: "main.go", LinesAdded: 3}}
+		repos := []v3.RepoState{{RepoIndex: 0, Branch: "caic-test", ChangedFiles: 1}}
 		prefix := []agent.TimedMessage{
 			{Message: &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: diff, Repos: repos}},
 			{Message: delta},
@@ -1093,7 +1095,7 @@ func TestTask(t *testing.T) {
 			// Add an AskMessage.
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
-				Questions: []agent.AskQuestion{{Question: "which?"}},
+				Questions: []v3.AskQuestion{{Question: "which?"}},
 			}, false)
 			if tk.GetState() != taskslog.StateAsking {
 				t.Errorf("state = %v, want %v", tk.GetState(), taskslog.StateAsking)
@@ -1105,7 +1107,7 @@ func TestTask(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
-				Questions: []agent.AskQuestion{{Question: "which?"}},
+				Questions: []v3.AskQuestion{{Question: "which?"}},
 			}, false)
 			tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: "ask1"}, false)
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
@@ -1119,7 +1121,7 @@ func TestTask(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
-				Questions: []agent.AskQuestion{{Question: "which?"}},
+				Questions: []v3.AskQuestion{{Question: "which?"}},
 			}, false)
 			tk.addMessage(t.Context(), &agent.ToolResultMessage{
 				ToolUseID: "ask1",
@@ -1141,7 +1143,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."}, false)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
-				Questions: []agent.AskQuestion{{Question: "which?"}},
+				Questions: []v3.AskQuestion{{Question: "which?"}},
 			}, false)
 			if tk.GetState() != taskslog.StateAsking {
 				t.Fatalf("state = %v, want %v before result", tk.GetState(), taskslog.StateAsking)
@@ -1184,7 +1186,7 @@ func TestTask(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
-				Questions: []agent.AskQuestion{{Question: "which?"}},
+				Questions: []v3.AskQuestion{{Question: "which?"}},
 			}, false)
 			// Simulate watchSession setting Waiting before ResultMessage
 			// is processed by the dispatch goroutine.
@@ -1225,7 +1227,7 @@ func TestTask(t *testing.T) {
 			}, false)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
-				Questions: []agent.AskQuestion{{Question: "which?"}},
+				Questions: []v3.AskQuestion{{Question: "which?"}},
 			}, false)
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != taskslog.StateAsking {
@@ -1387,7 +1389,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
-			ds := agent.DiffStat{
+			ds := v3.DiffStat{
 				{Path: "main.go", LinesAdded: 10, LinesDeleted: 3},
 				{Path: "img.png", Binary: true},
 			}
@@ -1405,7 +1407,7 @@ func TestTask(t *testing.T) {
 			// Update with new diff stat.
 			tk.addMessage(t.Context(), &agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
-				DiffStat:    agent.DiffStat{{Path: "new.go", LinesAdded: 1, LinesDeleted: 0}},
+				DiffStat:    v3.DiffStat{{Path: "new.go", LinesAdded: 1, LinesDeleted: 0}},
 			}, false)
 			got = tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "new.go" {
@@ -1419,7 +1421,7 @@ func TestTask(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			tk.addMessage(t.Context(), &agent.ResultMessage{
 				MessageType: "result",
-				DiffStat:    agent.DiffStat{{Path: "a.go", LinesAdded: 5, LinesDeleted: 2}},
+				DiffStat:    v3.DiffStat{{Path: "a.go", LinesAdded: 5, LinesDeleted: 2}},
 			}, false)
 			got := tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "a.go" || got[0].LinesAdded != 5 {
@@ -1437,12 +1439,12 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "old.go", LinesAdded: 1}},
+					DiffStat:    v3.DiffStat{{Path: "old.go", LinesAdded: 1}},
 				},
 				&agent.TextMessage{Text: "hello"},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "latest.go", LinesAdded: 5}},
+					DiffStat:    v3.DiffStat{{Path: "latest.go", LinesAdded: 5}},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1458,11 +1460,11 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "stale.go", LinesAdded: 1}},
+					DiffStat:    v3.DiffStat{{Path: "stale.go", LinesAdded: 1}},
 				},
 				&agent.ResultMessage{
 					MessageType: "result",
-					DiffStat:    agent.DiffStat{{Path: "authoritative.go", LinesAdded: 10}},
+					DiffStat:    v3.DiffStat{{Path: "authoritative.go", LinesAdded: 10}},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1478,11 +1480,11 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.ResultMessage{
 					MessageType: "result",
-					DiffStat:    agent.DiffStat{{Path: "result.go", LinesAdded: 5}},
+					DiffStat:    v3.DiffStat{{Path: "result.go", LinesAdded: 5}},
 				},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "relay.go", LinesAdded: 3}},
+					DiffStat:    v3.DiffStat{{Path: "relay.go", LinesAdded: 3}},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1508,12 +1510,12 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}},
+					DiffStat:    v3.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}},
 				},
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{},
+					DiffStat:    v3.DiffStat{},
 				},
 			})
 			got := tk.LiveDiffStat()
@@ -1524,7 +1526,7 @@ func TestTask(t *testing.T) {
 			tk.SetRuntimeConnectionInfo("test-runtime:adopted", runtime.ConnectionTarget{}, "", "", 0)
 			tk.SetLiveRepositorySummary(&repo.GitSnapshot{
 				Read:     repo.NewGitRead(tk.RuntimeInstanceID()),
-				DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}},
+				DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 2}},
 			})
 			got = tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "main.go" {
@@ -2051,7 +2053,7 @@ func TestTask(t *testing.T) {
 				&agent.InitMessage{SessionID: "s1"},
 				&agent.AskMessage{
 					ToolUseID: "ask1",
-					Questions: []agent.AskQuestion{{Question: "which?"}},
+					Questions: []v3.AskQuestion{{Question: "which?"}},
 				},
 				&agent.ResultMessage{MessageType: "result"},
 			}
@@ -2068,7 +2070,7 @@ func TestTask(t *testing.T) {
 				&agent.InitMessage{SessionID: "s1"},
 				&agent.AskMessage{
 					ToolUseID: "ask1",
-					Questions: []agent.AskQuestion{{Question: "which?"}},
+					Questions: []v3.AskQuestion{{Question: "which?"}},
 				},
 			}
 			tk.SeedTimeline(msgs)
@@ -2083,7 +2085,7 @@ func TestTask(t *testing.T) {
 			msgs := []agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "ask1",
-					Questions: []agent.AskQuestion{{Question: "which?"}},
+					Questions: []v3.AskQuestion{{Question: "which?"}},
 				},
 				&agent.ToolResultMessage{ToolUseID: "ask1"},
 				&agent.ResultMessage{MessageType: "result"},
@@ -2100,7 +2102,7 @@ func TestTask(t *testing.T) {
 			msgs := []agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "ask1",
-					Questions: []agent.AskQuestion{{Question: "which?"}},
+					Questions: []v3.AskQuestion{{Question: "which?"}},
 				},
 				&agent.ToolResultMessage{ToolUseID: "ask1", Error: "permission denied"},
 				&agent.ResultMessage{MessageType: "result"},
@@ -2138,7 +2140,7 @@ func TestTask(t *testing.T) {
 				&agent.ResultMessage{MessageType: "result"},
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat:    agent.DiffStat{{Path: "main.go", LinesAdded: 1}},
+					DiffStat:    v3.DiffStat{{Path: "main.go", LinesAdded: 1}},
 				},
 			}
 			tk.SeedTimeline(msgs)
@@ -2515,7 +2517,7 @@ func TestTask(t *testing.T) {
 				t.Parallel()
 				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 				tk.SetState(taskslog.StateRunning)
-				tk.addMessage(t.Context(), &agent.AskMessage{ToolUseID: "ask1", Questions: []agent.AskQuestion{{Question: "which?"}}}, false)
+				tk.addMessage(t.Context(), &agent.AskMessage{ToolUseID: "ask1", Questions: []v3.AskQuestion{{Question: "which?"}}}, false)
 				tk.addMessage(t.Context(), native("child-1", agent.NativeSubagentStatusRunning), false)
 				tk.addMessage(t.Context(), result(), false)
 				if got := tk.GetState(); got != taskslog.StateAsking {
@@ -3041,16 +3043,16 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
@@ -3080,31 +3082,31 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
@@ -3128,31 +3130,31 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "First?"}},
+					Questions: []v3.AskQuestion{{Question: "First?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "First?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "First?"}},
 						},
 					},
 				},
 				&agent.AskMessage{
 					ToolUseID: "toolu-2",
-					Questions: []agent.AskQuestion{{Question: "Second?"}},
+					Questions: []v3.AskQuestion{{Question: "Second?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-2",
 						ToolUseID: "toolu-2",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Second?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Second?"}},
 						},
 					},
 				},
@@ -3173,16 +3175,16 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
@@ -3200,16 +3202,16 @@ func TestTask(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
@@ -3254,7 +3256,7 @@ func TestTask(t *testing.T) {
 			path := filepath.Join(dir, tk.LogFilename())
 			header, err := json.Marshal(agent.MetaMessage{
 				MessageType: "caic_meta",
-				Version:     int(agent.LogVersionV1),
+				Version:     int(agent.LogVersionV3),
 				Prompt:      "test",
 				Harness:     "claude",
 			})
@@ -3287,10 +3289,7 @@ func TestTask(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			encoded, err := agent.MarshalMessage(msg)
-			if err != nil {
-				t.Fatal(err)
-			}
+			encoded := []byte(`{"forge_owner":"acme","forge_pr":42,"forge_repo":"widget","t":"pr"}`)
 			want := append(append([]byte(nil), before...), append(encoded, '\n')...)
 			if !bytes.Equal(data, want) {
 				t.Fatalf("log = %q, want %q", data, want)
@@ -3303,7 +3302,7 @@ func TestTask(t *testing.T) {
 					MessageType: "caic_meta",
 					Version:     int(version),
 					Prompt:      "test",
-					Harness:     h,
+					Harness:     string(h),
 				}
 				value := any(meta)
 				if version == agent.LogVersionV2 {
@@ -3519,8 +3518,8 @@ func TestTask(t *testing.T) {
 
 	t.Run("SyntheticUserInput", func(t *testing.T) {
 		t.Parallel()
-		img := agent.ImageData{Data: "base64data", MediaType: "image/png"}
-		prompt := agent.Prompt{Text: "look at this", Images: []agent.ImageData{img}}
+		img := v3.ImageData{Data: "base64data", MediaType: "image/png"}
+		prompt := agent.Prompt{Text: "look at this", Images: []v3.ImageData{img}}
 		msg := syntheticUserInput(prompt)
 		if msg.Text != "look at this" {
 			t.Errorf("Text = %q, want %q", msg.Text, "look at this")
@@ -3580,15 +3579,15 @@ func TestTask(t *testing.T) {
 	})
 	t.Run("DiffStatMessageRepoStates", func(t *testing.T) {
 		t.Parallel()
-		probe := []agent.RepoState{{RepoIndex: 0, Branch: "caic-1", Ahead: 2, ChangedFiles: 3, LinesAdded: 10, LinesDeleted: 4, UncommittedFiles: 1}}
-		watcherDiff := agent.DiffStat{{Path: "relay.go", LinesAdded: 1}}
+		probe := []v3.RepoState{{RepoIndex: 0, Branch: "caic-1", Ahead: 2, ChangedFiles: 3, LinesAdded: 10, LinesDeleted: 4, UncommittedFiles: 1}}
+		watcherDiff := v3.DiffStat{{Path: "relay.go", LinesAdded: 1}}
 		t.Run("LiveUpdateNotifies", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 			stateChanged, _ := tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
-				DiffStat:    agent.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 4}},
+				DiffStat:    v3.DiffStat{{Path: "main.go", LinesAdded: 10, LinesDeleted: 4}},
 				Repos:       probe,
 			}}, false)
 			if !stateChanged {
@@ -4105,16 +4104,16 @@ func TestRepositorySummaryRejectsReplacedInstance(t *testing.T) {
 	t.Parallel()
 	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 	tk.SetRuntimeConnectionInfo("test-runtime:new", runtime.ConnectionTarget{}, "", "", 0)
-	current := agent.DiffStat{{Path: "current.go", LinesAdded: 1}}
+	current := v3.DiffStat{{Path: "current.go", LinesAdded: 1}}
 	tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: current}}, false)
 	for _, id := range []runtime.ID{"test-runtime:old", ""} {
-		if tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(id), RepoStates: []agent.RepoState{{Branch: "stale"}}}) {
+		if tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(id), RepoStates: []v3.RepoState{{Branch: "stale"}}}) {
 			t.Fatal("accepted a summary from a replaced or removed instance")
 		}
 	}
 	read := repo.NewGitRead("test-runtime:old")
 	changed, _, _ := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
-		DiffStat: agent.DiffStat{{Path: "old.go"}}, Repos: []agent.RepoState{{Branch: "old"}},
+		DiffStat: v3.DiffStat{{Path: "old.go"}}, Repos: []v3.RepoState{{Branch: "old"}},
 	}}, false, &repo.GitSnapshot{Read: read}, nil)
 	if changed {
 		t.Fatal("delayed post-tool probe updated the task summary")
@@ -4130,10 +4129,10 @@ func TestPartialGitSummary(t *testing.T) {
 	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
 	target := repo.GitTarget{InstanceID: tk.RuntimeInstanceID(), Repos: []runtime.Repo{{ContainerPath: "/home/user/src/one", Branch: "branch-one"}, {ContainerPath: "/home/user/src/two", Branch: "branch-two"}}}
 	tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target,
-		DiffStat:   agent.DiffStat{{Path: "one/old.go", LinesAdded: 3}, {Path: "two/old.go", LinesAdded: 7}},
-		RepoStates: []agent.RepoState{{RepoIndex: 0, ChangedFiles: 1, LinesAdded: 3}, {RepoIndex: 1, ChangedFiles: 1, LinesAdded: 7}}})
+		DiffStat:   v3.DiffStat{{Path: "one/old.go", LinesAdded: 3}, {Path: "two/old.go", LinesAdded: 7}},
+		RepoStates: []v3.RepoState{{RepoIndex: 0, ChangedFiles: 1, LinesAdded: 3}, {RepoIndex: 1, ChangedFiles: 1, LinesAdded: 7}}})
 	tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, FailedRepos: []int{1},
-		DiffStat: agent.DiffStat{{Path: "one/fresh.go", LinesAdded: 5}}, RepoStates: []agent.RepoState{{RepoIndex: 0, ChangedFiles: 1, LinesAdded: 5}}})
+		DiffStat: v3.DiffStat{{Path: "one/fresh.go", LinesAdded: 5}}, RepoStates: []v3.RepoState{{RepoIndex: 0, ChangedFiles: 1, LinesAdded: 5}}})
 	if got := tk.LiveDiffStat(); len(got) != 2 || got[0].Path != "one/fresh.go" || got[1].Path != "two/old.go" {
 		t.Fatalf("partial read hid failed repository changes: %+v", got)
 	}
@@ -4162,7 +4161,7 @@ func TestPartialGitSummaryRecovery(t *testing.T) {
 	if states := tk.Snapshot().RepoStates; len(states) != 1 || !states[0].Stale {
 		t.Fatalf("initial failure appeared clean: %+v", states)
 	}
-	clean := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, RepoStates: []agent.RepoState{{RepoIndex: 0, Branch: "main"}}}
+	clean := repo.GitSnapshot{Read: repo.NewGitRead(target.InstanceID), Target: target, RepoStates: []v3.RepoState{{RepoIndex: 0, Branch: "main"}}}
 	if !tk.SetLiveRepositorySummary(&clean) {
 		t.Fatal("recovery was not published")
 	}
@@ -4189,7 +4188,7 @@ func TestGitSummaryLogRoundTrip(t *testing.T) {
 			}
 			// Dispatch owns the log even before a session is attached.
 			target := tk.GitTarget()
-			original := &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "old.go", LinesAdded: 7}}, Repos: []agent.RepoState{{RepoIndex: 0, Branch: "main", ChangedFiles: 1, LinesAdded: 7, Stale: kind == "result clean recovery"}}}
+			original := &agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: v3.DiffStat{{Path: "old.go", LinesAdded: 7}}, Repos: []v3.RepoState{{RepoIndex: 0, Branch: "main", ChangedFiles: 1, LinesAdded: 7, Stale: kind == "result clean recovery"}}}
 			if err := log.AppendMessage(original); err != nil {
 				t.Fatal(err)
 			}
@@ -4205,7 +4204,7 @@ func TestGitSummaryLogRoundTrip(t *testing.T) {
 				}
 				if kind == "result clean recovery" {
 					snapshot.FailedRepos = nil
-					snapshot.RepoStates = []agent.RepoState{{RepoIndex: 0, Branch: "main"}}
+					snapshot.RepoStates = []v3.RepoState{{RepoIndex: 0, Branch: "main"}}
 				}
 			}
 			changed, _, err := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: message}, false, &snapshot, log)

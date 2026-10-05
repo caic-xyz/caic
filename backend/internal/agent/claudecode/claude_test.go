@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -40,7 +42,7 @@ func TestWritePrompt(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
 		var b wireFormat
-		images := []agent.ImageData{
+		images := []v3.ImageData{
 			{MediaType: "image/png", Data: "iVBOR..."},
 		}
 		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
@@ -86,7 +88,7 @@ func TestWritePrompt(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
 		var b wireFormat
-		images := []agent.ImageData{
+		images := []v3.ImageData{
 			{MediaType: "image/jpeg", Data: "/9j/..."},
 		}
 		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, agent.DiscardLogSink{Version: agent.LogVersionV1}); err != nil {
@@ -419,15 +421,15 @@ func TestControlConn(t *testing.T) {
 				&agent.TextMessage{Text: "I need one choice."},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{
 								Question: "Which login boundary should Google use in caic?",
 								Header:   "Login",
-								Options: []agent.AskOption{
+								Options: []v3.AskOption{
 									{Label: "Identity only"},
 									{Label: "Forge-coupled"},
 								},
@@ -559,22 +561,22 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
-		pending := agent.PendingUserAction{
+		pending := v3.PendingUserAction{
 			Kind:      agent.PendingUserActionAskUserQuestion,
 			RequestID: "req-restored",
 			ToolUseID: "toolu-restored",
-			Ask: agent.PendingAskAction{
-				Questions: []agent.AskQuestion{{
+			Ask: v3.PendingAskAction{
+				Questions: []v3.AskQuestion{{
 					Question: "Which login boundary should Google use in caic?",
 					Header:   "Login",
-					Options: []agent.AskOption{
+					Options: []v3.AskOption{
 						{Label: "Identity only"},
 						{Label: "Forge-coupled"},
 					},
 				}},
 			},
 		}
-		if err := c.restorePendingActions([]agent.PendingUserAction{pending}); err != nil {
+		if err := c.restorePendingActions([]v3.PendingUserAction{pending}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -607,16 +609,16 @@ func TestControlConn(t *testing.T) {
 		c := &controlConn{Conn: inner}
 		pending := &agent.PendingUserActionMessage{
 			MessageType: agent.PendingUserActionMessageType,
-			Action: agent.PendingUserAction{
+			Action: v3.PendingUserAction{
 				Kind:      agent.PendingUserActionAskUserQuestion,
 				RequestID: "req-restored",
 				ToolUseID: "toolu-restored",
-				Ask: agent.PendingAskAction{
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+				Ask: v3.PendingAskAction{
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 			},
 		}
-		if err := c.restorePendingActions([]agent.PendingUserAction{pending.Action}); err != nil {
+		if err := c.restorePendingActions([]v3.PendingUserAction{pending.Action}); err != nil {
 			t.Fatal(err)
 		}
 		handled, err := c.handleControlMessage(pending)
@@ -639,15 +641,15 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
-		pending := agent.PendingUserAction{
+		pending := v3.PendingUserAction{
 			Kind:      agent.PendingUserActionAskUserQuestion,
 			RequestID: "req-restored",
 			ToolUseID: "toolu-restored",
-			Ask: agent.PendingAskAction{
-				Questions: []agent.AskQuestion{{Question: "Which?"}},
+			Ask: v3.PendingAskAction{
+				Questions: []v3.AskQuestion{{Question: "Which?"}},
 			},
 		}
-		if err := c.restorePendingActions([]agent.PendingUserAction{pending, pending}); err != nil {
+		if err := c.restorePendingActions([]v3.PendingUserAction{pending, pending}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -666,21 +668,21 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
-		actions := []agent.PendingUserAction{
+		actions := []v3.PendingUserAction{
 			{
 				Kind:      agent.PendingUserActionAskUserQuestion,
 				RequestID: "req-1",
 				ToolUseID: "toolu-1",
-				Ask: agent.PendingAskAction{
-					Questions: []agent.AskQuestion{{Question: "First?"}},
+				Ask: v3.PendingAskAction{
+					Questions: []v3.AskQuestion{{Question: "First?"}},
 				},
 			},
 			{
 				Kind:      agent.PendingUserActionAskUserQuestion,
 				RequestID: "req-2",
 				ToolUseID: "toolu-2",
-				Ask: agent.PendingAskAction{
-					Questions: []agent.AskQuestion{{Question: "Second?"}},
+				Ask: v3.PendingAskAction{
+					Questions: []v3.AskQuestion{{Question: "Second?"}},
 				},
 			},
 		}
@@ -697,12 +699,12 @@ func TestControlConn(t *testing.T) {
 		t.Parallel()
 		inner := &fakeConn{}
 		c := &controlConn{Conn: inner}
-		action := agent.PendingUserAction{
-			Kind:      agent.PendingUserActionKind("future_action"),
+		action := v3.PendingUserAction{
+			Kind:      v3.PendingUserActionKind("future_action"),
 			RequestID: "req-future",
 			ToolUseID: "toolu-future",
 		}
-		if err := c.restorePendingActions([]agent.PendingUserAction{action}); err == nil {
+		if err := c.restorePendingActions([]v3.PendingUserAction{action}); err == nil {
 			t.Fatal("restorePendingActions returned nil error")
 		} else if !strings.Contains(err.Error(), "unsupported pending user action kind") {
 			t.Fatalf("err = %v, want unsupported pending user action kind", err)

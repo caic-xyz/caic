@@ -14,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/logtest"
 )
 
@@ -37,7 +38,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "big.bin")
 		runGit(t, clone, "commit", "-m", "add binary")
 
-		ds := agent.DiffStat{{Path: "big.bin", Binary: true}}
+		ds := v3.DiffStat{{Path: "big.bin", Binary: true}}
 		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)
@@ -66,7 +67,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "small.bin")
 		runGit(t, clone, "commit", "-m", "add small binary")
 
-		ds := agent.DiffStat{{Path: "small.bin", Binary: true}}
+		ds := v3.DiffStat{{Path: "small.bin", Binary: true}}
 		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)
@@ -197,7 +198,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "clean.go")
 		runGit(t, clone, "commit", "-m", "add clean")
 
-		ds := agent.DiffStat{{Path: "clean.go", LinesAdded: 1}}
+		ds := v3.DiffStat{{Path: "clean.go", LinesAdded: 1}}
 		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
 		if err != nil {
 			t.Fatal(err)

@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
@@ -837,7 +839,7 @@ func TestRunner(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
-					DiffStat: agent.DiffStat{
+					DiffStat: v3.DiffStat{
 						{Path: "a.go", LinesAdded: 10, LinesDeleted: 3},
 						{Path: "b.go", LinesAdded: 5, LinesDeleted: 0},
 					},
@@ -900,7 +902,7 @@ func TestRunner(t *testing.T) {
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
 			tk.SeedTimeline([]agent.Message{
-				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: agent.DiffStat{{Path: "main.go", LinesAdded: 1}}},
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat", DiffStat: v3.DiffStat{{Path: "main.go", LinesAdded: 1}}},
 				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
 			})
 
@@ -984,6 +986,68 @@ func TestRunner(t *testing.T) {
 
 	t.Run("ReviveTask", func(t *testing.T) {
 		t.Parallel()
+		t.Run("rejects_read_only_history_before_state_or_runtime_changes", func(t *testing.T) {
+			t.Parallel()
+			for _, compressed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
+					t.Parallel()
+					backend := &runtimetest.FakeBackend{}
+					dir := t.TempDir()
+					r := newTestAgentRuntimeWithRuntime(t, backend, nil, dir)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "historical"}, "test", "", "")
+					id := runtime.NewID("test-runtime", "historical")
+					tk.SetRuntimeConnectionInfo(id, runtime.ConnectionTarget{SSHHost: "historical"}, "", "", 0)
+					tk.SetSessionMetadata("historical-session", "", "", "")
+					tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "historical"}})
+					tk.SetState(taskslog.StateStopped)
+					path := filepath.Join(dir, tk.LogFilename())
+					const history = `{"type":"caic_meta","version":1,"prompt":"historical","repos":[],"harness":"test"}` + "\n" + `{"type":"caic_result","state":"stopped"}` + "\n"
+					if err := os.WriteFile(path, []byte(history), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if compressed {
+						var err error
+						path, err = r.LogStore.Compress(path, nil, taskslog.StateStopped)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					before, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+					if err != nil {
+						t.Fatal(err)
+					}
+					r.LogPath.Set(path)
+					if _, err := r.ReviveTask(t.Context(), tk); !errors.Is(err, agent.ErrReadOnlyLog) {
+						t.Fatalf("v1 revival: %v", err)
+					}
+					if _, err := r.Reconnect(t.Context(), tk); !errors.Is(err, agent.ErrReadOnlyLog) {
+						t.Fatalf("v1 reconnect: %v", err)
+					}
+					if _, err := r.Start(t.Context(), tk, ""); !errors.Is(err, agent.ErrReadOnlyLog) {
+						t.Fatalf("v1 start: %v", err)
+					}
+					tk.SetState(taskslog.StateWaiting)
+					count := tk.MessageCount()
+					if _, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "continue"}); !errors.Is(err, agent.ErrReadOnlyLog) {
+						t.Fatalf("v1 restart: %v", err)
+					}
+					if _, err := r.ClearContextSession(t.Context(), tk); !errors.Is(err, agent.ErrReadOnlyLog) {
+						t.Fatalf("v1 clear context: %v", err)
+					}
+					if tk.GetState() != taskslog.StateWaiting || tk.MessageCount() != count {
+						t.Fatal("rejected v1 replacement cleared history or changed state")
+					}
+					tk.SetState(taskslog.StateStopped)
+					if tk.GetState() != taskslog.StateStopped || tk.HasSession() || backend.Status(id) != runtimetest.StatusAbsent {
+						t.Fatal("rejected v1 continuation mutated task or runtime")
+					}
+					got, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+					if err != nil || !bytes.Equal(got, before) {
+						t.Fatalf("v1 history changed: %v", err)
+					}
+				})
+			}
+		})
 		t.Run("refreshes_repository_state_after_live_tool", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
@@ -1016,7 +1080,7 @@ func TestRunner(t *testing.T) {
 			})
 			// Replace the one-shot revival probe with stale state. The next
 			// live Bash result must publish an authoritative probe again.
-			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{Repos: []agent.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}}}}, false)
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{Repos: []v3.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}}}}, false)
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: "rebase", Name: "Bash", Input: json.RawMessage(`{}`)}}
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{ToolUseID: "rebase"}}
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result", Result: "rebased"}}
@@ -1043,7 +1107,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			backend := &reviveCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
-			prompt := agent.Prompt{Text: "recover this task", Images: []agent.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}
+			prompt := agent.Prompt{Text: "recover this task", Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}}}
 			tk := mustNewTask(t, ksid.NewID(), prompt, "test", "", "")
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateStopped)
@@ -1527,16 +1591,16 @@ func testRunnerSessions(t *testing.T) {
 			tk.SeedTimeline([]agent.Message{
 				&agent.AskMessage{
 					ToolUseID: "toolu-1",
-					Questions: []agent.AskQuestion{{Question: "Which?"}},
+					Questions: []v3.AskQuestion{{Question: "Which?"}},
 				},
 				&agent.PendingUserActionMessage{
 					MessageType: agent.PendingUserActionMessageType,
-					Action: agent.PendingUserAction{
+					Action: v3.PendingUserAction{
 						Kind:      agent.PendingUserActionAskUserQuestion,
 						RequestID: "req-1",
 						ToolUseID: "toolu-1",
-						Ask: agent.PendingAskAction{
-							Questions: []agent.AskQuestion{{Question: "Which?"}},
+						Ask: v3.PendingAskAction{
+							Questions: []v3.AskQuestion{{Question: "Which?"}},
 						},
 					},
 				},
@@ -1815,7 +1879,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatal("stale result lost its recorded payload or lifecycle")
 			}
 			// A later relay refresh supersedes already completed host probes.
-			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: agent.DiffStat{{Path: "restored.go", LinesAdded: 1}}}}, false)
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: v3.DiffStat{{Path: "restored.go", LinesAdded: 1}}}}, false)
 			if tk.SetLiveRepositorySummary(&latest) || tk.LiveDiffStat()[0].Path != "restored.go" {
 				t.Fatal("completed snapshot overwrote a later relay refresh")
 			}
@@ -1831,7 +1895,7 @@ func testRunnerSessions(t *testing.T) {
 					tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
 					tk.SetRuntimeConnectionInfo("test-runtime:ctr-1", runtime.ConnectionTarget{}, "", "", 0)
 					tk.SetState(taskslog.StateRunning)
-					prior := agent.DiffStat{{Path: "prior.go", LinesAdded: 4}}
+					prior := v3.DiffStat{{Path: "prior.go", LinesAdded: 4}}
 					backend.onDiff = func() {
 						// A summary change before this RPC finishes must not invalidate the
 						// completed result read. A changed instance still invalidates it.
@@ -1849,7 +1913,7 @@ func testRunnerSessions(t *testing.T) {
 					case <-time.After(time.Second):
 						t.Fatal("result dispatch did not finish")
 					}
-					want := agent.DiffStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}}
+					want := v3.DiffStat{{Path: "main.go", LinesAdded: 5, LinesDeleted: 1}}
 					if replaced {
 						want = prior
 					}
@@ -1869,7 +1933,7 @@ func testRunnerSessions(t *testing.T) {
 					t.Parallel()
 					backend := &resultFetchBackend{FakeBackend: testContainer()}
 					backend.RepositoryStatusValue = runtime.RepositoryStatus{Branch: "caic-0", Behind: 2}
-					want := agent.DiffStat{{Path: "fresh.go", LinesAdded: 9}}
+					want := v3.DiffStat{{Path: "fresh.go", LinesAdded: 9}}
 					if tc.clean {
 						want = nil
 					} else {
@@ -1930,7 +1994,7 @@ func testRunnerSessions(t *testing.T) {
 			tk.SetState(taskslog.StateRunning)
 			persisted := &agenttest.LogSink{Version: agent.LogVersionV2}
 			// Exercise delivery before AttachSession.
-			tk.addMessage(t.Context(), agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+			tk.addMessage(t.Context(), agent.NewTurnCommitSnapshotMessage([]v3.RepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
 				CommitHash:     "1111111111111111111111111111111111111111",
@@ -1968,7 +2032,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatalf("result summary = %#v", summaryMessage)
 			}
 
-			wantCommits := []agent.RepositoryCommit{{
+			wantCommits := []v3.RepositoryCommit{{
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
 				CommitHash:     "2222222222222222222222222222222222222222",
@@ -1982,7 +2046,7 @@ func testRunnerSessions(t *testing.T) {
 				if !reflect.DeepEqual(snapshot.RepositoryCommits, wantCommits) {
 					t.Errorf("commit snapshot = %+v, want commits %+v", snapshot, wantCommits)
 				}
-				wantChange := &agent.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 2, BinaryFiles: 1}
+				wantChange := &v3.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 2, BinaryFiles: 1}
 				if !reflect.DeepEqual(snapshot.ChangeStat, wantChange) {
 					t.Errorf("commit snapshot change = %+v, want %+v", snapshot.ChangeStat, wantChange)
 				}
@@ -2102,7 +2166,7 @@ func testRunnerSessions(t *testing.T) {
 		})
 
 		t.Run("EmitDiffStatBranch", func(t *testing.T) {
-			probe := []agent.RepoState{{RepoIndex: 0, Branch: "caic-1", ChangedFiles: 3, LinesAdded: 10, LinesDeleted: 4}}
+			probe := []v3.RepoState{{RepoIndex: 0, Branch: "caic-1", ChangedFiles: 3, LinesAdded: 10, LinesDeleted: 4}}
 			repos := []runtime.Repo{{GitRoot: "/repo", Branch: "caic-0", ContainerPath: "/repo"}}
 			newRuntime := func(t *testing.T, backend testRuntimeBackend) *AgentRuntime {
 				r := newTestAgentRuntime(t, nil, "", nil)

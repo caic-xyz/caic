@@ -15,9 +15,10 @@ import (
 	"sync"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/md/git"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -36,12 +37,12 @@ func runtimeRemoteRef(id runtime.ID, branch string) string {
 // When the output also contains an appended git diff --stat block (as produced
 // by --numstat --stat), binary sizes are attached to the matching entries.
 // Returns nil if there are no changed files.
-func ParseDiffNumstat(numstat string) agent.DiffStat {
+func ParseDiffNumstat(numstat string) v3.DiffStat {
 	numstat = strings.TrimSpace(numstat)
 	if numstat == "" {
 		return nil
 	}
-	var files agent.DiffStat
+	var files v3.DiffStat
 	statIndex := 0
 	for line := range strings.SplitSeq(numstat, "\n") {
 		line = strings.TrimSpace(line)
@@ -66,7 +67,7 @@ func ParseDiffNumstat(numstat string) agent.DiffStat {
 		if len(parts) != 3 {
 			continue
 		}
-		fs := agent.DiffFileStat{Path: parts[2]}
+		fs := v3.DiffFileStat{Path: parts[2]}
 		if parts[0] == "-" && parts[1] == "-" {
 			fs.Binary = true
 		} else {
@@ -179,7 +180,7 @@ func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBra
 // pushes each repo's task branch to origin and returns the combined diff stat
 // and any safety issues found. Safety is checked per-repo; when force is
 // false, issues in any repo block the push.
-func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, force bool) (agent.DiffStat, []SafetyIssue, error) {
+func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, force bool) (v3.DiffStat, []SafetyIssue, error) {
 	id, repos, err := w.queryRuntime(t.GitTarget())
 	if err != nil {
 		return nil, nil, err
@@ -240,7 +241,7 @@ func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes 
 // and squash-pushes each repo's task branch onto its default branch. Safety
 // issues always block (no force override). The commit message is built from the
 // task title.
-func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, message string) (agent.DiffStat, []SafetyIssue, error) {
+func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, message string) (v3.DiffStat, []SafetyIssue, error) {
 	id, repos, err := w.queryRuntime(t.GitTarget())
 	if err != nil {
 		return nil, nil, err
@@ -524,7 +525,7 @@ func (w *Checkout) DiffStat(ctx context.Context, log *slog.Logger, runtimes *run
 
 // TurnSnapshot fetches branch tips and measures branch/turn changes as one
 // runtime operation, stamped under the checkout lock like every Git query.
-func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, previous []agent.RepositoryCommit) (GitSnapshot, []agent.RepositoryCommit, *agent.ChangeStat, error) {
+func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, previous []v3.RepositoryCommit) (GitSnapshot, []v3.RepositoryCommit, *v3.ChangeStat, error) {
 	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return GitSnapshot{}, nil, nil, err
@@ -539,8 +540,8 @@ func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes 
 	}
 	measured, err := runtimes.TurnSnapshot(ctx, id, baseline)
 	snapshot := GitSnapshot{Read: NewGitRead(id), Target: GitTarget{InstanceID: id, Repos: repos}}
-	var commits []agent.RepositoryCommit
-	change := &agent.ChangeStat{}
+	var commits []v3.RepositoryCommit
+	change := &v3.ChangeStat{}
 	hasBaseline := len(previous) > 0 && len(measured) == len(repos)
 	for i := range repos {
 		var entry *runtime.TurnRepository
@@ -562,7 +563,7 @@ func (w *Checkout) TurnSnapshot(ctx context.Context, log *slog.Logger, runtimes 
 			continue
 		}
 		for _, c := range entry.Branches {
-			commits = append(commits, agent.RepositoryCommit{RepositoryPath: c.RepositoryPath, BranchName: c.BranchName, CommitHash: c.CommitHash})
+			commits = append(commits, v3.RepositoryCommit{RepositoryPath: c.RepositoryPath, BranchName: c.BranchName, CommitHash: c.CommitHash})
 		}
 		if entry.TurnDiff == nil {
 			hasBaseline = false
@@ -599,8 +600,8 @@ func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, 
 	defer cancel()
 	w.branchMu.Lock()
 	defer w.branchMu.Unlock()
-	var result agent.DiffStat
-	var states []agent.RepoState
+	var result v3.DiffStat
+	var states []v3.RepoState
 	var errs []error
 	var failed []int
 	for i := range repos {
@@ -621,9 +622,9 @@ func (w *Checkout) DiffStatAndRepoStates(ctx context.Context, log *slog.Logger, 
 
 // summarizeRepositoryStatuses derives card statistics from the same snapshots
 // used by the diff view. Repos and statuses must have matching lengths.
-func summarizeRepositoryStatuses(repos []runtime.Repo, statuses []runtime.RepositoryStatus) (agent.DiffStat, []agent.RepoState) {
-	var result agent.DiffStat
-	states := make([]agent.RepoState, len(statuses))
+func summarizeRepositoryStatuses(repos []runtime.Repo, statuses []runtime.RepositoryStatus) (v3.DiffStat, []v3.RepoState) {
+	var result v3.DiffStat
+	states := make([]v3.RepoState, len(statuses))
 	for i := range statuses {
 		stat, state := repositorySummary(&repos[i], i, len(repos), &statuses[i])
 		result = append(result, stat...)
@@ -632,15 +633,15 @@ func summarizeRepositoryStatuses(repos []runtime.Repo, statuses []runtime.Reposi
 	return result, states
 }
 
-func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.RepositoryStatus) (agent.DiffStat, agent.RepoState) {
-	result := make(agent.DiffStat, 0, len(status.DiffStat))
+func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.RepositoryStatus) (v3.DiffStat, v3.RepoState) {
+	result := make(v3.DiffStat, 0, len(status.DiffStat))
 	for j := range status.DiffStat {
 		stat := status.DiffStat[j]
 		path := stat.Path
 		if repoCount > 1 {
 			path = diffRepoPrefix(repo) + "/" + path
 		}
-		result = append(result, agent.DiffFileStat{
+		result = append(result, v3.DiffFileStat{
 			Path:         path,
 			LinesAdded:   stat.LinesAdded,
 			LinesDeleted: stat.LinesDeleted,
@@ -660,7 +661,7 @@ func repositorySummary(repo *runtime.Repo, i, repoCount int, status *runtime.Rep
 			conflicts++
 		}
 	}
-	state := agent.RepoState{
+	state := v3.RepoState{
 		RepoIndex:        i,
 		Branch:           status.Branch,
 		Operation:        string(status.Operation),
@@ -759,8 +760,8 @@ func (w *Checkout) effectiveBaseBranch(t TaskView) string {
 // diff stat. File paths are prefixed with `<repoName>/` when there are multiple
 // repos so the frontend can distinguish changes per repo. The caller must hold
 // branchMu. It returns an error if any repo's diff fails.
-func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (agent.DiffStat, []int, error) {
-	var result agent.DiffStat
+func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, id runtime.ID, repos []runtime.Repo) (v3.DiffStat, []int, error) {
+	var result v3.DiffStat
 	var errs []error
 	var failed []int
 	for i := range repos {
@@ -909,12 +910,12 @@ func deleteLocalBranchIfUnmodified(ctx context.Context, checkout *git.Checkout, 
 // extractRepoDS filters the combined diff stat to entries belonging to repoName,
 // stripping the name prefix. When multi is false (single repo), ds is returned
 // unchanged since no prefix was applied.
-func extractRepoDS(ds agent.DiffStat, repoName string, multi bool) agent.DiffStat {
+func extractRepoDS(ds v3.DiffStat, repoName string, multi bool) v3.DiffStat {
 	if !multi {
 		return ds
 	}
 	prefix := repoName + "/"
-	var result agent.DiffStat
+	var result v3.DiffStat
 	for _, f := range ds {
 		if path, ok := strings.CutPrefix(f.Path, prefix); ok {
 			f.Path = path

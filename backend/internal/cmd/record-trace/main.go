@@ -30,6 +30,8 @@ import (
 	"strings"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	claudedto "github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -109,14 +111,14 @@ func mainImpl() error {
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for optional API key")
 	localFlag := flag.Bool("local", false, "run the harness on this machine instead of a container; requires the harness CLIs on PATH")
-	logVersionFlag := flag.Int("log-version", int(agent.LogVersionV1), "task-log version to record (1, 2, or 3)")
+	logVersionFlag := flag.Int("log-version", int(agent.LogVersionV3), "task-log version to record (2 or 3)")
 	flag.Parse()
 
 	if *harnessFlag == "" {
 		return errors.New("--harness is required")
 	}
 	logVersion := agent.LogVersion(*logVersionFlag)
-	if err := logVersion.Validate(); err != nil {
+	if err := logVersion.ValidateWritable(); err != nil {
 		return fmt.Errorf("--log-version: %w", err)
 	}
 	b, ok := backends[*harnessFlag]
@@ -142,6 +144,9 @@ func mainImpl() error {
 }
 
 func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv string, sc scenario, outputPath, model string, local bool, version agent.LogVersion) error {
+	if err := version.ValidateWritable(); err != nil {
+		return err
+	}
 	workDir, err := setupCheckout()
 	if err != nil {
 		return err
@@ -693,8 +698,8 @@ func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string,
 		MessageType: "caic_meta",
 		Version:     int(version),
 		Prompt:      promptText,
-		Harness:     harnessName,
-		Repos:       []agent.MetaRepo{},
+		Harness:     string(harnessName),
+		Repos:       []v3.MetaRepo{},
 		StartedAt:   time.Now().UTC(),
 	}
 	metaJSON, err := agent.MarshalLogMessage(version, &meta)

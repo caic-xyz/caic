@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -22,7 +24,7 @@ import (
 // non-empty and every struct field set, so the marshaled form exercises the
 // complete historical snapshot shape.
 func pinnedHeaderCacheFixture() *LoadedTask {
-	diffStat := agent.DiffStat{{Path: "file", LinesAdded: 1, LinesDeleted: 1, Binary: true}}
+	diffStat := v3.DiffStat{{Path: "file", LinesAdded: 1, LinesDeleted: 1, Binary: true}}
 	return &LoadedTask{
 		TaskID: "task",
 		Prompt: "prompt",
@@ -149,10 +151,10 @@ func TestHeaderCache(t *testing.T) {
 		fixture.Repos = []RepoMount{}
 		fixture.CacheMounts = nil
 		fixture.Mounts = []runtime.Mount{}
-		fixture.LastTrailer.DiffStat = agent.DiffStat{{Path: "binary", OldSize: 42, NewSize: 84}}
+		fixture.LastTrailer.DiffStat = v3.DiffStat{{Path: "binary", OldSize: 42, NewSize: 84}}
 		fixture.LastTrailer.DiskUsedBytes = new(int64(0))
 		fixture.LastTrailer.Usage.CacheTTLSeconds = 300
-		fixture.LastTrailer.StartupFailure = &agent.StartupFailure{Harness: "claude", Phase: "start", Cause: "broken"}
+		fixture.LastTrailer.StartupFailure = &v3.StartupFailure{Harness: "claude", Phase: "start", Cause: "broken"}
 		raw := inventoryJSON(t, fixture)
 		for _, fragment := range []string{`"repos":[]`, `"cache_mounts":null`, `"mounts":[]`, `"oldSize":42`, `"newSize":84`, `"disk_used_bytes":0`, `"cache_ttl_seconds":300`, `"startup_failure":{"harness":"claude","phase":"start","cause":"broken"}`} {
 			if !bytes.Contains(raw, []byte(fragment)) {

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -251,11 +253,11 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 	t.Run("commit snapshot is a standalone event", func(t *testing.T) {
 		t.Parallel()
 		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
-		events := tracker.ConvertMessage(agent.NewTurnCommitSnapshotMessage([]agent.RepositoryCommit{{
+		events := tracker.ConvertMessage(agent.NewTurnCommitSnapshotMessage([]logv3.RepositoryCommit{{
 			RepositoryPath: "/home/user/src/repo",
 			BranchName:     "caic-1",
 			CommitHash:     "1111111111111111111111111111111111111111",
-		}}, true, &agent.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 1, BinaryFiles: 1}), time.Unix(1, 0))
+		}}, true, &logv3.ChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 1, BinaryFiles: 1}), time.Unix(1, 0))
 		want := &v1.EventCommitSnapshot{
 			Baseline:   true,
 			ChangeStat: &v1.EventChangeStat{Files: 2, LinesAdded: 6, LinesDeleted: 1, BinaryFiles: 1},

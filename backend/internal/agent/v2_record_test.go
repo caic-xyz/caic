@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	v2 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v2"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 type v2AgentRecordFixture struct {
@@ -42,8 +45,8 @@ func TestHostGitSummaryDoesNotAdvanceRelayPosition(t *testing.T) {
 			t.Parallel()
 			encoded, err := MarshalLogMessage(version, &DiffStatMessage{
 				MessageType: "caic_diff_stat",
-				DiffStat:    DiffStat{{Path: "main.go", LinesAdded: 2}},
-				Repos:       []RepoState{{RepoIndex: 0, Branch: "main"}},
+				DiffStat:    v3.DiffStat{{Path: "main.go", LinesAdded: 2}},
+				Repos:       []v3.RepoState{{RepoIndex: 0, Branch: "main"}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -81,6 +84,18 @@ func assertV2FixtureRecord(t *testing.T, name, timestamp, nativeBytes, recordByt
 	wantTime, err := parseV2ProducerTime([]byte(timestamp))
 	if err != nil {
 		t.Fatalf("timestamp %q is not canonical: %v", timestamp, err)
+	}
+
+	// These same literal encoder vectors are exercised by the maintained
+	// Python relay, pinning both Go envelopes to the relay's physical bytes.
+	encoded, err := (&v2.NativeRecord{Type: "agent", Time: wantTime, Message: []byte(nativeBytes)}).MarshalJSON()
+	if err != nil || string(encoded)+"\n" != recordBytes {
+		t.Fatalf("v2 encoded %q: %v", encoded, err)
+	}
+	encoded, err = (&v3.NativeRecord{Type: "input", Time: wantTime, Message: []byte(nativeBytes)}).MarshalJSON()
+	wantInput := strings.Replace(recordBytes, `"t":"agent"`, `"t":"input"`, 1)
+	if err != nil || string(encoded)+"\n" != wantInput {
+		t.Fatalf("v3 input encoded %q: %v", encoded, err)
 	}
 
 	calls := 0
@@ -473,7 +488,7 @@ func TestV2AgentRecord(t *testing.T) {
 		t.Parallel()
 		action := &PendingUserActionMessage{
 			MessageType: PendingUserActionMessageType,
-			Action: PendingUserAction{
+			Action: v3.PendingUserAction{
 				Kind: PendingUserActionAskUserQuestion, RequestID: "request", ToolUseID: "tool",
 			},
 		}
@@ -514,4 +529,42 @@ func TestV2AgentRecord(t *testing.T) {
 			t.Fatalf("error = %v, calls = %d", err, calls)
 		}
 	})
+}
+
+func TestHistoricalContextClearedRecord(t *testing.T) {
+	t.Parallel()
+	// RestartSession wrote this exact SystemMessage projection in both formats.
+	const historical = `{"session_id":"","subtype":"context_cleared","t":"context_cleared","uuid":""}`
+	for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			t.Parallel()
+			encoded, err := MarshalLogMessage(version, ContextCleared())
+			if err != nil || string(encoded) != historical {
+				t.Fatalf("historical writer = %s, %v", encoded, err)
+			}
+			p, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := p.ParseRecord([]byte(historical))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(record.Messages) != 1 {
+				t.Fatalf("restored marker = %#v", record)
+			}
+			marker, ok := record.Messages[0].Message.(*SystemMessage)
+			if !ok || marker.Subtype != "context_cleared" {
+				t.Fatalf("restored marker = %#v", record)
+			}
+			if _, err := p.ParseRecord([]byte(`{"t":"context_cleared","unrelated":true}`)); err == nil {
+				t.Fatal("unknown field accepted")
+			}
+			for _, bad := range []string{`{"t":"context_cleared","session_id":false}`, `{"t":"context_cleared","subtype":"unrelated"}`} {
+				if _, err := p.ParseRecord([]byte(bad)); err == nil {
+					t.Fatalf("malformed marker accepted: %s", bad)
+				}
+			}
+		})
+	}
 }

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 // SafetyIssue describes a potential problem detected before pushing to origin.
@@ -50,7 +50,7 @@ type secretPattern struct {
 // CheckSafety scans the diff for large binary files and potential secrets.
 // It returns any issues found. A non-nil error indicates a git command failure,
 // or incomplete secret scan, not a safety problem.
-func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseBranch string, ds agent.DiffStat) ([]SafetyIssue, error) {
+func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseBranch string, ds v3.DiffStat) ([]SafetyIssue, error) {
 	if log == nil {
 		return nil, errors.New("safety logger is required")
 	}

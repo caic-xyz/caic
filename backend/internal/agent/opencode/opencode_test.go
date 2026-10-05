@@ -299,7 +299,7 @@ func TestHandshakeResultSetConfigOptions(t *testing.T) {
 
 type failingLogSink struct{}
 
-func (failingLogSink) LogVersion() agent.LogVersion { return agent.LogVersionV1 }
+func (failingLogSink) LogVersion() agent.LogVersion { return agent.LogVersionV3 }
 func (failingLogSink) AppendNative([]byte) error    { return nil }
 func (failingLogSink) AppendMessage(agent.Message) error {
 	return errors.New("persist session metadata")
@@ -321,9 +321,9 @@ for arg in "$@"; do
     relay=$!
     echo "$relay" > "$CAIC_OPENCODE_RELAY_PID"
     IFS= read -r _
-    printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"version":"1.0"}}}'
+    printf '%s\n' '{"t":"agent","ts":1.000,"msg":{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"version":"1.0"}}}}'
     IFS= read -r _
-    printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
+    printf '%s\n' '{"t":"agent","ts":2.000,"msg":{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}}'
     while IFS= read -r _; do :; done
     kill "$relay" 2>/dev/null
     wait "$relay" 2>/dev/null

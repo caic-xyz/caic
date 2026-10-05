@@ -16,12 +16,15 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/klauspost/compress/zstd"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
 )
 
 const (
@@ -52,15 +55,15 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		b.Fatal(err)
 	}
 	bw := bufio.NewWriterSize(f, 1<<20)
-	header := benchmarkJSONLine(b, agent.MetaMessage{
+	header := benchmarkJSONLine(b, v1.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     int(agent.LogVersionV1),
 		Prompt:      "benchmark adoption",
-		Repos:       []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
-		Harness:     harness.Claude,
+		Repos:       []v1.MetaRepo{{Name: "org/repo", Branch: "caic-0"}},
+		Harness:     string(harness.Claude),
 		StartedAt:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
-	session := benchmarkJSONLine(b, agent.MetaSessionMessage{
+	session := benchmarkJSONLine(b, v1.MetaSessionMessage{
 		MessageType:   "caic_session",
 		SessionID:     "benchmark-session",
 		ReportedModel: "claude-sonnet-4-6",
@@ -88,7 +91,7 @@ func newAdoptionBenchmarkFixture(b *testing.B) *adoptionBenchmarkFixture {
 		// compressed, terminal task log — the set the header cache targets.
 		// Its size is reserved from the padding so the fixture stays exactly
 		// target bytes.
-		result := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		result := benchmarkJSONLine(b, v1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		resultBytes := int64(len(result) + 1)
 		remaining := target - written
 		const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
@@ -147,7 +150,7 @@ func (f *adoptionBenchmarkFixture) loadedTask() *LoadedTask {
 }
 
 func (f *adoptionBenchmarkFixture) header() *agent.MetaMessage {
-	return &agent.MetaMessage{Prompt: "benchmark adoption", Repos: []agent.MetaRepo{{Name: "org/repo", Branch: "caic-0"}}, Harness: harness.Claude}
+	return &agent.MetaMessage{Prompt: "benchmark adoption", Repos: []v3.MetaRepo{{Name: "org/repo", Branch: "caic-0"}}, Harness: string(harness.Claude)}
 }
 
 type adoptionBenchmarkOperation struct {
@@ -547,12 +550,12 @@ func BenchmarkSettledScanAgeFilter(b *testing.B) {
 // writeSettledBenchLog writes a zstd-compressed terminal task log for repo of
 // roughly size uncompressed bytes (multi-block) so decompressing has a cost.
 func writeSettledBenchLog(b *testing.B, dir, name, repo string, size int) {
-	meta := benchmarkJSONLine(b, agent.MetaMessage{
+	meta := benchmarkJSONLine(b, v1.MetaMessage{
 		MessageType: "caic_meta", Version: int(agent.LogVersionV1), Prompt: "settled bench",
-		Repos: []agent.MetaRepo{{Name: repo, Branch: "caic-0"}}, Harness: harness.Claude,
+		Repos: []v1.MetaRepo{{Name: repo, Branch: "caic-0"}}, Harness: string(harness.Claude),
 		StartedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
-	trailer := benchmarkJSONLine(b, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+	trailer := benchmarkJSONLine(b, v1.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 	const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
 	const suffix = `"}]}}`
 	textLen := max(size-len(meta)-len(trailer)-len(prefix)-len(suffix)-4, 0)

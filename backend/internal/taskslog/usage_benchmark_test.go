@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v1"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -69,12 +71,12 @@ func BenchmarkUsageBackfill(b *testing.B) {
 }
 
 func writeUsageBenchmarkLog(b *testing.B, dir, id string, version agent.LogVersion, times []time.Time) int {
-	meta := agent.MetaMessage{
+	meta := v1.MetaMessage{
 		MessageType:    "caic_meta",
 		Version:        int(version),
 		Prompt:         "backfill benchmark",
-		Repos:          []agent.MetaRepo{{Name: "org/repo"}},
-		Harness:        harness.Claude,
+		Repos:          []v1.MetaRepo{{Name: "org/repo"}},
+		Harness:        string(harness.Claude),
 		RequestedModel: "claude-test",
 	}
 	header, err := json.Marshal(meta)

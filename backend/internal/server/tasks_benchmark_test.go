@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -302,8 +304,8 @@ func benchmarkPurgedTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *tes
 			MessageType: "caic_meta",
 			Version:     1,
 			Prompt:      "benchmark replay",
-			Repos:       []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
-			Harness:     harness.Claude,
+			Repos:       []v3.MetaRepo{{Name: "r", Branch: "caic-0"}},
+			Harness:     string(harness.Claude),
 			StartedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		}),
 		benchJSON(b, map[string]any{
@@ -364,8 +366,8 @@ func benchmarkPurgedPiTaskEventServer(b *testing.B, deltaCount int) (ksid.ID, *t
 			MessageType: "caic_meta",
 			Version:     1,
 			Prompt:      "benchmark pi replay",
-			Repos:       []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
-			Harness:     harness.Pi,
+			Repos:       []v3.MetaRepo{{Name: "r", Branch: "caic-0"}},
+			Harness:     string(harness.Pi),
 			StartedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		}),
 		`{"type":"message_start","message":{"role":"assistant","model":"gpt-5.5"}}`,

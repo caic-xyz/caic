@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -133,7 +135,7 @@ type handoffPromptInput struct {
 	model         string
 	repos         []taskslog.RepoMount
 	rateLimit     RateLimit
-	diffStat      agent.DiffStat
+	diffStat      v3.DiffStat
 	result        handoffResult
 	hasResult     bool
 	turns         []handoffTurn

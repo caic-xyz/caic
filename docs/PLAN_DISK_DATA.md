@@ -7,7 +7,10 @@ independent of runtime and API types, while preserving existing file formats.
 
 - Each file format owns its complete nested representation under its owner's
   `data` package. Duplication across runtime, API, and disk types, and across
-  disk versions, is intentional; do not use aliases or embed runtime structs.
+  disk versions, is intentional where needed; do not embed runtime structs
+  or alias them from data packages. Live code may use data types directly when
+  they fit; keep separate types and conversions where behavior or representation
+  differs. Reference original data types directly; do not add aliases.
 - Name schema files `data.go`. Data packages import only the standard library
   and contain data declarations plus serialization methods when necessary.
   Validation, defaults, migrations, I/O, hashing, TTLs, folds, and conversions
@@ -20,22 +23,7 @@ independent of runtime and API types, while preserving existing file formats.
   retain opaque native JSON. External formats, opaque bytes, generated source,
   and in-memory caches do not require new disk schemas.
 
-## Phase 1 — task-history: Explicit versioned physical task-log contracts
-
-- **Scope:** Extract caic-owned [task-log records](../backend/internal/agent/types.go)
-  into `taskslog/data/v1`, `/v2`, and `/v3`. Replace direct serialization of agent
-  messages with explicit projections. Cover Go writers,
-  Python relays, replay loaders, and log-validation tooling; keep parsing,
-  state application, and task `State`/`Result` behavior outside data packages.
-- **Preserve:** V1 field order where contractual, strict v2/v3 decoding,
-  canonical envelope bytes, timestamp precision, record-size bounds,
-  generation-local relay offsets, pending actions, and restart adoption.
-- **Verify:** Historical fixtures for all three log versions restore tasks and
-  results; Go and relay fixtures agree on physical records. Run agent,
-  taskslog, task/taskmgr, relay, and check-agent-logs tooling tests. Compare
-  focused parse/adoption benchmarks before and after.
-
-## Phase 2 — durable-observations: Independent usage, metrics, and audit records
+## Phase 1 — durable-observations: Independent usage, metrics, and audit records
 
 - **Scope:** Extract [usage rows](../backend/internal/usagedb/usagedb.go) into
   `usagedb/data`, [metrics records](../metricsdb/log.go) into `metricsdb/data/v2`,
@@ -51,7 +39,7 @@ independent of runtime and API types, while preserving existing file formats.
   Run usagedb, metricsdb, and audit tests; compare focused usage-ingest and
   metric-append benchmarks before and after.
 
-## Phase 3 — oauth-owner: Complete the dependency-owned persistence boundary
+## Phase 2 — oauth-owner: Complete the dependency-owned persistence boundary
 
 - **Scope:** In gomode's `oauth/oauthserver/storage.go`, extract the OAuth
   store's supported versioned schemas and nested records. Keep migrations and

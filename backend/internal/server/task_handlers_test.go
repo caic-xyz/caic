@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -264,8 +266,8 @@ func TestGitReadsRefreshTaskSummary(t *testing.T) {
 			tk := entry.Task()
 			tk.SetLiveRepositorySummary(&repo.GitSnapshot{
 				Read:       repo.NewGitRead(tk.RuntimeInstanceID()),
-				DiffStat:   agent.DiffStat{{Path: "stale.go", LinesAdded: 273, LinesDeleted: 108}},
-				RepoStates: []agent.RepoState{{Branch: "caic-1", Ahead: 1, ChangedFiles: 20}},
+				DiffStat:   logv3.DiffStat{{Path: "stale.go", LinesAdded: 273, LinesDeleted: 108}},
+				RepoStates: []logv3.RepoState{{Branch: "caic-1", Ahead: 1, ChangedFiles: 20}},
 			})
 			backend.RepositoryStatusValue = runtime.RepositoryStatus{
 				Branch: "caic-1", Behind: 2,
@@ -305,7 +307,7 @@ func TestGitReadsRefreshTaskSummary(t *testing.T) {
 				t.Fatal("empty snapshot did not notify subscribers")
 			}
 			snap = tk.Snapshot()
-			if len(snap.DiffStat) != 0 || len(snap.RepoStates) != 1 || snap.RepoStates[0] != (agent.RepoState{Branch: "caic-1"}) {
+			if len(snap.DiffStat) != 0 || len(snap.RepoStates) != 1 || snap.RepoStates[0] != (logv3.RepoState{Branch: "caic-1"}) {
 				t.Fatalf("clean snapshot kept stale stats: %+v, %+v", snap.DiffStat, snap.RepoStates)
 			}
 		})
