@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/config/data"
 )
 
 // uncommentDirective strips the leading '#' from a commented-out TOML directive
@@ -379,9 +381,9 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "voice.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: raw}), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tc := &tomlConfig{
-			Server: tomlServer{ExternalURL: "https://caic.example.com"},
-			VoiceGateway: tomlVoiceGateway{
+		tc := &data.Config{
+			Server: data.Server{ExternalURL: "https://caic.example.com"},
+			VoiceGateway: data.VoiceGateway{
 				URL:                  "https://voice.example.com",
 				InstanceID:           "caic-main",
 				SigningPrivateKeyPEM: "voice.pem",
@@ -411,8 +413,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		prune := "0 6 * * *"
 		repoRepack := "0 7 * * *"
 
-		tc := &tomlConfig{
-			Core: tomlCore{
+		tc := &data.Config{
+			Core: data.Core{
 				Root:       "/repos",
 				Prune:      &prune,
 				RepoRepack: &repoRepack,
@@ -422,30 +424,30 @@ func TestTomlToServerConfig(t *testing.T) {
 					"TAILSCALE_API_KEY": "tskey_from_core_env",
 				},
 			},
-			Debug: tomlDebug{
+			Debug: data.Debug{
 				LogLevel: "warn",
 			},
-			Server: tomlServer{
+			Server: data.Server{
 				HTTP:         ":2242",
 				GeoDB:        "geo.mmdb",
 				AllowOrigins: []string{"local", "tailscale"},
 			},
-			GitHub: tomlGitHub{
-				PAT: tomlPAT{Token: "ghp_abc"},
-				OAuth: tomlOAuth{
+			GitHub: data.GitHub{
+				PAT: data.PAT{Token: "ghp_abc"},
+				OAuth: data.OAuth{
 					ClientID:     "github-client-id",
 					ClientSecret: githubClientSecret,
 					AllowedUsers: []string{"alice", "bob"},
 				},
-				App: tomlGitHubApp{
+				App: data.GitHubApp{
 					PrivateKeyPEM: "key.pem", // relative path
 					AllowedOwners: []string{"org1", "org2"},
 					WebhookSecret: "hmac",
 				},
 			},
-			GitLab: tomlGitLab{
-				PAT: tomlPAT{Token: "glpat_abc"},
-				OAuth: tomlOAuth{
+			GitLab: data.GitLab{
+				PAT: data.PAT{Token: "glpat_abc"},
+				OAuth: data.OAuth{
 					ClientID:     "gitlab-client-id",
 					ClientSecret: gitlabClientSecret,
 					AllowedUsers: []string{"carol"},
@@ -537,8 +539,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tc := &tomlConfig{
-			Server: tomlServer{
+		tc := &data.Config{
+			Server: data.Server{
 				GeoDB: "", // not set in config
 			},
 		}
@@ -555,8 +557,8 @@ func TestTomlToServerConfig(t *testing.T) {
 	t.Run("geo_db is empty when unset and default file missing", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		tc := &tomlConfig{
-			Server: tomlServer{
+		tc := &data.Config{
+			Server: data.Server{
 				GeoDB: "", // not set in config
 			},
 		}
@@ -573,8 +575,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		wantKey := "AIza_from_config"
-		tc := &tomlConfig{
-			Core: tomlCore{
+		tc := &data.Config{
+			Core: data.Core{
 				Env: map[string]string{
 					"GEMINI_API_KEY": wantKey,
 				},
@@ -593,8 +595,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		wantKey := "tskey_config"
-		tc := &tomlConfig{
-			Core: tomlCore{
+		tc := &data.Config{
+			Core: data.Core{
 				Env: map[string]string{
 					"TAILSCALE_API_KEY": wantKey,
 				},
@@ -612,8 +614,8 @@ func TestTomlToServerConfig(t *testing.T) {
 	t.Run("external voice gateway", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		tc := &tomlConfig{
-			VoiceGateway: tomlVoiceGateway{
+		tc := &data.Config{
+			VoiceGateway: data.VoiceGateway{
 				URL: "https://voice.example.com",
 			},
 		}
@@ -686,7 +688,7 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "AIza_from_env"
 		t.Setenv("GEMINI_API_KEY", envKey)
-		tc := &tomlConfig{} // empty config, no core.env set
+		tc := &data.Config{} // empty config, no core.env set
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -701,8 +703,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		envKey := "AIza_from_env"
 		configKey := "AIza_from_config"
 		t.Setenv("GEMINI_API_KEY", envKey)
-		tc := &tomlConfig{
-			Core: tomlCore{
+		tc := &data.Config{
+			Core: data.Core{
 				Env: map[string]string{
 					"GEMINI_API_KEY": configKey,
 				},
@@ -734,7 +736,7 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "tskey_env"
 		t.Setenv("TAILSCALE_API_KEY", envKey)
-		tc := &tomlConfig{} // empty config
+		tc := &data.Config{} // empty config
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -749,7 +751,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	t.Parallel()
 	t.Run("default schedule", func(t *testing.T) {
 		t.Parallel()
-		s, err := autoUpdateSchedule(&tomlConfig{})
+		s, err := autoUpdateSchedule(&data.Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -760,7 +762,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 
 	t.Run("empty disables", func(t *testing.T) {
 		t.Parallel()
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: new(string)}})
+		s, err := autoUpdateSchedule(&data.Config{Core: data.Core{AutoUpdate: new(string)}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -772,7 +774,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	t.Run("custom cron", func(t *testing.T) {
 		t.Parallel()
 		cron := "0 3 * * *"
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
+		s, err := autoUpdateSchedule(&data.Config{Core: data.Core{AutoUpdate: &cron}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -787,7 +789,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	t.Run("invalid cron", func(t *testing.T) {
 		t.Parallel()
 		cron := "not a cron"
-		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
+		_, err := autoUpdateSchedule(&data.Config{Core: data.Core{AutoUpdate: &cron}})
 		if err == nil {
 			t.Error("expected error for invalid cron")
 		}
@@ -798,7 +800,7 @@ func TestPruneSchedule(t *testing.T) {
 	t.Parallel()
 	t.Run("default schedule", func(t *testing.T) {
 		t.Parallel()
-		s, err := pruneSchedule(&tomlConfig{})
+		s, err := pruneSchedule(&data.Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -812,7 +814,7 @@ func TestPruneSchedule(t *testing.T) {
 
 	t.Run("empty disables", func(t *testing.T) {
 		t.Parallel()
-		s, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: new(string)}})
+		s, err := pruneSchedule(&data.Config{Core: data.Core{Prune: new(string)}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -824,7 +826,7 @@ func TestPruneSchedule(t *testing.T) {
 	t.Run("custom cron", func(t *testing.T) {
 		t.Parallel()
 		cron := "0 3 * * *"
-		s, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: &cron}})
+		s, err := pruneSchedule(&data.Config{Core: data.Core{Prune: &cron}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -839,7 +841,7 @@ func TestPruneSchedule(t *testing.T) {
 	t.Run("invalid cron", func(t *testing.T) {
 		t.Parallel()
 		cron := "not a cron"
-		_, err := pruneSchedule(&tomlConfig{Core: tomlCore{Prune: &cron}})
+		_, err := pruneSchedule(&data.Config{Core: data.Core{Prune: &cron}})
 		if err == nil {
 			t.Error("expected error for invalid cron")
 		}
@@ -850,7 +852,7 @@ func TestRepoRepackSchedule(t *testing.T) {
 	t.Parallel()
 	t.Run("default nightly", func(t *testing.T) {
 		t.Parallel()
-		s, err := repoRepackSchedule(&tomlConfig{})
+		s, err := repoRepackSchedule(&data.Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -860,7 +862,7 @@ func TestRepoRepackSchedule(t *testing.T) {
 	})
 	t.Run("disabled", func(t *testing.T) {
 		t.Parallel()
-		s, err := repoRepackSchedule(&tomlConfig{Core: tomlCore{RepoRepack: new(string)}})
+		s, err := repoRepackSchedule(&data.Config{Core: data.Core{RepoRepack: new(string)}})
 		if err != nil || s != nil {
 			t.Fatalf("schedule = %+v, %v; want disabled", s, err)
 		}
@@ -868,7 +870,7 @@ func TestRepoRepackSchedule(t *testing.T) {
 	t.Run("invalid", func(t *testing.T) {
 		t.Parallel()
 		cron := "invalid"
-		if _, err := repoRepackSchedule(&tomlConfig{Core: tomlCore{RepoRepack: &cron}}); err == nil {
+		if _, err := repoRepackSchedule(&data.Config{Core: data.Core{RepoRepack: &cron}}); err == nil {
 			t.Fatal("expected invalid schedule error")
 		}
 	})
@@ -897,4 +899,59 @@ func TestAllowOriginsOrDefault(t *testing.T) {
 			t.Errorf("got %v, want [CA US]", got)
 		}
 	})
+}
+
+func TestVoiceConfigDiskProjection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const fixture = `[voice-gateway.config]
+backend="local-stack"
+model="fixture-model"
+[voice-gateway.config.server]
+webrtc_udp_port=-1
+[voice-gateway.config.local_stack.asr]
+engine="openai-audio"
+provider="fixture-asr-provider"
+remote="https://example.invalid/asr"
+model="fixture-asr-model"
+[voice-gateway.config.local_stack.llm]
+provider="openaicompatible"
+remote="https://example.invalid/llm"
+model="fixture-llm-model"
+api_key_name="FIXTURE_API_KEY"
+[voice-gateway.config.local_stack.tts]
+engine="openai-audio"
+remote="https://example.invalid/tts"
+model="fixture-tts-model"
+voice="fixture-voice"
+[[voice-gateway.config.trusted_issuers]]
+service="caic"
+issuer="https://example.invalid"
+public_key="fixture-public-key"
+oauth=true
+audience="fixture-audience"
+scope="fixture-scope"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tc, err := loadTOMLConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Voice.Gateway.Config
+	if got.Server.WebRTCUDPPort != -1 || got.Backend != "local-stack" || got.Model != "fixture-model" || got.LocalStack.ASR.Engine != "openai-audio" || got.LocalStack.ASR.Provider != "fixture-asr-provider" || got.LocalStack.ASR.Remote != "https://example.invalid/asr" || got.LocalStack.ASR.Model != "fixture-asr-model" || got.LocalStack.LLM.Provider != "openaicompatible" || got.LocalStack.LLM.Remote != "https://example.invalid/llm" || got.LocalStack.LLM.Model != "fixture-llm-model" || got.LocalStack.LLM.APIKeyName != "FIXTURE_API_KEY" || got.LocalStack.TTS.Engine != "openai-audio" || got.LocalStack.TTS.Remote != "https://example.invalid/tts" || got.LocalStack.TTS.Model != "fixture-tts-model" || got.LocalStack.TTS.Voice != "fixture-voice" {
+		t.Fatalf("voice config projection lost fields: %#v", got)
+	}
+	if len(got.TrustedIssuers) != 1 {
+		t.Fatalf("issuer count = %d", len(got.TrustedIssuers))
+	}
+	issuer := got.TrustedIssuers[0]
+	if issuer.Service != "caic" || issuer.Issuer != "https://example.invalid" || issuer.PublicKey != "fixture-public-key" || !issuer.OAuth || issuer.Audience != "fixture-audience" || issuer.Scope != "fixture-scope" {
+		t.Fatalf("issuer projection lost fields: %#v", issuer)
+	}
 }

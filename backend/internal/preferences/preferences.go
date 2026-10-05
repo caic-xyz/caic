@@ -27,25 +27,25 @@ const (
 // CacheMapping maps a host directory to a container path for cache/state sharing.
 type CacheMapping struct {
 	// HostPath is the path on the host filesystem to mount.
-	HostPath string `json:"hostPath"`
+	HostPath string
 	// ContainerPath is the path inside the container where HostPath will be mounted.
 	// Empty uses the matching home-relative HostPath; md owns the resolution.
-	ContainerPath string `json:"containerPath"`
+	ContainerPath string
 	// Enabled controls whether this mapping is passed to new containers.
-	Enabled bool `json:"enabled"`
+	Enabled bool
 }
 
 // MountMapping maps a host directory to a container path as a general mount.
 type MountMapping struct {
 	// HostPath is the path on the host filesystem to mount.
-	HostPath string `json:"hostPath"`
+	HostPath string
 	// ContainerPath is the path inside the container where HostPath will be mounted.
 	// Empty uses the matching home-relative HostPath; md owns the resolution.
-	ContainerPath string `json:"containerPath"`
+	ContainerPath string
 	// Enabled controls whether this mapping is passed to new containers.
-	Enabled bool `json:"enabled"`
+	Enabled bool
 	// ReadOnly controls whether the container sees this mount as read-only.
-	ReadOnly bool `json:"readOnly"`
+	ReadOnly bool
 }
 
 // ContainerImage identifies a base image and optional platform pair.
@@ -57,19 +57,19 @@ type ContainerImage struct {
 // Preferences holds persistent user preferences.
 type Preferences struct {
 	// Version is the preferences file format version.
-	Version int `json:"version"`
+	Version int
 	// Repositories is an ordered list of recently used repositories (most
 	// recent first), each with optional per-repo overrides.
-	Repositories []RepoPrefs `json:"repositories,omitempty"`
+	Repositories []RepoPrefs
 	// Harness is the last used agent harness (e.g. "claude", "codex").
-	Harness string `json:"harness,omitempty"`
+	Harness string
 	// Models maps harness name to the last used model for that harness.
-	Models map[string]string `json:"models,omitempty"`
+	Models map[string]string
 	// Efforts maps harness name to model name to the last used thinking effort.
 	// The empty model key stores the default-model preference.
-	Efforts EffortPreferences `json:"efforts,omitempty"`
+	Efforts EffortPreferences
 	// Settings holds user-configurable behavioral settings.
-	Settings Settings `json:"settings"`
+	Settings Settings
 }
 
 func newPreferences() *Preferences {
@@ -182,26 +182,26 @@ func cloneEffortPreferences(e EffortPreferences) EffortPreferences {
 type Settings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
-	AutoFixOnCIFailure bool `json:"autoFixOnCIFailure"`
+	AutoFixOnCIFailure bool
 	// AutoFixOnPROpen automatically creates a task to review and fix a pull
 	// request when it is opened or reopened via a forge webhook.
-	AutoFixOnPROpen bool `json:"autoFixOnPROpen"`
+	AutoFixOnPROpen bool
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
-	BaseImage string `json:"baseImage,omitempty"`
+	BaseImage string
 	// RuntimeSettings stores CPU architecture and limits by runtime name.
-	RuntimeSettings map[string]RuntimeSettings `json:"runtimeSettings,omitempty"`
+	RuntimeSettings map[string]RuntimeSettings
 	// PurgeDelay is the recovery window before a stopped task is deleted.
-	PurgeDelay time.Duration `json:"purgeDelay"`
+	PurgeDelay time.Duration
 	// WellKnownCaches maps cache name to enabled state. Absent or false means
 	// disabled, true means enabled. Caches are opt-in.
-	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
+	WellKnownCaches map[string]bool
 	// CacheMappings are custom directory mappings to mount into the container.
-	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
+	CacheMappings []CacheMapping
 	// CustomMounts are custom non-cache directory mappings to mount into the container.
-	CustomMounts []MountMapping `json:"customMounts,omitempty"`
+	CustomMounts []MountMapping
 	// RuntimeName is the last selected runtime backend for new tasks.
-	RuntimeName string `json:"runtimeName,omitempty"`
+	RuntimeName string
 }
 
 func defaultSettings() Settings {
@@ -234,20 +234,12 @@ func (s *Settings) Validate() error {
 	return nil
 }
 
-// UnmarshalJSON decodes settings, applying defaults to fields omitted from
-// older preference files.
-func (s *Settings) UnmarshalJSON(data []byte) error {
-	type plainSettings Settings
-	*s = defaultSettings()
-	return json.Unmarshal(data, (*plainSettings)(s))
-}
-
 // RuntimeSettings holds CPU configuration for a single runtime.
 type RuntimeSettings struct {
 	// ContainerPlatform selects the CPU architecture. Empty means native.
-	ContainerPlatform md.Platform `json:"containerPlatform,omitempty"`
+	ContainerPlatform md.Platform
 	// MaxCPUs limits CPU cores. Zero uses md's automatic runtime default.
-	MaxCPUs int `json:"maxCPUs,omitempty"`
+	MaxCPUs int
 }
 
 // Validate checks the runtime's CPU configuration.
@@ -265,16 +257,16 @@ func (s *RuntimeSettings) Validate() error {
 // global defaults in Preferences when set.
 type RepoPrefs struct {
 	// Path is the repository identifier (e.g. "github/caic").
-	Path string `json:"path"`
+	Path string
 	// BaseBranch overrides the repository's default branch when creating tasks.
-	BaseBranch string `json:"baseBranch,omitempty"`
+	BaseBranch string
 	// Harness is the preferred agent harness for this repo.
-	Harness string `json:"harness,omitempty"`
+	Harness string
 	// Model is the preferred model for this repo's harness.
-	Model string `json:"model,omitempty"`
+	Model string
 	// LastUsed is the Unix timestamp (seconds) of the last task created for
 	// this repo.
-	LastUsed int64 `json:"lastUsed,omitempty"`
+	LastUsed int64
 }
 
 // Store manages all users' preferences in a single JSON file.
@@ -295,8 +287,8 @@ func Open(path string) (*Store, error) {
 		}
 		return nil, fmt.Errorf("read preferences: %w", err)
 	}
-	var mf usersFile
-	if err := json.Unmarshal(data, &mf); err != nil {
+	mf, err := decodeUsersFile(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse preferences: %w", err)
 	}
 	if err := mf.Validate(); err != nil {
@@ -332,7 +324,7 @@ func (s *Store) Update(userID string, fn func(*Preferences)) error {
 		return fmt.Errorf("validate preferences: %w", err)
 	}
 	s.cached[userID] = p
-	data, err := json.MarshalIndent(usersFile{Users: s.cached}, "", "  ")
+	data, err := json.MarshalIndent(usersFileToData(s.cached), "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal preferences: %w", err)
 	}
@@ -382,12 +374,12 @@ const recentWindow = 7 * 24 * time.Hour
 // regardless of last-used time.
 const minRecentRepos = 10
 
-// usersFile is the on-disk JSON format for the Store.
+// usersFile groups runtime preferences by user for validation.
 type usersFile struct {
-	Users map[string]Preferences `json:"users,omitempty"`
+	Users map[string]Preferences
 }
 
-// Validate checks that the on-disk format is well-formed.
+// Validate checks all runtime preferences and user keys.
 func (f *usersFile) Validate() error {
 	for id := range f.Users {
 		if id == "" {

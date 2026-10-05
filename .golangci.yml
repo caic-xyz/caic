@@ -16,6 +16,7 @@ linters:
     - dupl
     - dupword
     - durationcheck
+    - depguard
     - embeddedstructfieldcheck
     - errchkjson
     - errname
@@ -74,6 +75,17 @@ linters:
     - wastedassign
     - whitespace
   settings:
+    depguard:
+      rules:
+        disk-data:
+          # File schemas own their nested types and must stay independent of
+          # runtime, API, and dependency packages, including future phases.
+          files:
+            - "**/data/*.go"
+            - "**/data/**/*.go"
+          list-mode: strict
+          allow:
+            - $gostd
     custom:
       commentcheck:
         type: module
@@ -104,6 +116,11 @@ linters:
   exclusions:
     generated: lax
     rules:
+      # Independent persisted schemas and their explicit runtime projections
+      # intentionally duplicate fields to keep each file contract independent.
+      - path: (^|/)(data(/|\.go$)|config_data\.go$)
+        linters:
+          - dupl
       - path: (.+)\.go$
         text: should have a package comment
     paths:

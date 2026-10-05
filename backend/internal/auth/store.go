@@ -10,29 +10,16 @@ import (
 	"sync"
 	"time"
 
+	v1 "github.com/caic-xyz/caic/backend/internal/auth/data/v1"
 	"github.com/maruel/ksid"
 )
 
-const storeVersion = 1
+// currentVersion is the users file format version written by this store.
+const currentVersion = 1
 
-// userRecord is the on-disk JSON representation of a user.
-type userRecord struct {
-	ID           string    `json:"id"`
-	Provider     Provider  `json:"provider"`
-	ProviderID   string    `json:"providerID"`
-	Username     string    `json:"username"`
-	AvatarURL    string    `json:"avatarURL,omitempty"`
-	AccessToken  string    `json:"accessToken"`
-	RefreshToken string    `json:"refreshToken,omitempty"`
-	TokenExpiry  time.Time `json:"tokenExpiry"`
-	CreatedAt    time.Time `json:"createdAt"`
-	LastSeenAt   time.Time `json:"lastSeenAt"`
-}
-
-// usersFile is the on-disk JSON structure.
 type usersFile struct {
-	Version int          `json:"version"`
-	Users   []userRecord `json:"users"`
+	Version int
+	Users   []User
 }
 
 // Store manages the users.json file with in-memory caching.
@@ -69,7 +56,7 @@ func (s *Store) UpsertUser(u *User) (User, error) {
 		}
 	}
 
-	var rec userRecord
+	var rec User
 	if idx >= 0 {
 		// Update existing.
 		rec = s.file.Users[idx]
@@ -82,7 +69,7 @@ func (s *Store) UpsertUser(u *User) (User, error) {
 		s.file.Users[idx] = rec
 	} else {
 		// Create new.
-		rec = userRecord{
+		rec = User{
 			ID:           "usr_" + ksid.NewID().String(),
 			Provider:     u.Provider,
 			ProviderID:   u.ProviderID,
@@ -100,7 +87,7 @@ func (s *Store) UpsertUser(u *User) (User, error) {
 	if err := saveUsersFile(&s.file, s.path); err != nil {
 		return User{}, err
 	}
-	return recordToUser(&rec), nil
+	return rec, nil
 }
 
 // FindByProviderID returns the user with the given provider+ID pair, or false.
@@ -109,7 +96,7 @@ func (s *Store) FindByProviderID(provider Provider, providerID string) (User, bo
 	defer s.mu.Unlock()
 	for i := range s.file.Users {
 		if s.file.Users[i].Provider == provider && s.file.Users[i].ProviderID == providerID {
-			return recordToUser(&s.file.Users[i]), true
+			return s.file.Users[i], true
 		}
 	}
 	return User{}, false
@@ -130,7 +117,7 @@ func (s *Store) FindByProvider(provider Provider) (User, bool) {
 	if best < 0 {
 		return User{}, false
 	}
-	return recordToUser(&s.file.Users[best]), true
+	return s.file.Users[best], true
 }
 
 // FindByID returns the user with the given internal ID, or false.
@@ -139,34 +126,56 @@ func (s *Store) FindByID(id string) (User, bool) {
 	defer s.mu.Unlock()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID == id {
-			return recordToUser(&s.file.Users[i]), true
+			return s.file.Users[i], true
 		}
 	}
 	return User{}, false
-}
-
-func recordToUser(r *userRecord) User {
-	return User(*r)
 }
 
 func loadUsersFile(path string) (*usersFile, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is caller-provided, validated at startup
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &usersFile{Version: storeVersion}, nil
+			return &usersFile{Version: currentVersion}, nil
 		}
 		return nil, fmt.Errorf("read users: %w", err)
 	}
-	var f usersFile
+	var f v1.UsersFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse users: %w", err)
 	}
-	return &f, nil
+	users := make([]User, len(f.Users))
+	if f.Users == nil {
+		users = nil
+	}
+	for i := range f.Users {
+		r := &f.Users[i]
+		users[i] = User{
+			ID: r.ID, Provider: Provider(r.Provider), ProviderID: r.ProviderID,
+			Username: r.Username, AvatarURL: r.AvatarURL,
+			AccessToken: r.AccessToken, RefreshToken: r.RefreshToken, TokenExpiry: r.TokenExpiry,
+			CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
+		}
+	}
+	return &usersFile{Version: f.Version, Users: users}, nil
 }
 
 func saveUsersFile(f *usersFile, path string) error {
-	f.Version = storeVersion
-	data, err := json.MarshalIndent(f, "", "  ")
+	f.Version = currentVersion
+	users := make([]v1.User, len(f.Users))
+	if f.Users == nil {
+		users = nil
+	}
+	for i := range f.Users {
+		r := &f.Users[i]
+		users[i] = v1.User{
+			ID: r.ID, Provider: v1.Provider(r.Provider), ProviderID: r.ProviderID,
+			Username: r.Username, AvatarURL: r.AvatarURL,
+			AccessToken: r.AccessToken, RefreshToken: r.RefreshToken, TokenExpiry: r.TokenExpiry,
+			CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
+		}
+	}
+	data, err := json.MarshalIndent(v1.UsersFile{Version: f.Version, Users: users}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal users: %w", err)
 	}

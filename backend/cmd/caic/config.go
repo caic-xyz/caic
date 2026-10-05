@@ -17,153 +17,62 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
+	"github.com/caic-xyz/caic/backend/internal/config/data"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/maruel/gomode/voicegateway"
 )
 
-// tomlConfig mirrors the TOML file layout at ~/.config/caic/config.toml.
-// Zero values mean "not set in file".
-// IMPORTANT: When adding or modifying configuration fields, update contrib/config.toml
-// accordingly. Document all default values in the example config file.
-type tomlConfig struct {
-	Core         tomlCore               `toml:"core"`
-	Server       tomlServer             `toml:"server"`
-	AI           tomlAI                 `toml:"ai"`
-	Harness      map[string]tomlHarness `toml:"harness"`
-	GitHub       tomlGitHub             `toml:"github"`
-	GitLab       tomlGitLab             `toml:"gitlab"`
-	Google       tomlGoogle             `toml:"google"`
-	VoiceGateway tomlVoiceGateway       `toml:"voice-gateway"`
-	Debug        tomlDebug              `toml:"debug"`
-}
-
-type tomlHarness struct {
-	Env map[string]string `toml:"env"`
-}
-
-type tomlCore struct {
-	Root       string            `toml:"root"`
-	AutoUpdate *string           `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
-	Prune      *string           `toml:"prune"`       // nil = default schedule; "" = disabled; else cron expression
-	RepoRepack *string           `toml:"repo_repack"` // nil = default schedule; "" = disabled; else cron expression
-	Env        map[string]string `toml:"env"`
-}
-
-type tomlServer struct {
-	HTTP           string   `toml:"http"`
-	ExternalURL    string   `toml:"external_url"`
-	GeoDB          string   `toml:"geo_db"`
-	AllowOrigins   []string `toml:"allow_origins"`
-	TrustedProxies []string `toml:"trusted_proxies"`
-}
-
-type tomlDebug struct {
-	LogLevel   string `toml:"log_level"`
-	NoLogTime  bool   `toml:"no_log_time"`
-	Pprof      bool   `toml:"pprof"`
-	CPUProfile string `toml:"cpuprofile"`
-	MemProfile string `toml:"memprofile"`
-	Trace      string `toml:"trace"`
-}
-
-type tomlAI struct {
-	Provider string `toml:"provider"`
-	Model    string `toml:"model"`
-}
-
-type tomlGitHub struct {
-	PAT   tomlPAT       `toml:"pat"`
-	OAuth tomlOAuth     `toml:"oauth"`
-	App   tomlGitHubApp `toml:"app"`
-}
-
-type tomlGitHubApp struct {
-	ID            int64    `toml:"id"`
-	PrivateKeyPEM string   `toml:"private_key_pem"` // file path, read at load time
-	AllowedOwners []string `toml:"allowed_owners"`
-	WebhookSecret string   `toml:"webhook_secret"`
-}
-
-type tomlGitLab struct {
-	PAT           tomlPAT   `toml:"pat"`
-	OAuth         tomlOAuth `toml:"oauth"`
-	URL           string    `toml:"url"`
-	WebhookSecret string    `toml:"webhook_secret"`
-}
-
-type tomlPAT struct {
-	Token string `toml:"token"`
-}
-
-type tomlGoogle struct {
-	OAuth tomlOAuth `toml:"oauth"`
-}
-
-type tomlOAuth struct {
-	ClientID     string   `toml:"client_id"`
-	ClientSecret string   `toml:"client_secret"`
-	AllowedUsers []string `toml:"allowed_users"`
-}
-
-type tomlVoiceGateway struct {
-	URL                  string              `toml:"url"`
-	InstanceID           string              `toml:"instance_id"`
-	TokenMode            string              `toml:"token_mode"`
-	SigningPrivateKeyPEM string              `toml:"signing_private_key_pem"`
-	Config               voicegateway.Config `toml:"config"`
-}
-
-// defaultConfig returns a tomlConfig with sensible defaults pre-populated.
+// defaultConfig returns a data.Config with sensible defaults pre-populated.
 // TOML decoding overwrites only fields present in the file.
-func defaultConfig() tomlConfig {
-	return tomlConfig{
-		Core: tomlCore{Root: "."},
-		Server: tomlServer{
+func defaultConfig() data.Config {
+	return data.Config{
+		Core: data.Core{Root: "."},
+		Server: data.Server{
 			HTTP:           ":2242",
 			ExternalURL:    "auto",
 			AllowOrigins:   slices.Clone(defaultAllowOrigins),
 			TrustedProxies: []string{},
 		},
-		Harness: map[string]tomlHarness{
+		Harness: map[string]data.Harness{
 			"claude":   {},
 			"codex":    {},
 			"opencode": {},
 			"pi":       {},
 		},
-		VoiceGateway: tomlVoiceGateway{
+		VoiceGateway: data.VoiceGateway{
 			TokenMode: string(server.VoiceTokenModeScoped),
 			Config:    embeddedVoiceGatewayConfigDefaults(),
 		},
-		Debug: tomlDebug{LogLevel: "info"},
+		Debug: data.Debug{LogLevel: "info"},
 	}
 }
 
-func embeddedVoiceGatewayConfigDefaults() voicegateway.Config {
+func embeddedVoiceGatewayConfigDefaults() data.VoiceConfig {
 	cfg := voicegateway.DefaultConfig()
 	cfg.Server.HTTP = ""
-	return cfg
+	return voiceConfigToData(&cfg)
 }
 
 // loadTOMLConfig reads and parses config.toml from cfgDir.
 // Returns a zero-value config if the file does not exist.
 // Returns an error if the file exists but is malformed or contains unknown keys.
-func loadTOMLConfig(cfgDir string) (tomlConfig, error) {
+func loadTOMLConfig(cfgDir string) (data.Config, error) {
 	path := filepath.Join(cfgDir, "config.toml")
-	data, err := os.ReadFile(path) //nolint:gosec // config file from XDG config dir
+	raw, err := os.ReadFile(path) //nolint:gosec // config file from XDG config dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return defaultConfig(), nil
 		}
-		return tomlConfig{}, fmt.Errorf("read config: %w", err)
+		return data.Config{}, fmt.Errorf("read config: %w", err)
 	}
 	tc := defaultConfig()
-	dec := toml.NewDecoder(strings.NewReader(string(data)))
+	dec := toml.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tc); err != nil {
-		return tomlConfig{}, fmt.Errorf("parse %s: %w", path, err)
+		return data.Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if tc.VoiceGateway.Config.Server.HTTP != "" {
-		return tomlConfig{}, fmt.Errorf("parse %s: voice-gateway.config.server.http is not supported; use server.http", path)
+		return data.Config{}, fmt.Errorf("parse %s: voice-gateway.config.server.http is not supported; use server.http", path)
 	}
 	slog.Info("loaded config", "path", path)
 	return tc, nil
@@ -178,11 +87,11 @@ func resolveFilePath(path, cfgDir string) ([]byte, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(cfgDir, path)
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // trusted config value
+	raw, err := os.ReadFile(path) //nolint:gosec // trusted config value
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	return data, nil
+	return raw, nil
 }
 
 // resolvePath resolves a path relative to cfgDir. Returns "" if path is empty.
@@ -198,7 +107,7 @@ func resolvePath(path, cfgDir string) string {
 
 // tomlToServerConfig converts a parsed TOML config into a server.Config.
 // cfgDir is used to resolve relative file paths.
-func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
+func tomlToServerConfig(ctx context.Context, tc *data.Config, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
 	githubKeyPEM, err := resolveFilePath(tc.GitHub.App.PrivateKeyPEM, cfgDir)
 	if err != nil {
 		return nil, "", "", "", err
@@ -317,7 +226,7 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 				InstanceID: tc.VoiceGateway.InstanceID,
 				TokenMode:  voiceTokenMode,
 				SigningKey: voiceSigningKey,
-				Config:     tc.VoiceGateway.Config,
+				Config:     voiceConfigToRuntime(&tc.VoiceGateway.Config),
 			},
 		},
 		Debug: server.DebugConfig{
@@ -386,7 +295,7 @@ const defaultRepoRepack = "0 2 * * *"
 // autoUpdateSchedule returns the parsed auto-update schedule, or nil if
 // disabled. When auto_update is not set in the config file, the default
 // schedule "50 4 * * *" (daily at 04:50) is used. Set to "" to disable.
-func autoUpdateSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
+func autoUpdateSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.AutoUpdate == nil {
 		s, err := autoupdate.ParseSchedule(defaultAutoUpdate)
 		if err != nil {
@@ -407,7 +316,7 @@ func autoUpdateSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
 // pruneSchedule returns the parsed image-prune schedule, or nil if disabled.
 // When prune is not set in the config file, the default schedule "0 5 * * *"
 // (daily at 05:00) is used. Set to "" to disable.
-func pruneSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
+func pruneSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.Prune == nil {
 		s, err := autoupdate.ParseSchedule(defaultPrune)
 		if err != nil {
@@ -425,7 +334,7 @@ func pruneSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
 	return &s, nil
 }
 
-func repoRepackSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
+func repoRepackSchedule(tc *data.Config) (*autoupdate.Schedule, error) {
 	if tc.Core.RepoRepack == nil {
 		s, err := autoupdate.ParseSchedule(defaultRepoRepack)
 		if err != nil {

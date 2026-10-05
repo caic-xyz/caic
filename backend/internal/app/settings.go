@@ -11,21 +11,25 @@ import (
 	"encoding/pem"
 	"log/slog"
 	"os"
+
+	"github.com/caic-xyz/caic/backend/internal/app/data"
 )
 
 type settings struct {
-	SessionSecret string `json:"sessionSecret,omitempty"`
+	SessionSecret string
 	// TODO: Migrate to a oauth section.
-	OAuthPrivateKeyPEM string `json:"mcpOAuthPrivateKeyPEM,omitempty"`
-	OAuthKeyID         string `json:"mcpOAuthKeyID,omitempty"`
+	OAuthPrivateKeyPEM string
+	OAuthKeyID         string
 }
 
 func loadSettings(log *slog.Logger, path string) (*settings, error) {
 	var s settings
-	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: internal config path
-		if err := json.Unmarshal(data, &s); err != nil {
+	if raw, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: internal config path
+		var f data.Settings
+		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, err
 		}
+		s = settings{SessionSecret: f.SessionSecret, OAuthPrivateKeyPEM: f.OAuthPrivateKeyPEM, OAuthKeyID: f.OAuthKeyID}
 	}
 
 	dirty := false
@@ -69,13 +73,13 @@ func newMCPOAuthSigningKey() (keyPEM, keyID string, err error) {
 }
 
 func writeSettingsAtomic(path string, s *settings) error {
-	data, err := json.MarshalIndent(s, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
+	raw, err := json.MarshalIndent(data.Settings{SessionSecret: s.SessionSecret, OAuthPrivateKeyPEM: s.OAuthPrivateKeyPEM, OAuthKeyID: s.OAuthKeyID}, "", "  ") //nolint:gosec // G117: sessionSecret is intentionally written to config file owned by the user
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
+	raw = append(raw, '\n')
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

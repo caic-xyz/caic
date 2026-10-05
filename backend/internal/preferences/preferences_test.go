@@ -3,8 +3,6 @@
 package preferences
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -235,25 +233,6 @@ func TestSettingsValidate(t *testing.T) {
 				t.Fatal("expected error for invalid purge delay")
 			}
 		})
-	}
-}
-
-func TestSettingsUnmarshalJSON(t *testing.T) {
-	t.Parallel()
-	var s Settings
-	if err := json.Unmarshal([]byte(`{}`), &s); err != nil {
-		t.Fatal(err)
-	}
-	if s.PurgeDelay != 15*time.Second {
-		t.Errorf("default purge delay = %s, want %s", s.PurgeDelay, 15*time.Second)
-	}
-
-	want := 91 * time.Second
-	if err := json.Unmarshal(fmt.Appendf(nil, `{"purgeDelay":%d}`, want), &s); err != nil {
-		t.Fatal(err)
-	}
-	if s.PurgeDelay != want {
-		t.Errorf("purge delay = %s, want %s", s.PurgeDelay, want)
 	}
 }
 
