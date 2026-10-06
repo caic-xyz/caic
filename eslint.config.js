@@ -90,6 +90,19 @@ export default tseslint.config(
       "solid/reactivity": "error",
       "solid/self-closing-comp": "error",
       "solid/style-prop": "error",
+      // The router runs with explicitLinks (index.tsx): it ignores a plain <a href> and the browser
+      // reloads the document. Mirror its skip conditions so each anchor states its intent.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "JSXOpeningElement[name.name='a']:has(> JSXAttribute[name.name='href'])" +
+            ":not(:has(> JSXAttribute[name.name=/^(link|target|download)$/]))" +
+            ":not(:has(> JSXAttribute[name.name='rel'][value.value=/\\bexternal\\b/]))",
+          message:
+            'Add `link` for in-app navigation, or `target`, `download`, or rel="external" to leave the app on purpose.',
+        },
+      ],
     },
   },
   // The Node scripts under scripts/ run outside the browser and reach for process, argv, and the
