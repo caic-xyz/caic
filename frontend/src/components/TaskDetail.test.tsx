@@ -1436,6 +1436,7 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(100);
 
     const resetTime = new Date("2026-07-09T13:00:00Z").toLocaleTimeString();
+    expect(document.body.textContent).toContain("⚠️ 89% of 7-day quota used");
     expect(document.body.textContent).toContain(`resets tomorrow at ${resetTime}`);
   });
 
@@ -1460,7 +1461,7 @@ describe("SSE connection", () => {
     });
     vi.advanceTimersByTime(100);
 
-    expect(document.body.textContent).toContain("Rate limit warning: seven-day-opus quota nearing its limit");
+    expect(document.body.textContent).toContain("⚠️ seven-day-opus quota nearing its limit");
     expect(document.body.textContent).not.toContain("-100%");
   });
 

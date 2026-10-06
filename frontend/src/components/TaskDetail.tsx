@@ -1696,9 +1696,9 @@ function RateLimitBanner(props: { ev: EventMessage }) {
     const label = rateLimitLabel(r?.rateLimitType);
     const utilization = r?.utilization;
     if (utilization === undefined || utilization < 0) {
-      return `Rate limit warning: ${label} nearing its limit`;
+      return `⚠️ ${label} nearing its limit`;
     }
-    return `Rate limit warning: ${rateLimitPercentage(utilization)}% of ${label} used`;
+    return `⚠️ ${rateLimitPercentage(utilization)}% of ${label} used`;
   };
   return (
     <Switch>
