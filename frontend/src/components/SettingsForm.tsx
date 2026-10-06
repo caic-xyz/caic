@@ -74,6 +74,7 @@ interface SettingsFormProps {
   imageRefreshStatus: (runtimeName: string) => ImageRefreshStatus;
   startImageRefresh: (runtimeName: string) => Promise<void>;
   saveSettings: (overrides?: SettingsOverrides) => Promise<void>;
+  checkForUpdate: () => Promise<void>;
   triggerServerUpdate: () => Promise<void>;
   refreshAvailableModels: (harness: Harness) => Promise<void>;
 }
@@ -175,13 +176,13 @@ export default function SettingsForm(props: SettingsFormProps) {
           </span>
         </div>
         <nav class={styles.sectionNav} aria-label="Settings sections">
-          <a href="/settings" aria-current={section() === "general" ? "page" : undefined}>
+          <a link href="/settings" aria-current={section() === "general" ? "page" : undefined}>
             General
           </a>
-          <a href="/settings?section=storage" aria-current={section() === "storage" ? "page" : undefined}>
+          <a link href="/settings?section=storage" aria-current={section() === "storage" ? "page" : undefined}>
             Storage
           </a>
-          <a href="/settings?section=server" aria-current={section() === "server" ? "page" : undefined}>
+          <a link href="/settings?section=server" aria-current={section() === "server" ? "page" : undefined}>
             Server
           </a>
         </nav>
@@ -412,16 +413,16 @@ export default function SettingsForm(props: SettingsFormProps) {
                           <div>Expires: {formatDate(grant.expiresAt)}</div>
                         </div>
                         <Show when={grant.status !== "revoked"}>
-                          <button
+                          <Button
                             type="button"
-                            class={styles.settingsButton}
-                            disabled={props.revokingOAuthGrantID() === grant.id}
+                            variant="red"
+                            loading={props.revokingOAuthGrantID() === grant.id}
                             onClick={() => {
                               void props.revokeOAuthClientGrant(grant.id);
                             }}
                           >
                             {props.revokingOAuthGrantID() === grant.id ? "Revoking…" : "Revoke access"}
-                          </button>
+                          </Button>
                         </Show>
                       </div>
                     )}
@@ -495,7 +496,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             <h3 id="settings-models" class={styles.settingsSectionTitle}>
               Reload models
             </h3>
-            <div class={styles.modelRefreshActions}>
+            <div class={styles.buttonRow}>
               <For
                 each={refreshableHarnesses()}
                 fallback={<p class={styles.settingsDescription}>No installed coding agents support model refresh.</p>}
@@ -535,23 +536,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             <h3 id="settings-version" class={styles.settingsSectionTitle}>
               Version
             </h3>
-            <Show
-              when={props.versionInfo()}
-              fallback={
-                <Show
-                  when={props.checkingUpdate()}
-                  fallback={
-                    <Show when={props.versionCheckError()}>
-                      <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`}>
-                        Check failed: {props.versionCheckError()}
-                      </p>
-                    </Show>
-                  }
-                >
-                  <p class={styles.settingsDescription}>Checking for updates…</p>
-                </Show>
-              }
-            >
+            <Show when={props.versionInfo()}>
               {(v) => (
                 <>
                   <p class={styles.settingsDescription}>
@@ -568,23 +553,41 @@ export default function SettingsForm(props: SettingsFormProps) {
                       Check failed: {v().checkError}
                     </p>
                   </Show>
-                  <Show when={v().autoUpdateEnabled && v().updateAvailable}>
-                    <button
-                      type="button"
-                      class={styles.settingsButton}
-                      disabled={props.updating()}
-                      onClick={() => {
-                        void props.triggerServerUpdate();
-                      }}
-                    >
-                      {props.updating() ? "Updating…" : "Update now"}
-                    </button>
-                  </Show>
-                  <Show when={props.updateStatus()}>
-                    <p class={styles.settingsDescription}>{props.updateStatus()}</p>
-                  </Show>
                 </>
               )}
+            </Show>
+            <Show when={props.versionCheckError()}>
+              <p class={`${styles.settingsDescription} ${styles.settingsDescriptionError}`} role="alert">
+                Check failed: {props.versionCheckError()}
+              </p>
+            </Show>
+            <div class={styles.buttonRow}>
+              <Button
+                type="button"
+                variant="gray"
+                loading={props.checkingUpdate()}
+                onClick={() => {
+                  void props.checkForUpdate();
+                }}
+              >
+                {props.checkingUpdate() ? "Checking…" : "Check for updates"}
+              </Button>
+              <Show when={props.versionInfo()?.autoUpdateEnabled && props.versionInfo()?.updateAvailable}>
+                <Button
+                  type="button"
+                  loading={props.updating()}
+                  onClick={() => {
+                    void props.triggerServerUpdate();
+                  }}
+                >
+                  {props.updating() ? "Updating…" : "Update now"}
+                </Button>
+              </Show>
+            </div>
+            <Show when={props.updateStatus()}>
+              <p class={styles.settingsDescription} role="status">
+                {props.updateStatus()}
+              </p>
             </Show>
           </section>
         </Show>

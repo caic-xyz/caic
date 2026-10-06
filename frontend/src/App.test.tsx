@@ -2154,6 +2154,27 @@ describe("App repo chips: No repository", () => {
     await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
   });
 
+  it("rechecks the server version on demand and reports a failed recheck", async () => {
+    const user = userEvent.setup();
+    renderApp("/settings?section=server");
+    await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/latest: v0\.0\.1 \(up to date\)/)).toBeInTheDocument();
+
+    vi.mocked(api.getVersion).mockResolvedValueOnce({
+      current: "0.0.1",
+      latest: "0.0.2",
+      updateAvailable: true,
+      autoUpdateEnabled: false,
+    });
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByText(/\(update available\)/)).toBeInTheDocument();
+    expect(api.getVersion).toHaveBeenCalledTimes(2);
+
+    vi.mocked(api.getVersion).mockRejectedValueOnce(new Error("offline"));
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Check failed: offline");
+  });
+
   it("links to the metrics page from the user menu", async () => {
     const user = userEvent.setup();
     const { history } = renderApp("/");

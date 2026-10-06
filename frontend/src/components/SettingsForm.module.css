@@ -133,28 +133,7 @@
   border-color: var(--color-primary-border);
 }
 
-.settingsButton {
-  width: 100%;
-  padding: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.settingsButton:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-.settingsButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.modelRefreshActions {
+.buttonRow {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;

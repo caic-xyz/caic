@@ -578,34 +578,36 @@ function createAppStore() {
     setWellKnownCacheSizes(Object.fromEntries(sizes.map((size) => [size.name, size])));
   };
 
+  async function checkForUpdate() {
+    setCheckingUpdate(true);
+    setVersionCheckError("");
+    try {
+      setVersionInfo(await api.getVersion());
+    } catch (e: unknown) {
+      setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
   // Fetch version, MCP grant, and cache size info when the settings page opens.
   createEffect(() => {
     if (location.pathname !== "/settings") return;
     const initialMcpOAuthAvailable = mcpOAuthAvailable();
-    void (async () => {
-      setCheckingUpdate(true);
-      setVersionCheckError("");
-      setOAuthGrantError("");
-      try {
-        const [v, sizes, grants] = await Promise.all([
-          api.getVersion(),
-          api.getCacheSizes().catch(() => null),
-          initialMcpOAuthAvailable
-            ? api.listOAuthGrants().catch((e: unknown) => {
-                setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
-                return null;
-              })
-            : Promise.resolve(null),
-        ]);
-        setVersionInfo(v);
-        if (sizes) updateWellKnownCacheSizes(sizes.wellKnown);
-        if (grants) setOAuthGrants(grants.grants);
-      } catch (e: unknown) {
-        setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
-      } finally {
-        setCheckingUpdate(false);
-      }
-    })();
+    void checkForUpdate();
+    setOAuthGrantError("");
+    void api
+      .getCacheSizes()
+      .then((sizes) => updateWellKnownCacheSizes(sizes.wellKnown))
+      .catch(() => undefined);
+    if (initialMcpOAuthAvailable) {
+      void api
+        .listOAuthGrants()
+        .then((grants) => setOAuthGrants(grants.grants))
+        .catch((e: unknown) => {
+          setOAuthGrantError(e instanceof Error ? e.message : "Could not load MCP clients");
+        });
+    }
   });
 
   // Tick every second for live elapsed-time display.
@@ -1723,6 +1725,7 @@ function createAppStore() {
     loadImageRefreshStatus,
     startImageRefresh,
     saveSettings,
+    checkForUpdate,
     triggerServerUpdate,
     refreshAvailableModels,
     // usage + connection

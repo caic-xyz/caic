@@ -58,6 +58,7 @@ export default function SettingsPage() {
         imageRefreshStatus={s.imageRefreshStatus}
         startImageRefresh={s.startImageRefresh}
         saveSettings={s.saveSettings}
+        checkForUpdate={s.checkForUpdate}
         triggerServerUpdate={s.triggerServerUpdate}
         refreshAvailableModels={s.refreshAvailableModels}
       />

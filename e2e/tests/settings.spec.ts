@@ -301,3 +301,42 @@ test("runtime CPU settings survive browser edits and reload", async ({ page, api
     await api.updatePreferences({ settings: original.settings });
   }
 });
+
+test("server version check button sits in a button row and rechecks on demand", async ({ page }, testInfo) => {
+  for (const viewport of [
+    { name: "desktop", width: 1600, height: 1000 },
+    { name: "mobile", width: 390, height: 800 },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/settings?section=server");
+    const version = page.getByRole("region", { name: "Version", exact: true });
+    const check = version.getByRole("button", { name: "Check for updates" });
+    await expect(check).toBeVisible();
+    const versionRequest = page.waitForRequest("**/server/version");
+    await check.click();
+    await versionRequest;
+    await expect(check).toBeEnabled();
+    const box = await check.boundingBox();
+    expect(box?.width ?? Infinity).toBeLessThan(viewport.width / 2);
+    await page.screenshot({ path: testInfo.outputPath(`server-version-${viewport.name}.png`) });
+  }
+});
+
+test("settings tabs navigate in the same document", async ({ page }) => {
+  await page.goto("/settings");
+  await page.evaluate(() => {
+    (window as unknown as { documentMarker: boolean }).documentMarker = true;
+  });
+  for (const [section, url] of [
+    ["Storage", "/settings?section=storage"],
+    ["Server", "/settings?section=server"],
+    ["General", "/settings"],
+  ]) {
+    const tab = page.getByRole("link", { name: section, exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-current", "page");
+    await expect(page).toHaveURL(url);
+    await expect(page.getByRole("link", { name: /^(General|Storage|Server)$/ })).toHaveCount(3);
+    expect(await page.evaluate(() => (window as unknown as { documentMarker?: boolean }).documentMarker)).toBe(true);
+  }
+});
