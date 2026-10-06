@@ -128,8 +128,8 @@ github.com/butuzov/ireturn v0.4.1 h1:vWb3NO4t77iku/sjCQ/2pHTQeOmxEhjIriJqRLg1Y+I
 github.com/butuzov/ireturn v0.4.1/go.mod h1:q+DXKzTDV5guNuXLnIab9fKXizTn2miZHLhxH7V/GB4=
 github.com/butuzov/mirror v1.3.3 h1:v0RsWBhfFc1RQqE/f3sHpSttKDtodFn0gFmtYyD4/hA=
 github.com/butuzov/mirror v1.3.3/go.mod h1:h9BzzwYnTiHO0GzgvaTqIg7VSsOUhdIv51cHFFBmX1w=
-github.com/caic-xyz/md v0.18.5-0.20261005172546-934ad68eb109 h1:E3qKPV3Oz7xI5Rf+J2IqnUfYTYnAxllDBlTz7J2hS4g=
-github.com/caic-xyz/md v0.18.5-0.20261005172546-934ad68eb109/go.mod h1:sMuk250ISxCi5xm4rqY/ExphXntB4ozxrIUlH1VyMhE=
+github.com/caic-xyz/md v0.18.5-0.20261006010737-42f3fd0b0699 h1:ztKrdPeytfot8UOmf+Y3k7Sog90zUYaBCvLxE/gFDNM=
+github.com/caic-xyz/md v0.18.5-0.20261006010737-42f3fd0b0699/go.mod h1:sMuk250ISxCi5xm4rqY/ExphXntB4ozxrIUlH1VyMhE=
 github.com/catenacyber/perfsprint v0.10.1 h1:u7Riei30bk46XsG8nknMhKLXG9BcXz3+3tl/WpKm0PQ=
 github.com/catenacyber/perfsprint v0.10.1/go.mod h1:DJTGsi/Zufpuus6XPGJyKOTMELe347o6akPvWG9Zcsc=
 github.com/ccojocar/zxcvbn-go v1.0.4 h1:FWnCIRMXPj43ukfX000kvBZvV6raSxakYr1nzyNrUcc=
