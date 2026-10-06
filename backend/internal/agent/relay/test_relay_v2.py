@@ -957,6 +957,7 @@ def test_exit_and_stripped_environment_controls() -> None:
 def test_antigravity_mcp_lifecycle() -> None:
     """Auxiliary plugins preserve HOME/worktrees and are removed on exit/retry."""
     with tempfile.TemporaryDirectory(prefix="caic-agy-mcp-test-") as root:
+        root = os.path.realpath(root)
         relay_dir = os.path.join(root, "relay")
         work_dir = os.path.join(root, "work")
         home = os.path.join(root, "home")
