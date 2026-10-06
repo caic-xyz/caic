@@ -21,7 +21,7 @@ func compressMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		accepted := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
 		enc := negotiateEncoding(accepted)
-		if enc == "" {
+		if enc == "" || r.Method == http.MethodHead {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -66,7 +66,9 @@ func (cw *compressWriter) WriteHeader(code int) {
 	// WebSocket upgrades hijack the connection; compressing the 101
 	// response adds a bogus Content-Encoding header and causes a
 	// "response.Write on hijacked connection" log on cleanup.
-	if code == http.StatusSwitchingProtocols {
+	// Bodyless statuses (1xx, 204, 304) reject the compressor's framing bytes
+	// with http.ErrBodyNotAllowed when it is closed.
+	if (code >= 100 && code < 200) || code == http.StatusNoContent || code == http.StatusNotModified {
 		cw.skipCompress = true
 		cw.headerSent = true
 	}
