@@ -20,7 +20,7 @@ import (
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
-// SafetyIssue describes a potential problem detected before pushing to origin.
+// SafetyIssue describes a potential problem detected before pushing.
 type SafetyIssue struct {
 	File   string
 	Kind   string // "large_binary" or "secret"
@@ -47,10 +47,12 @@ type secretPattern struct {
 	desc string
 }
 
-// CheckSafety scans the diff for large binary files and potential secrets.
+// CheckSafety scans the diff from baseRef to branch for large binary files and
+// potential secrets. Both refs are explicit Git revisions, including the remote
+// when comparing against a remote tracking branch.
 // It returns any issues found. A non-nil error indicates a git command failure,
 // or incomplete secret scan, not a safety problem.
-func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseBranch string, ds v3.DiffStat) ([]SafetyIssue, error) {
+func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseRef string, ds v3.DiffStat) ([]SafetyIssue, error) {
 	if log == nil {
 		return nil, errors.New("safety logger is required")
 	}
@@ -76,7 +78,7 @@ func CheckSafety(ctx context.Context, log *slog.Logger, dir, branch, baseBranch 
 	}
 
 	// Scan added lines for secrets.
-	secretIssues, err := scanDiffForSecrets(ctx, log, dir, branch, baseBranch)
+	secretIssues, err := scanDiffForSecrets(ctx, log, dir, branch, baseRef)
 	if err != nil {
 		return issues, err
 	}
@@ -97,12 +99,12 @@ func gitCatFileSize(ctx context.Context, log *slog.Logger, dir, branch, path str
 }
 
 // scanDiffForSecrets runs git diff and scans added lines for secret patterns.
-func scanDiffForSecrets(ctx context.Context, log *slog.Logger, dir, branch, baseBranch string) ([]SafetyIssue, error) {
-	log.InfoContext(ctx, "git diff for secrets", "branch", branch, "baseBranch", baseBranch)
+func scanDiffForSecrets(ctx context.Context, log *slog.Logger, dir, branch, baseRef string) ([]SafetyIssue, error) {
+	log.InfoContext(ctx, "git diff for secrets", "branch", branch, "baseRef", baseRef)
 	// Cancel the producer on scan failure, and always reap it before returning.
 	commandCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "git", "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "origin/"+baseBranch+"..."+branch) //nolint:gosec // branch names are from internal git state.
+	cmd := exec.CommandContext(commandCtx, "git", "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", baseRef+"..."+branch) //nolint:gosec // branch names are from internal git state.
 	cmd.Dir = dir
 	cmd.WaitDelay = time.Second
 	// A configured diff helper can emit credentials or source on stderr.

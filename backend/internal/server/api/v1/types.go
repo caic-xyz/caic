@@ -769,7 +769,7 @@ type SyncTarget string
 // Supported sync targets.
 const (
 	SyncTargetBranch  SyncTarget = "branch"  // Push to the task's own branch (default).
-	SyncTargetDefault SyncTarget = "default" // Squash-push to the repo's default branch.
+	SyncTargetDefault SyncTarget = "default" // Push existing commits to the repo's default branch.
 )
 
 // SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync.

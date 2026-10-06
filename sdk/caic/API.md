@@ -406,7 +406,7 @@ SyncTarget selects where to push changes.
 | Value | Description |
 |-------|-------------|
 | `branch` | Push to the task's own branch (default). |
-| `default` | Squash-push to the repo's default branch. |
+| `default` | Push existing commits to the repo's default branch. |
 
 ### TaskState
 

@@ -6,7 +6,11 @@ minimumReleaseAgeExclude:
   - pnpm
 
 allowBuilds:
-  # pnpm v11 returns exit code 1 for unapproved builds, which killed the .stamp target in the Makefile. Set it to true.
+  # Allow esbuild's build script so frozen dependency installation succeeds.
   esbuild: true
 minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeStrict: true
+
+# Make installs dependencies before parallel checks. Commands fail on stale
+# dependencies instead of launching competing installations.
+verifyDepsBeforeRun: error

@@ -124,6 +124,9 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	if d.UsageRollup == nil {
 		return nil, errors.New("usage rollup is required")
 	}
+	if d.PushCacheDir == "" {
+		return nil, errors.New("push cache directory is required")
+	}
 	log = log.With("cmp", "server")
 	if d.VoiceGateway.Mode == VoiceGatewayModeExternal {
 		switch {
@@ -207,6 +210,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			prefs:              d.Preferences,
 			checkouts:          d.Checkouts,
 			checkoutRoot:       d.CheckoutRoot,
+			pushCacheDir:       d.PushCacheDir,
 			repoStatus:         d.RepoStatus,
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
@@ -601,6 +605,8 @@ func hostIsLoopback(host string) bool {
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
+	// PushCacheDir is the configured application cache root for cloned checkouts.
+	PushCacheDir               string
 	Checkouts                  *repo.Registry
 	CheckoutRoot               string
 	RepoStatus                 *ci.RepoStatusStore

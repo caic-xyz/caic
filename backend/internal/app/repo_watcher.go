@@ -1,4 +1,4 @@
-// Repository watcher assembly for app-managed repo injection.
+// Discovers app-managed repositories and periodically expires idle push worktrees.
 
 package app
 
@@ -25,16 +25,18 @@ type repoWatcher struct {
 	log        *slog.Logger
 	ctx        context.Context
 	absRoot    string
+	cacheDir   string
 	checkouts  *repo.Registry
 	repoStatus *ci.RepoStatusStore
 	runtimes   *runtime.Router
 }
 
-func newRepoWatcher(ctx context.Context, log *slog.Logger, absRoot string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore, runtimes *runtime.Router) *repoWatcher {
+func newRepoWatcher(ctx context.Context, log *slog.Logger, absRoot, cacheDir string, checkouts *repo.Registry, repoStatus *ci.RepoStatusStore, runtimes *runtime.Router) *repoWatcher {
 	return &repoWatcher{
 		log:        log.With("root", absRoot),
 		ctx:        ctx,
 		absRoot:    absRoot,
+		cacheDir:   cacheDir,
 		checkouts:  checkouts,
 		repoStatus: repoStatus,
 		runtimes:   runtimes,
@@ -42,16 +44,27 @@ func newRepoWatcher(ctx context.Context, log *slog.Logger, absRoot string, check
 }
 
 func (w *repoWatcher) watch() {
+	w.cleanupPushWorktrees(w.ctx)
 	mtimes := make(map[string]time.Time)
 	ticker := time.NewTicker(repoWatcherInterval)
 	defer ticker.Stop()
+	cleanup := time.NewTicker(time.Hour)
+	defer cleanup.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			w.poll(w.ctx, mtimes)
+		case <-cleanup.C:
+			w.cleanupPushWorktrees(w.ctx)
 		case <-w.ctx.Done():
 			return
 		}
+	}
+}
+
+func (w *repoWatcher) cleanupPushWorktrees(ctx context.Context) {
+	if err := repo.SweepPushWorktrees(ctx, w.log, w.cacheDir); err != nil {
+		w.log.WarnContext(ctx, "expire idle push worktrees", "err", err)
 	}
 }
 
@@ -95,7 +108,7 @@ func (w *repoWatcher) register(ctx context.Context, abs string) {
 		w.log.WarnContext(ctx, "runtime instance list incomplete; branch numbering may collide with a running container", "path", abs, "err", err)
 	}
 	liveBranches := repo.LiveBranchesByRoot(instances)[abs]
-	checkout, err := repo.DiscoverCheckout(ctx, w.log.With("path", abs), abs, liveBranches)
+	checkout, err := repo.DiscoverCheckout(ctx, w.log.With("path", abs), abs, w.cacheDir, liveBranches)
 	if err != nil {
 		w.log.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
@@ -460,7 +461,7 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 	return r.Fork(ctx, p)
 }
 
-// Sync pushes the task branch to its configured origin or default branch.
+// Sync pushes task commits to each repository's task or default branch.
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
 	t := r.entry.Task()
 	switch t.GetState() {
@@ -478,38 +479,25 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 	if checkout == nil {
 		return nil, conflict("task has no checkout")
 	}
-	branch := ""
-	if primary := t.Primary(); primary != nil {
-		branch = primary.Branch
-	}
-	if target == SyncTargetDefault {
-		message := t.Title()
-		if message == "" {
-			message = t.InitialPrompt.Text
-		}
-		ds, issues, err := checkout.SyncToDefault(ctx, r.manager.log, r.manager.Runtimes, t, message)
-		if err != nil {
-			return nil, internalErr(err, "sync to default")
-		}
-		status := "synced"
-		if len(ds) == 0 {
-			status = "empty"
-		} else if len(issues) > 0 {
-			status = "blocked"
-		}
-		return &SyncResult{Status: status, Branch: checkout.BaseBranch, DiffStat: ds, SafetyIssues: issues}, nil
-	}
-	ds, issues, err := checkout.SyncToOrigin(ctx, r.manager.log, r.manager.Runtimes, t, force)
+	gitTarget, destinations, err := checkout.ResolvePushDestinations(ctx, r.manager.log, t.GitTarget(), target == SyncTargetDefault)
 	if err != nil {
-		return nil, internalErr(err, "sync to origin")
+		return nil, internalErr(err, "resolve push destination")
+	}
+	opts := repo.PushOptions{}
+	if target != SyncTargetDefault {
+		opts = repo.PushOptions{CommitPending: true, BypassSafety: force, Force: true}
+	}
+	ds, issues, err := checkout.Push(ctx, r.manager.log, r.manager.Runtimes, gitTarget, destinations, opts)
+	if err != nil {
+		return nil, internalErr(err, "sync to "+string(target))
 	}
 	status := "synced"
 	if len(ds) == 0 {
 		status = "empty"
-	} else if len(issues) > 0 && !force {
+	} else if len(issues) > 0 && !opts.BypassSafety {
 		status = "blocked"
 	}
-	return &SyncResult{Status: status, Branch: branch, DiffStat: ds, SafetyIssues: issues}, nil
+	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: ds, SafetyIssues: issues}, nil
 }
 
 // checkContinuation rejects retained v1 tasks before lifecycle state changes.

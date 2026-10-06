@@ -138,3 +138,18 @@ test("list tasks includes created task", async ({ api }) => {
   expect(found!.repos![0].name).toBeTruthy();
   expect(found!.repos![0].branch).toBeTruthy();
 });
+
+test("task sync preserves default and task branch result contracts", async ({ api }) => {
+  const id = await createTaskAPI(api, "api sync contract test");
+  const task = await waitForTaskState(api, id, "waiting");
+
+  const defaultResult = await api.syncTask(id, { target: "default" });
+  expect(defaultResult.status).toBe("empty");
+  expect(defaultResult.branch).toBe("main");
+  expect(defaultResult.safetyIssues ?? []).toEqual([]);
+
+  const taskResult = await api.syncTask(id, { target: "branch" });
+  expect(taskResult.status).toBe("empty");
+  expect(taskResult.branch).toBe(task.repos![0].branch);
+  expect(taskResult.safetyIssues ?? []).toEqual([]);
+});

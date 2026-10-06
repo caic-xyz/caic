@@ -73,7 +73,7 @@ func BenchmarkCheckSafety(b *testing.B) {
 			b.SetBytes(int64(size))
 			b.ResetTimer()
 			for b.Loop() {
-				issues, err := CheckSafety(b.Context(), log, dir, "topic", "main", nil)
+				issues, err := CheckSafety(b.Context(), log, dir, "topic", "origin/main", nil)
 				if err != nil || len(issues) != 0 {
 					b.Fatalf("CheckSafety: %v, %v", issues, err)
 				}

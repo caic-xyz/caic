@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"iter"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -222,9 +225,22 @@ func (b *RuntimeBackend) TurnSnapshot(ctx context.Context, id runtime.ID, previo
 	return out, nil
 }
 
-// Fetch implements runtime.Repository.
-func (*RuntimeBackend) Fetch(_ context.Context, _ runtime.ID, _ runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
-	return nil, nil
+// Fetch reports the fake runtime's existing host branch commits. Fake agents
+// produce fixture messages without pending filesystem edits to commit.
+func (b *RuntimeBackend) Fetch(ctx context.Context, id runtime.ID, _ runtime.FetchOpts) ([]runtime.FetchedBranch, error) {
+	b.mu.Lock()
+	repos := slices.Clone(b.repos[id])
+	b.mu.Unlock()
+	branches := make([]runtime.FetchedBranch, 0, len(repos))
+	for _, rp := range repos {
+		g := &git.Checkout{Root: rp.GitRoot, Logger: slog.Default()}
+		tip, err := g.RevParse(ctx, "refs/heads/"+rp.Branch)
+		if err != nil {
+			return nil, fmt.Errorf("fake fetch %s: %w", rp.ContainerPath, err)
+		}
+		branches = append(branches, runtime.FetchedBranch{RepositoryPath: rp.ContainerPath, BranchName: rp.Branch, CommitHash: tip})
+	}
+	return branches, nil
 }
 
 // Stop implements runtime.Lifecycle.

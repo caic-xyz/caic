@@ -47,6 +47,7 @@ type serverHandlers struct {
 	prefs              *preferences.Store
 	checkouts          *repo.Registry
 	checkoutRoot       string
+	pushCacheDir       string
 	repoStatus         *ci.RepoStatusStore
 	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
@@ -593,7 +594,7 @@ func (h *serverHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*
 	if err != nil {
 		return nil, err
 	}
-	info, err := repo.Clone(ctx, h.log.With("repo", target.relPath), req.URL, target.dir, req.Depth)
+	info, err := repo.Clone(ctx, h.log.With("repo", target.relPath), req.URL, target.dir, h.pushCacheDir, req.Depth)
 	if err != nil {
 		return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: err.Error()}
 	}

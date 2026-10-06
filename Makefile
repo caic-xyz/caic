@@ -1,7 +1,7 @@
 # Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-dev playwright-browser refresh-generated test test-e2e test-smoke tools upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
+.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-smoke tools upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
 
 # Ruff is installed separately; Go tool versions are declared in go.mod.
 RUFF_VERSION=0.16.8
@@ -14,7 +14,6 @@ tools:
 	@command -v uv > /dev/null 2>&1 || { echo 'uv is required to install the Python tools; see https://docs.astral.sh/uv/' >&2; exit 1; }
 	@ruff --version 2>/dev/null | grep -Fqw "$(RUFF_VERSION)" || uv tool install --force --quiet ruff==$(RUFF_VERSION)
 
-FRONTEND_STAMP=node_modules/.modules.yaml
 HTTP?=:2242
 
 # Static checks for verify, grouped into independent lanes run concurrently by
@@ -23,6 +22,8 @@ HTTP?=:2242
 # The verify recipe passes these single-quoted through two shell layers, so a
 # lane variable must not contain a single quote; use double quotes inside.
 #
+VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
 # The gofmt and goimports formatters are checked by custom-gcl run itself
 # (formatters section of .golangci.yml) with its warm analysis cache; a separate
 # `golangci-lint fmt --diff` pass would re-typecheck the whole tree without that
@@ -55,6 +56,7 @@ help:
 	@printf '  %-34s - %s\n' 'make check-agent-logs' 'Validate recent v2 task logs against genai wire DTOs'
 	@printf '  %-34s - %s\n' 'make build' 'Build Go server (includes frontend build)'
 	@printf '  %-34s - %s\n' 'make fake-dev' 'Run the server with fake backend (no containers)'
+	@printf '  %-34s - %s\n' 'make frontend-deps' 'Install dependencies from the frozen lockfile'
 	@printf '  %-34s - %s\n' 'make frontend-dev' 'Run frontend dev server (http://localhost:5173)'
 	@printf '  %-34s - %s\n' 'make refresh-generated' 'Regenerate API SDKs, AGENTS indexes, and backend architecture docs'
 	@printf '  %-34s - %s\n' 'make screenshots-check' 'Verify deterministic frontend screenshots'
@@ -63,10 +65,10 @@ help:
 	@printf '  %-34s - %s\n' 'make git-hooks' 'Install git pre-commit hooks'
 	@printf '  %-34s - %s\n' 'make upgrade' 'Upgrade Go and pnpm dependencies'
 
-$(FRONTEND_STAMP): pnpm-lock.yaml
-	@echo 'Installing frontend dependencies (one-off after a lockfile change)...'
+# Reconcile dependencies once per Make invocation before checks start. Warm
+# frozen installs reuse pnpm's caches; missing packages require downloads.
+frontend-deps:
 	@pnpm install --frozen-lockfile --silent
-	@touch $@
 
 generate-sdks:
 	@go generate ./...
@@ -75,7 +77,7 @@ refresh-generated: generate-sdks
 	@./scripts/update_agents_file_index.py
 	@./scripts/update_backend_architecture.py
 
-frontend-build: $(FRONTEND_STAMP) generate-sdks
+frontend-build: frontend-deps generate-sdks
 	@pnpm --silent build
 
 # The custom-gcl binary is not byte-reproducible (golangci-lint custom builds
@@ -97,16 +99,15 @@ build: frontend-build
 
 # The one static gate. Runs every check-only lane concurrently; the read-only
 # counterpart of fix and the pre-push gate. Independent of test.
-verify: tools custom-gcl $(FRONTEND_STAMP)
-	@go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-	@./scripts/run-concurrently.sh go,buildtags,js,ts,eslint,python,shell,misc '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
+verify: tools custom-gcl frontend-deps
+	@./scripts/run-concurrently.sh workflows,go,buildtags,js,ts,eslint,python,shell,misc '$(VERIFY_WORKFLOWS)' '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
 
 # Apply every autofix, then refresh the generated file index and architecture
 # diagram. Order matters: the stylelint fixer runs last because its
 # cascade-sensitive rewrites must not be undone by another formatter, and the
 # index refresh runs after fixes so the index matches the fixed tree. Does not
 # re-check; run verify for that.
-fix: tools custom-gcl $(FRONTEND_STAMP)
+fix: tools custom-gcl frontend-deps
 	@./custom-gcl run --show-stats=false ./... --fix
 	@go tool golangci-lint fmt
 	@pnpm exec eslint . --fix
@@ -121,23 +122,22 @@ fix: tools custom-gcl $(FRONTEND_STAMP)
 check-agent-logs:
 	@go run ./backend/internal/cmd/check-agent-logs
 
-benchmark: $(FRONTEND_STAMP)
+benchmark: frontend-deps
 	@go test ./... -run '^$$' -bench . -benchmem
 	@pnpm --silent benchmark
 
 fake-dev: frontend-build
 	@./scripts/run-dev.py --http $(HTTP) --fake
 
-test: $(FRONTEND_STAMP)
-	@go test -cover ./...
-	@pnpm --silent test:coverage
-	@python3 scripts/run_python_tests.py
+# Independent Go, frontend, and Python suites run after dependency installation.
+test: frontend-deps
+	@./scripts/run-concurrently.sh go,frontend,python 'go test -cover ./...' 'pnpm --silent test:coverage' 'python3 scripts/run_python_tests.py'
 
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
 # backend/frontend/dist with build targets, so never run it concurrently with
 # them. CI runs it; verify and test do not.
-test-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
+test-e2e: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
 	@pnpm --silent exec playwright test --config e2e/playwright.config.ts; \
 	status=$$?; \
@@ -152,7 +152,7 @@ test-e2e: $(FRONTEND_STAMP) generate-sdks playwright-browser
 test-smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 30m -coverprofile=coverage.out ./backend/cmd/caic/
 
-coverage: $(FRONTEND_STAMP)
+coverage: frontend-deps
 	@go test -coverprofile=coverage.out ./...
 	@echo ""
 	@echo "=== Go coverage ==="
@@ -168,16 +168,16 @@ git-hooks:
 	@git config merge.ours.driver true
 	@echo "✓ Git hooks installed"
 
-frontend-dev: $(FRONTEND_STAMP)
+frontend-dev: frontend-deps
 	@pnpm --silent dev
 
-playwright-browser: $(FRONTEND_STAMP)
+playwright-browser: frontend-deps
 	@pnpm --silent exec playwright install chromium
 
 # Slow, maintainer-only: renders frontend visuals twice and
 # compares decoded pixels against tracked baselines that encode the
 # development container's font stack.
-screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser
+screenshots-check: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
 	@python3 scripts/visual_screenshots.py check --rebuilt
 
@@ -188,11 +188,11 @@ screenshots-check: $(FRONTEND_STAMP) generate-sdks playwright-browser
 # to compare a bundle that predates uncommitted frontend inputs, so it would
 # otherwise catch a bare script invocation that forgot to build; these targets
 # build immediately above and declare that with --rebuilt.
-screenshots-generate-frontend: $(FRONTEND_STAMP) generate-sdks playwright-browser
+screenshots-generate-frontend: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
 	@python3 scripts/visual_screenshots.py generate --rebuilt
 
-screenshots-update: $(FRONTEND_STAMP) generate-sdks playwright-browser
+screenshots-update: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
 	@python3 scripts/visual_screenshots.py update --rebuilt
 

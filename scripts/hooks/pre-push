@@ -8,9 +8,7 @@ if (($# != 2)); then
   exit 2
 fi
 
-script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly script_dir
-repo_root="$(CDPATH='' cd -- "$script_dir/../.." && pwd)"
+repo_root="$(git rev-parse --show-toplevel)"
 readonly repo_root
 
 cd -- "$repo_root"

@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
@@ -88,21 +89,21 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 // With a GitHub App configured, it performs a single initial check and returns;
 // subsequent updates are delivered via check_suite webhook events.
 // Without an App, it polls every 15 s.
-func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string) {
+func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName, sha string) {
 	t := entry.Task()
-	svc.log.InfoContext(ctx, "monitor started", "task", t.ID, "owner", owner, "repo", repo, "sha", sha, "hasApp", svc.backend.GitHubApp() != nil)
+	svc.log.InfoContext(ctx, "monitor started", "task", t.ID, "owner", owner, "repo", repoName, "sha", sha, "hasApp", svc.backend.GitHubApp() != nil)
 
 	// Fast path: result already cached (e.g. after a server restart).
-	if cached, ok := svc.cache.Get(owner, repo, sha); ok {
+	if cached, ok := svc.cache.Get(owner, repoName, sha); ok {
 		svc.log.InfoContext(ctx, "cache hit", "task", t.ID, "status", cached.Status)
-		svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, cached)
+		svc.ApplyMonitorCIResult(ctx, entry, f, owner, repoName, sha, cached)
 		return
 	}
 
 	// With GitHub App: do one initial check to seed pending state, then rely on
 	// check_suite webhook events for the terminal result.
 	if svc.backend.GitHubApp() != nil {
-		runs, err := f.GetCheckRuns(ctx, owner, repo, sha)
+		runs, err := f.GetCheckRuns(ctx, owner, repoName, sha)
 		if err != nil {
 			if !errors.Is(err, forge.ErrNotFound) {
 				svc.log.WarnContext(ctx, "initial check runs", "task", t.ID, "err", err)
@@ -113,13 +114,13 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		}
 		svc.log.InfoContext(ctx, "initial check runs", "task", t.ID, "runs", len(runs))
 		if len(runs) > 0 {
-			result, done := EvaluateCheckRuns(owner, repo, runs)
+			result, done := EvaluateCheckRuns(owner, repoName, runs)
 			if done {
-				if err := svc.cache.Put(owner, repo, sha, result); err != nil {
+				if err := svc.cache.Put(owner, repoName, sha, result); err != nil {
 					svc.log.WarnContext(ctx, "cache write failed", "err", err)
 				}
 				svc.log.InfoContext(ctx, "completed via GitHub App", "task", t.ID, "status", result.Status)
-				svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, result)
+				svc.ApplyMonitorCIResult(ctx, entry, f, owner, repoName, sha, result)
 				return
 			}
 			status := InterimCIStatus(runs)
@@ -135,7 +136,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 	// checkOnce fetches and applies CI status. It returns true when
 	// monitoring should stop (terminal result or permanent error).
 	checkOnce := func() (stop bool) {
-		runs, err := f.GetCheckRuns(ctx, owner, repo, sha)
+		runs, err := f.GetCheckRuns(ctx, owner, repoName, sha)
 		if err != nil {
 			if errors.Is(err, forge.ErrNotFound) {
 				return true
@@ -146,17 +147,17 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 		if len(runs) == 0 {
 			return false
 		}
-		result, done := EvaluateCheckRuns(owner, repo, runs)
+		result, done := EvaluateCheckRuns(owner, repoName, runs)
 		if !done {
 			status := InterimCIStatus(runs)
 			t.SetCIStatus(status, result.Checks)
 			svc.backend.NotifyTaskChange()
 			return false
 		}
-		if err := svc.cache.Put(owner, repo, sha, result); err != nil {
+		if err := svc.cache.Put(owner, repoName, sha, result); err != nil {
 			svc.log.WarnContext(ctx, "cache write failed", "err", err)
 		}
-		svc.ApplyMonitorCIResult(ctx, entry, f, owner, repo, sha, result)
+		svc.ApplyMonitorCIResult(ctx, entry, f, owner, repoName, sha, result)
 		return true
 	}
 
@@ -190,7 +191,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 //   - CI failure: notify agent, then launch autoResync to push fixes and
 //     re-monitor so the loop repeats automatically.
 //   - CI success: squash-merge the PR via the forge API, then notify the agent.
-func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string, result forgecache.Result) {
+func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName, sha string, result forgecache.Result) {
 	t := entry.Task()
 
 	// Dedup: skip if we already notified this task for this SHA.
@@ -219,7 +220,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 				}
 			}
 			commitMsg := lastResultText(t)
-			if mergeErr := f.MergePR(ctx, owner, repo, snap.ForgePR, commitTitle, commitMsg); mergeErr != nil {
+			if mergeErr := f.MergePR(ctx, owner, repoName, snap.ForgePR, commitTitle, commitMsg); mergeErr != nil {
 				svc.log.WarnContext(ctx, "merge PR", "task", t.ID, "pr", snap.ForgePR, "err", mergeErr)
 				summary = fmt.Sprintf("%s CI: all checks passed. Auto-merge of %s failed: %v", f.Name(), f.PRLabel(snap.ForgePR), mergeErr)
 			} else {
@@ -227,7 +228,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 				summary = fmt.Sprintf("%s CI: all checks passed. %s merged successfully via squash commit.", f.Name(), f.PRLabel(snap.ForgePR))
 			}
 		} else {
-			summary = fmt.Sprintf("%s CI: all checks passed for %s/%s@%s.", f.Name(), owner, repo, sha[:min(7, len(sha))])
+			summary = fmt.Sprintf("%s CI: all checks passed for %s/%s@%s.", f.Name(), owner, repoName, sha[:min(7, len(sha))])
 		}
 	}
 	t.SetCIStatus(ciStatus, result.Checks)
@@ -248,7 +249,7 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 	// On CI failure: wait for the agent to finish its fix turn, then
 	// auto-sync the branch and restart CI monitoring.
 	if ciStatus == forge.CIStatusFailure {
-		go svc.autoResync(ctx, entry, f, owner, repo)
+		go svc.autoResync(ctx, entry, f, owner, repoName)
 	}
 }
 
@@ -344,10 +345,10 @@ func (svc *Service) waitForAgentResult(ctx context.Context, t *task.Task) bool {
 }
 
 // autoResync waits for the agent to finish its current turn, then pushes the
-// latest branch commits to origin and starts a new CI monitoring goroutine.
+// latest branch commits to each repository's remote and restarts CI monitoring.
 // Called after a CI failure so the loop closes: CI fails → agent fixes →
 // auto-push → CI re-runs → (repeat or merge on success).
-func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo string) {
+func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repoName string) {
 	t := entry.Task()
 	if !svc.waitForAgentResult(ctx, t) {
 		return
@@ -371,13 +372,19 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 
 	svc.log.InfoContext(ctx, "syncing branch", "task", t.ID, "br", p.Branch)
-	if _, _, err := checkout.SyncToOrigin(ctx, svc.log, svc.backend.RuntimeRouter(), t, false); err != nil {
-		svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err)
+	target, destinations, err := checkout.ResolvePushDestinations(ctx, svc.log, t.GitTarget(), false)
+	if err != nil {
+		svc.log.WarnContext(ctx, "resolve push destination", "task", t.ID, "err", err)
+		return
+	}
+	_, issues, err := checkout.Push(ctx, svc.log, svc.backend.RuntimeRouter(), target, destinations, repo.PushOptions{CommitPending: true, Force: true})
+	if err != nil || len(issues) > 0 {
+		svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err, "safetyIssues", len(issues))
 		return
 	}
 
 	// Fetch the new branch HEAD SHA from the forge after the push.
-	newSHA, err := f.GetDefaultBranchSHA(ctx, owner, repo, p.Branch)
+	newSHA, err := f.GetDefaultBranchSHA(ctx, owner, repoName, p.Branch)
 	if err != nil {
 		svc.log.WarnContext(ctx, "get SHA", "task", t.ID, "err", err)
 		return
@@ -385,7 +392,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 
 	svc.log.InfoContext(ctx, "restarting monitor", "task", t.ID, "sha", newSHA[:min(7, len(newSHA))])
 	svc.backend.NotifyTaskChange()
-	go svc.MonitorCI(ctx, entry, f, owner, repo, newSHA)
+	go svc.MonitorCI(ctx, entry, f, owner, repoName, newSHA)
 }
 
 // maybeAutoFix creates a new task to fix CI failures when auto-fix is enabled
@@ -404,8 +411,8 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 		svc.log.WarnContext(ctx, "no primary repo")
 		return
 	}
-	repo := svc.backend.RepoInfoFor(primary.Name)
-	if repo.RelPath == "" {
+	repoInfo := svc.backend.RepoInfoFor(primary.Name)
+	if repoInfo.RelPath == "" {
 		svc.log.WarnContext(ctx, "repo not found", "repo", primary.Name)
 		return
 	}
@@ -413,7 +420,7 @@ func (svc *Service) maybeAutoFix(ctx context.Context, t *task.Task, f forge.Forg
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
 	prompt := ciSummary.ForPR(prURL, snap.ForgePR, primary.Branch)
 	svc.log.InfoContext(ctx, "creating auto-fix task", "repo", primary.Name, "pr", snap.ForgePR, "branch", primary.Branch)
-	if _, err := svc.backend.CreateTask(ctx, task.CreateRequest{Repo: repo.RelPath, Prompt: prompt, OwnerID: t.OwnerID}); err != nil {
+	if _, err := svc.backend.CreateTask(ctx, task.CreateRequest{Repo: repoInfo.RelPath, Prompt: prompt, OwnerID: t.OwnerID}); err != nil {
 		svc.log.WarnContext(ctx, "create auto-fix task", "repo", primary.Name, "err", err)
 	}
 }

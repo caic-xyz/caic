@@ -457,6 +457,7 @@ func newMCPOAuthLifecycleRouter(t *testing.T, auditLogPath ...string) (*testRout
 
 	refreshTokenPath := t.TempDir() + "/mcp_oauth_refresh_tokens.json"
 	s, err := New(t.Context(), testLogger(), Dependencies{
+		PushCacheDir:               t.TempDir(),
 		Checkouts:                  checkoutRegistry,
 		RepoStatus:                 repoStatus,
 		Runtimes:                   runtimeRouter,

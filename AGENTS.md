@@ -57,6 +57,13 @@ documented beside their source and are not part of `make benchmark`.
 the header of `e2e/playwright.config.ts` for the constraints (frontend-build
 sharing, targeted runs, screenshot gating).
 
+### Smoke Tests
+
+Smoke tests such as `make test-smoke` are optional. They may be skipped,
+especially when the running environment lacks the privileges required by the
+container runtime. Report skipped smoke tests and the reason in the handoff;
+they are not a completion gate.
+
 <!-- BEGIN FILE INDEX -->
 ## File Index
 

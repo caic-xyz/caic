@@ -95,8 +95,7 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 | `ClearContextSession`     | `trace.NewTask`     | `task.clear-context:{id}` |
 | `StartSession`            | `trace.NewTask`     | `task.start-session:{id}` |
 | `ForkTask`                | `trace.NewTask`     | `task.fork:{src}->{dst}`  |
-| `SyncToOrigin` — fetch    | `trace.StartRegion` | `sync-fetch`              |
-| `SyncToDefault` — fetch   | `trace.StartRegion` | `sync-default-fetch`      |
+| `Push` — fetch            | `trace.StartRegion` | `push-fetch`              |
 
 ### Container operations (`backend/internal/runtime/mdruntime/backend.go`)
 

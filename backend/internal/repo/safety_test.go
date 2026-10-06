@@ -39,7 +39,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "commit", "-m", "add binary")
 
 		ds := v3.DiffStat{{Path: "big.bin", Binary: true}}
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "origin/main", ds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +68,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "commit", "-m", "add small binary")
 
 		ds := v3.DiffStat{{Path: "small.bin", Binary: true}}
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "origin/main", ds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "config.go")
 		runGit(t, clone, "commit", "-m", "add config")
 
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "origin/main", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +118,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "key.pem")
 		runGit(t, clone, "commit", "-m", "add key")
 
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "origin/main", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "app.conf")
 		runGit(t, clone, "commit", "-m", "add config")
 
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "origin/main", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,7 @@ func TestCheckSafety(t *testing.T) {
 
 		// Using the bare branch name would fail (the old bug).
 		ref := "refs/remotes/md-caic-0/caic-0"
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, ref, "main", nil)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, ref, "origin/main", nil)
 		if err != nil {
 			t.Fatalf("CheckSafety with remote ref failed: %v", err)
 		}
@@ -199,7 +199,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "commit", "-m", "add clean")
 
 		ds := v3.DiffStat{{Path: "clean.go", LinesAdded: 1}}
-		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "main", ds)
+		issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "caic-0", "origin/main", ds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +222,7 @@ func TestCheckSafety(t *testing.T) {
 			runGit(t, clone, "commit", "-m", "fixture")
 			var logs bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&logs, nil))
-			issues, err := CheckSafety(t.Context(), log, clone, "topic", "main", nil)
+			issues, err := CheckSafety(t.Context(), log, clone, "topic", "origin/main", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -244,7 +244,7 @@ func TestCheckSafety(t *testing.T) {
 			runGit(t, clone, "commit", "-m", "fixture")
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "topic", "main", nil)
+			issues, err := CheckSafety(ctx, logtest.Logger(t), clone, "topic", "origin/main", nil)
 			if err == nil || !strings.Contains(err.Error(), "1 MiB") || len(issues) != 0 {
 				t.Fatalf("issues=%v, err=%v", issues, err)
 			}
@@ -264,7 +264,7 @@ func TestCheckSafety(t *testing.T) {
 					}
 					runGit(t, clone, "add", ".")
 					runGit(t, clone, "commit", "-m", "fixture")
-					_, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "topic", "main", nil)
+					_, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "topic", "origin/main", nil)
 					// The added-line '+' counts toward the documented diff-line bound.
 					if length < 1<<20 && err != nil {
 						t.Fatal(err)
@@ -279,7 +279,7 @@ func TestCheckSafety(t *testing.T) {
 		t.Run("CommandError", func(t *testing.T) {
 			t.Parallel()
 			clone := initTestRepo(t, "main")
-			issues, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "missing", "main", nil)
+			issues, err := CheckSafety(t.Context(), logtest.Logger(t), clone, "missing", "origin/main", nil)
 			if err == nil || !strings.Contains(err.Error(), "git diff for secret scan") || len(issues) != 0 {
 				t.Fatalf("issues=%v, err=%v", issues, err)
 			}
@@ -301,7 +301,7 @@ func TestCheckSafety(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 			defer cancel()
 			start := time.Now()
-			_, err := CheckSafety(ctx, logtest.Logger(t), clone, "topic", "main", nil)
+			_, err := CheckSafety(ctx, logtest.Logger(t), clone, "topic", "origin/main", nil)
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("got %v", err)
 			}
@@ -328,7 +328,7 @@ func TestCheckSafety(t *testing.T) {
 			runGit(t, clone, "config", "diff.external", "sh "+script)
 			var logs bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&logs, nil))
-			_, err := CheckSafety(t.Context(), log, clone, "topic", "main", nil)
+			_, err := CheckSafety(t.Context(), log, clone, "topic", "origin/main", nil)
 			if err == nil {
 				t.Fatal("command unexpectedly succeeded")
 			}
@@ -381,7 +381,7 @@ func TestScanDiffForSecrets_Deduplication(t *testing.T) {
 	runGit(t, clone, "add", "keys.go")
 	runGit(t, clone, "commit", "-m", "add keys")
 
-	issues, err := scanDiffForSecrets(ctx, logtest.Logger(t), clone, "caic-0", "main")
+	issues, err := scanDiffForSecrets(ctx, logtest.Logger(t), clone, "caic-0", "origin/main")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Checkout serializes Git operations and returns snapshots ordered by probe completion.
+// Checkout owns pooled task pushes and Git queries with snapshots ordered by probe completion.
 
 package repo
 
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime/trace"
 	"slices"
@@ -26,10 +27,6 @@ import (
 // is the currently checked-out branch of the host repo. Expected when caic hosts
 // its own repository, so callers log it below warning level.
 var errBranchCheckedOut = errors.New("branch is currently checked out")
-
-func runtimeRemoteRef(id runtime.ID, branch string) string {
-	return "refs/remotes/" + string(id.InstanceID()) + "/" + branch
-}
 
 // ParseDiffNumstat parses git diff --numstat output into a DiffStat.
 // Each line has the format: <added>\t<deleted>\t<path>.
@@ -133,33 +130,53 @@ type Checkout struct {
 	BaseBranch       string
 	BaseBranchRemote string
 	GitTimeout       time.Duration
+	// PushTimeout bounds setup, hooks, network, and Git cleanup; verification
+	// can require a cold tool/dependency install, unlike ordinary Git queries.
+	PushTimeout time.Duration
+	PushDir     string
 
 	branchMu sync.Mutex // Serializes branch creation (nextID + git branch) to avoid duplicate names.
 	nextID   int        // Next branch sequence number (protected by branchMu).
 }
 
-// NewCheckout creates the initialized checkout at dir. liveBranches are
-// branch names ("caic-N") taken from currently running containers mapped to
+// NewCheckout creates the initialized checkout at dir.
+//
+// liveBranches are branch names ("caic-N") taken from running containers mapped to
 // dir; pass the container-derived branches for this repo so a container
 // whose branch never made it into git (e.g. a launch that failed mid-setup)
 // still reserves its sequence number. See maxBranchSeqNum.
-func NewCheckout(ctx context.Context, log *slog.Logger, dir, baseBranch string, liveBranches []string) (*Checkout, error) {
+// cacheDir is the configured application cache root. Persisted idle push
+// worktrees remain reusable across restarts; interrupted operations are reported.
+func NewCheckout(ctx context.Context, log *slog.Logger, dir, cacheDir, baseBranch string, liveBranches []string) (*Checkout, error) {
 	if dir == "" {
 		return nil, errors.New("checkout directory is required")
 	}
 	if log == nil {
 		return nil, errors.New("checkout logger is required")
 	}
+	if cacheDir == "" {
+		return nil, errors.New("checkout cache directory is required")
+	}
+	pushDir, err := pushCacheDir(cacheDir, true)
+	if err != nil {
+		return nil, err
+	}
 	checkout := &Checkout{
 		BaseBranch: baseBranch,
 		Dir:        dir,
 		GitTimeout: time.Minute,
+		// Cold verification may install dependencies and build its tools.
+		PushTimeout: 10 * time.Minute,
+		PushDir:     pushDir,
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkout.GitTimeout)
 	defer cancel()
 	highest, err := maxBranchSeqNum(ctx, log, checkout.Dir, liveBranches)
 	if err != nil {
 		return nil, err
+	}
+	if err := checkout.reportRetainedPushWorktrees(ctx, log, dir); err != nil {
+		return nil, fmt.Errorf("report retained push worktrees: %w", err)
 	}
 	checkout.nextID = highest + 1
 	return checkout, nil
@@ -176,124 +193,145 @@ func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBra
 	return w.allocateBranchLocked(ctx, log, baseBranch, preferred)
 }
 
-// SyncToOrigin fetches the instance to refresh the host tracking refs, then
-// pushes each repo's task branch to origin and returns the combined diff stat
-// and any safety issues found. Safety is checked per-repo; when force is
-// false, issues in any repo block the push.
-func (w *Checkout) SyncToOrigin(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, force bool) (v3.DiffStat, []SafetyIssue, error) {
-	id, repos, err := w.queryRuntime(t.GitTarget())
-	if err != nil {
-		return nil, nil, err
-	}
-	region := trace.StartRegion(ctx, "sync-fetch")
-	log = log.With("repo", w.RelPath)
-	log.InfoContext(ctx, "fetch", "repos", len(repos))
-	// The safety scan and push below operate on the host tracking refs, so
-	// refresh them first. A failed fetch must abort: pushing a stale ref
-	// would silently drop work done since the last fetch.
-	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-	_, err = runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{Commit: true})
-	fetchCancel()
-	// Per-repo diff failures are already logged; the stat only feeds the
-	// result report, so the sync proceeds regardless.
-	snapshot, _ := w.DiffStat(ctx, log, runtimes, GitTarget{InstanceID: id, Repos: repos})
-	ds := snapshot.DiffStat
-	region.End()
-	if err != nil {
-		return nil, nil, fmt.Errorf("fetch: %w", err)
-	}
-
-	// Phase 1: safety check each repo, collect all issues.
-	multi := len(repos) > 1
-	var allIssues []SafetyIssue
-	for _, repo := range repos {
-		branch := repo.Branch
-		ref := runtimeRemoteRef(id, branch)
-		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
-		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		issues, err := CheckSafety(safetyCtx, log, repo.GitRoot, ref, w.BaseBranch, repoDS)
-		safetyCancel()
-		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.ContainerPath, err)
-		}
-		allIssues = append(allIssues, issues...)
-	}
-	if len(allIssues) > 0 && !force {
-		return ds, allIssues, nil
-	}
-
-	// Phase 2: push each repo.
-	for _, repo := range repos {
-		branch := repo.Branch
-		ref := runtimeRemoteRef(id, branch)
-		pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		checkout := &git.Checkout{Root: repo.GitRoot, Logger: log}
-		if err := checkout.PushRef(pushCtx, ref, branch, true); err != nil {
-			pushCancel()
-			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.ContainerPath, err)
-		}
-		pushCancel()
-	}
-	return ds, allIssues, nil
+// PushDestination selects one repository's remote, destination branch, and
+// safety comparison revision. Callers resolve one destination per captured task repository.
+type PushDestination struct {
+	Remote string
+	Branch string
+	// BaseRef is an explicit safety comparison ref or immutable commit ID.
+	BaseRef string
 }
 
-// SyncToDefault fetches changes from the instance, runs safety checks per repo,
-// and squash-pushes each repo's task branch onto its default branch. Safety
-// issues always block (no force override). The commit message is built from the
-// task title.
-func (w *Checkout) SyncToDefault(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, t TaskView, message string) (v3.DiffStat, []SafetyIssue, error) {
-	id, repos, err := w.queryRuntime(t.GitTarget())
+// PushOptions keeps committing pending edits, accepting safety issues, and
+// allowing non-fast-forward updates independent.
+type PushOptions struct {
+	CommitPending bool
+	BypassSafety  bool
+	Force         bool
+}
+
+// ResolvePushDestinations fills host roots and discovers destinations for a
+// captured task target under bounded, request-independent Git contexts.
+// defaultTarget selects each remote's default branch as the destination; otherwise
+// it selects the task branch. Safety always compares against that remote's
+// default branch, independently of the runtime's task-diff baseline.
+func (w *Checkout) ResolvePushDestinations(ctx context.Context, log *slog.Logger, target GitTarget, defaultTarget bool) (GitTarget, []PushDestination, error) {
+	id, repos, err := w.queryRuntime(target)
+	if err != nil {
+		return GitTarget{}, nil, err
+	}
+	target = GitTarget{InstanceID: id, Repos: repos}
+	destinations := make([]PushDestination, len(repos))
+	ctx = context.WithoutCancel(ctx)
+	for i := range repos {
+		rp := &repos[i]
+		g := &git.Checkout{Root: rp.GitRoot, Logger: log}
+		gitCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
+		remote, err := g.DefaultRemote(gitCtx)
+		if err != nil {
+			cancel()
+			return GitTarget{}, nil, fmt.Errorf("remote for %s: %w", rp.ContainerPath, err)
+		}
+		base, err := g.DefaultBranch(gitCtx, remote)
+		if err != nil {
+			cancel()
+			return GitTarget{}, nil, fmt.Errorf("default branch for %s: %w", rp.ContainerPath, err)
+		}
+		branch := rp.Branch
+		if defaultTarget {
+			branch = base
+		}
+		ref := "refs/remotes/" + remote + "/" + base
+		baseCommit, err := g.RevParse(gitCtx, ref)
+		cancel()
+		if err != nil {
+			return GitTarget{}, nil, fmt.Errorf("comparison base for %s: %w", rp.ContainerPath, err)
+		}
+		destinations[i] = PushDestination{Remote: remote, Branch: branch, BaseRef: baseCommit}
+	}
+	return target, destinations, nil
+}
+
+// Push fetches and pins each task commit before checking and pushing it to the
+// corresponding destination.
+//
+// Public diff statistics remain runtime owned, including pending edits.
+// Safety issues in any repo block all pushes unless explicitly bypassed.
+// No host checkout files or branches change.
+func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, destinations []PushDestination, opts PushOptions) (v3.DiffStat, []SafetyIssue, error) {
+	ctx = context.WithoutCancel(ctx)
+	id, repos, err := w.queryRuntime(target)
 	if err != nil {
 		return nil, nil, err
 	}
-	region := trace.StartRegion(ctx, "sync-default-fetch")
-	log = log.With("repo", w.RelPath)
-	log.InfoContext(ctx, "fetch for default sync", "repos", len(repos))
-	// The squash below operates on the host tracking refs, so refresh them
-	// first. A failed fetch must abort: squashing a stale ref would silently
-	// drop work done since the last fetch.
-	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-	_, err = runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{Commit: true})
+	if len(repos) == 0 {
+		return nil, nil, errors.New("push requires at least one repository")
+	}
+	if len(destinations) != len(repos) {
+		return nil, nil, errors.New("one push destination is required per repository")
+	}
+	for _, d := range destinations {
+		if d.Remote == "" || d.Branch == "" || d.BaseRef == "" {
+			return nil, nil, errors.New("push destination requires remote, branch, and comparison revision")
+		}
+	}
+	region := trace.StartRegion(ctx, "push-fetch")
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, w.GitTimeout)
+	branches, err := runtimes.Fetch(fetchCtx, id, runtime.FetchOpts{Commit: opts.CommitPending})
 	fetchCancel()
-	// Per-repo diff failures are already logged; the stat only feeds the
-	// result report, so the sync proceeds regardless.
-	snapshot, _ := w.DiffStat(ctx, log, runtimes, GitTarget{InstanceID: id, Repos: repos})
-	ds := snapshot.DiffStat
 	region.End()
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch: %w", err)
 	}
-
-	// Phase 1: safety check each repo, collect all issues.
-	multi := len(repos) > 1
+	// Fetch returns immutable object IDs. Never resolve the mutable runtime
+	// tracking ref again, even if another refresh moves it during verification.
+	commits := make([]string, len(repos))
+	for i := range repos {
+		for _, b := range branches {
+			if b.RepositoryPath == repos[i].ContainerPath && b.BranchName == repos[i].Branch {
+				commits[i] = b.CommitHash
+				break
+			}
+		}
+		if commits[i] == "" {
+			return nil, nil, fmt.Errorf("fetch did not return commit for %s branch %s", repos[i].ContainerPath, repos[i].Branch)
+		}
+	}
+	// The runtime owns the public task diff: its integration base/upstream
+	// and pending edits are distinct from the committed content we push.
+	// Preserve that result even when the runtime's best-effort probe fails.
+	snapshot, _ := w.DiffStat(ctx, log, runtimes, GitTarget{InstanceID: id, Repos: repos})
+	ds := snapshot.DiffStat
 	var allIssues []SafetyIssue
-	for _, repo := range repos {
-		branch := repo.Branch
-		ref := runtimeRemoteRef(id, branch)
-		repoDS := extractRepoDS(ds, diffRepoPrefix(&repo), multi)
-		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		issues, err := CheckSafety(safetyCtx, log, repo.GitRoot, ref, w.BaseBranch, repoDS)
-		safetyCancel()
+	for i, d := range destinations {
+		rp := &repos[i]
+		g := &git.Checkout{Root: rp.GitRoot, Logger: log}
+		checkCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
+		base := d.BaseRef
+		stat, err := g.RunGit(checkCtx, "diff", "--numstat", "--stat", base+"..."+commits[i])
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.ContainerPath, err)
+			cancel()
+			return ds, allIssues, fmt.Errorf("diff %s: %w", rp.ContainerPath, err)
+		}
+		repoDS := ParseDiffNumstat(stat)
+		issues, err := CheckSafety(checkCtx, log, rp.GitRoot, commits[i], base, repoDS)
+		cancel()
+		if err != nil {
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", rp.ContainerPath, err)
 		}
 		allIssues = append(allIssues, issues...)
 	}
-	if len(allIssues) > 0 {
+	if len(allIssues) > 0 && !opts.BypassSafety {
 		return ds, allIssues, nil
 	}
-
-	// Phase 2: squash each repo onto its default branch.
-	for _, repo := range repos {
-		branch := repo.Branch
-		ref := runtimeRemoteRef(id, branch)
-		squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), w.GitTimeout)
-		checkout := &git.Checkout{Root: repo.GitRoot, Logger: log}
-		if err := checkout.SquashOnto(squashCtx, ref, w.BaseBranch, message); err != nil {
-			squashCancel()
-			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.ContainerPath, w.BaseBranch, err)
+	for i, d := range destinations {
+		rp := &repos[i]
+		pushCtx, cancel := context.WithTimeout(ctx, w.PushTimeout)
+		err := w.pushWorktree(pushCtx, log, rp.GitRoot, commits[i], d, opts.Force)
+		cancel()
+		if err != nil {
+			return ds, allIssues, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
 		}
-		squashCancel()
 	}
 	return ds, allIssues, nil
 }
@@ -785,6 +823,93 @@ func (w *Checkout) diffStatLocked(ctx context.Context, log *slog.Logger, runtime
 	return result, failed, errors.Join(errs...)
 }
 
+// pushWorktree exclusively claims an idle checkout or creates a detached one.
+// Completed pushes return one slot to the persistent idle pool; interrupted
+// operations remain quarantined across server restarts.
+func (w *Checkout) pushWorktree(ctx context.Context, log *slog.Logger, root, commit string, d PushDestination, force bool) error {
+	g := &git.Checkout{Root: root, Logger: log}
+	common, err := pushCommonDir(ctx, g)
+	if err != nil {
+		return err
+	}
+	dir, reused, err := acquirePushWorktree(ctx, w.PushDir, common)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "checkout")
+	reusable := false
+	err = awaitPushCommand(ctx, func() error {
+		checkout := &git.Checkout{Root: path, Logger: log}
+		if reused {
+			if err := validateReusablePushWorktree(ctx, g, common, dir); err != nil {
+				return err
+			}
+			// Only this caic-owned checkout is reset. Keep ignored verification
+			// caches while removing leftovers, including nested untracked repos.
+			if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
+				return err
+			}
+			if _, err := checkout.RunGit(ctx, "checkout", "--detach", "--force", commit); err != nil {
+				return err
+			}
+			if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
+				return err
+			}
+		} else {
+			if _, err := g.RunGit(ctx, "worktree", "add", "--detach", path, commit); err != nil {
+				return fmt.Errorf("create push worktree: %w", err)
+			}
+		}
+		reusable = true
+		// Preserve native Git transport and lock configuration, including the
+		// user's SSH configuration. The outer deadline also bounds slow hooks.
+		return checkout.PushRef(ctx, d.Remote, "HEAD", d.Branch, force)
+	})
+	if ctx.Err() != nil {
+		return errors.Join(err, retainPushWorktree(ctx, log, root, dir))
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
+	defer cancel()
+	cleanupErr := releasePushWorktree(cleanupCtx, g, w.PushDir, common, dir, reusable)
+	if cleanupErr != nil {
+		return errors.Join(err, cleanupErr, retainPushWorktree(ctx, log, root, dir))
+	}
+	return err
+}
+
+func (w *Checkout) reportRetainedPushWorktrees(ctx context.Context, log *slog.Logger, root string) error {
+	common, err := pushCommonDir(ctx, &git.Checkout{Root: root, Logger: log})
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(w.PushDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "operation-") {
+			continue
+		}
+		// Never reclaim abandoned operations automatically: neither a dead
+		// host nor a released lock establishes hook-process completion.
+		dir := filepath.Join(w.PushDir, e.Name())
+		owner, err := readPushMarker(dir, "owner-v1")
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, errInvalidPushMarker) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if owner == common || owner == root {
+			if _, err := readPushIdleSince(dir); err == nil {
+				continue
+			}
+			_ = retainPushWorktree(ctx, log, root, dir)
+		}
+	}
+	return nil
+}
+
 // maxBranchSeqNum finds the highest sequence number N among all local and
 // remote branches matching "caic-N", plus liveBranches (branch names taken
 // from currently running containers for this repo). liveBranches covers
@@ -905,24 +1030,6 @@ func deleteLocalBranchIfUnmodified(ctx context.Context, checkout *git.Checkout, 
 		return false, err
 	}
 	return true, nil
-}
-
-// extractRepoDS filters the combined diff stat to entries belonging to repoName,
-// stripping the name prefix. When multi is false (single repo), ds is returned
-// unchanged since no prefix was applied.
-func extractRepoDS(ds v3.DiffStat, repoName string, multi bool) v3.DiffStat {
-	if !multi {
-		return ds
-	}
-	prefix := repoName + "/"
-	var result v3.DiffStat
-	for _, f := range ds {
-		if path, ok := strings.CutPrefix(f.Path, prefix); ok {
-			f.Path = path
-			result = append(result, f)
-		}
-	}
-	return result
 }
 
 func diffContentArgs(path string, repo *runtime.Repo, multi bool) []string {
