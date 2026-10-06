@@ -72,6 +72,20 @@ describe("TaskCard", () => {
     expect(screen.getByText("openai-codex/gpt-6.1-sol")).toBeInTheDocument();
   });
 
+  it("shows the harness logo with the harness name as accessible name and tooltip", () => {
+    renderCard(() => (
+      <TaskCard {...props({ harness: "codex", harnessLogoUrl: "/logos/codex.svg", model: "gpt-5", effort: "low" })} />
+    ));
+
+    const logo = screen.getByRole("img", { name: "codex" });
+    expect(logo).toHaveAttribute("src", "/logos/codex.svg");
+    expect(logo.closest("div")).toHaveTextContent(/^gpt-5 · low$/);
+    const trigger = logo.parentElement;
+    if (!trigger) throw new Error("Missing harness tooltip trigger");
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByText("codex")).toBeInTheDocument();
+  });
+
   it("uses the final model-name segment without a harness", () => {
     renderCard(() => <TaskCard {...props({ harness: undefined, model: "provider/family/model", effort: "high" })} />);
     expect(screen.getByText("model").closest("div")).toHaveTextContent(/^model · high$/);

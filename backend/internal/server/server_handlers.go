@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 
+	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
@@ -376,12 +377,26 @@ func (h *serverHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v
 			SupportsCompact:      b.SupportsCompact(),
 			SupportsModelRefresh: supportsModelRefresh,
 			QuotaGroup:           quotaGroup,
+			LogoURL:              harnessLogoURL(name),
 		})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {
 		return strings.Compare(string(a.Name), string(b.Name))
 	})
 	return &out, nil
+}
+
+// harnessLogoURL returns the embedded logo URL for a harness, or "" when none exists.
+func harnessLogoURL(name v1.Harness) string {
+	logo := string(name)
+	if name == v1.HarnessClaude {
+		// The Claude Code logo is shared with the claudecode quota provider.
+		logo = string(v1.QuotaProviderClaudeCode)
+	}
+	if file := frontend.LogoFile(logo); file != "" {
+		return "/logos/" + file
+	}
+	return ""
 }
 
 // refreshHarness bypasses one model cache, then returns that harness inventory.

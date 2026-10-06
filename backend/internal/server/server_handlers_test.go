@@ -137,6 +137,9 @@ func TestServerHandlers(t *testing.T) {
 		if (*got)[0].QuotaGroup != v1.QuotaProviderClaudeCode || (*got)[1].QuotaGroup != v1.QuotaProviderCodex || (*got)[2].QuotaGroup != "" {
 			t.Fatalf("quota groups = [%q %q %q], want [claudecode codex empty]", (*got)[0].QuotaGroup, (*got)[1].QuotaGroup, (*got)[2].QuotaGroup)
 		}
+		if (*got)[0].LogoURL != "/logos/claudecode.svg" || (*got)[1].LogoURL != "/logos/codex.svg" || (*got)[2].LogoURL != "/logos/pi.svg" {
+			t.Fatalf("logo URLs = [%q %q %q], want [claudecode codex pi]", (*got)[0].LogoURL, (*got)[1].LogoURL, (*got)[2].LogoURL)
+		}
 		models := (*got)[1].Models
 		if len(models) != 1 || models[0].ID != "gpt-5" || len(models[0].EffortOptions) != 2 {
 			t.Fatalf("models = %#v, want gpt-5 with [low ultra]", models)

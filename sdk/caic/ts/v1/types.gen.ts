@@ -1032,6 +1032,8 @@ export interface HarnessInfo {
   supportsModelRefresh: boolean;
   /** Shared quota source; empty when harness usage cannot be inferred. */
   quotaGroup?: QuotaProvider;
+  /** Absolute URL path to the harness logo, e.g. "/logos/codex.svg"; empty when none exists. */
+  logoUrl?: string;
 }
 
 /** RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh. */

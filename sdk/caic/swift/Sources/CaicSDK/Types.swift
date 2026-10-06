@@ -870,6 +870,8 @@ public struct HarnessInfo: Codable {
     public let supportsModelRefresh: Bool
     /// Shared quota source; empty when harness usage cannot be inferred.
     public let quotaGroup: QuotaProvider?
+    /// Absolute URL path to the harness logo, e.g. "/logos/codex.svg"; empty when none exists.
+    public let logoUrl: String?
 }
 
 /// RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.

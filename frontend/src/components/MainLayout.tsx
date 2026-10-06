@@ -179,6 +179,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           supportsCompact={(harness) =>
             s.harnesses().find((candidate) => candidate.name === harness)?.supportsCompact ?? false
           }
+          harnessLogoUrl={(harness) => s.harnesses().find((candidate) => candidate.name === harness)?.logoUrl}
           actionId={s.actionId}
           autoFixCI={s.autoFixCI}
           autoFixPR={s.autoFixPR}

@@ -31,6 +31,7 @@ export interface TaskListProps {
   onQuotaRecovery: (id: string) => void;
   onError: (message: string) => void;
   supportsCompact: (harness: string) => boolean;
+  harnessLogoUrl: (harness: string) => string | undefined;
   actionId: Accessor<string | null>;
   autoFixCI: Accessor<boolean>;
   autoFixPR: Accessor<boolean>;
@@ -286,6 +287,7 @@ export default function TaskList(props: TaskListProps) {
         stateUpdatedAt={t().stateUpdatedAt}
         repos={t().repos}
         harness={t().harness}
+        harnessLogoUrl={props.harnessLogoUrl(t().harness)}
         model={t().reportedModel || t().requestedModel}
         effort={t().reportedEffort || t().requestedEffort}
         costUSD={t().costUSD}

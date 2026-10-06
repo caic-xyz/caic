@@ -209,6 +209,14 @@ a.featureIconBadge:focus-visible {
   color: var(--color-text-meta);
 }
 
+.harnessLogo {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: 0.35em;
+  vertical-align: -0.125em;
+}
+
 .tokens {
   --tokens-color: inherit;
 

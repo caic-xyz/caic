@@ -75,6 +75,7 @@ type HarnessInfo struct {
 	SupportsCompact      bool          `json:"supportsCompact"`
 	SupportsModelRefresh bool          `json:"supportsModelRefresh"`
 	QuotaGroup           QuotaProvider `json:"quotaGroup,omitempty"` // Shared quota source; empty when harness usage cannot be inferred.
+	LogoURL              string        `json:"logoUrl,omitempty"`    // Absolute URL path to the harness logo, e.g. "/logos/codex.svg"; empty when none exists.
 }
 
 // RefreshHarnessReq is the request for POST /api/caic/v1/server/harnesses/{harness}/refresh.

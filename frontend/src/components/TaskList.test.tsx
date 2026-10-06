@@ -51,6 +51,7 @@ function taskListProps(tasks: Task[]): Omit<TaskListProps, "selectedId"> {
     onQuotaRecovery: () => undefined,
     onError: () => undefined,
     supportsCompact: () => false,
+    harnessLogoUrl: () => undefined,
     actionId: () => null,
     autoFixCI: () => false,
     autoFixPR: () => false,

@@ -689,6 +689,7 @@ HarnessInfo is the JSON representation of an available harness.
 | `supportsCompact` | `boolean` |  | yes |
 | `supportsModelRefresh` | `boolean` |  | yes |
 | `quotaGroup` | `QuotaProvider` | Shared quota source; empty when harness usage cannot be inferred. |  |
+| `logoUrl` | `string` | Absolute URL path to the harness logo, e.g. "/logos/codex.svg"; empty when none exists. |  |
 
 ### RefreshHarnessReq
 

@@ -44,6 +44,7 @@ export interface TaskCardProps {
   stateUpdatedAt: string;
   repos?: TaskRepo[];
   harness?: string;
+  harnessLogoUrl?: string;
   model?: string;
   effort?: string;
   costUSD: number;
@@ -512,11 +513,17 @@ export default function TaskCard(props: TaskCardProps) {
         <Show when={props.harness || props.model}>
           <div class={styles.metaRow}>
             <span class={styles.meta}>
-              {props.harness}
+              <Show when={props.harnessLogoUrl} fallback={props.harness}>
+                {(url) => (
+                  <Tooltip text={props.harness} stopActivationPropagation>
+                    <img class={styles.harnessLogo} src={url()} alt={props.harness} />
+                  </Tooltip>
+                )}
+              </Show>
               <Show when={props.model} keyed>
                 {(model) => (
                   <>
-                    <Show when={props.harness}>{" · "}</Show>
+                    <Show when={props.harness && !props.harnessLogoUrl}>{" · "}</Show>
                     <Tooltip text={model} disabled={!model.includes("/")} stopActivationPropagation>
                       <span>{model.slice(model.lastIndexOf("/") + 1)}</span>
                     </Tooltip>
