@@ -9,39 +9,39 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Label</key>
-	<string>com.caic.caic</string>
+  <key>Label</key>
+  <string>com.caic.caic</string>
 
-	<key>ProgramArguments</key>
-	<array>
-		<string>/Users/CHANGEME/.local/bin/caic</string>
-	</array>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/CHANGEME/.local/bin/caic</string>
+  </array>
 
-	<key>RunAtLoad</key>
-	<true/>
+  <key>RunAtLoad</key>
+  <true/>
 
-	<key>KeepAlive</key>
-	<true/>
+  <key>KeepAlive</key>
+  <true/>
 
-	<key>StandardOutPath</key>
-	<string>/tmp/caic.log</string>
+  <key>StandardOutPath</key>
+  <string>/tmp/caic.log</string>
 
-	<key>StandardErrorPath</key>
-	<string>/tmp/caic.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/caic.log</string>
 
-	<key>ProcessType</key>
-	<string>Background</string>
+  <key>ProcessType</key>
+  <string>Background</string>
 
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>PATH</key>
-		<string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-	</dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
 
-	<key>SoftResourceLimits</key>
-	<dict>
-		<key>NumberOfFiles</key>
-		<integer>4096</integer>
-	</dict>
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>4096</integer>
+  </dict>
 </dict>
 </plist>
