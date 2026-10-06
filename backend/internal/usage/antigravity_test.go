@@ -65,7 +65,7 @@ func TestAntigravityFetcher(t *testing.T) {
 			id    string
 			label string
 			used  float64
-		}{{"gemini-weekly", "7d", .06}, {"gemini-5h", "5h", .11}, {"3p-weekly", "3p-7d", 0}, {"3p-5h", "3p-5h", 1}} {
+		}{{"gemini-5h", "5h", .11}, {"gemini-weekly", "7d", .06}, {"3p-5h", "3p-5h", 1}, {"3p-weekly", "3p-7d", 0}} {
 			got := q.RateLimits[i]
 			if got.Window != want.id || got.Label != want.label || math.Abs(got.Utilization-want.used) > 1e-9 || got.ResetsAt.IsZero() {
 				t.Errorf("bucket = %#v, want %#v", got, want)
@@ -95,7 +95,7 @@ func TestAntigravityFetcher(t *testing.T) {
 	t.Run("unknown reset", func(t *testing.T) {
 		t.Setenv("CAIC_TEST_AGY_RESPONSE", strings.Replace(agyQuotaResponse, `,"reset_time":"2099-10-09T02:11:21Z"`, "", 1))
 		q := NewAntigravityFetcher().Get(t.Context())
-		if q == nil || len(q.RateLimits) != 4 || !q.RateLimits[0].ResetsAt.IsZero() {
+		if q == nil || len(q.RateLimits) != 4 || !q.RateLimits[1].ResetsAt.IsZero() {
 			t.Fatalf("quota = %#v", q)
 		}
 	})

@@ -76,6 +76,10 @@ func (f *AntigravityFetcher) fetch(ctx context.Context) (*ProviderQuota, error) 
 	q := f.quota()
 	var ids []string
 	for _, group := range data.Groups {
+		// agy lists the weekly bucket first; badges read shortest window first.
+		slices.SortStableFunc(group.Buckets, func(a, b antigravity.UsageBucket) int {
+			return agyWindowRank(a.Window) - agyWindowRank(b.Window)
+		})
 		for _, bucket := range group.Buckets {
 			if bucket.Disabled {
 				continue // A disabled bucket does not restrict the account.
@@ -121,6 +125,18 @@ func (f *AntigravityFetcher) fetch(ctx context.Context) (*ProviderQuota, error) 
 		}
 	}
 	return q, nil
+}
+
+// agyWindowRank orders agy bucket windows by length; unknown windows sort last.
+func agyWindowRank(window string) int {
+	switch window {
+	case "5h":
+		return 0
+	case "weekly":
+		return 1
+	default:
+		return 2
+	}
 }
 
 // agyQuotaOutput bounds the small account-quota document to 1 MiB.
