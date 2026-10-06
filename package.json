@@ -27,7 +27,7 @@
     "prepare": "scripts/install-git-hooks.sh"
   },
   "dependencies": {
-    "@maruel/gomode": "github:maruel/gomode#cb1e237b7f068b0cd95b4370918085982c0c48ee",
+    "@maruel/gomode": "github:maruel/gomode#8a6c776817f3463f79085ea82faf2c60fad5573b",
     "@material-symbols/svg-400": "0.47.4",
     "@novnc/novnc": "1.7.0",
     "@observablehq/plot": "0.6.17",
