@@ -387,7 +387,10 @@ def test_harness_without_caic_mcp() -> None:
                 env=_make_env(relay_dir),
                 timeout=15,
             )
-            records = _decode_records(result.stdout)
+            # Empty stdin detaches the client like an SSH drop, possibly before
+            # the agent prints, so read the durable log once the daemon exits.
+            _wait_for_daemon_exit(os.path.join(relay_dir, "pid"))
+            records = _decode_records(Path(relay_dir, "output.jsonl").read_bytes())
             messages = [record["msg"] for record in records if record["t"] == "agent"]
             assert len(messages) == 1, (result.stdout, result.stderr)
             assert messages[0]["args"] == []
