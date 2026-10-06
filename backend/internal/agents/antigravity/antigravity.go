@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 	"github.com/maruel/genai/providers/antigravity"
 )
 
@@ -116,24 +117,25 @@ func sortModels(ids []string) []string {
 }
 
 // Backend implements agent.Backend for agy. Task MCP uses a relay-owned plugin
-// workspace without changing shared ~/.gemini settings. agy accepts text input
-// only.
+// workspace without changing shared ~/.gemini settings. Images are formatted as
+// text data URLs for agy stream-json input.
 type Backend struct {
 	agent.Base
 }
 
 // New creates an Antigravity backend with its cached model inventory.
 func New(cacheDir string, envVars []string) *Backend {
-	b := &Backend{HarnessID: harness.Antigravity, QuotaProviderID: agent.QuotaProviderAntigravity}
+	b := &Backend{
+		HarnessID:       harness.Antigravity,
+		QuotaProviderID: agent.QuotaProviderAntigravity,
+		Images:          true,
+	}
 	b.SetModelInventory(agent.CachedModelInventory(cacheDir, harness.Antigravity, envVars))
 	return b
 }
 
 // Start launches agy through the shared relay and its task-local MCP plugin.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	if len(opts.InitialPrompt.Images) != 0 {
-		return nil, errors.New("antigravity: image input is not supported")
-	}
 	relayArgs := []string{"--harness", "antigravity"}
 	if opts.MCP != nil {
 		relayArgs = append(relayArgs, "--caic-mcp")
@@ -215,14 +217,26 @@ type wireFormat struct {
 	hasText bool
 }
 
-// WritePrompt sends text input and records native input provenance in v3 logs.
+// WritePrompt sends text and image input and records native input provenance in v3 logs.
 func (*wireFormat) WritePrompt(w io.Writer, p agent.Prompt, log agent.LogSink) error {
-	if len(p.Images) != 0 {
-		return errors.New("antigravity: image input is not supported")
+	var blocks []antigravity.StreamInputContentBlock
+	if p.Text != "" {
+		blocks = append(blocks, antigravity.StreamInputContentBlock{Type: "text", Text: p.Text})
+	}
+	for _, img := range p.Images {
+		blocks = append(blocks, antigravity.StreamInputContentBlock{
+			Type: "text",
+			// TODO: Gross hack but the agent figure it out and saves it as a temporary file. Let's use a proper image once
+			// agy supports it with --input-format=stream-json.
+			Text: "data:" + img.MediaType + ";base64," + img.Data,
+		})
+	}
+	if len(blocks) == 0 {
+		blocks = append(blocks, antigravity.StreamInputContentBlock{Type: "text", Text: ""})
 	}
 	data, err := json.Marshal(antigravity.StreamInputMessage{
 		Event:   antigravity.EventUser,
-		Message: antigravity.StreamInputUserMessage{Content: []antigravity.StreamInputContentBlock{{Type: "text", Text: p.Text}}},
+		Message: antigravity.StreamInputUserMessage{Content: blocks},
 	})
 	if err != nil {
 		return err
@@ -257,7 +271,11 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			if c.Type != "text" {
 				return nil, fmt.Errorf("antigravity: unsupported input content %q", c.Type)
 			}
-			m.Text += c.Text
+			if mediaType, data, ok := parseDataURL(c.Text); ok {
+				m.Images = append(m.Images, v3.ImageData{MediaType: mediaType, Data: data})
+			} else {
+				m.Text += c.Text
+			}
 		}
 		return []agent.Message{m}, nil
 	case antigravity.EventInit:
@@ -414,4 +432,16 @@ func parseModels(out []byte) (agent.ModelInventory, error) {
 		return agent.ModelInventory{}, fmt.Errorf("read agy models: %w", err)
 	}
 	return agent.ModelInventory{}, errors.New("agy exited without a models result")
+}
+
+func parseDataURL(s string) (mediaType, data string, ok bool) {
+	if !strings.HasPrefix(s, "data:image/") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(s, "data:")
+	mediaType, data, found := strings.Cut(rest, ";base64,")
+	if !found || data == "" {
+		return "", "", false
+	}
+	return mediaType, data, true
 }

@@ -36,7 +36,7 @@ func TestBackend(t *testing.T) {
 	})
 	t.Run("capabilities", func(t *testing.T) {
 		t.Parallel()
-		if b.Harness() != harness.Antigravity || b.SupportsImages() || b.SupportsCompact() || b.QuotaProvider() != agent.QuotaProviderAntigravity {
+		if b.Harness() != harness.Antigravity || !b.SupportsImages() || b.SupportsCompact() || b.QuotaProvider() != agent.QuotaProviderAntigravity {
 			t.Fatal("unexpected backend capabilities")
 		}
 	})
@@ -45,10 +45,8 @@ func TestBackend(t *testing.T) {
 		if _, err := b.Start(t.Context(), &agent.Options{MCP: mcptest.FakeRegistry{}, Logger: slog.Default(), Dir: "/tmp"}); err == nil || !strings.Contains(err.Error(), "missing SSH host") {
 			t.Fatalf("task MCP start target validation = %v", err)
 		}
-		// An empty target would fail relay launch. The image error must precede
-		// any launch so rejection cannot leave an orphaned remote process.
-		if _, err := b.Start(t.Context(), &agent.Options{InitialPrompt: agent.Prompt{Images: []v3.ImageData{{Data: "image"}}}}); err == nil || !strings.Contains(err.Error(), "image input is not supported") {
-			t.Fatalf("initial image rejection = %v", err)
+		if _, err := b.Start(t.Context(), &agent.Options{InitialPrompt: agent.Prompt{Images: []v3.ImageData{{Data: "image"}}}, Logger: slog.Default(), Dir: "/tmp"}); err == nil || !strings.Contains(err.Error(), "missing SSH host") {
+			t.Fatalf("start with images missing SSH host = %v", err)
 		}
 	})
 	t.Run("AttachRelay", func(t *testing.T) {
@@ -98,14 +96,59 @@ func TestWireFormat(t *testing.T) {
 				}
 			})
 		}
+		t.Run("images and text", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			var out bytes.Buffer
+			log := &agenttest.LogSink{Version: agent.LogVersionV3}
+			prompt := agent.Prompt{
+				Text:   "describe this",
+				Images: []v3.ImageData{{MediaType: "image/png", Data: "aW1hZ2U="}},
+			}
+			if err := w.WritePrompt(&out, prompt, log); err != nil {
+				t.Fatal(err)
+			}
+			want := `{"event":"user","message":{"content":[{"type":"text","text":"describe this"},{"type":"text","text":"data:image/png;base64,aW1hZ2U="}]}}` + "\n"
+			if out.String() != want {
+				t.Fatalf("input = %q, want %q", out.String(), want)
+			}
+			msgs, err := w.ParseMessage(out.Bytes())
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("parse input = %v, %v", msgs, err)
+			}
+			m, ok := msgs[0].(*agent.UserInputMessage)
+			if !ok || m.Text != "describe this" || len(m.Images) != 1 || m.Images[0].MediaType != "image/png" || m.Images[0].Data != "aW1hZ2U=" {
+				t.Fatalf("parsed input = %+v", msgs[0])
+			}
+		})
+		t.Run("images only", func(t *testing.T) {
+			t.Parallel()
+			w := New("", nil).NewWire()
+			var out bytes.Buffer
+			log := &agenttest.LogSink{Version: agent.LogVersionV3}
+			prompt := agent.Prompt{
+				Images: []v3.ImageData{{MediaType: "image/jpeg", Data: "anBn"}},
+			}
+			if err := w.WritePrompt(&out, prompt, log); err != nil {
+				t.Fatal(err)
+			}
+			want := `{"event":"user","message":{"content":[{"type":"text","text":"data:image/jpeg;base64,anBn"}]}}` + "\n"
+			if out.String() != want {
+				t.Fatalf("input = %q, want %q", out.String(), want)
+			}
+			msgs, err := w.ParseMessage(out.Bytes())
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("parse input = %v, %v", msgs, err)
+			}
+			m, ok := msgs[0].(*agent.UserInputMessage)
+			if !ok || m.Text != "" || len(m.Images) != 1 || m.Images[0].MediaType != "image/jpeg" || m.Images[0].Data != "anBn" {
+				t.Fatalf("parsed input = %+v", msgs[0])
+			}
+		})
 		t.Run("errors", func(t *testing.T) {
 			t.Parallel()
 			w := New("", nil).NewWire()
 			log := &agenttest.LogSink{Version: agent.LogVersionV3}
-			var out bytes.Buffer
-			if err := w.WritePrompt(&out, agent.Prompt{Images: []v3.ImageData{{Data: "image"}}}, log); err == nil || out.Len() != 0 {
-				t.Fatal("images must fail without writing")
-			}
 			if err := w.WritePrompt(shortWriter{}, agent.Prompt{Text: "hello"}, log); !errors.Is(err, io.ErrShortWrite) {
 				t.Fatalf("short write = %v", err)
 			}
