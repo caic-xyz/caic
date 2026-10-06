@@ -366,6 +366,34 @@ func TestParseModels(t *testing.T) {
 			t.Fatalf("models = %+v, %v", inv, err)
 		}
 	})
+	t.Run("order", func(t *testing.T) {
+		t.Parallel()
+		ids := []string{
+			"gemini-3.7-flash-high", "gemini-3.8-flash-low", "gemini-3.8-flash-high", "gemini-3.1-pro-low",
+			"gemini-3.1-pro-high", "claude-sonnet-5-5-high", "claude-opus-5-5-low", "claude-opus-5-5-high",
+			"gpt-oss-120b-medium", "gemini-3.7-flash-medium",
+		}
+		models := make([]string, 0, len(ids))
+		for _, id := range ids {
+			models = append(models, `{"id":"`+id+`"}`)
+		}
+		out := `{"event":"command_result","command":{"name":"models","data":{"models":[` + strings.Join(models, ",") + `]}}}` + result
+		inv, err := parseModels([]byte(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(inv.Models))
+		for _, m := range inv.Models {
+			got = append(got, m.ID)
+		}
+		want := []string{
+			"gemini-3.8-flash-high", "gemini-3.7-flash-medium", "gemini-3.8-flash-low", "gemini-3.1-pro-high", "gemini-3.1-pro-low",
+			"claude-opus-5-5-high", "claude-opus-5-5-low", "claude-sonnet-5-5-high",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("models = %v, want %v", got, want)
+		}
+	})
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
 		for _, out := range []string{

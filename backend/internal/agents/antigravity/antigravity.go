@@ -4,12 +4,14 @@ package antigravity
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -18,6 +20,100 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/maruel/genai/providers/antigravity"
 )
+
+// modelFamilyOrder lists model families from most to least preferred.
+var modelFamilyOrder = []string{"gemini", "claude"}
+
+// modelNameOrder lists, per family, the model names from most to least
+// preferred. Names not listed sort last.
+var modelNameOrder = map[string][]string{
+	"gemini": {"flash", "pro"},
+	"claude": {"opus", "sonnet"},
+}
+
+// modelEffortOrder lists efforts from highest to lowest.
+var modelEffortOrder = []string{"high", "medium", "low"}
+
+// modelParts is an agy model ID split on "-". "gemini-3.8-flash-high" is
+// family "gemini", name "flash", version 3.8, effort "high".
+type modelParts struct {
+	id      string
+	family  string
+	name    string
+	version float64
+	effort  string
+}
+
+// parseModelID splits id on "-". The first segment is the family, the last is
+// the effort, the first run of numeric segments is the version and the other
+// segments make the name, so "claude-opus-5-5-low" is family "claude", name
+// "opus", version 5.5, effort "low".
+func parseModelID(id string) modelParts {
+	segs := strings.Split(id, "-")
+	p := modelParts{id: id, family: segs[0]}
+	if len(segs) < 3 {
+		p.name = strings.Join(segs[1:], "-")
+		return p
+	}
+	p.effort = segs[len(segs)-1]
+	segs = segs[1 : len(segs)-1]
+	start := slices.IndexFunc(segs, isNumeric)
+	if start < 0 {
+		p.name = strings.Join(segs, "-")
+		return p
+	}
+	end := start
+	for end < len(segs) && isNumeric(segs[end]) {
+		end++
+	}
+	p.version, _ = strconv.ParseFloat(strings.Join(segs[start:end], "."), 64)
+	p.name = strings.Join(append(slices.Clone(segs[:start]), segs[end:]...), "-")
+	return p
+}
+
+func isNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
+}
+
+// sortModels hides gpt-oss, keeps only the latest version of each
+// family-name-effort combination, then orders the rest by family, name and
+// effort.
+func sortModels(ids []string) []string {
+	type key struct{ family, name, effort string }
+	var parts []modelParts
+	latest := map[key]float64{}
+	for _, id := range ids {
+		if strings.HasPrefix(id, "gpt-oss") {
+			continue
+		}
+		p := parseModelID(id)
+		parts = append(parts, p)
+		k := key{p.family, p.name, p.effort}
+		latest[k] = max(latest[k], p.version)
+	}
+	parts = slices.DeleteFunc(parts, func(p modelParts) bool {
+		return p.version < latest[key{p.family, p.name, p.effort}]
+	})
+	rank := func(order []string, v string) int {
+		if i := slices.Index(order, v); i >= 0 {
+			return i
+		}
+		return len(order)
+	}
+	slices.SortStableFunc(parts, func(a, b modelParts) int {
+		return cmp.Or(
+			cmp.Compare(rank(modelFamilyOrder, a.family), rank(modelFamilyOrder, b.family)),
+			cmp.Compare(rank(modelNameOrder[a.family], a.name), rank(modelNameOrder[b.family], b.name)),
+			cmp.Compare(rank(modelEffortOrder, a.effort), rank(modelEffortOrder, b.effort)),
+		)
+	})
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = p.id
+	}
+	return out
+}
 
 // Backend implements agent.Backend for agy. Task MCP uses a relay-owned plugin
 // workspace without changing shared ~/.gemini settings. agy accepts text input
@@ -306,7 +402,7 @@ func parseModels(out []byte) (agent.ModelInventory, error) {
 				return agent.ModelInventory{}, errors.New("agy returned no models")
 			}
 			inv := agent.ModelInventory{}
-			for _, id := range agent.SortModels(ids) {
+			for _, id := range sortModels(ids) {
 				inv.Models = append(inv.Models, agent.Model{ID: id})
 			}
 			return inv, nil
