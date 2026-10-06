@@ -1,8 +1,6 @@
 // TaskDetail renders agent output with runtime file links, task context, actions, and Git-state diff navigation.
 
 import {
-  createContext,
-  useContext,
   createSignal,
   createMemo,
   createEffect,
@@ -70,11 +68,11 @@ import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../for
 import { formatQuotaCountdown } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
 import type { ToolCall } from "../grouping";
-import { Marked, Renderer, type Tokens } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import { bindPromptSubmitShortcut } from "./promptSubmitShortcut";
 import Button from "./Button";
+import Markdown, { MarkdownTaskContext } from "./Markdown";
 import UnifiedDiffBlock from "./UnifiedDiffBlock";
 import ProgressPanel from "./ProgressPanel";
 import NativeAgents, { BackgroundCommands, BackgroundCommandStatusChip, NativeActivityStatus } from "./NativeSubagents";
@@ -110,8 +108,6 @@ const expandedSessionsByTask = new Map<string, Set<string>>();
 // A setup that appears to last longer than this is reconstructed history with
 // unavailable producer timestamps, not a credible container startup duration.
 const maxCredibleSetupDurationMs = 60 * 60 * 1000;
-
-const MarkdownTaskContext = createContext<Accessor<string>>();
 
 interface Props {
   taskId: string;
@@ -2259,124 +2255,6 @@ function ToolCallCard(props: {
         )}
       </Show>
     </>
-  );
-}
-
-const markdownRenderer = {
-  code(this: Renderer, token: Tokens.Code): string {
-    const code = Renderer.prototype.code.call(this, token);
-    if (token.codeBlockStyle === "indented") return code;
-    const blockClass = token.text.includes("\n")
-      ? styles.codeBlock
-      : `${styles.codeBlock} ${styles.singleLineCodeBlock}`;
-    return `<div class="${blockClass}"><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true"></span><span class="${styles.checkIcon}" aria-hidden="true"></span></button>${code}</div>\n`;
-  },
-};
-
-function Markdown(props: { text: string }) {
-  const taskId = useContext(MarkdownTaskContext);
-  const marked = new Marked({
-    breaks: true,
-    gfm: true,
-    renderer: {
-      ...markdownRenderer,
-      link(this: Renderer, token: Tokens.Link): string {
-        // Markdown path destinations refer to runtime files. Web URLs,
-        // protocol-relative URLs, and fragment anchors retain normal navigation.
-        let path = token.href;
-        if (path.startsWith("file:///")) path = path.slice(7);
-        else if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//") || path.startsWith("#")) {
-          return Renderer.prototype.link.call(this, token);
-        }
-        if (!taskId || !path) return Renderer.prototype.link.call(this, token);
-        path = path.replace(/#.*$/, "").replace(/:\d+(?::\d+)?$/, "");
-        // Marked decodes neither percent-encoded spaces nor file URI paths.
-        try {
-          path = decodeURIComponent(path);
-        } catch {
-          return Renderer.prototype.link.call(this, token);
-        }
-        const href = `/api/caic/v1/tasks/${encodeURIComponent(taskId())}/file?${new URLSearchParams({ path })}`;
-        return Renderer.prototype.link
-          .call(this, { ...token, href })
-          .replace("<a ", '<a target="_blank" rel="noopener noreferrer" ');
-      },
-    },
-  });
-  const html = createMemo(() => marked.parse(props.text) as string);
-  const [raw, setRaw] = createSignal(false);
-  const [copied, setCopied] = createSignal(false);
-  let wrapperRef: HTMLDivElement | undefined;
-
-  function copyCodeBlock(event: MouseEvent) {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const button = target.closest<HTMLButtonElement>("button[data-copy-code]");
-    if (!button) return;
-
-    const text = button.parentElement?.querySelector("pre > code")?.textContent;
-    if (text === undefined || text === null) return;
-
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        button.classList.add(styles.copied);
-        setTimeout(() => {
-          button.classList.remove(styles.copied);
-        }, 1500);
-      })
-      .catch((error: unknown) => {
-        console.error("Failed to copy code block", error);
-      });
-  }
-
-  onMount(() => {
-    const wrapper = wrapperRef;
-    if (!wrapper) return;
-    wrapper.addEventListener("click", copyCodeBlock);
-    onCleanup(() => wrapper.removeEventListener("click", copyCodeBlock));
-  });
-
-  return (
-    <div
-      class={styles.markdownWrap}
-      ref={(el) => {
-        wrapperRef = el;
-      }}
-    >
-      <div class={styles.rawToolbar}>
-        <button
-          class={styles.rawToolbarBtn}
-          onClick={() => setRaw(!raw())}
-          title={raw() ? "Show rendered" : "Show raw"}
-        >
-          {raw() ? "rendered" : "raw"}
-        </button>
-        <Show when={raw()}>
-          <button
-            class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
-            onClick={() => {
-              navigator.clipboard.writeText(props.text);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-            title="Copy to clipboard"
-          >
-            <CopyIcon width={14} height={14} class={styles.copyIcon} />
-            <CheckIcon width={14} height={14} class={styles.checkIcon} />
-          </button>
-        </Show>
-      </div>
-      <Show
-        when={raw()}
-        fallback={
-          // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
-          <div class={styles.markdown} innerHTML={html()} />
-        }
-      >
-        <pre class={styles.rawText}>{props.text}</pre>
-      </Show>
-    </div>
   );
 }
 

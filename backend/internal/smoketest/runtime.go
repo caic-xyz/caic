@@ -462,7 +462,9 @@ func artifactFile(path string) ([]byte, error) {
 	case "/home/user/src/caic/test-results/screenshot.png":
 		return base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
 	case "/home/user/src/caic/README.md":
-		return []byte("# Task artifact\n"), nil
+		return []byte("# Task artifact\n\nSee the [guide](docs/guide.md).\n"), nil
+	case "/home/user/src/caic/docs/guide.md":
+		return []byte("# Guide\n\n![Shot](../test-results/screenshot.png)\n\nBack to the [README](../README.md).\n"), nil
 	default:
 		return nil, fs.ErrNotExist
 	}

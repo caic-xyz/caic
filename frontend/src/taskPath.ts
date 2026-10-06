@@ -34,7 +34,7 @@ export function taskPathForTask(task: TaskPathTask): string {
 export function taskIdFromPath(pathname: string): string | null {
   const prefix = "/task/@";
   if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length).replace(/\/(diff|info|processes|stats|vnc)$/, "");
+  const rest = pathname.slice(prefix.length).replace(/\/(diff|info|processes|stats|view|vnc)$/, "");
   const plus = rest.indexOf("+");
   return plus === -1 ? rest : rest.slice(0, plus);
 }

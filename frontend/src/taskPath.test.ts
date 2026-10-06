@@ -29,6 +29,7 @@ describe("taskIdFromPath", () => {
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/stats")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/vnc")).toBe("abc123");
     expect(taskIdFromPath("/task/@abc123+repo-caic-1-fix-bug/info")).toBe("abc123");
+    expect(taskIdFromPath("/task/@abc123/view")).toBe("abc123");
   });
 
   it("extracts IDs from slugless task subroutes", () => {

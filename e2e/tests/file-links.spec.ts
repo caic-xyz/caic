@@ -1,8 +1,8 @@
-// Browser coverage for task-container file links, image display, text, and missing artifacts.
+// Browser coverage for task-container file links, image display, the markdown viewer, and missing artifacts.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
-  test(`task file links open artifacts at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
+  test(`task file links open artifacts and markdown at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
     const id = await createTaskAPI(
       api,
@@ -24,11 +24,26 @@ for (const width of [390, 1280]) {
     await imagePage.close();
     await expect(page).toHaveURL(`/task/@${id}`);
 
-    const textOpened = page.waitForEvent("popup");
-    await page.getByRole("link", { name: "Readme", exact: true }).click();
-    const textPage = await textOpened;
-    await expect(textPage.locator("body")).toContainText("# Task artifact");
-    await textPage.close();
+    await test.step("markdown links open in the in-app viewer", async () => {
+      const readmeURL = "/home/user/src/caic/README.md";
+      await page.getByRole("link", { name: "Readme", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent(readmeURL)}`);
+      await expect(page.getByRole("heading", { name: "Task artifact" })).toBeVisible();
+
+      await page.getByRole("link", { name: "guide", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Guide" })).toBeVisible();
+      const shot = page.getByRole("img", { name: "Shot" });
+      await expect(shot).toBeVisible();
+      expect(await shot.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+
+      await page.getByRole("link", { name: "README", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Task artifact" })).toBeVisible();
+      await page.getByRole("button", { name: "Back to task" }).click();
+      await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
+    });
+
+    const readme = await request.get(`/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2FREADME.md`);
+    expect(await readme.text()).toContain("# Task artifact");
 
     const fileURL = `/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fscreenshot.png`;
     const partial = await request.get(fileURL, {

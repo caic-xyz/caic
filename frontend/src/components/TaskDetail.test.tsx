@@ -253,10 +253,10 @@ describe("TaskDetail", () => {
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
     renderTaskDetail();
-    expect(screen.getByRole("link", { name: "Skill" })).toHaveAttribute(
-      "href",
-      "/api/caic/v1/tasks/abc/file?path=%2Fhome%2Fuser%2Fskill+notes.md",
-    );
+    // Markdown documents open in the in-app viewer, not a new tab.
+    const skill = screen.getByRole("link", { name: "Skill" });
+    expect(skill).toHaveAttribute("href", "/task/@abc/view?path=%2Fhome%2Fuser%2Fskill+notes.md");
+    expect(skill).not.toHaveAttribute("target");
     expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
       "href",
       "/api/caic/v1/tasks/abc/file?path=.%2Fsrc%2FApp.tsx",
