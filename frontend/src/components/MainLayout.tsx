@@ -175,6 +175,8 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onRevive={s.handleRevive}
           onFork={s.handleFork}
           onQuotaRecovery={s.handleQuotaRecovery}
+          isQuotaDismissed={s.isQuotaWarningDismissed}
+          onDismissQuotaWarning={s.dismissQuotaWarning}
           onError={s.showWarning}
           supportsCompact={(harness) =>
             s.harnesses().find((candidate) => candidate.name === harness)?.supportsCompact ?? false

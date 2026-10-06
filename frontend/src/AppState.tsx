@@ -34,7 +34,7 @@ import { useHostMode } from "@maruel/gomode/web/HostMode";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { notifications } from "@maruel/gomode/web/notifications";
-import { QuotaRecoveryTracker } from "./quota";
+import { QuotaRecoveryTracker, quotaDismissalKey } from "./quota";
 import { quotaRecoveryTargets } from "./quotaTargets";
 import { taskPath, taskIdFromPath, taskPathForTask } from "./taskPath";
 import { evictTaskDiff, invalidateTaskDiff, taskDiffCache } from "./diffCache";
@@ -530,6 +530,24 @@ function createAppStore() {
       });
     }
   };
+  const [dismissedQuotaResets, setDismissedQuotaResets] = createSignal<Map<string, string>>(new Map());
+  createEffect(() => {
+    const currentTasks = tasks();
+    const map = dismissedQuotaResets();
+    if (map.size === 0) return;
+    let changed = false;
+    const next = new Map(map);
+    for (const [id] of map) {
+      const task = currentTasks.find((t) => t.id === id);
+      if (!task || !task.rateLimit?.blocked) {
+        next.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      setDismissedQuotaResets(next);
+    }
+  });
   const checkAndNotify = (task: Task) => {
     const needsInput = task.state === "waiting" || task.state === "asking" || task.state === "has_plan";
     const prevState = prevStates.get(task.id);
@@ -1184,6 +1202,23 @@ function createAppStore() {
     void generateForkHandoffFor(id, generation);
   }
 
+  function dismissQuotaWarning(taskId: string) {
+    const task = taskById(taskId);
+    const key = quotaDismissalKey(task?.rateLimit);
+    setDismissedQuotaResets((prev) => {
+      const next = new Map(prev);
+      next.set(taskId, key);
+      return next;
+    });
+  }
+
+  function isQuotaWarningDismissed(taskId: string): boolean {
+    const task = taskById(taskId);
+    if (!task || !task.rateLimit?.blocked) return false;
+    const dismissedKey = dismissedQuotaResets().get(taskId);
+    return dismissedKey !== undefined && dismissedKey === quotaDismissalKey(task.rateLimit);
+  }
+
   function closeFork() {
     forkDialogGeneration++;
     setForkTaskId(null);
@@ -1632,6 +1667,8 @@ function createAppStore() {
     handleRevive,
     handleFork,
     handleQuotaRecovery,
+    dismissQuotaWarning,
+    isQuotaWarningDismissed,
     navigateToTask,
     fixCI,
     // input drafts

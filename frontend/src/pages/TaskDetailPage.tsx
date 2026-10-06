@@ -56,6 +56,8 @@ export default function TaskDetailPage() {
               }
               supportsCompact={s.harnesses().find((h) => h.name === (t()?.harness ?? ""))?.supportsCompact}
               rateLimit={t()?.rateLimit}
+              quotaDismissed={s.isQuotaWarningDismissed(taskId)}
+              onDismissQuotaWarning={s.dismissQuotaWarning}
               now={s.now()}
               onStop={s.handleStop}
               onPurge={s.handlePurge}

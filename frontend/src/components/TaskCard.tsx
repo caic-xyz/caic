@@ -10,6 +10,7 @@ import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
+import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 
 import type {
   DiffStat,
@@ -83,6 +84,8 @@ export interface TaskCardProps {
   supportsCompact?: boolean;
   onFork?: () => void;
   onQuotaRecovery?: () => void;
+  quotaDismissed?: boolean;
+  onDismissQuotaWarning?: () => void;
   onError: (message: string) => void;
   /** Task number for voice mode display. Shown only when voice is connected. */
   voiceNumber?: number;
@@ -534,7 +537,7 @@ export default function TaskCard(props: TaskCardProps) {
                 {" · "}
                 {props.effort}
               </Show>
-              <Show when={props.rateLimit?.blocked}>
+              <Show when={props.rateLimit?.blocked && !props.quotaDismissed}>
                 <>
                   {" · "}
                   <Tooltip
@@ -589,20 +592,47 @@ export default function TaskCard(props: TaskCardProps) {
           </div>
         </Show>
 
-        <Show when={props.rateLimit?.blocked && props.repos?.[0]?.name ? props.onQuotaRecovery : undefined} keyed>
-          {(recover) => (
-            <button
-              type="button"
-              class={styles.quotaRecovery}
-              data-testid="quota-recovery-card"
-              onClick={(event) => {
-                event.stopPropagation();
-                recover();
-              }}
-            >
-              Continue in new agent
-            </button>
-          )}
+        <Show
+          when={
+            props.rateLimit?.blocked &&
+            !props.quotaDismissed &&
+            ((props.repos?.[0]?.name ? props.onQuotaRecovery : undefined) || props.onDismissQuotaWarning)
+          }
+        >
+          <div class={styles.quotaRecoveryRow}>
+            <Show when={props.repos?.[0]?.name ? props.onQuotaRecovery : undefined} keyed>
+              {(recover) => (
+                <button
+                  type="button"
+                  class={styles.quotaRecovery}
+                  data-testid="quota-recovery-card"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    recover();
+                  }}
+                >
+                  Continue in new agent
+                </button>
+              )}
+            </Show>
+            <Show when={props.onDismissQuotaWarning} keyed>
+              {(dismiss) => (
+                <button
+                  type="button"
+                  class={styles.quotaDismiss}
+                  data-testid="quota-dismiss-card"
+                  aria-label="Dismiss quota warning"
+                  title="Dismiss quota warning"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    dismiss();
+                  }}
+                >
+                  <CloseIcon width={14} height={14} aria-hidden="true" />
+                </button>
+              )}
+            </Show>
+          </div>
         </Show>
 
         <Show when={props.error}>

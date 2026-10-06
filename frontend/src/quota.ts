@@ -1,6 +1,6 @@
 // Shared quota helpers for task-card countdowns and recovery notifications.
 
-import type { Task } from "@sdk/types.gen";
+import type { Task, TaskRateLimit } from "@sdk/types.gen";
 
 /** Tracks quota-blocked waiting tasks and reports their one-time recovery transition. */
 export class QuotaRecoveryTracker {
@@ -41,4 +41,9 @@ export function formatQuotaCountdown(resetsAt: string, now: number): string {
 
   const days = Math.floor(hours / 24);
   return `${days}d ${hours % 24}h`;
+}
+
+export function quotaDismissalKey(rateLimit?: TaskRateLimit): string {
+  if (!rateLimit) return "";
+  return `${rateLimit.window ?? ""}:${rateLimit.resetsAt ?? ""}:${rateLimit.quotaGroup ?? ""}`;
 }

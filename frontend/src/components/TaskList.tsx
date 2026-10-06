@@ -29,6 +29,8 @@ export interface TaskListProps {
   onRevive: (id: string) => void;
   onFork: (id: string) => void;
   onQuotaRecovery: (id: string) => void;
+  isQuotaDismissed?: (id: string) => boolean;
+  onDismissQuotaWarning?: (id: string) => void;
   onError: (message: string) => void;
   supportsCompact: (harness: string) => boolean;
   harnessLogoUrl: (harness: string) => string | undefined;
@@ -329,6 +331,8 @@ export default function TaskList(props: TaskListProps) {
         purgeModifierActive={purgeModifierActive()}
         onFork={() => props.onFork(t().id)}
         onQuotaRecovery={() => props.onQuotaRecovery(t().id)}
+        quotaDismissed={props.isQuotaDismissed?.(t().id)}
+        onDismissQuotaWarning={props.onDismissQuotaWarning ? () => props.onDismissQuotaWarning?.(t().id) : undefined}
         onError={props.onError}
         supportsCompact={props.supportsCompact(t().harness)}
         actionLoading={props.actionId() === t().id}

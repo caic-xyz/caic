@@ -368,6 +368,42 @@ describe("TaskDetail", () => {
     expect(screen.queryByTestId("quota-recovery-detail-action")).not.toBeInTheDocument();
   });
 
+  it("allows dismissing the quota warning", async () => {
+    const user = userEvent.setup();
+    const onDismissQuotaWarning = vi.fn();
+    renderTaskDetail({
+      taskId: "task-quota",
+      taskState: "waiting",
+      rateLimit: {
+        blocked: true,
+        window: "5h",
+        resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+      },
+      onDismissQuotaWarning,
+    });
+
+    expect(screen.getByTestId("quota-recovery-detail")).toBeInTheDocument();
+    const dismissButton = screen.getByRole("button", { name: "Dismiss quota warning" });
+    expect(dismissButton).toHaveAttribute("title", "Dismiss quota warning");
+    await user.click(dismissButton);
+    expect(onDismissQuotaWarning).toHaveBeenCalledWith("task-quota");
+    expect(screen.queryByTestId("quota-recovery-detail")).not.toBeInTheDocument();
+  });
+
+  it("hides the quota warning when quotaDismissed is true", () => {
+    renderTaskDetail({
+      taskState: "waiting",
+      rateLimit: {
+        blocked: true,
+        window: "5h",
+        resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+      },
+      quotaDismissed: true,
+    });
+
+    expect(screen.queryByTestId("quota-recovery-detail")).not.toBeInTheDocument();
+  });
+
   it("repository state diff link href ends with /diff", async () => {
     renderTaskDetail();
     const link = await screen.findByRole("link", {

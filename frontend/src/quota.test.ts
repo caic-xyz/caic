@@ -5,7 +5,7 @@ import { expect } from "@tests/expect";
 
 import type { ISOTimestamp, Task } from "@sdk/types.gen";
 
-import { QuotaRecoveryTracker, formatQuotaCountdown } from "./quota";
+import { QuotaRecoveryTracker, formatQuotaCountdown, quotaDismissalKey } from "./quota";
 
 const now = Date.parse("2026-07-08T12:00:00Z");
 
@@ -79,5 +79,26 @@ describe("formatQuotaCountdown", () => {
 
   it("formats remaining hours", () => {
     expect(formatQuotaCountdown("2026-07-08T14:05:00Z", now)).toBe("2h 5m");
+  });
+});
+
+describe("quotaDismissalKey", () => {
+  it("returns empty string for missing rateLimit", () => {
+    expect(quotaDismissalKey(undefined)).toBe("");
+  });
+
+  it("builds key from rateLimit properties", () => {
+    expect(
+      quotaDismissalKey({
+        blocked: true,
+        window: "5h",
+        resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+        quotaGroup: "claudecode",
+      }),
+    ).toBe("5h:2026-07-08T12:42:00Z:claudecode");
+  });
+
+  it("handles missing optional rateLimit fields", () => {
+    expect(quotaDismissalKey({ blocked: true })).toBe("::");
   });
 });

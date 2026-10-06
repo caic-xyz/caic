@@ -423,6 +423,49 @@ describe("TaskCard", () => {
     expect(screen.queryByTestId("quota-recovery-card")).not.toBeInTheDocument();
   });
 
+  it("dismisses the quota warning from the task card", () => {
+    const onClick = vi.fn();
+    const onDismissQuotaWarning = vi.fn();
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          onClick,
+          onDismissQuotaWarning,
+          rateLimit: {
+            blocked: true,
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+        })}
+      />
+    ));
+
+    const dismissButton = screen.getByRole("button", { name: "Dismiss quota warning" });
+    expect(dismissButton).toHaveAttribute("title", "Dismiss quota warning");
+    fireEvent.click(dismissButton);
+    expect(onDismissQuotaWarning).toHaveBeenCalledOnce();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("hides quota countdown and actions when quota is dismissed", () => {
+    renderCard(() => (
+      <TaskCard
+        {...props({
+          rateLimit: {
+            blocked: true,
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+          quotaDismissed: true,
+        })}
+      />
+    ));
+
+    expect(screen.queryByTestId("quota-countdown")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quota-recovery-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quota-dismiss-card")).not.toBeInTheDocument();
+  });
+
   it("renders errors as a clamped summary", () => {
     const error = "Error: failed to load extension from a very long runtime path";
     const { getByText } = renderCard(() => <TaskCard {...props({ error })} />);

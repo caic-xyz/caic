@@ -65,7 +65,7 @@ import {
 } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
-import { formatQuotaCountdown } from "../quota";
+import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
 import type { ToolCall } from "../grouping";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -150,6 +150,8 @@ interface Props {
   onRevive: (id: string) => void;
   onFork?: (id: string) => void;
   onQuotaRecovery?: (id: string) => void;
+  quotaDismissed?: boolean;
+  onDismissQuotaWarning?: (id: string) => void;
   parentTaskID?: string;
   childTasks: { id: string; title: string }[];
   onClose: () => void;
@@ -228,6 +230,14 @@ export default function TaskDetail(props: Props) {
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
+  const [dismissedKey, setDismissedKey] = createSignal<string | null>(null);
+  const isQuotaDismissed = () =>
+    props.quotaDismissed || (dismissedKey() !== null && dismissedKey() === quotaDismissalKey(props.rateLimit));
+
+  const handleDismissQuota = () => {
+    setDismissedKey(quotaDismissalKey(props.rateLimit));
+    props.onDismissQuotaWarning?.(props.taskId);
+  };
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
@@ -1110,7 +1120,7 @@ export default function TaskDetail(props: Props) {
             </For>
           </nav>
         </Show>
-        <Show when={props.rateLimit?.blocked}>
+        <Show when={props.rateLimit?.blocked && !isQuotaDismissed()}>
           <section
             class={styles.quotaRecovery}
             aria-labelledby="quota-recovery-title"
@@ -1126,15 +1136,27 @@ export default function TaskDetail(props: Props) {
                 continue its workspace in a new agent.
               </p>
             </div>
-            <Show when={props.onQuotaRecovery && props.repo}>
-              <Button
+            <div class={styles.quotaRecoveryActions}>
+              <Show when={props.onQuotaRecovery && props.repo}>
+                <Button
+                  type="button"
+                  onClick={() => props.onQuotaRecovery?.(props.taskId)}
+                  data-testid="quota-recovery-detail-action"
+                >
+                  Continue in new agent
+                </Button>
+              </Show>
+              <button
                 type="button"
-                onClick={() => props.onQuotaRecovery?.(props.taskId)}
-                data-testid="quota-recovery-detail-action"
+                class={styles.quotaDismiss}
+                onClick={handleDismissQuota}
+                aria-label="Dismiss quota warning"
+                title="Dismiss quota warning"
+                data-testid="quota-recovery-detail-dismiss"
               >
-                Continue in new agent
-              </Button>
-            </Show>
+                <CloseIcon width={18} height={18} aria-hidden="true" />
+              </button>
+            </div>
           </section>
         </Show>
         <Show when={props.error} keyed>

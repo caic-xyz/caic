@@ -229,6 +229,12 @@ a.featureIconBadge:focus-visible {
   color: var(--color-danger);
 }
 
+.quotaRecoveryRow {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
 .quotaRecovery {
   align-self: flex-start;
   padding: 0;
@@ -246,6 +252,28 @@ a.featureIconBadge:focus-visible {
 }
 
 .quotaRecovery:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.quotaDismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.quotaDismiss:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.quotaDismiss:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }

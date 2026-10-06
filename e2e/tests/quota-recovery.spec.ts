@@ -98,3 +98,19 @@ test("mobile quota recovery opens from task detail and navigates to the fork", a
   await expect(page.getByTestId("task-list")).toBeHidden();
   expect((await api.getTask(source.id)).rateLimit?.blocked).toBe(true);
 });
+
+test("dismissing quota warning hides the warning banner and task countdown", async ({ page, api, uniquePrompt }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const source = await createQuotaBlockedTask(api, uniquePrompt("FAKE_QUOTA_RECOVERY dismiss source"));
+  await page.goto(`/task/@${source.id}`);
+
+  const recovery = page.getByTestId("quota-recovery-detail");
+  await expect(recovery).toBeVisible();
+  const sourceCard = page.locator(`[data-task-id="${source.id}"]`);
+  await expect(sourceCard.getByTestId("quota-countdown")).toBeVisible();
+
+  await page.getByTestId("quota-recovery-detail-dismiss").click();
+  await expect(recovery).toBeHidden();
+  await expect(sourceCard.getByTestId("quota-countdown")).toBeHidden();
+  await expect(sourceCard.getByTestId("quota-recovery-card")).toBeHidden();
+});

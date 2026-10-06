@@ -3074,6 +3074,51 @@ describe("App repo chips: No repository", () => {
     );
   });
 
+  it("dismisses task quota warning and preserves dismissal across task navigation", async () => {
+    const user = userEvent.setup();
+    renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [
+        makeTask({
+          id: "task1",
+          state: "waiting",
+          repos: [{ name: "repos/a", branch: "main" }],
+          rateLimit: {
+            blocked: true,
+            quotaGroup: "claudecode",
+            window: "5h",
+            resetsAt: "2026-07-08T12:42:00Z" as ISOTimestamp,
+          },
+        }),
+        makeTask({
+          id: "task2",
+          state: "waiting",
+          repos: [{ name: "repos/b", branch: "main" }],
+        }),
+      ],
+    });
+
+    await expect(screen.findByTestId("quota-recovery-detail")).resolves.toBeInTheDocument();
+    expect(screen.getByTestId("quota-countdown")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("quota-recovery-detail-dismiss"));
+    expect(screen.queryByTestId("quota-recovery-detail")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quota-countdown")).not.toBeInTheDocument();
+
+    const task2Card = document.querySelector<HTMLElement>("[data-task-id='task2']");
+    if (!task2Card) throw new Error("task2 card not found");
+    fireEvent.click(task2Card);
+
+    const task1Card = document.querySelector<HTMLElement>("[data-task-id='task1']");
+    if (!task1Card) throw new Error("task1 card not found");
+    fireEvent.click(task1Card);
+
+    expect(screen.queryByTestId("quota-recovery-detail")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quota-countdown")).not.toBeInTheDocument();
+  });
+
   it("does not dismiss the fork dialog when it is clicked", async () => {
     const user = userEvent.setup();
     renderApp("/task/@task1");
