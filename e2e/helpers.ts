@@ -1,6 +1,7 @@
 // Shared e2e test helpers: typed API client and utilities.
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -138,12 +139,21 @@ export async function convertPngsToWebp(dir: string): Promise<void> {
     }
   }
   pngs.sort();
-  for (const src of pngs) {
-    const dst = src.replace(/\.png$/, ".webp");
-    execFileSync("ffmpeg", ["-y", "-i", src, "-lossless", "1", dst], {
-      stdio: "pipe",
-      timeout: 60_000,
-    });
-    unlinkSync(src);
-  }
+  const encode = promisify(execFile);
+  const queue = [...pngs];
+  await Promise.all(
+    Array.from({ length: Math.min(2, queue.length) }, async () => {
+      for (let src = queue.shift(); src !== undefined; src = queue.shift()) {
+        const dst = src.replace(/\.png$/, ".webp");
+        await encode(
+          "ffmpeg",
+          ["-v", "error", "-y", "-threads", "1", "-i", src, "-threads", "1", "-lossless", "1", dst],
+          {
+            timeout: 60_000,
+          },
+        );
+        unlinkSync(src);
+      }
+    }),
+  );
 }

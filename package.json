@@ -20,9 +20,9 @@
     "benchmark": "tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'",
     "postbuild": "./scripts/precompress_dist.py --dist backend/frontend/dist --delete-originals --encodings br",
     "preview": "vite preview",
-    "test": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
+    "test": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
     "test:watch": "pnpm --silent test -- --watch",
-    "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --conditions=browser --test-force-exit --experimental-test-coverage --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
+    "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --experimental-test-coverage --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json",
     "prepare": "scripts/install-git-hooks.sh"
   },

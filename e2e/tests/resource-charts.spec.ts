@@ -20,8 +20,8 @@ for (const history of ["clustered", "live"] as const) {
           memUsed: 512,
           memLimit: 1024,
           memPerc: 50,
-          netRx: 0,
-          netTx: 0,
+          netRx: index * 12000,
+          netTx: index * 8000,
           blockRead: 0,
           blockWrite: 0,
           diskUsed: -1,
@@ -120,5 +120,36 @@ for (const history of ["clustered", "live"] as const) {
     // The readout is centered on the focused sample; at the right edge it parks
     // inside the frame instead of being clipped by the viewport.
     await expect.poll(() => readAt("right"), { timeout: 15_000 }).toBe("matched");
+
+    // Percentage and throughput labels have different widths. Every tick must
+    // fit the actual SVG at both responsive layouts, including its leading digits.
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await resources.scrollIntoViewIfNeeded();
+      for (const label of [
+        "CPU utilization over time",
+        "Network receive throughput over time",
+        "Network transmit throughput over time",
+      ]) {
+        await expect
+          .poll(() =>
+            page.getByLabel(label, { exact: true }).evaluate((svg) => {
+              const bounds = svg.getBoundingClientRect();
+              const ticks = Array.from(svg.querySelectorAll('[aria-label="y-axis tick label"] text'));
+              return (
+                ticks.length === 2 &&
+                ticks.every((tick) => {
+                  const box = tick.getBoundingClientRect();
+                  return box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5;
+                })
+              );
+            }),
+          )
+          .toBe(true);
+      }
+    }
   });
 }

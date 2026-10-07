@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -46,6 +47,13 @@ func fakeAgentBackends() agent.Backends {
 	pi.QuotaProviderID = ""
 	backends[harness.Codex] = &fakeModelBackend{FakeBackend: codex}
 	backends[harness.Pi] = &fakeModelBackend{FakeBackend: pi}
+	if os.Getenv(visualFixturesEnv) == "1" {
+		claude.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "sonnet", ContextWindow: 200_000}, {ID: "haiku", ContextWindow: 200_000}}})
+		codex.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "gpt-6-luna", ContextWindow: 272_000}}})
+		for _, b := range []*smoketest.FakeBackend{agy, pi} {
+			b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "sonnet", ContextWindow: 200_000}}})
+		}
+	}
 	return backends
 }
 
@@ -56,9 +64,12 @@ type fakeModelBackend struct {
 }
 
 // FetchModelInventory implements agent.ModelFetcher.
-func (*fakeModelBackend) FetchModelInventory(ctx context.Context, _ runtime.ConnectionTarget, _ []string) (agent.ModelInventory, error) {
+func (b *fakeModelBackend) FetchModelInventory(ctx context.Context, _ runtime.ConnectionTarget, _ []string) (agent.ModelInventory, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.ModelInventory{}, err
+	}
+	if os.Getenv(visualFixturesEnv) == "1" {
+		return b.ModelInventory(), nil
 	}
 	return agent.ModelInventory{Models: []agent.Model{
 		{ID: "fake-model", ContextWindow: 200_000, EffortOptions: []string{"low", "medium", "high"}},
@@ -77,7 +88,16 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(tmpDir)) }()
-	clone, err := smoketest.InitRepo(ctx, tmpDir)
+	visualFixtures := os.Getenv(visualFixturesEnv) == "1"
+	names := [2]string{"clone", "clone2"}
+	if visualFixtures {
+		// Settings captures must stay identical after committing the baselines.
+		autoupdate.Version = "0.0.0"
+		// Host gh credentials must not enable live release checks or updates.
+		cfg.GitHub.Token = ""
+		names = [2]string{"caic", "gomode"}
+	}
+	clone, err := smoketest.InitRepo(ctx, tmpDir, names)
 	if err != nil {
 		return fmt.Errorf("init fake repo: %w", err)
 	}
@@ -141,7 +161,6 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 
 	fc := smoketest.NewRuntimeBackend(fvnc.Port())
 	cfg.Runtime.System = fc
-	visualFixtures := os.Getenv(visualFixturesEnv) == "1"
 	// Resource statistics stream only for behaviour tests: the documentation
 	// screenshots compare two renders and need a stable glyph.
 	fc.StreamStats = !visualFixtures
@@ -170,7 +189,7 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 
 	// Pre-populate the harness model cache so refreshHarnessModels skips
 	// launching temporary containers for real harness model discovery.
-	if err := smoketest.InitHarnessCache(fakeLogsDir); err != nil {
+	if err := smoketest.InitHarnessCache(fakeLogsDir, visualFixtures); err != nil {
 		return fmt.Errorf("init fake harness cache: %w", err)
 	}
 	cfg.Runtime.SkipWarmup = true

@@ -94,18 +94,11 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 			Delta:     m.Delta,
 		}}, nil
 	case "result":
-		var m resultMsg
+		var m agent.ResultMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
-		return []agent.Message{&agent.ResultMessage{
-			MessageType:  m.Type,
-			Subtype:      m.Subtype,
-			Result:       m.Result,
-			NumTurns:     m.NumTurns,
-			TotalCostUSD: m.TotalCostUSD,
-			DurationMs:   m.DurationMs,
-		}}, nil
+		return []agent.Message{&m}, nil
 	case "native_subagent":
 		var m agent.NativeSubagentMessage
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -158,13 +151,4 @@ type widgetMsg struct {
 type widgetDeltaMsg struct {
 	ID    string `json:"id"`
 	Delta string `json:"delta"`
-}
-
-type resultMsg struct {
-	Type         string  `json:"type"`
-	Subtype      string  `json:"subtype"`
-	Result       string  `json:"result"`
-	NumTurns     int     `json:"num_turns"`
-	TotalCostUSD float64 `json:"total_cost_usd"`
-	DurationMs   int64   `json:"duration_ms"`
 }

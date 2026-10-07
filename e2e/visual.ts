@@ -3,6 +3,10 @@ import { expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { validateEventMessage, validateTask } from "../sdk/caic/ts/v1/validate.gen";
+import { createApiClient } from "../sdk/caic/ts/v1/api.gen";
+import type { ImageRefreshStatus } from "../sdk/caic/ts/v1/types.gen";
+import { resourceHistory, usageHistory } from "./visual-fixtures";
 
 const visualTime = "2026-09-02T12:00:00.000Z";
 
@@ -17,6 +21,81 @@ export function screenshotDir(layout: FrontendScreenshotLayout): string {
 
 export async function prepareVisualPage(page: Page): Promise<void> {
   await page.clock.setFixedTime(visualTime);
+  // Freeze demonstration inputs at the API seam. The product keeps its real
+  // corners, icons, timing controls, and full native-activity content.
+  await page.route("**/api/caic/v1/server/cache-sizes", (route) =>
+    route.fulfill({
+      json: {
+        wellKnown: [
+          { name: "go-mod", sizeBytes: 284000000 },
+          { name: "npm", sizeBytes: 92000000 },
+          { name: "pip", sizeBytes: 46000000 },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/caic/v1/server/config", async (route) => {
+    const client = createApiClient((url, init) => fetch(new URL(url, route.request().url()), init));
+    const config = await client.getConfig();
+    config.runtimes = [{ name: "md" }];
+    await route.fulfill({ json: config });
+  });
+  await page.route("**/api/caic/v1/server/runtimes/*/image/refresh", (route) => {
+    const status: ImageRefreshStatus = { state: "succeeded" };
+    return route.fulfill({ json: status });
+  });
+  await page.route("**/api/caic/v1/usage/dashboard", (route) => route.fulfill({ json: usageHistory() }));
+  await page.route("**/api/caic/v1/tasks/*/events*", async (route) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch(route.request().url(), { signal: controller.signal });
+      if (!response.ok || !response.body) throw new Error(`Visual history fetch failed: ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let body = "";
+      try {
+        while (!body.includes("event: ready\n")) {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error("Visual history ended before ready");
+          body += decoder.decode(chunk.value, { stream: true });
+          if (body.length > 2 * 1024 * 1024) throw new Error("Visual history exceeds 2 MiB");
+        }
+      } finally {
+        await reader.cancel();
+      }
+      const taskResponse = await fetch(
+        route
+          .request()
+          .url()
+          .replace(/\/events.*$/, ""),
+        { signal: controller.signal },
+      );
+      if (!taskResponse.ok) throw new Error(`Visual task fetch failed: ${taskResponse.status}`);
+      const task = validateTask(await taskResponse.json());
+      const start = Date.parse(task.startedAt ?? "");
+      if (!Number.isFinite(start)) throw new Error("Visual task has no start timestamp");
+      let index = 0;
+      const frames = body
+        .split("\n\n")
+        .filter((frame) => frame.split("\n").some((line) => line.startsWith("data: ")) && !/^event:/m.test(frame));
+      const events = frames.map((frame) => {
+        const data = frame.split("\n").find((line) => line.startsWith("data: "));
+        if (!data) throw new Error("Visual event has no data");
+        const event = validateEventMessage(JSON.parse(data.slice(6)));
+        event.ts = start + index++ * 150;
+        return `data: ${JSON.stringify(event)}\n\n`;
+      });
+      events.push(...resourceHistory().map((event) => `data: ${JSON.stringify(event)}\n\n`));
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: `retry: 600000\n\n${events.join("")}event: ready\ndata: {}\n\n`,
+      });
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+    }
+  });
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
 }
 
@@ -31,65 +110,6 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
         *, *::before, *::after {
           animation: none !important;
           transition: none !important;
-        }
-        /* Rounded corners of captured controls land on fractional pixels and
-           whose edge antialiasing then varies between otherwise identical
-           renders, so the captured surfaces render square. */
-        [data-testid="prompt-input"],
-        [data-testid="attach-images"],
-        [data-testid="submit-task"],
-        [data-testid="task-message-area"] {
-          border-radius: 0 !important;
-        }
-        [data-testid="task-detail-form"] {
-          border-radius: 0 !important;
-        }
-        [data-testid="task-detail-form"] button {
-          border-radius: 0 !important;
-        }
-        div:has(> [data-testid="prompt-input"]),
-        div:has(> [data-testid="task-detail-prompt"]) {
-          border-radius: 0 !important;
-        }
-        [data-task-id] {
-          border-radius: 0 !important;
-        }
-        [data-testid="usage-badge"] {
-          border-radius: 0 !important;
-        }
-        [data-testid="provider-usage"] {
-          border-color: transparent !important;
-          border-radius: 0 !important;
-        }
-        [data-testid="cache-size"] {
-          visibility: hidden !important;
-          width: 4rem !important;
-        }
-        button[title="Back to task"] svg,
-        button[title="Collapse sidebar"] svg,
-        [data-testid="attach-images"] svg,
-        [data-testid="submit-task"] svg {
-          /* Antialiasing of these icons varies between otherwise identical
-             renders, which fails the repeatability comparison. */
-          shape-rendering: crispEdges;
-        }
-        [data-testid="timing-duration"] > span {
-          display: none !important;
-        }
-        [data-testid="timing-duration"]::after {
-          content: "150ms";
-          font-size: 0.72rem;
-          font-variant-numeric: tabular-nums;
-          opacity: 0.72;
-          white-space: nowrap;
-        }
-        [data-testid="task-setup"] [data-testid="timing-duration"]::after {
-          content: "42ms";
-        }
-        /* Native-agent card durations are wall-clock event deltas that vary
-           between renders, and the showcase does not need them. */
-        [data-testid="native-subagent-duration"] {
-          display: none !important;
         }
       `,
     });
@@ -113,6 +133,7 @@ export async function captureScreenshot(page: Page, layout: FrontendScreenshotLa
   const outputDir = screenshotDir(layout);
   mkdirSync(outputDir, { recursive: true });
   await page.screenshot({
+    animations: "disabled",
     caret: "hide",
     path: path.join(outputDir, filename),
   });

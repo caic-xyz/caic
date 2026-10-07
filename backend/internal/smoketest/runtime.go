@@ -1,4 +1,5 @@
 // Package smoketest provides fake runtime and repository fixtures for smoke and e2e tests.
+
 package smoketest
 
 import (
@@ -22,26 +23,33 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-// InitRepo creates two fake repos (clone and clone2) in tmpDir so that the
+// InitRepo creates two named fixture repositories in tmpDir so that the
 // add-repo button is visible after the first repo is auto-selected on load.
 // Returns the path to the primary clone.
-func InitRepo(ctx context.Context, tmpDir string) (string, error) {
-	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote.git"), filepath.Join("repos", "clone")); err != nil {
+func InitRepo(ctx context.Context, tmpDir string, names [2]string) (string, error) {
+	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote.git"), filepath.Join("repos", names[0])); err != nil {
 		return "", err
 	}
-	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote2.git"), filepath.Join("repos", "clone2")); err != nil {
+	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote2.git"), filepath.Join("repos", names[1])); err != nil {
 		return "", err
 	}
-	return filepath.Join(tmpDir, "repos", "clone"), nil
+	return filepath.Join(tmpDir, "repos", names[0]), nil
 }
 
 // InitHarnessCache pre-populates the harness model cache with fresh dummy
 // entries so refreshHarnessModels skips launching temp containers for real
 // harness model discovery during smoke and e2e tests.
-func InitHarnessCache(cacheDir string) error {
+func InitHarnessCache(cacheDir string, visual bool) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 	for _, h := range []harness.Name{harness.Antigravity, harness.Codex, harness.OpenCode, harness.Pi} {
-		cache.SetModelInventory(h, agent.ModelInventory{Models: []agent.Model{{ID: "fake-model", ContextWindow: 200_000}}}, "")
+		model := "fake-model"
+		if visual {
+			model = "sonnet"
+			if h == harness.Codex {
+				model = "gpt-6-luna"
+			}
+		}
+		cache.SetModelInventory(h, agent.ModelInventory{Models: []agent.Model{{ID: model, ContextWindow: 200_000}}}, "")
 	}
 	return nil
 }

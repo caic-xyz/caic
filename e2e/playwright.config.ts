@@ -34,6 +34,12 @@ const serverPort = process.env.CAIC_E2E_PORT ?? "8090";
 if (!/^\d+$/.test(serverPort)) {
   throw new Error(`CAIC_E2E_PORT must be a decimal port, got ${serverPort}`);
 }
+const prebuiltBinary = process.env.CAIC_E2E_BINARY;
+if (prebuiltBinary && !/^\/[a-zA-Z0-9_./-]+$/.test(prebuiltBinary)) {
+  throw new Error("CAIC_E2E_BINARY must be an absolute path without shell metacharacters");
+}
+const binaryOption = prebuiltBinary ? ` --binary ${prebuiltBinary}` : "";
+const serverLog = includeVisuals ? `e2e-server-${serverPort}.log` : "e2e-server.log";
 const serverURL = `http://${serverHost}:${serverPort}`;
 process.env.CAIC_E2E_SEED = seed;
 if (process.env.TEST_WORKER_INDEX === undefined) {
@@ -44,6 +50,8 @@ export default defineConfig({
   testDir: "./tests",
   testIgnore: includeVisuals ? [] : ["**/gen-screenshots.spec.ts", "**/prompt-input.spec.ts"],
   timeout: 60_000,
+  // Keep browser processes within a predictable memory budget on large hosts.
+  workers: includeVisuals ? 1 : 4,
   outputDir: process.env.CAIC_E2E_OUTPUT_DIR,
   // The dot reporter keeps progress to one line; failures still print in full at the end.
   reporter: "dot",
@@ -51,7 +59,7 @@ export default defineConfig({
     // Both streams go to the log file instead of the terminal: the fake server is
     // chatty and the dot reporter keeps the run to one line. The test-e2e make
     // target prints the log tail when the suite fails.
-    command: `mkdir -p ../test-results && ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake > ../test-results/e2e-server.log 2>&1`,
+    command: `mkdir -p ../test-results && ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake${binaryOption} > ../test-results/${serverLog} 2>&1`,
     url: `${serverURL}/api/caic/v1/server/config`,
     reuseExistingServer: false,
     timeout: 30_000,
@@ -62,7 +70,14 @@ export default defineConfig({
     deviceScaleFactor: 1,
     launchOptions: includeVisuals
       ? {
-          args: ["--disable-gpu", "--disable-gpu-rasterization", "--num-raster-threads=1"],
+          args: [
+            "--disable-gpu",
+            "--disable-gpu-rasterization",
+            "--num-raster-threads=1",
+            "--disable-skia-runtime-opts",
+            "--disable-lcd-text",
+            "--disable-font-subpixel-positioning",
+          ],
         }
       : undefined,
     locale: "en-US",

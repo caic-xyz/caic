@@ -9,14 +9,20 @@ rot silently."""
 
 import argparse
 import concurrent.futures
+import hashlib
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+
+from screenshot_catalog import CatalogSpec, publish_catalog, recover_catalog, validate_catalog
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_VISUAL_PORTS = (41741, 41742)
@@ -40,6 +46,44 @@ FRONTEND_BUILD_INPUTS = (
 FRONTEND_BUNDLE = "backend/frontend/dist"
 BASELINE_DIR = ROOT_DIR / "e2e" / "screenshots" / "frontend"
 IMAGE_SUFFIXES = frozenset({".avif", ".png", ".webp"})
+# Every declared documentation scene is required, including prompt and animation captures.
+FRONTEND_SCENE_FILES = frozenset(
+    {
+        "desktop/overview.webp",
+        "desktop/prompt-detail-long.webp",
+        "desktop/prompt-detail-short.webp",
+        "desktop/prompt-long.webp",
+        "desktop/prompt-short.webp",
+        "desktop/settings-general.webp",
+        "desktop/settings-mounts.webp",
+        "desktop/settings-server-error.webp",
+        "desktop/settings-server.webp",
+        "desktop/task-ask.webp",
+        "desktop/task-detail.webp",
+        "desktop/task-list-scrolled.webp",
+        "desktop/task-native-subagents.webp",
+        "desktop/task-plan.webp",
+        "desktop/task-repository-changes.webp",
+        "desktop/task-resources.webp",
+        "desktop/task-stats.webp",
+        "desktop/task-vnc.webp",
+        "desktop/task-widget.avif",
+        "desktop/task-widget.webp",
+        "desktop/usage.webp",
+        "mobile/overview.webp",
+        "mobile/settings-general.webp",
+        "mobile/settings-mounts-mobile.webp",
+        "mobile/settings-server-error-mobile.webp",
+        "mobile/settings-server-mobile.webp",
+        "mobile/task-detail-header-compact.webp",
+        "mobile/task-detail.webp",
+        "mobile/task-list-scrolled-mobile.webp",
+        "mobile/task-repository-changes.webp",
+        "mobile/task-resources.webp",
+        "mobile/task-stats.webp",
+        "mobile/usage.webp",
+    },
+)
 VISUAL_SEED = "caic-visual-v1"
 # Playwright deletes test-results/ at the start of every run, so failed renders
 # live beside it instead of inside it: they have to survive a re-run to be
@@ -133,6 +177,8 @@ def luma_difference(actual: bytes, expected: bytes) -> LumaDifference:
     """Measure absolute differences between equal-length decoded luma planes."""
     if len(actual) != len(expected):
         raise ValueError("decoded luma planes have different lengths")
+    if actual == expected:
+        return LumaDifference(maximum=0, pixel_count=len(actual), total=0)
     maximum = 0
     total = 0
     for actual_value, expected_value in zip(actual, expected, strict=True):
@@ -152,6 +198,8 @@ def compare_images(actual_dir: Path, expected_dir: Path, label: str) -> list[str
     for name in sorted(expected.keys() - actual.keys()):
         differences.append(f"{label}: missing image {name}")
     for name in sorted(actual.keys() & expected.keys()):
+        if actual[name].read_bytes() == expected[name].read_bytes():
+            continue
         actual_layout = video_layout(actual[name])
         expected_layout = video_layout(expected[name])
         if actual_layout != expected_layout:
@@ -229,7 +277,7 @@ def run_frontend_spec(command: list[str], env: dict[str, str]) -> None:
     result.check_returncode()
 
 
-def render_frontend(output_dir: Path, port: int = FRONTEND_VISUAL_PORTS[0]) -> None:
+def render_frontend(output_dir: Path, port: int = FRONTEND_VISUAL_PORTS[0], binary: Path | None = None) -> None:
     """Render the frontend visual tests into output_dir."""
     output_dir.mkdir(parents=True)
     env = os.environ.copy()
@@ -246,44 +294,55 @@ def render_frontend(output_dir: Path, port: int = FRONTEND_VISUAL_PORTS[0]) -> N
             "TZ": "UTC",
         },
     )
-    for spec in FRONTEND_SPECS:
-        run_frontend_spec(
-            [
-                "pnpm",
-                "exec",
-                "playwright",
-                "test",
-                "--config",
-                "e2e/playwright.config.ts",
-                spec,
-                "--workers=1",
-            ],
-            env,
-        )
+    if binary is not None:
+        env["CAIC_E2E_BINARY"] = str(binary)
+    run_frontend_spec(
+        ["pnpm", "exec", "playwright", "test", "--config", "e2e/playwright.config.ts", *FRONTEND_SPECS, "--workers=1"],
+        env,
+    )
 
 
-def render_frontend_passes(first: Path, second: Path) -> None:
+def render_frontend_passes(first: Path, second: Path, binary: Path | None = None) -> None:
     """Render both isolated frontend passes concurrently."""
     require_available_loopback_ports(FRONTEND_VISUAL_PORTS)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
-            executor.submit(render_frontend, output, port)
+            executor.submit(render_frontend, output, port, binary)
             for output, port in zip((first, second), FRONTEND_VISUAL_PORTS, strict=True)
         ]
         for future in concurrent.futures.as_completed(futures):
             future.result()
 
 
+def catalog_dimensions(path: Path) -> tuple[int, int]:
+    """Return dimensions of the first image/video stream in a scene."""
+    width, height, _ = video_layout(path).strip().splitlines()[0].split(",")
+    return int(width), int(height)
+
+
+def validate_frontend_catalog(directory: Path, expected_files: frozenset[str] | None) -> dict:
+    """Validate the complete frontend catalog against its owned images."""
+    spec = CatalogSpec("caic", "web", IMAGE_SUFFIXES, expected_files)
+    catalog = validate_catalog(directory, spec, catalog_dimensions)
+    for scene in catalog["scenarios"]:
+        path = Path(scene["file"])
+        name = path.with_suffix("").as_posix() + ("-animation" if path.suffix == ".avif" else "")
+        if scene["name"] != name:
+            raise RuntimeError("Frontend screenshot scene name disagrees with its file")
+    return catalog
+
+
 def replace_baselines(source_dir: Path, baseline_dir: Path) -> None:
-    """Replace the owned baseline image set with generated images."""
-    generated = image_files(source_dir)
-    existing = image_files(baseline_dir)
-    for name in sorted(existing.keys() - generated.keys()):
-        existing[name].unlink()
-    for name, source in generated.items():
-        destination = baseline_dir / name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+    """Publish a validated frontend catalog while retaining recoverable prior images."""
+    if baseline_dir != BASELINE_DIR:
+        raise RuntimeError("Only the managed frontend baseline directory may be published")
+    publish_catalog(
+        source_dir,
+        ROOT_DIR,
+        baseline_dir,
+        partial(validate_frontend_catalog, expected_files=FRONTEND_SCENE_FILES),
+        partial(validate_frontend_catalog, expected_files=None),
+    )
 
 
 def preserve_failure(platform: str, first: Path, second: Path) -> Path:
@@ -294,6 +353,60 @@ def preserve_failure(platform: str, first: Path, second: Path) -> Path:
     shutil.copytree(first, destination / "first")
     shutil.copytree(second, destination / "second")
     return destination
+
+
+def write_manifest(directory: Path) -> None:
+    """Publish image dimensions, content hashes, and capture-input provenance."""
+    files = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "-co",
+            "--exclude-standard",
+            "--",
+            "backend",
+            "e2e",
+            "frontend",
+            "scripts/run-dev.py",
+            "scripts/visual_screenshots.py",
+            "scripts/screenshot_catalog.py",
+            "pnpm-lock.yaml",
+            *FRONTEND_BUILD_INPUTS,
+        ],
+        cwd=ROOT_DIR,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    digest = hashlib.sha256()
+    for name in sorted(set(files)):
+        source = ROOT_DIR / name
+        if source.is_file() and not name.startswith("e2e/screenshots/"):
+            digest.update(name.encode() + b"\0" + source.read_bytes() + b"\0")
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT_DIR, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    scenarios = []
+    for name, source in image_files(directory).items():
+        width, height, _ = video_layout(source).strip().splitlines()[0].split(",")
+        scenarios.append(
+            {
+                "name": str(Path(name).with_suffix("")) + ("-animation" if source.suffix == ".avif" else ""),
+                "file": name,
+                "width": int(width),
+                "height": int(height),
+                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "description": Path(name).stem.replace("-", " "),
+            }
+        )
+    manifest = {
+        "schemaVersion": 1,
+        "producer": "caic",
+        "platform": "web",
+        "source": {"revision": revision, "inputsSha256": digest.hexdigest()},
+        "scenarios": scenarios,
+    }
+    (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
@@ -309,6 +422,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    started = time.monotonic()
     if not args.rebuilt:
         problem = frontend_bundle_staleness(
             changed_paths(FRONTEND_BUILD_INPUTS),
@@ -331,17 +445,29 @@ def main() -> int:
                 )
                 return 1
 
+    committed = None
+    if args.mode == "check":
+        committed = validate_frontend_catalog(BASELINE_DIR, FRONTEND_SCENE_FILES)
+    elif args.mode == "update":
+        recover_catalog(ROOT_DIR, BASELINE_DIR, partial(validate_frontend_catalog, expected_files=None))
+
     with tempfile.TemporaryDirectory(prefix="caic-visual-") as tmp:
         tmp_dir = Path(tmp)
+        binary = tmp_dir / "caic-fake"
+        subprocess.run(
+            ["go", "build", "-tags", "e2e", "-o", str(binary), "./backend/cmd/caic"], cwd=ROOT_DIR, check=True
+        )
         first = tmp_dir / "frontend" / "first"
         second = tmp_dir / "frontend" / "second"
         if args.mode == "generate":
             print("Rendering frontend screenshots...")
-            render_frontend(first)
+            render_frontend(first, binary=binary)
+            write_manifest(first)
             print("frontend screenshots rendered.")
             return 0
         print("Rendering frontend screenshots (passes 1/2 and 2/2)...")
-        render_frontend_passes(first, second)
+        render_frontend_passes(first, second, binary)
+        write_manifest(first)
 
         differences = compare_images(first, second, "frontend repeatability")
         if differences:
@@ -351,6 +477,9 @@ def main() -> int:
             return 1
 
         if args.mode == "check":
+            generated = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
+            if committed is None or committed["source"]["inputsSha256"] != generated["source"]["inputsSha256"]:
+                raise RuntimeError("Frontend capture inputs changed; run make screenshots-update")
             differences = compare_images(first, BASELINE_DIR, "frontend baseline")
             if differences:
                 print("\n".join(differences), file=sys.stderr)
@@ -362,6 +491,7 @@ def main() -> int:
         else:
             replace_baselines(first, BASELINE_DIR)
             print("Updated frontend screenshot baselines.")
+    print(f"Frontend screenshots {args.mode}: {time.monotonic() - started:.2f}s")
     return 0
 
 

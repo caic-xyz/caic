@@ -9,9 +9,16 @@
 # sentinel.  Used by the caic -tags e2e server for e2e testing.
 
 import json
+import os
 import re
 import sys
 import time
+
+
+def pause(seconds: float) -> None:
+    """Keep behavior tests paced; documentation replay uses emitted timing data."""
+    time.sleep(seconds * (0.01 if os.environ.get("CAIC_E2E_VISUALS") == "1" else 1))
+
 
 JOKES = [
     "Why do programmers prefer dark mode? Because light attracts bugs.",
@@ -461,7 +468,7 @@ def emit_text(text: str) -> None:
     part1 = text[: sp + 1]
     part2 = text[sp + 1 :]
     emit({"type": "text_delta", "text": part1})
-    time.sleep(0.05)
+    pause(0.05)
     emit({"type": "text_delta", "text": part2})
     emit({"type": "text", "text": text})
 
@@ -475,14 +482,33 @@ def emit_tool_result(tool_id: str, duration_ms: int) -> None:
 
 
 def emit_result(turns: int, result: str, cost: float = 0.01, duration: int = 500) -> None:
+    visual = os.environ.get("CAIC_E2E_VISUALS") == "1"
+    if visual:
+        cost, duration = {
+            "Plan created": (0.015, 3400),
+            "Widget displayed": (0.012, 1400),
+            "Asking user": (0.008, 900),
+            "Native activity finished": (0.024, 2600),
+        }.get(result, (cost, duration))
     emit(
         {
             "type": "result",
             "subtype": "success",
             "result": result,
             "num_turns": turns,
-            "total_cost_usd": cost,
-            "duration_ms": duration,
+            "total_cost_usd": round(cost * 17, 2) if visual else cost,
+            "duration_ms": duration * 25 if visual else duration,
+            "duration_api_ms": duration * 18 if visual else 0,
+            "context_window": 200000 if visual else 0,
+            "usage": {
+                "input_tokens": 2400 + turns * 300,
+                "output_tokens": 3800 + turns * 400,
+                "cache_creation_input_tokens": 8400,
+                "cache_read_input_tokens": 42000,
+                "reasoning_output_tokens": 1200,
+            }
+            if visual
+            else {},
         }
     )
 
@@ -503,7 +529,7 @@ def emit_widget_turn(turns: int) -> None:
     # Stream partial HTML deltas.
     mid = len(WIDGET_HTML) // 2
     emit({"type": "widget_delta", "id": "toolu_widget", "delta": WIDGET_HTML[:mid]})
-    time.sleep(0.05)
+    pause(0.05)
     emit({"type": "widget_delta", "id": "toolu_widget", "delta": WIDGET_HTML[mid:]})
     # Final complete widget.
     emit({"type": "widget", "id": "toolu_widget", "title": WIDGET_TITLE, "html": WIDGET_HTML})
@@ -521,7 +547,7 @@ def emit_ask_turn(turns: int) -> None:
 def emit_attention_update_turn(turns: int) -> None:
     """Stay running long enough for monitoring to observe an update."""
     emit_text("Monitoring update is running before attention is required.")
-    time.sleep(2.0)
+    pause(2.0)
     emit_result(turns, "Monitoring update requires attention now", duration=2500)
 
 
@@ -531,15 +557,15 @@ def emit_demo_turn(turns: int) -> None:
     for step in scenario["steps"]:
         if "thinking" in step:
             emit({"type": "thinking", "text": step["thinking"]})
-            time.sleep(0.1)
+            pause(0.1)
         if "text" in step:
             emit_text(step["text"])
-            time.sleep(0.1)
+            pause(0.1)
         if "tool" in step:
             tool_id, name, input_obj = step["tool"]
             emit_tool_use(tool_id, name, input_obj)
             duration_ms = TOOL_DURATIONS_MS.get(name, 200)
-            time.sleep(duration_ms / 1000)
+            pause(duration_ms / 1000)
             emit_tool_result(tool_id, duration_ms)
     emit_result(turns, scenario["result"], scenario.get("cost", 0.01), scenario.get("duration", 500))
 
@@ -611,7 +637,7 @@ def emit_background_commands_turn(turns: int) -> None:
     )
     # The second command stays running past the result, so a settled replay must
     # report it as last-observed-running instead of inventing an outcome.
-    time.sleep(0.05)
+    pause(0.05)
     emit_result(turns, "Background commands finished")
 
 
@@ -620,29 +646,44 @@ def emit_native_subagents_turn(turns: int) -> None:
     # Parent narration before, between, and after the runs gives the transcript
     # the content boundaries the UI anchors each settled card to.
     emit_text("Delegating the review to two parallel agents and a chained batch.")
+    visual = os.environ.get("CAIC_E2E_VISUALS") == "1"
     for identity in ("joker", "reviewer"):
         emit(
             {
                 "type": "native_subagent",
                 "subagent": {
-                    "id": identity,
+                    "id": {"joker": "token-validation", "reviewer": "session-migration"}[identity]
+                    if visual
+                    else identity,
                     "group_id": "parallel",
-                    "label": identity,
-                    "prompt": "Tell a README joke",
+                    "label": ("Token validation" if identity == "joker" else "Session migration")
+                    if visual
+                    else identity,
+                    "prompt": "Review authentication boundaries and regression coverage"
+                    if visual
+                    else "Tell a README joke",
                     "status": "running",
                 },
             }
         )
-    time.sleep(0.2)
+    pause(0.2)
     for identity, status, result in (
-        ("joker", "completed", "Read me before you judge me."),
+        (
+            "joker",
+            "completed",
+            "Confirmed token expiry validation and added a regression test."
+            if visual
+            else "Read me before you judge me.",
+        ),
         ("reviewer", "failed", "Permission denied"),
     ):
         emit(
             {
                 "type": "native_subagent",
                 "subagent": {
-                    "id": identity,
+                    "id": {"joker": "token-validation", "reviewer": "session-migration"}[identity]
+                    if visual
+                    else identity,
                     "status": status,
                     "result": result,
                 },
@@ -655,7 +696,7 @@ def emit_native_subagents_turn(turns: int) -> None:
             "subagent": {
                 "id": "batch",
                 "scope": "batch",
-                "label": "Chained work",
+                "label": "Cross-service integration" if visual else "Chained work",
                 "status": "unknown",
             },
         }
@@ -667,7 +708,7 @@ def emit_native_subagents_turn(turns: int) -> None:
             "subagent": {
                 "id": "paused-batch",
                 "scope": "batch",
-                "label": "Detached workflow",
+                "label": "Browser regression suite" if visual else "Detached workflow",
                 "status": "running",
             },
         }
@@ -683,20 +724,22 @@ def emit_native_subagents_turn(turns: int) -> None:
     )
     # Keep the result strictly after the last native observation so the UI
     # anchors the batch cards above the summary instead of on its timestamp.
-    time.sleep(0.05)
+    pause(0.05)
     emit_result(turns, "Native activity finished")
 
 
 def main() -> None:
     # Model the agent handshake so setup timing is visible and non-zero in e2e.
-    time.sleep(0.12)
+    pause(0.12)
     emit(
         {
             "type": "init",
-            "session_id": "test-session",
+            "session_id": "0ac768bc-a58b-4f81-9e49-c0147d33d640"
+            if os.environ.get("CAIC_E2E_VISUALS") == "1"
+            else "test-session",
             "cwd": "/workspace",
-            "model": "fake-model",
-            "claude_code_version": "fake",
+            "model": os.environ.get("CAIC_FAKE_MODEL", "fake-model"),
+            "claude_code_version": "2.1.185" if os.environ.get("CAIC_E2E_VISUALS") == "1" else "fake",
         }
     )
 
@@ -756,7 +799,7 @@ def main() -> None:
             emit_demo_turn(turns)
             continue
 
-        if "FAKE_WIDGET" in line:
+        if "FAKE_WIDGET" in line or (os.environ.get("CAIC_E2E_VISUALS") == "1" and "refraction" in lower):
             emit_widget_turn(turns)
             continue
 

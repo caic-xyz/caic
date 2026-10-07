@@ -137,8 +137,15 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
   const domain = data.length > 0 ? [data[0].ts, data[data.length - 1].ts] : undefined;
   const available = data.filter((sample): sample is ResourceDatum & { value: number } => sample.value !== null);
   const showAxis = options.axisAnchor !== null && options.axisFormat !== null && options.maxValue !== null;
-  const marginLeft = showAxis && options.axisAnchor === "left" ? 40 : 3;
-  const marginRight = showAxis && options.axisAnchor === "right" ? 40 : 3;
+  // Plot does not enlarge margins for tick text. At the fixed 10 px chart font,
+  // reserve a conservative seven pixels per formatted character plus ticks and
+  // padding: throughput units are wider than percentage labels.
+  const axisMargin =
+    options.axisFormat !== null && options.maxValue !== null
+      ? Math.max(40, Math.max(options.axisFormat(0).length, options.axisFormat(options.maxValue).length) * 7 + 4)
+      : 3;
+  const marginLeft = showAxis && options.axisAnchor === "left" ? axisMargin : 3;
+  const marginRight = showAxis && options.axisAnchor === "right" ? axisMargin : 3;
   const span = domain ? domain[1] - domain[0] : 0;
   const readoutInset = span > 0 ? (readoutHalfWidth / (width - marginLeft - marginRight)) * span : 0;
   const readoutTs = (sample: ResourceDatum) =>

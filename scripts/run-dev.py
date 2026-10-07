@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run caic development server with a temporary config directory.
 
-Uses 'go run' to build and run the server, with a temporary config.toml.
+Runs a fresh Go build or a caller-supplied binary with a temporary config.toml.
 Supports --fake for testing without real containers.
 
 If --http :0 is used, dynamically finds a free port and writes it to a file.
@@ -42,7 +42,11 @@ def main():
         "--port-file",
         help="Write the actual port to this file (for dynamic ports)",
     )
+    parser.add_argument("--binary", help="run this prebuilt caic executable instead of go run")
     args = parser.parse_args()
+    binary = os.path.abspath(args.binary) if args.binary else None
+    if binary and not os.access(binary, os.X_OK):
+        parser.error(f"caic binary is not executable: {binary}")
 
     # Handle dynamic port allocation
     http_addr = args.http
@@ -59,10 +63,13 @@ def main():
         with open(config_path, "w") as f:
             f.write(f'[server]\nhttp = "{http_addr}"\n')
 
-        cmd = ["go", "run"]
-        if args.fake:
-            cmd.extend(["-tags", "e2e"])
-        cmd.extend(["./backend/cmd/caic", "-config-dir", tmp_dir])
+        if binary:
+            cmd = [binary, "-config-dir", tmp_dir]
+        else:
+            cmd = ["go", "run"]
+            if args.fake:
+                cmd.extend(["-tags", "e2e"])
+            cmd.extend(["./backend/cmd/caic", "-config-dir", tmp_dir])
 
         proc = subprocess.Popen(cmd, cwd=ROOT_DIR)
 

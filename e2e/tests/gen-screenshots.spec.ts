@@ -2,7 +2,7 @@
 //
 // Run with: make screenshots-check (or make screenshots-update to accept changes)
 // Output: e2e/screenshots/frontend/{desktop,mobile}/
-import { test, expect, createTaskAPI, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
+import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot } from "../visual";
 import type { Locator } from "@playwright/test";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
@@ -36,14 +36,24 @@ async function stabilizeWidget(locator: Locator) {
 
 test.describe.configure({ mode: "serial" });
 
-test("generate settings screenshots", async ({ page }) => {
+test("generate settings screenshots", async ({ page, api }) => {
+  // Host GitHub credentials must not change version text or update controls.
+  expect(await api.getVersion()).toEqual({
+    current: "0.0.0",
+    updateAvailable: false,
+    autoUpdateEnabled: false,
+  });
   await prepareVisualPage(page);
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/settings");
   await expect(page.getByRole("region", { name: "Container", exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Image and coding agents refreshed. New tasks will use the updated image."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh image and coding agents for md" })).toBeVisible();
   await captureScreenshot(page, "desktop", "settings-general.png");
   await page.setViewportSize({ width: 390, height: 844 });
-  await captureScreenshot(page, "mobile", "settings-general-mobile.png");
+  await captureScreenshot(page, "mobile", "settings-general.png");
   // Screenshot 1: Settings — realistic home-relative mounts with layout checks.
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/settings?section=storage");
@@ -92,8 +102,8 @@ test("generate settings screenshots", async ({ page }) => {
   await captureScreenshot(page, "desktop", "settings-server-error.png");
   await page.setViewportSize({ width: 390, height: 844 });
   await captureScreenshot(page, "mobile", "settings-server-error-mobile.png");
-  convertPngsToWebp(screenshotDir("desktop"));
-  convertPngsToWebp(screenshotDir("mobile"));
+  await convertPngsToWebp(screenshotDir("desktop"));
+  await convertPngsToWebp(screenshotDir("mobile"));
 });
 
 test("generate documentation screenshots", async ({ page, api }) => {
@@ -113,24 +123,40 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const harnesses = await api.listHarnesses();
   expect(repos.length).toBeGreaterThanOrEqual(2);
   expect(harnesses.length).toBeGreaterThan(0);
+  const harness = harnesses[0].name;
+  const createTask = async (prompt: string) => {
+    const task = await api.createTask({
+      initialPrompt: { text: prompt },
+      repos: [{ name: repos[0].path }],
+      harness,
+    });
+    expect(task.id).toBeTruthy();
+    return task.id;
+  };
   const detailTask = await api.createTask({
     initialPrompt: { text: "Fix OAuth security hardening and migration across service boundaries" },
     repos: [{ name: repos[0].path }, { name: repos[1].path }],
-    harness: harnesses[0].name,
+    harness,
   });
   const id1 = detailTask.id;
   await waitForTaskState(api, id1, "waiting", 30_000);
 
   // Task 2: plan mode — "plan" triggers plan mode.
-  const id2 = await createTaskAPI(api, "Plan the rate limiting implementation for API endpoints");
+  const id2 = await createTask("Plan the rate limiting implementation for API endpoints");
   await waitForTaskState(api, id2, "has_plan", 30_000);
 
   // Task 3: ask mode — "which" triggers ask mode.
-  const id3 = await createTaskAPI(api, "Which storage backend should we use for session data?");
+  const askTask = await api.createTask({
+    initialPrompt: { text: "Which storage backend should we use for session data?" },
+    repos: [{ name: repos[1].path }],
+    harness: "codex",
+    model: "gpt-6-luna",
+  });
+  const id3 = askTask.id;
   await waitForTaskState(api, id3, "asking", 30_000);
 
-  // Task 4: widget — "FAKE_WIDGET" triggers widget mode.
-  const id4 = await createTaskAPI(api, "FAKE_WIDGET Explain light refraction in water");
+  // Task 4: a capture-only natural prompt selects the interactive diagram fixture.
+  const id4 = await createTask("Explain light refraction in water with an interactive diagram");
   await waitForTaskState(api, id4, "waiting", 30_000);
   await waitForCISettle(api, [id1, id2, id3, id4]);
 
@@ -143,17 +169,22 @@ test("generate documentation screenshots", async ({ page, api }) => {
     timeout: 10_000,
   });
 
+  await captureScreenshot(page, "desktop", "overview.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "overview.png");
+  await page.setViewportSize({ width: 1280, height: 800 });
+
   // Screenshot 1: Interacting with an agent — task detail with tool uses.
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
-  await expect(page.getByTestId("task-setup").locator("summary")).toContainText(/(?:\d+ms|\d+\.\d+s)/);
+  await expect(page.getByTestId("task-setup").locator("summary")).toContainText("150ms");
   const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
   await expect(toolSummary).toBeVisible({ timeout: 10_000 });
   await toolSummary.click();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^180ms$/ })).toBeVisible();
   await expect(page.getByTestId("tool-duration").filter({ hasText: /^0:01$/ })).toBeVisible();
-  await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:02$/ })).toBeVisible();
+  await expect(page.getByTestId("turn-duration").filter({ hasText: /^0:55$/ })).toBeVisible();
   const desktopHeaderStats = page.getByTestId("task-detail-header").getByTestId("repo-state-diff-stats");
   await expect(desktopHeaderStats).toHaveCount(2);
   for (let i = 0; i < 2; i++) {
@@ -201,6 +232,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
     .toEqual({ documentFits: true, paneFits: true });
   await page.mouse.move(0, 0);
   await captureScreenshot(page, "desktop", "task-repository-changes.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "task-repository-changes.png");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.getByTitle("Expand sidebar").click();
   await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
@@ -301,6 +334,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
           `${tmpDir}/frame-%03d.png`,
           "-c:v",
           "libaom-av1",
+          "-cpu-used",
+          "8",
           "-crf",
           "30",
           "-b:v",
@@ -328,7 +363,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const vncResp = await api.createTask({
     initialPrompt: { text: "Show the VNC display" },
     repos: [{ name: repos[0].path }],
-    harness: harnesses[0].name,
+    harness,
     display: true,
   });
   await waitForTaskState(api, vncResp.id, "waiting", 30_000);
@@ -377,7 +412,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Verify the context menu toggle is visible at mobile width.
   const contextToggle = page.locator("[aria-label='Context actions']");
   await expect(contextToggle).toBeVisible({ timeout: 3_000 });
-  await captureScreenshot(page, "mobile", "task-detail-mobile.png");
+  await captureScreenshot(page, "mobile", "task-detail.png");
 
   // Screenshot 8: Dense task-detail header at the width where a larger phone
   // or narrow desktop pane needs compact repository state markers.
@@ -416,8 +451,18 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Screenshot 9: Scrolled task list — the desktop list fades at the bottom,
   // while mobile scrolls the app shell so the header leaves room for cards.
   const scrollTaskIds: string[] = [];
-  for (let i = 1; i <= 8; i++) {
-    const id = await createTaskAPI(api, `Scroll gradient demo task ${String(i).padStart(2, "0")}`);
+  const scrollPrompts = [
+    "Investigate flaky OAuth callback tests",
+    "Cache repository status snapshots",
+    "Add keyboard navigation to the diff viewer",
+    "Improve reconnect behavior after a network change",
+    "Reduce memory retained by collapsed patches",
+    "Document service authentication and callback URLs",
+    "Validate uploaded image dimensions before decoding",
+    "Add resource charts to the task statistics view",
+  ];
+  for (const prompt of scrollPrompts) {
+    const id = await createTask(prompt);
     scrollTaskIds.push(id);
     // Branch allocation happens during async setup. Settle it before creating
     // the next fixture so visible branch numbers follow creation order.
@@ -471,7 +516,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   // Screenshot 10: Native subagents — inline lifecycle cards anchored to the
   // parent narration that preceded each run settling.
-  const nativeId = await createTaskAPI(api, "Delegate the auth review to three parallel subagents");
+  const nativeId = await createTask("Delegate the auth review to three parallel subagents");
   await waitForTaskState(api, nativeId, "waiting", 30_000);
   await waitForCISettle(api, [nativeId]);
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -484,12 +529,54 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(nativeCards).toHaveCount(4);
   // Expand the completed run so the showcase includes the card content.
   await nativeCards.first().locator("summary").click();
-  await expect(nativeCards.first().getByText("Read me before you judge me.")).toBeVisible();
+  await expect(
+    nativeCards.first().getByText("Confirmed token expiry validation and added a regression test."),
+  ).toBeVisible();
   const nativeMessageArea = page.getByTestId("task-message-area");
   await nativeMessageArea.evaluate((el) => {
     el.scrollTop = 0;
   });
   await captureScreenshot(page, "desktop", "task-native-subagents.png");
 
+  await page.goto(`/task/@${id1}/stats`);
+  await expect(page.getByTestId("resource-charts")).toBeVisible();
+  await expect(page.getByTestId("task-analytics-charts")).toBeVisible();
+  await captureScreenshot(page, "desktop", "task-stats.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "task-stats.png");
+
+  // Frame the resource section independently of the token/timing summary.
+  // Lazy chart modules and responsive Plot redraws must settle before capture.
+  for (const layout of ["desktop", "mobile"] as const) {
+    await page.setViewportSize(layout === "desktop" ? { width: 1280, height: 800 } : { width: 390, height: 844 });
+    const resources = page.getByTestId("resource-charts");
+    await resources.scrollIntoViewIfNeeded();
+    for (const label of [
+      "CPU utilization over time",
+      "Memory utilization over time",
+      "Network receive throughput over time",
+      "Network transmit throughput over time",
+      "Writable disk usage over time",
+    ]) {
+      const chart = page.getByLabel(label, { exact: true });
+      await expect(chart).toBeVisible();
+      await expect.poll(() => chart.locator('[aria-label="dot"] circle').count()).toBeGreaterThanOrEqual(23);
+      await expect
+        .poll(() =>
+          chart.evaluate((svg) => {
+            const box = svg.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
+          }),
+        )
+        .toBe(true);
+    }
+    await captureScreenshot(page, layout, "task-resources.png");
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/usage");
+  await expect(page.getByTestId("usage-charts")).toBeVisible();
+  await captureScreenshot(page, "desktop", "usage.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureScreenshot(page, "mobile", "usage.png");
   await convertPngsToWebp(screenshotRoot);
 });

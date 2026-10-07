@@ -1,6 +1,7 @@
 """Unit tests for deterministic screenshot luminance comparison and render modes."""
 
 import argparse
+import json
 import socket
 import subprocess
 import tempfile
@@ -81,16 +82,17 @@ class GenerateModeTest(unittest.TestCase):
         rendered: list[str] = []
         stdout = StringIO()
 
-        def render(directory):
+        def render(directory, binary):
             directory.mkdir(parents=True)
             rendered.append(str(directory))
 
         with (
             redirect_stdout(stdout),
             mock.patch.object(visual_screenshots.shutil, "which", return_value=None),
+            mock.patch.object(visual_screenshots.subprocess, "run"),
             mock.patch.dict(
                 visual_screenshots.__dict__,
-                {"render_frontend": render},
+                {"render_frontend": render, "write_manifest": lambda _directory: None},
             ),
             mock.patch.dict(
                 visual_screenshots.__dict__,
@@ -175,6 +177,41 @@ class FrontendBundleFreshnessTest(unittest.TestCase):
 
 
 class ScreenshotTreeTest(unittest.TestCase):
+    def test_manifest_provenance_changes_with_generated_sdk_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Capture Test",
+                    "-c",
+                    "user.email=capture@example.test",
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    "Fixture",
+                ],
+                cwd=root,
+                check=True,
+            )
+            output = root / "captures"
+            output.mkdir()
+            for name in ("sdk/caic/ts/v1/api.gen.ts", "sdk/mcp/ts/api.gen.ts", "sdk/voicegateway/ts/api.gen.ts"):
+                with self.subTest(input=name):
+                    source = root / name
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_text("export const version = 1;\n")
+                    with mock.patch.object(visual_screenshots, "ROOT_DIR", root):
+                        visual_screenshots.write_manifest(output)
+                        before = json.loads((output / "manifest.json").read_text())["source"]["inputsSha256"]
+                        source.write_text("export const version = 2;\n")
+                        visual_screenshots.write_manifest(output)
+                        after = json.loads((output / "manifest.json").read_text())["source"]["inputsSha256"]
+                    self.assertNotEqual(before, after)
+
     def test_image_files_keeps_recursive_relative_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -189,28 +226,9 @@ class ScreenshotTreeTest(unittest.TestCase):
                 ["desktop/detail.webp", "mobile/detail.png"],
             )
 
-    def test_replace_baselines_replaces_recursive_owned_images(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "source"
-            baseline = root / "baseline"
-            (source / "desktop").mkdir(parents=True)
-            (source / "mobile").mkdir()
-            (baseline / "desktop").mkdir(parents=True)
-            (baseline / "legacy.webp").write_bytes(b"stale")
-            (baseline / "desktop" / "detail.webp").write_bytes(b"old")
-            (source / "desktop" / "detail.webp").write_bytes(b"new")
-            (source / "mobile" / "detail.webp").write_bytes(b"mobile")
-
-            replace_baselines(source, baseline)
-
-            self.assertEqual(
-                {name: path.read_bytes() for name, path in image_files(baseline).items()},
-                {
-                    "desktop/detail.webp": b"new",
-                    "mobile/detail.webp": b"mobile",
-                },
-            )
+    def test_publishing_is_confined_to_the_managed_frontend_directory(self):
+        with self.assertRaisesRegex(RuntimeError, "Only the managed frontend"):
+            replace_baselines(Path("source"), Path("arbitrary"))
 
 
 class FrontendRenderingTest(unittest.TestCase):
@@ -242,14 +260,14 @@ class FrontendRenderingTest(unittest.TestCase):
 
             render_frontend(output, 32123)
 
-        self.assertEqual(run.call_count, len(FRONTEND_SPECS))
-        for call, spec in zip(run.call_args_list, FRONTEND_SPECS, strict=True):
-            command, env = call.args
+        run.assert_called_once()
+        command, env = run.call_args.args
+        for spec in FRONTEND_SPECS:
             self.assertIn(spec, command)
-            self.assertEqual(env["CAIC_E2E_HOST"], FRONTEND_VISUAL_HOST)
-            self.assertEqual(env["CAIC_E2E_PORT"], "32123")
-            self.assertEqual(env["CAIC_SCREENSHOT_DIR"], str(output))
-            self.assertTrue(env["CAIC_E2E_OUTPUT_DIR"].endswith("playwright/frontend/first"))
+        self.assertEqual(env["CAIC_E2E_HOST"], FRONTEND_VISUAL_HOST)
+        self.assertEqual(env["CAIC_E2E_PORT"], "32123")
+        self.assertEqual(env["CAIC_SCREENSHOT_DIR"], str(output))
+        self.assertTrue(env["CAIC_E2E_OUTPUT_DIR"].endswith("playwright/frontend/first"))
 
     @mock.patch("visual_screenshots.subprocess.run")
     def test_frontend_spec_success_is_quiet(self, run: mock.Mock) -> None:
@@ -278,12 +296,12 @@ class FrontendRenderingTest(unittest.TestCase):
     @mock.patch("visual_screenshots.render_frontend")
     def test_frontend_passes_run_concurrently(self, render: mock.Mock, available: mock.Mock) -> None:
         barrier = threading.Barrier(2, timeout=1)
-        render.side_effect = lambda _output, _port: barrier.wait()
+        render.side_effect = lambda _output, _port, _binary: barrier.wait()
 
         render_frontend_passes(Path("first"), Path("second"))
 
         self.assertCountEqual(
             render.call_args_list,
-            [mock.call(Path("first"), 31001), mock.call(Path("second"), 31002)],
+            [mock.call(Path("first"), 31001, None), mock.call(Path("second"), 31002, None)],
         )
         available.assert_called_once_with((31001, 31002))

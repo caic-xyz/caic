@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "producer": "caic",
+  "platform": "web",
+  "source": {
+    "revision": "d3067acfb0f37f424bb9bab5cba9dc4724f040f3",
+    "inputsSha256": "dec78c88ff5080bccafd1c87fd58893cca346bce9bb291e1130e13a7caf750a1"
+  },
+  "scenarios": [
+    {
+      "name": "desktop/overview",
+      "file": "desktop/overview.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "9f6662e177bc462c4b6f9516a1e81c480b7b974954cc239336cd73168e5d3415",
+      "description": "overview"
+    },
+    {
+      "name": "desktop/prompt-detail-long",
+      "file": "desktop/prompt-detail-long.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "564a8c6ee8b53b9170c399d3b55f1d9c655658d3b0dd2f4f4e420b1285989493",
+      "description": "prompt detail long"
+    },
+    {
+      "name": "desktop/prompt-detail-short",
+      "file": "desktop/prompt-detail-short.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "c01ea3b691730dfcd228218515ece7a5ee8292604cb1fa689838fb90871a4da1",
+      "description": "prompt detail short"
+    },
+    {
+      "name": "desktop/prompt-long",
+      "file": "desktop/prompt-long.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "fdcd6ac31c496dd6755dc356a0e145a9da5058966ba3727641eedbb1b84f146c",
+      "description": "prompt long"
+    },
+    {
+      "name": "desktop/prompt-short",
+      "file": "desktop/prompt-short.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "28aca1d16f934b105bcb771d5cd886b2694050e3b42d5fb0e99e7d0f5db76294",
+      "description": "prompt short"
+    },
+    {
+      "name": "desktop/settings-general",
+      "file": "desktop/settings-general.webp",
+      "width": 1600,
+      "height": 900,
+      "sha256": "6d78b96b147aa6551db3c92f63698f96fdfa165c01d977bebd869aaf04614ef9",
+      "description": "settings general"
+    },
+    {
+      "name": "desktop/settings-mounts",
+      "file": "desktop/settings-mounts.webp",
+      "width": 1600,
+      "height": 900,
+      "sha256": "4cecb8132732754a64f06a880795b2e0d1413c43bbf1869b2f367b3f7dafe0ef",
+      "description": "settings mounts"
+    },
+    {
+      "name": "desktop/settings-server-error",
+      "file": "desktop/settings-server-error.webp",
+      "width": 1600,
+      "height": 900,
+      "sha256": "ca63484197e68d105e67e75300a3d3186bd76a0c53ebbf9f6a9be1cf2ab08d0d",
+      "description": "settings server error"
+    },
+    {
+      "name": "desktop/settings-server",
+      "file": "desktop/settings-server.webp",
+      "width": 1600,
+      "height": 900,
+      "sha256": "ca5660f6b1633741a2740aa2aae2ff548b61673f439664507caec5dcc1cf9336",
+      "description": "settings server"
+    },
+    {
+      "name": "desktop/task-ask",
+      "file": "desktop/task-ask.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "bf6a347543bb84f6a5e62b5bbefc3a5a2a8b423f5cf634242450cd380b273106",
+      "description": "task ask"
+    },
+    {
+      "name": "desktop/task-detail",
+      "file": "desktop/task-detail.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "b29f7534009843492efdd811dc74fdaa31454ed8a848129a4e0776799400234a",
+      "description": "task detail"
+    },
+    {
+      "name": "desktop/task-list-scrolled",
+      "file": "desktop/task-list-scrolled.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "ecc41c3bf1e65375a091cfe613e7fd6c13a4c1419e1f858e2270502cc9a698ca",
+      "description": "task list scrolled"
+    },
+    {
+      "name": "desktop/task-native-subagents",
+      "file": "desktop/task-native-subagents.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "34ce511e71552b3bb62983e27171253742ad0e360aacb098b284f3db915206a0",
+      "description": "task native subagents"
+    },
+    {
+      "name": "desktop/task-plan",
+      "file": "desktop/task-plan.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "14f7662b62877edecd2c8946d1815fa976b6bd2b08c9ee42af8bb5f3dc91e3b5",
+      "description": "task plan"
+    },
+    {
+      "name": "desktop/task-repository-changes",
+      "file": "desktop/task-repository-changes.webp",
+      "width": 800,
+      "height": 720,
+      "sha256": "733c6d843784454d7cf0ffdb0fe515e4db0c36b7b2e2e4a249b8fd9bad0c8558",
+      "description": "task repository changes"
+    },
+    {
+      "name": "desktop/task-resources",
+      "file": "desktop/task-resources.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "6aa29f2b65cadb848661cbe69101360499906d8984fa3959d9854665258d2a90",
+      "description": "task resources"
+    },
+    {
+      "name": "desktop/task-stats",
+      "file": "desktop/task-stats.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "3066309bdda99b5052aa11d9c448a97edd4daaa6177a1a360d477bc6a040dee2",
+      "description": "task stats"
+    },
+    {
+      "name": "desktop/task-vnc",
+      "file": "desktop/task-vnc.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "4653a5e589d4f85eab8ddd8d12434b02a2006826d31c28886a47c1a6176c6005",
+      "description": "task vnc"
+    },
+    {
+      "name": "desktop/task-widget-animation",
+      "file": "desktop/task-widget.avif",
+      "width": 640,
+      "height": 724,
+      "sha256": "30c69ffb2745e1b727c7ca0f02716e418c428b571540e62768b481787ffab841",
+      "description": "task widget"
+    },
+    {
+      "name": "desktop/task-widget",
+      "file": "desktop/task-widget.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "7c427d84fcf5f9923cab5d991d630d6e10a5d0dc9ecb1788c790fbaebb2a689e",
+      "description": "task widget"
+    },
+    {
+      "name": "desktop/usage",
+      "file": "desktop/usage.webp",
+      "width": 1280,
+      "height": 800,
+      "sha256": "89b17be8a27cae1485f90829cc9f3f877b3c68f50a0af8047d9d8b6b71860ec9",
+      "description": "usage"
+    },
+    {
+      "name": "mobile/overview",
+      "file": "mobile/overview.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "c2e3952755cd0cb801f49b0b5e8144bf9d503fc1e247c2f346c846edbf0fe8f3",
+      "description": "overview"
+    },
+    {
+      "name": "mobile/settings-general",
+      "file": "mobile/settings-general.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "126b95d35cc9f72c585e4e405daa3956f05511bb7d9675ec5b3a55a6747c63c4",
+      "description": "settings general"
+    },
+    {
+      "name": "mobile/settings-mounts-mobile",
+      "file": "mobile/settings-mounts-mobile.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "b51dd42f75a4e6ff4d708d813522c857b35cbaa91eb2228234e22613fc3b88dc",
+      "description": "settings mounts mobile"
+    },
+    {
+      "name": "mobile/settings-server-error-mobile",
+      "file": "mobile/settings-server-error-mobile.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "c9086644128783c777a0e2ec739145cad3c6954495f45785d77d97495c3e8ecd",
+      "description": "settings server error mobile"
+    },
+    {
+      "name": "mobile/settings-server-mobile",
+      "file": "mobile/settings-server-mobile.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "fe27273fae1712a586e77ddca2481e3fc514d3f8b5b532f32f878973224e72c7",
+      "description": "settings server mobile"
+    },
+    {
+      "name": "mobile/task-detail-header-compact",
+      "file": "mobile/task-detail-header-compact.webp",
+      "width": 525,
+      "height": 320,
+      "sha256": "4bb195d66b582c12f3e2477a3eb25d26ce4019357348e4dc537b153cbe71d174",
+      "description": "task detail header compact"
+    },
+    {
+      "name": "mobile/task-detail",
+      "file": "mobile/task-detail.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "8a951a5b5d73df4f0058b4ba7b2908aa76381838ae1c1f54efa0923ef2a4eef2",
+      "description": "task detail"
+    },
+    {
+      "name": "mobile/task-list-scrolled-mobile",
+      "file": "mobile/task-list-scrolled-mobile.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "1e795ff7dc805a4c2a90c754139f2c1ae18c3ae36b588dea6a8dd34f05b900e3",
+      "description": "task list scrolled mobile"
+    },
+    {
+      "name": "mobile/task-repository-changes",
+      "file": "mobile/task-repository-changes.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "f155f3e1788a19375a9e39245233604e10491447abc7d4d75a3fb5d0e4f65333",
+      "description": "task repository changes"
+    },
+    {
+      "name": "mobile/task-resources",
+      "file": "mobile/task-resources.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "5ee1a8b9dae804034520048526325d275c9d88bffaf0f435b5c6b63b5cbcc902",
+      "description": "task resources"
+    },
+    {
+      "name": "mobile/task-stats",
+      "file": "mobile/task-stats.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "4b69b49f001115c3697784ab10446a70af42a524761aa6b8b793e7ff3e65d1f1",
+      "description": "task stats"
+    },
+    {
+      "name": "mobile/usage",
+      "file": "mobile/usage.webp",
+      "width": 390,
+      "height": 844,
+      "sha256": "ac4f7d156c4d5ef090a9d4fadb136bf3307c4f514d2e1542ab68a0b0c407b454",
+      "description": "usage"
+    }
+  ]
+}

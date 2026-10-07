@@ -332,7 +332,7 @@ func TestInitHarnessCache(t *testing.T) {
 	t.Parallel()
 
 	cacheDir := t.TempDir()
-	if err := InitHarnessCache(cacheDir); err != nil {
+	if err := InitHarnessCache(cacheDir, false); err != nil {
 		t.Fatalf("InitHarnessCache: %v", err)
 	}
 

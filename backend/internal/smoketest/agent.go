@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -53,6 +54,13 @@ func (*FakeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
 // Start launches the embedded fake Python agent as a subprocess.
 func (b *FakeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	cmd := exec.CommandContext(ctx, "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
+	if os.Getenv("CAIC_E2E_VISUALS") == "1" {
+		model := "claude-sonnet-5"
+		if b.Harness() == harness.Codex {
+			model = "gpt-6-luna"
+		}
+		cmd.Env = append(os.Environ(), "CAIC_FAKE_MODEL="+model)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
