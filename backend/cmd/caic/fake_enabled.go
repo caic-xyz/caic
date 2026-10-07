@@ -48,10 +48,8 @@ func fakeAgentBackends() agent.Backends {
 	backends[harness.Codex] = &fakeModelBackend{FakeBackend: codex}
 	backends[harness.Pi] = &fakeModelBackend{FakeBackend: pi}
 	if os.Getenv(visualFixturesEnv) == "1" {
-		claude.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "sonnet", ContextWindow: 200_000}, {ID: "haiku", ContextWindow: 200_000}}})
-		codex.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "gpt-6-luna", ContextWindow: 272_000}}})
-		for _, b := range []*smoketest.FakeBackend{agy, pi} {
-			b.SetModelInventory(agent.ModelInventory{Models: []agent.Model{{ID: "sonnet", ContextWindow: 200_000}}})
+		for h, b := range backends {
+			b.SetModelInventory(smoketest.VisualModelInventory(h))
 		}
 	}
 	return backends

@@ -346,4 +346,31 @@ func TestInitHarnessCache(t *testing.T) {
 			t.Errorf("ModelInventory(%q).IDs() = %v, want [fake-model]", h, inventory.IDs())
 		}
 	}
+
+	t.Run("visual selected models remain discoverable", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if err := InitHarnessCache(dir, true); err != nil {
+			t.Fatal(err)
+		}
+		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
+		for _, tc := range []struct {
+			harness harness.Name
+			model   string
+			effort  string
+		}{
+			{harness.Codex, "gpt-6.1-sol", "high"},
+			{harness.Pi, "deepseek/deepseek-flashh", "medium"},
+			{harness.Antigravity, "gemini-3.8-flash-high", ""},
+		} {
+			inventory, fresh := cache.ModelInventory(tc.harness, "")
+			if !fresh || len(inventory.Models) != 1 || inventory.Models[0].ID != tc.model {
+				t.Errorf("cached %q inventory = %#v fresh=%t, want %q", tc.harness, inventory, fresh, tc.model)
+				continue
+			}
+			if tc.effort != "" && !slices.Contains(inventory.Models[0].EffortOptions, tc.effort) {
+				t.Errorf("cached %q does not support selected effort %q", tc.harness, tc.effort)
+			}
+		}
+	})
 }

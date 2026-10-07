@@ -513,6 +513,35 @@ def emit_result(turns: int, result: str, cost: float = 0.01, duration: int = 500
     )
 
 
+def emit_capture_running() -> None:
+    """Emit useful work and hold an active verification tool until shutdown."""
+    emit({"type": "thinking", "text": "Checking request identity and existing API middleware before adding limits."})
+    emit(
+        {
+            "type": "text",
+            "text": "Checking the API middleware, applying rate limits, and running the focused regression tests.",
+        }
+    )
+    emit_tool_use("toolu_rate_read", "Read", {"file_path": "backend/internal/server/router.go"})
+    emit_tool_result("toolu_rate_read", 180)
+    emit_tool_use(
+        "toolu_rate_edit",
+        "Edit",
+        {
+            "file_path": "backend/internal/server/ratelimit.go",
+            "old_string": "const maxRateLimitBuckets = 100_000",
+            "new_string": "const maxRateLimitBuckets = 50_000",
+        },
+    )
+    emit_tool_result("toolu_rate_edit", 240)
+    emit_tool_use("toolu_rate_verify", "Bash", {"command": "go test ./backend/internal/server -run TestRateLimit"})
+    # Reading the normal input channel is the cancellation boundary. No timer,
+    # completion result, or subsequent prompt can settle this capture task.
+    for line in sys.stdin:
+        if "\x00" in line:
+            break
+
+
 def emit_plan_turn(turns: int) -> None:
     """Emit Write(.claude/plans/plan.md) + ExitPlanMode + result."""
     emit_tool_use(
@@ -729,6 +758,10 @@ def emit_native_subagents_turn(turns: int) -> None:
 
 
 def main() -> None:
+    version = "fake"
+    if os.environ.get("CAIC_E2E_VISUALS") == "1":
+        # Other harnesses do not report a Claude Code release number.
+        version = "2.1.185" if os.environ.get("CAIC_FAKE_HARNESS") == "claude" else ""
     # Model the agent handshake so setup timing is visible and non-zero in e2e.
     pause(0.12)
     emit(
@@ -738,8 +771,9 @@ def main() -> None:
             if os.environ.get("CAIC_E2E_VISUALS") == "1"
             else "test-session",
             "cwd": "/workspace",
-            "model": os.environ.get("CAIC_FAKE_MODEL", "fake-model"),
-            "claude_code_version": "2.1.185" if os.environ.get("CAIC_E2E_VISUALS") == "1" else "fake",
+            "model": os.environ.get("CAIC_FAKE_MODEL") or "fake-model",
+            "reported_effort": os.environ.get("CAIC_FAKE_EFFORT", ""),
+            "claude_code_version": version,
         }
     )
 
@@ -783,6 +817,9 @@ def main() -> None:
 
         # Natural prompt detection (for screenshots with clean prompts).
         lower = line.lower()
+        if os.environ.get("CAIC_E2E_VISUALS") == "1" and lower == "implement rate limiting for api endpoints":
+            emit_capture_running()
+            break
         if NATURAL_NATIVE_RE.search(lower):
             emit_native_subagents_turn(turns)
             continue

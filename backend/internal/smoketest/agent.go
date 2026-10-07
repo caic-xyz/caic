@@ -1,4 +1,4 @@
-// Fake agent backend for smoke and e2e tests.
+// Fake agent sessions and shared model inventories for smoke and e2e captures.
 
 package smoketest
 
@@ -54,13 +54,11 @@ func (*FakeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
 // Start launches the embedded fake Python agent as a subprocess.
 func (b *FakeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	cmd := exec.CommandContext(ctx, "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
-	if os.Getenv("CAIC_E2E_VISUALS") == "1" {
-		model := "claude-sonnet-5"
-		if b.Harness() == harness.Codex {
-			model = "gpt-6-luna"
-		}
-		cmd.Env = append(os.Environ(), "CAIC_FAKE_MODEL="+model)
+	model := opts.Model
+	if model == "" && os.Getenv("CAIC_E2E_VISUALS") == "1" {
+		model = VisualModelInventory(b.Harness()).Models[0].ID
 	}
+	cmd.Env = append(os.Environ(), "CAIC_FAKE_MODEL="+model, "CAIC_FAKE_EFFORT="+opts.Effort, "CAIC_FAKE_HARNESS="+string(b.Harness()))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -97,6 +95,29 @@ func (*FakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session
 // NewWire implements agent.Backend.
 func (b *FakeBackend) NewWire() agent.WireFormat {
 	return b
+}
+
+// VisualModelInventory defines the selected documentation models and their
+// supported effort controls for both discovery and the persisted harness cache.
+func VisualModelInventory(h harness.Name) agent.ModelInventory {
+	m := agent.Model{ID: "fake-model", ContextWindow: 200_000}
+	switch h {
+	case harness.Antigravity:
+		m.ID = "gemini-3.8-flash-high"
+	case harness.Claude:
+		m.ID = "opus-5.5"
+		m.EffortOptions = []string{"low", "medium", "high"}
+	case harness.Codex:
+		m.ID = "gpt-6.1-sol"
+		m.ContextWindow = 272_000
+		m.EffortOptions = []string{"low", "medium", "high"}
+	case harness.OpenCode:
+		// OpenCode keeps the general fixture model; it is not a capture example.
+	case harness.Pi:
+		m.ID = "deepseek/deepseek-flashh"
+		m.EffortOptions = []string{"low", "medium", "high"}
+	}
+	return agent.ModelInventory{Models: []agent.Model{m}}
 }
 
 var _ agent.Backend = (*FakeBackend)(nil)

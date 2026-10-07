@@ -49,7 +49,12 @@ export async function prepareVisualPage(page: Page): Promise<void> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      const response = await fetch(route.request().url(), { signal: controller.signal });
+      // Replay the complete snapshot, including pending tools after the latest
+      // narration. Browser pagination and reconnect cursors can omit that tail.
+      const snapshotURL = new URL(route.request().url());
+      snapshotURL.searchParams.delete("backward");
+      snapshotURL.searchParams.delete("last-event-id");
+      const response = await fetch(snapshotURL, { signal: controller.signal });
       if (!response.ok || !response.body) throw new Error(`Visual history fetch failed: ${response.status}`);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -122,6 +127,20 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   }
   await page.evaluate(async () => {
     await document.fonts.ready;
+    // Repaint the settled page so resized SVGs do not reuse partially
+    // invalidated raster caches. Restore the exact style without changing layout.
+    const root = document.documentElement;
+    const visibility = root.style.getPropertyValue("visibility");
+    const priority = root.style.getPropertyPriority("visibility");
+    try {
+      root.style.setProperty("visibility", "hidden", "important");
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+    } finally {
+      if (visibility) root.style.setProperty("visibility", visibility, priority);
+      else root.style.removeProperty("visibility");
+    }
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
@@ -129,6 +148,8 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
 }
 
 export async function captureScreenshot(page: Page, layout: FrontendScreenshotLayout, filename: string): Promise<void> {
+  // Keep incidental hover controls from depending on the previous click or resize.
+  await page.mouse.move(0, 0);
   await waitForVisualReadiness(page);
   const outputDir = screenshotDir(layout);
   mkdirSync(outputDir, { recursive: true });

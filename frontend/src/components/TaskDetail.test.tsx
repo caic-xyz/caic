@@ -137,6 +137,28 @@ function resultEvent(ts: number): EventMessage {
 }
 
 describe("TaskDetail", () => {
+  it("omits empty session metadata without leaving extra separators", async () => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "init",
+        ts: 1_000,
+        init: {
+          reportedModel: "gemini-3.8-flash-high",
+          agentVersion: "",
+          sessionID: "session-one",
+          tools: [],
+          cwd: "",
+          harness: "antigravity",
+        },
+      });
+      handlers.onMessage({ kind: "text", ts: 2_000, text: { text: "Verification is running." } });
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    expect(await screen.findByText("Session started · gemini-3.8-flash-high · session-one")).toBeInTheDocument();
+  });
+
   it("replaces the Diff link with a repository state marker", async () => {
     renderTaskDetail();
 

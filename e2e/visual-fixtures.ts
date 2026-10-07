@@ -66,7 +66,7 @@ export function usageHistory(): UsageDashboardResp {
       skills: [{ name: "code-review", count }],
       repos,
     };
-    const models = [{ ...base, model: "claude-sonnet-5", contextWindow: 200000 }];
+    const models = [{ ...base, model: "opus-5.5", contextWindow: 200000 }];
     return {
       ...base,
       day: new Date(Date.UTC(2026, 7, 20 + index)).toISOString().slice(0, 10),

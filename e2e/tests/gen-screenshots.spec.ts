@@ -3,7 +3,7 @@
 // Run with: make screenshots-check (or make screenshots-update to accept changes)
 // Output: e2e/screenshots/frontend/{desktop,mobile}/
 import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
-import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot } from "../visual";
+import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot, waitForVisualReadiness } from "../visual";
 import type { Locator } from "@playwright/test";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 import path from "path";
@@ -116,49 +116,63 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Wait for repos to load.
   await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
-  // Create tasks that will reach different states for a populated task list.
-  // Task 1: a long title and mapped repository state exercise the dense task
-  // card and detail-header layouts in every visual capture.
+  // Create the showcase in reverse because the sidebar orders active tasks by
+  // descending ID: Codex waiting, Claude asking, Pi waiting, Antigravity running.
   const repos = await api.listRepos();
-  const harnesses = await api.listHarnesses();
   expect(repos.length).toBeGreaterThanOrEqual(2);
-  expect(harnesses.length).toBeGreaterThan(0);
-  const harness = harnesses[0].name;
   const createTask = async (prompt: string) => {
     const task = await api.createTask({
       initialPrompt: { text: prompt },
       repos: [{ name: repos[0].path }],
-      harness,
+      harness: "claude",
+      model: "opus-5.5",
+      effort: "high",
     });
     expect(task.id).toBeTruthy();
     return task.id;
   };
-  const detailTask = await api.createTask({
-    initialPrompt: { text: "Fix OAuth security hardening and migration across service boundaries" },
-    repos: [{ name: repos[0].path }, { name: repos[1].path }],
-    harness,
+  const runningTask = await api.createTask({
+    initialPrompt: { text: "Implement rate limiting for API endpoints" },
+    repos: [{ name: repos[0].path }],
+    harness: "antigravity",
+    model: "gemini-3.8-flash-high",
   });
-  const id1 = detailTask.id;
-  await waitForTaskState(api, id1, "waiting", 30_000);
+  const id2 = runningTask.id;
+  await waitForTaskState(api, id2, "running", 30_000);
 
-  // Task 2: plan mode — "plan" triggers plan mode.
-  const id2 = await createTask("Plan the rate limiting implementation for API endpoints");
-  await waitForTaskState(api, id2, "has_plan", 30_000);
+  const widgetTask = await api.createTask({
+    initialPrompt: { text: "Explain light refraction in water with an interactive diagram" },
+    repos: [{ name: repos[0].path }],
+    harness: "pi",
+    model: "deepseek/deepseek-flashh",
+    effort: "medium",
+  });
+  const id4 = widgetTask.id;
+  await waitForTaskState(api, id4, "waiting", 30_000);
 
-  // Task 3: ask mode — "which" triggers ask mode.
+  // Claude Code owns the asking-state example.
   const askTask = await api.createTask({
     initialPrompt: { text: "Which storage backend should we use for session data?" },
-    repos: [{ name: repos[1].path }],
-    harness: "codex",
-    model: "gpt-6-luna",
+    repos: [{ name: repos[0].path }],
+    harness: "claude",
+    model: "opus-5.5",
+    effort: "high",
   });
   const id3 = askTask.id;
   await waitForTaskState(api, id3, "asking", 30_000);
 
-  // Task 4: a capture-only natural prompt selects the interactive diagram fixture.
-  const id4 = await createTask("Explain light refraction in water with an interactive diagram");
-  await waitForTaskState(api, id4, "waiting", 30_000);
-  await waitForCISettle(api, [id1, id2, id3, id4]);
+  // A long title and mapped repository state exercise the dense task card and
+  // detail-header layouts in the completed Codex example.
+  const detailTask = await api.createTask({
+    initialPrompt: { text: "Fix OAuth security hardening and migration across service boundaries" },
+    repos: [{ name: repos[0].path }, { name: repos[1].path }],
+    harness: "codex",
+    model: "gpt-6.1-sol",
+    effort: "high",
+  });
+  const id1 = detailTask.id;
+  const settledDetail = await waitForTaskState(api, id1, "waiting", 30_000);
+  await waitForCISettle(api, [id1, id3, id4]);
 
   // Reload to get fresh state.
   await page.goto("/");
@@ -168,6 +182,23 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(page.locator("[data-task-id]").first()).toBeVisible({
     timeout: 10_000,
   });
+  const showcase = [
+    { id: id1, modelLabel: "gpt-6.1-sol", effort: "high", state: "waiting" },
+    { id: id3, modelLabel: "opus-5.5", effort: "high", state: "asking" },
+    { id: id4, modelLabel: "deepseek-flashh", effort: "medium", state: "waiting" },
+    { id: id2, modelLabel: "gemini-3.8-flash-high", effort: "", state: "running" },
+  ];
+  await expect
+    .poll(() =>
+      page.locator("[data-task-id]").evaluateAll((cards) => cards.map((card) => card.getAttribute("data-task-id"))),
+    )
+    .toEqual(showcase.map((task) => task.id));
+  for (const task of showcase) {
+    const card = page.locator(`[data-task-id="${task.id}"]`);
+    await expect(card).toContainText(task.modelLabel);
+    await expect(card).toContainText(task.state);
+    if (task.effort) await expect(card).toContainText(task.effort);
+  }
 
   await captureScreenshot(page, "desktop", "overview.png");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -203,7 +234,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.setViewportSize({ width: 800, height: 720 });
   expect(page.viewportSize()).toEqual({ width: 800, height: 720 });
   await expect(page.getByText("Repository changes", { exact: true })).toBeVisible();
-  await expect(page.getByText("caic-0", { exact: true }).first()).toBeVisible();
+  expect(settledDetail.repos).toHaveLength(2);
+  await expect(page.getByText(settledDetail.repos![0].branch, { exact: true }).first()).toBeVisible();
   await expect(page.getByText("origin/main", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("1 commit ahead", { exact: true })).toBeVisible();
   await expect(page.getByText("Commits ahead (1)", { exact: true })).toBeVisible();
@@ -238,13 +270,23 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.getByTitle("Expand sidebar").click();
   await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
 
-  // Screenshot 3: Plan mode.
-  const planCard = page.locator(`[data-task-id="${id2}"]`);
-  if ((await planCard.count()) > 0) {
-    await planCard.click();
-    await expect(page.getByTestId("plan-content")).toBeVisible();
-    await captureScreenshot(page, "desktop", "task-plan.png");
-  }
+  // Screenshot 3: A running agent with verification still in progress.
+  const runningCard = page.locator(`[data-task-id="${id2}"]`);
+  await runningCard.click();
+  await expect(runningCard).toContainText("running");
+  await expect(page.getByText(/^Session started · gemini-3\.8-flash-high · [\da-f-]+$/)).toBeVisible();
+  await expect(
+    page.getByText("Checking the API middleware, applying rate limits, and running the focused regression tests.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  const runningTools = page.getByText("2/3 tools: Read, Edit, Bash", { exact: true });
+  await expect(runningTools).toBeVisible();
+  await runningTools.click();
+  const verification = page.getByText("go test ./backend/internal/server -run TestRateLimit", { exact: true });
+  await expect(verification).toBeVisible();
+  await expect(verification.locator("xpath=ancestor::summary")).toContainText("Bash");
+  await captureScreenshot(page, "desktop", "task-running.png");
 
   // Screenshot 4: Ask mode.
   const askCard = page.locator(`[data-task-id="${id3}"]`);
@@ -363,7 +405,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const vncResp = await api.createTask({
     initialPrompt: { text: "Show the VNC display" },
     repos: [{ name: repos[0].path }],
-    harness,
+    harness: "claude",
+    model: "opus-5.5",
+    effort: "high",
     display: true,
   });
   await waitForTaskState(api, vncResp.id, "waiting", 30_000);
@@ -417,6 +461,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Screenshot 8: Dense task-detail header at the width where a larger phone
   // or narrow desktop pane needs compact repository state markers.
   await page.setViewportSize({ width: 525, height: 320 });
+  await waitForVisualReadiness(page);
   const detailHeader = page.getByTestId("task-detail-header");
   const headerStats = detailHeader.getByTestId("repo-state-diff-stats");
   await expect(headerStats).toHaveCount(2);
@@ -434,15 +479,15 @@ test("generate documentation screenshots", async ({ page, api }) => {
     .first()
     .boundingBox();
   expect(titleBox?.width).toBeLessThanOrEqual(128);
-  const [repositoryStateBox, infoLinkBox] = await Promise.all([
-    headerStats.first().locator("xpath=../..").boundingBox(),
-    infoLink.boundingBox(),
-  ]);
-  expect(repositoryStateBox).not.toBeNull();
-  expect(infoLinkBox).not.toBeNull();
-  expect(
-    Math.abs(repositoryStateBox!.y + repositoryStateBox!.height / 2 - infoLinkBox!.y - infoLinkBox!.height / 2),
-  ).toBeLessThanOrEqual(1);
+  await expect
+    .poll(async () => {
+      const [repositoryStateBox, infoLinkBox] = await Promise.all([
+        requiredBox(headerStats.first().locator("xpath=../..")),
+        requiredBox(infoLink),
+      ]);
+      return Math.abs(repositoryStateBox.y + repositoryStateBox.height / 2 - infoLinkBox.y - infoLinkBox.height / 2);
+    })
+    .toBeLessThanOrEqual(1);
   await expect.poll(() => detailHeader.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await captureScreenshot(page, "mobile", "task-detail-header-compact.png");
   // Restore desktop viewport.
@@ -475,17 +520,12 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await expect(page.locator("[data-task-id]").first()).toBeVisible({
     timeout: 10_000,
   });
-  await expect
-    .poll(
-      async () => {
-        const statuses = await page
-          .getByTestId("ci-status")
-          .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.status));
-        return statuses.length > 0 && statuses.every((status) => status === "success");
-      },
-      { timeout: 15_000 },
-    )
-    .toBe(true);
+  for (const id of scrollTaskIds) {
+    await expect(page.locator(`[data-task-id="${id}"]`).getByTestId("ci-status")).toHaveAttribute(
+      "data-status",
+      "success",
+    );
+  }
   const taskList = page.getByTestId("task-list");
   await expect.poll(async () => taskList.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
   await taskList.evaluate((el) => {

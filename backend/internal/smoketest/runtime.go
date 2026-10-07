@@ -36,20 +36,17 @@ func InitRepo(ctx context.Context, tmpDir string, names [2]string) (string, erro
 	return filepath.Join(tmpDir, "repos", names[0]), nil
 }
 
-// InitHarnessCache pre-populates the harness model cache with fresh dummy
+// InitHarnessCache pre-populates the harness model cache with fresh fixture
 // entries so refreshHarnessModels skips launching temp containers for real
 // harness model discovery during smoke and e2e tests.
 func InitHarnessCache(cacheDir string, visual bool) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 	for _, h := range []harness.Name{harness.Antigravity, harness.Codex, harness.OpenCode, harness.Pi} {
-		model := "fake-model"
+		inventory := agent.ModelInventory{Models: []agent.Model{{ID: "fake-model", ContextWindow: 200_000}}}
 		if visual {
-			model = "sonnet"
-			if h == harness.Codex {
-				model = "gpt-6-luna"
-			}
+			inventory = VisualModelInventory(h)
 		}
-		cache.SetModelInventory(h, agent.ModelInventory{Models: []agent.Model{{ID: model, ContextWindow: 200_000}}}, "")
+		cache.SetModelInventory(h, inventory, "")
 	}
 	return nil
 }
