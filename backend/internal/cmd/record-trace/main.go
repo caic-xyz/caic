@@ -752,7 +752,7 @@ func setupCodexAuth(ctx context.Context, ctr, apiKeyEnv string) error {
 		return nil
 	}
 	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ctr, //nolint:gosec // podman args are safe
-		"bash", "-c", "codex login --with-api-key")
+		"bash", "-c", "codex --no-daemon login --with-api-key")
 	cmd.Stdin = strings.NewReader(apiKey)
 	cmd.Stderr = os.Stderr
 	slog.InfoContext(ctx, "Setting up codex auth in container")

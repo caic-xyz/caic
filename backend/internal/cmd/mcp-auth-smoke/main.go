@@ -122,13 +122,13 @@ func smokeCodex(ctx context.Context, baseEnv []string, tmp, endpoint string) err
 	}
 	env := append([]string(nil), baseEnv...)
 	env = append(env, "CODEX_HOME="+codexHome)
-	if _, err := runCommand(ctx, "codex", env, "mcp", "add", "caic", "--url", endpoint); err != nil {
+	if _, err := runCommand(ctx, "codex", env, "--no-daemon", "mcp", "add", "caic", "--url", endpoint); err != nil {
 		return fmt.Errorf("codex mcp add: %w", err)
 	}
-	if _, err := runCommand(ctx, "codex", env, "mcp", "login", "caic", "--scopes", "caic:mcp.read,caic:tasks.read"); err != nil {
+	if _, err := runCommand(ctx, "codex", env, "--no-daemon", "mcp", "login", "caic", "--scopes", "caic:mcp.read,caic:tasks.read"); err != nil {
 		return fmt.Errorf("codex mcp login: %w", err)
 	}
-	listOut, err := runCommand(ctx, "codex", env, "mcp", "list")
+	listOut, err := runCommand(ctx, "codex", env, "--no-daemon", "mcp", "list")
 	if err != nil {
 		return fmt.Errorf("codex mcp list: %w", err)
 	}

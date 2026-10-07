@@ -135,7 +135,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 	// TODO: re-enable widget MCP plugin once it's fixed for codex
 	// return []string{
-	// 	"codex", "app-server",
+	// 	"codex", "--no-daemon", "app-server",
 	// 	"-c", `approval_policy="never"`,
 	// 	"-c", `sandbox_mode="danger-full-access"`,
 	// 	"-c", `mcp_servers.widget.command="python3"`,
@@ -228,7 +228,7 @@ var (
 
 func codexAppServerArgs() []string {
 	return []string{
-		"codex", "app-server",
+		"codex", "--no-daemon", "app-server",
 		"-c", `approval_policy="never"`,
 		"-c", `sandbox_mode="danger-full-access"`,
 	}

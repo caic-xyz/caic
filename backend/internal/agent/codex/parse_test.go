@@ -969,7 +969,7 @@ func TestAgentArgs(t *testing.T) {
 		t.Parallel()
 		args := New("", nil).AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
 		want := []string{
-			"codex", "app-server",
+			"codex", "--no-daemon", "app-server",
 			"-c", `approval_policy="never"`,
 			"-c", `sandbox_mode="danger-full-access"`,
 		}
