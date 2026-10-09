@@ -156,7 +156,7 @@ func TestCheckout(t *testing.T) {
 				t.Fatal("timed-out cleanup lost operation directory")
 			}
 			owner, err := os.ReadFile(filepath.Join(dirs[0], "owner-v1"))
-			if err != nil || string(owner) != filepath.Join(root, ".git") {
+			if err != nil || string(owner) != canonicalPath(t, filepath.Join(root, ".git")) {
 				t.Fatalf("timed-out cleanup lost ownership: %q, %v", owner, err)
 			}
 			if got := runPushGit(t, root, "ls-remote", "origin", "refs/heads/deadline"); got == "" {
@@ -174,7 +174,7 @@ func TestCheckout(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if w.PushDir != filepath.Join(cache, "push") {
+			if w.PushDir != canonicalPath(t, filepath.Join(cache, "push")) {
 				t.Fatalf("push directory=%q", w.PushDir)
 			}
 			if err := w.pushWorktree(t.Context(), logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "service"}, false); err != nil {
@@ -237,7 +237,9 @@ func TestCheckout(t *testing.T) {
 				root := initTestRepo(t, "main")
 				w := newInitializedTestCheckout(t, root)
 				markers := t.TempDir()
-				hook := "#!/bin/sh\nset -eu\npwd > '" + markers + "/'$(basename \"$(dirname \"$PWD\")\")\nwhile [ ! -f '" + markers + "/release' ]; do sleep 0.01; done\n"
+				// Rename publishes each marker with its content; readers never see it empty.
+				staging := t.TempDir()
+				hook := "#!/bin/sh\nset -eu\nname=$(basename \"$(dirname \"$PWD\")\")\npwd > '" + staging + "/'$name\nmv '" + staging + "/'$name '" + markers + "/'$name\nwhile [ ! -f '" + markers + "/release' ]; do sleep 0.01; done\n"
 				writePushFile(t, root, ".git/hooks/pre-push", hook, 0o700)
 				errs := make(chan error, 2)
 				var wg sync.WaitGroup
@@ -258,7 +260,8 @@ func TestCheckout(t *testing.T) {
 					if time.Now().After(deadline) {
 						writePushFile(t, markers, "release", "", 0o600)
 						wg.Wait()
-						t.Fatal("concurrent hooks did not start")
+						close(errs)
+						t.Fatal("concurrent hooks did not start", <-errs, <-errs)
 					}
 					time.Sleep(10 * time.Millisecond)
 				}
@@ -327,16 +330,15 @@ func TestCheckout(t *testing.T) {
 			})
 			for _, tc := range []struct {
 				name, commit, hook string
-				timeout            time.Duration
-				cancel             bool
+				// hang runs a hook that blocks until the push is canceled.
+				hang bool
 			}{
 				{name: "SetupFailure", commit: "nonexistent"},
 				{name: "SetupHookFailure", commit: "HEAD", hook: "#!/bin/sh\nexit 1\n"},
 				{name: "HookRejection", commit: "HEAD", hook: "#!/bin/sh\nexit 1\n"},
-				{name: "HookCancellation", commit: "HEAD", hook: "#!/bin/sh\nsleep 2\nexit 1\n", timeout: 100 * time.Millisecond, cancel: true},
+				{name: "HookCancellation", commit: "HEAD", hang: true},
 				{name: "CleanupTimeout", commit: "HEAD"},
-				{name: "HookTimeout", commit: "HEAD", hook: "#!/bin/sh\nsleep 2\nexit 1\n", timeout: 100 * time.Millisecond},
-				{name: "SetupHookTimeout", commit: "HEAD", hook: "#!/bin/sh\nsleep 2\nexit 1\n", timeout: 100 * time.Millisecond},
+				{name: "SetupHookCancellation", commit: "HEAD", hang: true},
 				{name: "CleanupFailure", commit: "HEAD", hook: "#!/bin/sh\ngit worktree lock \"$PWD\"\nexit 1\n"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -346,26 +348,35 @@ func TestCheckout(t *testing.T) {
 					if tc.name == "CleanupTimeout" {
 						w.GitTimeout = time.Nanosecond
 					}
-					if tc.hook != "" {
+					hook := tc.hook
+					hookStarted := filepath.Join(t.TempDir(), "started")
+					if tc.hang {
+						hook = "#!/bin/sh\n: > '" + hookStarted + "'\nsleep 2\nexit 1\n"
+					}
+					if hook != "" {
 						hookName := "pre-push"
 						if strings.HasPrefix(tc.name, "SetupHook") {
 							hookName = "post-checkout"
 						}
-						writePushFile(t, root, ".git/hooks/"+hookName, tc.hook, 0o700)
+						writePushFile(t, root, ".git/hooks/"+hookName, hook, 0o700)
 					}
-					ctx := t.Context()
-					if tc.timeout > 0 {
-						var cancel context.CancelFunc
-						if tc.cancel {
-							ctx, cancel = context.WithCancel(ctx)
-							timer := time.AfterFunc(tc.timeout, cancel)
-							t.Cleanup(func() { timer.Stop() })
-						} else {
-							ctx, cancel = context.WithTimeout(ctx, tc.timeout)
-						}
-						t.Cleanup(cancel)
+					ctx, cancel := context.WithCancel(t.Context())
+					t.Cleanup(cancel)
+					// Cancel only once the hook runs; a fixed timer can expire before
+					// the operation directory exists on a loaded machine.
+					canceled := make(chan time.Time, 1)
+					if tc.hang {
+						go func() {
+							for ctx.Err() == nil {
+								if _, err := os.Stat(hookStarted); err == nil {
+									canceled <- time.Now()
+									cancel()
+									return
+								}
+								time.Sleep(10 * time.Millisecond)
+							}
+						}()
 					}
-					started := time.Now()
 					err := w.pushWorktree(ctx, logtest.Logger(t), root, tc.commit, PushDestination{Remote: "origin", Branch: "task"}, false)
 					if err == nil {
 						t.Fatal("push unexpectedly succeeded")
@@ -375,9 +386,19 @@ func TestCheckout(t *testing.T) {
 						if !strings.Contains(err.Error(), "locked push worktree") {
 							t.Fatal("cleanup error lost", err)
 						}
-					case tc.timeout > 0 || tc.name == "CleanupTimeout":
-						if time.Since(started) > time.Second || !strings.Contains(err.Error(), "retained") {
-							t.Fatal("deadline or retention guidance lost", err)
+					case tc.hang || tc.name == "CleanupTimeout":
+						if tc.hang {
+							select {
+							case at := <-canceled:
+								if time.Since(at) > time.Second {
+									t.Fatal("cancellation waited for the hook", err)
+								}
+							default:
+								t.Fatal("hook did not start", err)
+							}
+						}
+						if !strings.Contains(err.Error(), "retained") {
+							t.Fatal("retention guidance lost", err)
 						}
 						if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
 							t.Fatal(err)
@@ -400,7 +421,9 @@ func TestCheckout(t *testing.T) {
 			root := initTestRepo(t, "main")
 			w := newInitializedTestCheckout(t, root)
 			markers := t.TempDir()
-			writePushFile(t, root, ".git/hooks/pre-push", "#!/bin/sh\nset -eu\npwd > '"+markers+"/started'\nwhile [ ! -f '"+markers+"/release' ]; do sleep 0.01; done\nexit 1\n", 0o700)
+			// Rename publishes the marker with its content; readers never see it empty.
+			staging := t.TempDir()
+			writePushFile(t, root, ".git/hooks/pre-push", "#!/bin/sh\nset -eu\npwd > '"+staging+"/started'\nmv '"+staging+"/started' '"+markers+"/started'\nwhile [ ! -f '"+markers+"/release' ]; do sleep 0.01; done\nexit 1\n", 0o700)
 			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestCheckout$/^pushWorktree$/^CrashHelper$") //nolint:gosec // fixture-owned test binary simulates a restarted server.
 			cmd.Env = append(os.Environ(), "CAIC_PUSH_CRASH_ROOT="+root, "CAIC_PUSH_CRASH_CACHE="+w.PushDir)
 			if err := cmd.Start(); err != nil {
@@ -437,7 +460,7 @@ func TestCheckout(t *testing.T) {
 			t.Cleanup(func() { writePushFile(t, markers, "release", "", 0o600) })
 			marker := filepath.Join(filepath.Dir(checkout), "owner-v1")
 			owner, err := os.ReadFile(marker) //nolint:gosec // marker reported by fixture-owned hook.
-			if err != nil || string(owner) != filepath.Join(root, ".git") {
+			if err != nil || string(owner) != canonicalPath(t, filepath.Join(root, ".git")) {
 				t.Fatalf("initial ownership marker was replaced during setup: %q, %v", owner, err)
 			}
 			if err := w.reportRetainedPushWorktrees(t.Context(), logtest.Logger(t), root); err != nil {
@@ -610,7 +633,8 @@ func TestCheckout(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 			t.Cleanup(cancel)
-			if err := w.pushWorktree(ctx, logtest.Logger(t), root, "HEAD", PushDestination{Remote: "origin", Branch: "second"}, false); !errors.Is(err, context.DeadlineExceeded) {
+			// Claim directly: a short deadline could otherwise expire in Git before the lock.
+			if _, _, err := acquirePushWorktree(ctx, w.PushDir, common); !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("other server bypassed pool lock: %v", err)
 			}
 			if len(pushOperationDirs(t, w)) != 0 {
@@ -1988,6 +2012,15 @@ func writePushFile(t *testing.T, root, name, content string, mode os.FileMode) {
 	if err := os.WriteFile(path, []byte(content), mode); err != nil { //nolint:gosec // fixture-owned path and contents.
 		t.Fatal(err)
 	}
+}
+
+// canonicalPath resolves temporary directory aliases such as macOS /var.
+func canonicalPath(t *testing.T, path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }
 func runPushGit(t *testing.T, root string, args ...string) string {
 	out, err := (&git.Checkout{Root: root, Logger: logtest.Logger(t)}).RunGit(t.Context(), args...)

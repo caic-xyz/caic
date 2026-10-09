@@ -123,7 +123,7 @@ func withPushPool(ctx context.Context, cache, common string, run func() error) (
 
 func readPushMarker(dir, name string) (string, error) {
 	path := filepath.Join(dir, name)
-	info, err := os.Lstat(path) //nolint:gosec // bounded marker in the configured application cache.
+	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
 	}
@@ -238,7 +238,7 @@ func releasePushWorktree(ctx context.Context, g *git.Checkout, cache, common, di
 					return err
 				}
 				stamp := time.Now().UTC().Format(time.RFC3339Nano) + "\n"
-				return os.WriteFile(filepath.Join(dir, "idle-v1"), []byte(stamp), 0o600) //nolint:gosec // exclusively claimed operation directory under the configured cache.
+				return os.WriteFile(filepath.Join(dir, "idle-v1"), []byte(stamp), 0o600)
 			}
 		}
 		return finishPushCleanup(ctx, dir, func() error {
@@ -280,7 +280,7 @@ func finishPushCleanup(ctx context.Context, dir string, run func() error) error 
 	if err := awaitPushCommand(ctx, run); err != nil {
 		return err
 	}
-	return os.RemoveAll(dir) //nolint:gosec // owned operation directory after validated Git cleanup completes.
+	return os.RemoveAll(dir)
 }
 
 func retainPushWorktree(ctx context.Context, log git.Logger, root, dir string) error {
@@ -292,7 +292,7 @@ func retainPushWorktree(ctx context.Context, log git.Logger, root, dir string) e
 
 func inspectPushWorktree(ctx context.Context, g *git.Checkout, common, dir string) (bool, error) {
 	path := filepath.Join(dir, "checkout")
-	info, err := os.Lstat(path) //nolint:gosec // owned operation checkout path under the configured cache; replacements are rejected below.
+	info, err := os.Lstat(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
@@ -321,7 +321,7 @@ func inspectPushWorktree(ctx context.Context, g *git.Checkout, common, dir strin
 	if registered {
 		// Also validate the live checkout's common directory when it exists. A
 		// missing checkout after a crash is safe to remove through its registration.
-		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil { //nolint:gosec // owned cache checkout pointer inspected before Git discovery.
+		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
 			actual, err := pushCommonDir(ctx, &git.Checkout{Root: path, Logger: g.Logger})
 			if err != nil {
 				return false, err
@@ -332,7 +332,7 @@ func inspectPushWorktree(ctx context.Context, g *git.Checkout, common, dir strin
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return false, err
 		}
-	} else if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil { //nolint:gosec // owned cache checkout pointer inspected before Git discovery.
+	} else if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
 		return false, errors.New("refusing an unregistered Git checkout")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
@@ -363,7 +363,7 @@ func validateReusablePushWorktree(ctx context.Context, g *git.Checkout, common, 
 	}
 	// A missing .git is safe to remove through registration, but never safe to
 	// run checkout-local clean/reset: Git could discover a parent repository.
-	info, err := os.Lstat(filepath.Join(dir, "checkout", ".git")) //nolint:gosec // owned cache pointer must be regular before checkout reuse.
+	info, err := os.Lstat(filepath.Join(dir, "checkout", ".git"))
 	if err != nil {
 		return err
 	}

@@ -671,7 +671,11 @@ func TestCloneRepo(t *testing.T) {
 		if checkout.RelPath != "cloned" {
 			t.Fatalf("RelPath = %q, want cloned", checkout.RelPath)
 		}
-		wantPushDir := filepath.Join(s.serverHandlers.pushCacheDir, "push")
+		// The push cache path is canonical; resolve aliases such as macOS /var.
+		wantPushDir, err := filepath.EvalSymlinks(filepath.Join(s.serverHandlers.pushCacheDir, "push"))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if checkout.PushDir != wantPushDir {
 			t.Fatalf("PushDir = %q, want %q", checkout.PushDir, wantPushDir)
 		}
