@@ -1,0 +1,10 @@
+# Codecov reports coverage without failing statuses or posting PR comments.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+comment: false
