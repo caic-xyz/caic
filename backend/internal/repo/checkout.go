@@ -834,25 +834,30 @@ func (w *Checkout) pushWorktree(ctx context.Context, log *slog.Logger, root, com
 	reusable := false
 	err = awaitPushCommand(ctx, func() error {
 		checkout := &git.Checkout{Root: path, Logger: log}
-		if reused {
-			if err := validateReusablePushWorktree(ctx, g, common, dir); err != nil {
-				return err
+		// Git does not serialize worktree registration: listing worktrees fails
+		// while another add has written only part of its administrative files.
+		// Register and validate under the pool lock; checkout hooks run outside it.
+		if err := withPushPool(ctx, w.PushDir, common, func() error {
+			if reused {
+				return validateReusablePushWorktree(ctx, g, common, dir)
 			}
-			// Only this caic-owned checkout is reset. Keep ignored verification
-			// caches while removing leftovers, including nested untracked repos.
-			if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
-				return err
-			}
-			if _, err := checkout.RunGit(ctx, "checkout", "--detach", "--force", commit); err != nil {
-				return err
-			}
-			if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
-				return err
-			}
-		} else {
-			if _, err := g.RunGit(ctx, "worktree", "add", "--detach", path, commit); err != nil {
+			if _, err := g.RunGit(ctx, "worktree", "add", "--no-checkout", "--detach", path, commit); err != nil {
 				return fmt.Errorf("create push worktree: %w", err)
 			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		// Only this caic-owned checkout is reset. Keep ignored verification
+		// caches while removing leftovers, including nested untracked repos.
+		if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
+			return err
+		}
+		if _, err := checkout.RunGit(ctx, "checkout", "--detach", "--force", commit); err != nil {
+			return err
+		}
+		if _, err := checkout.RunGit(ctx, "clean", "-ffd"); err != nil {
+			return err
 		}
 		reusable = true
 		// Preserve native Git transport and lock configuration, including the
