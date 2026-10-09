@@ -36,7 +36,11 @@ it("stops a camera stream whose permission resolves after the dialog is closed",
 
 it("does not adopt a Blob whose encoding completes after camera cancellation", async () => {
   const stop = vi.fn();
-  camera(async () => ({ getTracks: () => [{ stop }] }) as unknown as MediaStream);
+  let resolve!: (stream: MediaStream) => void;
+  const permission = new Promise<MediaStream>((r) => {
+    resolve = r;
+  });
+  camera(() => permission);
   vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     drawImage: () => {},
   } as unknown as CanvasRenderingContext2D);
@@ -49,8 +53,13 @@ it("does not adopt a Blob whose encoding completes after camera cancellation", a
   const video = view.container.querySelector("video");
   if (!video) throw new Error("Camera preview missing");
   Object.defineProperties(video, { videoWidth: { value: 100 }, videoHeight: { value: 100 } });
-  await vi.waitFor(() => expect(view.getByRole("button", { name: "Take photo" })).toBeEnabled());
-  fireEvent.click(view.getByRole("button", { name: "Take photo" }));
+  const takePhoto = view.getByRole("button", { name: "Take photo" });
+  expect(takePhoto).toBeDisabled();
+  resolve({ getTracks: () => [{ stop }] } as unknown as MediaStream);
+  // Camera startup awaits this promise before enabling capture.
+  await permission;
+  expect(takePhoto).toBeEnabled();
+  fireEvent.click(takePhoto);
   expect(encode).toHaveBeenCalledOnce();
   view.unmount();
   complete(new Blob(["image"], { type: "image/jpeg" }));
@@ -60,7 +69,8 @@ it("does not adopt a Blob whose encoding completes after camera cancellation", a
 });
 
 it("shows rejected attachment admission without closing the camera, allowing retry", async () => {
-  camera(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
+  const permission = Promise.resolve({ getTracks: () => [] } as unknown as MediaStream);
+  camera(() => permission);
   vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     drawImage: () => {},
   } as unknown as CanvasRenderingContext2D);
@@ -75,7 +85,8 @@ it("shows rejected attachment admission without closing the camera, allowing ret
   const video = view.container.querySelector("video");
   if (!video) throw new Error("Camera preview missing");
   Object.defineProperties(video, { videoWidth: { value: 100 }, videoHeight: { value: 100 } });
-  await vi.waitFor(() => expect(view.getByRole("button", { name: "Take photo" })).toBeEnabled());
+  await permission;
+  expect(view.getByRole("button", { name: "Take photo" })).toBeEnabled();
   fireEvent.click(view.getByRole("button", { name: "Take photo" }));
   await vi.waitFor(() => expect(view.getByRole("alert")).toHaveTextContent("Attachments must total 20 MiB or less."));
   expect(close).not.toHaveBeenCalled();
