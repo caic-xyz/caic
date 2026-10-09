@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/andybalholm/brotli v1.2.6
 	github.com/buger/jsonparser v1.6.1
-	github.com/caic-xyz/md v0.18.6-0.20261009023026-99894a811257
+	github.com/caic-xyz/md v0.18.6
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.1
@@ -14,7 +14,7 @@ require (
 	github.com/klauspost/compress v1.20.1
 	github.com/lmittmann/tint v1.2.0
 	github.com/maruel/apisdkgen v0.1.1
-	github.com/maruel/genai v0.10.2-0.20261009022419-e1ac5191f799
+	github.com/maruel/genai v0.10.2
 	github.com/maruel/gomode v0.1.2
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.1

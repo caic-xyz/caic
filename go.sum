@@ -128,8 +128,8 @@ github.com/butuzov/ireturn v0.4.1 h1:vWb3NO4t77iku/sjCQ/2pHTQeOmxEhjIriJqRLg1Y+I
 github.com/butuzov/ireturn v0.4.1/go.mod h1:q+DXKzTDV5guNuXLnIab9fKXizTn2miZHLhxH7V/GB4=
 github.com/butuzov/mirror v1.3.3 h1:v0RsWBhfFc1RQqE/f3sHpSttKDtodFn0gFmtYyD4/hA=
 github.com/butuzov/mirror v1.3.3/go.mod h1:h9BzzwYnTiHO0GzgvaTqIg7VSsOUhdIv51cHFFBmX1w=
-github.com/caic-xyz/md v0.18.6-0.20261009023026-99894a811257 h1:sXkBRdmk44s7d1FL7eAa+E9O7AGNO8jArRU0eQwlXT0=
-github.com/caic-xyz/md v0.18.6-0.20261009023026-99894a811257/go.mod h1:wwD0KLWYcSIbOdT8lFZHhZHDFvgg5ll9rKt/udFGC0Q=
+github.com/caic-xyz/md v0.18.6 h1:bXSqteIhAFOvR7vg5DL77asFyOu6RBaf3TMlIRIQzEQ=
+github.com/caic-xyz/md v0.18.6/go.mod h1:pMd31AfCkFZ15e2tleuX0+Rp8SmzNNeHQ5ne1c+y2E4=
 github.com/catenacyber/perfsprint v0.10.1 h1:u7Riei30bk46XsG8nknMhKLXG9BcXz3+3tl/WpKm0PQ=
 github.com/catenacyber/perfsprint v0.10.1/go.mod h1:DJTGsi/Zufpuus6XPGJyKOTMELe347o6akPvWG9Zcsc=
 github.com/ccojocar/zxcvbn-go v1.0.4 h1:FWnCIRMXPj43ukfX000kvBZvV6raSxakYr1nzyNrUcc=
@@ -447,8 +447,8 @@ github.com/maratori/testpackage v1.1.2 h1:ffDSh+AgqluCLMXhM19f/cpvQAKygKAJXFl9aU
 github.com/maratori/testpackage v1.1.2/go.mod h1:8F24GdVDFW5Ew43Et02jamrVMNXLUNaOynhDssITGfc=
 github.com/maruel/apisdkgen v0.1.1 h1:YX9g0+QDiKDOpvbH0nTgabCVS1s/RGgsrOHN7VPAHAw=
 github.com/maruel/apisdkgen v0.1.1/go.mod h1:S4tV7GOUaW6aRhd8AQiN5WJkgLtl+DWWISNYwdpbugc=
-github.com/maruel/genai v0.10.2-0.20261009022419-e1ac5191f799 h1:eB3naqgK1+39fAm8zVfyZGSJQDYd9p3WEd/PbHBqSd0=
-github.com/maruel/genai v0.10.2-0.20261009022419-e1ac5191f799/go.mod h1:SdPjQFSU81PxF8jB+kvN40X05ZO+XFGABoFWNxx3k6k=
+github.com/maruel/genai v0.10.2 h1:MjgHd0lX1UiQgKDHTER6ZeinGQQ+wSwjlQHXbOFY7aU=
+github.com/maruel/genai v0.10.2/go.mod h1:SdPjQFSU81PxF8jB+kvN40X05ZO+XFGABoFWNxx3k6k=
 github.com/maruel/genaipy v0.1.2 h1:LCjKM72hIHTyL9Nt8Fb7DYv7/UJNjGjCjG5fHntO59w=
 github.com/maruel/genaipy v0.1.2/go.mod h1:VERlWtNMq1oCuG7CzRZJSQ0EUVYGkgMGdU+Z2WQzvpI=
 github.com/maruel/gomode v0.1.2 h1:S2Vd/642WlzxsSobSjm0thqsoNIrSlFh2GKxo2icMOg=
