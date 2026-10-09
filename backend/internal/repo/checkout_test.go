@@ -969,9 +969,17 @@ func TestCheckout(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := fmt.Sprintf("/repo%d", i)
-			target.Repos = append(target.Repos, runtime.Repo{GitRoot: root, ContainerPath: path, Branch: "caic-1"})
-			sc.FetchedBranches = append(sc.FetchedBranches, runtime.FetchedBranch{RepositoryPath: path, BranchName: "caic-1", CommitHash: tip})
+			path := fmt.Sprintf("/home/user/src/repo%d", i)
+			taskPath, fetchedPath := path, path
+			if i == 0 {
+				// md resolves home-relative task paths in fetched results.
+				taskPath = fmt.Sprintf("~/src/repo%d", i)
+			} else {
+				// Other runtimes may return home-relative fetched paths.
+				fetchedPath = fmt.Sprintf("~/src/repo%d", i)
+			}
+			target.Repos = append(target.Repos, runtime.Repo{GitRoot: root, ContainerPath: taskPath, Branch: "caic-1"})
+			sc.FetchedBranches = append(sc.FetchedBranches, runtime.FetchedBranch{RepositoryPath: fetchedPath, BranchName: "caic-1", CommitHash: tip})
 			// Move the runtime tracking ref to a later commit carrying a secret.
 			// The immutable Fetch result remains the task commit above.
 			if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("sk-"+strings.Repeat("a", 24)+"\n"), 0o600); err != nil {

@@ -18,6 +18,7 @@ import (
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
+	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -287,8 +288,11 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 	// tracking ref again, even if another refresh moves it during verification.
 	commits := make([]string, len(repos))
 	for i := range repos {
+		// Task metadata and runtime backends may use either home-relative
+		// or resolved paths for the same container repository.
+		path := md.ResolveContainerPath(repos[i].ContainerPath)
 		for _, b := range branches {
-			if b.RepositoryPath == repos[i].ContainerPath && b.BranchName == repos[i].Branch {
+			if md.ResolveContainerPath(b.RepositoryPath) == path && b.BranchName == repos[i].Branch {
 				commits[i] = b.CommitHash
 				break
 			}
