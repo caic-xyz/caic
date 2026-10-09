@@ -85,7 +85,7 @@ func checkMessage(path string, line int, harness string, message []byte, input b
 	case "antigravity":
 		if input {
 			dto = "StreamInputMessage"
-			err = strictDecode(message, &antigravitydto.StreamInputMessage{})
+			err = checkAntigravityInput(message)
 		} else {
 			dto = "StreamEvent"
 			err = strictDecode(message, &antigravitydto.StreamEvent{})
@@ -421,6 +421,33 @@ func strictDecode(data []byte, dst any) error {
 	return nil
 }
 
+func checkAntigravityInput(data []byte) error {
+	// Override the message field to validate string and block-array content
+	// strictly, independent of the DTO's custom unmarshaler.
+	var envelope struct {
+		antigravitydto.StreamInputMessage
+
+		Message json.RawMessage `json:"message"`
+	}
+	if err := strictDecode(data, &envelope); err != nil {
+		return err
+	}
+	if isEmptyJSON(envelope.Message) {
+		return nil
+	}
+	var message struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if err := strictDecode(envelope.Message, &message); err != nil {
+		return err
+	}
+	content := bytes.TrimSpace(message.Content)
+	if isEmptyJSON(content) || content[0] == '"' {
+		return nil
+	}
+	return strictDecode(content, &[]antigravitydto.StreamInputContentBlock{})
+}
+
 func checkClaude(data []byte) (string, error) {
 	var probe claudedto.OutputTypeProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
@@ -526,6 +553,8 @@ func checkCodex(data []byte) (string, error) {
 		dst = &codexdto.SkillsChangedNotification{}
 	case codexdto.MethodErrorNotification:
 		dst = &codexdto.ErrorNotification{}
+	case codexdto.MethodWarning:
+		dst = &codexdto.WarningNotification{}
 	default:
 		return "JSONRPCMessage", fmt.Errorf("unrecognized Codex notification method %q; add its DTO and checker dispatch", msg.Method)
 	}

@@ -102,8 +102,10 @@ func TestRun(t *testing.T) {
 			want   string
 		}{
 			{"valid", `{"t":"agent","ts":1.000,"msg":{"event":"init","conversation_id":"s","init":{"model":"gemini-3.8-flash-low"}}}`, ""},
+			{"string input", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":"hello"}}}`, ""},
 			{"output drift", `{"t":"agent","ts":1.000,"msg":{"event":"step_update","step_update":{"state":"DONE","future":true}}}`, `unknown field "future"`},
 			{"input drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":[{"type":"text","text":"hello","future":true}]}}}`, `unknown field "future"`},
+			{"input message drift", `{"t":"input","ts":1.000,"msg":{"event":"user","message":{"content":"hello","future":true}}}`, `unknown field "future"`},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -167,6 +169,33 @@ func TestRun(t *testing.T) {
 
 func TestCheckCodex(t *testing.T) {
 	t.Parallel()
+	t.Run("warning schema", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			data string
+			want string
+		}{
+			{"valid", `{"method":"warning","params":{"threadId":"thread","message":"Warning text"}}`, ""},
+			{"global", `{"method":"warning","params":{"threadId":null,"message":"Warning text"}}`, ""},
+			{"error", `{"method":"warning","params":{"message":"Warning text","future":true}}`, `unknown field "future"`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				dto, err := checkCodex([]byte(tc.data))
+				if dto != "*codex.WarningNotification" {
+					t.Fatalf("DTO = %q, err = %v", dto, err)
+				}
+				if tc.want == "" {
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("err = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	})
 	for _, tc := range []struct {
 		name string
 		data string
