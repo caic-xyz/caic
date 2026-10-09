@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import select
 import shutil
 import socket
 import subprocess
@@ -900,6 +901,7 @@ def test_real_relay_output_superset_no_stdin_echo_and_attach_offset() -> None:
 def test_exit_and_stripped_environment_controls() -> None:
     relay_dir = tempfile.mkdtemp(prefix="caic-relay-v2-test-")
     output_path = os.path.join(relay_dir, "output.jsonl")
+    release_path = os.path.join(relay_dir, "release-child")
     env = _make_env(relay_dir)
     env["CAIC_RELAY_TEST_SECRET"] = "not-persisted"
     proc: subprocess.Popen[bytes] | None = None
@@ -917,9 +919,15 @@ def test_exit_and_stripped_environment_controls() -> None:
                 sys.executable,
                 "-c",
                 (
-                    "import os; print('{\"ready\":true}'); "
-                    "raise SystemExit(2 if 'CAIC_RELAY_TEST_SECRET' in os.environ else 0)"
+                    "import os, sys, time\n"
+                    "deadline = time.monotonic() + 10\n"
+                    "while not os.path.exists(sys.argv[1]):\n"
+                    "    if time.monotonic() >= deadline: raise SystemExit('child was not released')\n"
+                    "    time.sleep(0.01)\n"
+                    "print('{\"ready\":true}')\n"
+                    "raise SystemExit(2 if 'CAIC_RELAY_TEST_SECRET' in os.environ else 0)\n"
                 ),
+                release_path,
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -933,11 +941,32 @@ def test_exit_and_stripped_environment_controls() -> None:
         # of output.jsonl instead of the full stream.
         assert proc.stdin is not None
         assert proc.stdout is not None
-        stdout = proc.stdout.read()
+        # Force the live-attach path: a fast child can otherwise exit before
+        # attachment and exercise only the durable-log fallback.
+        deadline = time.monotonic() + 5
+        stdout = b""
+        while not stdout.endswith(b"\n"):
+            remaining = deadline - time.monotonic()
+            assert remaining > 0 and select.select([proc.stdout], [], [], remaining)[0], "relay did not attach"
+            chunk = os.read(proc.stdout.fileno(), 1)
+            assert chunk, "relay closed stdout before attachment"
+            stdout += chunk
+        assert json.loads(stdout)["t"] == "relay_generation", stdout
+        Path(release_path).touch()
+        deadline = time.monotonic() + 5
+        while True:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0 and select.select([proc.stdout], [], [], remaining)[0], (
+                "relay did not close stdout after child exit while stdin remained open"
+            )
+            chunk = os.read(proc.stdout.fileno(), 65536)
+            if not chunk:
+                break
+            stdout += chunk
         proc.stdin.close()
+        proc.wait(timeout=10)
         if proc.stderr is not None:
             proc.stderr.read()
-        proc.wait(timeout=10)
         with open(output_path, "rb") as output_file:
             persisted = output_file.read()
         assert stdout == persisted

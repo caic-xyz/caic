@@ -1145,8 +1145,12 @@ def attach_client(offset):
             pass
         finally:
             # When relay closes, signal EOF to our parent.
+            # Python's standard streams use closefd=False: closing only the
+            # wrapper leaves the pipe open while the main thread reads stdin.
             try:
+                fd = sys.stdout.fileno()
                 sys.stdout.close()
+                os.close(fd)
             except OSError:
                 pass
 
