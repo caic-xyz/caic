@@ -174,6 +174,9 @@ func (f *FakeBackend) Fetch(ctx context.Context, id runtime.ID, opts runtime.Fet
 	return slices.Clone(f.FetchedBranches), f.FetchErr
 }
 
+// RefreshRefs implements runtime.Repository.
+func (*FakeBackend) RefreshRefs(context.Context, runtime.ID) error { return nil }
+
 // Fetches returns the options of every Fetch call, in order.
 func (f *FakeBackend) Fetches() []runtime.FetchOpts {
 	f.mu.Lock()

@@ -443,6 +443,9 @@ type Repository interface {
 	TurnSnapshot(ctx context.Context, id ID, previous []FetchedBranch) ([]TurnRepository, error)
 	Diff(ctx context.Context, id ID, repoIdx int, args ...string) (string, error)
 	Fetch(ctx context.Context, id ID, opts FetchOpts) ([]FetchedBranch, error)
+	// RefreshRefs copies cached upstream refs into the instance without moving
+	// working branches or committing pending edits.
+	RefreshRefs(ctx context.Context, id ID) error
 	FileDiff(ctx context.Context, id ID, repoIdx int, commit, path, originalPath string) (string, error)
 	RepositoryStatus(ctx context.Context, id ID, repoIdx int) (RepositoryStatus, error)
 	// CompactRepositoryStatus returns the branch, divergence, working-tree

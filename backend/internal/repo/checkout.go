@@ -1,4 +1,4 @@
-// Checkout owns pooled task pushes and Git queries with snapshots ordered by probe completion.
+// Checkout owns pooled task pushes, upstream ref refreshes, and ordered Git query snapshots.
 
 package repo
 
@@ -194,23 +194,6 @@ func (w *Checkout) AllocateBranch(ctx context.Context, log *slog.Logger, baseBra
 	return w.allocateBranchLocked(ctx, log, baseBranch, preferred)
 }
 
-// PushDestination selects one repository's remote, destination branch, and
-// safety comparison revision. Callers resolve one destination per captured task repository.
-type PushDestination struct {
-	Remote string
-	Branch string
-	// BaseRef is an explicit safety comparison ref or immutable commit ID.
-	BaseRef string
-}
-
-// PushOptions keeps committing pending edits, accepting safety issues, and
-// allowing non-fast-forward updates independent.
-type PushOptions struct {
-	CommitPending bool
-	BypassSafety  bool
-	Force         bool
-}
-
 // ResolvePushDestinations fills host roots and discovers destinations for a
 // captured task target under bounded, request-independent Git contexts.
 // defaultTarget selects each remote's default branch as the destination; otherwise
@@ -258,7 +241,8 @@ func (w *Checkout) ResolvePushDestinations(ctx context.Context, log *slog.Logger
 //
 // Public diff statistics remain runtime owned, including pending edits.
 // Safety issues in any repo block all pushes unless explicitly bypassed.
-// No host checkout files or branches change.
+// Successful pushes refresh the runtime's cached upstream refs. No host checkout
+// files or branches change. The returned statistics describe the pre-push diff.
 func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime.Router, target GitTarget, destinations []PushDestination, opts PushOptions) (v3.DiffStat, []SafetyIssue, error) {
 	ctx = context.WithoutCancel(ctx)
 	id, repos, err := w.queryRuntime(target)
@@ -336,6 +320,12 @@ func (w *Checkout) Push(ctx context.Context, log *slog.Logger, runtimes *runtime
 		if err != nil {
 			return ds, allIssues, fmt.Errorf("push %s to %s/%s: %w", rp.ContainerPath, d.Remote, d.Branch, err)
 		}
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, w.GitTimeout)
+	err = runtimes.RefreshRefs(refreshCtx, id)
+	cancel()
+	if err != nil {
+		return ds, allIssues, &PushRefreshError{Err: err}
 	}
 	return ds, allIssues, nil
 }
@@ -913,6 +903,37 @@ func (w *Checkout) reportRetainedPushWorktrees(ctx context.Context, log *slog.Lo
 	}
 	return nil
 }
+
+// PushDestination selects one repository's remote, destination branch, and
+// safety comparison revision. Callers resolve one destination per captured task repository.
+type PushDestination struct {
+	Remote string
+	Branch string
+	// BaseRef is an explicit safety comparison ref or immutable commit ID.
+	BaseRef string
+}
+
+// PushOptions keeps committing pending edits, accepting safety issues, and
+// allowing non-fast-forward updates independent.
+type PushOptions struct {
+	CommitPending bool
+	BypassSafety  bool
+	Force         bool
+}
+
+// PushRefreshError reports a container ref refresh failure after every remote
+// push succeeded. Callers must still track CI for the published commits.
+type PushRefreshError struct {
+	Err error
+}
+
+// Error describes the completed publication and failed refresh.
+func (e *PushRefreshError) Error() string {
+	return "push completed but refreshing container upstream refs failed: " + e.Err.Error()
+}
+
+// Unwrap returns the refresh failure.
+func (e *PushRefreshError) Unwrap() error { return e.Err }
 
 // maxBranchSeqNum finds the highest sequence number N among all local and
 // remote branches matching "caic-N", plus liveBranches (branch names taken

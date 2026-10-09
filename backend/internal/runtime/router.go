@@ -34,6 +34,7 @@ const (
 	metricRepoDiff              = "repo.diff"
 	metricRepoFileDiff          = "repo.file_diff"
 	metricRepoFetch             = "repo.fetch"
+	metricRepoRefreshRefs       = "repo.refresh_refs"
 	metricRepoStatus            = "repo.status"
 	metricRepoCompactStatus     = "repo.compact_status"
 	metricRepoDiffSize          = "repo.diff_size"
@@ -203,6 +204,17 @@ func (r *Router) Fetch(ctx context.Context, id ID, opts FetchOpts) (branches []F
 		return nil, err
 	}
 	return rt.Fetch(ctx, id, opts)
+}
+
+// RefreshRefs copies cached upstream refs into the owning runtime instance.
+func (r *Router) RefreshRefs(ctx context.Context, id ID) (err error) {
+	start := time.Now()
+	defer func() { r.observe(ctx, metricRepoRefreshRefs, start, err, r.runtimeAttrs(id.RuntimeName())...) }()
+	rt, err := r.runtimeForInstance(id)
+	if err != nil {
+		return err
+	}
+	return rt.RefreshRefs(ctx, id)
 }
 
 // Stop gracefully stops a runtime instance on its owning backend.

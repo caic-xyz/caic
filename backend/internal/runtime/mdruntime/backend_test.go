@@ -39,6 +39,7 @@ type fakeMDContainer struct {
 	connectRes  *md.StartResult
 	connectErr  error
 	stopErr     error
+	syncErr     error
 	forkResult  mdContainer
 	forkErr     error
 	agentMounts []md.Mount
@@ -98,6 +99,14 @@ func (f *fakeMDContainer) Fetch(_ context.Context, _, _ io.Writer, repoIdx int, 
 		return nil, nil
 	}
 	return slices.Clone(f.fetchResults[repoIdx]), nil
+}
+
+func (f *fakeMDContainer) SyncDefaultBranch(_ context.Context, repoIdx int) error {
+	f.calls = append(f.calls, fmt.Sprintf("SyncDefaultBranch:%d", repoIdx))
+	if repoIdx == 0 {
+		return f.syncErr
+	}
+	return nil
 }
 
 func (f *fakeMDContainer) Stop(_ context.Context) error {
@@ -459,6 +468,30 @@ func TestBackend(t *testing.T) {
 		}
 		if ctr.diffOpts == nil || !ctr.diffOpts.Full || !slices.Equal(ctr.diffOpts.Args, []string{"--numstat"}) {
 			t.Errorf("Diff opts = %+v, want the whole branch with --numstat", ctr.diffOpts)
+		}
+	})
+
+	t.Run("RefreshRefs", func(t *testing.T) {
+		t.Parallel()
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("error=%v", fail), func(t *testing.T) {
+				t.Parallel()
+				ctr := &fakeMDContainer{repo: []md.Repo{{ContainerPath: "/repo/one"}, {ContainerPath: "/repo/two"}}}
+				if fail {
+					ctr.syncErr = errors.New("upstream sync failed")
+				}
+				b := newTestBackend(&fakeMDClient{getResult: ctr})
+				err := b.RefreshRefs(t.Context(), "docker:ctr-1")
+				if fail && (!errors.Is(err, ctr.syncErr) || !strings.Contains(err.Error(), "/repo/one")) {
+					t.Fatalf("refresh must surface repository error: %v", err)
+				}
+				if !fail && err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(ctr.calls, []string{"SyncDefaultBranch:0", "SyncDefaultBranch:1"}) {
+					t.Fatalf("refresh must sync every repository without committing: %v", ctr.calls)
+				}
+			})
 		}
 	})
 

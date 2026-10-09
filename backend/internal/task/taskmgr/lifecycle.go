@@ -461,7 +461,8 @@ func (r *Lifecycle) ForkDelegatedFor(ctx context.Context, parentTaskID ksid.ID, 
 	return r.Fork(ctx, p)
 }
 
-// Sync pushes task commits to each repository's task or default branch.
+// Sync pushes task commits to each repository's task or default branch and
+// publishes refreshed diff statistics and repository state after a successful push.
 func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*SyncResult, error) {
 	t := r.entry.Task()
 	switch t.GetState() {
@@ -492,10 +493,19 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		return nil, internalErr(err, "sync to "+string(target))
 	}
 	status := "synced"
-	if len(ds) == 0 {
-		status = "empty"
-	} else if len(issues) > 0 && !opts.BypassSafety {
+	if len(issues) > 0 && !opts.BypassSafety {
 		status = "blocked"
+	} else if len(ds) == 0 {
+		status = "empty"
+	}
+	if status != "blocked" {
+		snapshot, err := checkout.DiffStatAndRepoStates(ctx, r.manager.log, r.manager.Runtimes, gitTarget)
+		if t.SetLiveRepositorySummary(&snapshot) {
+			r.manager.NotifyTaskChange()
+		}
+		if err != nil {
+			return nil, internalErr(err, "push completed but refreshing task repository summary failed")
+		}
 	}
 	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: ds, SafetyIssues: issues}, nil
 }

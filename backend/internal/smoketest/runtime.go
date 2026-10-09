@@ -243,6 +243,9 @@ func (b *RuntimeBackend) Fetch(ctx context.Context, id runtime.ID, _ runtime.Fet
 	return branches, nil
 }
 
+// RefreshRefs implements runtime.Repository. Fake repositories already use host refs.
+func (*RuntimeBackend) RefreshRefs(context.Context, runtime.ID) error { return nil }
+
 // Stop implements runtime.Lifecycle.
 func (*RuntimeBackend) Stop(_ context.Context, _ runtime.ID) error { return nil }
 

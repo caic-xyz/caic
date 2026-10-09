@@ -1004,6 +1004,9 @@ func TestCheckout(t *testing.T) {
 		if err != nil || len(issues) != 0 || len(ds) != 2 {
 			t.Fatalf("push pinned commits: stats=%+v issues=%+v err=%v", ds, issues, err)
 		}
+		if !slices.Equal(sc.refreshIDs, []runtime.ID{id}) {
+			t.Fatalf("successful push must refresh container upstream refs: %v", sc.refreshIDs)
+		}
 		if destinations[0].Remote != "origin" || destinations[0].Branch != "main" || destinations[1].Remote != "upstream" || destinations[1].Branch != "trunk" {
 			t.Fatalf("independent destinations: %+v", destinations)
 		}
@@ -1032,6 +1035,9 @@ func TestCheckout(t *testing.T) {
 		_, issues, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{Force: true})
 		if err != nil || len(issues) == 0 {
 			t.Fatalf("second-repo safety check: %+v, %v", issues, err)
+		}
+		if len(sc.refreshIDs) != 1 {
+			t.Fatal("blocked push refreshed container refs")
 		}
 		for i, root := range roots {
 			g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
@@ -1111,6 +1117,14 @@ func TestCheckout(t *testing.T) {
 					if opts.Commit {
 						t.Fatal("push committed pending edits without authorization")
 					}
+				}
+				sc.refreshErr = errors.New("container refs unavailable")
+				_, _, err = w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, destinations, PushOptions{})
+				if !errors.Is(err, sc.refreshErr) || !strings.Contains(err.Error(), "push completed") {
+					t.Fatalf("post-push refresh failure must report that publication completed: %v", err)
+				}
+				if _, ok := errors.AsType[*PushRefreshError](err); !ok {
+					t.Fatalf("CI must distinguish a successful push with failed refresh: %v", err)
 				}
 			})
 		}
@@ -1618,14 +1632,21 @@ func TestDiffRepoPrefix(t *testing.T) {
 type recordingContainer struct {
 	*runtimetest.FakeBackend
 
-	fetchIDs []runtime.ID
-	diffIDs  []runtime.ID
-	diffIdxs []int
+	fetchIDs   []runtime.ID
+	refreshIDs []runtime.ID
+	refreshErr error
+	diffIDs    []runtime.ID
+	diffIdxs   []int
 }
 
 // newRecordingContainer builds a recordingContainer with the fixed diff output.
 func newRecordingContainer() *recordingContainer {
 	return &recordingContainer{FakeBackend: &runtimetest.FakeBackend{DiffOutput: "5\t1\tmain.go\n"}}
+}
+
+func (c *recordingContainer) RefreshRefs(_ context.Context, id runtime.ID) error {
+	c.refreshIDs = append(c.refreshIDs, id)
+	return c.refreshErr
 }
 
 func (c *recordingContainer) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOpts) ([]runtime.FetchedBranch, error) {

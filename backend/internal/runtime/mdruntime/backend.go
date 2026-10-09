@@ -73,6 +73,7 @@ type mdContainer interface {
 	Connect(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) (*md.StartResult, error)
 	Diff(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.DiffOpts) error
 	Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error)
+	SyncDefaultBranch(ctx context.Context, repoIdx int) error
 	Stop(ctx context.Context) error
 	Purge(ctx context.Context, stdout, stderr io.Writer) error
 	Revive(ctx context.Context, stdout, stderr io.Writer) error
@@ -297,6 +298,10 @@ func (a mdContainerAdapter) Diff(ctx context.Context, stdout, stderr io.Writer, 
 
 func (a mdContainerAdapter) Fetch(ctx context.Context, stdout, stderr io.Writer, repoIdx int, opts *md.FetchOpts) ([]md.FetchedBranch, error) {
 	return a.c.Fetch(ctx, stdout, stderr, repoIdx, opts)
+}
+
+func (a mdContainerAdapter) SyncDefaultBranch(ctx context.Context, repoIdx int) error {
+	return a.c.SyncDefaultBranch(ctx, repoIdx)
 }
 
 func (a mdContainerAdapter) Stop(ctx context.Context) error { return a.c.Stop(ctx) }
@@ -599,6 +604,26 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.ID, opts runtime.FetchOp
 		}
 	}
 	return fetched, nil
+}
+
+// RefreshRefs implements runtime.Repository.
+func (b *Backend) RefreshRefs(ctx context.Context, id runtime.ID) error {
+	localID, err := b.localID(id)
+	if err != nil {
+		return err
+	}
+	ct, err := b.container(ctx, string(localID))
+	if err != nil {
+		return err
+	}
+	var errs []error
+	repos := ct.Repos()
+	for i := range repos {
+		if err := ct.SyncDefaultBranch(ctx, i); err != nil {
+			errs = append(errs, fmt.Errorf("refresh upstream refs for %s: %w", repos[i].ContainerPath, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Stop implements runtime.Lifecycle.

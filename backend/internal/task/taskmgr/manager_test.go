@@ -3518,6 +3518,54 @@ func TestManager(t *testing.T) {
 	})
 	t.Run("Sync", func(t *testing.T) {
 		t.Parallel()
+		t.Run("valid_refreshes_live_repository_summary", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			initTaskRepo(t, dir, []string{"branch", "caic-0"})
+			checkout, err := repo.NewCheckout(t.Context(), testLogger(), dir, t.TempDir(), "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "caic-0")
+			cmd.Dir = dir
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend := &runtimetest.FakeBackend{
+				DiffOutput:            "3\t0\tcommitted.go\n1\t0\tpending.go\n",
+				FetchedBranches:       []runtime.FetchedBranch{{RepositoryPath: "/home/user/src/repo", BranchName: "caic-0", CommitHash: strings.TrimSpace(string(out))}},
+				RepositoryStatusValue: runtime.RepositoryStatus{Branch: "caic-0", DiffStat: []runtime.GitFileStat{{Path: "pending.go", LinesAdded: 1}}},
+			}
+			m := newTestManager(t, Config{ServerCtx: t.Context(), Runtimes: newTestRuntime(t, backend, nil)})
+			registerCheckout(t, m.Checkouts, "repo", checkout)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "x"}, "", "")
+			tk.Repos = []taskslog.RepoMount{{Name: "repo", GitRoot: dir, ContainerPath: "~/src/repo", Branch: "caic-0"}}
+			tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{}, "", "", 0)
+			tk.SetState(taskslog.StateWaiting)
+			tk.SetLiveRepositorySummary(&repo.GitSnapshot{Read: repo.NewGitRead(tk.RuntimeInstanceID()), DiffStat: v3.DiffStat{{Path: "committed.go", LinesAdded: 3}, {Path: "pending.go", LinesAdded: 1}}})
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			changed := m.Changed()
+			result, err := e.Lifecycle.Sync(t.Context(), SyncTargetOrigin, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "synced" || len(result.DiffStat) != 2 {
+				t.Fatalf("sync must preserve its pre-push report: %+v", result)
+			}
+			if got := tk.LiveDiffStat(); len(got) != 1 || got[0].Path != "pending.go" {
+				t.Fatalf("post-push stats must retain only pending edits: %+v", got)
+			}
+			if got := tk.Snapshot().RepoStates; len(got) != 1 || got[0].Ahead != 0 || got[0].LinesAdded != 1 {
+				t.Fatalf("post-push repository state: %+v", got)
+			}
+			select {
+			case <-changed:
+			default:
+				t.Fatal("sync did not notify task-list subscribers")
+			}
+		})
 		t.Run("error_pending_no_container", func(t *testing.T) {
 			t.Parallel()
 			m := newTestManager(t, Config{ServerCtx: t.Context()})

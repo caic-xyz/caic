@@ -1,4 +1,4 @@
-// Runtime smoke coverage fetches task commits and pushes through ordinary HEAD-only hooks.
+// Runtime smoke coverage verifies task pushes, HEAD-only hooks, and upstream/stat refreshes.
 
 //go:build smoke
 
@@ -54,9 +54,10 @@ func TestSmokePush(t *testing.T) {
 	id := task.ID.String()
 	task = waitForTaskState(t, smoke, id, "waiting")
 	container := string(runtime.ID(task.Runtime.ID).InstanceID())
+	containerRoot := "/home/user/src/" + filepath.Base(repos[0].Path)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	t.Cleanup(cancel)
-	cmd := exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", container, "sh", "-c", "set -eu; cd -- \"$1\"; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD", "sh", root) //nolint:gosec // fixture-owned runtime, container, and repository.
+	cmd := exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "sh", "-c", "set -eu; cd -- \"$1\"; printf '%s\\n' runtime-task > smoke-push.txt; git add smoke-push.txt; git -c user.name=Smoke -c user.email=smoke@example.com commit -m 'Runtime task change'; git rev-parse HEAD", "sh", containerRoot) //nolint:gosec // fixture-owned runtime, container, and repository.
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("container commit: %v: %s", err, out)
@@ -70,6 +71,22 @@ func TestSmokePush(t *testing.T) {
 	postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/sync", v1.SyncReq{}, &resp)
 	if resp.Status != "synced" {
 		t.Fatalf("sync: %+v", resp)
+	}
+	cmd = exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/"+task.Repos[0].Branch) //nolint:gosec // fixture-owned runtime, container, and repository.
+	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != tip {
+		t.Fatalf("container task-branch tracking ref: %q, %v; want %s", out, err, tip)
+	}
+	postJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id+"/sync", v1.SyncReq{Target: "default"}, &resp)
+	if resp.Status != "synced" {
+		t.Fatalf("default sync: %+v", resp)
+	}
+	cmd = exec.CommandContext(ctx, smoketest.SmokeRuntime(), "exec", "--user", "user", container, "git", "-C", containerRoot, "rev-parse", "refs/remotes/origin/main") //nolint:gosec // fixture-owned runtime, container, and repository.
+	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != tip {
+		t.Fatalf("container upstream tracking ref: %q, %v; want %s", out, err, tip)
+	}
+	getJSON(t, smoke.baseURL, "/api/caic/v1/tasks/"+id, &task)
+	if len(task.DiffStat) != 0 || len(task.RepoStates) != 1 || task.RepoStates[0].Ahead != 0 {
+		t.Fatalf("post-push task statistics: diff=%+v repos=%+v", task.DiffStat, task.RepoStates)
 	}
 	verified, err := os.ReadFile(audit)
 	if err != nil || strings.TrimSpace(string(verified)) != tip {

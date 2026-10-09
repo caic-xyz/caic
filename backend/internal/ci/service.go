@@ -379,8 +379,20 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 	_, issues, err := checkout.Push(ctx, svc.log, svc.backend.RuntimeRouter(), target, destinations, repo.PushOptions{CommitPending: true, Force: true})
 	if err != nil || len(issues) > 0 {
-		svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err, "safetyIssues", len(issues))
-		return
+		if _, refreshFailed := errors.AsType[*repo.PushRefreshError](err); !refreshFailed {
+			svc.log.WarnContext(ctx, "sync failed", "task", t.ID, "err", err, "safetyIssues", len(issues))
+			return
+		}
+		svc.log.WarnContext(ctx, "push completed but refreshing container upstream refs failed", "task", t.ID, "err", err)
+	}
+	if err == nil {
+		snapshot, err := checkout.DiffStatAndRepoStates(ctx, svc.log, svc.backend.RuntimeRouter(), target)
+		if t.SetLiveRepositorySummary(&snapshot) {
+			svc.backend.NotifyTaskChange()
+		}
+		if err != nil {
+			svc.log.WarnContext(ctx, "push completed but refreshing task repository summary failed", "task", t.ID, "err", err)
+		}
 	}
 
 	// Fetch the new branch HEAD SHA from the forge after the push.
