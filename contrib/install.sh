@@ -161,7 +161,7 @@ install_service_launchd() {
   dest="${HOME}/Library/LaunchAgents/com.caic.caic.plist"
   if [ ! -f "$dest" ]; then
     mkdir -p "$(dirname "$dest")"
-    sed "s|/Users/CHANGEME/.local/bin/caic|${INSTALL_DIR}/caic|" "$src" >"$dest"
+    cp "$src" "$dest"
     printf '  installed %s\n' "$dest"
     launchctl bootstrap "gui/$(id -u)" "$dest"
   else

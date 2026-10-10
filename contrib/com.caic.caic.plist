@@ -3,6 +3,7 @@
 <!-- Install: cp contrib/com.caic.caic.plist ~/Library/LaunchAgents/ -->
 <!--          mkdir -p ~/.config/caic && cp contrib/config.toml ~/.config/caic/config.toml -->
 <!--          Edit ~/.config/caic/config.toml (see contrib/config.toml for documentation). -->
+<!--          The account login shell loads its login profile for service variables. -->
 <!-- Enable:  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist -->
 <!-- Disable: launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist -->
 <!-- Logs:    tail -f /tmp/caic.log -->
@@ -14,7 +15,9 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/CHANGEME/.local/bin/caic</string>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>shell=$(/usr/bin/id -P | /usr/bin/awk -F: '{print $NF}'); exec "$shell" -lc 'exec ~/.local/bin/caic'</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -31,12 +34,6 @@
 
   <key>ProcessType</key>
   <string>Background</string>
-
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-  </dict>
 
   <key>SoftResourceLimits</key>
   <dict>

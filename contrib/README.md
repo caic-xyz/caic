@@ -18,7 +18,8 @@ Platform service files and default configuration for running caic as a daemon.
 ```bash
 # Install
 cp contrib/com.caic.caic.plist ~/Library/LaunchAgents/
-# Edit the plist to set the correct binary path.
+# The agent runs caic through the account's login shell, loading its login profile.
+# Export service variables from ~/.zprofile (zsh) or ~/.bash_profile (Bash).
 
 # Enable
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist
