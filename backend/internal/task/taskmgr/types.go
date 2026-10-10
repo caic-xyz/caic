@@ -20,6 +20,7 @@ type CreateParams struct {
 	Prompt            agent.Prompt
 	Repos             []CreateRepo // first entry is primary; empty = no-repo
 	Harness           harness.Name
+	ResumeSessionID   string // opaque harness-native session ID; empty starts a fresh session
 	Model             string // "" = harness default
 	Effort            string // thinking effort; empty = default
 	Tailscale         bool

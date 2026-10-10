@@ -3,12 +3,12 @@ package backends
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
-	"github.com/caic-xyz/caic/backend/internal/agents/antigravity"
 )
 
 // Default returns the standard caic agent backend set.

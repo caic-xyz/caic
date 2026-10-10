@@ -103,6 +103,7 @@ function createAppStore() {
     return true;
   };
 
+  const [resumeSessionID, setResumeSessionID] = createSignal("");
   const [prompt, setPromptValue] = createSignal("");
   let promptRevision = 0;
   const setPrompt = (value: string) => {
@@ -132,6 +133,7 @@ function createAppStore() {
   const [selectedHarness, setSelectedHarness] = createSignal("");
   const [runtimes, setRuntimes] = createSignal<RuntimeInfo[]>([]);
   const [selectedRuntimeName, setSelectedRuntimeName] = createSignal("");
+  const [featuresOpen, setFeaturesOpen] = createSignal(false);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
   const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
   const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
@@ -1291,6 +1293,7 @@ function createAppStore() {
     const p = prompt().trim();
     const imgs = pendingImages();
     const revision = promptRevision;
+    const sessionID = resumeSessionID();
     const selRepos = selectedRepos();
     if (submitting() || (!p && imgs.length === 0)) return;
     notifications.requestNotificationPermission({
@@ -1338,6 +1341,7 @@ function createAppStore() {
         },
         repos: repoSpecs,
         harness: harness as Harness,
+        ...(sessionID.trim() ? { resumeSessionID: sessionID.trim() } : {}),
         ...(runtimeName ? { runtimeName } : {}),
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
@@ -1352,6 +1356,7 @@ function createAppStore() {
       setPrefModel(harness, model);
       setPrefEffort(harness, model, effort);
       if (promptRevision === revision) setPrompt("");
+      if (resumeSessionID() === sessionID) setResumeSessionID("");
       removePendingImages(imgs);
       navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));
     } catch (err) {
@@ -1605,6 +1610,8 @@ function createAppStore() {
     // new-task form
     prompt,
     setPrompt,
+    resumeSessionID,
+    setResumeSessionID,
     selectedRepos,
     setSelectedRepos,
     selectedModel,
@@ -1617,6 +1624,8 @@ function createAppStore() {
     runtimes,
     selectedRuntimeName,
     setSelectedRuntimeName: selectRuntimeName,
+    featuresOpen,
+    setFeaturesOpen,
     harnessSupportsImages,
     pendingImages,
     addPendingImages,

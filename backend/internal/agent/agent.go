@@ -1134,6 +1134,11 @@ type RelayProcess struct {
 	Stdout io.Reader
 }
 
+// ShellQuote preserves one argument through a POSIX shell without expansion.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 // PrepareRelay deploys the relay script and starts the SSH serve-attach
 // process. relayArgs configure the relay; agentArgs start the harness after
 // the relay's command separator. The caller creates a Conn and Session from
@@ -1168,8 +1173,14 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	sshArgs = append(sshArgs, "--")
 	sshArgs = append(sshArgs, agentArgs...)
 
+	// OpenSSH joins remote arguments and passes them through the login shell.
+	// Keep the fixed environment assignment as shell syntax; quote the command
+	// and its arguments so opaque session IDs remain one argv value.
+	for i := 2; i < len(sshArgs); i++ {
+		sshArgs[i] = ShellQuote(sshArgs[i])
+	}
 	opts.Logger.DebugContext(ctx, "relay", "msg", "launch", "target", sshHost, "args", agentArgs)
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // remote arguments are shell-quoted; target is server-owned.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)

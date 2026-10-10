@@ -87,9 +87,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		relayArgs = append(relayArgs, "--caic-mcp")
 		codexArgs = append(codexArgs,
 			"-c", `mcp_servers.caic.command="python3"`,
-			// ssh reconstructs the remote command through a shell. Keep the TOML
-			// string delimiters as literal characters for the Codex CLI to parse.
-			"-c", `mcp_servers.caic.args=[\"`+agent.RelayScriptPath+`\",\"caic-mcp\"]`,
+			"-c", `mcp_servers.caic.args=["`+agent.RelayScriptPath+`","caic-mcp"]`,
 		)
 	}
 	rp, err := agent.PrepareRelay(ctx, opts, relayArgs, codexArgs)
@@ -319,7 +317,13 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	// 4. Send thread/start or thread/resume.
 	var threadReq codex.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
-		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID})
+		// thread/resume loads persisted local thread history from CODEX_HOME
+		// (default ~/.codex). The ID alone cannot recover missing history.
+		// md mounts ~/.codex into new containers; a custom CODEX_HOME must
+		// also be accessible. This resumes the local app-server, not a cloud task.
+		// https://developers.openai.com/codex/app-server/
+		// https://developers.openai.com/codex/config-advanced/
+		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID, Model: opts.Model})
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
 		}

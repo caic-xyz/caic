@@ -368,7 +368,7 @@ case "$2" in
 esac
 for arg in "$@"; do
   case "$arg" in
-  serve-attach)
+  "'serve-attach'")
     /bin/sleep 600 </dev/null >/dev/null 2>&1 &
     relay=$!
     echo "$relay" > "$CAIC_OPENCODE_RELAY_PID"

@@ -98,6 +98,7 @@ test("Ctrl+Enter submits from a focused feature toggle without toggling it", asy
   const prompt = uniquePrompt("shortcut from feature toggle");
   await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await expect(page.getByTestId("submit-task")).toBeEnabled();
+  await page.getByRole("button", { name: "Show features" }).click();
   const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
   await expect(toggle).toBeChecked();
   await toggle.focus();

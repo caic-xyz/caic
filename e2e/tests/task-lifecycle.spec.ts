@@ -61,6 +61,125 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await waitForTaskState(api, task!.id, "purged");
 });
 
+test("new-task effort stays compact and features follow the selectors", async ({ page, api }, testInfo) => {
+  const harnesses = await api.listHarnesses();
+  await page.route("**/server/harnesses", (route) =>
+    route.fulfill({
+      json: harnesses.map((harness) =>
+        harness.name === "codex"
+          ? { ...harness, models: [{ id: "fake-model", effortOptions: ["low", "medium", "high"] }] }
+          : harness,
+      ),
+    }),
+  );
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("harness-select").selectOption("codex");
+  await page.getByTestId("model-select").click();
+  await page.getByRole("option", { name: "fake-model", exact: true }).click();
+  const effort = page.getByTestId("effort-select");
+  await effort.selectOption("medium");
+  const disclosure = page.getByRole("button", { name: "Show features" });
+  const desktopEffort = (await effort.boundingBox())!;
+  const desktopDisclosure = (await disclosure.boundingBox())!;
+  expect.soft(Math.abs(desktopDisclosure.y - desktopEffort.y)).toBeLessThan(1);
+  expect.soft(desktopDisclosure.x - desktopEffort.x - desktopEffort.width).toBeLessThan(10);
+  await page.screenshot({ path: testInfo.outputPath("compact-controls-desktop.png") });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(effort).toBeVisible();
+  expect.soft((await effort.boundingBox())!.width).toBeLessThanOrEqual(desktopEffort.width + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("compact-controls-mobile.png") });
+});
+
+test("collapsed task features preserve opaque session IDs on desktop and mobile", async ({
+  page,
+  api,
+  uniquePrompt,
+}, testInfo) => {
+  const config = await api.getConfig();
+  const runtimes = config.runtimes;
+  if (!runtimes?.length) throw new Error("Fake server must expose a runtime");
+  await page.route("**/server/config", (route) =>
+    route.fulfill({
+      json: { ...config, runtimes: [...runtimes, { name: "standby" }] },
+    }),
+  );
+  await page.goto("/");
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+  const runtime = page.getByRole("combobox", { name: "Runtime" });
+  const disclosure = page.getByRole("button", { name: /^(Show|Hide) features$/ });
+  const input = page.getByRole("textbox", { name: "Session ID to resume" });
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(input).toBeHidden();
+  await expect(runtime).toBeHidden();
+  const harness = page.getByTestId("harness-select");
+  await expect
+    .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
+    .toBeLessThan(1);
+  await page.screenshot({ path: testInfo.outputPath("features-collapsed-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(async () => Math.abs((await disclosure.boundingBox())!.height - (await harness.boundingBox())!.height))
+    .toBeLessThan(1);
+  await page.screenshot({ path: testInfo.outputPath("features-collapsed-mobile.png") });
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await disclosure.focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("prompt-input")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(disclosure).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  await expect(input).toBeVisible();
+  await expect(runtime).toBeVisible();
+  await runtime.selectOption(runtimes[0].name);
+  await expect(input).toHaveAttribute("placeholder", "Session ID to resume");
+  await expect(input).not.toHaveAttribute("maxlength");
+  await disclosure.focus();
+  await page.keyboard.press("Tab");
+  await expect(runtime).toBeFocused();
+  const sessionID = "harness session:';$(opaque) " + "opaque-value-".repeat(12);
+  await input.fill(`  ${sessionID}  `);
+  expect((await input.boundingBox())!.width).toBeLessThan(450);
+  await page.screenshot({ path: testInfo.outputPath("resume-session-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(input).toHaveValue(`  ${sessionID}  `);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const bounds = await input.boundingBox();
+  expect(bounds!.width).toBeGreaterThan(250);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: testInfo.outputPath("resume-session-mobile.png") });
+  const toggle = page.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
+  await toggle.focus();
+  await page.keyboard.press("Space");
+  await expect(toggle).not.toBeChecked();
+  await page.getByRole("button", { name: "Hide features" }).click();
+  await expect(input).toBeHidden();
+  await expect(runtime).toBeHidden();
+  await expect(page.getByRole("button", { name: "Show features" })).toBeFocused();
+  await page.getByRole("button", { name: "Show features" }).click();
+  await expect(input).toHaveValue(`  ${sessionID}  `);
+  await expect(runtime).toHaveValue(runtimes[0].name);
+  await expect(toggle).not.toBeChecked();
+  await page.getByRole("button", { name: "Hide features" }).click();
+
+  const prompt = uniquePrompt("Continue the existing session");
+  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
+  const request = page.waitForRequest((req) => req.method() === "POST" && req.url().endsWith("/api/caic/v1/tasks"));
+  await page.getByTestId("submit-task").click();
+  const body = (await request).postDataJSON();
+  expect(body).toMatchObject({ resumeSessionID: sessionID, runtimeName: runtimes[0].name });
+  expect(body.caicMCP).toBeUndefined();
+  await expect(page).toHaveURL(/\/task\//);
+  const tasks = await api.listTasks();
+  const task = tasks.find((t) => t.initialPrompt === prompt);
+  expect(task).toBeTruthy();
+  await waitForTaskState(api, task!.id, "waiting");
+  await api.stopTask(task!.id);
+});
+
 test("mobile stopped task card exposes Revive without selection", async ({ page, api }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const id = await createTaskAPI(api, "Revive from the mobile task summary");

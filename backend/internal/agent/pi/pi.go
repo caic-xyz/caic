@@ -102,6 +102,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 	args := []string{"pi", "--mode", "rpc", "--approve"}
 	if a.ResumeSessionID != "" {
+		// Resume reads local JSONL history under ~/.pi/agent/sessions/ by default,
+		// grouped by working directory. The ID alone cannot recover missing history.
+		// md mounts ~/.pi into new containers. A custom session directory must
+		// also be accessible; sessions created with --no-session cannot resume.
+		// https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sessions.md
 		args = append(args, "--session", a.ResumeSessionID)
 	}
 	return args

@@ -1162,6 +1162,7 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
 | `harness` | `Harness` |  | yes |
 | `runtimeName` | `string` |  |  |
+| `resumeSessionID` | `string` | Opaque harness-native session ID; the session must be accessible in the new runtime. |  |
 | `tailscale` | `boolean` |  |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |

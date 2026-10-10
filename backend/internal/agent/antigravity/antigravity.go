@@ -166,6 +166,14 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 		args = append(args, "--effort", a.Effort)
 	}
 	if a.ResumeSessionID != "" {
+		// agy persists conversation history locally under ~/.gemini/antigravity-cli/.
+		// The resume guide's backend lookup does not establish a cloud-backup
+		// guarantee. Do not assume an ID can recover missing local history.
+		// --continue uses ~/.gemini/antigravity-cli/cache/last_conversations.json
+		// to look up the workspace's last ID; an explicit ID bypasses that lookup.
+		// md mounts ~/.gemini into new containers for shared harness state.
+		// https://github.com/maruel/genai/blob/v0.10.2/providers/antigravity/client.go
+		// https://www.antigravity.google/docs/cli/commands/resume
 		args = append(args, "--conversation", a.ResumeSessionID)
 	}
 	return args
@@ -383,7 +391,7 @@ func convertUsage(u *antigravity.JSONUsage) agent.Usage {
 func shellCommand(args []string) string {
 	quoted := make([]string, len(args))
 	for i, a := range args {
-		quoted[i] = "'" + strings.ReplaceAll(a, "'", "'\"'\"'") + "'"
+		quoted[i] = agent.ShellQuote(a)
 	}
 	return strings.Join(quoted, " ")
 }

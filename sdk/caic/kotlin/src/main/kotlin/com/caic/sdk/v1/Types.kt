@@ -1900,6 +1900,8 @@ data class CreateTaskReq(
     val effort: String? = null,
     val harness: Harness,
     val runtimeName: String? = null,
+    /** Opaque harness-native session ID; the session must be accessible in the new runtime. */
+    @SerialName("resumeSessionID") val resumeSessionID: String? = null,
     val tailscale: Boolean? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,

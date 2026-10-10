@@ -535,11 +535,12 @@ func TestRunner(t *testing.T) {
 				})
 			}
 		})
-		t.Run("PassesModelAndEffort", func(t *testing.T) {
+		t.Run("PassesModelEffortAndResumeSession", func(t *testing.T) {
 			t.Parallel()
 			backend := &testBackend{FakeBackend: &agenttest.FakeBackend{}}
 			r := newTestAgentRuntimeWithRuntime(t, testContainer(), map[harness.Name]agent.Backend{"test": backend}, t.TempDir())
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "model-1", "high")
+			tk.SetSessionMetadata("session:not-a-guid", "", "", "")
 			tk.StartedAt = time.Now().UTC()
 			h, err := r.Start(t.Context(), tk, "")
 			if err != nil {
@@ -557,6 +558,12 @@ func TestRunner(t *testing.T) {
 			}
 			if backend.capturedOpts.Effort != "high" {
 				t.Errorf("Effort = %q, want high", backend.capturedOpts.Effort)
+			}
+			if got := backend.capturedOpts.ResumeSessionID; got != "session:not-a-guid" {
+				t.Errorf("ResumeSessionID = %q, want session:not-a-guid", got)
+			}
+			if got := backend.capturedOpts.InitialPrompt.Text; got != "test" {
+				t.Errorf("InitialPrompt = %q, want test", got)
 			}
 		})
 		t.Run("PersistsSetupLogsOnFailure", func(t *testing.T) {

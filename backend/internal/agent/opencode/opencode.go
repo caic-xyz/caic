@@ -523,6 +523,11 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 	var sessionReq opencode.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
+		// session/load reads local session data under ~/.local/share/opencode/
+		// by default. The ID alone cannot recover missing history. md mounts
+		// OpenCode's data directory into new containers; custom storage must
+		// also be accessible. The load request supplies this task's workspace.
+		// https://opencode.ai/docs/troubleshooting/#storage
 		params, err := marshalParams(opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: servers})
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal session/load params: %w", err)

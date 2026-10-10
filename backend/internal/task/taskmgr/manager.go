@@ -467,6 +467,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (ksid.ID, error) {
 	if err != nil {
 		return 0, badRequestf("%v", err)
 	}
+	t.SetSessionMetadata(p.ResumeSessionID, "", "", "")
 	t.Repos = mounts
 	t.RuntimeName = runtimeName
 	t.MaxCPUs = p.MaxCPUs

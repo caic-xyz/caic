@@ -1489,6 +1489,8 @@ export interface CreateTaskReq {
   effort?: string;
   harness: Harness;
   runtimeName?: string;
+  /** Opaque harness-native session ID; the session must be accessible in the new runtime. */
+  resumeSessionID?: string;
   tailscale?: boolean;
   usb?: boolean;
   display?: boolean;

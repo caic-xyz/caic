@@ -275,14 +275,15 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	region = trace.StartRegion(ctx, "agent-session")
 	target := sr.AgentTarget
 	opts := &agent.Options{
-		Logger:        r.Log,
-		Target:        target,
-		Dir:           r.runtimeDir(t),
-		Model:         t.RequestedModel,
-		Effort:        t.RequestedEffort,
-		InitialPrompt: t.InitialPrompt,
-		MsgCh:         msgCh,
-		Log:           log,
+		Logger:          r.Log,
+		Target:          target,
+		Dir:             r.runtimeDir(t),
+		Model:           t.RequestedModel,
+		Effort:          t.RequestedEffort,
+		InitialPrompt:   t.InitialPrompt,
+		ResumeSessionID: t.GetSessionID(),
+		MsgCh:           msgCh,
+		Log:             log,
 	}
 	if err := r.configureTaskMCP(t, opts); err != nil {
 		close(msgCh)

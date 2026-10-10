@@ -5,8 +5,8 @@ package backends
 import (
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
-	"github.com/caic-xyz/caic/backend/internal/agents/antigravity"
 )
 
 func TestDefault(t *testing.T) {

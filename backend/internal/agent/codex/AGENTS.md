@@ -165,7 +165,7 @@ resumes with `thread/resume` and compacts with `thread/compact/start`.
 - Steer a running turn — `turn/steer`
 - Roll back turns — `thread/rollback`
 - Switch the model for a turn — `model` on `turn/start`; caic selects the model
-  once at `thread/start`
+  once at `thread/start` or `thread/resume`
 
 Codex can also fork a thread and run a code review, but the pinned `genai` DTOs
 model neither request — `ThreadStartParams` carries no fork field — so extending

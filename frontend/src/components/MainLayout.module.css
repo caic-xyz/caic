@@ -28,8 +28,70 @@
     margin-bottom 150ms ease-out;
 }
 
+.featureToggle {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: calc(1.4em + 0.7rem);
+  padding: 0.35rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: var(--color-bg-input);
+  border: none;
+  border-radius: var(--radius-md);
+}
+
+.featureToggle:hover {
+  background: var(--color-bg-input-hover);
+}
+
+.featureToggle:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
+.featureArrowOpen {
+  transform: rotate(90deg);
+}
+
+.featurePanel {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.featurePanel[hidden] {
+  display: none;
+}
+
+.sessionInput {
+  box-sizing: border-box;
+  flex: 1 1 16rem;
+  min-width: 0;
+  max-width: calc(36ch + 1rem + 2px);
+  padding: 0.5rem;
+  font: inherit;
+  font-family: monospace;
+  color: var(--color-text-primary);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.sessionInput:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
 .promptInput {
-  flex: 1;
+  flex: 1 1 100%;
   max-height: 10rem;
   padding: 0.35rem 0.5rem;
   overflow-y: auto;

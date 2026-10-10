@@ -64,7 +64,7 @@ func runPiSSHHelper() {
 			os.Exit(1)
 		}
 		fmt.Println("Pi and extensions updated")
-	case slices.Contains(args, "serve-attach"):
+	case slices.Contains(args, "'serve-attach'"):
 		runPiRelayHelper()
 	}
 }
@@ -324,7 +324,7 @@ func TestBackendStart(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	args, err := os.ReadFile(filepath.Join(dir, "relay-args")) //nolint:gosec // test-owned temporary directory
-	if err != nil || !strings.Contains(string(args), "--session ses-1") {
+	if err != nil || !strings.Contains(string(args), "'--session' 'ses-1'") {
 		t.Fatalf("Pi resume command=%s err=%v", args, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "updated")); err != nil {

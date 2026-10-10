@@ -95,6 +95,11 @@ func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
 		args = append(args, "--effort", a.Effort)
 	}
 	if a.ResumeSessionID != "" {
+		// Resume reads local JSONL history under ~/.claude/projects/ by default.
+		// The ID alone cannot recover missing history. md mounts ~/.claude into
+		// new containers; a custom CLAUDE_CONFIG_DIR needs accessible storage too.
+		// Sessions are directory-scoped, so workspace paths affect discovery.
+		// https://code.claude.com/docs/en/how-claude-code-works#work-with-sessions
 		args = append(args, "--resume", a.ResumeSessionID)
 	}
 	return args

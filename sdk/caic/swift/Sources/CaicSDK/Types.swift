@@ -1296,6 +1296,8 @@ public struct CreateTaskReq: Codable {
     public let effort: String?
     public let harness: Harness
     public let runtimeName: String?
+    /// Opaque harness-native session ID; the session must be accessible in the new runtime.
+    public let resumeSessionID: String?
     public let tailscale: Bool?
     public let usb: Bool?
     public let display: Bool?

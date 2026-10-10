@@ -622,18 +622,19 @@ type CILogResp struct {
 
 // CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 type CreateTaskReq struct {
-	InitialPrompt Prompt     `json:"initialPrompt"`
-	Repos         []RepoSpec `json:"repos,omitempty"`
-	Model         string     `json:"model,omitempty"`
-	Effort        string     `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
-	Harness       Harness    `json:"harness"`
-	RuntimeName   string     `json:"runtimeName,omitempty"`
-	Tailscale     bool       `json:"tailscale,omitempty"`
-	USB           bool       `json:"usb,omitempty"`
-	Display       bool       `json:"display,omitempty"`
-	Sudo          bool       `json:"sudo,omitempty"`
-	GitHubToken   bool       `json:"gitHubToken,omitempty"`
-	CaicMCP       bool       `json:"caicMCP,omitempty"` // Enables task-scoped CAIC MCP delegation.
+	InitialPrompt   Prompt     `json:"initialPrompt"`
+	Repos           []RepoSpec `json:"repos,omitempty"`
+	Model           string     `json:"model,omitempty"`
+	Effort          string     `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
+	Harness         Harness    `json:"harness"`
+	RuntimeName     string     `json:"runtimeName,omitempty"`
+	ResumeSessionID string     `json:"resumeSessionID,omitempty"` // Opaque harness-native session ID; the session must be accessible in the new runtime.
+	Tailscale       bool       `json:"tailscale,omitempty"`
+	USB             bool       `json:"usb,omitempty"`
+	Display         bool       `json:"display,omitempty"`
+	Sudo            bool       `json:"sudo,omitempty"`
+	GitHubToken     bool       `json:"gitHubToken,omitempty"`
+	CaicMCP         bool       `json:"caicMCP,omitempty"` // Enables task-scoped CAIC MCP delegation.
 }
 
 // Validate checks that prompt and harness are valid. Repos is optional (empty

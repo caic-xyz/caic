@@ -80,6 +80,7 @@ export default function KeyboardShortcuts(props: Props) {
     s.navigate("/");
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLElement>(selector);
+      if (el?.matches("[data-testid='runtime-select']")) s.setFeaturesOpen(true);
       el?.focus();
     });
   }

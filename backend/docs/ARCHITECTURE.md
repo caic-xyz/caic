@@ -20,6 +20,7 @@ graph TD
   pkg_frontend["frontend"]
   pkg_internal_agent["internal/agent"]
   pkg_internal_agent_agenttest["internal/agent/agenttest"]
+  pkg_internal_agent_antigravity["internal/agent/antigravity"]
   pkg_internal_agent_backends["internal/agent/backends"]
   pkg_internal_agent_claudecode["internal/agent/claudecode"]
   pkg_internal_agent_codex["internal/agent/codex"]
@@ -28,7 +29,6 @@ graph TD
   pkg_internal_agent_opencode["internal/agent/opencode"]
   pkg_internal_agent_pi["internal/agent/pi"]
   pkg_internal_agent_relay["internal/agent/relay"]
-  pkg_internal_agents_antigravity["internal/agents/antigravity"]
   pkg_internal_app["internal/app"]
   pkg_internal_app_data["internal/app/data"]
   pkg_internal_auth["internal/auth"]
@@ -85,13 +85,18 @@ graph TD
   pkg_internal_agent -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
+  pkg_internal_agent_antigravity --> pkg_internal_agent
+  pkg_internal_agent_antigravity --> pkg_internal_agent_harness
+  pkg_internal_agent_antigravity --> pkg_internal_runtime
+  pkg_internal_agent_antigravity --> pkg_internal_taskslog_data_v3
+  pkg_internal_agent_antigravity -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_backends --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent_antigravity
   pkg_internal_agent_backends --> pkg_internal_agent_claudecode
   pkg_internal_agent_backends --> pkg_internal_agent_codex
   pkg_internal_agent_backends --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent_opencode
   pkg_internal_agent_backends --> pkg_internal_agent_pi
-  pkg_internal_agent_backends --> pkg_internal_agents_antigravity
   pkg_internal_agent_claudecode --> pkg_internal_agent
   pkg_internal_agent_claudecode --> pkg_internal_agent_harness
   pkg_internal_agent_claudecode --> pkg_internal_taskslog_data_v3
@@ -114,11 +119,6 @@ graph TD
   pkg_internal_agent_pi --> pkg_internal_taskslog_data_v3
   pkg_internal_agent_pi -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_pi -.-> pkg_internal_taskslog
-  pkg_internal_agents_antigravity --> pkg_internal_agent
-  pkg_internal_agents_antigravity --> pkg_internal_agent_harness
-  pkg_internal_agents_antigravity --> pkg_internal_runtime
-  pkg_internal_agents_antigravity --> pkg_internal_taskslog_data_v3
-  pkg_internal_agents_antigravity -.-> pkg_internal_agent_agenttest
   pkg_internal_app --> pkg_internal_agent
   pkg_internal_app --> pkg_internal_agent_backends
   pkg_internal_app --> pkg_internal_agent_harness
@@ -281,6 +281,7 @@ graph TD
 graph TD
   pkg_internal_agent["internal/agent"]
   pkg_internal_agent_agenttest["internal/agent/agenttest"]
+  pkg_internal_agent_antigravity["internal/agent/antigravity"]
   pkg_internal_agent_backends["internal/agent/backends"]
   pkg_internal_agent_claudecode["internal/agent/claudecode"]
   pkg_internal_agent_codex["internal/agent/codex"]
@@ -289,7 +290,6 @@ graph TD
   pkg_internal_agent_opencode["internal/agent/opencode"]
   pkg_internal_agent_pi["internal/agent/pi"]
   pkg_internal_agent_relay["internal/agent/relay"]
-  pkg_internal_agents_antigravity["internal/agents/antigravity"]
   pkg_internal_runtime["internal/runtime"]
   pkg_internal_runtime_runtimetest["internal/runtime/runtimetest"]
   pkg_internal_taskslog["internal/taskslog"]
@@ -310,13 +310,18 @@ graph TD
   pkg_internal_agent -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
+  pkg_internal_agent_antigravity --> pkg_internal_agent
+  pkg_internal_agent_antigravity --> pkg_internal_agent_harness
+  pkg_internal_agent_antigravity --> pkg_internal_runtime
+  pkg_internal_agent_antigravity --> pkg_internal_taskslog_data_v3
+  pkg_internal_agent_antigravity -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_backends --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent_antigravity
   pkg_internal_agent_backends --> pkg_internal_agent_claudecode
   pkg_internal_agent_backends --> pkg_internal_agent_codex
   pkg_internal_agent_backends --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent_opencode
   pkg_internal_agent_backends --> pkg_internal_agent_pi
-  pkg_internal_agent_backends --> pkg_internal_agents_antigravity
   pkg_internal_agent_claudecode --> pkg_internal_agent
   pkg_internal_agent_claudecode --> pkg_internal_agent_harness
   pkg_internal_agent_claudecode --> pkg_internal_taskslog_data_v3
@@ -339,11 +344,6 @@ graph TD
   pkg_internal_agent_pi --> pkg_internal_taskslog_data_v3
   pkg_internal_agent_pi -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_pi -.-> pkg_internal_taskslog
-  pkg_internal_agents_antigravity --> pkg_internal_agent
-  pkg_internal_agents_antigravity --> pkg_internal_agent_harness
-  pkg_internal_agents_antigravity --> pkg_internal_runtime
-  pkg_internal_agents_antigravity --> pkg_internal_taskslog_data_v3
-  pkg_internal_agents_antigravity -.-> pkg_internal_agent_agenttest
   pkg_internal_runtime --> pkg_internal_agent_harness
   pkg_internal_runtime -.-> pkg_internal_runtime_runtimetest
   pkg_internal_runtime_runtimetest --> pkg_internal_runtime
@@ -381,6 +381,7 @@ graph TD
   subgraph Agent["Agent"]
     pkg_internal_agent["internal/agent"]
     pkg_internal_agent_agenttest["internal/agent/agenttest"]
+    pkg_internal_agent_antigravity["internal/agent/antigravity"]
     pkg_internal_agent_backends["internal/agent/backends"]
     pkg_internal_agent_claudecode["internal/agent/claudecode"]
     pkg_internal_agent_codex["internal/agent/codex"]
@@ -423,7 +424,6 @@ graph TD
   end
 
   subgraph Support["Support"]
-    pkg_internal_agents_antigravity["internal/agents/antigravity"]
     pkg_internal_app["internal/app"]
     pkg_internal_app_data["internal/app/data"]
     pkg_internal_auth["internal/auth"]
@@ -463,13 +463,18 @@ graph TD
   pkg_internal_agent -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_agenttest --> pkg_internal_agent_harness
+  pkg_internal_agent_antigravity --> pkg_internal_agent
+  pkg_internal_agent_antigravity --> pkg_internal_agent_harness
+  pkg_internal_agent_antigravity --> pkg_internal_runtime
+  pkg_internal_agent_antigravity --> pkg_internal_taskslog_data_v3
+  pkg_internal_agent_antigravity -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_backends --> pkg_internal_agent
+  pkg_internal_agent_backends --> pkg_internal_agent_antigravity
   pkg_internal_agent_backends --> pkg_internal_agent_claudecode
   pkg_internal_agent_backends --> pkg_internal_agent_codex
   pkg_internal_agent_backends --> pkg_internal_agent_harness
   pkg_internal_agent_backends --> pkg_internal_agent_opencode
   pkg_internal_agent_backends --> pkg_internal_agent_pi
-  pkg_internal_agent_backends --> pkg_internal_agents_antigravity
   pkg_internal_agent_claudecode --> pkg_internal_agent
   pkg_internal_agent_claudecode --> pkg_internal_agent_harness
   pkg_internal_agent_claudecode --> pkg_internal_taskslog_data_v3
@@ -492,11 +497,6 @@ graph TD
   pkg_internal_agent_pi --> pkg_internal_taskslog_data_v3
   pkg_internal_agent_pi -.-> pkg_internal_agent_agenttest
   pkg_internal_agent_pi -.-> pkg_internal_taskslog
-  pkg_internal_agents_antigravity --> pkg_internal_agent
-  pkg_internal_agents_antigravity --> pkg_internal_agent_harness
-  pkg_internal_agents_antigravity --> pkg_internal_runtime
-  pkg_internal_agents_antigravity --> pkg_internal_taskslog_data_v3
-  pkg_internal_agents_antigravity -.-> pkg_internal_agent_agenttest
   pkg_internal_app --> pkg_internal_agent
   pkg_internal_app --> pkg_internal_agent_backends
   pkg_internal_app --> pkg_internal_agent_harness
@@ -694,7 +694,8 @@ graph TD
 | `frontend`                              | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                                                                                                    |
 | `internal/agent`                        | `internal/agent/data/harnesscache`, `internal/agent/harness`, `internal/agent/relay`, `internal/runtime`, `internal/taskslog/data/v1`, `internal/taskslog/data/v2`, `internal/taskslog/data/v3`                                                                                                                                                                                                                                                                                                                                                                                                                  | `internal/agent/agenttest`                                                                                                                                                                                                                              |
 | `internal/agent/agenttest`              | `internal/agent`, `internal/agent/harness`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | None                                                                                                                                                                                                                                                    |
-| `internal/agent/backends`               | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agents/antigravity`                                                                                                                                                                                                                                                                                                                                                                                                                                   | None                                                                                                                                                                                                                                                    |
+| `internal/agent/antigravity`            | `internal/agent`, `internal/agent/harness`, `internal/runtime`, `internal/taskslog/data/v3`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `internal/agent/agenttest`                                                                                                                                                                                                                              |
+| `internal/agent/backends`               | `internal/agent`, `internal/agent/antigravity`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/harness`, `internal/agent/opencode`, `internal/agent/pi`                                                                                                                                                                                                                                                                                                                                                                                                                                    | None                                                                                                                                                                                                                                                    |
 | `internal/agent/claudecode`             | `internal/agent`, `internal/agent/harness`, `internal/taskslog/data/v3`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `internal/agent/agenttest`, `internal/taskslog`                                                                                                                                                                                                         |
 | `internal/agent/codex`                  | `internal/agent`, `internal/agent/harness`, `internal/runtime`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `internal/agent/agenttest`, `internal/taskslog`                                                                                                                                                                                                         |
 | `internal/agent/data/harnesscache`      | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                                                                                                    |
@@ -702,7 +703,6 @@ graph TD
 | `internal/agent/opencode`               | `internal/agent`, `internal/agent/harness`, `internal/runtime`, `internal/taskslog/data/v3`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `internal/agent/agenttest`, `internal/taskslog`                                                                                                                                                                                                         |
 | `internal/agent/pi`                     | `internal/agent`, `internal/agent/harness`, `internal/runtime`, `internal/taskslog/data/v3`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `internal/agent/agenttest`, `internal/taskslog`                                                                                                                                                                                                         |
 | `internal/agent/relay`                  | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                                                                                                    |
-| `internal/agents/antigravity`           | `internal/agent`, `internal/agent/harness`, `internal/runtime`, `internal/taskslog/data/v3`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `internal/agent/agenttest`                                                                                                                                                                                                                              |
 | `internal/app`                          | `internal/agent`, `internal/agent/backends`, `internal/agent/harness`, `internal/app/data`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemgr`, `internal/forge/github`, `internal/preferences`, `internal/repo`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/task/taskmgr`, `internal/taskslog`, `internal/usage`, `internal/usagedb`, `internal/usagedb/data`                                                                        | `internal/runtime/runtimetest`, `internal/server/api/v1`, `internal/taskslog/data/v1`                                                                                                                                                                   |
 | `internal/app/data`                     | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | None                                                                                                                                                                                                                                                    |
 | `internal/auth`                         | `internal/auth/data/v1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | None                                                                                                                                                                                                                                                    |

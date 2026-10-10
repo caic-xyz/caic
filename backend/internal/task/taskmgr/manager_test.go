@@ -2258,10 +2258,11 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := newManagerWithRepo(t)
 			id, err := m.Create(t.Context(), CreateParams{
-				Prompt:  agent.Prompt{Text: "hi"},
-				Repos:   []CreateRepo{{Name: "my/repo", BaseBranch: "main"}},
-				Harness: "fake",
-				MaxCPUs: 7,
+				Prompt:          agent.Prompt{Text: "hi"},
+				Repos:           []CreateRepo{{Name: "my/repo", BaseBranch: "main"}},
+				Harness:         "fake",
+				MaxCPUs:         7,
+				ResumeSessionID: "session:not-a-guid",
 			})
 			if err != nil {
 				t.Fatalf("Create: %v", err)
@@ -2272,6 +2273,9 @@ func TestManager(t *testing.T) {
 				t.Fatal("entry not found after Create")
 			}
 			tk := e.Task()
+			if got := tk.GetSessionID(); got != "session:not-a-guid" {
+				t.Errorf("SessionID = %q, want session:not-a-guid", got)
+			}
 			if tk.MaxCPUs != 7 {
 				t.Errorf("MaxCPUs = %d, want 7", tk.MaxCPUs)
 			}

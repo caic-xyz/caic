@@ -225,6 +225,31 @@ func v2Records(native string) string {
 
 func TestHandshake(t *testing.T) {
 	t.Parallel()
+	t.Run("resume_with_selected_model", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"saved-session"},"model":"gpt-5.4"}}
+`
+		var stdin bytes.Buffer
+		_, _, _, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{
+			Dir: "/repo", Model: "gpt-5.4", ResumeSessionID: "saved-session", Log: &agenttest.LogSink{Version: agent.LogVersionV1},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req struct {
+			Method string                   `json:"method"`
+			Params codex.ThreadResumeParams `json:"params"`
+		}
+		lines := bytes.Split(bytes.TrimSpace(stdin.Bytes()), []byte{'\n'})
+		if err := json.Unmarshal(lines[len(lines)-1], &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Method != "thread/resume" || req.Params.ThreadID != "saved-session" || req.Params.Model != "gpt-5.4" {
+			t.Fatalf("resume request = %#v, want saved-session with gpt-5.4", req)
+		}
+	})
 	t.Run("model_list_params", func(t *testing.T) {
 		t.Parallel()
 		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}

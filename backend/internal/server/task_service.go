@@ -499,6 +499,7 @@ func (s *taskService) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v
 		Prompt:              apiconv.PromptToAgent(req.InitialPrompt),
 		Repos:               taskRepos,
 		Harness:             harnessName,
+		ResumeSessionID:     req.ResumeSessionID,
 		Model:               req.Model,
 		Effort:              req.Effort,
 		Tailscale:           req.Tailscale,
@@ -574,7 +575,7 @@ func (s *taskService) createDelegatedTask(ctx context.Context, sourceID ksid.ID,
 	if req.InitialPrompt.Text == "" || len(req.InitialPrompt.Images) > 0 {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task requires a text prompt"}
 	}
-	if len(req.Repos) != 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || req.RuntimeName != "" || req.Tailscale || req.USB || req.Display || req.Sudo || req.GitHubToken || req.CaicMCP {
+	if req.ResumeSessionID != "" || len(req.Repos) != 0 || req.Harness != "" || req.Model != "" || req.Effort != "" || req.RuntimeName != "" || req.Tailscale || req.USB || req.Display || req.Sudo || req.GitHubToken || req.CaicMCP {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "delegated task may only set initialPrompt"}
 	}
 	sourceEntry, ok := s.taskMgr.GetEntry(sourceID)

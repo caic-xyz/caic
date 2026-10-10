@@ -11,7 +11,9 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,6 +25,45 @@ import (
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/mcp/mcptest"
 )
+
+func TestPrepareRelay(t *testing.T) {
+	// Emulate OpenSSH's remote-shell parsing, then capture the harness argv.
+	dir := t.TempDir()
+	for name, script := range map[string]string{
+		"ssh":     "#!/bin/sh\nset -eu\ncase \"$*\" in\n*serve-attach*) shift; exec /bin/sh -c \"$*\" ;;\n*) /bin/cat >/dev/null ;;\nesac\n",
+		"python3": "#!/bin/sh\nset -eu\ntest \"${PYTHONDONTWRITEBYTECODE-}\" = 1\nprintf '%s\\0' \"$@\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o700); err != nil { //nolint:gosec // Private SSH test fixtures must be executable.
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	id := "session with spaces'; printf INJECTED; $(printf SUBSTITUTED)"
+	opts := &Options{
+		Logger: slog.New(slog.DiscardHandler),
+		Target: runtime.ConnectionTarget{SSHHost: "task"},
+		Dir:    "/workspace with spaces",
+		Log:    &testLogSink{Version: LogVersionV3},
+	}
+	rp, err := PrepareRelay(t.Context(), opts, nil, []string{"claude", "--resume", id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rp.Stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(rp.Stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rp.Cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{RelayScriptPath, "serve-attach", "--dir", "/workspace with spaces", "--no-log-stdin", "--", "claude", "--resume", id}
+	if got := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("remote argv = %q, want %q", got, want)
+	}
+}
 
 // testWire implements WireFormat for testing.
 type testWire struct{}

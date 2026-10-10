@@ -30,7 +30,7 @@ import (
 // conversation state in the container's ~/.gemini, which md mounts from the
 // host. CAIC_AGY_MODEL optionally selects a model.
 //
-// Run: CAIC_AGY_SSH=<host> go test -tags=smoke -run TestLiveRelay -v -timeout=10m ./backend/internal/agents/antigravity/
+// Run: CAIC_AGY_SSH=<host> go test -tags=smoke -run TestLiveRelay -v -timeout=10m ./backend/internal/agent/antigravity/
 func TestLiveRelay(t *testing.T) {
 	host := os.Getenv("CAIC_AGY_SSH")
 	if host == "" {

@@ -1150,7 +1150,8 @@ describe("App keyboard shortcuts", () => {
       runtimes: [{ name: "docker" }, { name: "podman" }],
     });
     renderApp();
-    const runtime = await screen.findByRole("combobox", { name: "Runtime" });
+    const runtime = await screen.findByTestId("runtime-select");
+    expect(runtime).not.toBeVisible();
 
     await user.keyboard("{F1}");
     expect(screen.getByText("Focus runtime for the new task")).toBeInTheDocument();
@@ -1159,6 +1160,19 @@ describe("App keyboard shortcuts", () => {
 
     await user.keyboard("{F3}");
     await waitFor(() => expect(runtime).toHaveFocus());
+    expect(runtime).toBeVisible();
+    expect(screen.getByRole("button", { name: "Hide features" })).toHaveAttribute("aria-expanded", "true");
+    await user.selectOptions(runtime, "podman");
+    await user.click(screen.getByRole("button", { name: "Hide features" }));
+    expect(runtime).not.toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Show features" }));
+    expect(runtime).toHaveValue("podman");
+    await user.click(screen.getByRole("button", { name: "Hide features" }));
+    await user.type(screen.getByTestId("prompt-input"), "Use the selected runtime");
+    await user.click(screen.getByTestId("submit-task"));
+    await waitFor(() =>
+      expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ runtimeName: "podman" })),
+    );
   });
 
   it("focuses a delayed task-detail prompt on desktop", async () => {
@@ -1384,6 +1398,7 @@ describe("App keyboard shortcuts", () => {
 
     expect(screen.getByTestId("prompt-input")).toHaveFocus();
 
+    await user.click(screen.getByRole("button", { name: "Show features" }));
     const feature = screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
     feature.focus();
     await user.keyboard("/");
@@ -3259,6 +3274,38 @@ describe("App repo chips: No repository", () => {
     expect(call.repos).toBeUndefined();
   });
 
+  it("resumes an opaque session and retains it for retry, then clears it after creation", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.createTask).mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(makeTask());
+    renderApp();
+
+    expect(screen.queryByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Session ID to resume" })).toBeNull();
+    const disclosure = screen.getByRole("button", { name: "Show features" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await user.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    const input = screen.getByRole("textbox", { name: "Session ID to resume" });
+    expect(input).toHaveAttribute("placeholder", "Session ID to resume");
+    await user.type(input, "  session:not-a-guid  ");
+    await user.click(screen.getByRole("button", { name: "Hide features" }));
+    expect(input).not.toBeVisible();
+    expect(input).toHaveValue("  session:not-a-guid  ");
+    await user.click(screen.getByRole("button", { name: "Show features" }));
+    expect(input).toBeVisible();
+    await user.type(screen.getByTestId("prompt-input"), "continue the work");
+    await user.click(screen.getByTestId("submit-task"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("submit-task")).not.toBeDisabled());
+    expect(input).toHaveValue("  session:not-a-guid  ");
+    expect(vi.mocked(api.createTask).mock.calls[0][0].resumeSessionID).toBe("session:not-a-guid");
+
+    await user.click(screen.getByTestId("submit-task"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(vi.mocked(api.createTask).mock.calls[1][0].resumeSessionID).toBe("session:not-a-guid");
+  });
+
   it("enables CAIC MCP delegation by default", async () => {
     const user = userEvent.setup();
     renderApp();
@@ -3268,6 +3315,7 @@ describe("App repo chips: No repository", () => {
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
     expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBe(true);
+    expect(vi.mocked(api.createTask).mock.calls[0][0].resumeSessionID).toBeUndefined();
   });
 
   it("omits the CAIC MCP delegation grant when disabled", async () => {
@@ -3275,6 +3323,7 @@ describe("App repo chips: No repository", () => {
     renderApp();
 
     await user.type(screen.getByTestId("prompt-input"), "delegate the review");
+    await user.click(screen.getByRole("button", { name: "Show features" }));
     await user.click(screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" }));
     await user.click(screen.getByTestId("submit-task"));
 
@@ -3287,6 +3336,7 @@ describe("App repo chips: No repository", () => {
     renderApp();
 
     await user.type(screen.getByTestId("prompt-input"), "review the change");
+    await user.click(screen.getByRole("button", { name: "Show features" }));
     const toggle = screen.getByRole("checkbox", { name: "Enable CAIC MCP delegation for this task" });
     expect(toggle).toBeChecked();
     toggle.focus();
