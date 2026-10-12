@@ -1,4 +1,4 @@
-// Tests Markdown prose rendering, runtime links, code copying, inline Mermaid diagrams, and raw mode toggle.
+// Tests Markdown prose rendering, runtime links, CAD model links, code copying, inline Mermaid diagrams, and raw mode toggle.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect } from "@tests/expect";
@@ -184,5 +184,17 @@ describe("Markdown", () => {
     const codeLink = screen.getByRole("link", { name: "Code" });
     expect(codeLink).toHaveAttribute("href", "/api/caic/v1/tasks/task123/file?path=src%2Fmain.go");
     expect(codeLink).toHaveAttribute("target", "_blank");
+  });
+
+  it("routes in-app CAD links for STL and STEP models when MarkdownTaskContext is provided", async () => {
+    renderMarkdown("See [Model](part.stl) or [Assembly](assembly.step).", () => "task123");
+
+    const stlLink = screen.getByRole("link", { name: "Model" });
+    expect(stlLink).toHaveAttribute("href", "/task/@task123/view?path=part.stl");
+    expect(stlLink).toHaveAttribute("data-app-link");
+
+    const stepLink = screen.getByRole("link", { name: "Assembly" });
+    expect(stepLink).toHaveAttribute("href", "/task/@task123/view?path=assembly.step");
+    expect(stepLink).toHaveAttribute("data-app-link");
   });
 });

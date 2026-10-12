@@ -34,7 +34,9 @@
     "@solidjs/router": "1.0.0",
     "marked": "18.0.13",
     "mermaid": "12.1.0",
-    "solid-js": "1.9.15"
+    "occt-import-js": "0.0.23",
+    "solid-js": "1.9.15",
+    "three": "0.186.1"
   },
   "devDependencies": {
     "@babel/core": "7.29.7",
@@ -47,6 +49,7 @@
     "@types/babel__core": "7.20.5",
     "@types/jsdom": "30.0.0",
     "@types/node": "26.6.2",
+    "@types/three": "0.186.0",
     "@vitest/expect": "5.0.1",
     "@vitest/spy": "5.0.1",
     "babel-preset-solid": "1.9.15",

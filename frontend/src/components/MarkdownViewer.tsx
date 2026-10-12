@@ -34,10 +34,14 @@ export default function MarkdownViewer(props: Props) {
   // Escape navigates back to the task detail.
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") navigate(props.taskPath);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        navigate(props.taskPath);
+      }
     };
-    document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    document.addEventListener("keydown", onKey, true);
+    onCleanup(() => document.removeEventListener("keydown", onKey, true));
   });
 
   return (

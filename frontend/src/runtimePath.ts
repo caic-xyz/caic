@@ -1,6 +1,8 @@
-// Resolves markdown destinations that name task-runtime files and builds their file and viewer URLs.
+// Resolves markdown and CAD destinations that name task-runtime files and builds their file and viewer URLs.
 
 const markdownExtension = /\.(md|markdown)$/i;
+const stlExtension = /\.stl$/i;
+const stepExtension = /\.(step|stp)$/i;
 
 /**
  * Returns the runtime file path a markdown destination names, or null for web
@@ -28,6 +30,22 @@ export function runtimeFilePath(href: string, baseDir: string | null): string | 
 
 export function isMarkdownPath(path: string): boolean {
   return markdownExtension.test(path);
+}
+
+export function isStlPath(path: string): boolean {
+  return stlExtension.test(path);
+}
+
+export function isStepPath(path: string): boolean {
+  return stepExtension.test(path);
+}
+
+export function isCadPath(path: string): boolean {
+  return isStlPath(path) || isStepPath(path);
+}
+
+export function isViewablePath(path: string): boolean {
+  return isMarkdownPath(path) || isCadPath(path);
 }
 
 /** Returns the directory of a runtime file path: "/" at the root, "." for a bare name. */

@@ -489,6 +489,10 @@ func artifactFile(path string) ([]byte, error) {
 		return []byte("# Task artifact\n\nSee the [guide](docs/guide.md).\n"), nil
 	case "/home/user/src/caic/docs/guide.md":
 		return []byte("# Guide\n\n![Shot](../test-results/screenshot.png)\n\nBack to the [README](../README.md).\n"), nil
+	case "/home/user/src/caic/models/bracket.stl":
+		return []byte("solid bracket\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 20 0\nendloop\nendfacet\nendsolid bracket\n"), nil
+	case "/home/user/src/caic/models/cube.step":
+		return []byte("ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('cube.step','2026-10-12',(''),(''),'','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"), nil
 	default:
 		return nil, fs.ErrNotExist
 	}

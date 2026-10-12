@@ -1,4 +1,4 @@
-// Reads a bounded text prefix of a task runtime file through the raw task-file endpoint.
+// Reads bounded text or raw binary of a task runtime file through the raw task-file endpoint.
 
 import { taskFileURL } from "./runtimePath";
 
@@ -37,4 +37,15 @@ export async function readTaskTextFile(taskId: string, path: string, signal: Abo
     // Stops the transfer after a cut; a cancel rejection cannot change the result.
     await reader.cancel().catch(() => undefined);
   }
+}
+
+/** Reads the raw binary contents of a task runtime file. */
+export async function readTaskBinaryFile(taskId: string, path: string, signal: AbortSignal): Promise<ArrayBuffer> {
+  const res = await fetch(taskFileURL(taskId, path), { signal });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
+    throw new Error(typeof message === "string" ? message : `HTTP ${res.status}`);
+  }
+  return res.arrayBuffer();
 }

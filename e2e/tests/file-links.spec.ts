@@ -1,4 +1,4 @@
-// Browser coverage for task-container file links, image display, markdown viewer, inline mermaid diagrams, and missing artifacts.
+// Browser coverage for task-container file links, image display, markdown viewer, CAD 3D viewer, inline mermaid diagrams, and missing artifacts.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
@@ -7,7 +7,7 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(
       api,
       uniquePrompt(
-        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png) and [Readme](/home/user/src/caic/README.md).",
+        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), and [Bracket](/home/user/src/caic/models/bracket.stl).",
       ),
     );
     await waitForTaskState(api, id, "waiting");
@@ -42,8 +42,25 @@ for (const width of [390, 1280]) {
       await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
     });
 
+    await test.step("cad model links open in the in-app 3d viewer", async () => {
+      const bracketURL = "/home/user/src/caic/models/bracket.stl";
+      await page.getByRole("link", { name: "Bracket", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent(bracketURL)}`);
+      await expect(page.getByTitle(bracketURL)).toBeVisible();
+      await expect(page.getByRole("link", { name: "raw file" })).toBeVisible();
+      await expect(page.getByText("1 triangles")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
+    });
+
     const readme = await request.get(`/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2FREADME.md`);
     expect(await readme.text()).toContain("# Task artifact");
+
+    const stl = await request.get(
+      `/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Fmodels%2Fbracket.stl`,
+    );
+    expect(stl.status()).toBe(200);
+    expect(await stl.text()).toContain("solid bracket");
 
     const fileURL = `/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fscreenshot.png`;
     const partial = await request.get(fileURL, {

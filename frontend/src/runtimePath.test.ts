@@ -1,9 +1,19 @@
-// Tests runtime file path resolution, markdown detection, and file and viewer URLs.
+// Tests runtime file path resolution, markdown and CAD detection, and file and viewer URLs.
 
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
-import { dirname, isMarkdownPath, runtimeFilePath, taskFileURL, taskViewURL } from "./runtimePath";
+import {
+  dirname,
+  isCadPath,
+  isMarkdownPath,
+  isStepPath,
+  isStlPath,
+  isViewablePath,
+  runtimeFilePath,
+  taskFileURL,
+  taskViewURL,
+} from "./runtimePath";
 
 describe("runtimeFilePath", () => {
   it("leaves web URLs, protocol-relative URLs, and anchors to the browser", () => {
@@ -58,6 +68,43 @@ describe("isMarkdownPath", () => {
     expect(isMarkdownPath("/a/notes.MARKDOWN")).toBe(true);
     expect(isMarkdownPath("/a/notes.mdx")).toBe(false);
     expect(isMarkdownPath("/a/md")).toBe(false);
+  });
+});
+
+describe("isStlPath", () => {
+  it("accepts only STL extensions", () => {
+    expect(isStlPath("model.stl")).toBe(true);
+    expect(isStlPath("/path/to/PART.STL")).toBe(true);
+    expect(isStlPath("model.stla")).toBe(false);
+  });
+});
+
+describe("isStepPath", () => {
+  it("accepts STEP and STP extensions", () => {
+    expect(isStepPath("assembly.step")).toBe(true);
+    expect(isStepPath("assembly.STEP")).toBe(true);
+    expect(isStepPath("part.stp")).toBe(true);
+    expect(isStepPath("part.STP")).toBe(true);
+    expect(isStepPath("step.txt")).toBe(false);
+  });
+});
+
+describe("isCadPath", () => {
+  it("accepts STL and STEP models", () => {
+    expect(isCadPath("bracket.stl")).toBe(true);
+    expect(isCadPath("bracket.step")).toBe(true);
+    expect(isCadPath("bracket.stp")).toBe(true);
+    expect(isCadPath("bracket.obj")).toBe(false);
+  });
+});
+
+describe("isViewablePath", () => {
+  it("accepts both markdown documents and CAD models", () => {
+    expect(isViewablePath("README.md")).toBe(true);
+    expect(isViewablePath("bracket.stl")).toBe(true);
+    expect(isViewablePath("bracket.step")).toBe(true);
+    expect(isViewablePath("bracket.stp")).toBe(true);
+    expect(isViewablePath("main.go")).toBe(false);
   });
 });
 

@@ -1,4 +1,4 @@
-// Markdown renders agent and file text with runtime file links, in-app markdown navigation, copyable code, inline mermaid diagrams, and a raw toggle.
+// Markdown renders agent and file text with runtime file links, in-app markdown and CAD navigation, copyable code, inline mermaid diagrams, and a raw toggle.
 
 import {
   Show,
@@ -17,7 +17,7 @@ import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid"
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 
 import styles from "./Markdown.module.css";
-import { isMarkdownPath, runtimeFilePath, taskFileURL, taskViewURL } from "../runtimePath";
+import { isViewablePath, runtimeFilePath, taskFileURL, taskViewURL } from "../runtimePath";
 import { getMermaidCachedSvg, renderMermaidBlocks, toggleMermaidView } from "../mermaid";
 
 /** The task whose runtime files markdown paths name. Without it, links stay ordinary. */
@@ -60,8 +60,8 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
       link(this: Renderer, token: Tokens.Link): string {
         const path = runtimePath(token.href);
         if (path === null || !taskId) return Renderer.prototype.link.call(this, token);
-        // Markdown documents open in the app; other runtime files open in a new tab.
-        if (isMarkdownPath(path)) {
+        // In-app viewable files (markdown, STL, STEP) open in the app; other files open in a new tab.
+        if (isViewablePath(path)) {
           return Renderer.prototype.link
             .call(this, { ...token, href: taskViewURL(taskId(), path) })
             .replace("<a ", "<a data-app-link ");
