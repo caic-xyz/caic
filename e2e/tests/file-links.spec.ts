@@ -1,4 +1,4 @@
-// Browser coverage for task-container file links, image display, the markdown viewer, and missing artifacts.
+// Browser coverage for task-container file links, image display, markdown viewer, inline mermaid diagrams, and missing artifacts.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
@@ -66,3 +66,28 @@ for (const width of [390, 1280]) {
     expect(await missing.json()).toMatchObject({ error: { code: "NOT_FOUND", message: "file not found" } });
   });
 }
+
+test("inline mermaid diagram renders in task view with toggle", async ({ page, api, uniquePrompt }) => {
+  const prompt = uniquePrompt("Architecture:\n\n```mermaid\ngraph TD;\n  Client-->Server;\n```\n\nDiagram notes:");
+  const id = await createTaskAPI(api, prompt);
+  await waitForTaskState(api, id, "waiting");
+  await page.goto(`/task/@${id}`);
+
+  // Expand the first turn to reveal the prompt
+  await page
+    .getByRole("button", { name: /1 message/ })
+    .first()
+    .click();
+
+  const diagram = page.getByRole("img", { name: "Mermaid diagram" });
+  await expect(diagram).toBeVisible();
+  await expect(diagram.locator("svg")).toBeVisible();
+
+  const toggleBtn = page.getByRole("button", { name: "Show code" });
+  await expect(toggleBtn).toBeVisible();
+  await toggleBtn.click();
+
+  await expect(diagram).toBeHidden();
+  await expect(page.locator("code.language-mermaid")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show diagram" })).toBeVisible();
+});

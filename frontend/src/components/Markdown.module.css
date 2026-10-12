@@ -237,3 +237,74 @@
   height: auto;
   border-radius: var(--radius-md);
 }
+
+.mermaidBlock {
+  position: relative;
+  margin: 0.5em 0;
+  overflow: hidden;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.mermaidToolbar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.mermaidToolbar .codeCopyBtn {
+  position: static;
+}
+
+.mermaidToggleBtn {
+  display: inline-flex;
+  gap: 0.2em;
+  align-items: center;
+  padding: 0.1em 0.4em;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.mermaidToggleBtn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-input-hover);
+}
+
+.mermaidDiagram {
+  display: flex;
+  justify-content: center;
+  min-height: 4rem;
+  padding: 2rem 1rem 1rem;
+  overflow-x: auto;
+  background: var(--color-bg-surface);
+}
+
+.mermaidDiagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaidPlaceholder {
+  width: 100%;
+  min-height: 2rem;
+}
+
+.mermaidSource {
+  display: block;
+}
+
+.mermaidSource pre {
+  padding-top: 1.5rem;
+  padding-right: 6rem;
+  margin: 0;
+}

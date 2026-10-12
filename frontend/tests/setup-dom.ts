@@ -54,6 +54,7 @@ for (const key of [
   "cancelAnimationFrame",
   "localStorage",
   "sessionStorage",
+  "CSSStyleSheet",
 ]) {
   const value = globals[key];
   if (value !== undefined) globalTarget[key] = value;
@@ -118,6 +119,16 @@ if (!HTMLElementCtor.prototype.scrollIntoView) {
   Object.defineProperty(HTMLElementCtor.prototype, "scrollIntoView", {
     configurable: true,
     value: () => {},
+  });
+}
+
+// jsdom does not implement SVG getBBox; stub it so SVG renderers like mermaid
+// can measure elements in unit tests.
+const SVGElementCtor = globalTarget["SVGElement"] as unknown as { prototype: Record<string, unknown> };
+if (SVGElementCtor && !SVGElementCtor.prototype.getBBox) {
+  Object.defineProperty(SVGElementCtor.prototype, "getBBox", {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, width: 100, height: 100, top: 0, left: 0, right: 100, bottom: 100, toJSON: () => {} }),
   });
 }
 

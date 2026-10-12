@@ -33,6 +33,7 @@
     "@observablehq/plot": "0.6.17",
     "@solidjs/router": "1.0.0",
     "marked": "18.0.13",
+    "mermaid": "12.1.0",
     "solid-js": "1.9.15"
   },
   "devDependencies": {
