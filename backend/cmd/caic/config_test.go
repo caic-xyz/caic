@@ -67,6 +67,24 @@ func TestLoadTOMLConfig(t *testing.T) {
 		if tc.Core.Root != want.Core.Root {
 			t.Fatalf("want Root %q, got %q", want.Core.Root, tc.Core.Root)
 		}
+		if !tc.Core.ShellEnv {
+			t.Fatal("shell environment loading must default on")
+		}
+	})
+
+	t.Run("shell environment can be disabled", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[core]\nshell_env = false\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tc, err := loadTOMLConfig(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.Core.ShellEnv {
+			t.Fatal("explicit shell_env=false was ignored")
+		}
 	})
 
 	t.Run("parses all fields", func(t *testing.T) {

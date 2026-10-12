@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- caic macOS launchd user agent -->
-<!-- Install: cp contrib/com.caic.caic.plist ~/Library/LaunchAgents/ -->
+<!-- caic macOS launchd user agent with system-path defaults and per-user installer overrides -->
+<!-- Install: configure executable and log paths with plutil; see contrib/README.md. -->
 <!--          mkdir -p ~/.config/caic && cp contrib/config.toml ~/.config/caic/config.toml -->
 <!--          Edit ~/.config/caic/config.toml (see contrib/config.toml for documentation). -->
-<!--          The account login shell loads its login profile for service variables. -->
+<!--          caic loads the user's shell environment unless core.shell_env is false. -->
 <!-- Enable:  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist -->
 <!-- Disable: launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.caic.caic.plist -->
-<!-- Logs:    tail -f /tmp/caic.log -->
+<!-- Logs:    defaults to /var/log/caic/; installer uses ~/Library/Logs/caic/. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -15,9 +15,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/sh</string>
-    <string>-c</string>
-    <string>shell=$(/usr/bin/id -P | /usr/bin/awk -F: '{print $NF}'); exec "$shell" -lc 'exec ~/.local/bin/caic'</string>
+    <string>/usr/local/bin/caic</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -27,10 +25,10 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/tmp/caic.log</string>
+  <string>/var/log/caic/stdout.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/tmp/caic.log</string>
+  <string>/var/log/caic/stderr.log</string>
 
   <key>ProcessType</key>
   <string>Background</string>

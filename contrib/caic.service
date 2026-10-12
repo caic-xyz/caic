@@ -1,4 +1,4 @@
-# caic systemd user service using the login-unlocked desktop SSH agent.
+# caic systemd user service.
 # Install: mkdir -p ~/.config/systemd/user && cp contrib/caic.service ~/.config/systemd/user/
 #          mkdir -p ~/.config/caic && cp contrib/config.toml ~/.config/caic/config.toml
 #          Edit ~/.config/caic/config.toml (see contrib/config.toml for documentation).
@@ -8,9 +8,9 @@
 [Unit]
 Description=Coding Agents in Containers
 Documentation=https://github.com/caic-xyz/caic
-After=network-online.target podman.socket graphical-session-pre.target gnome-keyring-daemon.service
+After=network-online.target podman.socket graphical-session-pre.target
 # Start Podman's packaged socket when available without requiring it for Docker-only setups.
-Wants=network-online.target podman.socket gnome-keyring-daemon.service
+Wants=network-online.target podman.socket
 
 [Service]
 Type=simple
@@ -18,13 +18,11 @@ ExecStart=%h/.local/bin/caic
 WorkingDirectory=%h
 # The Podman CLI becomes a remote client; the separate podman.service owns containers.
 Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
-# Environment overrides belong in ~/.config/systemd/user/caic.env.
-# For example, use it to add ~/.local/bin to PATH.
-EnvironmentFile=%h/.config/systemd/user/caic.env
-# Use the desktop agent independently of inherited shell environments.
-Environment=SSH_AUTH_SOCK=%t/keyring/ssh
-# Retry via Restart=always until the desktop SSH socket is available.
-ExecStartPre=/usr/bin/test -S %t/keyring/ssh
+# With core.shell_env=false, environment overrides belong in this optional file.
+# Otherwise, shell exports replace inherited values such as PATH.
+EnvironmentFile=-%h/.config/systemd/user/caic.env
+# caic imports PATH and SSH_AUTH_SOCK from the user's shell by default.
+# Set core.shell_env=false to use only the service environment.
 Restart=always
 RestartSec=1s
 

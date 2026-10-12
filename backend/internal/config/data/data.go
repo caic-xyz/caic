@@ -25,6 +25,7 @@ type Harness struct {
 // Core is the persisted Core section.
 type Core struct {
 	Root       string            `toml:"root"`
+	ShellEnv   bool              `toml:"shell_env"`   // default true; load interactive login shell exports at startup
 	AutoUpdate *string           `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
 	Prune      *string           `toml:"prune"`       // nil = default schedule; "" = disabled; else cron expression
 	RepoRepack *string           `toml:"repo_repack"` // nil = default schedule; "" = disabled; else cron expression

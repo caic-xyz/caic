@@ -160,8 +160,18 @@ install_service_launchd() {
   [ -f "$src" ] || return 0
   dest="${HOME}/Library/LaunchAgents/com.caic.caic.plist"
   if [ ! -f "$dest" ]; then
+    logs="${HOME}/Library/Logs/caic"
     mkdir -p "$(dirname "$dest")"
-    cp "$src" "$dest"
+    (umask 077 && mkdir -p "$logs")
+    # launchd does not expand HOME. Configure absolute paths before publishing.
+    staged="${tmpdir}/com.caic.caic.plist"
+    cp "$src" "$staged"
+    /usr/bin/plutil -replace ProgramArguments.0 -string "${INSTALL_DIR}/caic" -- "$staged"
+    /usr/bin/plutil -replace StandardOutPath -string "${logs}/stdout.log" -- "$staged"
+    /usr/bin/plutil -replace StandardErrorPath -string "${logs}/stderr.log" -- "$staged"
+    /usr/bin/plutil -lint -s -- "$staged"
+    chmod 0644 "$staged"
+    mv "$staged" "$dest"
     printf '  installed %s\n' "$dest"
     launchctl bootstrap "gui/$(id -u)" "$dest"
   else

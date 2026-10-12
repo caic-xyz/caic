@@ -123,6 +123,11 @@ Flags:
 	if err != nil {
 		return err
 	}
+	if tc.Core.ShellEnv && !*printURLFlag {
+		if err := importShellEnvironment(ctx); err != nil {
+			slog.WarnContext(ctx, "shell environment unavailable; using inherited environment", "err", err)
+		}
+	}
 	cfg, addr, root, logLevel, err := tomlToServerConfig(ctx, &tc, cfgDir)
 	if err != nil {
 		return err

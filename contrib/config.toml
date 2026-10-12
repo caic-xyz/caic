@@ -7,6 +7,14 @@
 # Parent directory containing the git repositories managed by caic.
 #root = "."
 
+# Load exported variables from the user's interactive login shell once at startup
+# (macOS/Linux). Shell exports replace inherited values, including PATH and
+# SSH_AUTH_SOCK; process/session bookkeeping stays unchanged. A failed probe warns
+# and keeps the inherited environment. Startup waits at most 6 seconds.
+# This runs user startup scripts without a terminal. Set false to disable.
+# Config directory selection happens before loading the shell environment.
+#shell_env = true
+
 # Auto-update schedule (cron expression, local time). Checks GitHub Releases and
 # replaces the binary on a match. Unset = daily at 04:50; "" disables.
 # e.g. auto_update = "50 4 * * *"

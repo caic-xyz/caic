@@ -1,4 +1,5 @@
 // TOML configuration file loading.
+
 package main
 
 import (
@@ -26,7 +27,7 @@ import (
 // TOML decoding overwrites only fields present in the file.
 func defaultConfig() data.Config {
 	return data.Config{
-		Core: data.Core{Root: "."},
+		Core: data.Core{Root: ".", ShellEnv: true},
 		Server: data.Server{
 			HTTP:           ":2242",
 			ExternalURL:    "auto",
