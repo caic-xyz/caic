@@ -1,13 +1,23 @@
 // Browser coverage for task-container file links, image display, markdown viewer, CAD 3D viewer, inline mermaid diagrams, and missing artifacts.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { createBambu3mfFixture } from "../../frontend/tests/cad-fixture";
 
 for (const width of [390, 1280]) {
   test(`task file links open artifacts and markdown at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("**/file?*", async (route) => {
+      if (new URL(route.request().url()).searchParams.get("path") === "/models/assembly.3mf") {
+        await route.fulfill({ contentType: "model/3mf", body: Buffer.from(createBambu3mfFixture()) });
+      } else {
+        await route.continue();
+      }
+    });
     const id = await createTaskAPI(
       api,
       uniquePrompt(
-        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), and [Bracket](/home/user/src/caic/models/bracket.stl).",
+        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), and [Print](/models/assembly.3mf).",
       ),
     );
     await waitForTaskState(api, id, "waiting");
@@ -51,6 +61,34 @@ for (const width of [390, 1280]) {
       await expect(page.getByText("1 triangles")).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
+    });
+
+    await test.step("3MF links render colored component instances with viewer controls", async () => {
+      await page.getByRole("link", { name: "Print", exact: true }).click();
+      await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/models/assembly.3mf")}`);
+      await expect(page.getByText("4 triangles")).toHaveAttribute("title", "Dimensions: 70 × 20 × 0");
+      await expect(page.locator("canvas")).toBeVisible();
+      await expect(page.getByRole("list", { name: "Printing plates" })).toBeVisible();
+      await expect(
+        page.getByRole("list", { name: "Printing plates" }).getByText("Plate 1: Panel", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("list", { name: "Printing plates" }).getByText("Plate 3: Spare", { exact: true }),
+      ).toBeVisible();
+      await page.screenshot({ path: test.info().outputPath("printing-plates.png") });
+      const canvas = await page.locator("canvas").boundingBox();
+      if (!canvas) throw new Error("Missing canvas bounds");
+      await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(canvas.x + canvas.width / 2 + 40, canvas.y + canvas.height / 2, { steps: 8 });
+      await page.mouse.up();
+      await page.screenshot({ path: test.info().outputPath("printing-plates-orbit.png") });
+      await page.getByRole("button", { name: "reset view", exact: true }).click();
+      await page.getByRole("button", { name: "wireframe", exact: true }).click();
+      await page.getByRole("button", { name: "reset view", exact: true }).click();
+      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
+      expect(errors).toEqual([]);
     });
 
     const readme = await request.get(`/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2FREADME.md`);

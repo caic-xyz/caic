@@ -1,13 +1,23 @@
-// CAD 3D viewer support: parses and renders STL and STEP models via Three.js and Open CASCADE.
+// CAD viewer: renders models with Bambu filament colors, readable dark shading, and labeled printing plates.
 
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
+import { isStlPath, isStepPath } from "./runtimePath";
+import { applyBambuMetadata } from "./bambu3mf";
+import type { CadPlate } from "./bambu3mf";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import occtimportjs from "occt-import-js";
 import type { OcctInstance } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
 
+export interface ParsedCad {
+  group: THREE.Group;
+  plates: CadPlate[];
+}
+
 export interface CadModelInfo {
+  plates: CadPlate[];
   triangleCount: number;
   meshCount: number;
   dimensions: {
@@ -111,8 +121,26 @@ export async function parseStep(buffer: ArrayBuffer): Promise<THREE.Group> {
   return group;
 }
 
+// Parses a 3MF archive while preserving build transforms and materials.
+export function parse3mf(buffer: ArrayBuffer): ParsedCad {
+  const group = new ThreeMFLoader().parse(buffer);
+  const plates = applyBambuMetadata(group, buffer);
+  if (computeModelInfo(group).triangleCount === 0) {
+    throw new Error("Failed to parse 3MF file: no triangles in build");
+  }
+  return { group, plates };
+}
+
+// Selects the same parser for the canvas and metadata-only viewer.
+export async function parseCad(buffer: ArrayBuffer, filename: string): Promise<ParsedCad> {
+  if (isStlPath(filename)) return { group: createStlGroup(parseStl(buffer)), plates: [] };
+  if (isStepPath(filename)) return { group: await parseStep(buffer), plates: [] };
+  if (/\.3mf$/i.test(filename)) return parse3mf(buffer);
+  throw new Error("Unsupported CAD file format");
+}
+
 /** Computes triangle counts and bounding dimensions for a model group. */
-export function computeModelInfo(group: THREE.Group): CadModelInfo {
+export function computeModelInfo(group: THREE.Group): Omit<CadModelInfo, "plates"> {
   let triangleCount = 0;
   let meshCount = 0;
   group.traverse((child) => {
@@ -141,7 +169,162 @@ export function computeModelInfo(group: THREE.Group): CadModelInfo {
   };
 }
 
-/** Initializes an interactive Three.js CAD scene on the provided canvas. */
+// Clips a 10 mm grid to the printable polygon, including concave outlines.
+function createPlateGrid(outline: CadPlate["outline"]): THREE.BufferGeometry {
+  const bounds = new THREE.Box2();
+  outline.forEach((p) => bounds.expandByPoint(new THREE.Vector2(p.x, p.y)));
+  const size = bounds.getSize(new THREE.Vector2());
+  // Bound intersection work for dimensions supplied by untrusted project files.
+  if ((Math.ceil(size.x / 10) + Math.ceil(size.y / 10)) * outline.length > 1_000_000) {
+    throw new Error("Printing plate is too large for a 10 mm grid");
+  }
+  const points: THREE.Vector3[] = [];
+  for (const axis of ["x", "y"] as const) {
+    const other = axis === "x" ? "y" : "x";
+    for (let offset = 10; offset < size[axis]; offset += 10) {
+      const coordinate = bounds.min[axis] + offset;
+      const intersections: number[] = [];
+      for (let i = 0; i < outline.length; i++) {
+        const a = outline[i];
+        const b = outline[(i + 1) % outline.length];
+        // Half-open crossings count vertices once and exclude parallel edges.
+        if ((a[axis] <= coordinate && b[axis] > coordinate) || (b[axis] <= coordinate && a[axis] > coordinate)) {
+          intersections.push(a[other] + ((coordinate - a[axis]) / (b[axis] - a[axis])) * (b[other] - a[other]));
+        }
+      }
+      intersections.sort((a, b) => a - b);
+      for (let i = 0; i + 1 < intersections.length; i += 2) {
+        for (const value of [intersections[i], intersections[i + 1]]) {
+          points.push(new THREE.Vector3(axis === "x" ? coordinate : value, axis === "y" ? coordinate : value, -0.05));
+        }
+      }
+    }
+  }
+  return new THREE.BufferGeometry().setFromPoints(points);
+}
+
+// Builds translucent plate surfaces, outlines, and grids independently of model metrics.
+export function createPlateGroup(plates: CadPlate[]): THREE.Group {
+  const group = new THREE.Group();
+  for (const plate of plates) {
+    const grid = new THREE.LineSegments(
+      createPlateGrid(plate.outline),
+      new THREE.LineBasicMaterial({
+        color: 0x263442,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+      }),
+    );
+    const shape = new THREE.Shape(plate.outline.map((p) => new THREE.Vector2(p.x, p.y)));
+    const surface = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshStandardMaterial({
+        color: 0x7b8794,
+        roughness: 1,
+        metalness: 0,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.25,
+        depthWrite: false,
+      }),
+    );
+    surface.position.z = -0.1;
+    surface.name = `Plate ${plate.id}: ${plate.name}`;
+    const line = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(plate.outline.map((p) => new THREE.Vector3(p.x, p.y, -0.05))),
+      new THREE.LineBasicMaterial({ color: 0x263442 }),
+    );
+    group.add(surface, line, grid);
+  }
+  return group;
+}
+
+// Pure black absorbs all diffuse light. Give dark materials a small display-only
+// reflectance floor and visible highlights without changing parsed filament colors.
+export function prepareModelShading(group: THREE.Group): void {
+  const materials = new Map<THREE.Material, THREE.Material>();
+  function prepare(source: THREE.Material): THREE.Material {
+    const cached = materials.get(source);
+    if (cached) return cached;
+    if (
+      !(source instanceof THREE.MeshPhongMaterial || source instanceof THREE.MeshStandardMaterial) ||
+      Math.max(source.color.r, source.color.g, source.color.b) >= 0.02
+    )
+      return source;
+    const material = source.clone();
+    material.color.addScalar(0.015);
+    if (material instanceof THREE.MeshPhongMaterial) {
+      material.specular.setHex(0x444444);
+      material.shininess = 30;
+    }
+    materials.set(source, material);
+    return material;
+  }
+  group.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.material = Array.isArray(child.material) ? child.material.map(prepare) : prepare(child.material);
+    }
+  });
+}
+
+// Renders transparent text in the plate's XY plane, above its top edge.
+function createPlateLabel(
+  plate: CadPlate,
+  anisotropy: number,
+): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Cannot render printing plate text");
+  context.font = "48px sans-serif";
+  const lines: string[] = [];
+  let line = "";
+  for (const word of `Plate ${plate.id}${plate.name ? `: ${plate.name}` : ""}`.split(/\s+/)) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && context.measureText(candidate).width > 960) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  lines.push(line);
+  const textWidth = lines.reduce((max, text) => Math.max(max, Math.min(960, context.measureText(text).width)), 0);
+  canvas.width = Math.ceil(textWidth + 32);
+  // Cap the texture size even when a project supplies a very long plate name.
+  canvas.height = Math.min(1024, lines.length * 60 + 32);
+  const lineHeight = (canvas.height - 32) / lines.length;
+  context.font = `${Math.min(48, lineHeight / 1.25)}px sans-serif`;
+  context.fillStyle = new THREE.Color(0x263442).getStyle();
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  lines.forEach((text, i) => context.fillText(text, canvas.width / 2, 16 + (i + 0.5) * lineHeight, canvas.width - 32));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = anisotropy;
+  const bounds = new THREE.Box2();
+  plate.outline.forEach((p) => bounds.expandByPoint(new THREE.Vector2(p.x, p.y)));
+  const size = bounds.getSize(new THREE.Vector2());
+  const aspect = canvas.height / canvas.width;
+  const width = Math.min(size.x * 0.9, (size.y * 0.16) / aspect);
+  const height = width * aspect;
+  const label = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    }),
+  );
+  label.name = `Plate ${plate.id}: ${plate.name}`;
+  label.position.set((bounds.min.x + bounds.max.x) / 2, bounds.max.y + size.y * 0.025 + height / 2, 0);
+  return label;
+}
+
+/** Initializes an interactive CAD scene with flat plate text. */
 export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -150,6 +333,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
+  camera.up.set(0, 0, 1); // CAD models and print beds use Z as the vertical axis.
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
@@ -199,12 +383,14 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   function disposeGroup(group: THREE.Group) {
     scene.remove(group);
     group.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
+      if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
         child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else {
-          child.material.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (material instanceof THREE.MeshBasicMaterial && material.map instanceof THREE.CanvasTexture) {
+            material.map.dispose();
+          }
+          material.dispose();
         }
       }
     });
@@ -217,13 +403,15 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
         currentGroup = null;
       }
 
-      const isStl = /\.stl$/i.test(filename);
-      if (isStl) {
-        const geom = parseStl(buffer);
-        currentGroup = createStlGroup(geom);
-      } else {
-        currentGroup = await parseStep(buffer);
+      const model = await parseCad(buffer, filename);
+      const info = { ...computeModelInfo(model.group), plates: model.plates };
+      prepareModelShading(model.group);
+      const plates = createPlateGroup(model.plates);
+      for (const plate of model.plates) {
+        plates.add(createPlateLabel(plate, Math.min(8, renderer.capabilities.getMaxAnisotropy())));
       }
+      currentGroup = new THREE.Group();
+      currentGroup.add(model.group, plates);
 
       const box = new THREE.Box3().setFromObject(currentGroup);
       const center = box.getCenter(new THREE.Vector3());
@@ -233,12 +421,12 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
       box.setFromObject(currentGroup);
       fitCamera(box);
 
-      return computeModelInfo(currentGroup);
+      return info;
     },
 
     setWireframe(enabled: boolean) {
       if (!currentGroup) return;
-      currentGroup.traverse((child) => {
+      currentGroup.children[0].traverse((child) => {
         if (child instanceof THREE.Mesh) {
           if (Array.isArray(child.material)) {
             child.material.forEach((m) => {

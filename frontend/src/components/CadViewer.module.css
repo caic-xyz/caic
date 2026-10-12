@@ -1,4 +1,4 @@
-/* Styles for the full-page 3D CAD (STL/STEP) file viewer. */
+/* Styles for the CAD viewer, toolbar, and accessible plate list. */
 
 .container {
   display: flex;
@@ -78,6 +78,16 @@
 .rawLink {
   font-size: 0.8rem;
   color: var(--color-link);
+}
+
+.plates {
+  max-height: 6rem;
+  padding-left: 1.5rem;
+  margin: 0 0 0.75rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .content {

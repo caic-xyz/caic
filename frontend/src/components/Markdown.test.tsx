@@ -186,8 +186,12 @@ describe("Markdown", () => {
     expect(codeLink).toHaveAttribute("target", "_blank");
   });
 
-  it("routes in-app CAD links for STL and STEP models when MarkdownTaskContext is provided", async () => {
-    renderMarkdown("See [Model](part.stl) or [Assembly](assembly.step).", () => "task123");
+  it("routes in-app CAD links for STL, STEP, and 3MF models when MarkdownTaskContext is provided", async () => {
+    renderMarkdown("See [Model](part.stl), [Assembly](assembly.step), or [Print](print.3mf).", () => "task123");
+
+    const printLink = screen.getByRole("link", { name: "Print" });
+    expect(printLink).toHaveAttribute("href", "/task/@task123/view?path=print.3mf");
+    expect(printLink).toHaveAttribute("data-app-link");
 
     const stlLink = screen.getByRole("link", { name: "Model" });
     expect(stlLink).toHaveAttribute("href", "/task/@task123/view?path=part.stl");

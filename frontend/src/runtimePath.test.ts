@@ -90,7 +90,10 @@ describe("isStepPath", () => {
 });
 
 describe("isCadPath", () => {
-  it("accepts STL and STEP models", () => {
+  it("accepts STL, STEP, and 3MF models", () => {
+    expect(isCadPath("assembly.3mf")).toBe(true);
+    expect(isCadPath("/models/ASSEMBLY.3MF")).toBe(true);
+    expect(isCadPath("assembly.3mf.zip")).toBe(false);
     expect(isCadPath("bracket.stl")).toBe(true);
     expect(isCadPath("bracket.step")).toBe(true);
     expect(isCadPath("bracket.stp")).toBe(true);
@@ -101,6 +104,7 @@ describe("isCadPath", () => {
 describe("isViewablePath", () => {
   it("accepts both markdown documents and CAD models", () => {
     expect(isViewablePath("README.md")).toBe(true);
+    expect(isViewablePath("assembly.3mf")).toBe(true);
     expect(isViewablePath("bracket.stl")).toBe(true);
     expect(isViewablePath("bracket.step")).toBe(true);
     expect(isViewablePath("bracket.stp")).toBe(true);

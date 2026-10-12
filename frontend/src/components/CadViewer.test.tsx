@@ -1,4 +1,4 @@
-// Tests 3D CAD viewer loading, STL/STEP parsing, toolbar actions, failure states, and keyboard navigation.
+// Tests CAD viewer loading, model and plate metadata, failure states, and keyboard navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -7,6 +7,7 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import CadViewer from "./CadViewer";
+import { create3mfFixture, createBambu3mfFixture } from "../../tests/cad-fixture";
 
 function renderViewer(path: string) {
   window.history.replaceState(null, "", `/task/@abc/view?path=${encodeURIComponent(path)}`);
@@ -65,6 +66,28 @@ endsolid sample
 
     expect(screen.getByText("/home/user/models/cube.step")).toBeInTheDocument();
     expect(await screen.findByText(/12 triangles/)).toBeInTheDocument();
+  });
+
+  it("loads 3MF metadata without WebGL", async () => {
+    fetchMock.mockResolvedValue(new Response(create3mfFixture()));
+    renderViewer("/models/assembly.3mf");
+    expect(await screen.findByText("2 triangles")).toHaveAttribute("title", "Dimensions: 30 × 20 × 0");
+  });
+
+  it("lists printing plates without requiring WebGL", async () => {
+    fetchMock.mockResolvedValue(new Response(createBambu3mfFixture()));
+    renderViewer("/models/bambu.3mf");
+    expect(await screen.findByRole("list", { name: "Printing plates" })).toHaveTextContent("Plate 1: Panel");
+    expect(screen.getByText("Plate 2: Frame")).toBeInTheDocument();
+    expect(screen.getByText("Plate 3: Spare")).toBeInTheDocument();
+    expect(screen.getByText("4 triangles")).toHaveAttribute("title", "Dimensions: 70 × 20 × 0");
+  });
+
+  it("shows a parse error for a malformed 3MF file", async () => {
+    fetchMock.mockResolvedValue(new Response("not a zip"));
+    renderViewer("/models/broken.3mf");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(/triangles/)).not.toBeInTheDocument();
   });
 
   it("navigates back to the task when back button is clicked", async () => {

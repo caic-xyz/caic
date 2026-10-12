@@ -41,7 +41,7 @@ export function isStepPath(path: string): boolean {
 }
 
 export function isCadPath(path: string): boolean {
-  return isStlPath(path) || isStepPath(path);
+  return isStlPath(path) || isStepPath(path) || /\.3mf$/i.test(path);
 }
 
 export function isViewablePath(path: string): boolean {

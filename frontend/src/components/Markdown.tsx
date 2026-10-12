@@ -60,7 +60,7 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
       link(this: Renderer, token: Tokens.Link): string {
         const path = runtimePath(token.href);
         if (path === null || !taskId) return Renderer.prototype.link.call(this, token);
-        // In-app viewable files (markdown, STL, STEP) open in the app; other files open in a new tab.
+        // In-app viewable files (markdown and CAD) open in the app; other files open in a new tab.
         if (isViewablePath(path)) {
           return Renderer.prototype.link
             .call(this, { ...token, href: taskViewURL(taskId(), path) })

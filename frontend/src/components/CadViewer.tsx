@@ -1,6 +1,6 @@
-// Full-page interactive 3D viewer that renders STL and STEP CAD files from a task runtime.
+// Full-page CAD viewer for task-runtime models, filament colors, and printing plates.
 
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 
@@ -61,8 +61,7 @@ export default function CadViewer(props: Props) {
 
     try {
       const buffer = await readTaskBinaryFile(props.taskId, filePath, abortController.signal);
-      const { createCadScene, isWebGLSupported, parseStl, parseStep, createStlGroup, computeModelInfo } =
-        await import("../cad");
+      const { createCadScene, isWebGLSupported, parseCad, computeModelInfo } = await import("../cad");
 
       const hasWebGL = isWebGLSupported();
       setWebglAvailable(hasWebGL);
@@ -79,9 +78,8 @@ export default function CadViewer(props: Props) {
         }
       } else {
         // Compute model info even without WebGL for accessibility and metadata.
-        const isStl = /\.stl$/i.test(filePath);
-        const group = isStl ? createStlGroup(parseStl(buffer)) : await parseStep(buffer);
-        setModelInfo(computeModelInfo(group));
+        const model = await parseCad(buffer, filePath);
+        setModelInfo({ ...computeModelInfo(model.group), plates: model.plates });
       }
       setLoading(false);
     } catch (err: unknown) {
@@ -164,6 +162,18 @@ export default function CadViewer(props: Props) {
           raw file
         </a>
       </div>
+      <Show when={modelInfo()?.plates.length}>
+        <ul class={styles.plates} aria-label="Printing plates">
+          <For each={modelInfo()?.plates}>
+            {(plate) => (
+              <li>
+                Plate {plate.id}
+                {plate.name ? `: ${plate.name}` : ""}
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
       <div class={styles.content}>
         <Show when={error()}>
           {(err) => (
