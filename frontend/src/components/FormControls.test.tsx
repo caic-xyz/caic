@@ -1,11 +1,46 @@
-// Tests shared form controls' keyboard behavior.
+// Tests shared form controls' keyboard behavior and harness selection across option reordering.
 
 import { describe, it } from "node:test";
 import { vi, expect } from "@tests/expect";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 
-import { ToggleChip } from "./FormControls";
+import type { HarnessInfo } from "@sdk/types.gen";
+import { HarnessControls, ToggleChip } from "./FormControls";
+
+it("preserves the selected harness when quota updates reorder its options", () => {
+  const choices: HarnessInfo[] = (["claude", "codex", "pi"] as const).map((name) => ({
+    name,
+    models: [],
+    supportsImages: false,
+    supportsCompact: false,
+    supportsModelRefresh: false,
+  }));
+  const [harnesses, setHarnesses] = createSignal(choices);
+  const [harness, setHarness] = createSignal("claude");
+  render(() => (
+    <HarnessControls
+      harnesses={harnesses()}
+      harness={harness()}
+      model=""
+      effort=""
+      onHarness={setHarness}
+      onModel={() => {}}
+      onEffort={() => {}}
+    />
+  ));
+  const select = screen.getByRole("combobox", { name: "Harness" });
+  for (const order of [
+    [2, 0, 1],
+    [1, 2, 0],
+    [0, 1, 2],
+    [1, 0, 2],
+    [2, 1, 0],
+  ]) {
+    setHarnesses(order.map((index) => choices[index]));
+    expect(select).toHaveValue("claude");
+  }
+});
 
 describe("ToggleChip", () => {
   it("toggles with Enter without submitting its form", () => {

@@ -1,6 +1,6 @@
 // Shared form control components for task harness selects and capability toggles.
 
-import { For, Show, splitProps, type JSX } from "solid-js";
+import { createEffect, For, Show, splitProps, type JSX } from "solid-js";
 
 import type { HarnessInfo } from "@sdk/types.gen";
 
@@ -28,9 +28,9 @@ export function ControlSelect(props: ControlSelectProps) {
   );
 }
 
-// HarnessControls renders the harness/model/effort select triple. Options mark
-// their own `selected` state so the painted value can't desync from the signal
-// when options and value update in the same flush (async load, dialog open).
+// HarnessControls renders the harness/model/effort select triple. Reapply the
+// harness value after option reordering, which can reset the native selection.
+// Effort options mark their selected state for simultaneous option/value updates.
 export function HarnessControls(props: {
   harnesses: HarnessInfo[];
   harness: string;
@@ -45,6 +45,12 @@ export function HarnessControls(props: {
   labelPrefix?: string;
   harnessOptionLabel?: (harness: HarnessInfo) => string;
 }) {
+  let harnessSelect: HTMLSelectElement | undefined;
+  createEffect(() => {
+    const harnesses = props.harnesses;
+    const harness = props.harness;
+    if (harnesses.length > 1 && harnessSelect) harnessSelect.value = harness;
+  });
   const label = (name: string) => `${props.labelPrefix ?? ""}${name}`;
   const moveHarness = (delta: number) => {
     const current = props.harnesses.findIndex((candidate) => candidate.name === props.harness);
@@ -67,6 +73,7 @@ export function HarnessControls(props: {
     <>
       <Show when={props.harnesses.length > 1}>
         <ControlSelect
+          ref={harnessSelect}
           aria-label={label("Harness")}
           aria-keyshortcuts={props.harnessKeyShortcuts}
           data-testid={props.labelPrefix ? "fork-harness-select" : "harness-select"}

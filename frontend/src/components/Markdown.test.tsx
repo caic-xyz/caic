@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { Accessor } from "solid-js";
 
@@ -76,8 +76,8 @@ describe("Markdown", () => {
 
     renderMarkdown(text);
 
-    // Wait for async mermaid compilation
-    const toggleBtn = await screen.findByRole("button", { name: "Show code" });
+    // Mermaid compilation under coverage can exceed Testing Library's one-second default.
+    const toggleBtn = await screen.findByRole("button", { name: "Show code" }, { timeout: 10_000 });
     const diagram = screen.getByRole("img", { name: "Mermaid diagram" });
     expect(diagram).toBeInTheDocument();
     expect(diagram.innerHTML).toContain("<svg");
@@ -112,7 +112,7 @@ describe("Markdown", () => {
     const text = "```mermaid\ngraph TD;\n  Start --> End;\n```";
     renderMarkdown(text);
 
-    await screen.findByRole("button", { name: "Show code" });
+    await screen.findByRole("button", { name: "Show code" }, { timeout: 10_000 });
     const copyBtn = screen.getByRole("button", { name: "Copy code block" });
     await user.click(copyBtn);
 
@@ -123,10 +123,7 @@ describe("Markdown", () => {
     const text = "```mermaid\nthis is invalid mermaid\n```";
     const { container } = renderMarkdown(text);
 
-    // Give render effect time to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    expect(screen.getByText("this is invalid mermaid")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("this is invalid mermaid")).toBeVisible(), { timeout: 10_000 });
     const diagram = container.querySelector<HTMLElement>("[data-mermaid-diagram]");
     expect(diagram).not.toBeNull();
     expect(diagram?.style.display).toBe("none");
