@@ -133,15 +133,19 @@ func TestImportShellEnvironment(t *testing.T) {
 		}
 	})
 	t.Run("oversized snapshot retains inherited environment", func(t *testing.T) {
+		dd, err := exec.LookPath("dd")
+		if err != nil {
+			t.Fatal(err)
+		}
 		shell := filepath.Join(t.TempDir(), "shell")
 		// More than 1 MiB of machine output must cancel the writer promptly.
-		script := "#!/bin/sh\n/usr/bin/dd if=/dev/zero bs=1048577 count=1 >&3 2>/dev/null\n/bin/sleep 30\n"
+		script := "#!/bin/sh\n" + dd + " if=/dev/zero bs=1048577 count=1 >&3 2>/dev/null || exit 1\n/bin/sleep 30\n"
 		if err := os.WriteFile(shell, []byte(script), 0o700); err != nil { //nolint:gosec // executable shell fixture in test-owned directory.
 			t.Fatal(err)
 		}
 		t.Setenv("SHELL", shell)
 		t.Setenv("CAIC_TEST_VALUE", "inherited")
-		err := importShellEnvironment(t.Context())
+		err = importShellEnvironment(t.Context())
 		if err == nil || !strings.Contains(err.Error(), "exceeds 1 MiB") {
 			t.Fatalf("expected capture-limit error, got %v", err)
 		}
