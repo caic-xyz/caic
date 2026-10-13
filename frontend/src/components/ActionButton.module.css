@@ -1,0 +1,44 @@
+/* Shared compact toolbar actions with selection, focus, and disabled feedback. */
+.button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 4px;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+}
+
+.content {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.button:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.button[aria-pressed="true"] {
+  color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
+  box-shadow: inset 0 0 0 2px var(--color-selected);
+}
+
+.button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--color-primary-container-hover);
+}

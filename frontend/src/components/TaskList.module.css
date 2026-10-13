@@ -74,35 +74,8 @@
   margin: 0;
 }
 
-.collapseBtn {
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-}
-
-.collapseBtn:hover {
-  background: var(--color-bg-hover);
-}
-
 .expandBtn {
-  display: flex;
-  align-items: center;
   align-self: flex-start;
-  padding: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-}
-
-.expandBtn:hover {
-  background: var(--color-bg-hover);
 }
 
 .placeholder {
@@ -199,8 +172,8 @@
     opacity: 1;
   }
 
-  .collapseBtn,
-  .expandBtn {
+  button.collapseBtn,
+  button.expandBtn {
     display: none;
   }
 }

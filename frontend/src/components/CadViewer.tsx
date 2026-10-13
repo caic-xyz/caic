@@ -1,7 +1,9 @@
-// Full-page CAD viewer for task-runtime models, filament colors, and printing plates.
+// CAD document pane for task-runtime models, filament colors, printing plates, and clean camera controls.
 
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FileViewerHeader from "./FileViewerHeader";
+import ActionButton from "./ActionButton";
+import ResetIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 
 import styles from "./CadViewer.module.css";
 import { readTaskBinaryFile } from "../taskFile";
@@ -113,17 +115,17 @@ export default function CadViewer(props: Props) {
             )}
           </Show>
           <Show when={webglAvailable() && !loading() && !error()}>
-            <button
-              type="button"
-              class={`${styles.toolBtn}${wireframe() ? ` ${styles.active}` : ""}`}
+            <ActionButton
+              label="wireframe"
               onClick={toggleWireframe}
               title="Toggle wireframe display"
+              aria-pressed={wireframe()}
             >
               wireframe
-            </button>
-            <button type="button" class={styles.toolBtn} onClick={resetCamera} title="Reset camera position">
-              reset view
-            </button>
+            </ActionButton>
+            <ActionButton label="Reset camera" onClick={resetCamera} title="Reset camera position">
+              <ResetIcon width={20} height={20} />
+            </ActionButton>
           </Show>
         </div>
       </FileViewerHeader>

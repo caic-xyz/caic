@@ -84,6 +84,7 @@ import {
   type NativeActivity,
 } from "../nativeSubagents";
 import StatsIcon from "./StatsIcon";
+import ActionButton from "./ActionButton";
 import TimingIcon from "./TimingIcon";
 import TurnInvocationIcon, { SessionInvocationIcon } from "./TurnInvocationIcon";
 import WidgetCard from "./WidgetCard";
@@ -893,9 +894,14 @@ export default function TaskDetail(props: Props) {
             headerRef = element;
           }}
         >
-          <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close">
+          <ActionButton
+            class={styles.closeBtn}
+            onClick={() => props.onClose()}
+            label="Close task details"
+            title="Close"
+          >
             <CloseIcon width={20} height={20} />
-          </button>
+          </ActionButton>
           <Show when={props.title}>
             <span class={styles.headerTitle}>{props.title}</span>
           </Show>

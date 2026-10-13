@@ -145,17 +145,37 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByText("4 triangles", { exact: true })).toBeVisible();
     const canvas = await page.locator("canvas").elementHandle();
     await page.getByRole("button", { name: "wireframe", exact: true }).click();
+    await page.getByRole("button", { name: "Reset camera", exact: true }).hover();
+    for (const name of ["Reset camera", "Full screen"]) {
+      const bounds = await page.getByRole("button", { name, exact: true }).boundingBox();
+      expect(bounds?.width).toBe(28);
+      expect(bounds?.height).toBe(28);
+    }
+    await page.getByRole("button", { name: "wireframe", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Reset camera", exact: true })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(page.getByRole("button", { name: "wireframe", exact: true })).toBeFocused();
+    await page.screenshot({ path: test.info().outputPath("cad-actions.png") });
+    await page.getByRole("button", { name: "Reset camera", exact: true }).click();
+    await page.getByRole("link", { name: "raw file", exact: true }).hover();
+    await expect(page.getByRole("button", { name: "wireframe", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.screenshot({ path: test.info().outputPath("cad-actions-resting.png") });
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
     await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
     expect(await canvas?.evaluate((node) => node.isConnected)).toBe(true);
-    await expect(page.getByRole("button", { name: "wireframe", exact: true })).toHaveClass(/active/);
+    await expect(page.getByRole("button", { name: "wireframe", exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
     await page.reload();
     await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
     await expect(page.getByTestId("new-task-button")).toBeHidden();
     await api.sendInput(id, { prompt: { text: "continue" } });
     await waitForTaskState(api, id, "waiting");
-    await expect(page.getByTestId("conversation-pane").getByText(/A SQL query walks into a bar/)).toBeAttached();
+    await expect(
+      page
+        .getByTestId("conversation-pane")
+        .getByText("A SQL query walks into a bar, sees two tables, and asks: Can I JOIN you?", { exact: true }),
+    ).toBeAttached();
     expect(errors).toEqual([]);
   });
 }

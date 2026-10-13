@@ -14,32 +14,8 @@
 }
 
 .badge {
-  padding: 0.15rem 0.45rem;
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.toolBtn {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.toolBtn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-input-hover);
-}
-
-.toolBtn.active {
-  color: var(--color-selected);
-  border-color: var(--color-selected);
 }
 
 .plates {

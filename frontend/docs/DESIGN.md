@@ -20,7 +20,9 @@ supports sustained work, not chatbot conversation or dashboard decoration.
 - Use Material Design icons for familiar actions. Keep action buttons
   borderless and transparent, with subtle hover feedback and visible keyboard
   focus. The task-summary collapse and task-detail close controls are the
-  visual references. Keep accessible names and comfortable touch targets.
+  visual references. Use 20px icons, 4px padding, and a 28×28px minimum action
+  button size on desktop and mobile. Text actions grow to fit their labels.
+  Keep accessible names and enough spacing to avoid accidental activation.
 - Use visible labels when an icon would be ambiguous.
 - Keep desktop information compact, not cramped. Preserve readable content
   and comfortable touch targets on mobile.

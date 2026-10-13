@@ -10,6 +10,7 @@ import ArrowDropDown from "@material-symbols/svg-400/outlined/arrow_drop_down.sv
 import type { CIStatus, Repo, Task, UsageResp } from "@sdk/types.gen";
 
 import TaskCard from "./TaskCard";
+import ActionButton from "./ActionButton";
 import CIDot from "./CIDot";
 import styles from "./TaskList.module.css";
 
@@ -354,9 +355,13 @@ export default function TaskList(props: TaskListProps) {
         <div class={styles.header}>
           <h2>Tasks</h2>
           <Show when={props.selectedId !== null}>
-            <button class={styles.collapseBtn} onClick={() => props.setSidebarOpen(false)} title="Collapse sidebar">
+            <ActionButton
+              class={styles.collapseBtn}
+              onClick={() => props.setSidebarOpen(false)}
+              label="Collapse sidebar"
+            >
               <LeftPanelClose width={20} height={20} />
-            </button>
+            </ActionButton>
           </Show>
         </div>
         <Show when={props.tasks().length === 0}>
@@ -445,9 +450,9 @@ export default function TaskList(props: TaskListProps) {
         </For>
       </div>
       <Show when={!props.sidebarOpen() && props.selectedId !== null}>
-        <button class={styles.expandBtn} onClick={() => props.setSidebarOpen(true)} title="Expand sidebar">
+        <ActionButton class={styles.expandBtn} onClick={() => props.setSidebarOpen(true)} label="Expand sidebar">
           <LeftPanelOpen width={20} height={20} />
-        </button>
+        </ActionButton>
       </Show>
     </>
   );

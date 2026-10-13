@@ -138,9 +138,9 @@ for (const width of [390, 1280]) {
       await page.mouse.move(canvas.x + canvas.width / 2 + 40, canvas.y + canvas.height / 2, { steps: 8 });
       await page.mouse.up();
       await page.screenshot({ path: test.info().outputPath("printing-plates-orbit.png") });
-      await page.getByRole("button", { name: "reset view", exact: true }).click();
+      await page.getByRole("button", { name: "Reset camera", exact: true }).click();
       await page.getByRole("button", { name: "wireframe", exact: true }).click();
-      await page.getByRole("button", { name: "reset view", exact: true }).click();
+      await page.getByRole("button", { name: "Reset camera", exact: true }).click();
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
       expect(errors).toEqual([]);

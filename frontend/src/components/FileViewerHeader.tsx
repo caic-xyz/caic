@@ -6,6 +6,7 @@ import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?so
 import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
 import { fileViewMode } from "../fileView";
 import { taskRawURL } from "../runtimePath";
+import ActionButton from "./ActionButton";
 import styles from "./FileViewerHeader.module.css";
 
 export default function FileViewerHeader(props: {
@@ -45,32 +46,22 @@ export default function FileViewerHeader(props: {
   return (
     <header class={styles.header} aria-label="Document controls">
       <Show when={!fullscreen()}>
-        <button
-          ref={closeButton}
-          type="button"
-          class={styles.button}
-          onClick={close}
-          title="Close document"
-          aria-label="Close document"
-        >
+        <ActionButton ref={closeButton} onClick={close} label="Close document">
           <ArrowBackIcon width={20} height={20} />
-        </button>
+        </ActionButton>
       </Show>
       <span class={styles.path} title={props.path}>
         {props.path}
       </span>
-      <button
+      <ActionButton
         ref={fullscreenButton}
-        type="button"
-        class={styles.button}
         onClick={toggleFullscreen}
-        aria-label={fullscreen() ? "Exit full screen" : "Full screen"}
-        title={fullscreen() ? "Exit full screen" : "Full screen"}
+        label={fullscreen() ? "Exit full screen" : "Full screen"}
       >
         <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} aria-hidden="true" />}>
           <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
         </Show>
-      </button>
+      </ActionButton>
       <a class={styles.rawLink} href={taskRawURL(props.taskId, props.path)} target="_blank" rel="noopener noreferrer">
         raw file
       </a>

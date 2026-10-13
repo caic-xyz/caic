@@ -36,21 +36,6 @@
   text-decoration: underline;
 }
 
-.closeBtn {
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-}
-
-.closeBtn:hover {
-  background: var(--color-bg-hover);
-}
-
 .headerTitle {
   display: none;
   flex: 0 1 8rem;
@@ -1312,7 +1297,7 @@ a.ciStatus:hover {
     max-height: 150px;
   }
 
-  .closeBtn {
+  button.closeBtn {
     display: none;
   }
 
