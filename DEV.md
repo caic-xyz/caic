@@ -14,6 +14,13 @@ From the repository root:
 make build
 ```
 
+## Frontend design
+
+[The frontend design direction](frontend/docs/DESIGN.md) defines caic's brand,
+visual style, and interaction character. Apply it to new and touched components;
+it does not call for a full UX redesign. See [frontend/AGENTS.md](frontend/AGENTS.md)
+for implementation and validation rules.
+
 ## Profiling
 
 Enable profiling by adding a `[debug]` section to `~/.config/caic/config.toml`:
