@@ -1,5 +1,20 @@
 /* Styles for the new-task form in the main layout. */
 
+.summaryPane {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.summarySelected {
+  flex: none;
+}
+
+.summaryHidden {
+  display: none;
+}
+
 .submitForm {
   display: flex;
   flex-wrap: wrap;

@@ -1,11 +1,9 @@
 // Full-page CAD viewer for task-runtime models, filament colors, and printing plates.
 
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { useNavigate } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import FileViewerHeader from "./FileViewerHeader";
 
 import styles from "./CadViewer.module.css";
-import { taskRawURL } from "../runtimePath";
 import { readTaskBinaryFile } from "../taskFile";
 import type { CadModelInfo, CadScene } from "../cad";
 
@@ -16,7 +14,6 @@ interface Props {
 }
 
 export default function CadViewer(props: Props) {
-  const navigate = useNavigate();
   let canvasRef: HTMLCanvasElement | undefined;
   let wrapRef: HTMLDivElement | undefined;
   let scene: CadScene | null = null;
@@ -28,19 +25,6 @@ export default function CadViewer(props: Props) {
   const [modelInfo, setModelInfo] = createSignal<CadModelInfo | null>(null);
   const [wireframe, setWireframe] = createSignal(false);
   const [webglAvailable, setWebglAvailable] = createSignal(true);
-
-  // Escape navigates back to the task detail.
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        navigate(props.taskPath);
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    onCleanup(() => document.removeEventListener("keydown", onKey, true));
-  });
 
   function toggleWireframe() {
     const next = !wireframe();
@@ -116,18 +100,7 @@ export default function CadViewer(props: Props) {
 
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
-        <button
-          class={styles.backBtn}
-          onClick={() => navigate(props.taskPath)}
-          title="Back to task"
-          aria-label="Back to task"
-        >
-          <ArrowBackIcon width={20} height={20} />
-        </button>
-        <span class={styles.path} title={props.path}>
-          {props.path}
-        </span>
+      <FileViewerHeader taskId={props.taskId} taskPath={props.taskPath} path={props.path}>
         <div class={styles.toolbar}>
           <Show when={modelInfo()} keyed>
             {(info) => (
@@ -153,10 +126,7 @@ export default function CadViewer(props: Props) {
             </button>
           </Show>
         </div>
-        <a class={styles.rawLink} href={taskRawURL(props.taskId, props.path)} target="_blank" rel="noopener noreferrer">
-          raw file
-        </a>
-      </div>
+      </FileViewerHeader>
       <Show when={modelInfo()?.plates.length}>
         <ul class={styles.plates} aria-label="Printing plates">
           <For each={modelInfo()?.plates}>

@@ -51,7 +51,9 @@ for (const width of [390, 1280]) {
 
     await test.step("source and unsupported files open the same viewer", async () => {
       await page.getByRole("link", { name: "Source", exact: true }).click();
-      await expect(page.locator("pre")).toHaveText("package notes\n// # Not a Markdown heading");
+      await expect(page.getByTestId("document-pane").locator("pre")).toHaveText(
+        "package notes\n// # Not a Markdown heading",
+      );
       await page.keyboard.press("Escape");
       await page.getByRole("link", { name: "Binary", exact: true }).click();
       await expect(page.getByText(/No preview for this file/)).toBeVisible();
@@ -101,7 +103,7 @@ for (const width of [390, 1280]) {
 
       await page.getByRole("link", { name: "README", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Task artifact" })).toBeVisible();
-      await page.getByRole("button", { name: "Back to task" }).click();
+      await page.getByRole("button", { name: "Close document" }).click();
       await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
     });
 

@@ -1,4 +1,4 @@
-// FileViewerPage owns the single /task/:taskId/view route for task-runtime files.
+// FileViewerPage mounts one document renderer inside the persistent task workspace.
 
 import { Match, Show, Switch } from "solid-js";
 import { useParams, useSearchParams } from "@solidjs/router";
@@ -7,7 +7,7 @@ import FileContentViewer from "../components/FileContentViewer";
 import CadViewer from "../components/CadViewer";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPathForTask } from "../taskPath";
-import { DetailPane } from "../components/Layout";
+import styles from "./FileViewerPage.module.css";
 import { isCadPath } from "../runtimePath";
 
 export default function FileViewerPage() {
@@ -26,9 +26,9 @@ export default function FileViewerPage() {
           return task ? taskPathForTask(task) : `/task/@${taskId}`;
         };
         return (
-          <DetailPane>
-            <Show when={t() ? path() : null} keyed>
-              {(filePath) => (
+          <Show when={path()} keyed>
+            {(filePath) => (
+              <section class={styles.document} aria-label="Document" data-testid="document-pane">
                 <Switch>
                   <Match when={isCadPath(filePath)}>
                     <CadViewer taskId={taskId} taskPath={tp()} path={filePath} />
@@ -37,9 +37,9 @@ export default function FileViewerPage() {
                     <FileContentViewer taskId={taskId} taskPath={tp()} path={filePath} />
                   </Match>
                 </Switch>
-              )}
-            </Show>
-          </DetailPane>
+              </section>
+            )}
+          </Show>
         );
       }}
     </Show>

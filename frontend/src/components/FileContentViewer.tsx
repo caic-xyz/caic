@@ -1,8 +1,7 @@
 // Renders task-runtime Markdown, inert images, bounded plain text, and unsupported-file downloads.
 
-import { Match, Show, Switch, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
-import { useNavigate } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import { Match, Show, Switch, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import FileViewerHeader from "./FileViewerHeader";
 
 import styles from "./FileContentViewer.module.css";
 import Markdown, { MarkdownTaskContext } from "./Markdown";
@@ -17,7 +16,6 @@ interface Props {
 }
 
 export default function FileContentViewer(props: Props) {
-  const navigate = useNavigate();
   let abort: AbortController | undefined;
   const [imageError, setImageError] = createSignal(false);
   onCleanup(() => abort?.abort());
@@ -37,37 +35,9 @@ export default function FileContentViewer(props: Props) {
   });
   const doc = createMemo(() => splitFrontMatter(textFile()?.text ?? ""));
 
-  // Escape navigates back to the task detail.
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        navigate(props.taskPath);
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    onCleanup(() => document.removeEventListener("keydown", onKey, true));
-  });
-
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
-        <button
-          class={styles.backBtn}
-          onClick={() => navigate(props.taskPath)}
-          title="Back to task"
-          aria-label="Back to task"
-        >
-          <ArrowBackIcon width={20} height={20} />
-        </button>
-        <span class={styles.path} title={props.path}>
-          {props.path}
-        </span>
-        <a class={styles.rawLink} href={taskRawURL(props.taskId, props.path)} target="_blank" rel="noopener noreferrer">
-          raw file
-        </a>
-      </div>
+      <FileViewerHeader taskId={props.taskId} taskPath={props.taskPath} path={props.path} />
       <div class={styles.content}>
         <Switch>
           <Match when={file.state === "errored"}>

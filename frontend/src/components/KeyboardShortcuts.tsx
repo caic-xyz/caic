@@ -1,6 +1,8 @@
 // Global keyboard navigation and the discoverable keyboard-shortcuts reference dialog.
 
 import { For, onCleanup, onMount, Show } from "solid-js";
+import { useLocation } from "@solidjs/router";
+import { fileViewMode } from "../fileView";
 
 import { useAppState } from "../AppState";
 import { taskPathForTask } from "../taskPath";
@@ -41,6 +43,7 @@ function isEditing(target: EventTarget | null): boolean {
 }
 
 export default function KeyboardShortcuts(props: Props) {
+  const location = useLocation();
   const s = useAppState();
   let shortcutOpener: HTMLElement | null = null;
   let shortcutOpenerTaskId: string | undefined;
@@ -144,12 +147,20 @@ export default function KeyboardShortcuts(props: Props) {
       const target = event.target instanceof HTMLElement ? event.target : null;
       const taskPrompt = target?.closest("[data-testid='task-detail-prompt'], [data-testid='prompt-input']");
       const focusedCard = target?.matches("[data-task-id]") ? target : null;
+      // Document keys scroll or interact with the file, not the hidden task list.
+      if (
+        fileViewMode(location.pathname, location.search) !== "closed" &&
+        !target?.closest("[data-testid='conversation-pane']") &&
+        !focusedCard
+      )
+        return;
       if (event.key === "/" && (!isEditing(target) || target?.matches("input[type='checkbox']"))) {
         event.preventDefault();
         focusCurrentPrompt();
         return;
       }
       if (event.key === "Escape") {
+        if (fileViewMode(location.pathname, location.search) !== "closed") return;
         event.preventDefault();
         focusNewTaskControl("[data-testid='prompt-input']");
         return;

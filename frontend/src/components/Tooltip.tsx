@@ -105,7 +105,11 @@ export default function Tooltip(props: Props) {
           setShow((v) => !v);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Escape") setShow(false);
+          if (e.key === "Escape" && show()) {
+            e.preventDefault();
+            e.stopPropagation();
+            setShow(false);
+          }
           if (e.key === "Enter" || e.key === " ") {
             if (props.stopActivationPropagation) e.stopPropagation();
             e.preventDefault();

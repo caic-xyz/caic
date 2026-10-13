@@ -1,6 +1,8 @@
 // Default layout: task creation and sidebar/detail panes with voice task numbers.
 
-import { type JSX, For } from "solid-js";
+import { type JSX, For, createSignal, createEffect, onCleanup } from "solid-js";
+import { useLocation } from "@solidjs/router";
+import { fileViewMode } from "../fileView";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -23,6 +25,22 @@ import styles from "./MainLayout.module.css";
 
 export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();
+  const location = useLocation();
+  const mode = () => fileViewMode(location.pathname, location.search);
+  const fullscreen = () => mode() === "fullscreen";
+  const media = window.matchMedia("(max-width: 1279px)");
+  const [compact, setCompact] = createSignal(media.matches);
+  const [sidebarOverride, setSidebarOverride] = createSignal<boolean | null>(null);
+  const updateWidth = () => {
+    setCompact(media.matches);
+    setSidebarOverride(null);
+  };
+  media.addEventListener("change", updateWidth);
+  onCleanup(() => media.removeEventListener("change", updateWidth));
+  createEffect(() => {
+    if (s.selectedId() === null) setSidebarOverride(null);
+  });
+  const sidebarOpen = () => s.selectedId() === null || (sidebarOverride() ?? (mode() === "closed" || !compact()));
   const modelSettingVisible = () =>
     s.harnesses().length > 1 ||
     (s.harnesses().find((harness) => harness.name === s.selectedHarness())?.models.length ?? 0) > 0;
@@ -159,36 +177,44 @@ export default function MainLayout(props: { children?: JSX.Element }) {
       </form>
 
       <Layout>
-        <TaskList
-          tasks={s.tasks}
-          tasksLoading={s.tasksLoading}
-          settledLoading={s.settledLoading}
-          repos={s.repos}
-          usage={s.usage}
-          selectedId={s.selectedId()}
-          sidebarOpen={s.sidebarOpen}
-          setSidebarOpen={s.setSidebarOpen}
-          now={s.now}
-          onSelect={s.navigateToTask}
-          onStop={s.handleStop}
-          onPurge={s.handlePurge}
-          onRevive={s.handleRevive}
-          onFork={s.handleFork}
-          onQuotaRecovery={s.handleQuotaRecovery}
-          isQuotaDismissed={s.isQuotaWarningDismissed}
-          onDismissQuotaWarning={s.dismissQuotaWarning}
-          onError={s.showWarning}
-          supportsCompact={(harness) =>
-            s.harnesses().find((candidate) => candidate.name === harness)?.supportsCompact ?? false
-          }
-          harnessLogoUrl={(harness) => s.harnesses().find((candidate) => candidate.name === harness)?.logoUrl}
-          actionId={s.actionId}
-          autoFixCI={s.autoFixCI}
-          autoFixPR={s.autoFixPR}
-          onFixCI={s.fixCI}
-          voiceConnected={voiceConnected}
-          getTaskNumber={getVoiceTaskNumber}
-        />
+        <div
+          class={styles.summaryPane}
+          classList={{ [styles.summarySelected]: s.selectedId() !== null, [styles.summaryHidden]: fullscreen() }}
+          inert={fullscreen()}
+          aria-hidden={fullscreen()}
+          data-testid="summary-pane"
+        >
+          <TaskList
+            tasks={s.tasks}
+            tasksLoading={s.tasksLoading}
+            settledLoading={s.settledLoading}
+            repos={s.repos}
+            usage={s.usage}
+            selectedId={s.selectedId()}
+            sidebarOpen={sidebarOpen}
+            setSidebarOpen={setSidebarOverride}
+            now={s.now}
+            onSelect={s.navigateToTask}
+            onStop={s.handleStop}
+            onPurge={s.handlePurge}
+            onRevive={s.handleRevive}
+            onFork={s.handleFork}
+            onQuotaRecovery={s.handleQuotaRecovery}
+            isQuotaDismissed={s.isQuotaWarningDismissed}
+            onDismissQuotaWarning={s.dismissQuotaWarning}
+            onError={s.showWarning}
+            supportsCompact={(harness) =>
+              s.harnesses().find((candidate) => candidate.name === harness)?.supportsCompact ?? false
+            }
+            harnessLogoUrl={(harness) => s.harnesses().find((candidate) => candidate.name === harness)?.logoUrl}
+            actionId={s.actionId}
+            autoFixCI={s.autoFixCI}
+            autoFixPR={s.autoFixPR}
+            onFixCI={s.fixCI}
+            voiceConnected={voiceConnected}
+            getTaskNumber={getVoiceTaskNumber}
+          />
+        </div>
         {props.children}
       </Layout>
     </>

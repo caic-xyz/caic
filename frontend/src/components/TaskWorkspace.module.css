@@ -1,0 +1,53 @@
+/* Persistent responsive task and document panes with viewport-filling document presentation. */
+.workspace {
+  display: flex;
+  flex: 1;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.conversation,
+.document {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace .hidden {
+  display: none;
+}
+
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  padding: 0.5rem;
+  background: rgb(var(--color-bg-app-rgb));
+}
+
+.paneSelector {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.paneSelector button {
+  min-width: 4rem;
+  min-height: 2.75rem;
+  color: var(--color-text-primary);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.paneSelector button[aria-pressed="true"] {
+  color: var(--color-on-primary);
+  background: var(--color-primary);
+}
+
+@media (width <= 768px) {
+  .workspace {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}

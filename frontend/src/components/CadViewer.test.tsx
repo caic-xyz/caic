@@ -95,7 +95,7 @@ endsolid sample
     fetchMock.mockResolvedValue(new Response(new Uint8Array(10)));
     renderViewer("/home/user/models/sample.stl");
 
-    const backBtn = screen.getByRole("button", { name: "Back to task" });
+    const backBtn = screen.getByRole("button", { name: "Close document" });
     await user.click(backBtn);
     expect(window.location.pathname).toBe("/task/@abc+test");
   });

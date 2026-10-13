@@ -132,7 +132,6 @@ function createAppStore() {
   const [selectedHarness, setSelectedHarness] = createSignal("");
   const [runtimes, setRuntimes] = createSignal<RuntimeInfo[]>([]);
   const [selectedRuntimeName, setSelectedRuntimeName] = createSignal("");
-  const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
   const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
   const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
@@ -634,11 +633,6 @@ function createAppStore() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => clearInterval(timer));
   }
-
-  // Re-open sidebar when task view is closed while sidebar is collapsed.
-  createEffect(() => {
-    if (selectedId() === null) setSidebarOpen(true);
-  });
 
   function dismissSelectedTaskOnNotFound(id: string, err: unknown): boolean {
     if ((err as { status?: number }).status !== 404 || !taskSnapshotComplete()) return false;
@@ -1658,8 +1652,6 @@ function createAppStore() {
     setCaicMCP,
     voiceGatewayAvailable,
     // sidebar + actions
-    sidebarOpen,
-    setSidebarOpen,
     now,
     actionId,
     handleStop,

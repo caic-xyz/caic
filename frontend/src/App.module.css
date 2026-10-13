@@ -13,6 +13,19 @@
   font-family: system-ui;
 }
 
+.documentOpen {
+  width: min(100%, 1920px);
+}
+
+.documentFullscreen {
+  width: 100%;
+  padding: 0;
+}
+
+.app .chromeHidden {
+  display: none;
+}
+
 .normalContent {
   display: flex;
   flex: 1;

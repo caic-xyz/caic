@@ -1,0 +1,8 @@
+/* Document pane that retains its renderer when the workspace maximizes or restores it. */
+.document {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}

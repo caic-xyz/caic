@@ -93,6 +93,7 @@ import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons"
 import { prefetchTaskDiff } from "../diffCache";
 import styles from "./TaskDetail.module.css";
 import { api } from "../api";
+import { fileViewMode } from "../fileView";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
 // Keys: toolUseID, "group:<firstToolUseID>", "thinking:<firstEventTs>".
@@ -220,6 +221,7 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
+  const taskPath = () => location.pathname.replace(/\/view$/, "");
   const timeline = createTaskEventTimeline({
     taskId: () => props.taskId,
     taskState: () => props.taskState,
@@ -300,12 +302,13 @@ export default function TaskDetail(props: Props) {
   function setPromptRef(element: HTMLElement) {
     if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
     requestAnimationFrame(() => {
-      if (element.isConnected) element.focus();
+      if (element.isConnected && fileViewMode(location.pathname, location.search) === "closed") element.focus();
     });
   }
 
   function handlePromptNavigation(event: KeyboardEvent) {
     if (event.key === "Escape") {
+      if (fileViewMode(location.pathname, location.search) !== "closed") return;
       event.preventDefault();
       event.stopPropagation();
       props.onClose();
@@ -315,6 +318,16 @@ export default function TaskDetail(props: Props) {
       return;
     }
     if (event.key !== "Tab" || !event.shiftKey) return;
+    const currentCard = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]")).find(
+      (candidate) => candidate.dataset.taskId === props.taskId,
+    );
+    if (
+      !currentCard ||
+      currentCard.getClientRects().length === 0 ||
+      getComputedStyle(currentCard).visibility === "hidden" ||
+      currentCard.closest("[inert]")
+    )
+      return;
     event.preventDefault();
     event.stopPropagation();
     // Task updates can replace the card while this handler runs. Focus the
@@ -330,7 +343,8 @@ export default function TaskDetail(props: Props) {
   onMount(() => {
     // Escape dismisses the task detail (navigates to /).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented || fileViewMode(location.pathname, location.search) !== "closed")
+        return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.closest("[data-testid='task-detail-prompt']")) return;
       props.onClose();
@@ -1007,7 +1021,7 @@ export default function TaskDetail(props: Props) {
               })()}
             </Show>
           </span>
-          <A class={styles.diffLink} href={`${location.pathname}/info`} aria-label="Task info" title="Task info">
+          <A class={styles.diffLink} href={`${taskPath()}/info`} aria-label="Task info" title="Task info">
             <InfoIcon width="13" height="13" aria-hidden="true" />
           </A>
           <Show
@@ -1018,7 +1032,7 @@ export default function TaskDetail(props: Props) {
                 {(state) => (
                   <RepoStateIcons
                     state={state}
-                    href={`${location.pathname}/diff`}
+                    href={`${taskPath()}/diff`}
                     elideDiffStats={elideHeaderGitStats()}
                     onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
                   />
@@ -1027,7 +1041,7 @@ export default function TaskDetail(props: Props) {
               <Show when={!repoStates().some((state) => repoStateLabel(state))}>
                 <RepoStateIcons
                   state={diffStatState(props.diffStat)}
-                  href={`${location.pathname}/diff`}
+                  href={`${taskPath()}/diff`}
                   elideDiffStats={elideHeaderGitStats()}
                   onNavigateIntent={() => void prefetchTaskDiff(props.taskId).catch(() => undefined)}
                 />
@@ -1048,7 +1062,7 @@ export default function TaskDetail(props: Props) {
           >
             <A
               class={styles.diffLink}
-              href={`${location.pathname}/processes`}
+              href={`${taskPath()}/processes`}
               aria-label="Task processes"
               title="Task processes"
             >
@@ -1056,7 +1070,7 @@ export default function TaskDetail(props: Props) {
             </A>
           </Show>
           <Show when={(props.vncPort ?? 0) > 0}>
-            <A class={styles.diffLink} href={`${location.pathname}/vnc`}>
+            <A class={styles.diffLink} href={`${taskPath()}/vnc`}>
               VNC
             </A>
           </Show>
@@ -1091,7 +1105,7 @@ export default function TaskDetail(props: Props) {
             </span>
           </Show>
           <StatsIcon
-            href={`${location.pathname}/stats`}
+            href={`${taskPath()}/stats`}
             stats={statsHistory()}
             usage={{
               inputTokens: props.cumulativeInputTokens ?? 0,

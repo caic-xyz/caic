@@ -103,7 +103,9 @@ export default function WidgetCard(props: { group: MessageGroup }) {
 
   // Close fullscreen on Escape.
   function onKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape" && fullscreen()) {
+    if (e.key === "Escape" && fullscreen() && !e.defaultPrevented) {
+      e.preventDefault();
+      e.stopPropagation();
       setFullscreen(false);
     }
   }
@@ -122,10 +124,10 @@ export default function WidgetCard(props: { group: MessageGroup }) {
   );
 
   window.addEventListener("message", onMessage);
-  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keydown", onKeyDown, true);
   onCleanup(() => {
     window.removeEventListener("message", onMessage);
-    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("keydown", onKeyDown, true);
   });
 
   return (

@@ -1,0 +1,47 @@
+/* Compact document controls shared by all renderers and viewport sizes. */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.button {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+}
+
+.button:hover {
+  background: var(--color-bg-hover);
+}
+
+.path {
+  flex: 1;
+  min-width: 4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.rawLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  font-size: 0.8rem;
+  color: var(--color-link);
+}

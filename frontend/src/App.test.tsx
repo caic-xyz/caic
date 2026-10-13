@@ -1296,6 +1296,10 @@ describe("App keyboard shortcuts", () => {
     const detailPrompt = screen.getByTestId("task-detail-prompt");
     await waitFor(() => expect(detailPrompt).toHaveFocus());
 
+    // jsdom has no layout; supply geometry for the visible sidebar card.
+    const currentCard = document.querySelector<HTMLElement>("[data-task-id='task1']");
+    if (!currentCard) throw new Error("Selected task card was not rendered");
+    vi.spyOn(currentCard, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
     await user.tab({ shift: true });
     await waitFor(() => expect(document.querySelector("[data-task-id='task1']")).toHaveFocus());
   });
