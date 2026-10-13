@@ -1,4 +1,4 @@
-/* Styles for the CAD viewer, toolbar, and accessible plate list. */
+/* Styles for the CAD viewer, toolbar, and 3D canvas. */
 
 .container {
   display: flex;
@@ -16,16 +16,6 @@
 .badge {
   font-size: 0.75rem;
   color: var(--color-text-muted);
-}
-
-.plates {
-  max-height: 6rem;
-  padding-left: 1.5rem;
-  margin: 0 0 0.75rem;
-  overflow: auto;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  overflow-wrap: anywhere;
 }
 
 .content {

@@ -1,6 +1,6 @@
 // CAD document pane for task-runtime models, filament colors, printing plates, and clean camera controls.
 
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FileViewerHeader from "./FileViewerHeader";
 import ActionButton from "./ActionButton";
 import ResetIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
@@ -129,18 +129,6 @@ export default function CadViewer(props: Props) {
           </Show>
         </div>
       </FileViewerHeader>
-      <Show when={modelInfo()?.plates.length}>
-        <ul class={styles.plates} aria-label="Printing plates">
-          <For each={modelInfo()?.plates}>
-            {(plate) => (
-              <li>
-                Plate {plate.id}
-                {plate.name ? `: ${plate.name}` : ""}
-              </li>
-            )}
-          </For>
-        </ul>
-      </Show>
       <div class={styles.content}>
         <Show when={error()}>
           {(err) => (

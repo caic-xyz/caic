@@ -1,4 +1,4 @@
-// Tests CAD viewer loading, model and plate metadata, failure states, and keyboard navigation.
+// Tests CAD viewer loading, model metrics, failure states, and keyboard navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -74,13 +74,10 @@ endsolid sample
     expect(await screen.findByText("2 triangles")).toHaveAttribute("title", "Dimensions: 30 × 20 × 0");
   });
 
-  it("lists printing plates without requiring WebGL", async () => {
+  it("loads Bambu 3MF model metrics without WebGL", async () => {
     fetchMock.mockResolvedValue(new Response(createBambu3mfFixture()));
     renderViewer("/models/bambu.3mf");
-    expect(await screen.findByRole("list", { name: "Printing plates" })).toHaveTextContent("Plate 1: Panel");
-    expect(screen.getByText("Plate 2: Frame")).toBeInTheDocument();
-    expect(screen.getByText("Plate 3: Spare")).toBeInTheDocument();
-    expect(screen.getByText("4 triangles")).toHaveAttribute("title", "Dimensions: 70 × 20 × 0");
+    expect(await screen.findByText("4 triangles")).toHaveAttribute("title", "Dimensions: 70 × 20 × 0");
   });
 
   it("shows a parse error for a malformed 3MF file", async () => {

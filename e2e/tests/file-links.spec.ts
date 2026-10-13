@@ -123,13 +123,6 @@ for (const width of [390, 1280]) {
       await expect(page).toHaveURL(`/task/@${id}/view?path=${encodeURIComponent("/models/assembly.3mf")}`);
       await expect(page.getByText("4 triangles")).toHaveAttribute("title", "Dimensions: 70 × 20 × 0");
       await expect(page.locator("canvas")).toBeVisible();
-      await expect(page.getByRole("list", { name: "Printing plates" })).toBeVisible();
-      await expect(
-        page.getByRole("list", { name: "Printing plates" }).getByText("Plate 1: Panel", { exact: true }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("list", { name: "Printing plates" }).getByText("Plate 3: Spare", { exact: true }),
-      ).toBeVisible();
       await page.screenshot({ path: test.info().outputPath("printing-plates.png") });
       const canvas = await page.locator("canvas").boundingBox();
       if (!canvas) throw new Error("Missing canvas bounds");
