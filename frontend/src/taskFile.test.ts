@@ -1,4 +1,4 @@
-// Tests bounded task-file preview reads, exact-limit truncation, and transfer cancellation.
+// Tests bounded text reads, sniffed PDF previews, exact-limit truncation, and transfer cancellation.
 import { afterEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { readTaskFilePreview } from "./taskFile";
@@ -7,6 +7,31 @@ const fetchMock = vi.spyOn(globalThis, "fetch");
 afterEach(() => fetchMock.mockReset());
 
 describe("readTaskFilePreview", () => {
+  it("identifies PDFs by MIME and cancels the preview stream without retaining PDF bytes", async () => {
+    let cancelled = false;
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "Content-Type": "application/pdf" } },
+      ),
+    );
+    expect(await readTaskFilePreview("abc", "/report.bin", new AbortController().signal)).toEqual({ kind: "pdf" });
+    expect(cancelled).toBe(true);
+  });
+
+  it("does not treat a text file with a PDF extension as a PDF", async () => {
+    fetchMock.mockResolvedValue(new Response("plain text", { headers: { "Content-Type": "text/plain" } }));
+    expect(await readTaskFilePreview("abc", "/report.pdf", new AbortController().signal)).toEqual({
+      kind: "text",
+      text: "plain text",
+      truncated: false,
+    });
+  });
+
   for (const [size, truncated] of [
     [1_048_575, false],
     [1_048_576, false],

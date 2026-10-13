@@ -260,13 +260,7 @@ function Leaderboard(props: {
 }) {
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No usage in this range.</p>}>
-      <div
-        class={styles.tableWrap}
-        role="region"
-        aria-label="Usage leaderboard"
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- overflow region must be keyboard-scrollable
-        tabIndex={0}
-      >
+      <div class={styles.tableWrap} role="region" aria-label="Usage leaderboard" tabIndex={0}>
         <table class={styles.table}>
           <thead>
             <tr>
@@ -318,13 +312,7 @@ function Leaderboard(props: {
 function ToolTable(props: { entries: ReturnType<typeof summarizeUsageDays>["tools"] }) {
   return (
     <Show when={props.entries.length > 0} fallback={<p class={styles.noRows}>No tool calls in this range.</p>}>
-      <div
-        class={styles.tableWrap}
-        role="region"
-        aria-label="Tool durations"
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- overflow region must be keyboard-scrollable
-        tabIndex={0}
-      >
+      <div class={styles.tableWrap} role="region" aria-label="Tool durations" tabIndex={0}>
         <table class={styles.table}>
           <thead>
             <tr>

@@ -124,14 +124,14 @@ describe("FileContentViewer", () => {
             cancelled = true;
           },
         }),
-        { headers: { "Content-Type": "application/pdf" } },
+        { headers: { "Content-Type": "application/octet-stream" } },
       ),
     );
-    renderViewer("/report.pdf");
+    renderViewer("/report.bin");
     expect(await screen.findByText(/No preview/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "raw file" })).toHaveAttribute(
       "href",
-      "/api/caic/v1/tasks/abc/raw?path=%2Freport.pdf",
+      "/api/caic/v1/tasks/abc/raw?path=%2Freport.bin",
     );
     expect(cancelled).toBe(true);
   });

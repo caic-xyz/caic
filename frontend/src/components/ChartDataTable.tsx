@@ -16,13 +16,7 @@ export default function ChartDataTable(props: ChartDataTableProps) {
   return (
     <details class={`${styles.details} ${props.class ?? ""}`}>
       <summary>{`${props.caption} (${props.rows.length})`}</summary>
-      <div
-        aria-label={props.regionLabel}
-        class={styles.wrap}
-        role="region"
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- overflow region must be keyboard-scrollable
-        tabIndex={0}
-      >
+      <div aria-label={props.regionLabel} class={styles.wrap} role="region" tabIndex={0}>
         <table class={styles.table}>
           <thead>
             <tr>

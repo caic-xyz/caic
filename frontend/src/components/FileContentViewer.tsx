@@ -1,6 +1,6 @@
-// Renders task-runtime Markdown, inert images, bounded plain text, and unsupported-file downloads.
+// Renders task-runtime Markdown, images, lazy PDF previews, bounded plain text, and unsupported-file downloads.
 
-import { Match, Show, Switch, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy, onCleanup } from "solid-js";
 import FileViewerHeader from "./FileViewerHeader";
 
 import styles from "./FileContentViewer.module.css";
@@ -8,6 +8,8 @@ import Markdown, { MarkdownTaskContext } from "./Markdown";
 import { dirname, isMarkdownPath, taskRawURL } from "../runtimePath";
 import { splitFrontMatter } from "../frontMatter";
 import { readTaskFilePreview } from "../taskFile";
+
+const PdfPreview = lazy(() => import("./PdfPreview"));
 
 interface Props {
   taskId: string;
@@ -38,7 +40,7 @@ export default function FileContentViewer(props: Props) {
   return (
     <div class={styles.container}>
       <FileViewerHeader taskId={props.taskId} taskPath={props.taskPath} path={props.path} />
-      <div class={styles.content}>
+      <div class={styles.content} classList={{ [styles.pdfContent]: file.state === "ready" && file()?.kind === "pdf" }}>
         <Switch>
           <Match when={file.state === "errored"}>
             <div class={styles.error} role="alert">
@@ -61,6 +63,11 @@ export default function FileContentViewer(props: Props) {
                 onError={() => setImageError(true)}
               />
             </Show>
+          </Match>
+          <Match when={file.state === "ready" && file()?.kind === "pdf"}>
+            <Suspense fallback={<div class={styles.loading}>Loading PDF…</div>}>
+              <PdfPreview taskId={props.taskId} path={props.path} />
+            </Suspense>
           </Match>
           <Match when={file.state === "ready" && file()?.kind === "unsupported"}>
             <div class={styles.notice}>No preview for this file. Open the raw file to download it.</div>

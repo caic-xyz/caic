@@ -67,7 +67,8 @@ export default tseslint.config(
       // Image load/error events report resource state, not user interaction.
       "jsx-a11y/no-noninteractive-element-interactions": ["error", { img: ["onError", "onLoad"] }],
       "jsx-a11y/no-noninteractive-element-to-interactive-role": "error",
-      "jsx-a11y/no-noninteractive-tabindex": "error",
+      // Named overflow regions must be reachable for keyboard scrolling.
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["region", "tabpanel"] }],
       "jsx-a11y/no-redundant-roles": "error",
       "jsx-a11y/no-static-element-interactions": "error",
       "jsx-a11y/role-has-required-aria-props": "error",
