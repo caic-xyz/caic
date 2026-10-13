@@ -5,6 +5,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
 import { isStlPath, isStepPath } from "./runtimePath";
 import { applyBambuMetadata } from "./bambu3mf";
+import { BambuPaintGeometry } from "./bambuPaint";
 import type { CadPlate } from "./bambu3mf";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import occtimportjs from "occt-import-js";
@@ -147,7 +148,9 @@ export function computeModelInfo(group: THREE.Group): Omit<CadModelInfo, "plates
     if (child instanceof THREE.Mesh) {
       meshCount++;
       const geom = child.geometry;
-      if (geom.index) {
+      if (geom instanceof BambuPaintGeometry) {
+        triangleCount += geom.sourceTriangleCount;
+      } else if (geom.index) {
         triangleCount += geom.index.count / 3;
       } else if (geom.attributes.position) {
         triangleCount += geom.attributes.position.count / 3;

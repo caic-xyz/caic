@@ -1,6 +1,6 @@
 // Browser coverage for task-container file links, image display, markdown viewer, CAD 3D viewer, inline mermaid diagrams, and missing artifacts.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
-import { createBambu3mfFixture } from "../../frontend/tests/cad-fixture";
+import { createPaintedBambu3mfFixture } from "../../frontend/tests/cad-fixture";
 
 for (const width of [390, 1280]) {
   test(`task file links open artifacts and markdown at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
@@ -9,7 +9,7 @@ for (const width of [390, 1280]) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/file?*", async (route) => {
       if (new URL(route.request().url()).searchParams.get("path") === "/models/assembly.3mf") {
-        await route.fulfill({ contentType: "model/3mf", body: Buffer.from(createBambu3mfFixture()) });
+        await route.fulfill({ contentType: "model/3mf", body: Buffer.from(createPaintedBambu3mfFixture("8")) });
       } else {
         await route.continue();
       }

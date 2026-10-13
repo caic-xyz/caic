@@ -190,6 +190,9 @@ importers:
       occt-import-js:
         specifier: 0.0.23
         version: 0.0.23
+      saxes:
+        specifier: 6.0.0
+        version: 6.0.0
       solid-js:
         specifier: 1.9.15
         version: 1.9.15

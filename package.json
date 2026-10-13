@@ -35,6 +35,7 @@
     "marked": "18.0.13",
     "mermaid": "12.1.0",
     "occt-import-js": "0.0.23",
+    "saxes": "6.0.0",
     "solid-js": "1.9.15",
     "three": "0.186.1"
   },

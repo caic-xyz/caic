@@ -4,8 +4,9 @@ import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
 import { Box3, Color, LineSegments, Mesh, MeshPhongMaterial, Vector3 } from "three";
+import type { GeometryGroup } from "three";
 import { strToU8, strFromU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
-import { create3mfFixture, createBambu3mfFixture } from "../tests/cad-fixture";
+import { create3mfFixture, createBambu3mfFixture, createPaintedBambu3mfFixture } from "../tests/cad-fixture";
 import {
   computeModelInfo,
   createPlateGroup,
@@ -107,6 +108,25 @@ endsolid test_triangle
       if (child instanceof Mesh) colors.push(child.material.color.getHex());
     });
     expect(colors).toEqual([0xffffff, 0x482960, 0xff0000, 0xe4bd68, 0xe4bd68]);
+  });
+
+  it("uses per-face Bambu paint instead of the inherited filament", async () => {
+    const { group } = await parseCad(createPaintedBambu3mfFixture("8").buffer, "painted.3mf");
+    const colors: number[] = [];
+    group.traverse((child) => {
+      if (child instanceof Mesh) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        if (child.geometry.groups.length) {
+          child.geometry.groups.forEach((range: GeometryGroup) =>
+            colors.push(materials[range.materialIndex ?? 0].color.getHex()),
+          );
+        } else {
+          colors.push(materials[0].color.getHex());
+        }
+      }
+    });
+    expect(colors).toEqual([0xe4bd68, 0x482960, 0xff0000, 0xe4bd68]);
+    expect(computeModelInfo(group).triangleCount).toBe(4);
   });
 
   it("gives black display materials reflectance and highlights without changing source colors", async () => {

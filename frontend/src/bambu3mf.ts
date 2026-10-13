@@ -1,6 +1,8 @@
-// Parses Bambu 3MF filament assignments and printing-plate outlines without replacing standard materials.
+// Parses Bambu filament assignments, painted faces, and printing plates while preserving standard materials.
 import * as THREE from "three";
 import { strFromU8, unzipSync } from "three/addons/libs/fflate.module.js";
+import { BambuFacePainter, readBambuMeshInfo } from "./bambuPaint";
+import type { BambuMeshInfo } from "./bambuPaint";
 
 const productionNamespace = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06";
 
@@ -82,6 +84,7 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
     throw new Error("Invalid filament palette in 3MF color metadata");
   }
   const colors: string[] = palette;
+  const facePainter = new BambuFacePainter(colors);
   const rels = parseXml(files["_rels/.rels"]);
   const target = Array.from(rels.querySelectorAll("Relationship"))
     .find((rel) => rel.getAttribute("Type")?.endsWith("/3dmodel"))
@@ -89,30 +92,18 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
   if (!target) throw new Error("Missing 3MF model relationship");
   const rootPath = target.replace(/^\//, "");
   const documents = new Map<string, Document>();
-  const propertyDocuments = new Map<string, Document | null>();
-  function fallbackMeshes(path: string, id: string, node: THREE.Object3D): THREE.Object3D[] {
-    if (!propertyDocuments.has(path)) {
+  const meshSources = new Map<string, Map<string, BambuMeshInfo> | null>();
+  function meshInfo(path: string, id: string): BambuMeshInfo | null {
+    if (!meshSources.has(path)) {
       const bytes = unzipSync(new Uint8Array(buffer), { filter: (file) => file.name === path })[path];
       if (!bytes) throw new Error("Missing model in 3MF color metadata");
-      // Standard 3MF properties require a pid attribute. Avoid a second geometry DOM
-      // for uncolored slicer meshes; comments and other false positives only add parsing.
-      const text = strFromU8(bytes);
-      propertyDocuments.set(path, /\bpid\s*=/.test(text) ? parseXml(bytes) : null);
+      meshSources.set(path, readBambuMeshInfo(bytes));
     }
-    const doc = propertyDocuments.get(path);
-    if (!doc) return node.children;
-    const object = Array.from(doc.querySelectorAll("resources > object")).find((o) => o.getAttribute("id") === id);
+    const objects = meshSources.get(path);
+    if (!objects) return null;
+    const object = objects.get(id);
     if (!object) throw new Error("Missing object in 3MF color metadata");
-    const defaultTriangles =
-      !object.hasAttribute("pid") &&
-      Array.from(object.querySelectorAll("mesh > triangles > triangle")).some(
-        (triangle) => !triangle.hasAttribute("pid"),
-      );
-    const lattice = object.querySelector("mesh > beamlattice") !== null;
-    // The pinned loader emits numeric property resources first, then its one
-    // default mesh, then the optional lattice mesh. Names are user-controlled.
-    const count = Number(defaultTriangles) + Number(lattice);
-    return count > 0 ? node.children.slice(-count) : [];
+    return object;
   }
   function document(path: string): Document {
     let doc = documents.get(path);
@@ -151,7 +142,13 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
   ) {
     const effective = parts.get(id) ?? index;
     if (node.children.every((child) => child instanceof THREE.Mesh)) {
-      if (effective !== null) fallbackMeshes(path, id, node).forEach((mesh) => paint(mesh, effective));
+      const info = meshInfo(path, id);
+      // The pinned loader emits numeric property resources first, then its one
+      // default mesh, then the optional lattice mesh. Names are user-controlled.
+      const count = info ? Number(info.hasDefaultTriangles) + Number(info.lattice) : node.children.length;
+      const fallback = count > 0 ? node.children.slice(-count) : [];
+      fallback.forEach((mesh) => paint(mesh, effective));
+      if (info?.hasDefaultTriangles && fallback[0] instanceof THREE.Mesh) facePainter.paint(fallback[0], info);
       return;
     }
     const object = Array.from(document(path).querySelectorAll("resources > object")).find(
