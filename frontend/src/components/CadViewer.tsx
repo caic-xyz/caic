@@ -5,7 +5,7 @@ import { useNavigate } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 
 import styles from "./CadViewer.module.css";
-import { taskFileURL } from "../runtimePath";
+import { taskRawURL } from "../runtimePath";
 import { readTaskBinaryFile } from "../taskFile";
 import type { CadModelInfo, CadScene } from "../cad";
 
@@ -153,12 +153,7 @@ export default function CadViewer(props: Props) {
             </button>
           </Show>
         </div>
-        <a
-          class={styles.rawLink}
-          href={taskFileURL(props.taskId, props.path)}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+        <a class={styles.rawLink} href={taskRawURL(props.taskId, props.path)} target="_blank" rel="noopener noreferrer">
           raw file
         </a>
       </div>

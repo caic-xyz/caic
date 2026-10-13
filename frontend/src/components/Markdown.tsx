@@ -1,4 +1,4 @@
-// Markdown renders agent and file text with runtime file links, in-app markdown and CAD navigation, copyable code, inline mermaid diagrams, and a raw toggle.
+// Markdown safely renders agent and file text with viewer links, copyable code, strict Mermaid diagrams, and a raw toggle.
 
 import {
   Show,
@@ -13,11 +13,12 @@ import {
 } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { Marked, Renderer, type Tokens } from "marked";
+import DOMPurify from "dompurify";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 
 import styles from "./Markdown.module.css";
-import { isViewablePath, runtimeFilePath, taskFileURL, taskViewURL } from "../runtimePath";
+import { runtimeFilePath, taskRawURL, taskViewURL } from "../runtimePath";
 import { getMermaidCachedSvg, renderMermaidBlocks, toggleMermaidView } from "../mermaid";
 
 /** The task whose runtime files markdown paths name. Without it, links stay ordinary. */
@@ -34,7 +35,8 @@ const markdownRenderer = {
     if (token.lang === "mermaid") {
       const cached = getMermaidCachedSvg(token.text);
       if (cached !== null) {
-        return `<div class="${styles.mermaidBlock}" data-mermaid-block><div class="${styles.mermaidToolbar}"><button type="button" class="${styles.mermaidToggleBtn}" data-mermaid-toggle aria-label="Show code" title="Show code">code</button><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true"></span><span class="${styles.checkIcon}" aria-hidden="true"></span></button></div><div class="${styles.mermaidDiagram}" data-mermaid-diagram role="img" aria-label="Mermaid diagram">${cached}</div><div class="${styles.mermaidSource}" data-mermaid-source style="display: none;"><div class="${blockClass}">${code}</div></div></div>\n`;
+        // renderMermaidBlocks inserts strict-rendered SVG after Markdown sanitization.
+        return `<div class="${styles.mermaidBlock}" data-mermaid-block><div class="${styles.mermaidToolbar}"><button type="button" class="${styles.mermaidToggleBtn}" data-mermaid-toggle aria-label="Show code" title="Show code">code</button><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true"></span><span class="${styles.checkIcon}" aria-hidden="true"></span></button></div><div class="${styles.mermaidDiagram}" data-mermaid-diagram role="img" aria-label="Mermaid diagram"></div><div class="${styles.mermaidSource}" data-mermaid-source style="display: none;"><div class="${blockClass}">${code}</div></div></div>\n`;
       }
 
       return `<div class="${styles.mermaidBlock}" data-mermaid-block><div class="${styles.mermaidToolbar}"><button type="button" class="${styles.mermaidToggleBtn}" data-mermaid-toggle aria-label="Show code" title="Show code" style="display: none;">code</button><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true"></span><span class="${styles.checkIcon}" aria-hidden="true"></span></button></div><div class="${styles.mermaidDiagram}" data-mermaid-diagram role="img" aria-label="Mermaid diagram"><div class="${styles.mermaidPlaceholder}"></div></div><div class="${styles.mermaidSource}" data-mermaid-source style="display: none;"><div class="${blockClass}">${code}</div></div></div>\n`;
@@ -60,24 +62,25 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
       link(this: Renderer, token: Tokens.Link): string {
         const path = runtimePath(token.href);
         if (path === null || !taskId) return Renderer.prototype.link.call(this, token);
-        // In-app viewable files (markdown and CAD) open in the app; other files open in a new tab.
-        if (isViewablePath(path)) {
-          return Renderer.prototype.link
-            .call(this, { ...token, href: taskViewURL(taskId(), path) })
-            .replace("<a ", "<a data-app-link ");
-        }
         return Renderer.prototype.link
-          .call(this, { ...token, href: taskFileURL(taskId(), path) })
-          .replace("<a ", '<a target="_blank" rel="noopener noreferrer" ');
+          .call(this, { ...token, href: taskViewURL(taskId(), path) })
+          .replace("<a ", "<a data-app-link ");
       },
       image(this: Renderer, token: Tokens.Image): string {
         const path = runtimePath(token.href);
         if (path === null || !taskId) return Renderer.prototype.image.call(this, token);
-        return Renderer.prototype.image.call(this, { ...token, href: taskFileURL(taskId(), path) });
+        return Renderer.prototype.image.call(this, { ...token, href: taskRawURL(taskId(), path) });
       },
     },
   });
-  const html = createMemo(() => marked.parse(props.text) as string);
+  // Content cannot submit authenticated forms or install page-wide CSS.
+  const html = createMemo(() =>
+    DOMPurify.sanitize(marked.parse(props.text) as string, {
+      USE_PROFILES: { html: true },
+      FORBID_TAGS: ["form", "style"],
+      FORBID_ATTR: ["form", "formaction", "formenctype", "formmethod", "formtarget"],
+    }),
+  );
   const [raw, setRaw] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   let wrapperRef: HTMLDivElement | undefined;
@@ -171,7 +174,7 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
       <Show
         when={raw()}
         fallback={
-          // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
+          // eslint-disable-next-line solid/no-innerhtml -- DOMPurify sanitizes untrusted Markdown output
           <div class={styles.markdown} innerHTML={html()} />
         }
       >

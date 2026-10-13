@@ -1,15 +1,24 @@
-// Browser coverage for task-container file links, image display, markdown viewer, CAD 3D viewer, inline mermaid diagrams, and missing artifacts.
+// Browser coverage for unified container-file viewing, raw streams, CAD, safe text, images, and missing files.
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 import { createPaintedBambu3mfFixture } from "../../frontend/tests/cad-fixture";
 
 for (const width of [390, 1280]) {
-  test(`task file links open artifacts and markdown at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
+  test(`container files use viewer and raw handlers at ${width}px`, async ({ page, api, request, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.route("**/file?*", async (route) => {
+    await page.route("**/raw?*", async (route) => {
       if (new URL(route.request().url()).searchParams.get("path") === "/models/assembly.3mf") {
         await route.fulfill({ contentType: "model/3mf", body: Buffer.from(createPaintedBambu3mfFixture("8")) });
+      } else if (new URL(route.request().url()).searchParams.get("path") === "/notes.go") {
+        await route.fulfill({ contentType: "text/plain", body: "package notes\n// # Not a Markdown heading" });
+      } else if (new URL(route.request().url()).searchParams.get("path") === "/notes.md") {
+        await route.fulfill({
+          contentType: "text/html",
+          body: '# Notes\n\n<img src="/missing-preview.png" onerror="window.fileScriptExecuted=true"><script>window.fileScriptExecuted=true</script><style>body{display:none}</style><form method="post" action="/api/caic/v1/tasks"><button style="position:fixed;inset:0;opacity:0" formaction="/api/caic/v1/tasks/abc/purge" form="target">Submit</button></form>\n\n[Run](javascript:alert%281%29)',
+        });
+      } else if (new URL(route.request().url()).searchParams.get("path") === "/report.bin") {
+        await route.fulfill({ contentType: "application/octet-stream", body: Buffer.from([0, 1, 2]) });
       } else {
         await route.continue();
       }
@@ -17,22 +26,66 @@ for (const width of [390, 1280]) {
     const id = await createTaskAPI(
       api,
       uniquePrompt(
-        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), and [Print](/models/assembly.3mf).",
+        "Review [Screenshot](/home/user/src/caic/test-results/screenshot.png), [Readme](/home/user/src/caic/README.md), [Bracket](/home/user/src/caic/models/bracket.stl), [Print](/models/assembly.3mf), [Source](/notes.go), [Binary](/report.bin), and [Notes](/notes.md).",
       ),
     );
     await waitForTaskState(api, id, "waiting");
     await page.goto(`/task/@${id}`);
     const link = page.getByRole("link", { name: "Screenshot", exact: true });
     await expect(link).toBeVisible();
-    const opened = page.waitForEvent("popup");
     await link.click();
-    const imagePage = await opened;
-    await imagePage.waitForLoadState();
-    const image = imagePage.locator("img");
+    await expect(page).toHaveURL(
+      `/task/@${id}/view?path=${encodeURIComponent("/home/user/src/caic/test-results/screenshot.png")}`,
+    );
+    const image = page.getByRole("img", { name: "/home/user/src/caic/test-results/screenshot.png", exact: true });
     await expect(image).toBeVisible();
     expect(await image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
-    await imagePage.close();
-    await expect(page).toHaveURL(`/task/@${id}`);
+    await page.screenshot({ path: test.info().outputPath("image-viewer.png") });
+    const opened = page.waitForEvent("popup");
+    await page.getByRole("link", { name: "raw file" }).click();
+    const rawPage = await opened;
+    await expect(rawPage.locator("img")).toBeVisible();
+    await rawPage.close();
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
+
+    await test.step("source and unsupported files open the same viewer", async () => {
+      await page.getByRole("link", { name: "Source", exact: true }).click();
+      await expect(page.locator("pre")).toHaveText("package notes\n// # Not a Markdown heading");
+      await page.keyboard.press("Escape");
+      await page.getByRole("link", { name: "Binary", exact: true }).click();
+      await expect(page.getByText(/No preview for this file/)).toBeVisible();
+      await expect(page.getByRole("link", { name: "raw file" })).toHaveAttribute(
+        "href",
+        `/api/caic/v1/tasks/${id}/raw?path=%2Freport.bin`,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    await test.step("Markdown content cannot execute scripts", async () => {
+      await page.getByRole("link", { name: "Notes", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();
+      await expect(
+        page.locator("article").locator("[onerror], form, [form], [formaction], a[href^='javascript:']"),
+      ).toHaveCount(0);
+      await page.waitForFunction(
+        () => document.querySelector<HTMLImageElement>('img[src="/missing-preview.png"]')?.complete,
+      );
+      expect(await page.evaluate(() => Reflect.get(window, "fileScriptExecuted"))).toBeUndefined();
+      const contained = await page.getByRole("button", { name: "Submit", exact: true }).evaluate((button) => {
+        const bounds = button.getBoundingClientRect();
+        const documentBounds = button.closest("[data-markdown-wrap]")?.getBoundingClientRect();
+        return (
+          documentBounds !== undefined &&
+          bounds.top >= documentBounds.top &&
+          bounds.left >= documentBounds.left &&
+          bounds.right <= documentBounds.right &&
+          bounds.bottom <= documentBounds.bottom
+        );
+      });
+      expect(contained).toBe(true);
+      await page.keyboard.press("Escape");
+    });
 
     await test.step("markdown links open in the in-app viewer", async () => {
       const readmeURL = "/home/user/src/caic/README.md";
@@ -91,16 +144,16 @@ for (const width of [390, 1280]) {
       expect(errors).toEqual([]);
     });
 
-    const readme = await request.get(`/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2FREADME.md`);
+    const readme = await request.get(`/api/caic/v1/tasks/${id}/raw?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2FREADME.md`);
     expect(await readme.text()).toContain("# Task artifact");
 
     const stl = await request.get(
-      `/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Fmodels%2Fbracket.stl`,
+      `/api/caic/v1/tasks/${id}/raw?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Fmodels%2Fbracket.stl`,
     );
     expect(stl.status()).toBe(200);
     expect(await stl.text()).toContain("solid bracket");
 
-    const fileURL = `/api/caic/v1/tasks/${id}/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fscreenshot.png`;
+    const fileURL = `/api/caic/v1/tasks/${id}/raw?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fscreenshot.png`;
     const partial = await request.get(fileURL, {
       headers: { Range: "bytes=8-11", "Accept-Encoding": "gzip" },
     });
@@ -116,7 +169,7 @@ for (const width of [390, 1280]) {
     expect(fresh.headers()["etag"]).toBeUndefined();
     expect(fresh.headers()["last-modified"]).toBeUndefined();
 
-    const missing = await request.get(`/api/caic/v1/tasks/${id}/file?path=%2Fmissing.png`);
+    const missing = await request.get(`/api/caic/v1/tasks/${id}/raw?path=%2Fmissing.png`);
     expect(missing.status()).toBe(404);
     expect(await missing.json()).toMatchObject({ error: { code: "NOT_FOUND", message: "file not found" } });
   });

@@ -48,7 +48,7 @@ endsolid sample
 
     expect(screen.getByText("/home/user/models/sample.stl")).toBeInTheDocument();
     const rawLink = screen.getByRole("link", { name: "raw file" });
-    expect(rawLink).toHaveAttribute("href", "/api/caic/v1/tasks/abc/file?path=%2Fhome%2Fuser%2Fmodels%2Fsample.stl");
+    expect(rawLink).toHaveAttribute("href", "/api/caic/v1/tasks/abc/raw?path=%2Fhome%2Fuser%2Fmodels%2Fsample.stl");
     expect(rawLink).toHaveAttribute("target", "_blank");
 
     // Once parsed, the triangle badge appears

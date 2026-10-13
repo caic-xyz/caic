@@ -182,8 +182,9 @@ describe("Markdown", () => {
     expect(docLink).toHaveAttribute("data-app-link");
 
     const codeLink = screen.getByRole("link", { name: "Code" });
-    expect(codeLink).toHaveAttribute("href", "/api/caic/v1/tasks/task123/file?path=src%2Fmain.go");
-    expect(codeLink).toHaveAttribute("target", "_blank");
+    expect(codeLink).toHaveAttribute("href", "/task/@task123/view?path=src%2Fmain.go");
+    expect(codeLink).toHaveAttribute("data-app-link");
+    expect(codeLink).not.toHaveAttribute("target");
   });
 
   it("routes in-app CAD links for STL, STEP, and 3MF models when MarkdownTaskContext is provided", async () => {

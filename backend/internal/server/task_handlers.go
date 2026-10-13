@@ -817,17 +817,17 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
 	m.HandleFunc("GET /tasks/{id}/diff/index", h.handleGetDiffIndex)
 	m.HandleFunc("GET /tasks/{id}/diff/file", h.handleGetFileDiff)
-	m.HandleFunc("GET /tasks/{id}/file", h.handleTaskFile)
+	m.HandleFunc("GET /tasks/{id}/raw", h.handleTaskRaw)
 	m.HandleFunc("GET /tasks/{id}/repo-status", h.handleTaskRepoStatus)
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
 }
 
-// handleTaskFile is a raw browser resource endpoint, like the VNC WebSocket;
+// handleTaskRaw is a raw browser resource endpoint, like the VNC WebSocket;
 // it is intentionally outside the generated JSON SDK. Active document formats
 // download as attachments so container content cannot run on caic's origin.
-func (h *taskHandlers) handleTaskFile(w http.ResponseWriter, r *http.Request) {
+func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	w.Header().Set("Cache-Control", "no-store")
 	entry, err := h.getTask(r)

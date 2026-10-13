@@ -9,9 +9,8 @@ import {
   isMarkdownPath,
   isStepPath,
   isStlPath,
-  isViewablePath,
   runtimeFilePath,
-  taskFileURL,
+  taskRawURL,
   taskViewURL,
 } from "./runtimePath";
 
@@ -101,20 +100,9 @@ describe("isCadPath", () => {
   });
 });
 
-describe("isViewablePath", () => {
-  it("accepts both markdown documents and CAD models", () => {
-    expect(isViewablePath("README.md")).toBe(true);
-    expect(isViewablePath("assembly.3mf")).toBe(true);
-    expect(isViewablePath("bracket.stl")).toBe(true);
-    expect(isViewablePath("bracket.step")).toBe(true);
-    expect(isViewablePath("bracket.stp")).toBe(true);
-    expect(isViewablePath("main.go")).toBe(false);
-  });
-});
-
 describe("URLs", () => {
   it("encode the runtime path as a query value", () => {
-    expect(taskFileURL("abc", "/home/user/a b.md")).toBe("/api/caic/v1/tasks/abc/file?path=%2Fhome%2Fuser%2Fa+b.md");
+    expect(taskRawURL("abc", "/home/user/a b.md")).toBe("/api/caic/v1/tasks/abc/raw?path=%2Fhome%2Fuser%2Fa+b.md");
     expect(taskViewURL("abc", "/home/user/a b.md")).toBe("/task/@abc/view?path=%2Fhome%2Fuser%2Fa+b.md");
   });
 });

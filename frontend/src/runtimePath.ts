@@ -1,4 +1,4 @@
-// Resolves markdown and CAD destinations that name task-runtime files and builds their file and viewer URLs.
+// Resolves task-runtime file destinations and builds their viewer and raw URLs.
 
 const markdownExtension = /\.(md|markdown)$/i;
 const stlExtension = /\.stl$/i;
@@ -44,10 +44,6 @@ export function isCadPath(path: string): boolean {
   return isStlPath(path) || isStepPath(path) || /\.3mf$/i.test(path);
 }
 
-export function isViewablePath(path: string): boolean {
-  return isMarkdownPath(path) || isCadPath(path);
-}
-
 /** Returns the directory of a runtime file path: "/" at the root, "." for a bare name. */
 export function dirname(path: string): string {
   const slash = path.lastIndexOf("/");
@@ -69,11 +65,11 @@ function joinPath(dir: string, rel: string): string {
 }
 
 /** The raw task-file endpoint URL for a runtime path. */
-export function taskFileURL(taskId: string, path: string): string {
-  return `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/file?${new URLSearchParams({ path })}`;
+export function taskRawURL(taskId: string, path: string): string {
+  return `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/raw?${new URLSearchParams({ path })}`;
 }
 
-/** The in-app markdown viewer route for a runtime path. */
+/** The single in-app file viewer route for a runtime path. */
 export function taskViewURL(taskId: string, path: string): string {
   return `/task/@${encodeURIComponent(taskId)}/view?${new URLSearchParams({ path })}`;
 }

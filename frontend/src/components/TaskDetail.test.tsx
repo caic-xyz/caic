@@ -240,7 +240,7 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(link).not.toHaveAttribute("data-elide-diff-stats"));
   });
 
-  it("opens agent screenshot links through the task file endpoint", () => {
+  it("opens agent screenshot links in the file viewer", () => {
     taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({
         kind: "text",
@@ -256,10 +256,10 @@ describe("TaskDetail", () => {
     const link = screen.getByRole("link", { name: "Screenshot: General" });
     expect(link).toHaveAttribute(
       "href",
-      "/api/caic/v1/tasks/abc/file?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fsettings-general-desktop.png",
+      "/task/@abc/view?path=%2Fhome%2Fuser%2Fsrc%2Fcaic%2Ftest-results%2Fsettings-general-desktop.png",
     );
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link).not.toHaveAttribute("target");
+    expect(link).toHaveAttribute("data-app-link");
   });
 
   it("resolves file URIs and relative paths while preserving web links", () => {
@@ -281,7 +281,7 @@ describe("TaskDetail", () => {
     expect(skill).not.toHaveAttribute("target");
     expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
       "href",
-      "/api/caic/v1/tasks/abc/file?path=.%2Fsrc%2FApp.tsx",
+      "/task/@abc/view?path=.%2Fsrc%2FApp.tsx",
     );
     expect(screen.getByRole("link", { name: "Website" })).toHaveAttribute("href", "https://example.com");
     expect(screen.getByRole("link", { name: "Mail" })).toHaveAttribute("href", "mailto:user@example.com");

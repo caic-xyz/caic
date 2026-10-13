@@ -8,7 +8,7 @@ import MainLayout from "./components/MainLayout";
 import EmptyPage from "./pages/EmptyPage";
 import TaskDetailPage from "./pages/TaskDetailPage";
 import DiffPage from "./pages/DiffPage";
-import MarkdownPage from "./pages/MarkdownPage";
+import FileViewerPage from "./pages/FileViewerPage";
 import ProcessesPage from "./pages/ProcessesPage";
 import StatsPage from "./pages/StatsPage";
 import TaskInfoPage from "./pages/TaskInfoPage";
@@ -32,7 +32,7 @@ export function appRoutes(): JSX.Element {
         <Route path="/task/:taskId/processes" component={ProcessesPage} />
         <Route path="/task/:taskId/stats" component={StatsPage} />
         <Route path="/task/:taskId/info" component={TaskInfoPage} />
-        <Route path="/task/:taskId/view" component={MarkdownPage} />
+        <Route path="/task/:taskId/view" component={FileViewerPage} />
         <Route path="/task/:taskId/vnc" component={VncPage} />
       </Route>
       <Route path="/settings" component={SettingsPage} />

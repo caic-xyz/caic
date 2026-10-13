@@ -103,6 +103,10 @@
 
 .markdown {
   margin-bottom: 0.25rem;
+
+  /* Contain positioned author content inside the rendered document. */
+  contain: paint;
+  overflow-clip-margin: 3px; /* Match the global keyboard focus ring. */
   line-height: 1.5;
   overflow-wrap: break-word;
 }

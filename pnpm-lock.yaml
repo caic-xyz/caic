@@ -181,6 +181,9 @@ importers:
       '@solidjs/router':
         specifier: 1.0.0
         version: 1.0.0(solid-js@1.9.15)
+      dompurify:
+        specifier: 3.4.16
+        version: 3.4.16
       marked:
         specifier: 18.0.13
         version: 18.0.13

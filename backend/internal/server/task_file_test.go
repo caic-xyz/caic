@@ -30,7 +30,7 @@ func TestTaskFile(t *testing.T) {
 		entry.Task().OwnerID = "owner"
 		w := httptest.NewRecorder()
 		ctx := auth.NewContext(testHTTPContext(t), &auth.User{ID: "other"})
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/"+id.String()+"/file?path=/workspace/repo/notes.md", nil)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/"+id.String()+"/raw?path=/workspace/repo/notes.md", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, req)
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", w.Code)
@@ -42,7 +42,7 @@ func TestTaskFile(t *testing.T) {
 		s, _, id := newTaskDiffTestRouter(t)
 		testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, &failingFileRuntime{})
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodHead, "/tasks/"+id.String()+"/file?path=/file", nil)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodHead, "/tasks/"+id.String()+"/raw?path=/file", nil)
 		testTaskHandlers(s).routes().ServeHTTP(w, req)
 		if w.Code != 200 || w.Body.Len() != 0 {
 			t.Fatalf("HEAD status %d, body %d bytes", w.Code, w.Body.Len())
@@ -57,7 +57,7 @@ func TestTaskFile(t *testing.T) {
 			testTaskHandlers(s).routes().ServeHTTP(w, r.WithContext(ctx))
 		}))
 		t.Cleanup(server.Close)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/tasks/"+id.String()+"/file?path=/file", http.NoBody)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/tasks/"+id.String()+"/raw?path=/file", http.NoBody)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +84,7 @@ func TestTaskFile(t *testing.T) {
 		for _, text := range []string{"before", "after"} {
 			backend.Files["/file"] = []byte(text)
 			w := httptest.NewRecorder()
-			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/file?path=/file", nil)
+			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/file", nil)
 			req.Header.Set("If-None-Match", "*")
 			req.Header.Set("If-Modified-Since", "Wed, 21 Oct 2037 07:28:00 GMT")
 			testTaskHandlers(s).routes().ServeHTTP(w, req)
@@ -99,7 +99,7 @@ func TestTaskFile(t *testing.T) {
 		backend := &shrinkingFileRuntime{Files: map[string][]byte{"/file": []byte("0123456789")}}
 		testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, backend)
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/file?path=/file", nil)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/file", nil)
 		req.Header.Set("Range", "bytes=0-9")
 		defer func() {
 			got := recover()
@@ -137,7 +137,7 @@ func TestTaskFile(t *testing.T) {
 				s, _, id := newTaskDiffTestRouter(t)
 				testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, &runtimetest.FakeBackend{Files: map[string][]byte{"/file": []byte("0123456789")}})
 				w := httptest.NewRecorder()
-				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/file?path=/file", nil)
+				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/file", nil)
 				req.Header.Set("Range", tc.header)
 				req.Header.Set("Accept-Encoding", "gzip")
 				req.Header.Set("If-Range", tc.ifRange)
@@ -183,7 +183,7 @@ func TestTaskFile(t *testing.T) {
 		s, _, id := newTaskDiffTestRouter(t)
 		testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, &runtimetest.FakeBackend{Files: map[string][]byte{"/image": []byte("\x89PNG\r\n\x1a\nimage")}})
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/file?path=/image", nil)
+		req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?path=/image", nil)
 		req.Header.Set("Range", "bytes=8-10")
 		testTaskHandlers(s).routes().ServeHTTP(w, req)
 		if w.Code != 206 || w.Body.String() != "ima" || w.Header().Get("Content-Type") != "image/png" {
@@ -228,7 +228,7 @@ func TestTaskFile(t *testing.T) {
 			}
 			testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, &runtimetest.FakeBackend{Files: files})
 			w := httptest.NewRecorder()
-			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/file?"+url.Values{"path": {tc.path}}.Encode(), nil)
+			req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/"+id.String()+"/raw?"+url.Values{"path": {tc.path}}.Encode(), nil)
 			testTaskHandlers(s).routes().ServeHTTP(w, req)
 			if w.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", w.Code, tc.status, w.Body.String())
