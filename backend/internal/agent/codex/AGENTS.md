@@ -144,6 +144,11 @@ turn, 4.8 times per skill per task across the retained task-log cache and 50
 times in the worst one, which is why the day aggregate counts tasks rather than
 reads.
 
+A spawned child thread streams its items on the root session's wire, each
+`item/*` notification naming its `threadId`. A child's skill read keeps its
+analytics read, but once `thread/started` names the root thread the wire layer
+drops the child's load: it is not in the root thread's context.
+
 `skills/changed` carries empty params and only invalidates the catalog.
 `TurnInputTypeSkill` is a client-to-Codex input type, and caic sends plain text
 prompts. Neither proves a load.

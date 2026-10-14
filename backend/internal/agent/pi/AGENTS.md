@@ -212,6 +212,11 @@ short writes yield the first expiry of 300 seconds. A cache write without
 Pi has no Skill tool. `parse.go` infers a read from the `read` tool's `path`
 and the `bash` tool's `command`.
 
+The `pi-subagents` extension runs each child as its own Pi process, so a
+child's tool calls do not reach the parent's RPC stream; only the extension's
+`subagent` tool events and `setWidget` snapshots do. Every inferred load is
+therefore the main agent's.
+
 `CommandSourceSkill` marks a slash command's origin in the command catalog. It
 advertises what is available, not what was loaded.
 

@@ -23,6 +23,7 @@ type decodedItem struct {
 	typ           codex.ItemType
 	statusChanged *codex.ThreadStatusChangedNotification
 	turnCompleted *codex.TurnCompletedNotification
+	threadID      string // Thread of an item notification.
 }
 
 // The card map is allocated with the wire, created once per session, instead of

@@ -412,6 +412,10 @@ sealed interface EventKind {
         override val value = "commitSnapshot"
     }
     @Serializable
+    data object SkillLoad : EventKind {
+        override val value = "skillLoad"
+    }
+    @Serializable
     data class Other(override val value: String) : EventKind
 }
 
@@ -447,6 +451,7 @@ object EventKindSerializer : KSerializer<EventKind> {
             "rateLimit" -> EventKind.RateLimit
             "stats" -> EventKind.Stats
             "commitSnapshot" -> EventKind.CommitSnapshot
+            "skillLoad" -> EventKind.SkillLoad
             else -> EventKind.Other(v)
         }
     }
@@ -2252,6 +2257,18 @@ data class EventCommitSnapshot(
     val changeStat: EventChangeStat? = null,
 )
 
+/**
+ * EventSkillLoad is emitted when a skill enters the main agent's context. A
+ * failed call and a subagent's load emit none; an inferred load is emitted
+ * once the tool that opened the file succeeds.
+ */
+@Serializable
+data class EventSkillLoad(
+    val skill: String,
+    /** SKILL.md in the task runtime; empty when the harness did not report it. */
+    val path: String? = null,
+)
+
 // Backend-neutral event types
 
 /**
@@ -2288,6 +2305,7 @@ data class EventMessage(
     val rateLimit: EventRateLimit? = null,
     val stats: EventStats? = null,
     val commitSnapshot: EventCommitSnapshot? = null,
+    val skillLoad: EventSkillLoad? = null,
 )
 
 /**

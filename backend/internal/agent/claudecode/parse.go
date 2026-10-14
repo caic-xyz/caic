@@ -162,6 +162,7 @@ type decodedLine struct {
 	reasoningEstimate int                         // Nonnegative thinking-token estimate from a system record.
 	system            *claudecode.OutputSystemMsg // Set for a task lifecycle record.
 	user              *claudecode.OutputUserMsg   // Set for a decoded user record.
+	parentToolUseID   string                      // Set for a subagent's assistant record: the delegating tool use.
 }
 
 // parseMessageWithTracker decodes a single Claude Code NDJSON line with
@@ -191,7 +192,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 		msgs, err := parseSystem(line, subtype, &record)
 		return msgs, record, err
 	case claudecode.OutputAssistant:
-		msgs, err := parseAssistant(line)
+		msgs, err := parseAssistant(line, &record)
 		return msgs, record, err
 	case claudecode.OutputUser:
 		msgs, err := parseUser(line, &record)
@@ -432,11 +433,12 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 	}
 }
 
-func parseAssistant(line []byte) ([]agent.Message, error) {
+func parseAssistant(line []byte, record *decodedLine) ([]agent.Message, error) {
 	var w claudecode.OutputAssistantMsg
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
+	record.parentToolUseID = w.ParentToolUseID
 	var msgs []agent.Message
 	for i := range w.Message.Content {
 		b := &w.Message.Content[i]
@@ -560,6 +562,32 @@ func skillReadFromClaude(b *claudecode.OutputContentBlock) []agent.Message {
 		Skill:     in.Skill,
 		Args:      in.Args,
 	}}
+}
+
+// skillBaseDirPrefix opens the synthetic user record Claude Code injects
+// after a successful Skill call; the rest of its first line is the directory
+// holding the loaded SKILL.md.
+const skillBaseDirPrefix = "Base directory for this skill: "
+
+// skillPath returns the SKILL.md path a synthetic skill injection names, or
+// an empty string for any other record.
+func skillPath(u *claudecode.OutputUserMsg) string {
+	if u == nil || !u.IsSynthetic {
+		return ""
+	}
+	var body claudecode.OutputUserBlock
+	if json.Unmarshal(u.Message, &body) != nil || len(body.Content) == 0 || body.Content[0].Type != "text" {
+		return ""
+	}
+	rest, ok := strings.CutPrefix(body.Content[0].Text, skillBaseDirPrefix)
+	if !ok {
+		return ""
+	}
+	dir, _, _ := strings.Cut(rest, "\n")
+	if dir = strings.TrimSpace(dir); dir == "" {
+		return ""
+	}
+	return path.Join(dir, "SKILL.md")
 }
 
 func addEditInputView(use *agent.ToolUseMessage) {

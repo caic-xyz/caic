@@ -44,6 +44,7 @@ const (
 	EventKindRateLimit         EventKind = "rateLimit"
 	EventKindStats             EventKind = "stats"
 	EventKindCommitSnapshot    EventKind = "commitSnapshot"
+	EventKindSkillLoad         EventKind = "skillLoad"
 
 	// TODO: remove subagentStart and subagentEnd with their payload types and
 	// EventMessage fields once SDK consumers no longer switch on the kinds.
@@ -93,6 +94,7 @@ type EventMessage struct {
 	RateLimit         *EventRateLimit         `json:"rateLimit,omitempty"`
 	Stats             *EventStats             `json:"stats,omitempty"`
 	CommitSnapshot    *EventCommitSnapshot    `json:"commitSnapshot,omitempty"`
+	SkillLoad         *EventSkillLoad         `json:"skillLoad,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -280,6 +282,14 @@ type TodoItem struct {
 	Content    string `json:"content"`
 	Status     string `json:"status"` // "pending", "in_progress", "completed".
 	ActiveForm string `json:"activeForm,omitempty"`
+}
+
+// EventSkillLoad is emitted when a skill enters the main agent's context. A
+// failed call and a subagent's load emit none; an inferred load is emitted
+// once the tool that opened the file succeeds.
+type EventSkillLoad struct {
+	Skill string `json:"skill"`
+	Path  string `json:"path,omitempty"` // SKILL.md in the task runtime; empty when the harness did not report it.
 }
 
 // EventTodo is emitted when the agent writes/updates its todo list.

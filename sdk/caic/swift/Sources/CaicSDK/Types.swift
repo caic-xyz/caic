@@ -217,6 +217,7 @@ public struct EventKind: Codable, Equatable, Hashable {
     public static let RateLimit = EventKind("rateLimit")
     public static let Stats = EventKind("stats")
     public static let CommitSnapshot = EventKind("commitSnapshot")
+    public static let SkillLoad = EventKind("skillLoad")
 
     public static func other(_ value: String) -> EventKind { EventKind(value) }
 
@@ -1618,6 +1619,15 @@ public struct EventCommitSnapshot: Codable {
     public let changeStat: EventChangeStat?
 }
 
+/// EventSkillLoad is emitted when a skill enters the main agent's context. A
+/// failed call and a subagent's load emit none; an inferred load is emitted
+/// once the tool that opened the file succeeds.
+public struct EventSkillLoad: Codable {
+    public let skill: String
+    /// SKILL.md in the task runtime; empty when the harness did not report it.
+    public let path: String?
+}
+
 // Backend-neutral event types
 
 /// EventMessage is a single SSE event in the backend-neutral stream
@@ -1651,6 +1661,7 @@ public struct EventMessage: Codable {
     public let rateLimit: EventRateLimit?
     public let stats: EventStats?
     public let commitSnapshot: EventCommitSnapshot?
+    public let skillLoad: EventSkillLoad?
 }
 
 /// TaskEventBackward carries the latest visible agent response and its canonical

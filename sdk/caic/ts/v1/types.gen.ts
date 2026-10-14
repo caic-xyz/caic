@@ -43,7 +43,8 @@ export type EventKind =
   | "widgetDelta"
   | "rateLimit"
   | "stats"
-  | "commitSnapshot";
+  | "commitSnapshot"
+  | "skillLoad";
 /**
  * Supported values.
  */
@@ -73,6 +74,7 @@ export const EventKindWidgetDelta = "widgetDelta";
 export const EventKindRateLimit = "rateLimit";
 export const EventKindStats = "stats";
 export const EventKindCommitSnapshot = "commitSnapshot";
+export const EventKindSkillLoad = "skillLoad";
 
 export type EventNativeSubagentScope =
   | "agent"
@@ -472,6 +474,17 @@ export interface EventCommitSnapshot {
 }
 
 /**
+ * EventSkillLoad is emitted when a skill enters the main agent's context. A
+ * failed call and a subagent's load emit none; an inferred load is emitted
+ * once the tool that opened the file succeeds.
+ */
+export interface EventSkillLoad {
+  skill: string;
+  /** SKILL.md in the task runtime; empty when the harness did not report it. */
+  path?: string;
+}
+
+/**
  * EventMessage is a single SSE event in the backend-neutral stream
  * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
  */
@@ -504,6 +517,7 @@ export interface EventMessage {
   rateLimit?: EventRateLimit;
   stats?: EventStats;
   commitSnapshot?: EventCommitSnapshot;
+  skillLoad?: EventSkillLoad;
 }
 
 /**

@@ -162,6 +162,10 @@ func (m *ToolUseMessage) Type() string { return "tool_use" }
 // analytics and is never rendered in the visible timeline; the tool call and
 // its result stay out of the transcript.
 //
+// A reported read counts the invocation at its timestamp, whatever its
+// outcome and whichever agent made it; SkillLoadMessage reports what entered
+// the main agent's context.
+//
 // Its JSON encoding is derived from harness records on replay; keep JSON
 // field names and their meanings backward-compatible with logs written by
 // released binaries.
@@ -182,6 +186,31 @@ type SkillReadMessage struct {
 
 // Type implements Message.
 func (m *SkillReadMessage) Type() string { return "skill_read" }
+
+// SkillLoadMessage records that a skill entered the main agent's context. A
+// failed call and a subagent's load produce none. It is never rendered as a
+// timeline entry.
+//
+// A harness-reported load (Claude Code's Skill tool) is emitted confirmed. An
+// inferred load carries SourceToolUseID and is confirmed by SkillReadTracker
+// when the file-opening tool succeeds; an inferred read without a source tool
+// yields no load because nothing can confirm it.
+//
+// Its JSON encoding is derived from harness records on replay; keep JSON
+// field names and their meanings backward-compatible with logs written by
+// released binaries.
+type SkillLoadMessage struct {
+	Skill string `json:"skill"`
+	// Path is the loaded SKILL.md in the task runtime, or empty when the
+	// harness did not report it.
+	Path string `json:"path,omitempty"`
+	// SourceToolUseID is the file-opening tool whose success confirms an
+	// inferred load; empty for a harness-reported load.
+	SourceToolUseID string `json:"source_tool_use_id,omitempty"`
+}
+
+// Type implements Message.
+func (m *SkillLoadMessage) Type() string { return "skill_load" }
 
 // ToolInputViewKind identifies a normalized tool input view.
 type ToolInputViewKind string

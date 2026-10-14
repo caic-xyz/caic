@@ -558,6 +558,17 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			msgs = nil
 		}
 	}
+	// A child thread's skill reads still count for analytics, but its loads
+	// are not in the root thread's context. Like the result above, an unscoped
+	// wire keeps them.
+	if record.threadID != "" {
+		if root := w.rootThreadID(); root != "" && record.threadID != root {
+			msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
+				_, ok := m.(*agent.SkillLoadMessage)
+				return ok
+			})
+		}
+	}
 	native, err := w.nativeSubagents.parse(record)
 	if err != nil {
 		return nil, err
@@ -594,8 +605,9 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 // rootThreadID returns the session's root thread ID, or "" before the wire has
-// seen thread/started. A child thread's turn completion is compared against it to
-// keep the child's result out of the parent turn.
+// seen thread/started. A child thread's turn completion and items are compared
+// against it to keep the child's result out of the parent turn and its skill
+// loads out of the main context.
 func (w *wireFormat) rootThreadID() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()

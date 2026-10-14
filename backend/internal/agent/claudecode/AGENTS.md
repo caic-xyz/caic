@@ -124,12 +124,24 @@ The `Skill` tool reports a load directly. Its `{"skill": "<name>", "args":
 "..."}` input becomes a `SkillReadMessage` carrying the tool use ID, and the
 wire layer suppresses the paired tool result, so neither appears in the
 transcript. A block naming no skill still yields a message, so the wire layer
-can track the ID; it drops the read itself.
+can track the ID; it drops the read itself. The read feeds usage analytics at
+the invocation, whatever the call's outcome.
+
+After a successful call, Claude Code 2.1 injects a user record with
+`isSynthetic: true` whose text starts with `Base directory for this skill:
+<dir>`. The wire layer emits a `SkillLoadMessage` on the record after the
+successful result, with path `<dir>/SKILL.md` when that record is the
+injection and no path otherwise. A failed call (`is_error`) loads nothing.
+
+A subagent's assistant and user records carry `parent_tool_use_id`, the
+delegating tool use. Its `Skill` calls and file reads keep their analytics
+read but load nothing into the main context. Its tool results are keyed by the
+delegating ID, so they never match the child's `Skill` call.
 
 The model can also open a skill as an ordinary file. `parse.go` infers a read
-from `Read` (`file_path`) and `Bash` (`command`). Those tool calls stay in the
-timeline, and their inferred read carries no tool use ID so it suppresses
-nothing.
+and a pending load from `Read` (`file_path`) and `Bash` (`command`). Those
+tool calls stay in the timeline, and their inferred read carries no tool use
+ID so it suppresses nothing.
 
 ## Not Yet Exposed
 

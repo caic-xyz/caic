@@ -19,6 +19,7 @@ import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import InfoIcon from "@material-symbols/svg-400/outlined/info.svg?solid";
+import SkillIcon from "@material-symbols/svg-400/outlined/menu_book.svg?solid";
 import ProcessesIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 
@@ -33,6 +34,7 @@ import type {
   SyncTarget,
   DiffFileStat,
   ForgeCheck,
+  EventSkillLoad,
   EventStats,
   EventUsage,
   EventToolInputView,
@@ -64,6 +66,7 @@ import {
   type Turn,
 } from "../grouping";
 import { createTaskEventTimeline } from "../taskEventTimeline";
+import { taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
@@ -560,6 +563,35 @@ export default function TaskDetail(props: Props) {
     };
   });
   const setupLogLines = () => setupInfo().lines;
+
+  // Fold loaded skills incrementally, one entry per name in first-load order.
+  // A later load supplies the path when the first one lacked it.
+  let skillsTaskId = "";
+  let skillsEpoch = -1;
+  let skillsProcessed = 0;
+  const loadedSkills = createMemo<EventSkillLoad[]>((prev) => {
+    const taskId = props.taskId;
+    const epoch = timeline.epoch();
+    const history = messages();
+    let next = prev;
+    if (taskId !== skillsTaskId || epoch !== skillsEpoch || history.length < skillsProcessed) {
+      skillsTaskId = taskId;
+      skillsEpoch = epoch;
+      skillsProcessed = 0;
+      next = [];
+    }
+    for (let i = skillsProcessed; i < history.length; i++) {
+      const load = history[i].skillLoad;
+      if (history[i].kind !== "skillLoad" || !load) continue;
+      const seen = next.findIndex((skill) => skill.skill === load.skill);
+      if (seen >= 0 && (next[seen].path || !load.path)) continue;
+      if (next === prev) next = [...prev];
+      if (seen >= 0) next[seen] = load;
+      else next.push(load);
+    }
+    skillsProcessed = history.length;
+    return next;
+  }, []);
   const hasSessionStarted = () => setupInfo().firstInit !== null;
 
   // Sessions from completed messages: stable during streaming (only updates on turn completion).
@@ -1136,6 +1168,22 @@ export default function TaskDetail(props: Props) {
                 <A class={styles.hierarchyLink} href={`/task/@${child.id}`}>
                   Child: {child.title || child.id}
                 </A>
+              )}
+            </For>
+          </nav>
+        </Show>
+        <Show when={loadedSkills().length > 0}>
+          <nav class={styles.skills} aria-label="Loaded skills">
+            <SkillIcon class={styles.skillsIcon} width="14" height="14" aria-hidden="true" />
+            <For each={loadedSkills()}>
+              {(skill) => (
+                <Show when={skill.path} keyed fallback={<span>{skill.skill}</span>}>
+                  {(path) => (
+                    <A class={styles.skillLink} href={taskViewURL(props.taskId, path)} title={path}>
+                      {skill.skill}
+                    </A>
+                  )}
+                </Show>
               )}
             </For>
           </nav>

@@ -37,8 +37,9 @@ func TestSkillFromPath(t *testing.T) {
 		for _, line := range data {
 			t.Run(line.name, func(t *testing.T) {
 				t.Parallel()
-				if got := agent.SkillFromPath(line.in); got != line.want {
-					t.Errorf("SkillFromPath(%q) = %q, want %q", line.in, got, line.want)
+				want := agent.SkillFile{Name: line.want, Path: line.in}
+				if got := agent.SkillFromPath(line.in); got != want {
+					t.Errorf("SkillFromPath(%q) = %+v, want %+v", line.in, got, want)
 				}
 			})
 		}
@@ -63,8 +64,8 @@ func TestSkillFromPath(t *testing.T) {
 		for _, line := range data {
 			t.Run(line.name, func(t *testing.T) {
 				t.Parallel()
-				if got := agent.SkillFromPath(line.in); got != "" {
-					t.Errorf("SkillFromPath(%q) = %q, want empty", line.in, got)
+				if got := agent.SkillFromPath(line.in); got != (agent.SkillFile{}) {
+					t.Errorf("SkillFromPath(%q) = %+v, want zero", line.in, got)
 				}
 			})
 		}
@@ -73,26 +74,31 @@ func TestSkillFromPath(t *testing.T) {
 
 func TestSkillsFromCommand(t *testing.T) {
 	t.Parallel()
+	codeQuality := agent.SkillFile{Name: "code-quality", Path: "~/.agents/skills/code-quality/SKILL.md"}
+	review := agent.SkillFile{Name: "review", Path: "~/.agents/skills/review/SKILL.md"}
 
 	data := []struct {
 		name string
 		in   string
-		want []string
+		want []agent.SkillFile
 	}{
 		{
 			name: "codex bundles reads in one command",
 			in:   `/bin/bash -lc "sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md && sed -n '1,220p' /home/user/.agents/skills/go-code-quality/SKILL.md"`,
-			want: []string{"code-quality", "go-code-quality"},
+			want: []agent.SkillFile{
+				{Name: "code-quality", Path: "/home/user/.agents/skills/code-quality/SKILL.md"},
+				{Name: "go-code-quality", Path: "/home/user/.agents/skills/go-code-quality/SKILL.md"},
+			},
 		},
 		{
 			name: "repeated reads count raw",
 			in:   "cat ~/.agents/skills/code-quality/SKILL.md && cat ~/.agents/skills/code-quality/SKILL.md",
-			want: []string{"code-quality", "code-quality"},
+			want: []agent.SkillFile{codeQuality, codeQuality},
 		},
 		{
 			name: "a read beside an unrelated search",
 			in:   `sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md && rg -n -i "voice gateway" .`,
-			want: []string{"code-quality"},
+			want: []agent.SkillFile{{Name: "code-quality", Path: "/home/user/.agents/skills/code-quality/SKILL.md"}},
 		},
 		{
 			name: "git names a revision, not a working file",
@@ -112,9 +118,10 @@ func TestSkillsFromCommand(t *testing.T) {
 		{name: "OR branch may be skipped", in: "true || cat ~/.agents/skills/review/SKILL.md", want: nil},
 		{name: "semicolon hides read failure", in: "cat ~/.agents/skills/review/SKILL.md; true", want: nil},
 		{name: "pipeline hides read failure", in: "cat ~/.agents/skills/review/SKILL.md | head", want: nil},
-		{name: "quoted hash is not a comment", in: "cat '/tmp/#notes' && cat ~/.agents/skills/review/SKILL.md", want: []string{"review"}},
+		{name: "quoted hash is not a comment", in: "cat '/tmp/#notes' && cat ~/.agents/skills/review/SKILL.md", want: []agent.SkillFile{review}},
+		{name: "quoted path", in: `cat "~/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{review}},
 		{name: "sed script mentions a skill", in: "sed -n '/~/.agents/skills/review/SKILL.md/p' /tmp/notes", want: nil},
-		{name: "read before output redirection", in: "cat ~/.agents/skills/review/SKILL.md > /tmp/notes", want: []string{"review"}},
+		{name: "read before output redirection", in: "cat ~/.agents/skills/review/SKILL.md > /tmp/notes", want: []agent.SkillFile{review}},
 		{name: "empty", in: "", want: nil},
 	}
 	for _, line := range data {
@@ -138,10 +145,24 @@ func TestSkillReadTracker(t *testing.T) {
 	if count, got := tracker.Confirm(&agent.ToolResultMessage{ToolUseID: "call-1", Error: "missing file"}); !count || len(got) != 0 {
 		t.Errorf("failed read = %v, %v, want result only", count, got)
 	}
-	tracker.Confirm(read)
+	msgs := agent.InferredSkillReadFromPath("/home/user/.agents/skills/review/SKILL.md", "call-1")
+	for _, m := range msgs {
+		if count, got := tracker.Confirm(m); count || len(got) != 0 {
+			t.Fatalf("unconfirmed %T = %v, %v", m, count, got)
+		}
+	}
 	count, got := tracker.Confirm(&agent.ToolResultMessage{ToolUseID: "call-1"})
-	if !count || len(got) != 1 || got[0] != read {
-		t.Errorf("successful read = %v, %v, want result and read", count, got)
+	if !count || !slices.Equal(got, msgs) {
+		t.Errorf("successful read = %v, %v, want result, read, and load", count, got)
+	}
+	if load, ok := got[1].(*agent.SkillLoadMessage); !ok || load.Path != "/home/user/.agents/skills/review/SKILL.md" {
+		t.Errorf("load = %#v, want the opened path", got[1])
+	}
+	if count, got := tracker.Confirm(&agent.SkillLoadMessage{Skill: "review"}); !count || len(got) != 0 {
+		t.Errorf("reported load = %v, %v, want countable", count, got)
+	}
+	if msgs := agent.InferredSkillReadFromPath("/home/user/.agents/skills/review/SKILL.md", ""); len(msgs) != 1 {
+		t.Errorf("sourceless inference = %#v, want only the read", msgs)
 	}
 	tracker.Confirm(read)
 	tracker.Confirm(&agent.ResultMessage{})

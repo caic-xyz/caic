@@ -288,6 +288,38 @@ describe("TaskDetail", () => {
     expect(screen.getByRole("link", { name: "Section" })).toHaveAttribute("href", "#section");
   });
 
+  it("links each loaded skill once to the markdown viewer", () => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({ kind: "skillLoad", ts: 1000, skillLoad: { skill: "review" } });
+      handlers.onMessage({
+        kind: "skillLoad",
+        ts: 1001,
+        skillLoad: { skill: "code-quality", path: "/home/user/.claude/skills/code-quality/SKILL.md" },
+      });
+      handlers.onMessage({
+        kind: "skillLoad",
+        ts: 1002,
+        skillLoad: { skill: "code-quality", path: "/elsewhere/code-quality/SKILL.md" },
+      });
+      handlers.onMessage({
+        kind: "skillLoad",
+        ts: 1003,
+        skillLoad: { skill: "review", path: "~/.agents/skills/review/SKILL.md" },
+      });
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    const nav = screen.getByRole("navigation", { name: "Loaded skills" });
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual(["review", "code-quality"]);
+    expect(links[0]).toHaveAttribute("href", "/task/@abc/view?path=%7E%2F.agents%2Fskills%2Freview%2FSKILL.md");
+    expect(links[1]).toHaveAttribute(
+      "href",
+      "/task/@abc/view?path=%2Fhome%2Fuser%2F.claude%2Fskills%2Fcode-quality%2FSKILL.md",
+    );
+  });
+
   it("copies only the selected fenced code block", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);

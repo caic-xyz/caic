@@ -271,6 +271,41 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 			t.Fatalf("commit snapshot = %+v, want %+v", events, want)
 		}
 	})
+
+	t.Run("reported skill load is an event and a read is not", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Claude, "", nil, nil)
+		if events := tracker.ConvertMessage(&agent.SkillReadMessage{ToolUseID: "sk", Skill: "review"}, time.Unix(1, 0)); len(events) != 0 {
+			t.Fatalf("read events = %+v, want none", events)
+		}
+		events := tracker.ConvertMessage(&agent.SkillLoadMessage{Skill: "review", Path: "/s/review/SKILL.md"}, time.Unix(1, 0))
+		want := &v1.EventSkillLoad{Skill: "review", Path: "/s/review/SKILL.md"}
+		if len(events) != 1 || events[0].Kind != v1.EventKindSkillLoad || !reflect.DeepEqual(events[0].SkillLoad, want) {
+			t.Fatalf("events = %+v, want %+v", events, want)
+		}
+	})
+
+	t.Run("inferred skill load follows a successful tool result", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		at := time.Unix(1, 0)
+		for _, id := range []string{"ok", "failed"} {
+			for _, m := range agent.InferredSkillReadFromPath("/home/user/.agents/skills/"+id+"/SKILL.md", id) {
+				if events := tracker.ConvertMessage(m, at); len(events) != 0 {
+					t.Fatalf("unconfirmed %T events = %+v, want none", m, events)
+				}
+			}
+		}
+		events := tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "failed", Error: "exit 1"}, at)
+		if len(events) != 1 || events[0].Kind != v1.EventKindToolResult {
+			t.Fatalf("failed result events = %+v, want only the tool result", events)
+		}
+		events = tracker.ConvertMessage(&agent.ToolResultMessage{ToolUseID: "ok"}, at)
+		want := &v1.EventSkillLoad{Skill: "ok", Path: "/home/user/.agents/skills/ok/SKILL.md"}
+		if len(events) != 2 || events[1].Kind != v1.EventKindSkillLoad || !reflect.DeepEqual(events[1].SkillLoad, want) {
+			t.Fatalf("successful result events = %+v, want tool result then %+v", events, want)
+		}
+	})
 }
 
 func TestConvertMessagePlanContentProjection(t *testing.T) {

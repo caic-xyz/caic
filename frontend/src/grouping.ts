@@ -260,6 +260,9 @@ function groupMessagesAfter(
       case "stats":
         // Metadata-only; stats are handled by StatsIcon component.
         break;
+      case "skillLoad":
+        // Rendered by TaskDetail's loaded-skill links.
+        break;
       case "thinking": {
         // A final thinking event replaces any preceding thinkingDelta: either
         // in its thinking-only action group, or in the text group that absorbed

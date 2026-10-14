@@ -164,8 +164,8 @@ func TestParseMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 2 {
-			t.Fatalf("msgs = %d, want 2", len(msgs))
+		if len(msgs) != 3 {
+			t.Fatalf("msgs = %d, want 3", len(msgs))
 		}
 		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
 			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
@@ -176,6 +176,10 @@ func TestParseMessage(t *testing.T) {
 		}
 		if read.Skill != "customize-opencode" || !read.Inferred || read.ToolUseID != "" {
 			t.Errorf("SkillReadMessage = %+v", read)
+		}
+		wantLoad := agent.SkillLoadMessage{Skill: "customize-opencode", Path: "/home/user/.config/opencode/skill/customize-opencode/SKILL.md", SourceToolUseID: "call_2"}
+		if load, ok := msgs[2].(*agent.SkillLoadMessage); !ok || *load != wantLoad {
+			t.Errorf("msgs[2] = %#v, want %#v", msgs[2], wantLoad)
 		}
 	})
 

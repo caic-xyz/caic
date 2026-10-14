@@ -36,6 +36,30 @@
   text-decoration: underline;
 }
 
+.skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: -0.2rem 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.skillsIcon {
+  flex-shrink: 0;
+  fill: currentcolor;
+}
+
+.skillLink {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.skillLink:hover {
+  text-decoration: underline;
+}
+
 .headerTitle {
   display: none;
   flex: 0 1 8rem;

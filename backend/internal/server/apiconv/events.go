@@ -40,6 +40,7 @@ type ToolTimingTracker struct {
 	pending     map[string]time.Time
 	planContent func(toolUseID string) string
 	window      task.ResultTextWindow
+	skillReads  agent.SkillReadTracker // Confirms inferred skill loads.
 }
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
@@ -66,6 +67,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	if _, isResult := msg.(*agent.ResultMessage); !isResult {
 		tt.window.Update(msg)
 	}
+	countable, confirmed := tt.skillReads.Confirm(msg)
 	switch m := msg.(type) {
 	case *agent.InitMessage:
 		return []v1.EventMessage{{
@@ -177,7 +179,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			}
 			delete(tt.pending, m.ToolUseID)
 		}
-		return []v1.EventMessage{{
+		events := []v1.EventMessage{{
 			Kind: v1.EventKindToolResult,
 			Ts:   ts,
 			ToolResult: &v1.EventToolResult{
@@ -186,6 +188,17 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 				Error:     m.Error,
 			},
 		}}
+		for _, c := range confirmed {
+			if load, ok := c.(*agent.SkillLoadMessage); ok {
+				events = append(events, skillLoadEvent(load, ts))
+			}
+		}
+		return events
+	case *agent.SkillLoadMessage:
+		if !countable {
+			return nil
+		}
+		return []v1.EventMessage{skillLoadEvent(m, ts)}
 	case *agent.UsageMessage:
 		return []v1.EventMessage{{
 			Kind: v1.EventKindUsage,
@@ -390,6 +403,14 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		}}
 	default:
 		return nil
+	}
+}
+
+func skillLoadEvent(m *agent.SkillLoadMessage, ts int64) v1.EventMessage {
+	return v1.EventMessage{
+		Kind:      v1.EventKindSkillLoad,
+		Ts:        ts,
+		SkillLoad: &v1.EventSkillLoad{Skill: m.Skill, Path: m.Path},
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -145,77 +146,177 @@ func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.TimedMessage) er
 	return nil
 }
 
-// TestHasOAuth uses t.Setenv to point HOME at a temp dir and therefore cannot
-// run in parallel.
 // TestWireFormatSkillAndModel tests the stateful ParseMessage behavior:
-// Skill tool results stay suppressed, and model-less usage records are
-// attributed to the session's active model.
+// Skill tool results stay suppressed, analytics reads stay at the invocation,
+// only a successful main-agent Skill call loads a skill, and model-less usage
+// records are attributed to the session's active model.
 func TestWireFormatSkillAndModel(t *testing.T) {
 	t.Parallel()
-	t.Run("SkillToolResultSuppressed", func(t *testing.T) {
+	const (
+		mainUse      = `{"type":"assistant","parent_tool_use_id":null,"message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"code-quality"}}],"usage":{}}}`
+		mainResult   = `{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_1","content":"Launching skill: code-quality"}]}}`
+		injection    = `{"type":"user","isSynthetic":true,"parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /home/user/.claude/skills/code-quality\n\n# Code Quality\n"}]}}`
+		failedUse    = `{"type":"assistant","parent_tool_use_id":null,"message":{"model":"m","content":[{"type":"tool_use","id":"sk_2","name":"Skill","input":{"skill":"missing"}}],"usage":{}}}`
+		failedResult = `{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_2","content":"Unknown skill: missing","is_error":true}]}}`
+		// A subagent's records carry the delegating tool use ID; its tool
+		// result is keyed by that ID too.
+		childUse       = `{"type":"assistant","parent_tool_use_id":"agent_1","message":{"model":"m","content":[{"type":"tool_use","id":"sk_3","name":"Skill","input":{"skill":"review"}}],"usage":{}}}`
+		childResult    = `{"type":"user","parent_tool_use_id":"agent_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_3","content":"Launching skill: review"}]}}`
+		childInjection = `{"type":"user","isSynthetic":true,"parent_tool_use_id":"agent_1","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /home/user/.claude/skills/review\n\n# Review\n"}]}}`
+		otherResult    = `{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}`
+		turnResult     = `{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"result":"","session_id":"s","usage":{}}`
+	)
+	// parse feeds lines through one session and returns each line's messages.
+	parse := func(t *testing.T, lines ...string) [][]agent.Message {
+		b := newWireFormat()
+		out := make([][]agent.Message, len(lines))
+		for i, line := range lines {
+			msgs, err := b.ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[i] = msgs
+		}
+		return out
+	}
+	// loads returns the skill loads of every line, in order.
+	loads := func(perLine [][]agent.Message) []agent.SkillLoadMessage {
+		var out []agent.SkillLoadMessage
+		for _, msgs := range perLine {
+			for _, m := range msgs {
+				if l, ok := m.(*agent.SkillLoadMessage); ok {
+					out = append(out, *l)
+				}
+			}
+		}
+		return out
+	}
+
+	t.Run("ReadsStayAtInvocation", func(t *testing.T) {
 		t.Parallel()
-		var b wireFormat
-		b.widgetTracker = newWidgetTracker()
-		b.pendingSkillUses = make(map[string]struct{})
-		skillUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget"}}],"usage":{}}}`)
-		skillResult := []byte(`{"type":"user","parent_tool_use_id":"","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_1","content":"skill loaded"}]}}`)
-		otherResult := []byte(`{"type":"user","parent_tool_use_id":"","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}`)
-
-		msgs, err := b.ParseMessage(skillUse)
-		if err != nil {
-			t.Fatal(err)
+		// The messages other than loads match the wire output at c8791f8d,
+		// line by line, so usage rollups keep their counts and timestamps.
+		perLine := parse(t, mainUse, mainResult, injection, failedUse, failedResult, childUse, childResult, childInjection, turnResult)
+		want := [][]agent.Message{
+			{&agent.SkillReadMessage{ToolUseID: "sk_1", Skill: "code-quality"}},
+			nil,
+			nil,
+			{&agent.SkillReadMessage{ToolUseID: "sk_2", Skill: "missing"}},
+			nil,
+			{&agent.SkillReadMessage{ToolUseID: "sk_3", Skill: "review"}},
+			{&agent.ToolResultMessage{ToolUseID: "agent_1"}},
+			nil,
+			nil, // The ResultMessage is compared by type below.
 		}
-		var sawRead bool
-		for _, m := range msgs {
-			if _, ok := m.(*agent.SkillReadMessage); ok {
-				sawRead = true
+		for i, msgs := range perLine {
+			var got []agent.Message
+			for _, m := range msgs {
+				switch m.(type) {
+				case *agent.SkillLoadMessage:
+				case *agent.ResultMessage:
+					if i != len(perLine)-1 {
+						t.Errorf("line %d: unexpected result", i)
+					}
+				default:
+					got = append(got, m)
+				}
+			}
+			if !reflect.DeepEqual(got, want[i]) {
+				t.Errorf("line %d = %#v, want %#v", i, got, want[i])
 			}
 		}
-		if !sawRead {
-			t.Fatal("Skill tool_use should produce a SkillReadMessage")
-		}
+	})
 
-		msgs, err = b.ParseMessage(skillResult)
-		if err != nil {
-			t.Fatal(err)
+	t.Run("SuccessfulCallLoadsInjectedPath", func(t *testing.T) {
+		t.Parallel()
+		perLine := parse(t, mainUse, mainResult, injection, otherResult)
+		want := []agent.SkillLoadMessage{{Skill: "code-quality", Path: "/home/user/.claude/skills/code-quality/SKILL.md"}}
+		if got := loads(perLine); !reflect.DeepEqual(got, want) {
+			t.Fatalf("loads = %+v, want %+v", got, want)
 		}
-		for _, m := range msgs {
-			if _, ok := m.(*agent.ToolResultMessage); ok {
-				t.Error("paired Skill tool_result should be suppressed")
+		if len(perLine[2]) != 1 {
+			t.Errorf("injection msgs = %#v, want only the load", perLine[2])
+		}
+		if len(perLine[3]) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(perLine[3]))
+		}
+		if _, ok := perLine[3][0].(*agent.ToolResultMessage); !ok {
+			t.Errorf("type = %T, want *agent.ToolResultMessage", perLine[3][0])
+		}
+	})
+
+	t.Run("LoadWithoutInjectionHasNoPath", func(t *testing.T) {
+		t.Parallel()
+		perLine := parse(t, mainUse, mainResult, otherResult)
+		want := []agent.SkillLoadMessage{{Skill: "code-quality"}}
+		if got := loads(perLine); !reflect.DeepEqual(got, want) {
+			t.Fatalf("loads = %+v, want %+v", got, want)
+		}
+		if _, ok := perLine[2][0].(*agent.SkillLoadMessage); !ok || len(perLine[2]) != 2 {
+			t.Errorf("msgs = %#v, want the load before the tool result", perLine[2])
+		}
+	})
+
+	t.Run("FailedCallLoadsNothing", func(t *testing.T) {
+		t.Parallel()
+		if got := loads(parse(t, failedUse, failedResult, otherResult)); len(got) != 0 {
+			t.Errorf("loads = %+v, want none", got)
+		}
+	})
+
+	t.Run("SubagentCallLoadsNothing", func(t *testing.T) {
+		t.Parallel()
+		perLine := parse(t, childUse, childResult, childInjection, otherResult)
+		if got := loads(perLine); len(got) != 0 {
+			t.Errorf("loads = %+v, want none", got)
+		}
+		if len(perLine[0]) != 1 {
+			t.Fatalf("msgs = %#v, want the analytics read", perLine[0])
+		}
+		if read, ok := perLine[0][0].(*agent.SkillReadMessage); !ok || read.Skill != "review" {
+			t.Errorf("msgs[0] = %#v, want the review read", perLine[0][0])
+		}
+	})
+
+	t.Run("SubagentFileReadLoadsNothing", func(t *testing.T) {
+		t.Parallel()
+		read := func(parent string) string {
+			return `{"type":"assistant","parent_tool_use_id":` + parent + `,"message":{"model":"m","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/home/user/.agents/skills/review/SKILL.md"}}],"usage":{}}}`
+		}
+		for _, line := range []struct {
+			parent string
+			loads  int
+		}{{"null", 1}, {`"agent_1"`, 0}} {
+			msgs := parse(t, read(line.parent))[0]
+			var reads, got int
+			for _, m := range msgs {
+				switch m.(type) {
+				case *agent.SkillReadMessage:
+					reads++
+				case *agent.SkillLoadMessage:
+					got++
+				}
 			}
-		}
-
-		msgs, err = b.ParseMessage(otherResult)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(msgs) != 1 {
-			t.Fatalf("msgs = %d, want 1", len(msgs))
-		}
-		if _, ok := msgs[0].(*agent.ToolResultMessage); !ok {
-			t.Errorf("type = %T, want *agent.ToolResultMessage", msgs[0])
+			if reads != 1 || got != line.loads {
+				t.Errorf("parent %s: reads = %d, loads = %d, want 1 and %d", line.parent, reads, got, line.loads)
+			}
 		}
 	})
 
 	t.Run("SkillPendingUsesClearedAtResult", func(t *testing.T) {
 		t.Parallel()
-		var b wireFormat
-		b.widgetTracker = newWidgetTracker()
-		b.pendingSkillUses = make(map[string]struct{})
-		skillUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget"}}],"usage":{}}}`)
-		if _, err := b.ParseMessage(skillUse); err != nil {
+		b := newWireFormat()
+		if _, err := b.ParseMessage([]byte(mainUse)); err != nil {
 			t.Fatal(err)
 		}
-		result := []byte(`{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"result":"","session_id":"s","usage":{}}`)
-		if _, err := b.ParseMessage(result); err != nil {
+		if _, err := b.ParseMessage([]byte(turnResult)); err != nil {
 			t.Fatal(err)
 		}
 		if len(b.pendingSkillUses) != 0 {
 			t.Errorf("pendingSkillUses = %v, want empty after turn result", b.pendingSkillUses)
 		}
 		// The result no longer suppresses an unrelated result with the same ID.
-		lateResult := []byte(`{"type":"user","parent_tool_use_id":"","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_1","content":"late"}]}}`)
-		msgs, err := b.ParseMessage(lateResult)
+		msgs, err := b.ParseMessage([]byte(mainResult))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -228,7 +329,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		t.Parallel()
 		var b wireFormat
 		b.widgetTracker = newWidgetTracker()
-		b.pendingSkillUses = make(map[string]struct{})
+		b.pendingSkillUses = make(map[string]string)
 		assistant := []byte(`{"type":"assistant","message":{"model":"claude-opus","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5}}}`)
 		msgs, err := b.ParseMessage(assistant)
 		if err != nil {
@@ -271,7 +372,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		// suppressed too.
 		var b wireFormat
 		b.widgetTracker = newWidgetTracker()
-		b.pendingSkillUses = make(map[string]struct{})
+		b.pendingSkillUses = make(map[string]string)
 		toolUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_9","name":"Skill","input":{}}],"usage":{}}}`)
 		msgs, err := b.ParseMessage(toolUse)
 		if err != nil {
@@ -295,6 +396,8 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 	})
 }
 
+// TestHasOAuth uses t.Setenv to point HOME at a temp dir and therefore cannot
+// run in parallel.
 func TestHasOAuth(t *testing.T) {
 	writeClaudeJSON := func(t *testing.T, home, contents string) {
 		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {

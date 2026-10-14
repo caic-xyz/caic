@@ -122,9 +122,9 @@ var _ agent.Backend = (*Backend)(nil)
 // reasoning-token accounting, native-subagent correlation, the active model
 // reported by the assistant so result records can resolve the model's context
 // window and usage records without a model stay attributed, and the Skill
-// tool calls whose results must stay suppressed. A fresh instance is created
-// for every session so this state can't leak between concurrent Claude Code
-// tasks sharing the registered Backend singleton.
+// tool calls whose results must stay suppressed or confirm a load. A fresh
+// instance is created for every session so this state can't leak between
+// concurrent Claude Code tasks sharing the registered Backend singleton.
 type wireFormat struct {
 	nativeSubagents              nativeSubagents
 	backgroundCommands           backgroundCommands
@@ -132,7 +132,13 @@ type wireFormat struct {
 	pendingReasoningOutputTokens int
 	pendingReasoningEstimate     int
 	reportedModel                string
-	pendingSkillUses             map[string]struct{}
+	// pendingSkillUses maps a Skill tool use ID to the skill its success
+	// loads into the main context, until the paired tool result arrives. The
+	// value is empty for a call naming no skill and for a subagent's call.
+	pendingSkillUses map[string]string
+	// loadedSkill is the skill whose Skill call succeeded. Its load waits one
+	// record for the synthetic injection that names the skill directory.
+	loadedSkill string
 }
 
 // newWireFormat builds a live wireFormat with fresh per-session state for use by
@@ -147,18 +153,31 @@ func newWireFormat() *wireFormat {
 		},
 		backgroundCommands: backgroundCommands{known: make(map[string]bool)},
 		widgetTracker:      newWidgetTracker(),
-		pendingSkillUses:   make(map[string]struct{}),
+		pendingSkillUses:   make(map[string]string),
 	}
 }
 
 // ParseMessage wraps the package-level parser with per-session state: widget
 // tracking for streaming deltas, session-model attribution for model-less
-// usage records, and Skill tool-result suppression.
+// usage records, Skill tool-result suppression, and skill loads.
+//
+// The analytics SkillReadMessage stays at the Skill invocation. A main-agent
+// call that succeeds also yields a SkillLoadMessage on the record that follows
+// its tool result: Claude Code names the skill directory only in that
+// synthetic injection, and another record leaves the load without a path. A
+// subagent record carries parent_tool_use_id; its loads are not in the main
+// context, so the wire layer drops them.
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	msgs, record, err := parseMessageWithTracker(line, w.widgetTracker)
 	if err != nil {
 		return nil, err
 	}
+	var loaded *agent.SkillLoadMessage
+	if w.loadedSkill != "" {
+		loaded = &agent.SkillLoadMessage{Skill: w.loadedSkill, Path: skillPath(record.user)}
+		w.loadedSkill = ""
+	}
+	subagent := record.parentToolUseID != ""
 	w.pendingReasoningEstimate += record.reasoningEstimate
 	native, err := w.nativeSubagents.parse(record, msgs)
 	if err != nil {
@@ -178,19 +197,35 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			// Track the read so its paired tool result stays suppressed, even
 			// when the read itself is dropped below for lacking a skill name.
 			if m.ToolUseID != "" {
-				w.pendingSkillUses[m.ToolUseID] = struct{}{}
+				load := m.Skill
+				if subagent {
+					load = ""
+				}
+				w.pendingSkillUses[m.ToolUseID] = load
 			}
 			if m.Skill == "" {
 				// Parse-level placeholder for an unexpected Skill input shape;
 				// keep it out of the timeline like the pre-skill-read behavior.
 				keep = false
 			}
+		case *agent.SkillLoadMessage:
+			// An inferred load from a file read; a subagent's read is not in
+			// the main context.
+			keep = !subagent
 		case *agent.ToolResultMessage:
-			if _, ok := w.pendingSkillUses[m.ToolUseID]; ok {
+			if load, ok := w.pendingSkillUses[m.ToolUseID]; ok {
 				delete(w.pendingSkillUses, m.ToolUseID)
 				// The Skill tool's result is internal machinery; the read
 				// itself is already recorded.
 				keep = false
+				if load != "" && m.Error == "" {
+					if w.loadedSkill != "" {
+						// Another success before the next record; no
+						// injection can name both directories.
+						out = append(out, &agent.SkillLoadMessage{Skill: w.loadedSkill})
+					}
+					w.loadedSkill = load
+				}
 			}
 		case *agent.UsageMessage:
 			if m.ReportedModel != "" {
@@ -225,6 +260,9 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		if keep {
 			out = append(out, msg)
 		}
+	}
+	if loaded != nil {
+		out = append([]agent.Message{loaded}, out...)
 	}
 	return out, nil
 }

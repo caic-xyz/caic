@@ -132,8 +132,9 @@ may alter or reject that request.
 OpenCode has no Skill tool. `parse.go` infers a read from the `read` tool's
 `filePath` and the `shell` tool's `command`. The first `tool_call` carries an
 empty `rawInput`, and the arguments arrive on an `in_progress` update. OpenCode
-can repeat that update with the same input; the wire parser emits the read once
-per tool-call ID and clears its state when the call completes.
+can repeat that update with the same input; the wire parser emits the read and
+its pending load once per tool-call ID and clears its state when the call
+completes.
 
 OpenCode scans more roots than the other harnesses. It reads `~/.claude` and
 `~/.agents` like Claude Code, then its own config directories:
@@ -147,6 +148,11 @@ directory name is singular or plural and a skill nests; the directory holding
 Two roots stay out of reach. The `skills.paths` config names arbitrary
 directories and `skills.urls` downloads into OpenCode's cache; a path rule
 cannot know either.
+
+A `task` subagent's own tool calls do not reach the parent's ACP stream: in the
+retained 1.18.31 log, every `session/update` carries the parent `sessionId`,
+and the child session ID appears only in the task's output text. Every
+inferred load is therefore the main agent's.
 
 `available_commands_update` lists skills as commands. It advertises what is
 available, not what was loaded.

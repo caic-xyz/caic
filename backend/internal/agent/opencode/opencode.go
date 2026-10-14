@@ -298,8 +298,11 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		case opencode.StatusInProgress:
 			if _, seen := w.skillReadCalls[toolCall.ToolCallID]; seen {
 				msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
-					_, ok := m.(*agent.SkillReadMessage)
-					return ok
+					switch m.(type) {
+					case *agent.SkillReadMessage, *agent.SkillLoadMessage:
+						return true
+					}
+					return false
 				})
 			} else {
 				for _, m := range msgs {

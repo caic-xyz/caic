@@ -201,26 +201,31 @@ func TestParseMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 3 {
-			t.Fatalf("msgs = %d, want 3", len(msgs))
+		if len(msgs) != 5 {
+			t.Fatalf("msgs = %d, want 5", len(msgs))
 		}
 		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
 			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
 		}
 		want := []string{"code-quality", "go-code-quality"}
-		for i, m := range msgs[1:] {
-			read, ok := m.(*agent.SkillReadMessage)
+		for i, name := range want {
+			read, ok := msgs[1+2*i].(*agent.SkillReadMessage)
 			if !ok {
-				t.Fatalf("msgs[%d] = %T, want *agent.SkillReadMessage", i+1, m)
+				t.Fatalf("msgs[%d] = %T, want *agent.SkillReadMessage", 1+2*i, msgs[1+2*i])
 			}
-			if read.Skill != want[i] {
-				t.Errorf("Skill = %q, want %q", read.Skill, want[i])
+			if read.Skill != name {
+				t.Errorf("Skill = %q, want %q", read.Skill, name)
 			}
 			if !read.Inferred {
 				t.Error("a recovered read must be marked inferred")
 			}
 			if read.ToolUseID != "" {
 				t.Errorf("ToolUseID = %q, want empty so the tool result survives", read.ToolUseID)
+			}
+			// The load waits for the command's success.
+			wantLoad := &agent.SkillLoadMessage{Skill: name, Path: "/home/user/.agents/skills/" + name + "/SKILL.md", SourceToolUseID: "item_2"}
+			if load, ok := msgs[2+2*i].(*agent.SkillLoadMessage); !ok || *load != *wantLoad {
+				t.Errorf("msgs[%d] = %#v, want %#v", 2+2*i, msgs[2+2*i], wantLoad)
 			}
 		}
 	})
@@ -992,6 +997,36 @@ func TestAgentArgs(t *testing.T) {
 
 func TestWireFormat(t *testing.T) {
 	t.Parallel()
+	t.Run("ChildThreadSkillReadLoadsNothing", func(t *testing.T) {
+		t.Parallel()
+		// Observed shape (4DLLPGQ6C000): spawned child threads run the same
+		// skill read as the root thread on the root session's wire.
+		wire := New("", nil).NewWire()
+		if _, err := wire.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []struct {
+			thread string
+			loads  int
+		}{{"child", 0}, {"root", 1}} {
+			msgs, err := wire.ParseMessage([]byte(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_` + line.thread + `","type":"commandExecution","command":"cat /home/user/.agents/skills/code-quality/SKILL.md","cwd":"/repo","status":"inProgress"},"threadId":"` + line.thread + `","turnId":"turn_1"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reads, loads int
+			for _, m := range msgs {
+				switch m.(type) {
+				case *agent.SkillReadMessage:
+					reads++
+				case *agent.SkillLoadMessage:
+					loads++
+				}
+			}
+			if reads != 1 || loads != line.loads {
+				t.Errorf("%s thread: reads = %d, loads = %d, want 1 and %d", line.thread, reads, loads, line.loads)
+			}
+		}
+	})
 	t.Run("WritePromptBasic", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{threadID: "t1"}

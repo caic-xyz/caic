@@ -223,12 +223,12 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 			if timed.ProducerTime.IsZero() {
 				continue
 			}
-			count, reads := skillReads.Confirm(timed.Message)
+			count, confirmed := skillReads.Confirm(timed.Message)
 			if count {
 				add(timed.Message, timed.ProducerTime)
 			}
-			for _, read := range reads {
-				add(read, timed.ProducerTime)
+			for _, c := range confirmed {
+				add(c, timed.ProducerTime)
 			}
 		}
 		keys := make([]key, 0, len(buckets))

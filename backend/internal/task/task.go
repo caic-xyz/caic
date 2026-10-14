@@ -2272,12 +2272,12 @@ func (t *Task) activeModel() string {
 // observeRollupLocked forwards one agent message to the task's usage rollup
 // sink, which is never nil. The caller holds t.mu.
 func (t *Task) observeRollupLocked(m agent.Message, at, producerAt time.Time, replayed bool) {
-	count, reads := t.skillReads.Confirm(m)
+	count, confirmed := t.skillReads.Confirm(m)
 	if count {
 		t.observeRollupMessageLocked(m, at, producerAt, replayed)
 	}
-	for _, read := range reads {
-		t.observeRollupMessageLocked(read, at, producerAt, replayed)
+	for _, c := range confirmed {
+		t.observeRollupMessageLocked(c, at, producerAt, replayed)
 	}
 }
 

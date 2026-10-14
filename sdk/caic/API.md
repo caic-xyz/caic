@@ -237,6 +237,7 @@ EventKind identifies the type of SSE event.
 | `rateLimit` |  |
 | `stats` |  |
 | `commitSnapshot` |  |
+| `skillLoad` |  |
 
 ### EventNativeSubagentScope
 
@@ -1563,6 +1564,17 @@ fetched from the runtime when a turn finishes.
 | `baseline` | `boolean` |  |  |
 | `changeStat` | `EventChangeStat` |  |  |
 
+### EventSkillLoad
+
+EventSkillLoad is emitted when a skill enters the main agent's context. A
+failed call and a subagent's load emit none; an inferred load is emitted
+once the tool that opened the file succeeds.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `skill` | `string` |  | yes |
+| `path` | `string` | SKILL.md in the task runtime; empty when the harness did not report it. |  |
+
 ### EventMessage
 
 EventMessage is a single SSE event in the backend-neutral stream
@@ -1598,6 +1610,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `rateLimit` | `EventRateLimit` |  |  |
 | `stats` | `EventStats` |  |  |
 | `commitSnapshot` | `EventCommitSnapshot` |  |  |
+| `skillLoad` | `EventSkillLoad` |  |  |
 
 ### TaskEventBackward
 

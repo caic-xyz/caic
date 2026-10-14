@@ -1,4 +1,4 @@
-// Skill-read inference and confirmation recover successful skill file loads from harness tools.
+// Skill-read inference and confirmation recover analytics reads and confirmed loads from harness tools.
 
 package agent
 
@@ -35,20 +35,52 @@ const (
 var installedSkillPath = regexp.MustCompile(
 	`(?:^|[^\w.@-])` + skillRootDir + `/(?:` + pathChar + `*/)?skills?/(?:` + pathChar + `*/)?(` + nameChar + `+)/SKILL\.md(?:[^A-Za-z0-9.]|$)`)
 
-// SkillFromPath returns the skill a file path belongs to. It returns an empty
-// string when the path names no installed skill.
-func SkillFromPath(p string) string {
+// SkillFile identifies an installed skill and the SKILL.md path that loads it.
+type SkillFile struct {
+	// Name is the directory holding SKILL.md.
+	Name string
+	// Path is the SKILL.md path as the harness wrote it: absolute,
+	// home-relative, or relative to the harness working directory.
+	Path string
+}
+
+// SkillFromPath returns the skill a file path belongs to. It returns the zero
+// value when the path names no installed skill.
+func SkillFromPath(p string) SkillFile {
 	if p == "" {
-		return ""
+		return SkillFile{}
 	}
-	m := installedSkillPath.FindStringSubmatch(p)
-	if m == nil {
-		return ""
+	loc := installedSkillPath.FindStringSubmatchIndex(p)
+	if loc == nil {
+		return SkillFile{}
 	}
-	if strings.ContainsAny(m[0], "*?[]{}$") {
-		return ""
+	if strings.ContainsAny(p[loc[0]:loc[1]], "*?[]{}$") {
+		return SkillFile{}
 	}
-	return m[1]
+	// The match starts at the boundary before the skill root; the path
+	// extends back to the first byte that cannot appear in one.
+	start := loc[0]
+	if !isPathChar(p[start]) {
+		start++
+	}
+	for start > 0 && isPathChar(p[start-1]) {
+		start--
+	}
+	return SkillFile{Name: p[loc[2]:loc[3]], Path: p[start : loc[3]+len("/SKILL.md")]}
+}
+
+// inferred appends the read and the pending load that opening f implies.
+func (f *SkillFile) inferred(msgs []Message, sourceID string) []Message {
+	msgs = append(msgs, &SkillReadMessage{Skill: f.Name, Inferred: true, SourceToolUseID: sourceID})
+	if sourceID != "" {
+		msgs = append(msgs, &SkillLoadMessage{Skill: f.Name, Path: f.Path, SourceToolUseID: sourceID})
+	}
+	return msgs
+}
+
+// isPathChar reports whether c can appear in a path; it mirrors pathChar.
+func isPathChar(c byte) bool {
+	return !strings.ContainsRune(" \t\n\f\r\"'`", rune(c))
 }
 
 // SkillsFromCommand returns the skills a shell command opens, in the order
@@ -58,7 +90,7 @@ func SkillFromPath(p string) string {
 // The caller must pass a command, not a whole tool input. Only simple
 // file-reading commands are considered; shell listings, searches, and globs
 // are not evidence that the skill file was opened.
-func SkillsFromCommand(cmd string) []string {
+func SkillsFromCommand(cmd string) []SkillFile {
 	if cmd == "" {
 		return nil
 	}
@@ -69,7 +101,7 @@ func SkillsFromCommand(cmd string) []string {
 			break
 		}
 	}
-	var names []string
+	var files []SkillFile
 	for _, segment := range shellReadSegments(cmd) {
 		fields := strings.Fields(segment)
 		if len(fields) == 0 {
@@ -98,12 +130,12 @@ func SkillsFromCommand(cmd string) []string {
 				scriptSeen = true // sed's first positional operand is its script
 				continue
 			}
-			if name := SkillFromPath(word); name != "" {
-				names = append(names, name)
+			if f := SkillFromPath(word); f.Name != "" {
+				files = append(files, f)
 			}
 		}
 	}
-	return names
+	return files
 }
 
 // shellReadSegments keeps only commands whose successful overall exit proves
@@ -166,42 +198,45 @@ func shellReadSegments(cmd string) []string {
 	return segments
 }
 
-// InferredSkillReadFromPath returns the read message for a path a harness
-// opened, or nil when the path names no installed skill.
+// InferredSkillReadFromPath returns the messages for a path a harness opened,
+// or nil when the path names no installed skill: an analytics read and, when
+// sourceID can confirm it, a load carrying the opened SKILL.md.
 //
 // Only Claude Code reports a skill load directly, through its Skill tool. The
 // other harnesses open the file, so the path is the only evidence they give.
 func InferredSkillReadFromPath(p, sourceID string) []Message {
-	name := SkillFromPath(p)
-	if name == "" {
+	f := SkillFromPath(p)
+	if f.Name == "" {
 		return nil
 	}
-	return []Message{&SkillReadMessage{Skill: name, Inferred: true, SourceToolUseID: sourceID}}
+	return f.inferred(nil, sourceID)
 }
 
-// InferredSkillReadsFromCommand returns one read message per skill a shell
-// command opens.
+// InferredSkillReadsFromCommand returns the messages for each skill a shell
+// command opens, as InferredSkillReadFromPath does for one path.
 func InferredSkillReadsFromCommand(cmd, sourceID string) []Message {
-	names := SkillsFromCommand(cmd)
-	if len(names) == 0 {
+	files := SkillsFromCommand(cmd)
+	if len(files) == 0 {
 		return nil
 	}
-	msgs := make([]Message, 0, len(names))
-	for _, name := range names {
-		msgs = append(msgs, &SkillReadMessage{Skill: name, Inferred: true, SourceToolUseID: sourceID})
+	msgs := make([]Message, 0, 2*len(files))
+	for _, f := range files {
+		msgs = f.inferred(msgs, sourceID)
 	}
 	return msgs
 }
 
-// SkillReadTracker releases inferred reads only after the opening tool
-// succeeds. A turn boundary discards reads whose result never arrived.
+// SkillReadTracker releases inferred reads and loads only after the opening
+// tool succeeds. A turn boundary discards those whose result never arrived.
 type SkillReadTracker struct {
-	pending map[string][]*SkillReadMessage
+	pending map[string][]Message
 }
 
-// Confirm reports whether the input is already countable and returns reads
-// confirmed by a successful tool result. Ordinary messages allocate nothing.
-func (t *SkillReadTracker) Confirm(m Message) (bool, []*SkillReadMessage) {
+// Confirm reports whether the input is already countable and returns the
+// inferred reads and loads confirmed by a successful tool result, in arrival
+// order. Ordinary messages allocate nothing.
+func (t *SkillReadTracker) Confirm(m Message) (bool, []Message) {
+	var source string
 	switch m := m.(type) {
 	case *SkillReadMessage:
 		if !m.Inferred {
@@ -210,20 +245,28 @@ func (t *SkillReadTracker) Confirm(m Message) (bool, []*SkillReadMessage) {
 		if m.SourceToolUseID == "" {
 			return false, nil
 		}
-		if t.pending == nil {
-			t.pending = make(map[string][]*SkillReadMessage)
+		source = m.SourceToolUseID
+	case *SkillLoadMessage:
+		if m.SourceToolUseID == "" {
+			return true, nil
 		}
-		t.pending[m.SourceToolUseID] = append(t.pending[m.SourceToolUseID], m)
-		return false, nil
+		source = m.SourceToolUseID
 	case *ToolResultMessage:
-		reads := t.pending[m.ToolUseID]
+		confirmed := t.pending[m.ToolUseID]
 		delete(t.pending, m.ToolUseID)
 		if m.Error != "" {
 			return true, nil
 		}
-		return true, reads
+		return true, confirmed
 	case *ResultMessage:
 		clear(t.pending)
+		return true, nil
+	default:
+		return true, nil
 	}
-	return true, nil
+	if t.pending == nil {
+		t.pending = make(map[string][]Message)
+	}
+	t.pending[source] = append(t.pending[source], m)
+	return false, nil
 }

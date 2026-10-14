@@ -952,8 +952,8 @@ func TestParseMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 2 {
-			t.Fatalf("got %d messages, want 2", len(msgs))
+		if len(msgs) != 3 {
+			t.Fatalf("got %d messages, want 3", len(msgs))
 		}
 		if _, ok := msgs[0].(*agent.ToolUseMessage); !ok {
 			t.Fatalf("msgs[0] = %T, want *agent.ToolUseMessage", msgs[0])
@@ -964,6 +964,10 @@ func TestParseMessage(t *testing.T) {
 		}
 		if read.Skill != "go-code-quality" || !read.Inferred || read.ToolUseID != "" {
 			t.Errorf("SkillReadMessage = %+v", read)
+		}
+		wantLoad := agent.SkillLoadMessage{Skill: "go-code-quality", Path: "/home/user/.agents/skills/go-code-quality/SKILL.md", SourceToolUseID: "c9"}
+		if load, ok := msgs[2].(*agent.SkillLoadMessage); !ok || *load != wantLoad {
+			t.Errorf("msgs[2] = %#v, want %#v", msgs[2], wantLoad)
 		}
 	})
 

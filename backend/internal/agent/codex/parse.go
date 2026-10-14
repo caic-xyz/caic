@@ -129,13 +129,17 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if err != nil {
 			return nil, decodedItem{}, err
 		}
+		threadID, err := agent.JSONString(msg.Params, "threadId")
+		if err != nil {
+			return nil, decodedItem{}, fmt.Errorf("%s params: %w", msg.Method, err)
+		}
 		var msgs []agent.Message
 		if msg.Method == codex.MethodItemStarted {
 			msgs, err = parseItemStarted(&msg, raw, typ)
 		} else {
 			msgs, err = parseItemCompleted(&msg, raw, typ)
 		}
-		return msgs, decodedItem{raw: raw, typ: typ}, err
+		return msgs, decodedItem{raw: raw, typ: typ, threadID: threadID}, err
 
 	case codex.MethodItemDelta:
 		var p codex.AgentMessageDeltaNotification
