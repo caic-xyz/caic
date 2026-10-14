@@ -1,4 +1,4 @@
-// TaskDetail renders agent output with runtime file links, task context, actions, and Git-state diff navigation.
+// TaskDetail renders agent output with context-section skills, runtime file links, actions, and Git-state diff navigation.
 
 import {
   createSignal,
@@ -65,6 +65,7 @@ import {
   type Session,
   type Turn,
 } from "../grouping";
+import { ContextSkillsTracker } from "../contextSkills";
 import { createTaskEventTimeline } from "../taskEventTimeline";
 import { taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
@@ -564,38 +565,12 @@ export default function TaskDetail(props: Props) {
   });
   const setupLogLines = () => setupInfo().lines;
 
-  // Fold loaded skills incrementally, one entry per name in first-load order.
-  // A later load supplies the path when the first one lacked it.
-  let skillsTaskId = "";
-  let skillsEpoch = -1;
-  let skillsProcessed = 0;
-  const loadedSkills = createMemo<EventSkillLoad[]>((prev) => {
-    const taskId = props.taskId;
-    const epoch = timeline.epoch();
-    const history = messages();
-    let next = prev;
-    if (taskId !== skillsTaskId || epoch !== skillsEpoch || history.length < skillsProcessed) {
-      skillsTaskId = taskId;
-      skillsEpoch = epoch;
-      skillsProcessed = 0;
-      next = [];
-    }
-    for (let i = skillsProcessed; i < history.length; i++) {
-      const load = history[i].skillLoad;
-      if (history[i].kind !== "skillLoad" || !load) continue;
-      const seen = next.findIndex((skill) => skill.skill === load.skill);
-      if (seen >= 0 && (next[seen].path || !load.path)) continue;
-      if (next === prev) next = [...prev];
-      if (seen >= 0) next[seen] = load;
-      else next.push(load);
-    }
-    skillsProcessed = history.length;
-    return next;
-  }, []);
+  const skillsTracker = new ContextSkillsTracker();
+  const contextSkills = createMemo(() => skillsTracker.derive(props.taskId, timeline.epoch(), messages()));
   const hasSessionStarted = () => setupInfo().firstInit !== null;
 
   // Sessions from completed messages: stable during streaming (only updates on turn completion).
-  // groupSessions extracts init/compact_boundary events as session headers, not message groups.
+  // groupSessions extracts init/compaction/clear events as session headers, not message groups.
   const allCompletedSessions = createMemo(() => groupSessions(completedMsgs()));
   // Past sessions: all sessions before the current (last) one.
   const pastSessions = createMemo(() => allCompletedSessions().slice(0, -1));
@@ -608,25 +583,23 @@ export default function TaskDetail(props: Props) {
   // Boundary event for the current session from completed messages.
   const currentSessionBoundaryFromCompleted = createMemo(() => currentSessionEntry()?.boundaryEvent);
 
-  // Scan live messages for a session boundary event (e.g., init before the first result).
-  // This handles the common case where the first session starts before any turn completes.
-  const liveSessionBoundary = createMemo(() => {
-    const msgs = messages();
-    const start = splitIdx();
-    for (let i = start; i < msgs.length; i++) {
-      if (isSessionBoundary(msgs[i])) return msgs[i];
-    }
-    return undefined;
-  });
-  const currentSessionBoundaryEvent = createMemo(() => currentSessionBoundaryFromCompleted() ?? liveSessionBoundary());
+  // A completed section keeps its separator and turn keys throughout a live
+  // turn. Before the first result, the initial init supplies its separator.
+  const currentSessionBoundaryEvent = createMemo(
+    () =>
+      currentSessionBoundaryFromCompleted() ??
+      messages()
+        .slice(splitIdx())
+        .find((event) => event.kind === "init"),
+  );
   const currentSessionKey = createMemo(() => {
     const idx = allCompletedSessions().length - 1;
     const ev = currentSessionBoundaryEvent();
     return `session:${Math.max(0, idx)}:${ev?.ts ?? ""}`;
   });
 
-  // Live groups: recomputes on every message. Session boundary events are excluded —
-  // they become session headers, not message groups. The memo owns its stateful
+  // Live groups retain compaction/clear events at their position in the stream.
+  // Init metadata is rendered by the section separator. The memo owns its stateful
   // grouper reset so Solid cannot evaluate it before a sibling reset effect.
   let groupedTaskId = "";
   let groupedEpoch = -1;
@@ -643,7 +616,7 @@ export default function TaskDetail(props: Props) {
     }
     const msgs = messages()
       .slice(start)
-      .filter((ev) => !isSessionBoundary(ev));
+      .filter((ev) => ev.kind !== "init");
     return messageGrouper.group(msgs);
   });
 
@@ -697,12 +670,13 @@ export default function TaskDetail(props: Props) {
   // Live turn groups: incomplete turn groups flushed on structural boundaries.
   const liveItems = createMemo((): MsgItem[] => {
     const liveGroups = currentGroups();
-    return liveGroups.map((g, j) => ({
-      kind: "group" as const,
-      group: g,
-      isLive: true,
-      key: `g:${j}`,
-    }));
+    return liveGroups.map((g, j) => {
+      const event = g.events[0];
+      if (g.kind === "other" && g.events.length === 1 && event.kind === "system" && isSessionBoundary(event)) {
+        return { kind: "sessionBoundary", event, key: `g:${j}` };
+      }
+      return { kind: "group", group: g, isLive: true, key: `g:${j}` };
+    });
   });
   // Flat item model: past sessions (elided) + current session boundary + current session
   // completed turns (elided) + last completed turn (always expanded) + live turn groups.
@@ -1172,22 +1146,7 @@ export default function TaskDetail(props: Props) {
             </For>
           </nav>
         </Show>
-        <Show when={loadedSkills().length > 0}>
-          <nav class={styles.skills} aria-label="Loaded skills">
-            <SkillIcon class={styles.skillsIcon} width="14" height="14" aria-hidden="true" />
-            <For each={loadedSkills()}>
-              {(skill) => (
-                <Show when={skill.path} keyed fallback={<span>{skill.skill}</span>}>
-                  {(path) => (
-                    <A class={styles.skillLink} href={taskViewURL(props.taskId, path)} title={path}>
-                      {skill.skill}
-                    </A>
-                  )}
-                </Show>
-              )}
-            </For>
-          </nav>
-        </Show>
+        <SkillStrip taskId={props.taskId} skills={contextSkills().current} label="Loaded skills" />
         <Show when={props.rateLimit?.blocked && !isQuotaDismissed()}>
           <section
             class={styles.quotaRecovery}
@@ -1287,8 +1246,25 @@ export default function TaskDetail(props: Props) {
                 }
                 return undefined;
               };
+              const pastBoundary = () => {
+                const current = item();
+                return current.kind === "sessionElided" || current.kind === "sessionHeader"
+                  ? current.session.boundaryEvent
+                  : undefined;
+              };
               return (
                 <>
+                  <Show when={pastBoundary()} keyed>
+                    {(event) => (
+                      <Show when={contextSkills().closed.has(event)}>
+                        <SessionBoundaryItem
+                          event={event}
+                          taskId={props.taskId}
+                          skills={contextSkills().closed.get(event) ?? []}
+                        />
+                      </Show>
+                    )}
+                  </Show>
                   <Switch>
                     {/* Collapsed past session: single clickable row. */}
                     <Match when={sessElided()} keyed>
@@ -1329,9 +1305,15 @@ export default function TaskDetail(props: Props) {
                         </div>
                       )}
                     </Match>
-                    {/* Session boundary: init or compact_boundary rendered as a separator. */}
+                    {/* Session boundary: init, compaction, or clear rendered as a separator. */}
                     <Match when={sessBoundary()} keyed>
-                      {(sb) => <SessionBoundaryItem event={sb.event} />}
+                      {(sb) => (
+                        <SessionBoundaryItem
+                          event={sb.event}
+                          taskId={props.taskId}
+                          skills={contextSkills().closed.get(sb.event) ?? []}
+                        />
+                      )}
                     </Match>
                     {/* Collapsed past turn: single clickable row. */}
                     <Match when={elided()} keyed>
@@ -1707,35 +1689,62 @@ function compactTokenSummary(before: number | undefined, after: number | undefin
   return "";
 }
 
-// Renders the header for a session boundary (init or compact_boundary).
+function SkillStrip(props: { taskId: string; skills: EventSkillLoad[]; label: string }) {
+  return (
+    <Show when={props.skills.length > 0}>
+      <nav class={styles.skills} aria-label={props.label}>
+        <SkillIcon class={styles.skillsIcon} width="14" height="14" aria-hidden="true" />
+        <For each={props.skills}>
+          {(skill) => (
+            <Show when={skill.path} keyed fallback={<span>{skill.skill}</span>}>
+              {(path) => (
+                <A class={styles.skillLink} href={taskViewURL(props.taskId, path)} title={path}>
+                  {skill.skill}
+                </A>
+              )}
+            </Show>
+          )}
+        </For>
+      </nav>
+    </Show>
+  );
+}
+
+// Renders the header for a session boundary (init, compaction, or clear).
 // These events are extracted from the message stream and shown as section separators.
-function SessionBoundaryItem(props: { event: EventMessage }) {
+function SessionBoundaryItem(props: { event: EventMessage; taskId: string; skills: EventSkillLoad[] }) {
   const ev = () => props.event;
   const compactSummary = () => compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
   return (
-    <Switch>
-      <Match when={ev().init} keyed>
-        {(init) => (
-          <div class={styles.systemInit}>
-            {[
-              "Session started",
-              init.reportedModel,
-              init.reportedEffort ? `${init.reportedEffort} effort` : "",
-              init.agentVersion,
-              init.sessionID,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+    <>
+      <Switch>
+        <Match when={ev().init} keyed>
+          {(init) => (
+            <div class={styles.systemInit}>
+              {[
+                "Session started",
+                init.reportedModel,
+                init.reportedEffort ? `${init.reportedEffort} effort` : "",
+                init.agentVersion,
+                init.sessionID,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          )}
+        </Match>
+        <Match when={ev().system?.subtype === "compact_boundary"}>
+          <div class={styles.contextCleared}>
+            Conversation compacted
+            <Show when={compactSummary()}>{(summary) => ` · ${summary()}`}</Show>
           </div>
-        )}
-      </Match>
-      <Match when={ev().system?.subtype === "compact_boundary"}>
-        <div class={styles.contextCleared}>
-          Conversation compacted
-          <Show when={compactSummary()}>{(summary) => ` · ${summary()}`}</Show>
-        </div>
-      </Match>
-    </Switch>
+        </Match>
+        <Match when={ev().system?.subtype === "context_cleared"}>
+          <div class={styles.contextCleared}>Context cleared</div>
+        </Match>
+      </Switch>
+      <SkillStrip taskId={props.taskId} skills={props.skills} label="Previous context skills" />
+    </>
   );
 }
 
@@ -1826,9 +1835,6 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
     <Switch>
       <Match when={props.ev.rateLimit}>
         <RateLimitBanner ev={props.ev} />
-      </Match>
-      <Match when={props.ev.system?.subtype === "context_cleared"}>
-        <div class={styles.contextCleared}>Context cleared</div>
       </Match>
       <Match when={props.ev.system?.subtype === "api_error"}>
         <div class={styles.parseError}>API error</div>

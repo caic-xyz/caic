@@ -444,7 +444,7 @@ func parseItemStarted(msg *codex.JSONRPCMessage, raw json.RawMessage, typ codex.
 			Name:      "Bash",
 			Input:     input,
 		}
-		return append([]agent.Message{use}, agent.InferredSkillReadsFromCommand(item.Command, item.ID)...), nil
+		return append([]agent.Message{use}, agent.InferredSkillReadsFromCommand(item.Command, item.Cwd, item.ID)...), nil
 
 	case codex.ItemTypeFileChange:
 		var item codex.FileChangeItem

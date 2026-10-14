@@ -133,11 +133,14 @@ explicit applied-policy or duration field.
 ## Skill Reads
 
 Codex has neither a Skill tool nor a read tool. It opens a skill by shelling
-out, so `parse.go` infers a read from the `commandExecution` item's `command`:
+out, so `parse.go` infers a read from the `commandExecution` item's `command` and `cwd`:
 
 ```
 sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md
 ```
+
+Relative shell operands resolve against the recorded `cwd`. Directory changes
+and shell expansion omit an unresolved path while preserving the skill name.
 
 One command often loads several skills. Codex also re-reads a skill on every
 turn, 4.8 times per skill per task across the retained task-log cache and 50

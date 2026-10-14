@@ -12,7 +12,7 @@ func BenchmarkSkillsFromCommand(b *testing.B) {
 	cmd := `sed -n '1,240p' /home/user/.agents/skills/code-quality/SKILL.md && sed -n '1,240p' /home/user/.agents/skills/go-code-quality/SKILL.md`
 	b.ReportAllocs()
 	for range b.N {
-		if len(agent.SkillsFromCommand(cmd)) != 2 {
+		if len(agent.SkillsFromCommand(cmd, "/repo")) != 2 {
 			b.Fatal("lost skill reads")
 		}
 	}

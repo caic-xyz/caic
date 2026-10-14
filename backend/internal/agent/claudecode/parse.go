@@ -537,7 +537,7 @@ func inferredSkillReads(name string, input json.RawMessage, sourceID string) []a
 		if err := json.Unmarshal(input, &in); err != nil {
 			return nil
 		}
-		return agent.InferredSkillReadsFromCommand(in.Command, sourceID)
+		return agent.InferredSkillReadsFromCommand(in.Command, "", sourceID)
 	}
 	return nil
 }

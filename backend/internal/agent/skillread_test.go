@@ -21,6 +21,7 @@ func TestSkillFromPath(t *testing.T) {
 			in   string
 			want string
 		}{
+			{name: "spaced absolute path", in: "/home/user/My Skills/.agents/skills/code-quality/SKILL.md", want: "code-quality"},
 			{name: "agents root", in: "/home/user/.agents/skills/code-quality/SKILL.md", want: "code-quality"},
 			{name: "tilde", in: "~/.agents/skills/go-code-quality/SKILL.md", want: "go-code-quality"},
 			{name: "claude root", in: "/home/user/.claude/skills/review/SKILL.md", want: "review"},
@@ -74,8 +75,8 @@ func TestSkillFromPath(t *testing.T) {
 
 func TestSkillsFromCommand(t *testing.T) {
 	t.Parallel()
-	codeQuality := agent.SkillFile{Name: "code-quality", Path: "~/.agents/skills/code-quality/SKILL.md"}
-	review := agent.SkillFile{Name: "review", Path: "~/.agents/skills/review/SKILL.md"}
+	codeQuality := agent.SkillFile{Name: "code-quality", Path: ""}
+	review := agent.SkillFile{Name: "review", Path: ""}
 
 	data := []struct {
 		name string
@@ -90,6 +91,8 @@ func TestSkillsFromCommand(t *testing.T) {
 				{Name: "go-code-quality", Path: "/home/user/.agents/skills/go-code-quality/SKILL.md"},
 			},
 		},
+		{name: "escaped spaced absolute path", in: `cat /home/user/My\ Skills/.agents/skills/review/SKILL.md`, want: []agent.SkillFile{{Name: "review", Path: "/home/user/My Skills/.agents/skills/review/SKILL.md"}}},
+		{name: "quoted spaced absolute path", in: `cat "/home/user/My Skills/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{{Name: "review", Path: "/home/user/My Skills/.agents/skills/review/SKILL.md"}}},
 		{
 			name: "repeated reads count raw",
 			in:   "cat ~/.agents/skills/code-quality/SKILL.md && cat ~/.agents/skills/code-quality/SKILL.md",
@@ -122,12 +125,18 @@ func TestSkillsFromCommand(t *testing.T) {
 		{name: "quoted path", in: `cat "~/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{review}},
 		{name: "sed script mentions a skill", in: "sed -n '/~/.agents/skills/review/SKILL.md/p' /tmp/notes", want: nil},
 		{name: "read before output redirection", in: "cat ~/.agents/skills/review/SKILL.md > /tmp/notes", want: []agent.SkillFile{review}},
+		{name: "subshell home-relative", in: "(cat ~/.agents/skills/review/SKILL.md)", want: []agent.SkillFile{review}},
+		{name: "quoted parenthesis in path", in: `cat "/home/notes)/.agents/skills/review/SKILL.md"`, want: []agent.SkillFile{{Name: "review", Path: "/home/notes)/.agents/skills/review/SKILL.md"}}},
+		{name: "subshell absolute", in: "(cat /home/u/.agents/skills/review/SKILL.md)", want: []agent.SkillFile{{Name: "review", Path: "/home/u/.agents/skills/review/SKILL.md"}}},
+		{name: "subshell cd", in: "(cd /other && cat .agents/skills/review/SKILL.md)", want: []agent.SkillFile{{Name: "review"}}},
+		{name: "escaped wrapper", in: `bash -lc "cat \"/a b/.agents/skills/review/SKILL.md\""`, want: []agent.SkillFile{{Name: "review", Path: "/a b/.agents/skills/review/SKILL.md"}}},
+		{name: "split substitution", in: "cat $(dirname /repo/file)/.agents/skills/review/SKILL.md", want: []agent.SkillFile{{Name: "review"}}},
 		{name: "empty", in: "", want: nil},
 	}
 	for _, line := range data {
 		t.Run(line.name, func(t *testing.T) {
 			t.Parallel()
-			got := agent.SkillsFromCommand(line.in)
+			got := agent.SkillsFromCommand(line.in, "")
 			if !slices.Equal(got, line.want) {
 				t.Errorf("SkillsFromCommand(%q) = %v, want %v", line.in, got, line.want)
 			}
@@ -168,5 +177,31 @@ func TestSkillReadTracker(t *testing.T) {
 	tracker.Confirm(&agent.ResultMessage{})
 	if count, got := tracker.Confirm(&agent.ToolResultMessage{ToolUseID: "call-1"}); !count || len(got) != 0 {
 		t.Errorf("turn boundary retained %v, %v, want only result", count, got)
+	}
+}
+
+func TestInferredSkillReadsFromCommand(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, cmd, cwd, path string }{
+		{name: "relative with cwd", cmd: "cat .agents/skills/review/SKILL.md", cwd: "/repo", path: "/repo/.agents/skills/review/SKILL.md"},
+		{name: "relative without cwd", cmd: "cat .agents/skills/review/SKILL.md"},
+		{name: "dynamic prefix", cmd: "cat $ROOT/.agents/skills/review/SKILL.md", cwd: "/repo"},
+		{name: "cd dependent", cmd: "cd /other && cat .agents/skills/review/SKILL.md", cwd: "/repo"},
+		{name: "absolute after cd", cmd: "cd /other && cat /home/user/.agents/skills/review/SKILL.md", cwd: "/repo", path: "/home/user/.agents/skills/review/SKILL.md"},
+		{name: "home expansion unavailable", cmd: "cat ~/.agents/skills/review/SKILL.md", cwd: "/repo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			msgs := agent.InferredSkillReadsFromCommand(tc.cmd, tc.cwd, "call-1")
+			if len(msgs) != 2 {
+				t.Fatalf("messages = %v, want read and load", msgs)
+			}
+			if read, ok := msgs[0].(*agent.SkillReadMessage); !ok || read.Skill != "review" {
+				t.Errorf("read = %#v", msgs[0])
+			}
+			if load, ok := msgs[1].(*agent.SkillLoadMessage); !ok || load.Skill != "review" || load.Path != tc.path {
+				t.Errorf("load = %#v, want review with path %q", msgs[1], tc.path)
+			}
+		})
 	}
 }

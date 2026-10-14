@@ -790,6 +790,22 @@ def main() -> None:
         turns += 1
 
         # Exact keyword triggers (for e2e tests).
+        if line.startswith("FAKE_SKILLS"):
+            if "compact" in line:
+                emit({"type": "system", "subtype": "compact_boundary"})
+                emit_text("Context compacted; skills must be loaded again.")
+            else:
+                emit(
+                    {
+                        "type": "skill_load",
+                        "skill": "code-quality",
+                        "path": "/home/user/.agents/skills/code-quality/SKILL.md",
+                    }
+                )
+                emit({"type": "skill_load", "skill": "review", "path": "/home/user/.agents/skills/review/SKILL.md"})
+                emit_text("Loaded code-quality and review into this context.")
+            emit_result(turns, "Skill context updated")
+            continue
         if line.startswith("FAKE_NATIVE_SUBAGENTS"):
             emit_native_subagents_turn(turns)
             continue

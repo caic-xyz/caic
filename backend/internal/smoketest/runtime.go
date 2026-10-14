@@ -485,6 +485,14 @@ func artifactFile(path string) ([]byte, error) {
 	switch path {
 	case "/home/user/src/caic/test-results/screenshot.png":
 		return base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
+	case "/home/user/.agents/skills/code-quality/SKILL.md":
+		return []byte("# Code quality\n\nRead the [reference](references/rules.md).\n"), nil
+	case "/home/user/.agents/skills/code-quality/references/rules.md":
+		return []byte("# Quality rules\n\nRead the [examples](examples.md).\n"), nil
+	case "/home/user/.agents/skills/code-quality/references/examples.md":
+		return []byte("# Quality examples\n\nKeep changes focused.\n"), nil
+	case "/home/user/.agents/skills/review/SKILL.md":
+		return []byte("# Review\n\nbehavior and failure paths.\n"), nil
 	case "/home/user/src/caic/README.md":
 		return []byte("# Task artifact\n\nSee the [guide](docs/guide.md).\n"), nil
 	case "/home/user/src/caic/docs/guide.md":

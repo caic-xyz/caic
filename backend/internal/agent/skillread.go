@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"path"
 	"regexp"
 	"strings"
 )
@@ -13,12 +14,12 @@ const (
 	// own config directories: ~/.config/opencode, ~/.opencode, and any
 	// .opencode between the working directory and the worktree root.
 	skillRootDir = `(?:\.(?:agents|claude|codex|opencode|pi)|\.config/opencode)`
-	// pathChar excludes the whitespace and quoting that bound a path inside a
-	// shell command or a JSON tool input.
-	pathChar = "[^\\s\"'`]"
+	// pathChar accepts literal file paths, including spaces. Shell operands
+	// are unquoted before matching.
+	pathChar = "[^\"'`]"
 	// nameChar additionally excludes the separator, so a capture is one
 	// directory name.
-	nameChar = "[^\\s\"'`/]"
+	nameChar = "[^\"'`/]"
 )
 
 // installedSkillPath matches one SKILL.md under an installed skill root and
@@ -33,14 +34,15 @@ const (
 // internal/server/skills/tasks/SKILL.md and the widget plugin's own skill, and
 // a bare skills/ path also appears in a URL and in a git revision argument.
 var installedSkillPath = regexp.MustCompile(
-	`(?:^|[^\w.@-])` + skillRootDir + `/(?:` + pathChar + `*/)?skills?/(?:` + pathChar + `*/)?(` + nameChar + `+)/SKILL\.md(?:[^A-Za-z0-9.]|$)`)
+	`(?:^|[^\w.@-])` + skillRootDir + `/(?:` + pathChar + `*/)?skills?/(?:` + pathChar + `*/)?(` + nameChar + `+)/SKILL\.md$`)
 
 // SkillFile identifies an installed skill and the SKILL.md path that loads it.
 type SkillFile struct {
 	// Name is the directory holding SKILL.md.
 	Name string
-	// Path is the SKILL.md path as the harness wrote it: absolute,
-	// home-relative, or relative to the harness working directory.
+	// Path is the literal file-tool path or a resolved shell operand. Shell
+	// inference omits it when expansion makes it unknown, or when a relative
+	// operand lacks an absolute cwd or follows a directory-changing command.
 	Path string
 }
 
@@ -57,16 +59,7 @@ func SkillFromPath(p string) SkillFile {
 	if strings.ContainsAny(p[loc[0]:loc[1]], "*?[]{}$") {
 		return SkillFile{}
 	}
-	// The match starts at the boundary before the skill root; the path
-	// extends back to the first byte that cannot appear in one.
-	start := loc[0]
-	if !isPathChar(p[start]) {
-		start++
-	}
-	for start > 0 && isPathChar(p[start-1]) {
-		start--
-	}
-	return SkillFile{Name: p[loc[2]:loc[3]], Path: p[start : loc[3]+len("/SKILL.md")]}
+	return SkillFile{Name: p[loc[2]:loc[3]], Path: p}
 }
 
 // inferred appends the read and the pending load that opening f implies.
@@ -78,37 +71,42 @@ func (f *SkillFile) inferred(msgs []Message, sourceID string) []Message {
 	return msgs
 }
 
-// isPathChar reports whether c can appear in a path; it mirrors pathChar.
-func isPathChar(c byte) bool {
-	return !strings.ContainsRune(" \t\n\f\r\"'`", rune(c))
-}
-
 // SkillsFromCommand returns the skills a shell command opens, in the order
 // they appear. One command can open several: Codex bundles its reads into a
 // single bash invocation.
 //
 // The caller must pass a command, not a whole tool input. Only simple
 // file-reading commands are considered; shell listings, searches, and globs
-// are not evidence that the skill file was opened.
-func SkillsFromCommand(cmd string) []SkillFile {
+// are not evidence that the skill file was opened. Relative operands resolve
+// against cwd; unresolved paths retain only the skill name.
+func SkillsFromCommand(cmd, cwd string) []SkillFile {
 	if cmd == "" {
 		return nil
 	}
 	cmd = strings.TrimSpace(cmd)
-	for _, prefix := range []string{"/bin/bash -lc ", "bash -lc "} {
-		if rest, ok := strings.CutPrefix(cmd, prefix); ok && len(rest) >= 2 && (rest[0] == '\'' || rest[0] == '"') && rest[len(rest)-1] == rest[0] {
-			cmd = rest[1 : len(rest)-1]
-			break
+	if strings.HasPrefix(cmd, "/bin/bash -lc ") || strings.HasPrefix(cmd, "bash -lc ") {
+		fields := shellReadWords(cmd)
+		if len(fields) == 3 {
+			return SkillsFromCommand(fields[2], cwd)
 		}
+		return nil
 	}
+
 	var files []SkillFile
+	cwdKnown := true
 	for _, segment := range shellReadSegments(cmd) {
-		fields := strings.Fields(segment)
+		fields := shellReadWords(segment)
+		// A substitution may span several words. None can supply a reliable
+		// path without the shell environment and the substitution result.
+		dynamic := strings.ContainsAny(segment, "$`")
 		if len(fields) == 0 {
 			continue
 		}
-		verb := strings.TrimLeft(fields[0], "\"'(")
+		verb := fields[0]
 		switch verb {
+		case "cd", "pushd", "popd":
+			cwdKnown = false
+			continue
 		case "cat", "head", "tail", "less", "more", "bat", "nl", "sed":
 		default:
 			continue
@@ -131,11 +129,77 @@ func SkillsFromCommand(cmd string) []SkillFile {
 				continue
 			}
 			if f := SkillFromPath(word); f.Name != "" {
+				if dynamic || strings.HasPrefix(word, "~") || strings.ContainsAny(word, "*?[]{}") {
+					f.Path = ""
+				} else if !path.IsAbs(f.Path) {
+					if cwdKnown && path.IsAbs(cwd) {
+						f.Path = path.Join(cwd, f.Path)
+					} else {
+						f.Path = ""
+					}
+				}
 				files = append(files, f)
 			}
 		}
 	}
 	return files
+}
+
+// shellReadWords splits simple shell operands, removes their quoting, and
+// skips unquoted subshell parentheses.
+// Dynamic expansion is left intact; it cannot supply a reliable load path.
+func shellReadWords(s string) []string {
+	var words []string
+	for i := 0; i < len(s); {
+		if strings.ContainsRune("() \t\r\n", rune(s[i])) {
+			i++
+			continue
+		}
+		start := i
+		var word strings.Builder
+		quote := byte(0)
+		for i < len(s) {
+			c := s[i]
+			if quote == 0 && strings.ContainsRune("() \t\r\n", rune(c)) {
+				break
+			}
+			if c == '\\' && quote != '\'' && i+1 < len(s) &&
+				(quote != '"' || strings.ContainsRune("$`\"\\\n", rune(s[i+1]))) {
+				word.WriteString(s[start:i])
+				i++
+				if s[i] != '\n' {
+					word.WriteByte(s[i])
+				}
+				i++
+				start = i
+				continue
+			}
+			if c == '\'' || c == '"' {
+				if quote == 0 || quote == c {
+					word.WriteString(s[start:i])
+					if quote == 0 {
+						quote = c
+					} else {
+						quote = 0
+					}
+					i++
+					start = i
+					continue
+				}
+			}
+			i++
+		}
+		if quote != 0 {
+			return nil
+		}
+		if word.Len() == 0 {
+			words = append(words, s[start:i])
+		} else {
+			word.WriteString(s[start:i])
+			words = append(words, word.String())
+		}
+	}
+	return words
 }
 
 // shellReadSegments keeps only commands whose successful overall exit proves
@@ -213,9 +277,10 @@ func InferredSkillReadFromPath(p, sourceID string) []Message {
 }
 
 // InferredSkillReadsFromCommand returns the messages for each skill a shell
-// command opens, as InferredSkillReadFromPath does for one path.
-func InferredSkillReadsFromCommand(cmd, sourceID string) []Message {
-	files := SkillsFromCommand(cmd)
+// command opens, as InferredSkillReadFromPath does for one path. Relative
+// operands resolve against cwd; unresolved paths retain only the skill name.
+func InferredSkillReadsFromCommand(cmd, cwd, sourceID string) []Message {
+	files := SkillsFromCommand(cmd, cwd)
 	if len(files) == 0 {
 		return nil
 	}

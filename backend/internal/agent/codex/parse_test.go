@@ -229,6 +229,36 @@ func TestParseMessage(t *testing.T) {
 			}
 		}
 	})
+	t.Run("SkillReadPaths", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct{ name, cmd, path string }{
+			{name: "relative operand", cmd: "cat .agents/skills/review/SKILL.md", path: "/repo/.agents/skills/review/SKILL.md"},
+			{name: "changed working directory", cmd: "cd /other && cat .agents/skills/review/SKILL.md"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				raw, err := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "item/started", "params": map[string]any{
+						"item":     map[string]any{"id": "call-1", "type": "commandExecution", "command": tc.cmd, "cwd": "/repo", "status": "inProgress"},
+						"threadId": "t1", "turnId": "turn_1",
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				msgs, err := parseTestMessage(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(msgs) != 3 {
+					t.Fatalf("messages = %v, want tool, read, load", msgs)
+				}
+				if load, ok := msgs[2].(*agent.SkillLoadMessage); !ok || load.Skill != "review" || load.Path != tc.path {
+					t.Errorf("load = %#v, want review with path %q", msgs[2], tc.path)
+				}
+			})
+		}
+	})
 	t.Run("ItemCompletedCommandExecution", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"durationMs":150.5,"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`

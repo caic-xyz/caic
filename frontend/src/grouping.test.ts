@@ -10,6 +10,7 @@ import {
   groupMessages,
   groupTurns,
   groupSessions,
+  sessionSummary,
   turnSummary,
   toolCallDurationMs,
   toolCallDurations,
@@ -659,6 +660,38 @@ describe("groupSessions", () => {
     expect(sessions[1].turns).toHaveLength(1);
   });
 
+  for (const subtype of ["compact_boundary", "context_cleared"]) {
+    for (const initFirst of [false, true]) {
+      it(`adopts restarted init in ${subtype}, init first ${initFirst}`, () => {
+        const init = (id: string): EventMessage => ({
+          kind: "init",
+          ts: 1,
+          init: { sessionID: id, reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+        });
+        const prompt: EventMessage = { kind: "userInput", ts: 3, userInput: { text: "new prompt" } };
+        const restart = init("s2");
+        const boundary: EventMessage = { kind: "system", ts: 2, system: { subtype } };
+        const sessions = groupSessions([
+          init("s1"),
+          textDeltaEvent("old response"),
+          resultEvent(),
+          boundary,
+          ...(initFirst ? [restart, prompt] : [prompt, restart]),
+          textDeltaEvent("new response"),
+          resultEvent(),
+        ]);
+        expect(sessions).toHaveLength(2);
+        expect(sessions[1].boundaryEvent).toBe(boundary);
+        const events = sessions[1].turns.flatMap((turn) => turn.groups.flatMap((group) => group.events));
+        expect(events).toContain(prompt);
+        expect(events.some((event) => event.textDelta?.text === "new response")).toBe(true);
+        expect(sessionSummary(sessions[1])).toMatch(
+          subtype === "context_cleared" ? /^Cleared session/ : /^Compacted session/,
+        );
+      });
+    }
+  }
+
   it("splits on compact_boundary system events", () => {
     const msgs: EventMessage[] = [
       {
@@ -800,32 +833,34 @@ describe("groupSessions", () => {
     expect(lastTurn.textCount).toBeGreaterThan(0);
   });
 
-  it("userInput before compact_boundary is carried into the compacted session", () => {
-    const msgs: EventMessage[] = [
-      {
-        kind: "init",
-        ts: 1,
-        init: {
-          reportedModel: "m",
-          agentVersion: "1",
-          sessionID: "s1",
-          tools: [],
-          cwd: "/",
-          harness: "claude",
+  for (const subtype of ["compact_boundary", "context_cleared"]) {
+    it(`userInput before ${subtype} is carried into the new session`, () => {
+      const msgs: EventMessage[] = [
+        {
+          kind: "init",
+          ts: 1,
+          init: {
+            reportedModel: "m",
+            agentVersion: "1",
+            sessionID: "s1",
+            tools: [],
+            cwd: "/",
+            harness: "claude",
+          },
         },
-      },
-      textDeltaEvent("first response"),
-      resultEvent(),
-      { kind: "userInput", ts: 2, userInput: { text: "continue" } },
-      { kind: "system", ts: 3, system: { subtype: "compact_boundary" } },
-      textDeltaEvent("compacted response"),
-    ];
-    const sessions = groupSessions(msgs);
-    expect(sessions).toHaveLength(2);
-    const s2Events = sessions[1].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
-    expect(s2Events.some((e) => e.kind === "userInput")).toBe(true);
-  });
-
+        textDeltaEvent("first response"),
+        resultEvent(),
+        { kind: "userInput", ts: 2, userInput: { text: "continue" } },
+        { kind: "system", ts: 3, system: { subtype } },
+        textDeltaEvent("compacted response"),
+      ];
+      const sessions = groupSessions(msgs);
+      expect(sessions).toHaveLength(2);
+      expect(sessions[1].boundaryEvent?.system?.subtype).toBe(subtype);
+      const s2Events = sessions[1].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
+      expect(s2Events.some((e) => e.kind === "userInput")).toBe(true);
+    });
+  }
   it("repeated init with the same sessionID does not create a new session", () => {
     // Claude Code re-invocations within the same conversation reuse the same sessionID.
     // Only a different sessionID or compact_boundary should create a new top-level group.

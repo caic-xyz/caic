@@ -1,4 +1,4 @@
-// Tests fake-agent result parsing preserves measured usage and timing fields.
+// Tests fake-agent parsing preserves skill provenance, context boundaries, usage, and timing fields.
 
 package smoketest
 
@@ -10,6 +10,28 @@ import (
 
 func TestParseMessage(t *testing.T) {
 	t.Parallel()
+	t.Run("skill provenance", func(t *testing.T) {
+		t.Parallel()
+		messages, err := parseMessage([]byte(`{"type":"skill_load","skill":"review","path":"/skills/review/SKILL.md"}`))
+		if err != nil || len(messages) != 1 {
+			t.Fatalf("skill parse = %v, %v", messages, err)
+		}
+		load, ok := messages[0].(*agent.SkillLoadMessage)
+		if !ok || load.Skill != "review" || load.Path != "/skills/review/SKILL.md" {
+			t.Fatalf("skill load = %#v", messages[0])
+		}
+	})
+	t.Run("context boundary", func(t *testing.T) {
+		t.Parallel()
+		messages, err := parseMessage([]byte(`{"type":"system","subtype":"compact_boundary"}`))
+		if err != nil || len(messages) != 1 {
+			t.Fatalf("boundary parse = %v, %v", messages, err)
+		}
+		boundary, ok := messages[0].(*agent.SystemMessage)
+		if !ok || boundary.Subtype != "compact_boundary" {
+			t.Fatalf("context boundary = %#v", messages[0])
+		}
+	})
 	t.Run("result usage and timings", func(t *testing.T) {
 		t.Parallel()
 		messages, err := parseMessage([]byte(`{"type":"result","subtype":"success","result":"Done","num_turns":1,"total_cost_usd":0.37,"duration_ms":42000,"duration_api_ms":30000,"context_window":200000,"usage":{"input_tokens":2700,"output_tokens":4200,"cache_creation_input_tokens":8400,"cache_read_input_tokens":42000,"reasoning_output_tokens":1200}}`))

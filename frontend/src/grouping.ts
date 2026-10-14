@@ -44,11 +44,11 @@ export interface Turn {
   result?: EventResult;
 }
 
-// A session is a segment of the event stream opened by an init or compact_boundary event.
-// Session boundaries are init events (new Claude Code session) and compact_boundary system
-// events (context compaction). The current (last) session is never elided.
+// A session is a segment of the event stream opened by an init, compaction, or clear event.
+// Session boundaries are init events (new Claude Code session) and compaction/clear system
+// events. The current (last) session is never elided.
 export interface Session {
-  // The event that opened this session (init or compact_boundary system event).
+  // The event that opened this session (init, compaction, or clear system event).
   // undefined for an implicit initial segment before the first session event.
   boundaryEvent?: EventMessage;
   turns: Turn[];
@@ -60,7 +60,10 @@ export interface Session {
 
 // Returns true if ev starts a new session.
 export function isSessionBoundary(ev: EventMessage): boolean {
-  return ev.kind === "init" || (ev.kind === "system" && ev.system?.subtype === "compact_boundary");
+  return (
+    ev.kind === "init" ||
+    (ev.kind === "system" && (ev.system?.subtype === "compact_boundary" || ev.system?.subtype === "context_cleared"))
+  );
 }
 
 // rateLimitPercentage converts a utilization fraction to a percentage. A
@@ -310,7 +313,7 @@ function groupMessagesAfter(
         break;
       }
       case "system": {
-        // compact_boundary is consumed by groupSessions() before reaching here.
+        // Compaction and clear are consumed by groupSessions() before reaching here.
         // Thread status changes (active, idle, etc.) duplicate information
         // already in the task state — skip them to avoid noisy "other" groups.
         // model_rerouted and other informational subtypes are rendered via MessageItem.
@@ -800,7 +803,7 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
 
 const groupSessionsCache = new WeakMap<ReadonlyArray<EventMessage>, Session[]>();
 
-// Splits messages into sessions at init (only when sessionID changes) and compact_boundary events.
+// Splits messages into sessions at init (only when sessionID changes) and compaction/clear events.
 // The boundary event starts the new session and is NOT passed to groupMessages.
 // Re-invocations of Claude Code that share the same sessionID are NOT new sessions — they are
 // just new turns within the same session.
@@ -841,16 +844,23 @@ export function groupSessions(msgs: EventMessage[]): Session[] {
     if (ev.kind === "init") {
       const newID = ev.init?.sessionID;
       if (newID !== currentSessionID) {
-        // Genuinely new session: different sessionID.
-        if (boundaryEvent !== undefined) flushAndCarry();
-        boundaryEvent = ev;
+        // Restart init supplies the identity of the context just opened by a
+        // clear or compaction. Its prompt may already precede this init.
+        const openContext = boundaryEvent?.kind === "system" && !segment.some((event) => event.kind === "result");
+        if (!openContext) {
+          if (boundaryEvent !== undefined) flushAndCarry();
+          boundaryEvent = ev;
+        }
         currentSessionID = newID;
       }
       // Same sessionID: re-invocation within the same session; skip the init event entirely.
-    } else if (ev.kind === "system" && ev.system?.subtype === "compact_boundary") {
+    } else if (
+      ev.kind === "system" &&
+      (ev.system?.subtype === "compact_boundary" || ev.system?.subtype === "context_cleared")
+    ) {
       if (boundaryEvent !== undefined) flushAndCarry();
       boundaryEvent = ev;
-      currentSessionID = undefined; // Reset so next init is treated as a new boundary.
+      currentSessionID = undefined; // The restarted init supplies this context's identity.
     } else {
       segment.push(ev);
     }
@@ -993,6 +1003,8 @@ export function sessionSummary(session: Session): string {
   if (session.boundaryEvent?.kind === "init" && session.boundaryEvent.init) {
     const id = session.boundaryEvent.init.sessionID;
     parts.push(`Session ${id.slice(0, 8)}`);
+  } else if (session.boundaryEvent?.system?.subtype === "context_cleared") {
+    parts.push("Cleared session");
   } else {
     parts.push("Compacted session");
   }

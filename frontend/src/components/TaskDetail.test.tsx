@@ -288,7 +288,7 @@ describe("TaskDetail", () => {
     expect(screen.getByRole("link", { name: "Section" })).toHaveAttribute("href", "#section");
   });
 
-  it("links each loaded skill once to the markdown viewer", () => {
+  it("links distinct skill paths and enriches a uniquely named skill", () => {
     taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({ kind: "skillLoad", ts: 1000, skillLoad: { skill: "review" } });
       handlers.onMessage({
@@ -312,12 +312,253 @@ describe("TaskDetail", () => {
     renderTaskDetail();
     const nav = screen.getByRole("navigation", { name: "Loaded skills" });
     const links = within(nav).getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual(["review", "code-quality"]);
+    expect(links.map((link) => link.textContent)).toEqual(["review", "code-quality", "code-quality"]);
     expect(links[0]).toHaveAttribute("href", "/task/@abc/view?path=%7E%2F.agents%2Fskills%2Freview%2FSKILL.md");
     expect(links[1]).toHaveAttribute(
       "href",
       "/task/@abc/view?path=%2Fhome%2Fuser%2F.claude%2Fskills%2Fcode-quality%2FSKILL.md",
     );
+  });
+
+  for (const subtype of ["compact_boundary", "context_cleared"]) {
+    it(`keeps prior skill links at the ${subtype} separator and empties the header`, async () => {
+      let send: ((message: EventMessage) => void) | undefined;
+      taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+        send = handlers.onMessage;
+        handlers.onMessage({
+          kind: "init",
+          ts: 1,
+          init: { sessionID: "skills-session", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+        });
+        handlers.onMessage({ kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } });
+        handlers.onReady?.();
+        return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+      });
+      renderTaskDetail();
+      expect(screen.getByRole("navigation", { name: "Loaded skills" })).toBeInTheDocument();
+      send?.({ kind: "system", ts: 3, system: { subtype } });
+      await waitFor(() => expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument());
+      const prior = screen.getByRole("navigation", { name: "Previous context skills" });
+      expect(within(prior).getByRole("link", { name: "review" })).toHaveAttribute(
+        "href",
+        "/task/@abc/view?path=%2Fa%2FSKILL.md",
+      );
+      send?.({ kind: "skillLoad", ts: 4, skillLoad: { skill: "quality", path: "/b/SKILL.md" } });
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("navigation", { name: "Loaded skills" })).getByRole("link", { name: "quality" }),
+        ).toBeInTheDocument(),
+      );
+      expect(within(prior).getAllByRole("link")).toHaveLength(1);
+    });
+  }
+
+  it("retains every closed section's skill links when later sessions collapse", () => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      for (const message of [
+        { kind: "skillLoad", ts: 1, skillLoad: { skill: "review", path: "/a/SKILL.md" } },
+        {
+          kind: "result",
+          ts: 2,
+          result: { subtype: "success", result: "", durationMs: 0, totalCostUSD: 0, numTurns: 1, isError: false },
+        },
+        { kind: "system", ts: 3, system: { subtype: "compact_boundary" } },
+        { kind: "skillLoad", ts: 4, skillLoad: { skill: "quality", path: "/b/SKILL.md" } },
+        {
+          kind: "result",
+          ts: 5,
+          result: { subtype: "success", result: "", durationMs: 0, totalCostUSD: 0, numTurns: 1, isError: false },
+        },
+        { kind: "system", ts: 6, system: { subtype: "context_cleared" } },
+        { kind: "text", ts: 7, text: { text: "Fresh context" } },
+        {
+          kind: "result",
+          ts: 8,
+          result: { subtype: "success", result: "", durationMs: 0, totalCostUSD: 0, numTurns: 1, isError: false },
+        },
+      ] as EventMessage[])
+        handlers.onMessage(message);
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
+    expect(strips).toHaveLength(2);
+    expect(strips.map((strip) => within(strip).getByRole("link").textContent)).toEqual(["review", "quality"]);
+    expect(screen.queryByRole("navigation", { name: "Loaded skills" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a cleared prompt and restarted response in the same visible section", () => {
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      const events: EventMessage[] = [
+        {
+          kind: "init",
+          ts: 1,
+          init: { sessionID: "old", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+        },
+        { kind: "text", ts: 2, text: { text: "Old response" } },
+        {
+          kind: "result",
+          ts: 3,
+          result: {
+            subtype: "success",
+            result: "",
+            isError: false,
+            numTurns: 1,
+            totalCostUSD: 0,
+            duration: 0,
+            durationAPI: 0,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+              reportedModel: "m",
+            },
+          },
+        },
+        { kind: "system", ts: 4, system: { subtype: "context_cleared" } },
+        { kind: "userInput", ts: 5, userInput: { text: "Execute the new plan" } },
+        {
+          kind: "init",
+          ts: 6,
+          init: { sessionID: "new", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+        },
+        { kind: "text", ts: 7, text: { text: "Executing the new plan" } },
+        {
+          kind: "result",
+          ts: 8,
+          result: {
+            subtype: "success",
+            result: "",
+            isError: false,
+            numTurns: 1,
+            totalCostUSD: 0,
+            duration: 0,
+            durationAPI: 0,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+              reportedModel: "m",
+            },
+          },
+        },
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    expect(screen.getByText("Execute the new plan", { exact: true })).toBeVisible();
+    expect(screen.getByText("Executing the new plan", { exact: true })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Compacted session/ })).not.toBeInTheDocument();
+  });
+
+  it("preserves completed boundaries and turn expansion across live boundaries and same-session init", async () => {
+    let send: ((event: EventMessage) => void) | undefined;
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      send = handlers.onMessage;
+      const events: EventMessage[] = [
+        {
+          kind: "init",
+          ts: 1,
+          init: { sessionID: "same", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+        },
+        { kind: "skillLoad", ts: 2, skillLoad: { skill: "review", path: "/a/SKILL.md" } },
+        { kind: "text", ts: 3, text: { text: "Original response" } },
+        {
+          kind: "result",
+          ts: 4,
+          result: {
+            subtype: "success",
+            result: "",
+            isError: false,
+            numTurns: 1,
+            totalCostUSD: 0,
+            duration: 0,
+            durationAPI: 0,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+              reportedModel: "m",
+            },
+          },
+        },
+        { kind: "system", ts: 5, system: { subtype: "compact_boundary" } },
+        { kind: "skillLoad", ts: 6, skillLoad: { skill: "quality", path: "/b/SKILL.md" } },
+        { kind: "text", ts: 7, text: { text: "First compacted response" } },
+        {
+          kind: "result",
+          ts: 8,
+          result: {
+            subtype: "success",
+            result: "",
+            isError: false,
+            numTurns: 1,
+            totalCostUSD: 0,
+            duration: 0,
+            durationAPI: 0,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+              reportedModel: "m",
+            },
+          },
+        },
+        { kind: "text", ts: 9, text: { text: "Second compacted response" } },
+        {
+          kind: "result",
+          ts: 10,
+          result: {
+            subtype: "success",
+            result: "",
+            isError: false,
+            numTurns: 2,
+            totalCostUSD: 0,
+            duration: 0,
+            durationAPI: 0,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+              reportedModel: "m",
+            },
+          },
+        },
+      ];
+      for (const event of events) handlers.onMessage(event);
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    await userEvent.setup().click(screen.getByRole("button", { name: /^1 message/ }));
+    expect(screen.getByText("First compacted response", { exact: true })).toBeVisible();
+    send?.({
+      kind: "init",
+      ts: 11,
+      init: { sessionID: "same", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+    });
+    expect(screen.getByText("First compacted response", { exact: true })).toBeVisible();
+    send?.({ kind: "system", ts: 12, system: { subtype: "compact_boundary" } });
+    send?.({ kind: "text", ts: 13, text: { text: "Live response after second compaction" } });
+    const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
+    expect(strips.map((strip) => within(strip).getByRole("link").textContent)).toEqual(["review", "quality"]);
+    const first = screen.getByText("First compacted response", { exact: true });
+    const second = screen.getByText("Second compacted response", { exact: true });
+    expect(strips[0].compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(second.compareDocumentPosition(strips[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      strips[1].compareDocumentPosition(
+        await screen.findByText("Live response after second compaction", { exact: true }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("copies only the selected fenced code block", async () => {
