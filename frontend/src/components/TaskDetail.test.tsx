@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
 import TaskDetail from "./TaskDetail";
+import { TaskTimelineProvider } from "../TaskTimelineContext";
 import { api } from "../api";
 import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 
@@ -89,7 +90,13 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
         path="/*"
         component={() => (
           <HostModeProvider>
-            <TaskDetail {...baseProps} {...props} />
+            <TaskTimelineProvider
+              taskId={props.taskId ?? baseProps.taskId}
+              taskState={props.taskState ?? baseProps.taskState}
+              onError={props.onError ?? baseProps.onError}
+            >
+              <TaskDetail {...baseProps} {...props} />
+            </TaskTimelineProvider>
           </HostModeProvider>
         )}
       />

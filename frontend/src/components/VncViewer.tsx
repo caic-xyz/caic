@@ -1,25 +1,20 @@
-// noVNC-based desktop viewer for a task's container display.
+// noVNC-based container display within the URL-backed task workspace.
 
 import { createSignal, onMount, onCleanup, Show } from "solid-js";
-import { useNavigate } from "@solidjs/router";
 import RFB from "@novnc/novnc";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
-import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
-import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
+import TaskViewHeader from "./TaskViewHeader";
 
 import styles from "./VncViewer.module.css";
 
 interface Props {
   taskId: string;
+  taskPath: string;
   repo: string;
   branch: string;
 }
 
 export default function VncViewer(props: Props) {
-  const navigate = useNavigate();
   const [error, setError] = createSignal<string | null>(null);
-  const [fullscreen, setFullscreen] = createSignal(false);
-  let containerRef: HTMLDivElement | undefined;
   let canvasRef: HTMLDivElement | undefined;
 
   onMount(() => {
@@ -65,43 +60,14 @@ export default function VncViewer(props: Props) {
     });
   });
 
-  // Sync fullscreen state with browser Fullscreen API events.
-  onMount(() => {
-    const onFSChange = () => setFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", onFSChange);
-    onCleanup(() => document.removeEventListener("fullscreenchange", onFSChange));
-  });
-
-  function toggleFullscreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      containerRef?.requestFullscreen();
-    }
-  }
-
   return (
-    <div ref={containerRef} class={styles.container} classList={{ [styles.fullscreen]: fullscreen() }}>
-      <div class={styles.header}>
-        <Show when={!fullscreen()}>
-          <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
-            <ArrowBackIcon width={20} height={20} />
-          </button>
-          <span class={styles.headerMeta}>
-            <span class={styles.headerRepo}>{props.repo}</span>
-            <span class={styles.headerBranch}>{props.branch}</span>
-          </span>
-        </Show>
-        <button
-          class={styles.backBtn}
-          onClick={toggleFullscreen}
-          title={fullscreen() ? "Exit fullscreen" : "Fullscreen"}
-        >
-          <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} />}>
-            <FullscreenExitIcon width={20} height={20} />
-          </Show>
-        </button>
-      </div>
+    <div class={styles.container}>
+      <TaskViewHeader taskPath={props.taskPath} label="VNC controls" keyboardTarget={() => canvasRef}>
+        <span class={styles.headerMeta}>
+          <span class={styles.headerRepo}>{props.repo}</span>
+          <span class={styles.headerBranch}>{props.branch}</span>
+        </span>
+      </TaskViewHeader>
       <div class={styles.content}>
         <Show when={error()}>
           <div class={styles.error}>{error()}</div>

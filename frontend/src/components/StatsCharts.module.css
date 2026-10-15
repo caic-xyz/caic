@@ -119,7 +119,7 @@
   color: var(--color-text-muted);
 }
 
-@media (width <= 480px) {
+@container (width <= 620px) {
   .resourceGrid {
     grid-template-columns: 1fr;
   }

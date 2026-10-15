@@ -8,18 +8,14 @@ import type { EventStats } from "@sdk/types.gen";
 import { useAppState } from "../AppState";
 import { DetailPane } from "../components/Layout";
 import StatsDetail from "../components/StatsDetail";
-import { createTaskEventTimeline } from "../taskEventTimeline";
+import { useTaskTimeline } from "../TaskTimelineContext";
 import { taskIdFromParam, taskPathForTask } from "../taskPath";
 import { IncrementalTaskTimingTracker } from "../timing";
 
 function StatsPane(props: { taskId: string }) {
   const state = useAppState();
   const task = () => state.taskById(props.taskId);
-  const timeline = createTaskEventTimeline({
-    taskId: () => props.taskId,
-    taskState: () => task()?.state ?? "pending",
-    onError: state.showWarning,
-  });
+  const timeline = useTaskTimeline();
   const timingTracker = new IncrementalTaskTimingTracker();
   let timingEpoch = -1;
   const timings = createMemo(() => {

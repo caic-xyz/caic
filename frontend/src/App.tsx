@@ -21,7 +21,7 @@ import CloneRepoDialog from "./components/CloneRepoDialog";
 import MobileVoiceTasks from "./components/MobileVoiceTasks";
 import { getVoiceTaskNumber, voiceConnected } from "./voiceTaskState";
 import styles from "./App.module.css";
-import { fileViewMode } from "./fileView";
+import { taskViewMode } from "./taskView";
 
 /** Fallback UI shown when an ErrorBoundary catches a render error. */
 function ErrorFallback(props: { error: unknown; reset: () => void }) {
@@ -119,7 +119,7 @@ function Shell(props: { children?: JSX.Element }) {
   const mobileQuery = window.matchMedia("(max-width: 768px)");
   const [mobile, setMobile] = createSignal(mobileQuery.matches);
   const mobileVoice = () => mobile() && voiceConnected() && location.pathname === "/";
-  const documentMode = () => fileViewMode(location.pathname, location.search);
+  const taskView = () => taskViewMode(location.pathname, location.search);
 
   onMount(() => {
     const onViewportChange = (event: MediaQueryListEvent) => setMobile(event.matches);
@@ -133,8 +133,8 @@ function Shell(props: { children?: JSX.Element }) {
         <div
           class={styles.app}
           classList={{
-            [styles.documentOpen]: documentMode() !== "closed",
-            [styles.documentFullscreen]: documentMode() === "fullscreen",
+            [styles.subviewOpen]: taskView() !== "closed",
+            [styles.subviewFullscreen]: taskView() === "fullscreen",
           }}
           data-testid="app-shell"
         >
@@ -143,7 +143,7 @@ function Shell(props: { children?: JSX.Element }) {
             aria-hidden={mobileVoice()}
             data-testid="normal-content"
           >
-            <header class={styles.navbar} classList={{ [styles.chromeHidden]: documentMode() === "fullscreen" }}>
+            <header class={styles.navbar} classList={{ [styles.chromeHidden]: taskView() === "fullscreen" }}>
               <h1 class={styles.title}>
                 <button
                   class={styles.titleButton}
@@ -199,9 +199,9 @@ function Shell(props: { children?: JSX.Element }) {
           />
           <VoiceTaskFocus mobile={mobile} />
           <div
-            classList={{ [styles.chromeHidden]: documentMode() === "fullscreen" }}
-            inert={documentMode() === "fullscreen"}
-            aria-hidden={documentMode() === "fullscreen"}
+            classList={{ [styles.chromeHidden]: taskView() === "fullscreen" }}
+            inert={taskView() === "fullscreen"}
+            aria-hidden={taskView() === "fullscreen"}
           >
             <BrowserVoiceShell />
           </div>

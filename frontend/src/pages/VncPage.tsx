@@ -4,7 +4,7 @@ import { Show, Suspense, lazy } from "solid-js";
 import { useParams } from "@solidjs/router";
 
 import { useAppState } from "../AppState";
-import { taskIdFromParam } from "../taskPath";
+import { taskIdFromParam, taskPathForTask } from "../taskPath";
 import { DetailPane } from "../components/Layout";
 import styles from "./VncPage.module.css";
 
@@ -19,10 +19,19 @@ export default function VncPage() {
     <Show when={id()} keyed>
       {(taskId) => {
         const t = () => s.taskById(taskId);
+        const taskPath = () => {
+          const task = t();
+          return task ? taskPathForTask(task) : `/task/@${taskId}`;
+        };
         return (
           <DetailPane>
             <Suspense fallback={<div class={styles.loading}>Loading VNC viewer…</div>}>
-              <VncViewer taskId={taskId} repo={t()?.repos?.[0]?.name ?? ""} branch={t()?.repos?.[0]?.branch ?? ""} />
+              <VncViewer
+                taskPath={taskPath()}
+                taskId={taskId}
+                repo={t()?.repos?.[0]?.name ?? ""}
+                branch={t()?.repos?.[0]?.branch ?? ""}
+              />
             </Suspense>
           </DetailPane>
         );

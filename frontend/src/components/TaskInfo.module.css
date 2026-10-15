@@ -1,32 +1,10 @@
-/* Styles for the full-page TaskInfo component with launch config and runtime metadata. */
+/* Styles for the workspace TaskInfo component with launch config and runtime metadata. */
 
 .container {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-}
-
-.header {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.backBtn {
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-}
-
-.backBtn:hover {
-  background: var(--color-bg-hover);
 }
 
 .headerMeta {

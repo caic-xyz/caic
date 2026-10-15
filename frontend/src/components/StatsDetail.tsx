@@ -1,8 +1,7 @@
-// StatsDetail renders a task's usage, timing analytics, and resource history as a full-page view.
+// Task usage, timing analytics, and resource history within the persistent workspace.
 
-import { createMemo, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
-import { useNavigate } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import { createMemo, lazy, Show, Suspense } from "solid-js";
+import TaskViewHeader from "./TaskViewHeader";
 
 import type { EventMessage, EventStats } from "@sdk/types.gen";
 
@@ -176,28 +175,15 @@ export function StatsContent(props: StatsContentProps) {
 }
 
 export default function StatsDetail(props: StatsDetailProps) {
-  const navigate = useNavigate();
-
-  onMount(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") navigate(props.taskPath);
-    };
-    document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
-  });
-
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
-          <ArrowBackIcon width={20} height={20} />
-        </button>
+      <TaskViewHeader taskPath={props.taskPath} label="Performance controls">
         <span>Performance</span>
         <span class={styles.headerMeta}>
           <span class={styles.headerRepo}>{props.repo}</span>
           <span class={styles.headerBranch}>{props.branch}</span>
         </span>
-      </div>
+      </TaskViewHeader>
       <StatsContent events={props.events} stats={props.stats} turns={props.turns} usage={props.usage} />
     </div>
   );

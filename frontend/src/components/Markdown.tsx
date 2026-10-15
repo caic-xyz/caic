@@ -11,8 +11,7 @@ import {
   useContext,
   type Accessor,
 } from "solid-js";
-import { useLocation, useNavigate } from "@solidjs/router";
-import { fileViewMode, rememberFileOrigin } from "../fileView";
+import { useNavigate } from "@solidjs/router";
 import { Marked, Renderer, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
@@ -54,7 +53,6 @@ const markdownRenderer = {
 export default function Markdown(props: { text: string; baseDir?: string }) {
   const taskId = useContext(MarkdownTaskContext);
   const navigate = useNavigate();
-  const location = useLocation();
   const runtimePath = (href: string) => (taskId ? runtimeFilePath(href, props.baseDir ?? null) : null);
   const marked = new Marked({
     breaks: true,
@@ -94,7 +92,6 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
     // Modified clicks keep the browser's open-in-new-tab behavior.
     if (link && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
       event.preventDefault();
-      if (fileViewMode(location.pathname, location.search) === "closed") rememberFileOrigin(link);
       navigate(link.getAttribute("href") ?? "");
       return;
     }

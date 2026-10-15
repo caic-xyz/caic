@@ -1,11 +1,4 @@
-/* Compact document controls shared by all renderers and viewport sizes. */
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
+/* File identity and raw-link styles within shared task-view controls. */
 
 .path {
   flex: 1;

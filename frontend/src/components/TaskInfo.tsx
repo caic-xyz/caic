@@ -1,8 +1,8 @@
-// Full-page task metadata viewer for launch config and runtime facts.
+// Task metadata pane for launch config and runtime facts.
 
-import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { A, useNavigate } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
+import { A } from "@solidjs/router";
+import TaskViewHeader from "./TaskViewHeader";
 
 import type { TaskInfo as TaskInfoData, TaskInfoCacheMount, TaskInfoMount, TaskInfoRepo } from "@sdk/types.gen";
 
@@ -217,7 +217,6 @@ function cacheRows(data: TaskInfoData): TaskInfoCacheMount[] | undefined {
 }
 
 export default function TaskInfo(props: Props) {
-  const navigate = useNavigate();
   const [info, setInfo] = createSignal<TaskInfoData | null>(null);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -235,27 +234,15 @@ export default function TaskInfo(props: Props) {
       });
   });
 
-  // Escape navigates back to the task detail.
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") navigate(props.taskPath);
-    };
-    document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
-  });
-
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
-          <ArrowBackIcon width={20} height={20} />
-        </button>
+      <TaskViewHeader taskPath={props.taskPath} label="Task info controls">
         <span>Info</span>
         <span class={styles.headerMeta}>
           <span class={styles.headerRepo}>{props.repo}</span>
           <span class={styles.headerBranch}>{props.branch}</span>
         </span>
-      </div>
+      </TaskViewHeader>
       <div class={styles.content}>
         <Show when={error()} keyed>
           {(msg) => <div class={styles.error}>{msg}</div>}

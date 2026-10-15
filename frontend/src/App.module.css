@@ -13,11 +13,11 @@
   font-family: system-ui;
 }
 
-.documentOpen {
+.subviewOpen {
   width: min(100%, 1920px);
 }
 
-.documentFullscreen {
+.subviewFullscreen {
   width: 100%;
   padding: 0;
 }

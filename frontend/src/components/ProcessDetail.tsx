@@ -6,8 +6,7 @@
 // Exports buildTree, visibleProcesses, and ProcessNode for unit testing.
 
 import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
-import { useNavigate } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import TaskViewHeader from "./TaskViewHeader";
 import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
 
 import type { ProcessInfo } from "@sdk/types.gen";
@@ -281,7 +280,6 @@ function ProcessRow(props: RowProps) {
 }
 
 export default function ProcessDetail(props: Props) {
-  const navigate = useNavigate();
   const [processes, setProcesses] = createSignal<ProcessInfo[] | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
@@ -353,17 +351,9 @@ export default function ProcessDetail(props: Props) {
     void refresh();
   });
 
-  // Escape navigates back to the task detail.
   onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") navigate(props.taskPath);
-    };
-    document.addEventListener("keydown", onKey);
     const interval = setInterval(() => setNow(Date.now()), 1000);
-    onCleanup(() => {
-      clearInterval(interval);
-      document.removeEventListener("keydown", onKey);
-    });
+    onCleanup(() => clearInterval(interval));
   });
 
   const handleSignal = async (pid: number, sig: "SIGTERM" | "SIGKILL") => {
@@ -382,15 +372,12 @@ export default function ProcessDetail(props: Props) {
 
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
-          <ArrowBackIcon width={20} height={20} />
-        </button>
+      <TaskViewHeader taskPath={props.taskPath} label="Process controls">
         <span class={styles.headerMeta}>
           <span class={styles.headerRepo}>{props.repo}</span>
           <span class={styles.headerBranch}>{props.branch}</span>
         </span>
-      </div>
+      </TaskViewHeader>
       <Show when={!loading() && !error() && total() > 0}>
         <div class={styles.toolbar}>
           <span class={styles.processCount}>{total().toLocaleString()} processes</span>

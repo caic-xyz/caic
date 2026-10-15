@@ -30,12 +30,12 @@ export function appRoutes(): JSX.Element {
         <Route path="/task/:taskId" component={TaskWorkspace}>
           <Route path="/" component={() => null} />
           <Route path="/view" component={FileViewerPage} />
+          <Route path="/diff" component={DiffPage} />
+          <Route path="/processes" component={ProcessesPage} />
+          <Route path="/stats" component={StatsPage} />
+          <Route path="/info" component={TaskInfoPage} />
+          <Route path="/vnc" component={VncPage} />
         </Route>
-        <Route path="/task/:taskId/diff" component={DiffPage} />
-        <Route path="/task/:taskId/processes" component={ProcessesPage} />
-        <Route path="/task/:taskId/stats" component={StatsPage} />
-        <Route path="/task/:taskId/info" component={TaskInfoPage} />
-        <Route path="/task/:taskId/vnc" component={VncPage} />
       </Route>
       <Route path="/settings" component={SettingsPage} />
       <Route path="/metrics" component={MetricsPage} />

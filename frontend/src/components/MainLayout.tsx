@@ -2,7 +2,7 @@
 
 import { type JSX, For, createSignal, createEffect, onCleanup } from "solid-js";
 import { useLocation } from "@solidjs/router";
-import { fileViewMode } from "../fileView";
+import { taskViewMode } from "../taskView";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -26,7 +26,7 @@ import styles from "./MainLayout.module.css";
 export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();
   const location = useLocation();
-  const mode = () => fileViewMode(location.pathname, location.search);
+  const mode = () => taskViewMode(location.pathname, location.search);
   const fullscreen = () => mode() === "fullscreen";
   const media = window.matchMedia("(max-width: 1279px)");
   const [compact, setCompact] = createSignal(media.matches);

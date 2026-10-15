@@ -1,4 +1,4 @@
-/* Persistent responsive task and document panes with viewport-filling document presentation. */
+/* Persistent conversation and subview panes with responsive and viewport-filling presentation. */
 .workspace {
   display: flex;
   flex: 1;
@@ -8,7 +8,7 @@
 }
 
 .conversation,
-.document {
+.subview {
   display: flex;
   flex: 1;
   min-width: 0;

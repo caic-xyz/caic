@@ -1,9 +1,8 @@
-// Full-page repository status with ahead/behind commit groups and persistent lazy file rows.
+// Repository status and unified diffs in the persistent task workspace.
 
 import { createSignal, createEffect, For, Show, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { useNavigate } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import TaskViewHeader from "./TaskViewHeader";
 import WrapTextIcon from "@material-symbols/svg-400/outlined/wrap_text.svg?solid";
 
 import type { DiffIndexCommit, DiffIndexFileStat, DiffIndexFileStatus, DiffIndexRepository } from "@sdk/types.gen";
@@ -57,7 +56,6 @@ function indexedRepositories(repositories: DiffIndexRepository[]): ViewRepositor
 }
 
 export default function DiffDetail(props: Props) {
-  const navigate = useNavigate();
   const [repositories, setRepositories] = createStore<ViewRepository[]>([]);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
@@ -114,15 +112,6 @@ export default function DiffDetail(props: Props) {
     });
   };
 
-  // Escape navigates back to the task detail.
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") navigate(props.taskPath);
-    };
-    document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
-  });
-
   function statusLabels(file: DiffIndexFileStatus) {
     if (file.indexStatus === "?" && file.worktreeStatus === "?") {
       return [{ scope: "", label: "untracked" }];
@@ -140,10 +129,7 @@ export default function DiffDetail(props: Props) {
 
   return (
     <div class={styles.container}>
-      <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
-          <ArrowBackIcon width={20} height={20} />
-        </button>
+      <TaskViewHeader taskPath={props.taskPath} label="Diff controls">
         <span class={styles.headerMeta}>Repository changes</span>
         <button
           type="button"
@@ -155,7 +141,7 @@ export default function DiffDetail(props: Props) {
         >
           <WrapTextIcon width={20} height={20} />
         </button>
-      </div>
+      </TaskViewHeader>
       <div class={styles.fileList}>
         <Show when={loading()}>
           <div class={styles.diffLoading} role="status" aria-live="polite">

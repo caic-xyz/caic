@@ -2,7 +2,7 @@
 
 import { For, onCleanup, onMount, Show } from "solid-js";
 import { useLocation } from "@solidjs/router";
-import { fileViewMode } from "../fileView";
+import { taskViewMode } from "../taskView";
 
 import { useAppState } from "../AppState";
 import { taskPathForTask } from "../taskPath";
@@ -147,9 +147,9 @@ export default function KeyboardShortcuts(props: Props) {
       const target = event.target instanceof HTMLElement ? event.target : null;
       const taskPrompt = target?.closest("[data-testid='task-detail-prompt'], [data-testid='prompt-input']");
       const focusedCard = target?.matches("[data-task-id]") ? target : null;
-      // Document keys scroll or interact with the file, not the hidden task list.
+      // Subview keys stay within the active pane instead of navigating the task list.
       if (
-        fileViewMode(location.pathname, location.search) !== "closed" &&
+        taskViewMode(location.pathname, location.search) !== "closed" &&
         !target?.closest("[data-testid='conversation-pane']") &&
         !focusedCard
       )
@@ -160,7 +160,7 @@ export default function KeyboardShortcuts(props: Props) {
         return;
       }
       if (event.key === "Escape") {
-        if (fileViewMode(location.pathname, location.search) !== "closed") return;
+        if (taskViewMode(location.pathname, location.search) !== "closed") return;
         event.preventDefault();
         focusNewTaskControl("[data-testid='prompt-input']");
         return;

@@ -1,32 +1,10 @@
-/* Styles for the full-page repository status and unified diff view. */
+/* Styles for the workspace repository status and unified diff view. */
 
 .container {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-}
-
-.header {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.backBtn {
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-}
-
-.backBtn:hover {
-  background: var(--color-bg-hover);
 }
 
 .headerMeta {
@@ -362,14 +340,6 @@
 
 /* Mobile: <=768px */
 @media (width <= 768px) {
-  .container {
-    margin: 0 -0.5rem;
-  }
-
-  .header {
-    padding: 0 0.5rem;
-  }
-
   .fileList {
     border-right: none;
     border-left: none;

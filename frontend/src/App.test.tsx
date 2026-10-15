@@ -1,4 +1,4 @@
-// Tests app-shell task creation, account isolation, image draft ownership, warning replay, and preferences.
+// Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, and preferences.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -1009,6 +1009,46 @@ describe("App task-list SSE recovery", () => {
   });
 });
 
+it("switches conversation and statistics together without duplicating task streams", async () => {
+  const first = makeTask({ id: "first", title: "First task", state: "waiting" });
+  const second = makeTask({ id: "second", title: "Second task", state: "waiting" });
+  initialTaskSnapshot = [first, second];
+  vi.mocked(api.getTask).mockImplementation(async (id) => (id === "first" ? first : second));
+  vi.mocked(api.taskEventBackfill).mockImplementation((id, handlers) => {
+    queueMicrotask(() => {
+      handlers.onMessage({ kind: "textDelta", ts: 1000, textDelta: { text: `Transcript for ${id}` } });
+      handlers.onMessage({
+        kind: "stats",
+        ts: 1000,
+        stats: {
+          ts: 1000,
+          cpuPerc: id === "first" ? 11 : 88,
+          memUsed: 512,
+          memLimit: 1024,
+          memPerc: 50,
+          netRx: 0,
+          netTx: 0,
+          blockRead: 0,
+          blockWrite: 0,
+          diskUsed: -1,
+        },
+      });
+      handlers.onReady?.();
+    });
+    return new FakeEventSource() as unknown as EventSource;
+  });
+  const { history } = renderApp("/task/@first/stats");
+  await screen.findByText("Transcript for first");
+  await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("11.0%"));
+
+  history.set({ value: "/task/@second/stats" });
+
+  await screen.findByText("Transcript for second");
+  await waitFor(() => expect(screen.getByTestId("resource-charts")).toHaveTextContent("88.0%"));
+  expect(screen.queryByText("Transcript for first")).not.toBeInTheDocument();
+  expect(api.taskEventBackfill).toHaveBeenCalledTimes(2);
+});
+
 describe("App keyboard shortcuts", () => {
   it("describes F4 when browser voice mode is available", async () => {
     const user = userEvent.setup();
@@ -1389,16 +1429,21 @@ describe("App keyboard shortcuts", () => {
     expect(prompt).toHaveTextContent("/");
   });
 
-  it("returns from a task subview to its prompt with slash", async () => {
+  it("keeps slash in the subview and focuses the prompt from the conversation pane", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getTask).mockResolvedValue(makeTask());
     const { history } = renderApp("/task/@task1+do-something/stats");
-    screen.getByTestId("new-task-button").focus();
+    const back = await screen.findByRole("button", { name: "Back" });
+    back.focus();
 
     await user.keyboard("/");
 
-    await waitFor(() => expect(history.get()).not.toContain("/stats"));
+    expect(history.get()).toContain("/stats");
+    expect(back).toHaveFocus();
+    screen.getByTestId("conversation-pane").focus();
+    await user.keyboard("/");
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());
+    expect(history.get()).toContain("/stats");
   });
 
   it("leaves slash with an open dialog", async () => {

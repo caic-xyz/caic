@@ -66,7 +66,7 @@ import {
   type Turn,
 } from "../grouping";
 import { ContextSkillsTracker } from "../contextSkills";
-import { createTaskEventTimeline } from "../taskEventTimeline";
+import { useTaskTimeline } from "../TaskTimelineContext";
 import { taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
@@ -98,7 +98,7 @@ import RepoStateIcons, { diffStatState, repoStateLabel } from "./RepoStateIcons"
 import { prefetchTaskDiff } from "../diffCache";
 import styles from "./TaskDetail.module.css";
 import { api } from "../api";
-import { fileViewMode } from "../fileView";
+import { taskViewMode } from "../taskView";
 
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
 // Keys: toolUseID, "group:<firstToolUseID>", "thinking:<firstEventTs>".
@@ -226,12 +226,8 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 export default function TaskDetail(props: Props) {
   const hostMode = useHostMode();
   const location = useLocation();
-  const taskPath = () => location.pathname.replace(/\/view$/, "");
-  const timeline = createTaskEventTimeline({
-    taskId: () => props.taskId,
-    taskState: () => props.taskState,
-    onError: (message) => props.onError(message),
-  });
+  const taskPath = () => location.pathname.split("/").slice(0, 3).join("/");
+  const timeline = useTaskTimeline();
   const messages = timeline.messages;
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
@@ -307,13 +303,13 @@ export default function TaskDetail(props: Props) {
   function setPromptRef(element: HTMLElement) {
     if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
     requestAnimationFrame(() => {
-      if (element.isConnected && fileViewMode(location.pathname, location.search) === "closed") element.focus();
+      if (element.isConnected && taskViewMode(location.pathname, location.search) === "closed") element.focus();
     });
   }
 
   function handlePromptNavigation(event: KeyboardEvent) {
     if (event.key === "Escape") {
-      if (fileViewMode(location.pathname, location.search) !== "closed") return;
+      if (taskViewMode(location.pathname, location.search) !== "closed") return;
       event.preventDefault();
       event.stopPropagation();
       props.onClose();
@@ -348,7 +344,7 @@ export default function TaskDetail(props: Props) {
   onMount(() => {
     // Escape dismisses the task detail (navigates to /).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || fileViewMode(location.pathname, location.search) !== "closed")
+      if (e.key !== "Escape" || e.defaultPrevented || taskViewMode(location.pathname, location.search) !== "closed")
         return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.closest("[data-testid='task-detail-prompt']")) return;
