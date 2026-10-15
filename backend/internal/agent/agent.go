@@ -1159,8 +1159,8 @@ func PrepareRelay(ctx context.Context, opts *Options, relayArgs, agentArgs []str
 	}
 	opts.Logger.DebugContext(ctx, "startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
-	sshArgs := make([]string, 0, 9+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
-	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
+	sshArgs := make([]string, 0, 10+len(relayArgs)+2*len(opts.StripEnv)+len(agentArgs))
+	sshArgs = append(sshArgs, sshHost, "PYTHONDONTWRITEBYTECODE=1", "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin")
 	sshArgs = append(sshArgs, relayArgs...)
 	for _, key := range opts.StripEnv {
 		sshArgs = append(sshArgs, "--strip-env", key)

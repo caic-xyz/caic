@@ -392,14 +392,14 @@ func startRelayAgent(ctx context.Context, ctr, workDir, relayDir string, b agent
 		// harness with its own PATH and writes output.jsonl under relayDir.
 		relayArgs := append([]string{filepath.Join(relayDir, "relay.py")}, relayAttachArgs(harnessWorkDir(local, workDir), agentArgs)...)
 		cmd = exec.CommandContext(ctx, "python3", relayArgs...) //nolint:gosec // args are not user-controlled
-		cmd.Env = append(os.Environ(), "CAIC_RELAY_DIR="+relayDir)
+		cmd.Env = append(os.Environ(), "CAIC_RELAY_DIR="+relayDir, "PYTHONDONTWRITEBYTECODE=1")
 		cmd.Stderr = os.Stderr
 	} else {
 		export := ""
 		if binDirs != "" {
 			export = "export PATH=" + binDirs + ":$PATH && "
 		}
-		bashCmd := export + "python3 " + agent.RelayScriptPath + " " + strings.Join(relayAttachArgs(harnessWorkDir(local, workDir), agentArgs), " ")
+		bashCmd := export + "PYTHONDONTWRITEBYTECODE=1 python3 " + agent.RelayScriptPath + " " + strings.Join(relayAttachArgs(harnessWorkDir(local, workDir), agentArgs), " ")
 		relayFullCmd := []string{"podman", "exec", "-i", ctr, "bash", "-c", bashCmd}
 		cmd = exec.CommandContext(ctx, relayFullCmd[0], relayFullCmd[1:]...) //nolint:gosec // args are not user-controlled
 	}
