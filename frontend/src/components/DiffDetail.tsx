@@ -141,7 +141,7 @@ export default function DiffDetail(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
+        <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span class={styles.headerMeta}>Repository changes</span>

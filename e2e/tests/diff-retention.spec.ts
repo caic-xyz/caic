@@ -80,7 +80,7 @@ for (const workload of [
     }
     await cdp.send("HeapProfiler.collectGarbage");
     const collapsed = (await cdp.send("Runtime.getHeapUsage")).usedSize;
-    await page.getByRole("button", { name: "Back to task", exact: true }).click();
+    await page.keyboard.press("Escape");
     await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
     await cdp.send("HeapProfiler.collectGarbage");
     const departed = (await cdp.send("Runtime.getHeapUsage")).usedSize;

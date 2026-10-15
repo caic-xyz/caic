@@ -13,7 +13,6 @@ interface Props {
   taskId: string;
   repo: string;
   branch: string;
-  taskPath: string;
 }
 
 export default function VncViewer(props: Props) {
@@ -85,7 +84,7 @@ export default function VncViewer(props: Props) {
     <div ref={containerRef} class={styles.container} classList={{ [styles.fullscreen]: fullscreen() }}>
       <div class={styles.header}>
         <Show when={!fullscreen()}>
-          <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
+          <button class={styles.backBtn} onClick={() => navigate(-1)} title="Back">
             <ArrowBackIcon width={20} height={20} />
           </button>
           <span class={styles.headerMeta}>
