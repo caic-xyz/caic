@@ -163,6 +163,8 @@ for (const width of [390, 1000, 1440]) {
     }
     await page.getByRole("button", { name: "wireframe", exact: true }).focus();
     await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Translucent", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Axes", exact: true })).toBeFocused();
     await page.keyboard.press("Space");
     await expect(page.getByRole("button", { name: "Axes", exact: true })).toHaveAttribute("aria-pressed", "false");
@@ -170,6 +172,8 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByRole("button", { name: "Reset camera", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.getByRole("button", { name: "Axes", exact: true })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(page.getByRole("button", { name: "Translucent", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.getByRole("button", { name: "wireframe", exact: true })).toBeFocused();
     await page.screenshot({ path: test.info().outputPath("cad-actions.png") });

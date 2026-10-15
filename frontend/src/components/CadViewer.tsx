@@ -1,12 +1,17 @@
-// CAD document pane with cancellable worker STEP loading, measured progress, and model display controls.
+// CAD pane with cancellable STEP loading, depth translucency, wireframe, and icon display controls.
 
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FileViewerHeader from "./FileViewerHeader";
 import ActionButton from "./ActionButton";
 import ResetIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
+import WireframeIcon from "@material-symbols/svg-400/outlined/view_in_ar.svg?solid";
+import TranslucentIcon from "@material-symbols/svg-400/outlined/opacity.svg?solid";
+import AxesIcon from "@material-symbols/svg-400/outlined/3d_rotation.svg?solid";
+import CancelIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
+import RetryIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
 import styles from "./CadViewer.module.css";
-import type { CadModelInfo, CadScene } from "../cad";
+import type { CadModelInfo, CadScene, CadViewMode } from "../cad";
 import type { CadLoadProgress } from "../stepProtocol";
 
 interface Props {
@@ -48,14 +53,14 @@ export default function CadViewer(props: Props) {
   };
   const [error, setError] = createSignal<string | null>(null);
   const [modelInfo, setModelInfo] = createSignal<CadModelInfo | null>(null);
-  const [wireframe, setWireframe] = createSignal(false);
+  const [viewMode, setViewMode] = createSignal<CadViewMode>("solid");
   const [axesVisible, setAxesVisible] = createSignal(true);
   const [webglAvailable, setWebglAvailable] = createSignal(true);
 
-  function toggleWireframe() {
-    const next = !wireframe();
-    setWireframe(next);
-    scene?.setWireframe(next);
+  function toggleViewMode(mode: Exclude<CadViewMode, "solid">) {
+    const next = viewMode() === mode ? "solid" : mode;
+    setViewMode(next);
+    scene?.setViewMode(next);
   }
 
   function resetCamera() {
@@ -103,7 +108,7 @@ export default function CadViewer(props: Props) {
         }
         const info = await scene.loadModel(model, signal, report);
         signal.throwIfAborted();
-        scene.setWireframe(wireframe());
+        scene.setViewMode(viewMode());
         setModelInfo(info);
         if (wrapRef) {
           const rect = wrapRef.getBoundingClientRect();
@@ -168,11 +173,19 @@ export default function CadViewer(props: Props) {
           <Show when={webglAvailable() && !loading() && !error() && !cancelled()}>
             <ActionButton
               label="wireframe"
-              onClick={toggleWireframe}
+              onClick={() => toggleViewMode("wireframe")}
               title="Toggle wireframe display"
-              aria-pressed={wireframe()}
+              aria-pressed={viewMode() === "wireframe"}
             >
-              wireframe
+              <WireframeIcon width={20} height={20} />
+            </ActionButton>
+            <ActionButton
+              label="Translucent"
+              onClick={() => toggleViewMode("translucent")}
+              title="Toggle depth-based translucency"
+              aria-pressed={viewMode() === "translucent"}
+            >
+              <TranslucentIcon width={20} height={20} />
             </ActionButton>
             <ActionButton
               label="Axes"
@@ -180,7 +193,7 @@ export default function CadViewer(props: Props) {
               title="Toggle XYZ reference frame"
               aria-pressed={axesVisible()}
             >
-              Axes
+              <AxesIcon width={20} height={20} />
             </ActionButton>
             <ActionButton label="Reset camera" onClick={resetCamera} title="Reset camera position">
               <ResetIcon width={20} height={20} />
@@ -195,7 +208,7 @@ export default function CadViewer(props: Props) {
               {error() ?? "Model loading cancelled."}
             </p>
             <ActionButton ref={retryRef} label="Retry" onClick={() => void loadModelData(props.taskId, props.path)}>
-              Retry
+              <RetryIcon width={20} height={20} />
             </ActionButton>
           </div>
         </Show>
@@ -217,7 +230,7 @@ export default function CadViewer(props: Props) {
             </Show>
             <span class={styles.progressDetails}>{progressText()}</span>
             <ActionButton label="Cancel loading" onClick={cancelLoad}>
-              Cancel
+              <CancelIcon width={20} height={20} />
             </ActionButton>
           </div>
         </Show>

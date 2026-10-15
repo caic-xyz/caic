@@ -1,4 +1,4 @@
-// CAD viewer: loads STEP in a worker and renders CAD meshes with printing plates and a camera-aligned XYZ frame.
+// CAD viewer: loads STEP in a worker and renders solid, translucent, or wireframe models with plates and XYZ axes.
 
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
@@ -12,6 +12,9 @@ import { BambuPaintGeometry } from "./bambuPaint";
 import type { CadPlate } from "./bambu3mf";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
+import { CadTranslucency } from "./cadTranslucency";
+
+export type CadViewMode = "solid" | "translucent" | "wireframe";
 
 export interface ParsedCad {
   group: THREE.Group;
@@ -32,7 +35,7 @@ export interface CadModelInfo {
 export interface CadScene {
   loadModel(model: ParsedCad, signal: AbortSignal, progress: CadProgress): Promise<CadModelInfo>;
   clearModel(): void;
-  setWireframe(enabled: boolean): void;
+  setViewMode(mode: CadViewMode): void;
   setAxesVisible(visible: boolean): void;
   resetCamera(): void;
   resize(width: number, height: number): void;
@@ -402,6 +405,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   scene.add(dirLight2);
 
   let currentGroup: THREE.Group | null = null;
+  let translucency: CadTranslucency | null = null;
   const initialCameraPos = new THREE.Vector3();
   let animId: number | null = null;
   let isDestroyed = false;
@@ -410,6 +414,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
     if (isDestroyed) return;
     animId = requestAnimationFrame(animate);
     controls.update();
+    translucency?.update(camera);
     renderer.clear();
     renderer.render(scene, camera);
     if (axes.visible) axes.render(renderer);
@@ -433,6 +438,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   }
 
   function clearModel() {
+    translucency = null;
     if (currentGroup) {
       disposeCadGroup(currentGroup);
       currentGroup = null;
@@ -487,16 +493,23 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
 
     clearModel,
 
-    setWireframe(enabled: boolean) {
+    setViewMode(mode: CadViewMode) {
       if (!currentGroup) return;
-      currentGroup.children[0].traverse((child) => {
+      const model = currentGroup.children[0];
+      if (mode === "translucent" && !translucency) translucency = new CadTranslucency(model);
+      translucency?.setEnabled(mode === "translucent");
+      translucency?.update(camera);
+      const enabled = mode === "wireframe";
+      model.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           if (Array.isArray(child.material)) {
             child.material.forEach((m) => {
               m.wireframe = enabled;
+              m.needsUpdate = true;
             });
           } else {
             child.material.wireframe = enabled;
+            child.material.needsUpdate = true;
           }
         }
       });
