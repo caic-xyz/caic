@@ -1,9 +1,10 @@
-// CAD viewer: renders models with Bambu filament colors, readable dark shading, and labeled printing plates.
+// CAD viewer: imports plain and compressed STEP, STL, and 3MF models with colors and printing plates.
 
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
 import { isStlPath, isStepPath } from "./runtimePath";
+import { decompressStep } from "./stepCompression";
 import { applyBambuMetadata } from "./bambu3mf";
 import { BambuPaintGeometry } from "./bambuPaint";
 import type { CadPlate } from "./bambu3mf";
@@ -29,7 +30,7 @@ export interface CadModelInfo {
 }
 
 export interface CadScene {
-  loadModel(buffer: ArrayBuffer, filename: string): Promise<CadModelInfo>;
+  loadModel(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<CadModelInfo>;
   setWireframe(enabled: boolean): void;
   resetCamera(): void;
   resize(width: number, height: number): void;
@@ -88,9 +89,9 @@ export function createStlGroup(geometry: THREE.BufferGeometry): THREE.Group {
 }
 
 /** Parses a STEP or STP buffer into a Three.js Group with meshes and colors. */
-export async function parseStep(buffer: ArrayBuffer): Promise<THREE.Group> {
+export async function parseStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<THREE.Group> {
   const occt = await getOcct();
-  const fileBytes = new Uint8Array(buffer);
+  const fileBytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const result = occt.ReadStepFile(fileBytes, null);
   if (!result || !result.success) {
     throw new Error("Failed to parse STEP file: invalid geometry or syntax");
@@ -133,10 +134,18 @@ export function parse3mf(buffer: ArrayBuffer): ParsedCad {
 }
 
 // Selects the same parser for the canvas and metadata-only viewer.
-export async function parseCad(buffer: ArrayBuffer, filename: string): Promise<ParsedCad> {
-  if (isStlPath(filename)) return { group: createStlGroup(parseStl(buffer)), plates: [] };
-  if (isStepPath(filename)) return { group: await parseStep(buffer), plates: [] };
-  if (/\.3mf$/i.test(filename)) return parse3mf(buffer);
+export async function parseCad(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<ParsedCad> {
+  if (isStepPath(filename)) return { group: await parseStep(await decompressStep(buffer, filename)), plates: [] };
+  // Only compressed STEP downloads use prefix views; ordinary CAD buffers
+  // already own exactly their bytes. Respect subviews from other callers.
+  const data =
+    buffer instanceof ArrayBuffer
+      ? buffer
+      : buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength
+        ? buffer.buffer
+        : buffer.slice().buffer;
+  if (isStlPath(filename)) return { group: createStlGroup(parseStl(data)), plates: [] };
+  if (/\.3mf$/i.test(filename)) return parse3mf(data);
   throw new Error("Unsupported CAD file format");
 }
 
@@ -400,7 +409,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   }
 
   return {
-    async loadModel(buffer: ArrayBuffer, filename: string): Promise<CadModelInfo> {
+    async loadModel(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<CadModelInfo> {
       if (currentGroup) {
         disposeGroup(currentGroup);
         currentGroup = null;

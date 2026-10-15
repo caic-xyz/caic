@@ -79,12 +79,18 @@ describe("isStlPath", () => {
 });
 
 describe("isStepPath", () => {
-  it("accepts STEP and STP extensions", () => {
+  it("accepts plain and compressed STEP and STP extensions", () => {
     expect(isStepPath("assembly.step")).toBe(true);
     expect(isStepPath("assembly.STEP")).toBe(true);
     expect(isStepPath("part.stp")).toBe(true);
     expect(isStepPath("part.STP")).toBe(true);
-    expect(isStepPath("step.txt")).toBe(false);
+    for (const path of ["part.stpz", "PART.STPZ", "part.step.gz", "part.stp.gz", "part.step.zip", "part.STP.ZIP"]) {
+      expect(isStepPath(path)).toBe(true);
+      expect(isCadPath(path)).toBe(true);
+    }
+    for (const path of ["step.txt", "part.zip", "part.gz", "part.stpz.zip", "part.step.gz.txt"]) {
+      expect(isStepPath(path)).toBe(false);
+    }
   });
 });
 

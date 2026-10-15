@@ -1,7 +1,7 @@
-// Tests bounded text reads, sniffed PDF previews, exact-limit truncation, and transfer cancellation.
+// Tests bounded text and compressed STEP reads, sniffed previews, and transfer cancellation.
 import { afterEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
-import { readTaskFilePreview } from "./taskFile";
+import { readTaskBinaryFile, readTaskFilePreview } from "./taskFile";
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
 afterEach(() => fetchMock.mockReset());
@@ -75,5 +75,58 @@ describe("readTaskFilePreview", () => {
     const file = await readTaskFilePreview("abc", "/notes.txt", new AbortController().signal);
     expect(file).toEqual({ kind: "text", text: "x".repeat(1_048_576), truncated: true });
     expect(cancelled).toBe(true);
+  });
+});
+
+describe("readTaskBinaryFile", () => {
+  it("cancels oversized compressed STEP downloads based on actual streamed bytes", async () => {
+    for (const path of ["/part.stpz", "/part.step.zip", "/part.stp.gz"]) {
+      let cancelled = false;
+      let pulls = 0;
+      fetchMock.mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              pulls++;
+              controller.enqueue(new Uint8Array(1024 * 1024));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: { "Content-Length": "1" } },
+        ),
+      );
+      await expect(readTaskBinaryFile("abc", path, new AbortController().signal)).rejects.toThrow("64 MiB");
+      expect(cancelled).toBe(true);
+      expect(pulls).toBeLessThanOrEqual(66);
+    }
+  });
+
+  it("preserves bytes and accepts compressed STEP downloads exactly at the limit", async () => {
+    const bytes = new Uint8Array(64 * 1024 * 1024);
+    bytes[0] = 0x50;
+    bytes[bytes.length - 1] = 0xff;
+    fetchMock.mockResolvedValue(new Response(bytes));
+    const result = await readTaskBinaryFile("abc", "/part.stpz", new AbortController().signal);
+    if (!(result instanceof Uint8Array)) throw new Error("Expected a view of the download buffer");
+    expect(result.length).toBe(64 * 1024 * 1024);
+    expect(result[0]).toBe(0x50);
+    expect(result[result.length - 1]).toBe(0xff);
+  });
+
+  it("propagates compressed download failures", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new Error("stream failed"));
+          },
+        }),
+      ),
+    );
+    await expect(readTaskBinaryFile("abc", "/part.stpz", new AbortController().signal)).rejects.toThrow(
+      "stream failed",
+    );
   });
 });

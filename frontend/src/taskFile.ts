@@ -1,6 +1,6 @@
-// Reads bounded text previews and identifies image/PDF previews or CAD binary data through the raw endpoint.
+// Reads bounded text and compressed STEP streams and identifies image/PDF or CAD data through the raw endpoint.
 
-import { taskRawURL } from "./runtimePath";
+import { isCompressedStepPath, taskRawURL } from "./runtimePath";
 
 const maxTextBytes = 1 << 20;
 const imageTypes = new Set(["image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/webp"]);
@@ -52,6 +52,30 @@ export async function readTaskFilePreview(taskId: string, path: string, signal: 
 }
 
 /** Reads the raw binary contents of a task runtime file. */
-export async function readTaskBinaryFile(taskId: string, path: string, signal: AbortSignal): Promise<ArrayBuffer> {
-  return (await fetchTaskFile(taskId, path, signal)).arrayBuffer();
+export async function readTaskBinaryFile(
+  taskId: string,
+  path: string,
+  signal: AbortSignal,
+): Promise<ArrayBuffer | Uint8Array<ArrayBuffer>> {
+  const res = await fetchTaskFile(taskId, path, signal);
+  if (!isCompressedStepPath(path)) return res.arrayBuffer();
+  if (!res.body) return new ArrayBuffer(0);
+  const reader = res.body.getReader();
+  // Keep one destination allocation and return a view of the received prefix;
+  // slicing or Blob assembly would copy the complete compressed file.
+  const bytes = new Uint8Array(64 * 1024 * 1024);
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 64 * 1024 * 1024) throw new Error("Compressed STEP file exceeds 64 MiB");
+      bytes.set(value, size - value.byteLength);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  return bytes.subarray(0, size);
 }

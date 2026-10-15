@@ -3,6 +3,7 @@
 const markdownExtension = /\.(md|markdown)$/i;
 const stlExtension = /\.stl$/i;
 const stepExtension = /\.(step|stp)$/i;
+const compressedStepExtension = /\.(stpz|(?:step|stp)\.(?:gz|zip))$/i;
 
 /**
  * Returns the runtime file path a markdown destination names, or null for web
@@ -37,7 +38,11 @@ export function isStlPath(path: string): boolean {
 }
 
 export function isStepPath(path: string): boolean {
-  return stepExtension.test(path);
+  return stepExtension.test(path) || isCompressedStepPath(path);
+}
+
+export function isCompressedStepPath(path: string): boolean {
+  return compressedStepExtension.test(path);
 }
 
 export function isCadPath(path: string): boolean {

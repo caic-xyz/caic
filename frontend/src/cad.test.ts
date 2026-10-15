@@ -5,7 +5,7 @@ import { expect } from "@tests/expect";
 
 import { Box3, Color, LineSegments, Mesh, MeshPhongMaterial, Vector3 } from "three";
 import type { GeometryGroup } from "three";
-import { strToU8, strFromU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
+import { gzipSync, strToU8, strFromU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { create3mfFixture, createBambu3mfFixture, createPaintedBambu3mfFixture } from "../tests/cad-fixture";
 import {
   computeModelInfo,
@@ -275,6 +275,20 @@ endsolid test_triangle
     const nodeBuf = readFileSync(filePath);
     const buffer = nodeBuf.buffer.slice(nodeBuf.byteOffset, nodeBuf.byteOffset + nodeBuf.byteLength);
 
+    for (const filename of ["cube.stpz", "cube.step.zip", "cube.stp.zip", "cube.step.gz", "cube.stp.gz"]) {
+      const compressed = filename.endsWith(".gz")
+        ? gzipSync(new Uint8Array(buffer))
+        : zipSync({ "models/cube.STP": new Uint8Array(buffer) });
+      const model = await parseCad(compressed.buffer as ArrayBuffer, filename);
+      expect(computeModelInfo(model.group).triangleCount).toBe(12);
+    }
+    const bytes = new Uint8Array(buffer);
+    const middle = Math.floor(bytes.length / 2);
+    const members = [gzipSync(bytes.subarray(0, middle)), gzipSync(bytes.subarray(middle))];
+    const joined = new Uint8Array(members[0].length + members[1].length);
+    joined.set(members[0]);
+    joined.set(members[1], members[0].length);
+    expect(computeModelInfo((await parseCad(joined, "cube.step.gz")).group).triangleCount).toBe(12);
     const group = await parseStep(buffer);
     expect(group).not.toBeNull();
     const info = computeModelInfo(group);
