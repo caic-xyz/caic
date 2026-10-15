@@ -105,11 +105,13 @@ endsolid sample
   it("navigates back to the task when back button is clicked", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(new Response(new Uint8Array(10)));
+    window.history.replaceState(null, "", "/task/@abc+test");
+    window.history.pushState(null, "", "/task/@abc/view");
     renderViewer("/home/user/models/sample.stl");
 
-    const backBtn = screen.getByRole("button", { name: "Close document" });
+    const backBtn = screen.getByRole("button", { name: "Back" });
     await user.click(backBtn);
-    expect(window.location.pathname).toBe("/task/@abc+test");
+    await waitFor(() => expect(window.location.pathname).toBe("/task/@abc+test"));
   });
 
   it("navigates back when Escape key is pressed", async () => {

@@ -94,23 +94,26 @@ for (const width of [390, 1280]) {
     await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
     await retryClosed;
     expect(loads).toBe(2);
-    await page.getByRole("button", { name: "Close document", exact: true }).click();
+    await page.keyboard.press("Escape");
     const switchedStarted = page.waitForEvent("worker", (worker) => worker.url().includes("stepWorker"));
     await page.getByRole("link", { name: "Large", exact: true }).click();
     const switchedClosed = workerClosed(await switchedStarted);
     await expect(page.getByRole("progressbar", { name: "Parsing STEP" })).toBeVisible();
-    if (width === 390) await page.getByRole("button", { name: "Task", exact: true }).click();
+    if (width === 390) {
+      await page.goBack();
+      await switchedClosed;
+    }
     await page.getByRole("link", { name: "Cube", exact: true }).click();
     await switchedClosed;
     await expect(page.getByTitle("/cube.step", { exact: true })).toBeVisible();
     await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
-    await page.getByRole("button", { name: "Close document", exact: true }).click();
+    await page.keyboard.press("Escape");
     const closingStarted = page.waitForEvent("worker", (worker) => worker.url().includes("stepWorker"));
     await page.getByRole("link", { name: "Large", exact: true }).click();
     const closingClosed = workerClosed(await closingStarted);
     await expect(page.getByRole("progressbar", { name: "Parsing STEP" })).toBeVisible();
-    await page.getByRole("button", { name: "Close document", exact: true }).click();
+    await page.keyboard.press("Escape");
     await closingClosed;
     expect(page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
     expect(errors).toEqual([]);

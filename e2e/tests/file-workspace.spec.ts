@@ -2,6 +2,33 @@
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 import { createPaintedBambu3mfFixture } from "../../frontend/tests/cad-fixture";
 
+test("mobile document arrow traverses browser history", async ({ page, api, uniquePrompt }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.route("**/raw?*", (route) =>
+    route.fulfill({ contentType: "text/plain", body: "# Guide\n\n[Notes](/notes.md)" }),
+  );
+  const id = await createTaskAPI(api, uniquePrompt("Read [Guide](/guide.md)."));
+  await waitForTaskState(api, id, "waiting");
+  await page.goto(`/task/@${id}`);
+  await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
+  const taskURL = page.url();
+  await page.getByRole("link", { name: "Guide", exact: true }).click();
+  const guideURL = page.url();
+  await page.getByRole("link", { name: "Notes", exact: true }).click();
+  await expect(page).toHaveURL(/path=%2Fnotes.md/);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(guideURL);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(taskURL);
+  await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(guideURL);
+  await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(taskURL);
+  await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
+});
+
 for (const width of [390, 1000, 1440]) {
   test(`document workspace keeps task and viewer state at ${width}px`, async ({ page, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -70,17 +97,6 @@ for (const width of [390, 1000, 1440]) {
       await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
     } else {
       await expect(page.getByTestId("conversation-pane")).toBeHidden();
-      await page.getByRole("button", { name: "Task", exact: true }).click();
-      await expect(page).toHaveURL(/pane=task/);
-      await expect(page.getByTestId("task-detail-prompt")).toHaveText("Keep this draft");
-      await expect(page.getByTestId("document-pane")).toBeHidden();
-      await page.getByTestId("task-detail-prompt").focus();
-      await page.keyboard.press("Shift+Tab");
-      await expect(page.getByTestId("task-detail-prompt")).not.toBeFocused();
-      await page.getByRole("link", { name: "Guide", exact: true }).scrollIntoViewIfNeeded();
-      taskScroll = await page.getByTestId("task-message-area").evaluate((element) => element.scrollTop);
-      await page.getByRole("button", { name: "Document", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
     }
     await page.screenshot({ path: test.info().outputPath("docked-document.png") });
     await expect(page.getByTestId("voice-overlay")).toBeVisible();
@@ -122,16 +138,10 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByTitle("Expand sidebar")).toBeVisible();
     await page.setViewportSize({ width: 390, height: 900 });
     await expect(page.getByTestId("conversation-pane")).toBeHidden();
-    await page.getByRole("button", { name: "Task", exact: true }).click();
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(page.getByTestId("document-pane")).toBeVisible();
-    await page.setViewportSize({ width: 390, height: 900 });
-    await expect(page.getByTestId("document-pane")).toBeHidden();
-    await page.getByRole("button", { name: "Document", exact: true }).click();
     await page.setViewportSize({ width, height: 900 });
     expect(documentReads).toBe(1);
     expect(await conversation?.evaluate((node) => node.isConnected)).toBe(true);
-    await page.getByRole("button", { name: "Close document", exact: true }).click();
+    await page.keyboard.press("Escape");
     await expect(page.getByTestId("task-detail-prompt")).toHaveText("Keep this draft");
     await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeFocused();
     expect(await page.getByTestId("task-message-area").evaluate((element) => element.scrollTop)).toBe(taskScroll);

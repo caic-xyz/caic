@@ -215,7 +215,7 @@ for (const width of [390, 1280]) {
 
       await page.getByRole("link", { name: "README", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Task artifact" })).toBeVisible();
-      await page.getByRole("button", { name: "Close document" }).click();
+      await page.keyboard.press("Escape");
       await expect(page).toHaveURL(new RegExp(`/task/@${id}\\b`));
     });
 

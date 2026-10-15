@@ -1,4 +1,4 @@
-// Shared document controls own close, URL-backed maximize/restore, raw access, and Escape handling.
+// Shared document controls own history back, URL-backed maximize/restore, raw access, and Escape handling.
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
@@ -19,7 +19,7 @@ export default function FileViewerHeader(props: {
   const navigate = useNavigate();
   const [, setQuery] = useSearchParams();
   const fullscreen = () => fileViewMode(location.pathname, location.search) === "fullscreen";
-  let closeButton: HTMLButtonElement | undefined;
+  let backButton: HTMLButtonElement | undefined;
   let fullscreenButton: HTMLButtonElement | undefined;
   function close() {
     navigate(props.taskPath);
@@ -29,7 +29,7 @@ export default function FileViewerHeader(props: {
   }
 
   onMount(() => {
-    (fullscreen() ? fullscreenButton : closeButton)?.focus({ preventScroll: true });
+    (fullscreen() ? fullscreenButton : backButton)?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -46,7 +46,7 @@ export default function FileViewerHeader(props: {
   return (
     <header class={styles.header} aria-label="Document controls">
       <Show when={!fullscreen()}>
-        <ActionButton ref={closeButton} onClick={close} label="Close document">
+        <ActionButton ref={backButton} onClick={() => navigate(-1)} label="Back">
           <ArrowBackIcon width={20} height={20} />
         </ActionButton>
       </Show>
