@@ -153,7 +153,13 @@ for (const width of [390, 1000, 1440]) {
     }
     await page.getByRole("button", { name: "wireframe", exact: true }).focus();
     await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Axes", exact: true })).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(page.getByRole("button", { name: "Axes", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Reset camera", exact: true })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(page.getByRole("button", { name: "Axes", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.getByRole("button", { name: "wireframe", exact: true })).toBeFocused();
     await page.screenshot({ path: test.info().outputPath("cad-actions.png") });
@@ -165,6 +171,7 @@ for (const width of [390, 1000, 1440]) {
     await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
     expect(await canvas?.evaluate((node) => node.isConnected)).toBe(true);
     await expect(page.getByRole("button", { name: "wireframe", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Axes", exact: true })).toHaveAttribute("aria-pressed", "false");
     await page.getByRole("button", { name: "Full screen", exact: true }).click();
     await page.reload();
     await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();

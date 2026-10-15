@@ -1,4 +1,4 @@
-// CAD document pane for task-runtime models, filament colors, printing plates, and clean camera controls.
+// CAD document pane for runtime models, printing plates, and togglable wireframe and XYZ orientation controls.
 
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FileViewerHeader from "./FileViewerHeader";
@@ -26,6 +26,7 @@ export default function CadViewer(props: Props) {
   const [error, setError] = createSignal<string | null>(null);
   const [modelInfo, setModelInfo] = createSignal<CadModelInfo | null>(null);
   const [wireframe, setWireframe] = createSignal(false);
+  const [axesVisible, setAxesVisible] = createSignal(true);
   const [webglAvailable, setWebglAvailable] = createSignal(true);
 
   function toggleWireframe() {
@@ -36,6 +37,12 @@ export default function CadViewer(props: Props) {
 
   function resetCamera() {
     scene?.resetCamera();
+  }
+
+  function toggleAxes() {
+    const next = !axesVisible();
+    setAxesVisible(next);
+    scene?.setAxesVisible(next);
   }
 
   async function loadModelData(filePath: string) {
@@ -55,6 +62,7 @@ export default function CadViewer(props: Props) {
       if (hasWebGL && canvasRef) {
         if (!scene) {
           scene = createCadScene(canvasRef);
+          scene.setAxesVisible(axesVisible());
         }
         const info = await scene.loadModel(buffer, filePath);
         setModelInfo(info);
@@ -123,6 +131,14 @@ export default function CadViewer(props: Props) {
             >
               wireframe
             </ActionButton>
+            <ActionButton
+              label="Axes"
+              onClick={toggleAxes}
+              title="Toggle XYZ reference frame"
+              aria-pressed={axesVisible()}
+            >
+              Axes
+            </ActionButton>
             <ActionButton label="Reset camera" onClick={resetCamera} title="Reset camera position">
               <ResetIcon width={20} height={20} />
             </ActionButton>
@@ -155,6 +171,7 @@ export default function CadViewer(props: Props) {
               canvasRef = el;
             }}
             class={styles.canvas}
+            aria-label={axesVisible() ? "3D model with XYZ reference frame" : "3D model"}
           />
           <div class={styles.controlsHint}>Rotate: Left Drag | Pan: Right Drag | Zoom: Scroll</div>
         </div>

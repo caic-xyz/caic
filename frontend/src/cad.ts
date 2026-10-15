@@ -1,4 +1,4 @@
-// CAD viewer: imports plain and compressed STEP, STL, and 3MF models with colors and printing plates.
+// CAD viewer: imports STEP, STL, and 3MF models with colors, printing plates, and a camera-aligned XYZ frame.
 
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
@@ -9,6 +9,7 @@ import { applyBambuMetadata } from "./bambu3mf";
 import { BambuPaintGeometry } from "./bambuPaint";
 import type { CadPlate } from "./bambu3mf";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
 import occtimportjs from "occt-import-js";
 import type { OcctInstance } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
@@ -32,6 +33,7 @@ export interface CadModelInfo {
 export interface CadScene {
   loadModel(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<CadModelInfo>;
   setWireframe(enabled: boolean): void;
+  setAxesVisible(visible: boolean): void;
   resetCamera(): void;
   resize(width: number, height: number): void;
   destroy(): void;
@@ -336,16 +338,24 @@ function createPlateLabel(
   return label;
 }
 
-/** Initializes an interactive CAD scene with flat plate text. */
+// Initializes an interactive CAD scene with plate text and a corner XYZ frame.
 export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
+  renderer.autoClear = false;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
   camera.up.set(0, 0, 1); // CAD models and print beds use Z as the vertical axis.
+
+  // A separate viewport keeps the world axes independent of model scale and
+  // panning. ViewHelper applies the inverse camera rotation, including Z-up.
+  const axes = new ViewHelper(camera, canvas);
+  axes.setLabels("X", "Y", "Z");
+  axes.location.top = 8;
+  axes.location.right = 8;
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
@@ -372,7 +382,9 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
     if (isDestroyed) return;
     animId = requestAnimationFrame(animate);
     controls.update();
+    renderer.clear();
     renderer.render(scene, camera);
+    if (axes.visible) axes.render(renderer);
   }
   animate();
 
@@ -451,6 +463,10 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
       });
     },
 
+    setAxesVisible(visible: boolean) {
+      axes.visible = visible;
+    },
+
     resetCamera() {
       camera.position.copy(initialCameraPos);
       controls.target.set(0, 0, 0);
@@ -471,6 +487,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
         animId = null;
       }
       controls.dispose();
+      axes.dispose();
       if (currentGroup) {
         disposeGroup(currentGroup);
         currentGroup = null;
