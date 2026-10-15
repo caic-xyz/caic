@@ -15,7 +15,7 @@ const archive = zipSync({ "model.stp": model });
 bench(
   "16 MiB STEP ZIP: decompress and verify CRC",
   async () => {
-    await decompressStep(archive.buffer as ArrayBuffer, "model.stpz");
+    await decompressStep(archive.buffer as ArrayBuffer, "model.stpz", null);
   },
   { time: 500, warmupTime: 100 },
 );
@@ -24,7 +24,7 @@ const gzip = gzipSync(model);
 bench(
   "16 MiB STEP gzip: verify and decompress into one output",
   async () => {
-    await decompressStep(gzip.buffer as ArrayBuffer, "model.step.gz");
+    await decompressStep(gzip.buffer as ArrayBuffer, "model.step.gz", null);
   },
   { time: 500, warmupTime: 100 },
 );

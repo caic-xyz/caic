@@ -9,6 +9,7 @@ const maxStepBytes = 512 * 1024 * 1024;
 export async function decompressStep(
   buffer: ArrayBuffer | Uint8Array<ArrayBuffer>,
   filename: string,
+  progress: ((completed: number, total: number) => void) | null,
 ): Promise<ArrayBuffer | Uint8Array<ArrayBuffer>> {
   if (!isCompressedStepPath(filename)) return buffer;
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
@@ -16,9 +17,9 @@ export async function decompressStep(
   if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
     // Count and verify every member before allocating one exact-sized output.
     // The final trailer only gives the last member's size, not their total.
-    const gzipSize = inflateGzip(bytes, null);
+    const gzipSize = inflateGzip(bytes, null, progress);
     const gzipResult = new Uint8Array(gzipSize);
-    inflateGzip(bytes, gzipResult);
+    inflateGzip(bytes, gzipResult, progress);
     return gzipResult;
   }
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error("Invalid compressed STEP file: expected ZIP or gzip");
@@ -39,7 +40,8 @@ export async function decompressStep(
         view.getUint16(directoryOffset + 28, true) +
         view.getUint16(directoryOffset + 30, true) +
         view.getUint16(directoryOffset + 32, true);
-      if (!/\.(step|stp)$/i.test(file.name)) return false;
+      // STEP ZIP roots commonly use ISO-10303.p21 instead of a CAD extension.
+      if (!/\.(step|stp|p21)$/i.test(file.name)) return false;
       if (name !== null) throw new Error("STEP archive contains multiple models");
       if (file.originalSize > maxStepBytes || file.size > maxStepBytes) {
         throw new Error("Decompressed STEP file exceeds 512 MiB");
@@ -50,7 +52,7 @@ export async function decompressStep(
       return false;
     },
   });
-  if (name === null) throw new Error("STEP archive contains no .step or .stp model");
+  if (name === null) throw new Error("STEP archive contains no .step, .stp, or .p21 model");
   const result = new Uint8Array(expectedSize);
   let size = 0;
   let complete = false;
@@ -76,6 +78,7 @@ export async function decompressStep(
   // sizes are forged. The running output limit is authoritative.
   for (let inputOffset = 0; inputOffset < bytes.length; inputOffset += 1024) {
     archive.push(bytes.subarray(inputOffset, inputOffset + 1024), inputOffset + 1024 >= bytes.length);
+    progress?.(Math.min(inputOffset + 1024, bytes.length), bytes.length);
   }
   if (!complete || size !== expectedSize) throw new Error("Incomplete STEP archive or invalid model size");
   if ((crc ^ 0xffffffff) >>> 0 !== expectedCrc) throw new Error("Corrupt STEP archive: CRC checksum mismatch");
@@ -110,7 +113,11 @@ function zipDirectoryOffset(view: DataView): number {
 
 // fflate accepts concatenated gzip members but does not validate their CRCs.
 // The first pass counts and verifies; the second fills the only output buffer.
-function inflateGzip(bytes: Uint8Array<ArrayBuffer>, output: Uint8Array | null): number {
+function inflateGzip(
+  bytes: Uint8Array<ArrayBuffer>,
+  output: Uint8Array | null,
+  progress: ((completed: number, total: number) => void) | null,
+): number {
   if (bytes.length < 18) throw new Error("Incomplete gzip STEP file");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let total = 0;
@@ -140,6 +147,7 @@ function inflateGzip(bytes: Uint8Array<ArrayBuffer>, output: Uint8Array | null):
   inflater.onmember = finishMember;
   for (let offset = 0; offset < bytes.length; offset += 1024) {
     inflater.push(bytes.subarray(offset, offset + 1024), false);
+    progress?.((output === null ? 0 : bytes.length) + Math.min(offset + 1024, bytes.length), bytes.length * 2);
   }
   // Process all buffered members before finalizing; a final data push in
   // fflate stops after the first member remaining in that push.

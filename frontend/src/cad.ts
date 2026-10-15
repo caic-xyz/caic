@@ -1,18 +1,17 @@
-// CAD viewer: imports STEP, STL, and 3MF models with colors, printing plates, and a camera-aligned XYZ frame.
+// CAD viewer: loads STEP in a worker and renders CAD meshes with printing plates and a camera-aligned XYZ frame.
 
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
 import { isStlPath, isStepPath } from "./runtimePath";
-import { decompressStep } from "./stepCompression";
+import { loadStep } from "./stepWorkerClient";
+import { readTaskBinaryFile } from "./taskFile";
+import type { CadProgress, StepMesh } from "./stepProtocol";
 import { applyBambuMetadata } from "./bambu3mf";
 import { BambuPaintGeometry } from "./bambuPaint";
 import type { CadPlate } from "./bambu3mf";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
-import occtimportjs from "occt-import-js";
-import type { OcctInstance } from "occt-import-js";
-import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
 
 export interface ParsedCad {
   group: THREE.Group;
@@ -31,29 +30,13 @@ export interface CadModelInfo {
 }
 
 export interface CadScene {
-  loadModel(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<CadModelInfo>;
+  loadModel(model: ParsedCad, signal: AbortSignal, progress: CadProgress): Promise<CadModelInfo>;
+  clearModel(): void;
   setWireframe(enabled: boolean): void;
   setAxesVisible(visible: boolean): void;
   resetCamera(): void;
   resize(width: number, height: number): void;
   destroy(): void;
-}
-
-let occtPromise: Promise<unknown> | null = null;
-
-async function getOcct(): Promise<OcctInstance> {
-  if (!occtPromise) {
-    const isBrowser = typeof window !== "undefined" && (typeof process === "undefined" || !process.versions?.node);
-    occtPromise = occtimportjs({
-      locateFile: (name: string, prefix?: string) => {
-        if (isBrowser && name.endsWith(".wasm")) {
-          return occtWasmUrl;
-        }
-        return (prefix ?? "") + name;
-      },
-    });
-  }
-  return occtPromise as Promise<OcctInstance>;
 }
 
 /** Returns true if WebGL canvas rendering is available in the current environment. */
@@ -90,39 +73,68 @@ export function createStlGroup(geometry: THREE.BufferGeometry): THREE.Group {
   return group;
 }
 
-/** Parses a STEP or STP buffer into a Three.js Group with meshes and colors. */
-export async function parseStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<THREE.Group> {
-  const occt = await getOcct();
-  const fileBytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const result = occt.ReadStepFile(fileBytes, null);
-  if (!result || !result.success) {
-    throw new Error("Failed to parse STEP file: invalid geometry or syntax");
-  }
-
+// Constructs lightweight Three.js objects around transferred arrays without copying
+// their buffers. Normals and spatial bounds were computed in the worker.
+export async function createStepGroup(
+  meshes: StepMesh[],
+  signal: AbortSignal,
+  progress: CadProgress,
+): Promise<THREE.Group> {
   const group = new THREE.Group();
-  for (const meshData of result.meshes) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(meshData.attributes.position.array, 3));
-    if (meshData.attributes.normal) {
-      geometry.setAttribute("normal", new THREE.Float32BufferAttribute(meshData.attributes.normal.array, 3));
-    } else {
-      geometry.computeVertexNormals();
+  let start = performance.now();
+  progress({ stage: "meshes", completed: 0, total: meshes.length });
+  try {
+    for (let index = 0; index < meshes.length; index++) {
+      signal.throwIfAborted();
+      const source = meshes[index];
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(source.positions, 3));
+      geometry.setAttribute("normal", new THREE.BufferAttribute(source.normals, 3));
+      if (source.indices) geometry.setIndex(new THREE.BufferAttribute(source.indices, 1));
+      geometry.boundingBox = new THREE.Box3(new THREE.Vector3(...source.min), new THREE.Vector3(...source.max));
+      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(...source.sphere.center), source.sphere.radius);
+      const color = source.color ? new THREE.Color(...source.color) : new THREE.Color(0x8f_a1_b3);
+      group.add(
+        new THREE.Mesh(
+          geometry,
+          new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.15, side: THREE.DoubleSide }),
+        ),
+      );
+      if (performance.now() - start >= 4) {
+        progress({ stage: "meshes", completed: index + 1, total: meshes.length });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        start = performance.now();
+      }
     }
-    if (meshData.index && meshData.index.array) {
-      geometry.setIndex(new THREE.Uint32BufferAttribute(meshData.index.array, 1));
-    }
-    const color = meshData.color
-      ? new THREE.Color(meshData.color[0], meshData.color[1], meshData.color[2])
-      : new THREE.Color(0x8f_a1_b3);
-    const material = new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.35,
-      metalness: 0.15,
-      side: THREE.DoubleSide,
-    });
-    group.add(new THREE.Mesh(geometry, material));
+    signal.throwIfAborted();
+    progress({ stage: "meshes", completed: meshes.length, total: meshes.length });
+    return group;
+  } catch (error) {
+    disposeCadGroup(group);
+    throw error;
   }
-  return group;
+}
+
+// STEP's one-shot worker owns its large input and parser heap; ordinary mesh
+// formats retain their existing parser. Both canvas and metadata previews use it.
+export async function loadCadFile(
+  taskId: string,
+  filename: string,
+  signal: AbortSignal,
+  progress: CadProgress,
+): Promise<ParsedCad> {
+  signal.throwIfAborted();
+  if (isStepPath(filename)) {
+    const meshes = await loadStep(taskId, filename, signal, progress);
+    signal.throwIfAborted();
+    return { group: await createStepGroup(meshes, signal, progress), plates: [] };
+  }
+  const buffer = await readTaskBinaryFile(taskId, filename, signal, (completed, total) =>
+    progress({ stage: "download", completed, total }),
+  );
+  signal.throwIfAborted();
+  progress({ stage: "meshes", completed: null, total: null });
+  return parseCad(buffer, filename);
 }
 
 // Parses a 3MF archive while preserving build transforms and materials.
@@ -135,9 +147,8 @@ export function parse3mf(buffer: ArrayBuffer): ParsedCad {
   return { group, plates };
 }
 
-// Selects the same parser for the canvas and metadata-only viewer.
+// Parses STL and 3MF mesh formats; STEP files are owned by loadCadFile's worker.
 export async function parseCad(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<ParsedCad> {
-  if (isStepPath(filename)) return { group: await parseStep(await decompressStep(buffer, filename)), plates: [] };
   // Only compressed STEP downloads use prefix views; ordinary CAD buffers
   // already own exactly their bytes. Respect subviews from other callers.
   const data =
@@ -338,6 +349,23 @@ function createPlateLabel(
   return label;
 }
 
+// Releases model geometry, materials, and generated label textures.
+export function disposeCadGroup(group: THREE.Group) {
+  group.removeFromParent();
+  group.traverse((child) => {
+    if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+      child.geometry.dispose();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material instanceof THREE.MeshBasicMaterial && material.map instanceof THREE.CanvasTexture) {
+          material.map.dispose();
+        }
+        material.dispose();
+      }
+    }
+  });
+}
+
 // Initializes an interactive CAD scene with plate text and a corner XYZ frame.
 export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -404,49 +432,60 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
     controls.update();
   }
 
-  function disposeGroup(group: THREE.Group) {
-    scene.remove(group);
-    group.traverse((child) => {
-      if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-        child.geometry.dispose();
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        for (const material of materials) {
-          if (material instanceof THREE.MeshBasicMaterial && material.map instanceof THREE.CanvasTexture) {
-            material.map.dispose();
-          }
-          material.dispose();
-        }
-      }
-    });
+  function clearModel() {
+    if (currentGroup) {
+      disposeCadGroup(currentGroup);
+      currentGroup = null;
+    }
   }
 
   return {
-    async loadModel(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>, filename: string): Promise<CadModelInfo> {
-      if (currentGroup) {
-        disposeGroup(currentGroup);
-        currentGroup = null;
+    async loadModel(model: ParsedCad, signal: AbortSignal, progress: CadProgress): Promise<CadModelInfo> {
+      const candidate = new THREE.Group();
+      candidate.add(model.group);
+      let ownsCandidate = true;
+      function releaseCandidate() {
+        if (ownsCandidate) {
+          disposeCadGroup(candidate);
+          ownsCandidate = false;
+        }
       }
-
-      const model = await parseCad(buffer, filename);
-      const info = { ...computeModelInfo(model.group), plates: model.plates };
-      prepareModelShading(model.group);
-      const plates = createPlateGroup(model.plates);
-      for (const plate of model.plates) {
-        plates.add(createPlateLabel(plate, Math.min(8, renderer.capabilities.getMaxAnisotropy())));
+      try {
+        signal.throwIfAborted();
+        const info = { ...computeModelInfo(model.group), plates: model.plates };
+        prepareModelShading(model.group);
+        const plates = createPlateGroup(model.plates);
+        candidate.add(plates);
+        for (const plate of model.plates)
+          plates.add(createPlateLabel(plate, Math.min(8, renderer.capabilities.getMaxAnisotropy())));
+        const box = new THREE.Box3().setFromObject(candidate);
+        const center = box.getCenter(new THREE.Vector3());
+        candidate.position.sub(center);
+        box.translate(center.negate());
+        progress({ stage: "render", completed: null, total: null });
+        fitCamera(box);
+        // Compile shaders while the loading UI can still paint. The candidate
+        // remains detached until this request is still current and ready.
+        signal.addEventListener("abort", releaseCandidate, { once: true });
+        try {
+          await renderer.compileAsync(candidate, camera, scene);
+        } finally {
+          signal.removeEventListener("abort", releaseCandidate);
+        }
+        signal.throwIfAborted();
+        if (isDestroyed) throw new DOMException("Viewer closed", "AbortError");
+        clearModel();
+        currentGroup = candidate;
+        ownsCandidate = false;
+        scene.add(candidate);
+        return info;
+      } catch (error) {
+        releaseCandidate();
+        throw error;
       }
-      currentGroup = new THREE.Group();
-      currentGroup.add(model.group, plates);
-
-      const box = new THREE.Box3().setFromObject(currentGroup);
-      const center = box.getCenter(new THREE.Vector3());
-      currentGroup.position.sub(center);
-      scene.add(currentGroup);
-
-      box.setFromObject(currentGroup);
-      fitCamera(box);
-
-      return info;
     },
+
+    clearModel,
 
     setWireframe(enabled: boolean) {
       if (!currentGroup) return;
@@ -488,10 +527,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
       }
       controls.dispose();
       axes.dispose();
-      if (currentGroup) {
-        disposeGroup(currentGroup);
-        currentGroup = null;
-      }
+      clearModel();
       renderer.dispose();
     },
   };

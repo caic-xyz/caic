@@ -5,10 +5,10 @@ declare module "occt-import-js" {
     name?: string;
     color?: [number, number, number];
     attributes: {
-      position: { array: number[] | Float32Array };
-      normal?: { array: number[] | Float32Array };
+      position: { array: number[] | Float32Array<ArrayBuffer> };
+      normal?: { array: number[] | Float32Array<ArrayBuffer> };
     };
-    index?: { array: number[] | Uint16Array | Uint32Array };
+    index?: { array: number[] | Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer> };
   }
 
   export interface OcctResult {

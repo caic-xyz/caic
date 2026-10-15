@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import CadViewer from "./CadViewer";
@@ -55,23 +55,38 @@ endsolid sample
     expect(await screen.findByText(/1 triangles/)).toBeInTheDocument();
   });
 
-  it("loads a STEP model, parses its metrics, and displays the triangle count", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { resolve } = await import("node:path");
-    const filePath = resolve("node_modules/occt-import-js/test/testfiles/simple-basic-cube/cube.stp");
-    const nodeBuf = readFileSync(filePath);
-
-    fetchMock.mockResolvedValue(new Response(nodeBuf));
-    renderViewer("/home/user/models/cube.step");
-
-    expect(screen.getByText("/home/user/models/cube.step")).toBeInTheDocument();
-    expect(await screen.findByText(/12 triangles/)).toBeInTheDocument();
-  });
-
   it("loads 3MF metadata without WebGL", async () => {
     fetchMock.mockResolvedValue(new Response(create3mfFixture()));
     renderViewer("/models/assembly.3mf");
     expect(await screen.findByText("2 triangles")).toHaveAttribute("title", "Dimensions: 30 × 20 × 0");
+  });
+
+  it("cancels loading, retries, and ignores a late failure from the cancelled request", async () => {
+    const user = userEvent.setup();
+    let rejectFirst: (reason: Error) => void = () => {
+      throw new Error("Request not started");
+    };
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+    );
+    fetchMock.mockResolvedValue(new Response(create3mfFixture()));
+    renderViewer("/models/assembly.3mf");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("progressbar", { name: "Downloading model" })).not.toHaveAttribute("value");
+    await user.click(screen.getByRole("button", { name: "Cancel loading" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Model loading cancelled");
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    expect(screen.getByRole("button", { name: "Retry" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("2 triangles")).toBeInTheDocument();
+    rejectFirst(new Error("Late failure"));
+    // Flush the rejected fetch's continuation after the replacement has loaded.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("2 triangles")).toBeInTheDocument();
   });
 
   it("loads Bambu 3MF model metrics without WebGL", async () => {

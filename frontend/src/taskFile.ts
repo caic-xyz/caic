@@ -1,6 +1,6 @@
-// Reads bounded text and compressed STEP streams and identifies image/PDF or CAD data through the raw endpoint.
+// Streams bounded STEP downloads with progress and reads task-file previews and other CAD formats.
 
-import { isCompressedStepPath, taskRawURL } from "./runtimePath";
+import { isCompressedStepPath, isStepPath, taskRawURL } from "./runtimePath";
 
 const maxTextBytes = 1 << 20;
 const imageTypes = new Set(["image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/webp"]);
@@ -56,22 +56,43 @@ export async function readTaskBinaryFile(
   taskId: string,
   path: string,
   signal: AbortSignal,
+  progress: ((completed: number, total: number | null) => void) | null,
 ): Promise<ArrayBuffer | Uint8Array<ArrayBuffer>> {
   const res = await fetchTaskFile(taskId, path, signal);
-  if (!isCompressedStepPath(path)) return res.arrayBuffer();
+  signal.throwIfAborted();
+  const advertised = res.headers.get("Content-Encoding") ? null : res.headers.get("Content-Length");
+  const total =
+    advertised !== null && /^\d+$/.test(advertised) && Number.isSafeInteger(Number(advertised))
+      ? Number(advertised)
+      : null;
+  progress?.(0, total);
+  if (!isStepPath(path)) {
+    const buffer = await res.arrayBuffer();
+    signal.throwIfAborted();
+    progress?.(buffer.byteLength, buffer.byteLength);
+    return buffer;
+  }
   if (!res.body) return new ArrayBuffer(0);
   const reader = res.body.getReader();
   // Keep one destination allocation and return a view of the received prefix;
   // slicing or Blob assembly would copy the complete compressed file.
-  const bytes = new Uint8Array(64 * 1024 * 1024);
+  const compressed = isCompressedStepPath(path);
+  const limit = (compressed ? 64 : 512) * 1024 * 1024;
+  const capacity = !compressed && total !== null && total > 0 && total <= limit ? total : limit;
+  const bytes = new Uint8Array(capacity);
   let size = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 64 * 1024 * 1024) throw new Error("Compressed STEP file exceeds 64 MiB");
+      signal.throwIfAborted();
+      if (size > limit)
+        throw new Error(compressed ? "Compressed STEP file exceeds 64 MiB" : "STEP file exceeds 512 MiB");
+      if (size > capacity) throw new Error("STEP download exceeds Content-Length");
       bytes.set(value, size - value.byteLength);
+      progress?.(size, total !== null && size <= total ? total : null);
+      signal.throwIfAborted();
     }
   } finally {
     await reader.cancel().catch(() => undefined);

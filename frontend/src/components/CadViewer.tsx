@@ -1,4 +1,4 @@
-// CAD document pane for runtime models, printing plates, and togglable wireframe and XYZ orientation controls.
+// CAD document pane with cancellable worker STEP loading, measured progress, and model display controls.
 
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FileViewerHeader from "./FileViewerHeader";
@@ -6,8 +6,8 @@ import ActionButton from "./ActionButton";
 import ResetIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 
 import styles from "./CadViewer.module.css";
-import { readTaskBinaryFile } from "../taskFile";
 import type { CadModelInfo, CadScene } from "../cad";
+import type { CadLoadProgress } from "../stepProtocol";
 
 interface Props {
   taskId: string;
@@ -16,6 +16,7 @@ interface Props {
 }
 
 export default function CadViewer(props: Props) {
+  let retryRef: HTMLButtonElement | undefined;
   let canvasRef: HTMLCanvasElement | undefined;
   let wrapRef: HTMLDivElement | undefined;
   let scene: CadScene | null = null;
@@ -23,6 +24,28 @@ export default function CadViewer(props: Props) {
   let abortController: AbortController | null = null;
 
   const [loading, setLoading] = createSignal(true);
+  const [cancelled, setCancelled] = createSignal(false);
+  const [progress, setProgress] = createSignal<CadLoadProgress>({ stage: "download", completed: 0, total: null });
+  const stageLabel = () =>
+    ({
+      download: "Downloading model",
+      decompress: "Decompressing STEP",
+      parse: "Parsing STEP",
+      meshes: "Preparing meshes",
+      render: "Preparing view",
+    })[progress().stage];
+  const progressValue = () => {
+    const value = progress();
+    return value.total !== null && value.total > 0 && value.completed !== null ? value.completed : undefined;
+  };
+  const progressText = () => {
+    const value = progress();
+    if (value.total !== null && value.total > 0 && value.completed !== null)
+      return `${Math.floor((value.completed / value.total) * 100)}%`;
+    return value.stage === "download" && value.completed !== null
+      ? `${(value.completed / 1024 / 1024).toFixed(1)} MiB received`
+      : "";
+  };
   const [error, setError] = createSignal<string | null>(null);
   const [modelInfo, setModelInfo] = createSignal<CadModelInfo | null>(null);
   const [wireframe, setWireframe] = createSignal(false);
@@ -45,42 +68,61 @@ export default function CadViewer(props: Props) {
     scene?.setAxesVisible(next);
   }
 
-  async function loadModelData(filePath: string) {
+  function cancelLoad() {
     abortController?.abort();
-    abortController = new AbortController();
+    setLoading(false);
+    setCancelled(true);
+    queueMicrotask(() => retryRef?.focus());
+  }
+
+  async function loadModelData(taskId: string, filePath: string) {
+    abortController?.abort();
+    scene?.clearModel();
+    const controller = new AbortController();
+    const { signal } = controller;
+    abortController = controller;
     setLoading(true);
+    setCancelled(false);
     setError(null);
     setModelInfo(null);
-
+    setProgress({ stage: "download", completed: 0, total: null });
+    const report = (value: CadLoadProgress) => {
+      if (!signal.aborted) setProgress(value);
+    };
     try {
-      const buffer = await readTaskBinaryFile(props.taskId, filePath, abortController.signal);
-      const { createCadScene, isWebGLSupported, parseCad, computeModelInfo } = await import("../cad");
-
+      const { createCadScene, isWebGLSupported, loadCadFile, computeModelInfo, disposeCadGroup } =
+        await import("../cad");
+      signal.throwIfAborted();
+      const model = await loadCadFile(taskId, filePath, signal, report);
       const hasWebGL = isWebGLSupported();
       setWebglAvailable(hasWebGL);
-
       if (hasWebGL && canvasRef) {
         if (!scene) {
           scene = createCadScene(canvasRef);
           scene.setAxesVisible(axesVisible());
         }
-        const info = await scene.loadModel(buffer, filePath);
+        const info = await scene.loadModel(model, signal, report);
+        signal.throwIfAborted();
+        scene.setWireframe(wireframe());
         setModelInfo(info);
         if (wrapRef) {
           const rect = wrapRef.getBoundingClientRect();
           scene.resize(rect.width, rect.height);
         }
       } else {
-        // Compute model info even without WebGL for accessibility and metadata.
-        const model = await parseCad(buffer, filePath);
-        setModelInfo({ ...computeModelInfo(model.group), plates: model.plates });
+        try {
+          setModelInfo({ ...computeModelInfo(model.group), plates: model.plates });
+        } finally {
+          disposeCadGroup(model.group);
+        }
       }
       setLoading(false);
     } catch (err: unknown) {
-      if (abortController?.signal.aborted) return;
+      if (signal.aborted) return;
       setLoading(false);
-      const msg = err instanceof Error ? err.message : "Failed to load 3D model";
-      setError(msg);
+      setError(err instanceof Error ? err.message : "Failed to load 3D model");
+    } finally {
+      if (abortController === controller) abortController = null;
     }
   }
 
@@ -104,8 +146,9 @@ export default function CadViewer(props: Props) {
   });
 
   createEffect(() => {
-    const p = props.path;
-    void loadModelData(p);
+    const taskId = props.taskId;
+    const path = props.path;
+    void loadModelData(taskId, path);
   });
 
   return (
@@ -122,7 +165,7 @@ export default function CadViewer(props: Props) {
               </span>
             )}
           </Show>
-          <Show when={webglAvailable() && !loading() && !error()}>
+          <Show when={webglAvailable() && !loading() && !error() && !cancelled()}>
             <ActionButton
               label="wireframe"
               onClick={toggleWireframe}
@@ -146,17 +189,39 @@ export default function CadViewer(props: Props) {
         </div>
       </FileViewerHeader>
       <div class={styles.content}>
-        <Show when={error()}>
-          {(err) => (
-            <div class={styles.error} role="alert">
-              {err()}
-            </div>
-          )}
+        <Show when={error() || cancelled()}>
+          <div class={styles.loading}>
+            <p classList={{ [styles.errorText]: Boolean(error()) }} role={error() ? "alert" : "status"}>
+              {error() ?? "Model loading cancelled."}
+            </p>
+            <ActionButton ref={retryRef} label="Retry" onClick={() => void loadModelData(props.taskId, props.path)}>
+              Retry
+            </ActionButton>
+          </div>
         </Show>
-        <Show when={loading() && !error()}>
-          <div class={styles.loading}>Loading 3D model…</div>
+        <Show when={loading()}>
+          <div class={styles.loading} aria-busy="true">
+            <p class={styles.loadingMessage} role="status">
+              {stageLabel()}…
+            </p>
+            <Show
+              when={progressValue() !== undefined}
+              fallback={<progress class={styles.progress} aria-label={stageLabel()} />}
+            >
+              <progress
+                class={styles.progress}
+                aria-label={stageLabel()}
+                max={progress().total ?? 1}
+                value={progressValue() ?? 0}
+              />
+            </Show>
+            <span class={styles.progressDetails}>{progressText()}</span>
+            <ActionButton label="Cancel loading" onClick={cancelLoad}>
+              Cancel
+            </ActionButton>
+          </div>
         </Show>
-        <Show when={!loading() && !error() && !webglAvailable()}>
+        <Show when={!loading() && !error() && !cancelled() && !webglAvailable()}>
           <div class={styles.notice}>3D canvas preview requires WebGL support in your browser.</div>
         </Show>
         <div
@@ -164,7 +229,7 @@ export default function CadViewer(props: Props) {
             wrapRef = el;
           }}
           class={styles.canvasWrap}
-          classList={{ [styles.hidden]: loading() || Boolean(error()) || !webglAvailable() }}
+          classList={{ [styles.hidden]: loading() || cancelled() || Boolean(error()) || !webglAvailable() }}
         >
           <canvas
             ref={(el) => {

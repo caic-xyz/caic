@@ -79,6 +79,51 @@ describe("readTaskFilePreview", () => {
 });
 
 describe("readTaskBinaryFile", () => {
+  it("reports streamed STEP bytes and known totals without copying its destination", async () => {
+    fetchMock.mockResolvedValue(new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "Content-Length": "4" } }));
+    const progress: [number, number | null][] = [];
+    const result = await readTaskBinaryFile("abc", "/part.step", new AbortController().signal, (done, total) =>
+      progress.push([done, total]),
+    );
+    expect(progress).toEqual([
+      [0, 4],
+      [4, 4],
+    ]);
+    if (!(result instanceof Uint8Array)) throw new Error("Expected STEP byte view");
+    expect([...result]).toEqual([1, 2, 3, 4]);
+    expect(result.buffer.byteLength).toBe(4);
+  });
+
+  it("reports unknown decoded totals and cancels the stream when aborted during progress", async () => {
+    let cancelled = false;
+    const controller = new AbortController();
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(stream) {
+            stream.enqueue(new Uint8Array([1, 2, 3]));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "Content-Length": "1", "Content-Encoding": "gzip" } },
+      ),
+    );
+    const progress: [number, number | null][] = [];
+    await expect(
+      readTaskBinaryFile("abc", "/part.step", controller.signal, (done, total) => {
+        progress.push([done, total]);
+        if (done) controller.abort();
+      }),
+    ).rejects.toThrow();
+    expect(progress).toEqual([
+      [0, null],
+      [3, null],
+    ]);
+    expect(cancelled).toBe(true);
+  });
+
   it("cancels oversized compressed STEP downloads based on actual streamed bytes", async () => {
     for (const path of ["/part.stpz", "/part.step.zip", "/part.stp.gz"]) {
       let cancelled = false;
@@ -97,7 +142,7 @@ describe("readTaskBinaryFile", () => {
           { headers: { "Content-Length": "1" } },
         ),
       );
-      await expect(readTaskBinaryFile("abc", path, new AbortController().signal)).rejects.toThrow("64 MiB");
+      await expect(readTaskBinaryFile("abc", path, new AbortController().signal, null)).rejects.toThrow("64 MiB");
       expect(cancelled).toBe(true);
       expect(pulls).toBeLessThanOrEqual(66);
     }
@@ -108,7 +153,7 @@ describe("readTaskBinaryFile", () => {
     bytes[0] = 0x50;
     bytes[bytes.length - 1] = 0xff;
     fetchMock.mockResolvedValue(new Response(bytes));
-    const result = await readTaskBinaryFile("abc", "/part.stpz", new AbortController().signal);
+    const result = await readTaskBinaryFile("abc", "/part.stpz", new AbortController().signal, null);
     if (!(result instanceof Uint8Array)) throw new Error("Expected a view of the download buffer");
     expect(result.length).toBe(64 * 1024 * 1024);
     expect(result[0]).toBe(0x50);
@@ -125,7 +170,7 @@ describe("readTaskBinaryFile", () => {
         }),
       ),
     );
-    await expect(readTaskBinaryFile("abc", "/part.stpz", new AbortController().signal)).rejects.toThrow(
+    await expect(readTaskBinaryFile("abc", "/part.stpz", new AbortController().signal, null)).rejects.toThrow(
       "stream failed",
     );
   });
