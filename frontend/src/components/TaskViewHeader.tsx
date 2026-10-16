@@ -1,7 +1,7 @@
-// Shared task subview controls own history Back, URL-backed full screen, focus, and Escape precedence.
+// Shared task subview controls own pane closing, URL-backed full screen, focus, and Escape precedence.
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
-import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?solid";
 import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
 import { taskViewMode } from "../taskView";
@@ -19,14 +19,17 @@ export default function TaskViewHeader(props: {
   const navigate = useNavigate();
   const [, setQuery] = useSearchParams();
   const fullscreen = () => taskViewMode(location.pathname, location.search) === "fullscreen";
-  let backButton: HTMLButtonElement | undefined;
+  let closeButton: HTMLButtonElement | undefined;
   let fullscreenButton: HTMLButtonElement | undefined;
+  function close() {
+    navigate(props.taskPath);
+  }
   function toggleFullscreen() {
     setQuery({ fullscreen: fullscreen() ? undefined : "1" }, { replace: false });
   }
 
   onMount(() => {
-    (fullscreen() ? fullscreenButton : backButton)?.focus({ preventScroll: true });
+    (fullscreen() ? fullscreenButton : closeButton)?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -36,7 +39,7 @@ export default function TaskViewHeader(props: {
       if (fullscreen()) {
         toggleFullscreen();
         fullscreenButton?.focus({ preventScroll: true });
-      } else navigate(props.taskPath);
+      } else close();
     };
     // Embedded desktops consume canvas keydowns. Capture full-screen dismissal
     // on their host after document-level menus and overlays have handled Escape.
@@ -54,22 +57,22 @@ export default function TaskViewHeader(props: {
 
   return (
     <header class={styles.header} aria-label={props.label}>
-      <Show when={!fullscreen()}>
-        <ActionButton ref={backButton} onClick={() => navigate(-1)} label="Back">
-          <ArrowBackIcon width={20} height={20} aria-hidden="true" />
-        </ActionButton>
-      </Show>
       {props.children}
-      <ActionButton
-        ref={fullscreenButton}
-        onClick={toggleFullscreen}
-        label={fullscreen() ? "Exit full screen" : "Full screen"}
-      >
-        <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} aria-hidden="true" />}>
-          <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
-        </Show>
-      </ActionButton>
       {props.actions}
+      <div class={styles.paneControls}>
+        <ActionButton
+          ref={fullscreenButton}
+          onClick={toggleFullscreen}
+          label={fullscreen() ? "Exit full screen" : "Full screen"}
+        >
+          <Show when={fullscreen()} fallback={<FullscreenIcon width={20} height={20} aria-hidden="true" />}>
+            <FullscreenExitIcon width={20} height={20} aria-hidden="true" />
+          </Show>
+        </ActionButton>
+        <ActionButton ref={closeButton} onClick={close} label="Close view">
+          <CloseIcon width={20} height={20} aria-hidden="true" />
+        </ActionButton>
+      </div>
     </header>
   );
 }

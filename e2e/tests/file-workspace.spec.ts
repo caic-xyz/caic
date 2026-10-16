@@ -2,32 +2,52 @@
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 import { createPaintedBambu3mfFixture } from "../../frontend/tests/cad-fixture";
 
-test("mobile document arrow traverses browser history", async ({ page, api, uniquePrompt }) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.route("**/raw?*", (route) =>
-    route.fulfill({ contentType: "text/plain", body: "# Guide\n\n[Notes](/notes.md)" }),
-  );
-  const id = await createTaskAPI(api, uniquePrompt("Read [Guide](/guide.md)."));
-  await waitForTaskState(api, id, "waiting");
-  await page.goto(`/task/@${id}`);
-  await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
-  const taskURL = page.url();
-  await page.getByRole("link", { name: "Guide", exact: true }).click();
-  const guideURL = page.url();
-  await page.getByRole("link", { name: "Notes", exact: true }).click();
-  await expect(page).toHaveURL(/path=%2Fnotes.md/);
-  await page.getByRole("button", { name: "Back", exact: true }).click();
-  await expect(page).toHaveURL(guideURL);
-  await page.getByRole("button", { name: "Back", exact: true }).click();
-  await expect(page).toHaveURL(taskURL);
-  await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
-  await page.goForward();
-  await expect(page).toHaveURL(guideURL);
-  await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
-  await page.goBack();
-  await expect(page).toHaveURL(taskURL);
-  await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
-});
+for (const width of [390, 1280]) {
+  test(`document close and browser history have distinct behavior at ${width}px`, async ({
+    page,
+    api,
+    uniquePrompt,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.route("**/raw?*", (route) =>
+      route.fulfill({ contentType: "text/plain", body: "# Guide\n\n[Notes](/notes.md)" }),
+    );
+    const id = await createTaskAPI(api, uniquePrompt("Read [Guide](/guide.md)."));
+    await waitForTaskState(api, id, "waiting");
+    await page.goto(`/task/@${id}`);
+    await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
+    const taskURL = page.url();
+    await page.getByRole("link", { name: "Guide", exact: true }).click();
+    const guideURL = page.url();
+    await page.getByRole("link", { name: "Notes", exact: true }).click();
+    await expect(page).toHaveURL(/path=%2Fnotes.md/);
+    const notesURL = page.url();
+    await page.goBack();
+    await expect(page).toHaveURL(guideURL);
+    await page.goForward();
+    await expect(page).toHaveURL(notesURL);
+    await page.getByRole("button", { name: "Close view", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
+    await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeFocused();
+    await page.goBack();
+    await expect(page).toHaveURL(notesURL);
+    await page.goBack();
+    await expect(page).toHaveURL(guideURL);
+    await expect(page.getByRole("heading", { name: "Guide", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(taskURL);
+    await expect(page.getByRole("link", { name: "Guide", exact: true })).toBeVisible();
+
+    // Opening a full-screen document from outside the task still closes to its conversation.
+    await page.goto("/");
+    await page.goto(`${guideURL}&fullscreen=1`);
+    await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Close view", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/task/@${id}(?:\\+[^/]+)?$`));
+    await expect(page.getByTestId("task-detail-prompt")).toBeVisible();
+  });
+}
 
 for (const width of [390, 1000, 1440]) {
   test(`document workspace keeps task and viewer state at ${width}px`, async ({ page, api, uniquePrompt }) => {
@@ -119,7 +139,7 @@ for (const width of [390, 1000, 1440]) {
     await expect(page).toHaveURL(new RegExp(`/view\\?[^#]*fullscreen=1`));
     await expect(page.getByTestId("task-detail-prompt")).not.toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(page.getByRole("link", { name: "raw file", exact: true })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeFocused();
     await page.screenshot({ path: test.info().outputPath("fullscreen-document.png") });

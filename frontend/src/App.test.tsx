@@ -1433,13 +1433,13 @@ describe("App keyboard shortcuts", () => {
     const user = userEvent.setup();
     vi.mocked(api.getTask).mockResolvedValue(makeTask());
     const { history } = renderApp("/task/@task1+do-something/stats");
-    const back = await screen.findByRole("button", { name: "Back" });
-    back.focus();
+    const close = await screen.findByRole("button", { name: "Close view" });
+    close.focus();
 
     await user.keyboard("/");
 
     expect(history.get()).toContain("/stats");
-    expect(back).toHaveFocus();
+    expect(close).toHaveFocus();
     screen.getByTestId("conversation-pane").focus();
     await user.keyboard("/");
     await waitFor(() => expect(screen.getByTestId("task-detail-prompt")).toHaveFocus());

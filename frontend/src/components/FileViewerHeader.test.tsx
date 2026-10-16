@@ -67,8 +67,7 @@ describe("FileViewerHeader", () => {
   it("lets a tooltip dismiss before closing the document", async () => {
     fixture(<Tooltip text="Local explanation">Help</Tooltip>);
     const user = userEvent.setup();
-    await user.tab();
-    await user.tab();
+    screen.getByRole("button", { name: "Close view" }).focus();
     await user.tab();
     expect(screen.getByRole("button", { name: "Help" })).toHaveFocus();
     expect(screen.getByText("Local explanation")).toBeInTheDocument();

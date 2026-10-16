@@ -35,6 +35,9 @@ supports sustained work, not chatbot conversation or dashboard decoration.
 
 - Make the task and its output the main content. Keep chrome subordinate.
 - Give familiar actions consistent behavior across panes.
+- Close (×) dismisses a task pane and returns to its conversation, even from
+  full screen. Full-screen exit restores the pane. Browser Back and Forward
+  traverse navigation history, including links between documents.
 - Make state, errors, and recovery explicit.
 - Preserve the user's place, draft, and focus.
 

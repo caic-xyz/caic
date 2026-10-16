@@ -1,8 +1,16 @@
-/* Compact wrapping controls for workspace documents and task subviews. */
+/* Wrapping task-view headers with full-screen and close controls grouped at the right. */
 .header {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   margin-bottom: 0.5rem;
+}
+
+.paneControls {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  align-items: center;
+  margin-left: auto;
 }

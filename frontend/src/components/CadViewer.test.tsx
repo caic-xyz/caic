@@ -102,15 +102,15 @@ endsolid sample
     expect(screen.queryByText(/triangles/)).not.toBeInTheDocument();
   });
 
-  it("navigates back to the task when back button is clicked", async () => {
+  it("closes the viewer to its task regardless of browser history", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(new Response(new Uint8Array(10)));
-    window.history.replaceState(null, "", "/task/@abc+test");
+    window.history.replaceState(null, "", "/task/@other");
     window.history.pushState(null, "", "/task/@abc/view");
     renderViewer("/home/user/models/sample.stl");
 
-    const backBtn = screen.getByRole("button", { name: "Back" });
-    await user.click(backBtn);
+    const closeBtn = screen.getByRole("button", { name: "Close view" });
+    await user.click(closeBtn);
     await waitFor(() => expect(window.location.pathname).toBe("/task/@abc+test"));
   });
 

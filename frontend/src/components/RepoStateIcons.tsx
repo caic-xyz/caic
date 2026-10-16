@@ -140,7 +140,6 @@ export default function RepoStateIcons(props: Props) {
     <Show when={label()}>
       <Show
         when={props.href}
-        keyed
         fallback={
           <span
             class={styles.icons}
@@ -160,7 +159,7 @@ export default function RepoStateIcons(props: Props) {
           <A
             class={styles.link}
             data-elide-diff-stats={shouldElideDiffStats() ? "" : undefined}
-            href={href}
+            href={href()}
             ref={(element) => {
               markerRef = element;
             }}

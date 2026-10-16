@@ -1,12 +1,13 @@
 // Tests compact Git state markers for task repository rows.
 
 import type { JSX } from "solid-js";
+import { createSignal } from "solid-js";
 import { it } from "node:test";
 import { Route, Router } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { expect, vi } from "@tests/expect";
 
-import RepoStateIcons from "./RepoStateIcons";
+import RepoStateIcons, { diffStatState } from "./RepoStateIcons";
 
 function renderWithRouter(ui: () => JSX.Element) {
   return render(() => (
@@ -15,6 +16,22 @@ function renderWithRouter(ui: () => JSX.Element) {
     </Router>
   ));
 }
+
+it("preserves link identity and focus when its task URL changes", () => {
+  const [href, setHref] = createSignal("/task/@abc/diff");
+  renderWithRouter(() => (
+    <RepoStateIcons
+      state={diffStatState([{ path: "main.go", linesAdded: 1, linesDeleted: 0, oldSize: -1, newSize: -1 }])}
+      href={href()}
+    />
+  ));
+  const link = screen.getByRole("link");
+  link.focus();
+  setHref("/task/@abc+title/diff");
+  expect(screen.getByRole("link")).toBe(link);
+  expect(link).toHaveFocus();
+  expect(link).toHaveAttribute("href", "/task/@abc+title/diff");
+});
 
 it("renders dense markers with an accessible state summary", () => {
   renderWithRouter(() => (

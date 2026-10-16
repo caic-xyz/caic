@@ -12,6 +12,6 @@ test("task statistics open as a contained mobile detail view", async ({ page, ap
   await expect(page).toHaveURL(new RegExp(`/task/@${id}/stats$`));
   await expect(page.getByText("Performance", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Resources" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Back", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close view", exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
