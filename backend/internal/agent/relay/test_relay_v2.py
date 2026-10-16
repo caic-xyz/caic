@@ -279,6 +279,22 @@ def _wait_for_daemon_exit(pid_path: str, timeout: float = 15) -> None:
     raise AssertionError(f"relay daemon did not exit within {timeout}s")
 
 
+def _read_stdout_to_eof(proc: subprocess.Popen[bytes], timeout: float) -> bytes:
+    """Drain relay output with a deadline while keeping stdin open."""
+    assert proc.stdout is not None
+    deadline = time.monotonic() + timeout
+    stdout = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        assert remaining > 0 and select.select([proc.stdout], [], [], remaining)[0], (
+            "relay did not close stdout after child exit while stdin remained open"
+        )
+        chunk = os.read(proc.stdout.fileno(), 65536)
+        if not chunk:
+            return bytes(stdout)
+        stdout.extend(chunk)
+
+
 def _cleanup(relay_dir: str) -> None:
     pid_path = os.path.join(relay_dir, "pid")
     if os.path.exists(pid_path):
@@ -953,16 +969,7 @@ def test_exit_and_stripped_environment_controls() -> None:
             stdout += chunk
         assert json.loads(stdout)["t"] == "relay_generation", stdout
         Path(release_path).touch()
-        deadline = time.monotonic() + 5
-        while True:
-            remaining = deadline - time.monotonic()
-            assert remaining > 0 and select.select([proc.stdout], [], [], remaining)[0], (
-                "relay did not close stdout after child exit while stdin remained open"
-            )
-            chunk = os.read(proc.stdout.fileno(), 65536)
-            if not chunk:
-                break
-            stdout += chunk
+        stdout += _read_stdout_to_eof(proc, timeout=5)
         proc.stdin.close()
         proc.wait(timeout=10)
         if proc.stderr is not None:
@@ -1033,7 +1040,10 @@ def test_antigravity_mcp_lifecycle() -> None:
             )
             try:
                 if fail:
-                    out, err = proc.communicate(timeout=10)
+                    # stdin EOF detaches the client; wait for the daemon's
+                    # terminal output before communicate closes stdin.
+                    out = _read_stdout_to_eof(proc, timeout=10)
+                    _, err = proc.communicate(timeout=10)
                     records = _decode_records(out)
                     exits = [record for record in records if record["t"] == "exit"]
                     assert exits and exits[0]["exit_code"] != 0, (out, err)

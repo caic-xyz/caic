@@ -10,13 +10,18 @@ async function axesFrame(page: Page): Promise<Buffer> {
   let frame = await page.screenshot({ clip });
   // OrbitControls damps rotation over several frames. Wait for a stable image,
   // rather than sleeping or comparing a frame while the camera still moves.
+  // Software rendering on CI can take longer than the default five seconds
+  // to render enough frames for damping to settle.
   await expect
-    .poll(async () => {
-      const next = await page.screenshot({ clip });
-      const same = next.equals(frame);
-      frame = next;
-      return same;
-    })
+    .poll(
+      async () => {
+        const next = await page.screenshot({ clip });
+        const same = next.equals(frame);
+        frame = next;
+        return same;
+      },
+      { timeout: 15_000 },
+    )
     .toBe(true);
   return frame;
 }
