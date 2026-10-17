@@ -1,12 +1,13 @@
-// CAD pane with cancellable STEP loading, depth translucency, wireframe, and icon display controls.
+// CAD pane with cancellable STEP loading, display modes, and corner axis/reset controls.
 
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import FileViewerHeader from "./FileViewerHeader";
 import ActionButton from "./ActionButton";
-import ResetIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
+import CadViewControls from "./CadViewControls";
 import WireframeIcon from "@material-symbols/svg-400/outlined/view_in_ar.svg?solid";
+import SolidIcon from "@material-symbols/svg-400/outlined/deployed_code.svg?solid";
 import TranslucentIcon from "@material-symbols/svg-400/outlined/opacity.svg?solid";
-import AxesIcon from "@material-symbols/svg-400/outlined/3d_rotation.svg?solid";
 import CancelIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import RetryIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
@@ -19,6 +20,12 @@ interface Props {
   taskPath: string;
   path: string;
 }
+
+const VIEW_MODES = {
+  solid: { label: "Solid", icon: SolidIcon, next: "wireframe" },
+  wireframe: { label: "Wireframe", icon: WireframeIcon, next: "translucent" },
+  translucent: { label: "Translucent", icon: TranslucentIcon, next: "solid" },
+} as const;
 
 export default function CadViewer(props: Props) {
   let retryRef: HTMLButtonElement | undefined;
@@ -57,8 +64,13 @@ export default function CadViewer(props: Props) {
   const [axesVisible, setAxesVisible] = createSignal(true);
   const [webglAvailable, setWebglAvailable] = createSignal(true);
 
-  function toggleViewMode(mode: Exclude<CadViewMode, "solid">) {
-    const next = viewMode() === mode ? "solid" : mode;
+  const displayLabel = () => {
+    const mode = VIEW_MODES[viewMode()];
+    return `Display mode: ${mode.label}. Switch to ${VIEW_MODES[mode.next].label.toLowerCase()}`;
+  };
+
+  function cycleViewMode() {
+    const next = VIEW_MODES[viewMode()].next;
     setViewMode(next);
     scene?.setViewMode(next);
   }
@@ -171,32 +183,8 @@ export default function CadViewer(props: Props) {
             )}
           </Show>
           <Show when={webglAvailable() && !loading() && !error() && !cancelled()}>
-            <ActionButton
-              label="wireframe"
-              onClick={() => toggleViewMode("wireframe")}
-              title="Toggle wireframe display"
-              aria-pressed={viewMode() === "wireframe"}
-            >
-              <WireframeIcon width={20} height={20} />
-            </ActionButton>
-            <ActionButton
-              label="Translucent"
-              onClick={() => toggleViewMode("translucent")}
-              title="Toggle depth-based translucency"
-              aria-pressed={viewMode() === "translucent"}
-            >
-              <TranslucentIcon width={20} height={20} />
-            </ActionButton>
-            <ActionButton
-              label="Axes"
-              onClick={toggleAxes}
-              title="Toggle XYZ reference frame"
-              aria-pressed={axesVisible()}
-            >
-              <AxesIcon width={20} height={20} />
-            </ActionButton>
-            <ActionButton label="Reset camera" onClick={resetCamera} title="Reset camera position">
-              <ResetIcon width={20} height={20} />
+            <ActionButton label={displayLabel()} onClick={cycleViewMode}>
+              <Dynamic component={VIEW_MODES[viewMode()].icon} width={20} height={20} aria-hidden="true" />
             </ActionButton>
           </Show>
         </div>
@@ -244,14 +232,16 @@ export default function CadViewer(props: Props) {
           class={styles.canvasWrap}
           classList={{ [styles.hidden]: loading() || cancelled() || Boolean(error()) || !webglAvailable() }}
         >
-          <canvas
-            ref={(el) => {
-              canvasRef = el;
-            }}
-            class={styles.canvas}
-            aria-label={axesVisible() ? "3D model with XYZ reference frame" : "3D model"}
-          />
-          <div class={styles.controlsHint}>Rotate: Left Drag | Pan: Right Drag | Zoom: Scroll</div>
+          <CadViewControls axesVisible={axesVisible()} onToggleAxes={toggleAxes} onResetView={resetCamera}>
+            <canvas
+              ref={(el) => {
+                canvasRef = el;
+              }}
+              class={styles.canvas}
+              aria-label={axesVisible() ? "3D model with XYZ reference frame" : "3D model"}
+            />
+            <div class={styles.controlsHint}>Rotate: Left Drag | Pan: Right Drag | Zoom: Scroll</div>
+          </CadViewControls>
         </div>
       </div>
     </div>

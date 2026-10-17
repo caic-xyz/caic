@@ -1,4 +1,4 @@
-// Browser coverage for CAD orientation axes, keyboard toggling, camera tracking, and viewport containment.
+// Browser coverage for CAD corner hover/tap actions, axis restoration, drag-through rotation, and camera tracking.
 import type { Page } from "@playwright/test";
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 import { create3mfFixture } from "../../frontend/tests/cad-fixture";
@@ -41,68 +41,133 @@ async function frameTimes(page: Page) {
 }
 
 for (const width of [390, 1280]) {
-  test(`CAD axes follow orientation and toggle at ${width}px`, async ({ page, api, uniquePrompt }) => {
-    await page.setViewportSize({ width, height: 900 });
-    const errors: string[] = [];
-    const requests: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (message) => {
-      if (message.type() === "error") errors.push(message.text());
+  test.describe(`corner controls at ${width}px`, () => {
+    test.use({ hasTouch: width === 390 });
+    test(`CAD axes follow orientation and toggle at ${width}px`, async ({ page, api, uniquePrompt }) => {
+      await page.setViewportSize({ width, height: 900 });
+      const errors: string[] = [];
+      const requests: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      page.on("console", (message) => {
+        if (message.type() === "error") errors.push(message.text());
+      });
+      page.on("request", (request) => requests.push(request.url()));
+      await page.route("**/raw?*", async (route) => {
+        await route.fulfill({ contentType: "model/3mf", body: Buffer.from(create3mfFixture()) });
+      });
+      const id = await createTaskAPI(api, uniquePrompt("Inspect [Model](/model.3mf)."));
+      await waitForTaskState(api, id, "waiting");
+      await page.goto(`/task/@${id}`);
+      await page.getByRole("link", { name: "Model", exact: true }).click();
+      await expect(page.getByText("2 triangles", { exact: true })).toBeVisible();
+      const canvas = page.getByLabel(/^3D model/);
+      const bounds = await canvas.boundingBox();
+      if (!bounds) throw new Error("Missing CAD canvas");
+      const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+      const axis = { x: bounds.x + bounds.width - 72, y: bounds.y + 72 };
+      const trigger = page.getByRole("button", { name: "View controls", exact: true });
+      const panel = page.getByRole("group", { name: "View controls", exact: true });
+      async function reveal() {
+        if (width === 390) await page.touchscreen.tap(axis.x, axis.y);
+        else await page.mouse.move(axis.x, axis.y);
+        await expect(panel).toBeVisible();
+      }
+      const initial = await axesFrame(page);
+      await page.screenshot({ path: test.info().outputPath("axes-enabled.png") });
+      await expect(panel).toBeHidden();
+      await reveal();
+      await page.screenshot({ path: test.info().outputPath("axes-controls.png") });
+      if (width === 390) await page.touchscreen.tap(center.x, center.y);
+      else {
+        // Moving through the gap into the action panel must not dismiss it.
+        await page.mouse.move(axis.x, bounds.y + 138);
+        await expect(panel).toBeVisible();
+        await page.getByRole("button", { name: "Reset view", exact: true }).hover();
+        await page.mouse.move(center.x, center.y);
+      }
+      await expect(panel).toBeHidden();
+      if (width === 1280) {
+        await reveal();
+        await page.mouse.click(axis.x, axis.y);
+        await expect(panel).toBeVisible();
+        await page.mouse.move(center.x, center.y);
+        await expect(panel).toBeVisible();
+        await page.mouse.click(center.x, center.y);
+        await expect(panel).toBeHidden();
+      }
+      await reveal();
+      await page.getByRole("button", { name: "Hide axes", exact: true }).click();
+      await expect(page.getByLabel("3D model", { exact: true })).toBeVisible();
+      await expect(trigger).toBeFocused();
+      await expect(trigger.locator("svg")).toBeVisible();
+      expect((await axesFrame(page)).equals(initial)).toBe(false);
+      await page.screenshot({ path: test.info().outputPath("axes-disabled.png") });
+      if (width === 390) await trigger.tap();
+      else await trigger.hover();
+      await page.getByRole("button", { name: "Reset view", exact: true }).click();
+      await expect(page.getByLabel("3D model", { exact: true })).toBeVisible();
+      if (width === 1280) {
+        // Restored pointer focus must not make subsequent hover panels sticky.
+        await trigger.hover();
+        await expect(panel).toBeVisible();
+        await page.mouse.move(center.x, center.y);
+        await expect(panel).toBeHidden();
+      }
+      const hiddenTiming = width === 1280 ? await frameTimes(page) : null;
+      await trigger.press("Enter");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await expect(page.getByRole("button", { name: "Show axes", exact: true })).toBeFocused();
+      await page.keyboard.press("Space");
+      await expect(page.getByLabel("3D model with XYZ reference frame", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: /^Display mode:/ }).focus();
+      await page.mouse.move(center.x, center.y);
+      expect((await axesFrame(page)).equals(initial)).toBe(true);
+      if (width === 1280) {
+        console.log(JSON.stringify({ width, axesHidden: hiddenTiming, axesVisible: await frameTimes(page) }));
+      }
+
+      // A drag that starts on the axes reaches OrbitControls and never opens actions.
+      await page.mouse.move(axis.x, axis.y);
+      await page.mouse.down();
+      await page.mouse.move(axis.x - 50, axis.y + 20, { steps: 8 });
+      await page.mouse.up();
+      await expect(panel).toBeHidden();
+      const rotated = await axesFrame(page);
+      expect(rotated.equals(initial)).toBe(false);
+      await page.screenshot({ path: test.info().outputPath("axes-orbit.png") });
+
+      await page.mouse.move(center.x, center.y);
+      await page.mouse.down({ button: "right" });
+      await page.mouse.move(center.x + 12, center.y + 8, { steps: 4 });
+      await page.mouse.up({ button: "right" });
+      await page.mouse.wheel(0, 100);
+      expect((await axesFrame(page)).equals(rotated)).toBe(true);
+
+      await page.setViewportSize({ width: width + 40, height: 940 });
+      expect((await axesFrame(page)).equals(rotated)).toBe(true);
+      const buttonBounds = await trigger.boundingBox();
+      expect(buttonBounds && buttonBounds.x >= 0 && buttonBounds.x + buttonBounds.width <= width + 40).toBeTruthy();
+      await trigger.focus();
+      await page.getByRole("button", { name: "Reset view", exact: true }).click();
+      await page.getByRole("button", { name: /^Display mode:/ }).focus();
+      await page.mouse.move(center.x, center.y);
+      expect((await axesFrame(page)).equals(initial)).toBe(true);
+      await trigger.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Escape");
+      await expect(panel).toBeHidden();
+      await expect(trigger).toBeFocused();
+      await expect(page.getByTestId("document-pane")).toBeVisible();
+      await page.getByRole("button", { name: "Full screen", exact: true }).click();
+      await trigger.focus();
+      await page.keyboard.press("Escape");
+      await expect(panel).toBeHidden();
+      await expect(page.getByRole("button", { name: "Exit full screen", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeVisible();
+      expect(errors).toEqual([]);
+      await test.info().attach("network-requests", { body: JSON.stringify(requests), contentType: "application/json" });
     });
-    page.on("request", (request) => requests.push(request.url()));
-    await page.route("**/raw?*", async (route) => {
-      await route.fulfill({ contentType: "model/3mf", body: Buffer.from(create3mfFixture()) });
-    });
-    const id = await createTaskAPI(api, uniquePrompt("Inspect [Model](/model.3mf)."));
-    await waitForTaskState(api, id, "waiting");
-    await page.goto(`/task/@${id}`);
-    await page.getByRole("link", { name: "Model", exact: true }).click();
-    await expect(page.getByText("2 triangles", { exact: true })).toBeVisible();
-    const axes = page.getByRole("button", { name: "Axes", exact: true });
-    await expect(axes).toHaveAttribute("aria-pressed", "true");
-    const initial = await axesFrame(page);
-    await page.screenshot({ path: test.info().outputPath("axes-enabled.png") });
-
-    await axes.focus();
-    await page.keyboard.press("Space");
-    await expect(axes).toHaveAttribute("aria-pressed", "false");
-    await expect(axes).toBeFocused();
-    expect((await axesFrame(page)).equals(initial)).toBe(false);
-    await page.screenshot({ path: test.info().outputPath("axes-disabled.png") });
-    const hiddenTiming = width === 1280 ? await frameTimes(page) : null;
-    await page.keyboard.press("Enter");
-    await expect(axes).toHaveAttribute("aria-pressed", "true");
-    expect((await axesFrame(page)).equals(initial)).toBe(true);
-    if (width === 1280) {
-      console.log(JSON.stringify({ width, axesHidden: hiddenTiming, axesVisible: await frameTimes(page) }));
-    }
-
-    const canvas = page.getByLabel("3D model with XYZ reference frame", { exact: true });
-    const bounds = await canvas.boundingBox();
-    if (!bounds) throw new Error("Missing CAD canvas");
-    const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
-    await page.mouse.move(center.x, center.y);
-    await page.mouse.down();
-    await page.mouse.move(center.x + 50, center.y + 20, { steps: 8 });
-    await page.mouse.up();
-    const rotated = await axesFrame(page);
-    expect(rotated.equals(initial)).toBe(false);
-    await page.screenshot({ path: test.info().outputPath("axes-orbit.png") });
-
-    await page.mouse.move(center.x, center.y);
-    await page.mouse.down({ button: "right" });
-    await page.mouse.move(center.x + 12, center.y + 8, { steps: 4 });
-    await page.mouse.up({ button: "right" });
-    await page.mouse.wheel(0, 100);
-    expect((await axesFrame(page)).equals(rotated)).toBe(true);
-
-    await page.setViewportSize({ width: width + 40, height: 940 });
-    expect((await axesFrame(page)).equals(rotated)).toBe(true);
-    const buttonBounds = await axes.boundingBox();
-    expect(buttonBounds && buttonBounds.x >= 0 && buttonBounds.x + buttonBounds.width <= width + 40).toBeTruthy();
-    await page.getByRole("button", { name: "Reset camera", exact: true }).click();
-    expect((await axesFrame(page)).equals(initial)).toBe(true);
-    expect(errors).toEqual([]);
-    await test.info().attach("network-requests", { body: JSON.stringify(requests), contentType: "application/json" });
   });
 }

@@ -1,0 +1,54 @@
+/* CAD axis hover target, persistent hidden-axis trigger, and anchored view actions. */
+.viewport {
+  position: absolute;
+  inset: 0;
+}
+
+.corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+
+  /* Matches Three.js ViewHelper's 128px viewport and createCadScene's inset. */
+  width: 128px;
+  height: 128px;
+  pointer-events: none;
+}
+
+.compact {
+  width: 28px;
+  height: 28px;
+}
+
+.trigger {
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  background: var(--color-bg-surface);
+}
+
+.transparent {
+  pointer-events: none;
+  background: none;
+  opacity: 0;
+}
+
+.transparent:focus-visible {
+  opacity: 1;
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: max-content;
+  padding: 0.25rem;
+  pointer-events: auto;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 2px 8px var(--color-shadow-md);
+}
