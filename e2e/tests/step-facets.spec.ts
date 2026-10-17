@@ -1,7 +1,6 @@
-// Browser coverage for direct faceted STEP import and opt-in timing of the supplied dense assembly.
-import { readFileSync } from "node:fs";
+// Browser coverage for direct faceted STEP import and responsive loading of a generated dense assembly.
 import { zipSync } from "three/addons/libs/fflate.module.js";
-import { createFacetedStep } from "../../frontend/tests/step-fixture";
+import { createDenseFacetedStep, createFacetedStep } from "../../frontend/tests/step-fixture";
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 for (const width of [390, 1280]) {
@@ -31,18 +30,12 @@ for (const width of [390, 1280]) {
   });
 }
 
-// Local performance reproduction; the private 24 MB model is not a CI fixture.
-// CAIC_E2E_FACETED_ASSEMBLY=/home/user/src/assembly.stpz pnpm exec playwright test \
-//   --config e2e/playwright.config.ts e2e/tests/step-facets.spec.ts
-test("supplied 192599-triangle faceted STEP assembly finishes loading", async ({
+test("dense faceted STEP assembly finishes loading without blocking the page", async ({
   page,
   context,
   api,
   uniquePrompt,
 }) => {
-  const path = process.env.CAIC_E2E_FACETED_ASSEMBLY;
-  test.skip(!path, "Set CAIC_E2E_FACETED_ASSEMBLY to the supplied assembly.stpz");
-  if (!path) return;
   const errors: string[] = [];
   const wasm: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -52,7 +45,8 @@ test("supplied 192599-triangle faceted STEP assembly finishes loading", async ({
   page.on("request", (request) => {
     if (/occt-import-js.*\.wasm/.test(request.url())) wasm.push(request.url());
   });
-  const body = readFileSync(path);
+  // Four tetrahedron faces, each split into 220² triangles: 193,600 total.
+  const body = Buffer.from(zipSync({ "assembly.stp": createDenseFacetedStep(220) }));
   await context.route("**/raw?*", (route) => route.fulfill({ contentType: "application/zip", body }));
   const id = await createTaskAPI(api, uniquePrompt("Inspect [Assembly](/assembly.stpz)."));
   await waitForTaskState(api, id, "waiting");
@@ -74,7 +68,7 @@ test("supplied 192599-triangle faceted STEP assembly finishes loading", async ({
   });
   const start = performance.now();
   await page.getByRole("link", { name: "Assembly", exact: true }).click();
-  await expect(page.getByText("192,599 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("193,600 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
   const loadMs = performance.now() - start;
   const longestMainThreadMs = await monitor.evaluate((value) => value.stop());
   console.log(JSON.stringify({ facetedAssembly: { loadMs, longestMainThreadMs } }));

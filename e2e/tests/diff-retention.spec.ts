@@ -1,5 +1,5 @@
-// Browser coverage and opt-in heap measurements for collapsed and cached diff payloads.
-// Heap measurements: CAIC_DIFF_HEAP=1 pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/diff-retention.spec.ts --grep 'heap workload' --workers=1.
+// Browser coverage and heap measurements for collapsed and cached diff payloads.
+// Heap measurements: pnpm exec playwright test --config e2e/playwright.config.ts e2e/tests/diff-retention.spec.ts --grep 'heap workload' --workers=1.
 // Run against each production build separately; reported CDP usedSize is measured heap, not the cache's conservative payload estimate.
 
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
@@ -26,7 +26,6 @@ for (const workload of [
   { name: "cache", files: 32, size: 750_000 },
 ]) {
   test(`diff retained heap workload ${workload.name}`, async ({ page, api }, testInfo) => {
-    test.skip(process.env.CAIC_DIFF_HEAP !== "1", "opt-in browser heap measurement");
     const id = await createTaskAPI(api, `Diff retention ${workload.name}`);
     await waitForTaskState(api, id, "waiting");
     const paths = Array.from({ length: workload.files }, (_, index) => `retention-${index}.txt`);

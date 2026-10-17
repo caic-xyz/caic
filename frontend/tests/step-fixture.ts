@@ -1,5 +1,13 @@
-// Generates colored faceted STEP tetrahedra with assembly placements for import tests and benchmarks.
+// Generates colored faceted STEP assemblies, including subdivided tetrahedra for dense import workloads.
 export function createFacetedStep(parts: number, reusePart: boolean): Uint8Array<ArrayBuffer> {
+  return createAssembly(parts, reusePart, 1);
+}
+
+export function createDenseFacetedStep(subdivisions: number): Uint8Array<ArrayBuffer> {
+  return createAssembly(1, false, subdivisions);
+}
+
+function createAssembly(parts: number, reusePart: boolean, subdivisions: number): Uint8Array<ArrayBuffer> {
   const records: string[] = [];
   function emit(body: string): number {
     records.push(`#${records.length + 1}=${body};`);
@@ -44,6 +52,12 @@ export function createFacetedStep(parts: number, reusePart: boolean): Uint8Array
       instances.push({ ...instances[0], placement: placement(point(i * 5, 0, 0), z, i % 2 ? y : x) });
       continue;
     }
+    const coordinates = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ];
     const vertices = [zero, point(1, 0, 0), point(0, 1, 0), point(0, 0, 1)];
     const faces: number[] = [];
     const specs = [
@@ -53,13 +67,39 @@ export function createFacetedStep(parts: number, reusePart: boolean): Uint8Array
       { points: [1, 2, 3], normal: [1, 1, 1], tangent: [-1, 1, 0] },
     ];
     for (const spec of specs) {
-      const loop = emit(`POLY_LOOP('',(${spec.points.map((v) => `#${vertices[v]}`).join(",")}))`);
-      const bound = emit(`FACE_OUTER_BOUND('',#${loop},.T.)`);
       const n = direction(spec.normal[0], spec.normal[1], spec.normal[2]);
       const t = direction(spec.tangent[0], spec.tangent[1], spec.tangent[2]);
       const frame = placement(vertices[spec.points[0]], n, t);
       const plane = emit(`PLANE('',#${frame})`);
-      faces.push(emit(`FACE_SURFACE('',(#${bound}),#${plane},.T.)`));
+      const triangle = (points: number[]) => {
+        const loop = emit(`POLY_LOOP('',(${points.map((v) => `#${v}`).join(",")}))`);
+        const bound = emit(`FACE_OUTER_BOUND('',#${loop},.T.)`);
+        faces.push(emit(`FACE_SURFACE('',(#${bound}),#${plane},.T.)`));
+      };
+      if (subdivisions === 1) {
+        triangle(spec.points.map((v) => vertices[v]));
+        continue;
+      }
+      const [a, b, c] = spec.points.map((v) => coordinates[v]);
+      const rows: number[][] = [];
+      for (let row = 0; row <= subdivisions; row++) {
+        const points: number[] = [];
+        for (let column = 0; column <= subdivisions - row; column++) {
+          const position = a.map(
+            (value, axis) => value + ((b[axis] - value) * row + (c[axis] - value) * column) / subdivisions,
+          );
+          points.push(point(position[0], position[1], position[2]));
+        }
+        rows.push(points);
+      }
+      for (let row = 0; row < subdivisions; row++) {
+        for (let column = 0; column < subdivisions - row; column++) {
+          triangle([rows[row][column], rows[row + 1][column], rows[row][column + 1]]);
+          if (column < subdivisions - row - 1) {
+            triangle([rows[row + 1][column], rows[row + 1][column + 1], rows[row][column + 1]]);
+          }
+        }
+      }
     }
     const shell = emit(`CLOSED_SHELL('',(${faces.map((f) => `#${f}`).join(",")}))`);
     const body = emit(`FACETED_BREP('tetra; ''sample''',#${shell})`);
