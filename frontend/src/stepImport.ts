@@ -1,17 +1,21 @@
-// Parses STEP with the unchanged OCCT importer and prepares transferable geometry entirely off the UI thread.
+// Imports triangular faceted STEP directly, falls back to OCCT for other models, and packs transferable geometry.
 
-import { BufferAttribute, BufferGeometry } from "three";
 import occtimportjs from "occt-import-js";
 import type { OcctInstance, OcctResult } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
 import type { StepMesh } from "./stepProtocol";
+import { readFacetedStep } from "./stepFacets";
+import { createStepMesh } from "./stepMesh";
 
 let occtPromise: Promise<OcctInstance> | null = null;
 
-export function importStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<StepMesh[]> {
+export async function importStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<StepMesh[]> {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const facets = readFacetedStep(bytes);
+  if (facets) return facets;
   // End the input-owning frame before packing results so a large decoded file
   // does not remain referenced while the numeric geometry arrays are converted.
-  return readStep(buffer).then(packStepMeshes);
+  return readStep(bytes).then(packStepMeshes);
 }
 
 async function readStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<OcctResult> {
@@ -45,33 +49,13 @@ function packStepMeshes(result: OcctResult): StepMesh[] {
         ? sourceIndices
         : new Uint32Array(sourceIndices)
       : null;
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", new BufferAttribute(positions, 3));
-    if (indices) geometry.setIndex(new BufferAttribute(indices, 1));
     const sourceNormals = source.attributes.normal?.array;
-    if (sourceNormals) {
-      geometry.setAttribute(
-        "normal",
-        new BufferAttribute(sourceNormals instanceof Float32Array ? sourceNormals : new Float32Array(sourceNormals), 3),
-      );
-    } else {
-      geometry.computeVertexNormals();
-    }
-    geometry.computeBoundingBox();
-    geometry.computeBoundingSphere();
-    const box = geometry.boundingBox;
-    const sphere = geometry.boundingSphere;
-    if (!box || !sphere || box.isEmpty() || !Number.isFinite(sphere.radius))
-      throw new Error("Invalid STEP mesh bounds");
-    meshes[index] = {
-      positions,
-      normals: geometry.getAttribute("normal").array as Float32Array<ArrayBuffer>,
-      indices,
-      color: source.color ?? null,
-      min: [box.min.x, box.min.y, box.min.z],
-      max: [box.max.x, box.max.y, box.max.z],
-      sphere: { center: [sphere.center.x, sphere.center.y, sphere.center.z], radius: sphere.radius },
-    };
+    const normals = sourceNormals
+      ? sourceNormals instanceof Float32Array
+        ? sourceNormals
+        : new Float32Array(sourceNormals)
+      : null;
+    meshes[index] = createStepMesh(positions, normals, indices, source.color ?? null);
   }
   return meshes;
 }
