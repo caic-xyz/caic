@@ -5,7 +5,7 @@ import { expect } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import type { Accessor } from "solid-js";
+import { createSignal, type Accessor } from "solid-js";
 
 import Markdown, { MarkdownTaskContext } from "./Markdown";
 import { clearMermaidCache, renderMermaidDiagram } from "../mermaid";
@@ -128,6 +128,28 @@ describe("Markdown", () => {
     expect(diagram).not.toBeNull();
     expect(diagram?.style.display).toBe("none");
     expect(diagram?.innerHTML).toBe("");
+  });
+
+  it("recovers from incomplete streamed diagrams and restores cached diagrams after raw mode", async () => {
+    const user = userEvent.setup();
+    const [text, setText] = createSignal("```mermaid\nflowchart LR\nA[\n```");
+    render(() => (
+      <Router>
+        <Route path="/*" component={() => <Markdown text={text()} />} />
+      </Router>
+    ));
+    await waitFor(() => expect(screen.getByText(/A\[/)).toBeVisible());
+    setText("```mermaid\nflowchart LR\nA[Complete] --> B[Rendered]\n```");
+    await screen.findByRole("button", { name: "Show code" });
+    expect(screen.getByRole("img", { name: "Mermaid diagram" }).querySelector("svg")?.textContent).toContain(
+      "Complete",
+    );
+    await user.click(screen.getByRole("button", { name: "raw" }));
+    expect(screen.queryByRole("img", { name: "Mermaid diagram" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "rendered" }));
+    expect(screen.getByRole("img", { name: "Mermaid diagram" }).querySelector("svg")?.textContent).toContain(
+      "Rendered",
+    );
   });
 
   it("hides source code and shows diagram placeholder initially to prevent flicker", () => {

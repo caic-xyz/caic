@@ -17,6 +17,9 @@ supports sustained work, not chatbot conversation or dashboard decoration.
   colors communicate state, not decoration.
 - Establish hierarchy through spacing, alignment, typography, and subtle
   separators before adding cards, borders, or shadows.
+- Diagrams use flat fills with white nodes and pale groups. A faint, tight
+  shadow may separate node shapes from their background. Keep labels and
+  connectors crisp; do not filter the whole diagram or add decorative gradients.
 - Use Material Design icons for familiar actions. Keep action buttons
   borderless and transparent, with subtle hover feedback and visible keyboard
   focus. The task-summary collapse and task-detail close controls are the

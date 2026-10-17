@@ -1,4 +1,4 @@
-// Markdown safely renders agent and file text with viewer links, copyable code, strict Mermaid diagrams, and a raw toggle.
+// Markdown safely renders agent and file text with viewer links, copyable code, Pele diagrams, and a raw toggle.
 
 import {
   Show,
@@ -35,7 +35,7 @@ const markdownRenderer = {
     if (token.lang === "mermaid") {
       const cached = getMermaidCachedSvg(token.text);
       if (cached !== null) {
-        // renderMermaidBlocks inserts strict-rendered SVG after Markdown sanitization.
+        // renderMermaidBlocks inserts sanitized diagram SVG after Markdown sanitization.
         return `<div class="${styles.mermaidBlock}" data-mermaid-block><div class="${styles.mermaidToolbar}"><button type="button" class="${styles.mermaidToggleBtn}" data-mermaid-toggle aria-label="Show code" title="Show code">code</button><button type="button" class="${styles.codeCopyBtn}" data-copy-code aria-label="Copy code block" title="Copy code block"><span class="${styles.copyIcon}" aria-hidden="true"></span><span class="${styles.checkIcon}" aria-hidden="true"></span></button></div><div class="${styles.mermaidDiagram}" data-mermaid-diagram role="img" aria-label="Mermaid diagram"></div><div class="${styles.mermaidSource}" data-mermaid-source style="display: none;"><div class="${blockClass}">${code}</div></div></div>\n`;
       }
 

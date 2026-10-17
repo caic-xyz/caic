@@ -285,6 +285,18 @@
 }
 
 .mermaidDiagram {
+  --pele-bg: var(--color-bg-surface);
+  --pele-fg: var(--color-text-primary);
+  --pele-muted: var(--color-text-secondary);
+  --pele-line: var(--color-text-secondary);
+  --pele-surface: var(--color-bg-elevated);
+  --pele-surface-alt: var(--color-bg-input);
+  --pele-border: var(--color-border-strong);
+  --pele-accent: var(--color-primary);
+  --pele-critical: var(--color-danger);
+  --pele-radius: var(--radius-sm);
+  --diagram-node-shadow: drop-shadow(0 1px 1.5px var(--color-shadow-sm));
+
   display: flex;
   justify-content: center;
   min-height: 4rem;
@@ -293,9 +305,21 @@
   background: var(--color-bg-surface);
 }
 
-.mermaidDiagram svg {
+.mermaidDiagram > svg {
   max-width: 100%;
   height: auto;
+}
+
+.mermaidDiagram
+  :global(.pele-node)
+  > :is(rect, circle, ellipse, polygon, path):not([fill="none"], [style*="fill:none" i]) {
+  filter: var(--diagram-node-shadow);
+}
+
+@media print, (forced-colors: active) {
+  .mermaidDiagram {
+    --diagram-node-shadow: none;
+  }
 }
 
 .mermaidPlaceholder {

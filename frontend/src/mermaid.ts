@@ -1,30 +1,23 @@
-// Lazy-loaded Mermaid renderer: compiles diagrams to SVG with caching, responsive sizing, and code toggle.
+// Lazy-loaded Pele renderer for Mermaid syntax: bounded SVG caching, safe insertion, and source toggling.
 
-import type mermaidApi from "mermaid";
+import DOMPurify from "dompurify";
+import type * as peleApi from "pele/lazy";
 
-type MermaidInstance = typeof mermaidApi;
+type Pele = typeof peleApi;
 
-let mermaidPromise: Promise<MermaidInstance> | null = null;
+let pelePromise: Promise<Pele> | null = null;
 let nextDiagramId = 1;
 
 const svgCache = new Map<string, string>();
 const MAX_CACHE_SIZE = 100;
+const MAX_SOURCE_LENGTH = 50_000;
 
-function loadMermaid(): Promise<MermaidInstance> {
-  if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then((m) => {
-      const mermaid = m.default;
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: "neutral",
-        securityLevel: "strict",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        suppressErrorRendering: true,
-      });
-      return mermaid;
-    });
-  }
-  return mermaidPromise;
+function loadPele(): Promise<Pele> {
+  pelePromise ??= import("pele/lazy").catch((error: unknown) => {
+    pelePromise = null;
+    throw error;
+  });
+  return pelePromise;
 }
 
 /**
@@ -42,27 +35,59 @@ export function getMermaidCachedSvg(code: string): string | null {
  */
 export async function renderMermaidDiagram(code: string): Promise<string | null> {
   const trimmed = code.trim();
-  if (!trimmed) return null;
+  // Bound input before Pele's lazy type detection preprocesses the source.
+  if (!trimmed || trimmed.length > MAX_SOURCE_LENGTH) return null;
 
   const cached = svgCache.get(trimmed);
   if (cached !== undefined) return cached;
 
+  let pele: Pele | null = null;
   try {
-    const mermaid = await loadMermaid();
-    const isValid = await mermaid.parse(trimmed, { suppressErrors: true });
-    if (!isValid) return null;
-
-    const id = `mermaid_svg_${nextDiagramId++}`;
-    const { svg } = await mermaid.render(id, trimmed);
+    pele = await loadPele();
+    const { svg } = await pele.renderAsync(trimmed, {
+      autoDirection: false,
+      fontFamily: "system-ui",
+      images: false,
+      links: false,
+      maxEdges: 500,
+      outputLimit: 4_000_000,
+      responsive: true,
+    });
+    // Diagram SVG bypasses Markdown's HTML-only sanitizer. Preserve SVG styling,
+    // but disallow embedded documents, remote resources, navigation, and CSS sheets.
+    const safeSvg = DOMPurify.sanitize(svg, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      FORBID_TAGS: ["a", "foreignObject", "image", "style"],
+    });
 
     if (svgCache.size >= MAX_CACHE_SIZE) {
       const oldest = svgCache.keys().next().value;
       if (oldest !== undefined) svgCache.delete(oldest);
     }
-    svgCache.set(trimmed, svg);
-    return svg;
-  } catch {
+    svgCache.set(trimmed, safeSvg);
+    return safeSvg;
+  } catch (error) {
+    if (!pele || !(error instanceof pele.PeleError)) console.error("Failed to render Mermaid diagram", error);
     return null;
+  }
+}
+
+function insertMermaidSvg(diagramEl: HTMLElement, svg: string): void {
+  diagramEl.innerHTML = svg;
+  const root = diagramEl.querySelector("svg");
+  if (!root) return;
+  // Cached drawings can appear several times in one document. Pele uses IDs for
+  // accessible titles/descriptions; give each inserted instance its own names.
+  const prefix = `mermaid_svg_${nextDiagramId++}`;
+  for (const [tag, attribute] of [
+    ["title", "aria-labelledby"],
+    ["desc", "aria-describedby"],
+  ] as const) {
+    const label = root.querySelector(tag);
+    if (label?.id) {
+      label.id = `${prefix}_${tag}`;
+      root.setAttribute(attribute, label.id);
+    }
   }
 }
 
@@ -116,29 +141,25 @@ export async function renderMermaidBlocks(container: HTMLElement): Promise<void>
     const cached = svgCache.get(code);
     if (cached !== undefined) {
       if (!diagramEl.querySelector("svg")) {
-        diagramEl.innerHTML = cached;
+        insertMermaidSvg(diagramEl, cached);
       }
       block.dataset.renderedCode = code;
       applyMermaidViewState(block, diagramEl, sourceEl, toggleBtn);
       continue;
     }
 
-    const task = renderMermaidDiagram(code)
-      .then((svg) => {
-        const currentCode = block.querySelector<HTMLElement>("pre > code")?.textContent?.trim();
-        if (currentCode !== code) return;
+    const task = renderMermaidDiagram(code).then((svg) => {
+      const currentCode = block.querySelector<HTMLElement>("pre > code")?.textContent?.trim();
+      if (!container.contains(block) || currentCode !== code) return;
 
-        if (svg !== null) {
-          diagramEl.innerHTML = svg;
-          block.dataset.renderedCode = code;
-          applyMermaidViewState(block, diagramEl, sourceEl, toggleBtn);
-        } else {
-          showMermaidFallback(diagramEl, sourceEl, toggleBtn);
-        }
-      })
-      .catch(() => {
+      if (svg !== null) {
+        insertMermaidSvg(diagramEl, svg);
+        block.dataset.renderedCode = code;
+        applyMermaidViewState(block, diagramEl, sourceEl, toggleBtn);
+      } else {
         showMermaidFallback(diagramEl, sourceEl, toggleBtn);
-      });
+      }
+    });
 
     tasks.push(task);
   }

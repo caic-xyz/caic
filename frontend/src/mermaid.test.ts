@@ -1,4 +1,4 @@
-// Tests Mermaid diagram compilation, syntax failure fallback, caching, and view toggling.
+// Tests Pele diagram compatibility, security limits, cached accessibility, streaming replacement, and source toggling.
 
 import { beforeEach, describe, it } from "node:test";
 import { expect } from "@tests/expect";
@@ -38,6 +38,78 @@ describe("mermaid", () => {
 
     const second = await renderMermaidDiagram("graph TD;\nX-->Y;");
     expect(second).toBe(first);
+  });
+
+  for (const [name, code] of [
+    ["sequence", "sequenceDiagram\nAlice->>Bob: Hello"],
+    ["class", "classDiagram\nAnimal <|-- Duck"],
+    ["state", "stateDiagram-v2\n[*] --> Ready\nReady --> [*]"],
+    ["architecture", "architecture-beta\nservice api(server)[API]\nservice db(database)[Database]\napi:R -- L:db"],
+  ]) {
+    it(`renders ${name} diagrams`, async () => {
+      expect(await renderMermaidDiagram(code)).toContain("<svg");
+    });
+  }
+
+  it("disables links, remote images, and HTML labels", async () => {
+    const svg = await renderMermaidDiagram(`flowchart LR
+      A["<img src=x onerror=alert(1)>"] --> B
+      B@{ img: "https://example.com/diagram.png", label: "Remote image" }
+      click A "https://example.com/"
+    `);
+    expect(svg).not.toBeNull();
+    const container = document.createElement("div");
+    container.innerHTML = svg ?? "";
+    expect(container.querySelector("script, style, foreignObject, a, image, img, [href], [onerror]")).toBeNull();
+    expect(svg).not.toContain("https://example.com");
+  });
+
+  it("falls back for oversized sources and expanded edge counts", async () => {
+    expect(await renderMermaidDiagram("flowchart TD\n" + "A".repeat(50_000))).toBeNull();
+    const edges = Array.from({ length: 501 }, (_, i) => `A --> B${i}`).join("\n");
+    expect(await renderMermaidDiagram(`flowchart TD\n${edges}`)).toBeNull();
+  });
+
+  it("gives repeated cached diagrams independent accessible titles and descriptions", async () => {
+    const code = "flowchart LR\naccTitle: Pipeline\naccDescr: Build and test\nA --> B";
+    await renderMermaidDiagram(code);
+    const container = document.createElement("div");
+    container.innerHTML = Array.from(
+      { length: 2 },
+      () => `
+      <div data-mermaid-block>
+        <button data-mermaid-toggle></button>
+        <div data-mermaid-diagram></div>
+        <div data-mermaid-source><pre><code>${code}</code></pre></div>
+      </div>`,
+    ).join("");
+    await renderMermaidBlocks(container);
+    const ids: string[] = [];
+    for (const svg of container.querySelectorAll("svg")) {
+      const title = svg.querySelector("title");
+      const description = svg.querySelector("desc");
+      expect(title?.textContent).toBe("Pipeline");
+      expect(description?.textContent).toBe("Build and test");
+      expect(svg.getAttribute("aria-labelledby")).toBe(title?.id);
+      expect(svg.getAttribute("aria-describedby")).toBe(description?.id);
+      ids.push(title?.id ?? "", description?.id ?? "");
+    }
+    expect(ids).toHaveLength(4);
+    expect(new Set(ids).size).toBe(4);
+  });
+
+  it("ignores blocks replaced while a diagram loads", async () => {
+    const container = document.createElement("div");
+    container.innerHTML = `<div data-mermaid-block>
+      <button data-mermaid-toggle></button>
+      <div data-mermaid-diagram></div>
+      <div data-mermaid-source><pre><code>flowchart LR\nOld --> Drawing</code></pre></div>
+    </div>`;
+    const oldDiagram = container.querySelector("[data-mermaid-diagram]");
+    const pending = renderMermaidBlocks(container);
+    container.replaceChildren();
+    await pending;
+    expect(oldDiagram?.innerHTML).toBe("");
   });
 
   it("renders diagram into data-mermaid-block container", async () => {
