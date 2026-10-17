@@ -1,6 +1,6 @@
 // Shared form control components for task harness selects and capability toggles.
 
-import { createEffect, For, Show, splitProps, type JSX } from "solid-js";
+import { createEffect, createMemo, For, Show, splitProps, type JSX } from "solid-js";
 
 import type { HarnessInfo } from "@sdk/types.gen";
 
@@ -58,15 +58,17 @@ export function HarnessControls(props: {
     const nextHarness = props.harnesses[next];
     if (nextHarness) props.onHarness(nextHarness.name);
   };
-  const modelOptions = () =>
-    (props.harnesses.find((h) => h.name === props.harness)?.models ?? []).map((model) => ({
+  // Quota ordering and clock updates retain the selected harness's model menu.
+  const selectedHarness = createMemo(() => props.harnesses.find((h) => h.name === props.harness));
+  const modelOptions = createMemo(() =>
+    (selectedHarness()?.models ?? []).map((model) => ({
       value: model.id,
       label: model.id as JSX.Element,
       search: model.id,
-    }));
+    })),
+  );
   const efforts = () => {
-    const harness = props.harnesses.find((h) => h.name === props.harness);
-    const model = harness?.models.find((candidate) => candidate.id === props.model);
+    const model = selectedHarness()?.models.find((candidate) => candidate.id === props.model);
     return model?.effortOptions ?? [];
   };
   return (

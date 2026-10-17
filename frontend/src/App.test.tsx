@@ -2975,7 +2975,8 @@ describe("App repo chips: No repository", () => {
   }
 
   it("adopts a delayed recommendation without overwriting explicit target choices", async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     vi.mocked(api.listHarnesses).mockResolvedValue([
       {
         name: "claude",
@@ -3053,13 +3054,17 @@ describe("App repo chips: No repository", () => {
     dispatchUsageSSE(codexUsage("stale"));
     await user.click(screen.getByTestId("quota-recovery-detail-action"));
     await user.click(screen.getByRole("button", { name: "Fork Model" }));
-    await user.click(
-      within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole("option", {
-        name: "claude-explicit",
-      }),
-    );
+    const explicitModel = within(screen.getByRole("listbox", { name: "Fork Model" })).getByRole("option", {
+      name: "claude-explicit",
+    });
+    // A clock tick between press and release must not replace the clicked option.
+    await user.pointer({ target: explicitModel, keys: "[MouseLeft>]" });
+    vi.advanceTimersByTime(1000);
+    await user.pointer({ keys: "[/MouseLeft]" });
     dispatchUsageSSE(codexUsage("fresh"));
     await Promise.resolve();
+    expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
+    vi.advanceTimersByTime(1000);
     expect(screen.getByRole("combobox", { name: "Fork Harness" })).toHaveValue("claude");
     expect(screen.getByRole("button", { name: "Fork Model" })).toHaveTextContent("claude-explicit");
 
