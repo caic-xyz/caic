@@ -1,13 +1,15 @@
 // Packs typed STEP geometry with flat or supplied normals and validated bounds for worker transfer.
 import { BufferAttribute, BufferGeometry } from "three";
-import type { StepMesh } from "./stepProtocol";
+import type { StepImportTimings, StepMesh } from "./stepProtocol";
 
 export function createStepMesh(
   positions: Float32Array<ArrayBuffer>,
   normals: Float32Array<ArrayBuffer> | null,
   indices: Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer> | null,
   color: [number, number, number] | null,
+  timings?: StepImportTimings,
 ): StepMesh {
+  const started = timings ? performance.now() : 0;
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new BufferAttribute(positions, 3));
   if (indices) geometry.setIndex(new BufferAttribute(indices, 1));
@@ -18,6 +20,7 @@ export function createStepMesh(
   const box = geometry.boundingBox;
   const sphere = geometry.boundingSphere;
   if (!box || !sphere || box.isEmpty() || !Number.isFinite(sphere.radius)) throw new Error("Invalid STEP mesh bounds");
+  if (timings) timings.packingMs += performance.now() - started;
   return {
     positions,
     normals: geometry.getAttribute("normal").array as Float32Array<ArrayBuffer>,

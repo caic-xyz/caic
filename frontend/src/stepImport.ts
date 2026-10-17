@@ -1,24 +1,41 @@
-// Imports triangular faceted STEP directly, falls back to OCCT for other models, and packs transferable geometry.
+// Imports planar faceted STEP directly, falls back to OCCT for other models, and packs transferable geometry.
 
 import occtimportjs from "occt-import-js";
 import type { OcctInstance, OcctResult } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
-import type { StepMesh } from "./stepProtocol";
-import { readFacetedStep } from "./stepFacets";
+import type { CadProgress, StepImportTimings, StepMesh } from "./stepProtocol";
+import type { FacetedStepReader } from "./stepFacets";
 import { createStepMesh } from "./stepMesh";
 
 let occtPromise: Promise<OcctInstance> | null = null;
 
-export async function importStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<StepMesh[]> {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const facets = readFacetedStep(bytes);
+export async function importStep(
+  reader: FacetedStepReader,
+  timings?: StepImportTimings,
+  progress?: CadProgress,
+): Promise<StepMesh[]> {
+  const started = performance.now();
+  const previousPacking = timings?.packingMs ?? 0;
+  const facets = reader.meshes(timings, progress);
+  if (timings) timings.directParseMs += performance.now() - started - (timings.packingMs - previousPacking);
   if (facets) return facets;
+  progress?.({ stage: "parse", parseStep: "occt-init", completed: null, total: null });
   // End the input-owning frame before packing results so a large decoded file
   // does not remain referenced while the numeric geometry arrays are converted.
-  return readStep(bytes).then(packStepMeshes);
+  return readStep(reader.takeContiguous(), timings, progress).then((result) => {
+    const packingStarted = performance.now();
+    const meshes = packStepMeshes(result);
+    if (timings) timings.packingMs += performance.now() - packingStarted;
+    return meshes;
+  });
 }
 
-async function readStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<OcctResult> {
+async function readStep(
+  buffer: ArrayBuffer | Uint8Array<ArrayBuffer>,
+  timings: StepImportTimings | undefined,
+  progress: CadProgress | undefined,
+): Promise<OcctResult> {
+  const initStarted = performance.now();
   if (!occtPromise) {
     const isNode = typeof process !== "undefined" && Boolean(process.versions?.node);
     occtPromise = occtimportjs({
@@ -26,7 +43,12 @@ async function readStep(buffer: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<
     });
   }
   const occt = await occtPromise;
-  return occt.ReadStepFile(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer), null);
+  const parseStarted = performance.now();
+  if (timings) timings.occtInitMs += parseStarted - initStarted;
+  progress?.({ stage: "parse", parseStep: "occt", completed: null, total: null });
+  const result = occt.ReadStepFile(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer), null);
+  if (timings) timings.occtParseMs += performance.now() - parseStarted;
+  return result;
 }
 
 function packStepMeshes(result: OcctResult): StepMesh[] {

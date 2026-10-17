@@ -1,5 +1,6 @@
 // Runs one cancellable STEP worker per load and releases its WASM heap after completion or cancellation.
 
+import type { StepLoadTimings } from "./stepTimings";
 import type { CadProgress, StepMesh, StepMessage, StepRequest } from "./stepProtocol";
 
 export function loadStep(
@@ -7,9 +8,11 @@ export function loadStep(
   path: string,
   signal: AbortSignal,
   progress: CadProgress,
+  timings?: StepLoadTimings,
 ): Promise<StepMesh[]> {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
+    timings?.startWorker();
     const worker = new Worker(new URL("./stepWorker.ts", import.meta.url), { type: "module" });
     function cleanup() {
       signal.removeEventListener("abort", abort);
@@ -21,12 +24,14 @@ export function loadStep(
     }
     signal.addEventListener("abort", abort, { once: true });
     worker.onmessage = (event: MessageEvent<StepMessage>) => {
+      if (signal.aborted) return;
       const message = event.data;
       switch (message.type) {
         case "progress":
           progress(message.progress);
           break;
         case "result":
+          timings?.receiveWorker(message.timings);
           cleanup();
           resolve(message.meshes);
           break;

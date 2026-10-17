@@ -1,4 +1,4 @@
-// Generates colored faceted STEP assemblies, including subdivided tetrahedra for dense import workloads.
+// Generates faceted STEP assemblies, dense tetrahedra, rigid frames, and polygon prisms for import checks.
 export function createFacetedStep(parts: number, reusePart: boolean): Uint8Array<ArrayBuffer> {
   return createAssembly(parts, reusePart, 1);
 }
@@ -141,4 +141,86 @@ ${records.join("\n")}
 ENDSEC;
 END-ISO-10303-21;
 `);
+}
+
+// Closed prisms exercise polygon coverage without relying on a particular diagonal.
+export function createPolygonStep(contour: readonly [number, number][], reversed: boolean, instances: number): string {
+  const source = new TextDecoder().decode(createFacetedStep(instances, true));
+  const records: string[] = [];
+  const emit = (entity: string) => {
+    const id = 10000000 + records.length;
+    records.push(`#${id}=${entity};`);
+    return id;
+  };
+  const coordinates = [0, 1].flatMap((z) => contour.map(([x, y]) => [x, y, z]));
+  const points = coordinates.map((p) => emit(`CARTESIAN_POINT('',(${p.join(",")}))`));
+  const n = contour.length;
+  const loops = [Array.from({ length: n }, (_, i) => n - i - 1), Array.from({ length: n }, (_, i) => n + i)];
+  for (let i = 0; i < n; i++) loops.push([i, (i + 1) % n, ((i + 1) % n) + n, i + n]);
+  const faces = loops.map((indices) => {
+    const [a, b, c] = indices.map((i) => coordinates[i]);
+    const ab = b.map((v, i) => v - a[i]);
+    const ac = c.map((v, i) => v - a[i]);
+    const normal = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    const z = emit(`DIRECTION('',(${normal.map((v) => (reversed ? -v : v)).join(",")}))`);
+    const x = emit(`DIRECTION('',(${ab.join(",")}))`);
+    const placement = emit(`AXIS2_PLACEMENT_3D('',#${points[indices[0]]},#${z},#${x})`);
+    const plane = emit(`PLANE('',#${placement})`);
+    const loop = emit(`POLY_LOOP('',(${indices.map((i) => `#${points[i]}`).join(",")}))`);
+    const bound = emit(`FACE_OUTER_BOUND('',#${loop},.T.)`);
+    return emit(`FACE_SURFACE('',(#${bound}),#${plane},.${reversed ? "F" : "T"}.)`);
+  });
+  return source
+    .replace(/CLOSED_SHELL\('',\([^)]+\)\)/, `CLOSED_SHELL('',(${faces.map((id) => `#${id}`).join(",")}))`)
+    .replace("ENDSEC;\nEND-ISO-10303-21;", `${records.join("\n")}\nENDSEC;\nEND-ISO-10303-21;`);
+}
+
+// Noncommuting frames expose the difference between S^-1*T and T*S^-1.
+// The wrapper rotates around X and Y while reused parts rotate around Z.
+export function createFramedStep(parts: number, reusePart: boolean, nested: boolean): string {
+  const source = new TextDecoder().decode(createFacetedStep(parts, reusePart));
+  function match(pattern: RegExp) {
+    const result = source.match(pattern);
+    if (!result) throw new Error("Missing STEP assembly fixture entity");
+    return result;
+  }
+  const [, base] = match(/ITEM_DEFINED_TRANSFORMATION\('','',#(\d+),/);
+  const [, z, x] = match(new RegExp(`#${base}=AXIS2_PLACEMENT_3D\\('',#\\d+,#(\\d+),#(\\d+)\\)`));
+  const [, y] = match(/#(\d+)=DIRECTION\('',\(0,1,0\)\)/);
+  const [, root, items, context] = match(/^#(\d+)=SHAPE_REPRESENTATION\('',\(([^\n]+)\),#(\d+)\);$/m);
+  const [, product] = match(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','[^']*','',#(\d+),/);
+  const [, app] = match(/PRODUCT_CONTEXT\('',#(\d+),/);
+  let records = "#900000001=CARTESIAN_POINT('',(2,3,4));\n";
+  if (nested)
+    records += `
+#900000002=PRODUCT_CONTEXT('',#${app},'mechanical');
+#900000003=PRODUCT('wrapper','wrapper','',(#900000002));
+#900000004=PRODUCT_DEFINITION_FORMATION('','',#900000003);
+#900000005=PRODUCT_DEFINITION_CONTEXT('part definition',#${app},'design');
+#900000006=PRODUCT_DEFINITION('design','',#900000004,#900000005);
+#900000007=PRODUCT_DEFINITION_SHAPE('','',#900000006);
+#900000008=CARTESIAN_POINT('',(7,11,13));
+#900000009=DIRECTION('',(0,-1,0));
+#900000010=AXIS2_PLACEMENT_3D('',#900000008,#900000009,#${x});
+#900000011=CARTESIAN_POINT('',(17,19,23));
+#900000012=DIRECTION('',(0,0,-1));
+#900000013=AXIS2_PLACEMENT_3D('',#900000011,#${x},#900000012);
+#900000014=SHAPE_REPRESENTATION('',(#900000013),#${context});
+#900000015=SHAPE_DEFINITION_REPRESENTATION(#900000007,#900000014);
+#900000016=ITEM_DEFINED_TRANSFORMATION('','',#900000010,#900000013);
+#900000017=(REPRESENTATION_RELATIONSHIP('','',#${root},#900000014)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#900000016)SHAPE_REPRESENTATION_RELATIONSHIP());
+#900000018=NEXT_ASSEMBLY_USAGE_OCCURRENCE('wrapper','','',#900000006,#${product},$);
+#900000019=PRODUCT_DEFINITION_SHAPE('','',#900000018);
+#900000020=CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#900000017,#900000019);
+`;
+  let framed = source.replace(
+    new RegExp(`(#${base}=AXIS2_PLACEMENT_3D\\('',)#\\d+,#\\d+,#\\d+`),
+    `$1#900000001,#${z},#${y}`,
+  );
+  if (nested)
+    framed = framed.replace(
+      `#${root}=SHAPE_REPRESENTATION('',(${items}),#${context});`,
+      `#${root}=SHAPE_REPRESENTATION('',(${items},#900000010),#${context});`,
+    );
+  return framed.replace("ENDSEC;\nEND-ISO-10303-21;", `${records}ENDSEC;\nEND-ISO-10303-21;`);
 }

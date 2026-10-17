@@ -1,6 +1,6 @@
 // Streams bounded STEP downloads with progress and reads task-file previews and other CAD formats.
 
-import { isCompressedStepPath, isStepPath, taskRawURL } from "./runtimePath";
+import { isCompressedStepPath, taskRawURL } from "./runtimePath";
 
 const maxTextBytes = 1 << 20;
 const imageTypes = new Set(["image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/webp"]);
@@ -51,52 +51,74 @@ export async function readTaskFilePreview(taskId: string, path: string, signal: 
   }
 }
 
-/** Reads the raw binary contents of a task runtime file. */
+function contentLength(res: Response): number | null {
+  const advertised = res.headers.get("Content-Encoding") ? null : res.headers.get("Content-Length");
+  return advertised !== null && /^\d+$/.test(advertised) && Number.isSafeInteger(Number(advertised))
+    ? Number(advertised)
+    : null;
+}
+
+// Other CAD formats need a complete buffer; STEP uses the bounded consumer below.
 export async function readTaskBinaryFile(
   taskId: string,
   path: string,
   signal: AbortSignal,
   progress: ((completed: number, total: number | null) => void) | null,
-): Promise<ArrayBuffer | Uint8Array<ArrayBuffer>> {
+): Promise<ArrayBuffer> {
   const res = await fetchTaskFile(taskId, path, signal);
   signal.throwIfAborted();
-  const advertised = res.headers.get("Content-Encoding") ? null : res.headers.get("Content-Length");
-  const total =
-    advertised !== null && /^\d+$/.test(advertised) && Number.isSafeInteger(Number(advertised))
-      ? Number(advertised)
-      : null;
-  progress?.(0, total);
-  if (!isStepPath(path)) {
-    const buffer = await res.arrayBuffer();
-    signal.throwIfAborted();
-    progress?.(buffer.byteLength, buffer.byteLength);
-    return buffer;
-  }
-  if (!res.body) return new ArrayBuffer(0);
+  progress?.(0, contentLength(res));
+  const buffer = await res.arrayBuffer();
+  signal.throwIfAborted();
+  progress?.(buffer.byteLength, buffer.byteLength);
+  return buffer;
+}
+
+// The consumer runs synchronously before the next read. There is no application
+// queue of compressed chunks; inflate and indexing apply network backpressure.
+export async function streamTaskStepFile(
+  taskId: string,
+  path: string,
+  signal: AbortSignal,
+  consume: (chunk: Uint8Array<ArrayBuffer>) => void,
+  progress: (completed: number, total: number | null) => void,
+): Promise<number> {
+  const started = performance.now();
+  const res = await fetchTaskFile(taskId, path, signal);
+  let waitingMs = performance.now() - started;
+  signal.throwIfAborted();
+  const total = contentLength(res);
+  progress(0, total);
+  if (!res.body) return waitingMs;
   const reader = res.body.getReader();
-  // Keep one destination allocation and return a view of the received prefix;
-  // slicing or Blob assembly would copy the complete compressed file.
   const compressed = isCompressedStepPath(path);
   const limit = (compressed ? 64 : 512) * 1024 * 1024;
-  const capacity = !compressed && total !== null && total > 0 && total <= limit ? total : limit;
-  const bytes = new Uint8Array(capacity);
   let size = 0;
   try {
     for (;;) {
+      const before = performance.now();
       const { done, value } = await reader.read();
+      waitingMs += performance.now() - before;
+      signal.throwIfAborted();
       if (done) break;
       size += value.byteLength;
-      signal.throwIfAborted();
       if (size > limit)
         throw new Error(compressed ? "Compressed STEP file exceeds 64 MiB" : "STEP file exceeds 512 MiB");
-      if (size > capacity) throw new Error("STEP download exceeds Content-Length");
-      bytes.set(value, size - value.byteLength);
-      progress?.(size, total !== null && size <= total ? total : null);
-      signal.throwIfAborted();
+      if (!compressed && total !== null && size > total) throw new Error("STEP download exceeds Content-Length");
+      // Cap each consumer call even when a mocked response or browser provides
+      // a large chunk. The archive decoder further bounds inflate input slices.
+      for (let offset = 0; offset < value.length; offset += 65536) {
+        signal.throwIfAborted();
+        consume(value.subarray(offset, offset + 65536));
+        // Network receipt and decoding progress are independent: a browser
+        // chunk may already contain the full file while indexing still grows.
+        progress(size, total !== null && size <= total ? total : null);
+        signal.throwIfAborted();
+      }
     }
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
-  return bytes.subarray(0, size);
+  return waitingMs;
 }

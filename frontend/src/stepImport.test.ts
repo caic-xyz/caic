@@ -5,14 +5,23 @@ import { BufferGeometry, Mesh } from "three";
 import { gzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { expect, vi } from "@tests/expect";
 import { importStep } from "./stepImport";
-import { decompressStep } from "./stepCompression";
+import { StepDecompressor } from "./stepCompression";
+import { FacetedStepReader } from "./stepFacets";
 import { computeModelInfo, createStepGroup, disposeCadGroup } from "./cad";
+
+function input(bytes: Uint8Array<ArrayBuffer>, path: string) {
+  const reader = new FacetedStepReader();
+  const decoder = new StepDecompressor(path, (chunk) => reader.push(chunk));
+  for (let offset = 0; offset < bytes.length; offset += 1024) decoder.push(bytes.subarray(offset, offset + 1024));
+  decoder.finish();
+  return reader;
+}
 
 const cube = readFileSync("node_modules/occt-import-js/test/testfiles/simple-basic-cube/cube.stp");
 
 describe("STEP import", () => {
   it("packs geometry, normals, and bounds and shares its buffers with Three.js", async () => {
-    const data = await importStep(cube);
+    const data = await importStep(input(cube, "cube.step"));
     const group = await createStepGroup(data, new AbortController().signal, () => {});
     const info = computeModelInfo(group);
     expect(info.triangleCount).toBe(12);
@@ -34,7 +43,7 @@ describe("STEP import", () => {
   it("imports compressed STEP variants through the same geometry packer", async () => {
     for (const path of ["cube.stpz", "cube.step.zip", "cube.stp.zip", "cube.step.gz", "cube.stp.gz"]) {
       const compressed = path.endsWith(".gz") ? gzipSync(cube) : zipSync({ "models/cube.STP": cube });
-      const data = await importStep(await decompressStep(compressed.buffer as ArrayBuffer, path, null));
+      const data = await importStep(input(compressed, path));
       expect(data).toHaveLength(1);
       expect(data[0].indices?.length).toBe(36);
     }
@@ -46,11 +55,11 @@ describe("STEP import", () => {
     const joined = new Uint8Array(members[0].length + members[1].length);
     joined.set(members[0]);
     joined.set(members[1], members[0].length);
-    expect(await importStep(await decompressStep(joined, "cube.step.gz", null))).toHaveLength(1);
+    expect(await importStep(input(joined, "cube.step.gz"))).toHaveLength(1);
   });
 
   it("yields while assembling many meshes and disposes a cancelled partial model", async () => {
-    const data = await importStep(cube);
+    const data = await importStep(input(cube, "cube.step"));
     const controller = new AbortController();
     const disposed = vi.spyOn(BufferGeometry.prototype, "dispose");
     const timer = setTimeout(() => controller.abort(), 0);
@@ -70,8 +79,10 @@ describe("STEP import", () => {
   });
 
   it("rejects malformed STEP and aborts mesh assembly without retaining a partial model", async () => {
-    await expect(importStep(new TextEncoder().encode("not STEP"))).rejects.toThrow("Failed to parse STEP");
-    const data = await importStep(cube);
+    await expect(importStep(input(new TextEncoder().encode("not STEP"), "bad.step"))).rejects.toThrow(
+      "Failed to parse STEP",
+    );
+    const data = await importStep(input(cube, "cube.step"));
     const controller = new AbortController();
     controller.abort();
     await expect(createStepGroup(data, controller.signal, () => {})).rejects.toThrow();

@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
 import { isStlPath, isStepPath } from "./runtimePath";
+import type { StepLoadTimings } from "./stepTimings";
 import { loadStep } from "./stepWorkerClient";
 import { readTaskBinaryFile } from "./taskFile";
 import type { CadProgress, StepMesh } from "./stepProtocol";
@@ -34,6 +35,7 @@ export interface CadModelInfo {
 
 export interface CadScene {
   loadModel(model: ParsedCad, signal: AbortSignal, progress: CadProgress): Promise<CadModelInfo>;
+  whenRendered(signal: AbortSignal): Promise<void>;
   clearModel(): void;
   setViewMode(mode: CadViewMode): void;
   setAxesVisible(visible: boolean): void;
@@ -125,12 +127,16 @@ export async function loadCadFile(
   filename: string,
   signal: AbortSignal,
   progress: CadProgress,
+  timings?: StepLoadTimings,
 ): Promise<ParsedCad> {
   signal.throwIfAborted();
   if (isStepPath(filename)) {
-    const meshes = await loadStep(taskId, filename, signal, progress);
+    const meshes = await loadStep(taskId, filename, signal, progress, timings);
     signal.throwIfAborted();
-    return { group: await createStepGroup(meshes, signal, progress), plates: [] };
+    const started = performance.now();
+    const group = await createStepGroup(meshes, signal, progress);
+    if (timings) timings.meshSetupMs = performance.now() - started;
+    return { group, plates: [] };
   }
   const buffer = await readTaskBinaryFile(taskId, filename, signal, (completed, total) =>
     progress({ stage: "download", completed, total }),
@@ -409,6 +415,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
   const initialCameraPos = new THREE.Vector3();
   let animId: number | null = null;
   let isDestroyed = false;
+  let rendered: (() => void) | null = null;
 
   function animate() {
     if (isDestroyed) return;
@@ -418,6 +425,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
     renderer.clear();
     renderer.render(scene, camera);
     if (axes.visible) axes.render(renderer);
+    if (rendered && currentGroup && canvas.getBoundingClientRect().width > 0) rendered();
   }
   animate();
 
@@ -489,6 +497,25 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
         releaseCandidate();
         throw error;
       }
+    },
+
+    whenRendered(signal: AbortSignal): Promise<void> {
+      return new Promise((resolve, reject) => {
+        signal.throwIfAborted();
+        function cleanup() {
+          rendered = null;
+          signal.removeEventListener("abort", abort);
+        }
+        function abort() {
+          cleanup();
+          reject(signal.reason);
+        }
+        signal.addEventListener("abort", abort, { once: true });
+        rendered = () => {
+          cleanup();
+          resolve();
+        };
+      });
     },
 
     clearModel,

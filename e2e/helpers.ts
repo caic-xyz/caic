@@ -1,12 +1,30 @@
 // Shared e2e test helpers: typed API client and utilities.
-import { test as base, expect, type APIRequestContext } from "@playwright/test";
+import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
+import type { StepLoadTimingReport } from "../frontend/src/stepTimings";
 import type { Task } from "../sdk/caic/ts/v1/types.gen";
+
+// Observe diagnostic entries without exposing a test-only hook in the viewer.
+export async function collectStepTimings(page: Page): Promise<StepLoadTimingReport[]> {
+  const reports: StepLoadTimingReport[] = [];
+  page.on("console", async (message) => {
+    if (message.type() === "debug" && message.text().startsWith("Observed STEP timing"))
+      reports.push((await message.args()[1].jsonValue()) as StepLoadTimingReport);
+  });
+  await page.addInitScript(() => {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries())
+        if (entry.name === "caic.step.load")
+          console.debug("Observed STEP timing", (entry as PerformanceMeasure).detail);
+    }).observe({ type: "measure" });
+  });
+  return reports;
+}
 
 // ---------------------------------------------------------------------------
 // Adapt Playwright's APIRequestContext to the SDK's FetchFn interface.

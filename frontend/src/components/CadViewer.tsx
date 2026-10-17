@@ -1,4 +1,4 @@
-// CAD pane with cancellable STEP loading, display modes, and corner axis/reset controls.
+// CAD pane with timed cancellable STEP loading, slow-import recovery, and display/axis controls.
 
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Dynamic } from "solid-js/web";
@@ -13,6 +13,8 @@ import RetryIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 
 import styles from "./CadViewer.module.css";
 import type { CadModelInfo, CadScene, CadViewMode } from "../cad";
+import { isStepPath } from "../runtimePath";
+import { StepLoadTimings } from "../stepTimings";
 import type { CadLoadProgress } from "../stepProtocol";
 
 interface Props {
@@ -28,6 +30,7 @@ const VIEW_MODES = {
 } as const;
 
 export default function CadViewer(props: Props) {
+  let cancelRef: HTMLButtonElement | undefined;
   let retryRef: HTMLButtonElement | undefined;
   let canvasRef: HTMLCanvasElement | undefined;
   let wrapRef: HTMLDivElement | undefined;
@@ -37,23 +40,43 @@ export default function CadViewer(props: Props) {
 
   const [loading, setLoading] = createSignal(true);
   const [cancelled, setCancelled] = createSignal(false);
+  const [elapsedSeconds, setElapsedSeconds] = createSignal(0);
+  const [slowImport, setSlowImport] = createSignal(false);
   const [progress, setProgress] = createSignal<CadLoadProgress>({ stage: "download", completed: 0, total: null });
-  const stageLabel = () =>
-    ({
+  const stageLabel = () => {
+    const step = progress().parseStep;
+    if (progress().stage === "download" && progress().decodedBytes !== undefined) return "Downloading and reading STEP";
+    if (progress().stage === "parse" && step === "occt-init") return "Preparing STEP parser";
+    if (progress().stage === "parse" && step === "geometry") return "Extracting STEP faces";
+    return {
       download: "Downloading model",
-      decompress: "Decompressing STEP",
       parse: "Parsing STEP",
       meshes: "Preparing meshes",
       render: "Preparing view",
-    })[progress().stage];
+    }[progress().stage];
+  };
   const progressValue = () => {
     const value = progress();
     return value.total !== null && value.total > 0 && value.completed !== null ? value.completed : undefined;
   };
   const progressText = () => {
     const value = progress();
-    if (value.total !== null && value.total > 0 && value.completed !== null)
+    if (value.stage === "download" && value.decodedBytes !== undefined) {
+      const received =
+        value.total !== null && value.total > 0 && value.completed !== null
+          ? `${Math.floor((value.completed / value.total) * 100)}% received`
+          : `${((value.completed ?? 0) / 1024 / 1024).toFixed(1)} MiB received`;
+      return value.indexedRecords !== null && value.indexedRecords !== undefined
+        ? `${received} · ${value.indexedRecords.toLocaleString()} records indexed`
+        : `${received} · ${(value.decodedBytes / 1024 / 1024).toFixed(1)} MiB decoded`;
+    }
+    if (value.total !== null && value.total > 0 && value.completed !== null) {
+      if (value.stage === "parse")
+        return value.parseStep === "geometry"
+          ? `${value.completed.toLocaleString()} / ${value.total.toLocaleString()} faces`
+          : `${(value.completed / 1024 / 1024).toFixed(1)} / ${(value.total / 1024 / 1024).toFixed(1)} MiB`;
       return `${Math.floor((value.completed / value.total) * 100)}%`;
+    }
     return value.stage === "download" && value.completed !== null
       ? `${(value.completed / 1024 / 1024).toFixed(1)} MiB received`
       : "";
@@ -93,24 +116,55 @@ export default function CadViewer(props: Props) {
   }
 
   async function loadModelData(taskId: string, filePath: string) {
+    const restoreCancelFocus = document.activeElement === retryRef;
     abortController?.abort();
     scene?.clearModel();
     const controller = new AbortController();
     const { signal } = controller;
+    const timings = isStepPath(filePath) ? new StepLoadTimings() : undefined;
     abortController = controller;
     setLoading(true);
     setCancelled(false);
     setError(null);
     setModelInfo(null);
     setProgress({ stage: "download", completed: 0, total: null });
+    setElapsedSeconds(0);
+    setSlowImport(false);
+    if (restoreCancelFocus) queueMicrotask(() => cancelRef?.focus());
+    const started = performance.now();
+    let occtStarted: number | null = null;
+    // The kernel runs synchronously in its worker. Own its clock here so elapsed
+    // feedback and cancellation remain available without worker messages. A slow
+    // hint starts after ten seconds inside OCCT, excluding parser initialization.
+    const timer = timings
+      ? setInterval(() => {
+          if (signal.aborted || abortController !== controller) return;
+          const now = performance.now();
+          setElapsedSeconds(Math.floor((now - started) / 1000));
+          setSlowImport(occtStarted !== null && now - occtStarted >= 10_000);
+        }, 1000)
+      : null;
+    const stopTimer = () => {
+      if (timer !== null) clearInterval(timer);
+    };
+    signal.addEventListener("abort", stopTimer, { once: true });
     const report = (value: CadLoadProgress) => {
-      if (!signal.aborted) setProgress(value);
+      if (signal.aborted) return;
+      if (value.stage === "parse" && value.parseStep === "occt") {
+        occtStarted ??= performance.now();
+      } else {
+        occtStarted = null;
+        setSlowImport(false);
+      }
+      setProgress(value);
     };
     try {
       const { createCadScene, isWebGLSupported, loadCadFile, computeModelInfo, disposeCadGroup } =
         await import("../cad");
       signal.throwIfAborted();
-      const model = await loadCadFile(taskId, filePath, signal, report);
+      const model = await loadCadFile(taskId, filePath, signal, report, timings);
+      signal.throwIfAborted();
+      const sceneStarted = performance.now();
       const hasWebGL = isWebGLSupported();
       setWebglAvailable(hasWebGL);
       if (hasWebGL && canvasRef) {
@@ -122,9 +176,18 @@ export default function CadViewer(props: Props) {
         signal.throwIfAborted();
         scene.setViewMode(viewMode());
         setModelInfo(info);
+        if (timings) timings.sceneSetupMs = performance.now() - sceneStarted;
+        setLoading(false);
+        const frameStarted = performance.now();
         if (wrapRef) {
           const rect = wrapRef.getBoundingClientRect();
           scene.resize(rect.width, rect.height);
+        }
+        await scene.whenRendered(signal);
+        signal.throwIfAborted();
+        if (timings) {
+          timings.firstFrameMs = performance.now() - frameStarted;
+          timings.report();
         }
       } else {
         try {
@@ -139,6 +202,8 @@ export default function CadViewer(props: Props) {
       setLoading(false);
       setError(err instanceof Error ? err.message : "Failed to load 3D model");
     } finally {
+      stopTimer();
+      signal.removeEventListener("abort", stopTimer);
       if (abortController === controller) abortController = null;
     }
   }
@@ -197,28 +262,42 @@ export default function CadViewer(props: Props) {
             </p>
             <ActionButton ref={retryRef} label="Retry" onClick={() => void loadModelData(props.taskId, props.path)}>
               <RetryIcon width={20} height={20} />
+              Retry
             </ActionButton>
           </div>
         </Show>
         <Show when={loading()}>
-          <div class={styles.loading} aria-busy="true">
-            <p class={styles.loadingMessage} role="status">
-              {stageLabel()}…
-            </p>
-            <Show
-              when={progressValue() !== undefined}
-              fallback={<progress class={styles.progress} aria-label={stageLabel()} />}
-            >
-              <progress
-                class={styles.progress}
-                aria-label={stageLabel()}
-                max={progress().total ?? 1}
-                value={progressValue() ?? 0}
-              />
+          <div class={styles.loading}>
+            <div class={styles.loadingProgress} aria-busy="true">
+              <p class={styles.loadingMessage} role="status">
+                {stageLabel()}…
+              </p>
+              <Show
+                when={progressValue() !== undefined}
+                fallback={<progress class={styles.progress} aria-label={stageLabel()} />}
+              >
+                <progress
+                  class={styles.progress}
+                  aria-label={stageLabel()}
+                  max={progress().total ?? 1}
+                  value={progressValue() ?? 0}
+                />
+              </Show>
+              <span class={styles.progressDetails}>{progressText()}</span>
+            </div>
+            <Show when={isStepPath(props.path)}>
+              <div class={styles.loadFeedback}>
+                <span class={styles.progressDetails}>Elapsed: {elapsedSeconds()} s</span>
+                <p class={styles.slowMessage} role="status">
+                  {slowImport()
+                    ? "This model is taking longer to parse. You can keep waiting or cancel and retry."
+                    : ""}
+                </p>
+              </div>
             </Show>
-            <span class={styles.progressDetails}>{progressText()}</span>
-            <ActionButton label="Cancel loading" onClick={cancelLoad}>
+            <ActionButton ref={cancelRef} label="Cancel loading" onClick={cancelLoad}>
               <CancelIcon width={20} height={20} />
+              Cancel loading
             </ActionButton>
           </div>
         </Show>

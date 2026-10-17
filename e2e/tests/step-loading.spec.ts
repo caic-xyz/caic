@@ -2,7 +2,7 @@
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { zipSync } from "three/addons/libs/fflate.module.js";
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, collectStepTimings } from "../helpers";
 
 const cube = readFileSync("node_modules/occt-import-js/test/testfiles/simple-basic-cube/cube.stp", "utf8");
 const archive = Buffer.from(zipSync({ "cube.stp": new TextEncoder().encode(cube) }));
@@ -21,6 +21,7 @@ function nextStepWorker(page: Page) {
 for (const width of [390, 1280]) {
   test(`STEP loading survives fullscreen transitions at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
+    const diagnostics = await collectStepTimings(page);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const gate = Promise.withResolvers<void>();
@@ -54,6 +55,10 @@ for (const width of [390, 1280]) {
       gate.resolve();
       await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
       await closed;
+      await expect.poll(() => diagnostics.length).toBe(1);
+      expect(diagnostics[0].stages.occtParseMs).toBeGreaterThan(0);
+      expect(diagnostics[0].stages.firstFrameMs).toBeGreaterThan(0);
+      expect(diagnostics[0].unaccountedMs).toBeGreaterThanOrEqual(0);
       await expect(page.getByLabel(/^3D model/)).toBeVisible();
       expect(page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
       expect(loads).toBe(1);
@@ -66,6 +71,7 @@ for (const width of [390, 1280]) {
 
   test(`STEP cancellation, retry, and file switching at ${width}px`, async ({ page, context, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 900 });
+    const diagnostics = await collectStepTimings(page);
     let loads = 0;
     const gate = Promise.withResolvers<void>();
     const errors: string[] = [];
@@ -95,6 +101,7 @@ for (const width of [390, 1280]) {
       await expect(page.getByRole("progressbar", { name: "Downloading model" })).toBeVisible();
       await page.getByRole("button", { name: "Cancel loading", exact: true }).click();
       await closed;
+      expect(diagnostics).toHaveLength(0);
       await expect(page.getByRole("status")).toHaveText("Model loading cancelled.");
       await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeFocused();
       const retryStarted = nextStepWorker(page);
@@ -102,6 +109,7 @@ for (const width of [390, 1280]) {
       const { closed: retryClosed } = await retryStarted;
       await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
       await retryClosed;
+      await expect.poll(() => diagnostics.length).toBe(1);
       expect(loads).toBe(2);
       await page.keyboard.press("Escape");
       const switchedStarted = nextStepWorker(page);

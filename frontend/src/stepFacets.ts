@@ -1,7 +1,8 @@
-// Reads complete triangular planar STEP assemblies directly; unsupported representations use the OCCT importer.
-import { Color, Matrix4, SRGBColorSpace, Vector3 } from "three";
+// Incrementally indexes paged STEP bytes and resolves complete planar faceted assemblies; unsupported models use OCCT.
+import { Color, Matrix4, ShapeUtils, SRGBColorSpace, Vector2, Vector3 } from "three";
 import { createStepMesh } from "./stepMesh";
-import type { StepMesh } from "./stepProtocol";
+import { StepBytes } from "./stepBytes";
+import type { CadProgress, StepImportTimings, StepMesh } from "./stepProtocol";
 
 // Only this closed subset can bypass OCCT. In particular, curves, holes,
 // mapped representations, face styles, and alternate surface types must never
@@ -101,72 +102,96 @@ function flag(value: Value | undefined): boolean {
   return text === "T";
 }
 
-// STEP strings escape quotes by doubling them. Semicolons inside strings or
-// comments are not record boundaries. Scan bytes to avoid a second 512 MiB
-// whole-file string; decode only individual entities when they are needed.
-function scan(bytes: Uint8Array, visit: (id: number, start: number, end: number) => void) {
-  let start = 0;
-  let quoted = false;
-  let comment = false;
-  let section = 0;
-  const decoder = new TextDecoder();
-  for (let i = 0; i < bytes.length; i++) {
-    const c = bytes[i];
-    if (comment) {
-      if (c === 42 && bytes[i + 1] === 47) {
-        comment = false;
-        i++;
+// Incremental lexical states retain only the boundary state, never a growing
+// record string. Quotes, doubled quotes and comments can straddle any chunk.
+class Scanner {
+  private offset = 0;
+  private start = 0;
+  private state: "normal" | "quote" | "after-quote" | "slash" | "comment" | "star" = "normal";
+  private section = 0;
+  constructor(
+    private readonly bytes: StepBytes,
+    private readonly visit: (id: number, start: number, end: number) => void,
+  ) {}
+
+  push(chunk: Uint8Array) {
+    for (let i = 0; i < chunk.length; i++, this.offset++) {
+      const c = chunk[i];
+      if (this.state === "comment" || this.state === "star") {
+        this.state = this.state === "star" && c === 47 ? "normal" : c === 42 ? "star" : "comment";
+        continue;
       }
-    } else if (quoted) {
-      if (c === 39) {
-        if (bytes[i + 1] === 39) i++;
-        else quoted = false;
+      if (this.state === "quote") {
+        if (c === 39) this.state = "after-quote";
+        continue;
       }
-    } else if (c === 47 && bytes[i + 1] === 42) {
-      comment = true;
-      i++;
-    } else if (c === 39) quoted = true;
-    else if (c === 59) {
-      let p = start;
-      while (p < i) {
-        if (bytes[p] <= 32) p++;
-        else if (bytes[p] === 47 && bytes[p + 1] === 42) {
-          p += 2;
-          while (p < i && !(bytes[p] === 42 && bytes[p + 1] === 47)) p++;
-          p += 2;
-        } else break;
+      if (this.state === "after-quote") {
+        if (c === 39) {
+          this.state = "quote";
+          continue;
+        }
+        this.state = "normal";
       }
-      if (bytes[p] === 35) {
-        requireSupported(section === 4);
-        let id = 0;
-        p++;
-        const digits = p;
-        while (bytes[p] >= 48 && bytes[p] <= 57) id = id * 10 + bytes[p++] - 48;
-        requireSupported(p > digits && id > 0 && id <= 0xffffffff);
-        while (bytes[p] <= 32) p++;
-        requireSupported(bytes[p++] === 61);
-        visit(id, p, i);
-      } else {
-        const statement = decoder.decode(bytes.subarray(p, i)).trim();
-        if (section === 0 && statement === "ISO-10303-21") section = 1;
-        else if (section === 1 && statement === "HEADER") section = 2;
-        else if (section === 2 && statement === "ENDSEC") section = 3;
-        else if (section === 3 && statement === "DATA") section = 4;
-        else if (section === 4 && statement === "ENDSEC") section = 5;
-        else if (section === 5 && statement === "END-ISO-10303-21") section = 6;
-        else {
-          requireSupported(section === 2);
-          const header = new Arguments(statement).read();
-          requireSupported(
-            header.length === 1 && ["FILE_DESCRIPTION", "FILE_NAME", "FILE_SCHEMA"].includes(header[0].name),
-          );
+      if (this.state === "slash") {
+        this.state = "normal";
+        if (c === 42) {
+          this.state = "comment";
+          continue;
         }
       }
-      start = i + 1;
+      if (c === 47) this.state = "slash";
+      else if (c === 39) this.state = "quote";
+      else if (c === 59) {
+        this.record(this.offset);
+        this.start = this.offset + 1;
+      }
     }
   }
-  requireSupported(!quoted && !comment && section === 6);
-  for (let i = start; i < bytes.length; i++) requireSupported(bytes[i] <= 32);
+  private record(end: number) {
+    const bytes = this.bytes;
+    let p = this.start;
+    while (p < end) {
+      if (bytes.byte(p) <= 32) p++;
+      else if (bytes.byte(p) === 47 && bytes.byte(p + 1) === 42) {
+        p += 2;
+        while (p < end && !(bytes.byte(p) === 42 && bytes.byte(p + 1) === 47)) p++;
+        p += 2;
+      } else break;
+    }
+    if (bytes.byte(p) === 35) {
+      requireSupported(this.section === 4);
+      let id = 0;
+      p++;
+      const digits = p;
+      while (bytes.byte(p) >= 48 && bytes.byte(p) <= 57) id = id * 10 + bytes.byte(p++) - 48;
+      requireSupported(p > digits && id > 0 && id <= 0xffffffff);
+      while (bytes.byte(p) <= 32) p++;
+      requireSupported(bytes.byte(p++) === 61);
+      this.visit(id, p, end);
+    } else {
+      // Headers are small metadata; avoid decoding an unbounded non-entity
+      // statement into a second whole-file string before opting out.
+      requireSupported(end - p <= 1024 * 1024);
+      const statement = bytes.text(p, end).trim();
+      if (this.section === 0 && statement === "ISO-10303-21") this.section = 1;
+      else if (this.section === 1 && statement === "HEADER") this.section = 2;
+      else if (this.section === 2 && statement === "ENDSEC") this.section = 3;
+      else if (this.section === 3 && statement === "DATA") this.section = 4;
+      else if (this.section === 4 && statement === "ENDSEC") this.section = 5;
+      else if (this.section === 5 && statement === "END-ISO-10303-21") this.section = 6;
+      else {
+        requireSupported(this.section === 2);
+        const header = new Arguments(statement).read();
+        requireSupported(
+          header.length === 1 && ["FILE_DESCRIPTION", "FILE_NAME", "FILE_SCHEMA"].includes(header[0].name),
+        );
+      }
+    }
+  }
+  finish() {
+    requireSupported((this.state === "normal" || this.state === "after-quote") && this.section === 6);
+    for (let i = this.start; i < this.offset; i++) requireSupported(this.bytes.byte(i) <= 32);
+  }
 }
 
 class Arguments {
@@ -212,6 +237,30 @@ class Arguments {
     requireSupported(Number.isFinite(value));
     return value;
   }
+  // Counting shell references before extraction establishes truthful progress
+  // without allocating a decoded Value object for each face in the assembly.
+  shellFaceCount(): number {
+    this.expect("CLOSED_SHELL");
+    this.expect("(");
+    requireSupported(this.next().startsWith("'"));
+    this.expect(",");
+    this.expect("(");
+    let count = 0;
+    let token = this.next();
+    if (token !== ")")
+      while (true) {
+        requireSupported(/^#[0-9]+$/.test(token));
+        count++;
+        token = this.next();
+        if (token === ")") break;
+        requireSupported(token === ",");
+        token = this.next();
+      }
+    this.expect(")");
+    requireSupported(this.text.slice(this.offset).trim() === "");
+    return count;
+  }
+
   read(): Entity[] {
     const first = this.next();
     const entities: Entity[] = [];
@@ -233,17 +282,18 @@ class Arguments {
   }
 }
 
+// Fixed index pages avoid a counting pass and growing whole-index copies.
+const indexPageSize = 65536;
 class Records {
-  private readonly decoder = new TextDecoder();
-  private readonly ids: Uint32Array;
-  private readonly starts: Uint32Array;
-  private readonly ends: Uint32Array;
-  private readonly order: Uint32Array | null;
+  private readonly pages: Uint32Array[] = [];
+  private count = 0;
+  private sorted = true;
+  private order: Uint32Array | null = null;
   readonly metadata = new Map<string, number[]>();
-  constructor(private readonly bytes: Uint8Array) {
-    let count = 0;
-    scan(bytes, (id, start, end) => {
-      const head = this.decoder.decode(bytes.subarray(start, Math.min(start + 128, end)));
+  private readonly scanner: Scanner;
+  constructor(private readonly bytes: StepBytes) {
+    this.scanner = new Scanner(bytes, (id, start, end) => {
+      const head = bytes.text(start, Math.min(start + 128, end));
       const match = /^\s*([A-Z_][A-Z_0-9]*|\()/.exec(head);
       requireSupported(match);
       const name = match[1] === "(" ? "" : match[1];
@@ -253,44 +303,54 @@ class Records {
         if (entries) entries.push(id);
         else this.metadata.set(name, [id]);
       }
-      count++;
+      if (this.count && id <= this.field(this.count - 1, 0)) this.sorted = false;
+      if (this.count % indexPageSize === 0) this.pages.push(new Uint32Array(indexPageSize * 3));
+      const page = this.pages[this.pages.length - 1];
+      const offset = (this.count % indexPageSize) * 3;
+      page[offset] = id;
+      page[offset + 1] = start;
+      page[offset + 2] = end;
+      this.count++;
     });
-    requireSupported(this.metadata.has("FACETED_BREP"));
-    this.ids = new Uint32Array(count);
-    this.starts = new Uint32Array(count);
-    this.ends = new Uint32Array(count);
-    let index = 0;
-    let sorted = true;
-    scan(bytes, (id, start, end) => {
-      if (index && id <= this.ids[index - 1]) sorted = false;
-      this.ids[index] = id;
-      this.starts[index] = start;
-      this.ends[index++] = end;
-    });
-    this.order = sorted
-      ? null
-      : Uint32Array.from({ length: count }, (_, i) => i).sort((a, b) => this.ids[a] - this.ids[b]);
-    for (let i = 1; i < count; i++) {
-      requireSupported(this.ids[this.order?.[i - 1] ?? i - 1] < this.ids[this.order?.[i] ?? i]);
-    }
-    for (const id of this.metadata.get("") ?? []) {
-      requireSupported(this.read(id).every((entity) => Object.hasOwn(compoundTypes, entity.name)));
-    }
   }
-  read(id: number): Entity[] {
+  push(chunk: Uint8Array) {
+    this.scanner.push(chunk);
+  }
+  get length(): number {
+    return this.count;
+  }
+  private field(index: number, field: number): number {
+    return this.pages[Math.floor(index / indexPageSize)][(index % indexPageSize) * 3 + field];
+  }
+  finish() {
+    this.scanner.finish();
+    requireSupported(this.metadata.has("FACETED_BREP"));
+    this.order = this.sorted
+      ? null
+      : Uint32Array.from({ length: this.count }, (_, i) => i).sort((a, b) => this.field(a, 0) - this.field(b, 0));
+    for (let i = 1; i < this.count; i++)
+      requireSupported(this.field(this.order?.[i - 1] ?? i - 1, 0) < this.field(this.order?.[i] ?? i, 0));
+    for (const id of this.metadata.get("") ?? [])
+      requireSupported(this.read(id).every((entity) => Object.hasOwn(compoundTypes, entity.name)));
+  }
+  private text(id: number): string {
     let lo = 0;
-    let hi = this.ids.length;
+    let hi = this.count;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
       const candidate = this.order?.[mid] ?? mid;
-      if (this.ids[candidate] < id) lo = mid + 1;
+      if (this.field(candidate, 0) < id) lo = mid + 1;
       else hi = mid;
     }
     const index = this.order?.[lo] ?? lo;
-    requireSupported(lo < this.ids.length && this.ids[index] === id);
-    const entities = new Arguments(
-      this.decoder.decode(this.bytes.subarray(this.starts[index], this.ends[index])),
-    ).read();
+    requireSupported(lo < this.count && this.field(index, 0) === id);
+    return this.bytes.text(this.field(index, 1), this.field(index, 2));
+  }
+  shellFaceCount(id: number): number {
+    return new Arguments(this.text(id)).shellFaceCount();
+  }
+  read(id: number): Entity[] {
+    const entities = new Arguments(this.text(id)).read();
     requireSupported(entities.length > 0);
     for (const entity of entities) {
       const arity = Object.hasOwn(supported, entity.name) ? supported[entity.name] : compoundTypes[entity.name];
@@ -308,20 +368,63 @@ class Records {
   }
 }
 
-export function readFacetedStep(bytes: Uint8Array<ArrayBuffer>): StepMesh[] | null {
-  try {
-    return new FacetedAssembly(new Records(bytes)).meshes();
-  } catch (error) {
-    if (error instanceof Unsupported) return null;
-    throw error;
+export class FacetedStepReader {
+  private readonly bytes = new StepBytes();
+  private records: Records | null = new Records(this.bytes);
+  private state: "reading" | "fallback" | "consumed" = "reading";
+  get byteLength(): number {
+    return this.bytes.length;
+  }
+  takeContiguous(): Uint8Array<ArrayBuffer> {
+    if (this.state !== "fallback") throw new Error("STEP input is not available for kernel parsing");
+    this.state = "consumed";
+    return this.bytes.takeContiguous();
+  }
+  get indexedRecords(): number | null {
+    return this.records?.length ?? null;
+  }
+  push(chunk: Uint8Array) {
+    if (this.state !== "reading") throw new Error("STEP input is already finalized");
+    this.bytes.append(chunk);
+    try {
+      this.records?.push(chunk);
+    } catch (error) {
+      if (!(error instanceof Unsupported)) throw error;
+      this.records = null;
+    }
+  }
+  meshes(timings: StepImportTimings | undefined, progress: CadProgress | undefined): StepMesh[] | null {
+    if (this.state !== "reading") throw new Error("STEP input is already finalized");
+    this.state = "consumed";
+    if (!this.records) {
+      this.state = "fallback";
+      return null;
+    }
+    try {
+      this.records.finish();
+      const meshes = new FacetedAssembly(this.records, timings, progress).meshes();
+      this.bytes.release();
+      return meshes;
+    } catch (error) {
+      if (!(error instanceof Unsupported)) throw error;
+      this.state = "fallback";
+      return null;
+    } finally {
+      this.records = null;
+    }
   }
 }
 
 class FacetedAssembly {
   private readonly points = new Map<number, Vector3>();
   private readonly placements = new Map<number, Matrix4>();
+  private polygonChecks = 0;
   private readonly colors = new Map<number, [number, number, number]>();
-  constructor(private readonly records: Records) {}
+  constructor(
+    private readonly records: Records,
+    private readonly timings: StepImportTimings | undefined,
+    private readonly progress: CadProgress | undefined,
+  ) {}
   private vector(id: number, name: string): Vector3 {
     const args = this.records.get(id, name);
     const values = list(args[1]);
@@ -342,7 +445,9 @@ class FacetedAssembly {
     const args = this.records.get(id, "AXIS2_PLACEMENT_3D");
     const z = args[2] === null ? new Vector3(0, 0, 1) : this.vector(reference(args[2]), "DIRECTION");
     const x = args[3] === null ? new Vector3(1, 0, 0) : this.vector(reference(args[3]), "DIRECTION");
-    requireSupported(z.lengthSq() > 0 && x.lengthSq() > 0);
+    requireSupported(
+      z.lengthSq() > 0 && x.lengthSq() > 0 && Number.isFinite(z.lengthSq()) && Number.isFinite(x.lengthSq()),
+    );
     z.normalize();
     x.addScaledVector(z, -x.dot(z));
     requireSupported(x.lengthSq() > 1e-20);
@@ -474,27 +579,36 @@ class FacetedAssembly {
       requireSupported(
         rel && trans && relationship.some((entity) => entity.name === "SHAPE_REPRESENTATION_RELATIONSHIP"),
       );
-      const childId = reference(rel.args[2]);
-      const parentId = reference(rel.args[3]);
-      const parent = representations.get(parentId);
-      const child = representations.get(childId);
-      requireSupported(parent && child);
       const shape = r.get(reference(args[1]), "PRODUCT_DEFINITION_SHAPE");
       const occurrenceId = reference(shape[2]);
       requireSupported(!occurrences.has(occurrenceId));
       occurrences.add(occurrenceId);
       const occurrence = r.get(occurrenceId, "NEXT_ASSEMBLY_USAGE_OCCURRENCE");
+      // Product ownership resolves the relationship independently of its order.
+      const parentId = products.get(reference(occurrence[3]));
+      const childId = products.get(reference(occurrence[4]));
+      requireSupported(parentId !== undefined && childId !== undefined && parentId !== childId);
       requireSupported(
-        products.get(reference(occurrence[3])) === parentId && products.get(reference(occurrence[4])) === childId,
+        (reference(rel.args[2]) === childId && reference(rel.args[3]) === parentId) ||
+          (reference(rel.args[2]) === parentId && reference(rel.args[3]) === childId),
       );
+      const parent = representations.get(parentId);
+      const child = representations.get(childId);
+      requireSupported(parent && child);
       const transform = r.get(reference(trans.args[0]), "ITEM_DEFINED_TRANSFORMATION");
-      const source = reference(transform[2]);
-      const target = reference(transform[3]);
-      // Only explicit child-origin to parent placements bypass the CAD kernel.
-      // Reversed items and nonidentity source frames need OCCT's frame resolution.
-      requireSupported(child.items.has(source) && parent.items.has(target));
-      requireSupported(this.placement(source).equals(new Matrix4()));
-      const matrix = this.placement(target);
+      const first = reference(transform[2]);
+      const second = reference(transform[3]);
+      const forward = child.items.has(first) && parent.items.has(second);
+      const reverse = child.items.has(second) && parent.items.has(first);
+      // OCCT repairs swapped items by ownership. Shared frames that permit
+      // both interpretations remain ambiguous and require the complete kernel.
+      requireSupported(forward !== reverse);
+      const source = this.placement(forward ? first : second);
+      const target = this.placement(forward ? second : first);
+      // Match ComputeTransformation's SetTransformation(target, source): S^-1*T,
+      // not T*S^-1. See OCCT d2abb6d's STEPControl_ActorRead.cxx:1806 and
+      // gp_Trsf.cxx:206 (the version pinned by occt-import-js 0.0.23).
+      const matrix = source.clone().invert().multiply(target);
       parent.children.push({ id: childId, transform: matrix });
       children.add(childId);
     }
@@ -503,10 +617,16 @@ class FacetedAssembly {
       if (r.read(id).some((entity) => entity.name === "REPRESENTATION_RELATIONSHIP"))
         requireSupported(relationships.has(id));
     }
-    const result: StepMesh[] = [];
+    // Establish the total over assembled occurrences before extracting faces.
+    // Reused parts contribute once per visible instance. Bound output before
+    // allocating geometry, and retain only small body jobs alongside the index.
+    const jobs: { body: number; shell: number; count: number; matrix: Matrix4 }[] = [];
+    const bodyInfo = new Map<number, { shell: number; count: number }>();
+    let total = 0;
     const used = new Set<number>();
     const visited = new Set<number>();
     const scale = this.unit(context);
+    const outputLimit = 256 * 1024 * 1024;
     let outputBytes = 0;
     const visit = (id: number, matrix: Matrix4, path: Set<number>) => {
       requireSupported(!path.has(id) && path.size < 128);
@@ -515,21 +635,18 @@ class FacetedAssembly {
       const representation = representations.get(id);
       requireSupported(representation);
       for (const body of representation.bodies) {
-        const faces = list(r.get(reference(r.get(body, "FACETED_BREP")[1]), "CLOSED_SHELL")[1]);
-        requireSupported(faces.length > 0);
-        outputBytes += faces.length * 9 * 4 * 2;
-        if (outputBytes > 256 * 1024 * 1024) throw new Error("STEP preview geometry exceeds 256 MiB");
-        const positions = new Float32Array(faces.length * 9);
-        for (let i = 0; i < faces.length; i++) {
-          const triangle = this.triangle(reference(faces[i]));
-          for (let j = 0; j < 3; j++)
-            triangle[j]
-              .clone()
-              .applyMatrix4(matrix)
-              .multiplyScalar(scale)
-              .toArray(positions, i * 9 + j * 3);
+        let info = bodyInfo.get(body);
+        if (!info) {
+          const shell = reference(r.get(body, "FACETED_BREP")[1]);
+          const count = r.shellFaceCount(shell);
+          requireSupported(count > 0);
+          info = { shell, count };
+          bodyInfo.set(body, info);
         }
-        result.push(createStepMesh(positions, null, null, this.colors.get(body) ?? null));
+        outputBytes += info.count * 9 * 4 * 2;
+        if (outputBytes > outputLimit) throw new Error("STEP preview geometry exceeds 256 MiB");
+        jobs.push({ body, ...info, matrix });
+        total += info.count;
         used.add(body);
       }
       for (const child of representation.children) visit(child.id, matrix.clone().multiply(child.transform), path);
@@ -537,11 +654,54 @@ class FacetedAssembly {
     };
     for (const id of representations.keys()) if (!children.has(id)) visit(id, new Matrix4(), new Set());
     requireSupported(
-      result.length > 0 && used.size === r.entries("FACETED_BREP").length && visited.size === representations.size,
+      jobs.length > 0 && used.size === r.entries("FACETED_BREP").length && visited.size === representations.size,
     );
+    const result: StepMesh[] = [];
+    let completed = 0;
+    const report = () => this.progress?.({ stage: "parse", parseStep: "geometry", completed, total });
+    report();
+    for (const { body, shell, count, matrix } of jobs) {
+      // Decode only the current body's face references, even for reused parts.
+      const faces = list(r.get(shell, "CLOSED_SHELL")[1]);
+      let positions = new Float32Array(count * 9);
+      let offset = 0;
+      for (const face of faces) {
+        const triangles = this.triangles(reference(face));
+        outputBytes += (triangles.length - 3) * 3 * 4 * 2;
+        if (outputBytes > outputLimit) throw new Error("STEP preview geometry exceeds 256 MiB");
+        const needed = offset + triangles.length * 3;
+        if (needed > positions.length) {
+          // Only polygonal bodies grow. Triangular imports retain one exact
+          // allocation; spare capacity is bounded by the same output budget.
+          const capacity = Math.min(
+            Math.max(needed, positions.length * 2),
+            needed + Math.floor((outputLimit - outputBytes) / 8),
+          );
+          const grown = new Float32Array(capacity);
+          grown.set(positions);
+          positions = grown;
+        }
+        for (const point of triangles) {
+          point.clone().applyMatrix4(matrix).multiplyScalar(scale).toArray(positions, offset);
+          offset += 3;
+        }
+        completed++;
+        if (completed % 256 === 0) report();
+      }
+      result.push(
+        createStepMesh(
+          offset === positions.length ? positions : positions.slice(0, offset),
+          null,
+          null,
+          this.colors.get(body) ?? null,
+          this.timings,
+        ),
+      );
+    }
+    report();
     return result;
   }
-  private triangle(id: number): Vector3[] {
+  private triangles(id: number): Vector3[] {
     const entities = this.records.read(id);
     requireSupported(entities.length === 1);
     const { name, args } = entities[0];
@@ -550,13 +710,25 @@ class FacetedAssembly {
     requireSupported(bounds.length === 1);
     const bound = this.records.get(reference(bounds[0]), "FACE_OUTER_BOUND");
     const points = list(this.records.get(reference(bound[1]), "POLY_LOOP")[1]);
-    requireSupported(points.length === 3);
+    // Quadratic simplicity checks are restricted to small polygons. Large or
+    // ambiguous contours use OCCT wholesale rather than risking worker stalls.
+    requireSupported(points.length >= 3 && points.length <= 256);
     const triangle = points.map((value) => this.point(reference(value)));
     requireSupported(flag(bound[2]));
     const cross = new Vector3()
       .subVectors(triangle[1], triangle[0])
       .cross(new Vector3().subVectors(triangle[2], triangle[0]));
-    requireSupported(cross.lengthSq() > 0);
+    if (triangle.length > 3) {
+      cross.set(0, 0, 0);
+      for (let i = 1; i < triangle.length - 1; i++)
+        cross.add(
+          new Vector3()
+            .subVectors(triangle[i], triangle[0])
+            .cross(new Vector3().subVectors(triangle[i + 1], triangle[0])),
+        );
+    }
+    requireSupported(cross.lengthSq() > 0 && Number.isFinite(cross.lengthSq()));
+    let planeOrigin = triangle[0];
     if (name === "FACE_SURFACE") {
       const plane = this.records.get(reference(args[2]), "PLANE");
       const placement = this.records.get(reference(plane[1]), "AXIS2_PLACEMENT_3D");
@@ -568,9 +740,86 @@ class FacetedAssembly {
         requireSupported(x.cross(normal).lengthSq() > 0);
       }
       requireSupported(cross.clone().normalize().dot(normal) > 1 - 1e-5);
-      const origin = this.point(reference(placement[1]));
-      requireSupported(Math.abs(new Vector3().subVectors(triangle[0], origin).dot(normal)) < 1e-5);
+      planeOrigin = this.point(reference(placement[1]));
+      requireSupported(Math.abs(new Vector3().subVectors(triangle[0], planeOrigin).dot(normal)) < 1e-5);
+      if (triangle.length > 3) cross.copy(normal);
     }
-    return triangle;
+    if (triangle.length === 3) return triangle;
+    return this.polygon(triangle, cross.normalize(), planeOrigin);
+  }
+  private polygon(points: Vector3[], normal: Vector3, planeOrigin: Vector3): Vector3[] {
+    const n = points.length;
+    this.polygonChecks += (n * (n - 3)) / 2;
+    requireSupported(this.polygonChecks <= 2000000);
+    const origin = points[0];
+    const extent = Math.max(...points.map((p) => p.distanceTo(origin)));
+    const magnitude = Math.max(...points.flatMap((p) => [Math.abs(p.x), Math.abs(p.y), Math.abs(p.z)]));
+    const roundoff = magnitude * Number.EPSILON * 16;
+    requireSupported(Number.isFinite(extent) && extent > 0 && roundoff <= extent * 1e-6);
+    const tolerance = Math.max(extent * 1e-9, roundoff);
+    requireSupported(points.every((p) => Math.abs(new Vector3().subVectors(p, planeOrigin).dot(normal)) <= tolerance));
+    const axis =
+      Math.abs(normal.x) > Math.abs(normal.y)
+        ? Math.abs(normal.x) > Math.abs(normal.z)
+          ? 0
+          : 2
+        : Math.abs(normal.y) > Math.abs(normal.z)
+          ? 1
+          : 2;
+    const contour = points.map((p) => {
+      const v = p.clone().sub(origin).divideScalar(extent);
+      return axis === 0 ? new Vector2(v.y, v.z) : axis === 1 ? new Vector2(v.x, v.z) : new Vector2(v.x, v.y);
+    });
+    // Projection coordinates are normalized; tolerances do not depend on STEP length units.
+    const epsilon = 1e-10;
+    const turn = (a: Vector2, b: Vector2, c: Vector2) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    for (let i = 0; i < n; i++) {
+      const a = contour[i],
+        b = contour[(i + 1) % n];
+      requireSupported(Math.abs(turn(a, b, contour[(i + 2) % n])) > epsilon);
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;
+        const c = contour[j],
+          d = contour[(j + 1) % n];
+        if (
+          Math.max(a.x, b.x) < Math.min(c.x, d.x) - epsilon ||
+          Math.max(c.x, d.x) < Math.min(a.x, b.x) - epsilon ||
+          Math.max(a.y, b.y) < Math.min(c.y, d.y) - epsilon ||
+          Math.max(c.y, d.y) < Math.min(a.y, b.y) - epsilon
+        )
+          continue;
+        const abC = turn(a, b, c),
+          abD = turn(a, b, d),
+          cdA = turn(c, d, a),
+          cdB = turn(c, d, b);
+        requireSupported(
+          !(
+            Math.min(abC, abD) <= epsilon &&
+            Math.max(abC, abD) >= -epsilon &&
+            Math.min(cdA, cdB) <= epsilon &&
+            Math.max(cdA, cdB) >= -epsilon
+          ),
+        );
+      }
+    }
+    const area = Math.abs(ShapeUtils.area(contour));
+    requireSupported(area > epsilon);
+    const faces = ShapeUtils.triangulateShape(contour, []);
+    requireSupported(faces.length === n - 2);
+    const result: Vector3[] = [];
+    let covered = 0;
+    for (const [a, b, c] of faces) {
+      const triangleArea = Math.abs(turn(contour[a], contour[b], contour[c])) / 2;
+      requireSupported(triangleArea > epsilon);
+      covered += triangleArea;
+      const direction = new Vector3()
+        .subVectors(points[b], points[a])
+        .cross(new Vector3().subVectors(points[c], points[a]))
+        .dot(normal);
+      requireSupported(Number.isFinite(direction) && direction !== 0);
+      result.push(points[a], points[direction > 0 ? b : c], points[direction > 0 ? c : b]);
+    }
+    requireSupported(Math.abs(covered - area) <= Math.max(epsilon, area * 1e-9));
+    return result;
   }
 }

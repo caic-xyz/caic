@@ -1,4 +1,4 @@
-// Tests CAD viewer progress stages, cancellation and retry, model metrics, failures, and keyboard navigation.
+// Tests CAD viewer loading stages, elapsed feedback, cancellation, retry, model metrics, failures, and keyboard navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -7,9 +7,10 @@ import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import CadViewer from "./CadViewer";
-import { create3mfFixture, createBambu3mfFixture } from "../../tests/cad-fixture";
 import { stubStepWorkers } from "../../tests/step-worker";
 import { createStepMesh } from "../stepMesh";
+import type { CadLoadProgress, StepMessage } from "../stepProtocol";
+import { create3mfFixture, createBambu3mfFixture } from "../../tests/cad-fixture";
 
 function renderViewer(path: string) {
   window.history.replaceState(null, "", `/task/@abc/view?path=${encodeURIComponent(path)}`);
@@ -30,9 +31,10 @@ describe("CadViewer", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
-  it("renders controlled STEP download, decompression, and parsing progress until the result arrives", async () => {
+  it("renders controlled STEP download, indexing, and parsing progress until the result arrives", async () => {
     const workers = stubStepWorkers();
     renderViewer("/models/part.stpz");
     await waitFor(() => expect(workers).toHaveLength(1));
@@ -45,16 +47,17 @@ describe("CadViewer", () => {
     worker.send({ type: "progress", progress: { stage: "download", completed: 1048576, total: null } });
     expect(screen.getByRole("progressbar", { name: "Downloading model" })).not.toHaveAttribute("value");
     expect(screen.getByText("1.0 MiB received")).toBeInTheDocument();
-    worker.send({ type: "progress", progress: { stage: "decompress", completed: 50, total: 100 } });
-    expect(screen.getByRole("progressbar", { name: "Decompressing STEP" })).toHaveAttribute("value", "50");
+    worker.send({
+      type: "progress",
+      progress: { stage: "download", completed: 50, total: 100, decodedBytes: 200, indexedRecords: 12 },
+    });
+    expect(screen.getByRole("progressbar", { name: "Downloading and reading STEP" })).toHaveAttribute("value", "50");
+    expect(screen.getByText("50% received · 12 records indexed")).toBeInTheDocument();
     worker.send({ type: "progress", progress: { stage: "parse", completed: null, total: null } });
     expect(screen.getByRole("progressbar", { name: "Parsing STEP" })).not.toHaveAttribute("value");
-    expect(screen.getByRole("status")).toHaveTextContent("Parsing STEP…");
+    expect(screen.getByText("Parsing STEP…")).toHaveAttribute("role", "status");
     expect(screen.getByRole("button", { name: "Cancel loading" })).toBeInTheDocument();
-    worker.send({
-      type: "result",
-      meshes: [createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)],
-    });
+    worker.complete([createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)]);
     expect(await screen.findByText("1 triangles")).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(worker.terminate).toHaveBeenCalledTimes(1);
@@ -73,12 +76,105 @@ describe("CadViewer", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(workers).toHaveLength(2));
     expect(screen.getByRole("progressbar", { name: "Downloading model" })).toBeInTheDocument();
-    workers[1].send({
-      type: "result",
-      meshes: [createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)],
-    });
+    workers[1].complete([createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)]);
     expect(await screen.findByText("1 triangles")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("names parsing substeps and ignores queued progress after cancellation and retry", async () => {
+    const workers: FakeWorker[] = [];
+    class FakeWorker {
+      onmessage: ((event: MessageEvent<StepMessage>) => void) | null = null;
+      terminate = vi.fn();
+      constructor() {
+        workers.push(this);
+      }
+      postMessage = vi.fn();
+      progress(message: StepMessage) {
+        this.onmessage?.({ data: message } as MessageEvent<StepMessage>);
+      }
+    }
+    vi.stubGlobal("Worker", FakeWorker);
+    const user = userEvent.setup();
+    renderViewer("/models/assembly.step");
+    await waitFor(() => expect(workers).toHaveLength(1));
+    const worker = workers[0];
+    worker.progress({
+      type: "progress",
+      progress: { stage: "download", completed: 128, total: 1024, decodedBytes: 2048, indexedRecords: 12 },
+    });
+    expect(screen.getByRole("progressbar", { name: "Downloading and reading STEP" })).toHaveAttribute("value", "128");
+    expect(screen.getByText("12% received · 12 records indexed")).toBeInTheDocument();
+    worker.progress({
+      type: "progress",
+      progress: { stage: "parse", parseStep: "geometry", completed: 256, total: 280 },
+    });
+    expect(screen.getByRole("progressbar", { name: "Extracting STEP faces" })).toHaveAttribute("max", "280");
+    expect(screen.getByText("256 / 280 faces")).toBeInTheDocument();
+    worker.progress({
+      type: "progress",
+      progress: { stage: "parse", parseStep: "occt", completed: null, total: null },
+    });
+    expect(screen.getByRole("progressbar", { name: "Parsing STEP" })).not.toHaveAttribute("value");
+    await user.click(screen.getByRole("button", { name: "Cancel loading" }));
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(workers).toHaveLength(2));
+    worker.progress({
+      type: "progress",
+      progress: { stage: "parse", parseStep: "geometry", completed: 280, total: 280 },
+    });
+    expect(screen.getByRole("progressbar", { name: "Downloading model" })).not.toHaveAttribute("value");
+    expect(screen.queryByText("280 / 280 faces")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel loading" }));
+    expect(workers[1].terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts total elapsed time but delays the slow hint until kernel parsing, then clears it on progress", async () => {
+    let report: ((message: StepMessage) => void) | null = null;
+    class FakeWorker {
+      onmessage: ((event: MessageEvent<StepMessage>) => void) | null = null;
+      terminate = vi.fn();
+      postMessage() {
+        report = (message) => this.onmessage?.({ data: message } as MessageEvent<StepMessage>);
+      }
+    }
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.useFakeTimers();
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      renderViewer("/models/slow.step");
+      await vi.waitFor(() => expect(report).not.toBeNull());
+      const send = (progress: CadLoadProgress) => {
+        if (!report) throw new Error("Worker has not started");
+        report({ type: "progress", progress });
+      };
+      send({ stage: "parse", parseStep: "occt-init", completed: null, total: null });
+      now = 20_000;
+      vi.advanceTimersByTime(20_000);
+      expect(screen.getByRole("progressbar", { name: "Preparing STEP parser" })).not.toHaveAttribute("value");
+      expect(screen.getByText("Elapsed: 20 s").closest('[role="status"]')).toBeNull();
+      expect(screen.queryByText(/taking longer/)).not.toBeInTheDocument();
+      send({ stage: "parse", parseStep: "occt", completed: null, total: null });
+      now = 29_000;
+      vi.advanceTimersByTime(9000);
+      expect(screen.queryByText(/taking longer/)).not.toBeInTheDocument();
+      now = 31_000;
+      vi.advanceTimersByTime(2000);
+      const hint = screen.getByText(/taking longer/);
+      expect(hint).toHaveAttribute("role", "status");
+      expect(hint.closest('[aria-busy="true"]')).toBeNull();
+      expect(screen.getByText("Elapsed: 31 s")).toBeInTheDocument();
+      send({ stage: "meshes", completed: 0, total: 1 });
+      expect(screen.queryByText(/taking longer/)).not.toBeInTheDocument();
+      cleanup();
+      now = 60_000;
+      vi.advanceTimersByTime(29_000);
+      expect(screen.queryByText(/^Elapsed:/)).not.toBeInTheDocument();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("loads an STL model, parses its metrics, and displays the header and raw link", async () => {

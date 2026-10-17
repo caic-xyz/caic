@@ -15,13 +15,13 @@ describe("STEP worker client", () => {
     const loaded = loadStep("task", "/part.stpz", controller.signal, progress);
     const worker = workers[0];
     expect(worker.postMessage).toHaveBeenCalledWith({ taskId: "task", path: "/part.stpz" });
-    for (const stage of ["download", "decompress", "parse"] as const) {
+    for (const stage of ["download", "parse"] as const) {
       worker.send({ type: "progress", progress: { stage, completed: null, total: null } });
       expect(progress).toHaveBeenLastCalledWith({ stage, completed: null, total: null });
       expect(worker.terminate).not.toHaveBeenCalled();
     }
     const meshes = [createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)];
-    worker.send({ type: "result", meshes });
+    worker.complete(meshes);
     expect(await loaded).toBe(meshes);
     controller.abort();
     expect(worker.terminate).toHaveBeenCalledTimes(1);

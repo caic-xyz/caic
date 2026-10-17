@@ -77,7 +77,8 @@
   color: var(--color-danger);
 }
 
-.loading {
+.loading,
+.loadingProgress {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -97,4 +98,23 @@
 .progressDetails {
   min-height: 1em;
   font-variant-numeric: tabular-nums;
+}
+
+.loadingProgress {
+  width: 100%;
+  color: var(--color-text-secondary);
+}
+
+.slowMessage {
+  max-width: 24rem;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.slowMessage:not(:empty) {
+  margin-top: 0.75rem;
+}
+
+.loadFeedback {
+  color: var(--color-text-secondary);
 }
