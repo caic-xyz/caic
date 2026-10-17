@@ -49,9 +49,9 @@ func TestFakeBackend(t *testing.T) {
 						t.Fatal(err)
 					}
 					t.Cleanup(func() {
-						if err := s.Close(); err != nil {
-							t.Error(err)
-						}
+						// Test context cancellation kills the process. Wait reaps it
+						// and closes its pipes; the exit error is expected.
+						_ = s.Wait()
 					})
 					select {
 					case msg := <-ch:
