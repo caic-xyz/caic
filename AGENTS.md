@@ -31,10 +31,8 @@ hosted web frontend.
 
 ### Professionalism
 
-**Mandatory**: after making changes run `make fix`, then `make verify`.
-`make fix` applies every autofix and refreshes the generated file index and
-architecture diagram; `make verify` is the read-only static gate and the
-pre-push gate. Unit tests are `make test`. Run `make refresh-generated` after
+After changes, run `make fix`, `make verify`, and `make test`.
+Run `make refresh-generated` after
 changing API DTOs/routes, generated SDK inputs, file-indexed source comments,
 or backend package layout.
 
