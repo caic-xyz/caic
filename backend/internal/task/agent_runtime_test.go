@@ -1583,6 +1583,41 @@ func testRunnerSessions(t *testing.T) {
 				})
 			}
 		})
+		t.Run("preserves_idle_state", func(t *testing.T) {
+			t.Parallel()
+			for _, state := range []taskslog.State{taskslog.StateAsking, taskslog.StateHasPlan, taskslog.StateWaiting} {
+				t.Run(string(state), func(t *testing.T) {
+					t.Parallel()
+					backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
+					r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), agent.Backends{"test": backend})
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "test", "", "")
+					log, err := r.openLog(tk)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := log.Close(); err != nil {
+						t.Fatal(err)
+					}
+					tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+					tk.SetState(state)
+					h, err := r.Reconnect(t.Context(), tk)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						// The test context cancels the subprocess before cleanup.
+						_ = h.Session.Close()
+						_ = h.Drain()
+						if err := h.Log.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					if got := tk.GetState(); got != state {
+						t.Fatalf("idle state became %s, want %s", got, state)
+					}
+				})
+			}
+		})
 		t.Run("passes_history_to_attach_backend", func(t *testing.T) {
 			t.Parallel()
 			backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}

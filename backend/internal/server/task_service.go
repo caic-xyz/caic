@@ -1,4 +1,4 @@
-// Task command orchestration, runtime artifacts, API DTOs, and Git summary refreshes.
+// Task commands, accepted input delivery, runtime artifacts, API DTOs, and Git summary refreshes.
 
 package server
 
@@ -635,11 +635,14 @@ const (
 // the relay daemon's liveness over SSH and returns diagnostic details in the
 // 409 response so the frontend can show the user what went wrong.
 //
+// Accepted input outlives request cancellation: a disconnected caller does not
+// withdraw the send. A stuck transport write can delay shutdown.
+//
 // The relay probe uses the server context (not the request context) because the
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
 func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
-	err := entry.Lifecycle.SendInput(ctx, apiconv.PromptToAgent(req.Prompt))
+	err := entry.Lifecycle.SendInput(context.WithoutCancel(ctx), apiconv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
 	}

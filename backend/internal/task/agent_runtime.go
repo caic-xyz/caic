@@ -122,8 +122,8 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 	// Only transition to StateRunning if the restored messages indicate
 	// the agent was still producing output (no trailing ResultMessage).
 	// If the agent had already completed its turn, keep the inferred
-	// StateWaiting/StateAsking so the UI shows the correct status.
-	if prevState != taskslog.StateWaiting && prevState != taskslog.StateAsking {
+	// idle state so the UI shows the correct status.
+	if prevState != taskslog.StateWaiting && prevState != taskslog.StateAsking && prevState != taskslog.StateHasPlan {
 		t.SetState(taskslog.StateRunning)
 	}
 	opts.MsgCh = msgCh
@@ -133,7 +133,8 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		close(msgCh)
 		<-dispatchDone
 		_ = log.Close()
-		t.SetState(taskslog.StateWaiting)
+		// An attachment failure cannot resolve a pending question or plan.
+		t.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting)
 		r.Log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
@@ -146,7 +147,9 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 // EnsureSession waits briefly for h to confirm it's alive. If the session
 // exits within 10 seconds (agent had already finished), it detaches and
 // starts a fresh idle relay only when the task has no saved session.
-// Existing conversations fail instead of silently losing history.
+// Existing conversations fail instead of silently losing history. The supplied
+// context must also own the session process; cancellation drains its local
+// transport without sending a stop sentinel to the retained remote agent.
 func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *Task, h *SessionHandle) (*SessionHandle, error) {
 	select {
 	case <-h.Done():
@@ -167,7 +170,8 @@ func (r *AgentRuntime) EnsureSession(ctx context.Context, tlog *slog.Logger, t *
 		// Session is alive — all good.
 		return h, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		t.DetachSession()
+		return nil, errors.Join(ctx.Err(), h.Drain(), h.Log.Close())
 	}
 }
 

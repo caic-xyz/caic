@@ -269,7 +269,7 @@ func (r *Lifecycle) SendInput(ctx context.Context, prompt agent.Prompt) error {
 			return conflictErr(err, "send input")
 		}
 		var failedReconnect error
-		if reconnectErr := r.reconnectForInput(); reconnectErr == nil { //nolint:contextcheck // watcher uses the Manager lifetime.
+		if reconnectErr := r.reconnectForInput(); reconnectErr == nil { //nolint:contextcheck // The replacement session belongs to the server lifetime.
 			if retryErr := t.SendInput(ctx, prompt); retryErr == nil {
 				return nil
 			} else if !errors.Is(retryErr, task.ErrNoActiveSession) {
@@ -641,8 +641,9 @@ func (r *Lifecycle) reconnectForInput() error {
 	default:
 		return conflict("task is not ready for input")
 	}
+	// The replacement session survives the request that triggered attachment.
 	previousResult := r.entry.Result()
-	h, err := r.agentRuntime.Reconnect(r.ctx, t)
+	h, err := r.agentRuntime.Reconnect(r.manager.serverCtx, t)
 	if err != nil {
 		if t.HasSession() {
 			return nil
@@ -650,7 +651,7 @@ func (r *Lifecycle) reconnectForInput() error {
 		return err
 	}
 	tlog := r.manager.log.With("task", t.ID, "instance", t.RuntimeInstanceID())
-	h, err = r.agentRuntime.EnsureSession(r.ctx, tlog, t, h)
+	h, err = r.agentRuntime.EnsureSession(r.manager.serverCtx, tlog, t, h)
 	if err != nil {
 		return err
 	}
@@ -687,7 +688,8 @@ func (r *Lifecycle) reconnectImportedSession() {
 		h, err = r.agentRuntime.EnsureSession(r.ctx, tlog, t, h)
 		if err != nil {
 			tlog.Warn("ensure session failed", "err", err)
-			t.SetState(taskslog.StateWaiting)
+			// Failed readiness cannot resolve a pending question or plan.
+			t.SetStateIf(taskslog.StateRunning, taskslog.StateWaiting)
 			r.manager.NotifyTaskChange()
 			return
 		}
