@@ -66,10 +66,8 @@ they are not a completion gate.
 
 ## Python tools
 
-Python tools and repository scripts use `uv run --locked`, which manages the
-development environment automatically. Pinned tool versions live in the `dev`
-dependency group in `pyproject.toml`, with their resolution in `uv.lock`. Refresh
-the lock with `uv lock` after changing dependencies.
+Run Python tools and repository scripts with `uv run --locked`.
+Run `uv lock` after changing Python dependencies.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index
