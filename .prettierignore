@@ -17,3 +17,5 @@ CLAUDE.md
 # Playwright and screenshot failure artifacts written by the e2e targets.
 test-results
 visual-screenshots-failures
+# uv-managed Python development environment.
+/.venv/

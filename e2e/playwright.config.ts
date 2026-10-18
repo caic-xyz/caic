@@ -59,7 +59,7 @@ export default defineConfig({
     // Both streams go to the log file instead of the terminal: the fake server is
     // chatty and the dot reporter keeps the run to one line. The test-e2e make
     // target prints the log tail when the suite fails.
-    command: `mkdir -p ../test-results && ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake${binaryOption} > ../test-results/${serverLog} 2>&1`,
+    command: `mkdir -p ../test-results && uv run --locked python ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake${binaryOption} > ../test-results/${serverLog} 2>&1`,
     url: `${serverURL}/api/caic/v1/server/config`,
     reuseExistingServer: false,
     timeout: 30_000,

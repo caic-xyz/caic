@@ -3,7 +3,15 @@
 .env.local
 /.custom-gcl.sha
 /.gradle/
+/.ruff_cache/
+/.venv/
 /caic
+/codecov
+/codecov.SHA256SUM
+/codecov.SHA256SUM.sig
+/codecov.exe
+/codecov.exe.SHA256SUM
+/codecov.exe.SHA256SUM.sig
 /custom-gcl
 /dist/
 /e2e/screenshots/.frontend-publish-*/
@@ -17,6 +25,7 @@
 /test-results/
 /tmp/
 /visual-screenshots-failures/
+__pycache__/
 coverage.html
 coverage.out
 node_modules/

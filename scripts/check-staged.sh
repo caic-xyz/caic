@@ -125,12 +125,8 @@ if ((${#go_files[@]} > 0)); then
 fi
 
 if ((${#python_files[@]} > 0)); then
-  command -v ruff >/dev/null || {
-    printf '%s\n' 'ruff is required to validate staged Python files.' >&2
-    exit 1
-  }
-  run_check python-lint ruff check --quiet -- "${python_files[@]}"
-  run_check python-format ruff format --check --quiet -- "${python_files[@]}"
+  run_check python-lint uv run --locked ruff check --quiet -- "${python_files[@]}"
+  run_check python-format uv run --locked ruff format --check --quiet -- "${python_files[@]}"
 fi
 
 if ((${#style_files[@]} > 0)); then
@@ -141,7 +137,7 @@ if "$frontend_source_changed"; then
   run_check frontend-styles node scripts/lint_frontend_styles.mjs
 fi
 
-run_check binaries python3 scripts/lint_binaries.py
-run_check agents python3 scripts/update_agents_file_index.py --check
-run_check architecture python3 scripts/update_backend_architecture.py --check
+run_check binaries uv run --locked python scripts/lint_binaries.py
+run_check agents uv run --locked python scripts/update_agents_file_index.py --check
+run_check architecture uv run --locked python scripts/update_backend_architecture.py --check
 wait_for_checks

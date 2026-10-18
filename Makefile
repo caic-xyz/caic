@@ -1,18 +1,7 @@
 # Build, verify, test, and development workflow targets for the Go backend and TypeScript frontend.
 
 .DEFAULT_GOAL := help
-.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-smoke tools upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
-
-# Ruff is installed separately; Go tool versions are declared in go.mod.
-RUFF_VERSION=0.16.8
-
-# Prepend uv's tool directory so a recipe can run Ruff after installing it.
-UV_BIN := $(if $(shell command -v uv 2>/dev/null),$(shell uv tool dir --bin 2>/dev/null))
-export PATH := $(if $(UV_BIN),$(UV_BIN):)$(PATH)
-
-tools:
-	@command -v uv > /dev/null 2>&1 || { echo 'uv is required to install the Python tools; see https://docs.astral.sh/uv/' >&2; exit 1; }
-	@ruff --version 2>/dev/null | grep -Fqw "$(RUFF_VERSION)" || uv tool install --force --quiet ruff==$(RUFF_VERSION)
+.PHONY: help benchmark build check-agent-logs coverage custom-gcl fake-dev fix generate-sdks git-hooks frontend-build frontend-deps frontend-dev playwright-browser refresh-generated test test-e2e test-smoke upgrade verify screenshots-check screenshots-generate-frontend screenshots-update
 
 HTTP?=:2242
 
@@ -34,13 +23,13 @@ VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 # linting must run through the custom binary built from the published plugin
 # module; the plain binary is fine for `fmt`.
 VERIFY_GO = ./custom-gcl run --show-stats=false ./...
-VERIFY_GOBUILD = python3 scripts/lint_build_tags.py
+VERIFY_GOBUILD = uv run --locked python scripts/lint_build_tags.py
 VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && node scripts/lint_frontend_styles.mjs
 VERIFY_TS = pnpm --silent typecheck
 VERIFY_ESLINT = pnpm exec eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .
-VERIFY_PY = ruff format --check --quiet . && ruff check --quiet .
-VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -l $$files
-VERIFY_MISC = python3 scripts/lint_binaries.py && python3 scripts/update_agents_file_index.py --check && python3 scripts/update_backend_architecture.py --check
+VERIFY_PY = uv run --locked ruff format --check --quiet . && uv run --locked ruff check --quiet .
+VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files
+VERIFY_MISC = uv run --locked python scripts/lint_binaries.py && uv run --locked python scripts/update_agents_file_index.py --check && uv run --locked python scripts/update_backend_architecture.py --check
 
 help:
 	@echo 'caic - Manage multiple coding agents'
@@ -74,8 +63,8 @@ generate-sdks:
 	@go generate ./...
 
 refresh-generated: generate-sdks
-	@./scripts/update_agents_file_index.py
-	@./scripts/update_backend_architecture.py
+	@uv run --locked python scripts/update_agents_file_index.py
+	@uv run --locked python scripts/update_backend_architecture.py
 
 frontend-build: frontend-deps generate-sdks
 	@pnpm --silent build
@@ -99,7 +88,7 @@ build: frontend-build
 
 # The one static gate. Runs every check-only lane concurrently; the read-only
 # counterpart of fix and the pre-push gate. Independent of test.
-verify: tools custom-gcl frontend-deps
+verify: custom-gcl frontend-deps
 	@./scripts/run-concurrently.sh workflows,go,buildtags,js,ts,eslint,python,shell,misc '$(VERIFY_WORKFLOWS)' '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
 
 # Apply every autofix, then refresh the generated file index and architecture
@@ -107,17 +96,17 @@ verify: tools custom-gcl frontend-deps
 # cascade-sensitive rewrites must not be undone by another formatter, and the
 # index refresh runs after fixes so the index matches the fixed tree. Does not
 # re-check; run verify for that.
-fix: tools custom-gcl frontend-deps
+fix: custom-gcl frontend-deps
 	@./custom-gcl run --show-stats=false ./... --fix
 	@go tool golangci-lint fmt
 	@pnpm exec eslint . --fix
 	@pnpm exec prettier --write --log-level warn .
-	@ruff check --quiet --fix .
-	@ruff format --quiet .
+	@uv run --locked ruff check --quiet --fix .
+	@uv run --locked ruff format --quiet .
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
 	@pnpm exec stylelint --fix "frontend/src/**/*.css"
-	@./scripts/update_agents_file_index.py
-	@./scripts/update_backend_architecture.py
+	@uv run --locked python scripts/update_agents_file_index.py
+	@uv run --locked python scripts/update_backend_architecture.py
 
 check-agent-logs:
 	@go run ./backend/internal/cmd/check-agent-logs
@@ -127,11 +116,11 @@ benchmark: frontend-deps
 	@pnpm --silent benchmark
 
 fake-dev: frontend-build
-	@./scripts/run-dev.py --http $(HTTP) --fake
+	@uv run --locked python scripts/run-dev.py --http $(HTTP) --fake
 
 # Independent Go, frontend, and Python suites run after dependency installation.
 test: frontend-deps
-	@./scripts/run-concurrently.sh go,frontend,python 'go test -cover ./...' 'pnpm --silent test:coverage' 'python3 scripts/run_python_tests.py'
+	@./scripts/run-concurrently.sh go,frontend,python 'go test -cover ./...' 'pnpm --silent test:coverage' 'uv run --locked python scripts/run_python_tests.py'
 
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
@@ -179,7 +168,7 @@ playwright-browser: frontend-deps
 # development container's font stack.
 screenshots-check: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py check --rebuilt
+	@uv run --locked python scripts/visual_screenshots.py check --rebuilt
 
 # Platform-specific variants. Check compares against the tracked baselines, which
 # encode the development container's font stack, so it is a maintainer check.
@@ -190,11 +179,11 @@ screenshots-check: frontend-deps generate-sdks playwright-browser
 # build immediately above and declare that with --rebuilt.
 screenshots-generate-frontend: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py generate --rebuilt
+	@uv run --locked python scripts/visual_screenshots.py generate --rebuilt
 
 screenshots-update: frontend-deps generate-sdks playwright-browser
 	@pnpm --silent build
-	@python3 scripts/visual_screenshots.py update --rebuilt
+	@uv run --locked python scripts/visual_screenshots.py update --rebuilt
 
 upgrade:
 	@go get -u ./... && go mod tidy

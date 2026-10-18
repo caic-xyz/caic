@@ -18,7 +18,7 @@
     "dev": "vite",
     "build": "vite build",
     "benchmark": "tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'",
-    "postbuild": "./scripts/precompress_dist.py --dist backend/frontend/dist --delete-originals --encodings br",
+    "postbuild": "uv run --locked python scripts/precompress_dist.py --dist backend/frontend/dist --delete-originals --encodings br",
     "preview": "vite preview",
     "test": "NODE_OPTIONS=--no-experimental-webstorage tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
     "test:watch": "pnpm --silent test -- --watch",
