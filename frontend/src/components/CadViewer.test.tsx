@@ -1,4 +1,4 @@
-// Tests CAD viewer loading, model metrics, failure states, and keyboard navigation.
+// Tests CAD viewer progress stages, cancellation and retry, model metrics, failures, and keyboard navigation.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -8,6 +8,8 @@ import userEvent from "@testing-library/user-event";
 
 import CadViewer from "./CadViewer";
 import { create3mfFixture, createBambu3mfFixture } from "../../tests/cad-fixture";
+import { stubStepWorkers } from "../../tests/step-worker";
+import { createStepMesh } from "../stepMesh";
 
 function renderViewer(path: string) {
   window.history.replaceState(null, "", `/task/@abc/view?path=${encodeURIComponent(path)}`);
@@ -27,6 +29,56 @@ describe("CadViewer", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("renders controlled STEP download, decompression, and parsing progress until the result arrives", async () => {
+    const workers = stubStepWorkers();
+    renderViewer("/models/part.stpz");
+    await waitFor(() => expect(workers).toHaveLength(1));
+    const worker = workers[0];
+    worker.send({ type: "progress", progress: { stage: "download", completed: 25, total: 100 } });
+    const download = screen.getByRole("progressbar", { name: "Downloading model" });
+    expect(download).toHaveAttribute("value", "25");
+    expect(download).toHaveAttribute("max", "100");
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    worker.send({ type: "progress", progress: { stage: "download", completed: 1048576, total: null } });
+    expect(screen.getByRole("progressbar", { name: "Downloading model" })).not.toHaveAttribute("value");
+    expect(screen.getByText("1.0 MiB received")).toBeInTheDocument();
+    worker.send({ type: "progress", progress: { stage: "decompress", completed: 50, total: 100 } });
+    expect(screen.getByRole("progressbar", { name: "Decompressing STEP" })).toHaveAttribute("value", "50");
+    worker.send({ type: "progress", progress: { stage: "parse", completed: null, total: null } });
+    expect(screen.getByRole("progressbar", { name: "Parsing STEP" })).not.toHaveAttribute("value");
+    expect(screen.getByRole("status")).toHaveTextContent("Parsing STEP…");
+    expect(screen.getByRole("button", { name: "Cancel loading" })).toBeInTheDocument();
+    worker.send({
+      type: "result",
+      meshes: [createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)],
+    });
+    expect(await screen.findByText("1 triangles")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a controlled STEP parse and retries with a new worker", async () => {
+    const user = userEvent.setup();
+    const workers = stubStepWorkers();
+    renderViewer("/models/part.stpz");
+    await waitFor(() => expect(workers).toHaveLength(1));
+    workers[0].send({ type: "progress", progress: { stage: "parse", completed: null, total: null } });
+    await user.click(screen.getByRole("button", { name: "Cancel loading" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Model loading cancelled.");
+    expect(screen.getByRole("button", { name: "Retry" })).toHaveFocus();
+    expect(workers[0].terminate).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(workers).toHaveLength(2));
+    expect(screen.getByRole("progressbar", { name: "Downloading model" })).toBeInTheDocument();
+    workers[1].send({
+      type: "result",
+      meshes: [createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)],
+    });
+    expect(await screen.findByText("1 triangles")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("loads an STL model, parses its metrics, and displays the header and raw link", async () => {
