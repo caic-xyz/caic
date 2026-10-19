@@ -77,7 +77,10 @@ export default function TaskDetailPage() {
               imageGeneration={s.inputImageGeneration(taskId)}
               onAddImages={(blobs) => s.addInputImages(taskId, blobs)}
               onRemoveImage={(image) => s.removeInputImages(taskId, [image])}
-              onSendInput={() => s.sendTaskInput(taskId)}
+              pendingInput={t()?.pendingInput}
+              inputEditing={s.inputEditing(taskId)}
+              onEditQueuedInput={(queued) => s.editQueuedInput(taskId, queued)}
+              onSendInput={(steer) => s.sendTaskInput(taskId, steer)}
               onCancelInputConversion={() => s.cancelInputConversion(taskId)}
               onError={s.showWarning}
             />

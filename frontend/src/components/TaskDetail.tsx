@@ -1,4 +1,4 @@
-// TaskDetail renders current-context history, server-summarized archived disclosures, stable scrolling, and task actions.
+// TaskDetail renders current-context history, archived disclosures, pending prompt editing, file links, and task actions.
 
 import {
   createSignal,
@@ -24,6 +24,8 @@ import SkillIcon from "@material-symbols/svg-400/outlined/menu_book.svg?solid";
 import ProcessesIcon from "@material-symbols/svg-400/outlined/account_tree.svg?solid";
 import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
+import EditIcon from "@material-symbols/svg-400/outlined/edit.svg?solid";
+import ExpandIcon from "@material-symbols/svg-400/outlined/keyboard_arrow_down.svg?solid";
 
 import type {
   EventMessage,
@@ -45,6 +47,7 @@ import type {
   EventToolInputView,
   EventSubagentSpawn,
   TaskRateLimit,
+  PendingInput,
   GitRepositoryState,
 } from "@sdk/types.gen";
 import { RootConversationProjection } from "../rootConversation";
@@ -174,7 +177,10 @@ interface Props {
   imageGeneration: number;
   onAddImages: (blobs: Blob[]) => void;
   onRemoveImage: (image: DraftImage) => void;
-  onSendInput: () => Promise<void>;
+  pendingInput?: PendingInput | null;
+  inputEditing: boolean;
+  onEditQueuedInput: (queued: PendingInput) => Promise<void>;
+  onSendInput: (steer: boolean) => Promise<void>;
   onCancelInputConversion: () => void;
 }
 
@@ -295,6 +301,10 @@ export default function TaskDetail(props: Props) {
     props.onDismissQuotaWarning?.(props.taskId);
   };
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
+  const [sendMenuOpen, setSendMenuOpen] = createSignal(false);
+  createEffect(() => {
+    if (props.taskState !== "running") setSendMenuOpen(false);
+  });
   const [fixingPR, setFixingPR] = createSignal(false);
   // Compact Git state is pushed with the task over the task-list stream.
   const repoStates = () => props.repoStates ?? [];
@@ -353,7 +363,9 @@ export default function TaskDetail(props: Props) {
 
   // The prompt may appear after the task fetch; focus it whenever its ref attaches.
   // Touch-primary devices skip this to avoid opening the software keyboard.
+  let promptRef: HTMLElement | null = null;
   function setPromptRef(element: HTMLElement) {
+    promptRef = element;
     if (!props.autoFocusPrompt || window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
     requestAnimationFrame(() => {
       if (element.isConnected && taskViewMode(location.pathname, location.search) === "closed") element.focus();
@@ -642,15 +654,42 @@ export default function TaskDetail(props: Props) {
     rootProjection.clear();
     props.onCancelInputConversion();
   });
-  async function sendInput() {
-    if (sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)) return;
+  async function sendInput(steer: boolean) {
+    if (!canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)) return;
+    if (steer !== true && !repliesImmediately() && props.pendingInput) return;
     notifications.requestNotificationPermission({ enabled: hostMode.browserNotificationsEnabled() });
     setSending(true);
     setActionError(null);
     try {
-      await props.onSendInput();
+      await props.onSendInput(steer === true || repliesImmediately());
     } finally {
       if (inputActive) setSending(false);
+    }
+  }
+
+  async function editQueuedInput(queued: PendingInput) {
+    setActionError(null);
+    try {
+      await props.onEditQueuedInput(queued);
+      if (inputActive) {
+        promptRef?.focus();
+      }
+    } catch (err) {
+      if (inputActive) setActionError(`Edit failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
+  }
+
+  const [cancelingInput, setCancelingInput] = createSignal<string | null>(null);
+  async function cancelQueuedInput(id: string) {
+    setCancelingInput(id);
+    setActionError(null);
+    try {
+      await api.cancelQueuedInput(props.taskId, { id });
+      if (inputActive) promptRef?.focus();
+    } catch (err) {
+      setActionError(`Cancel failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setCancelingInput(null);
     }
   }
 
@@ -671,6 +710,8 @@ export default function TaskDetail(props: Props) {
     const group = lastAskGroup();
     return group !== null && group.answerText === undefined;
   };
+
+  const repliesImmediately = () => props.taskState === "asking" || props.taskState === "has_plan" || hasUnansweredAsk();
 
   // Detail SSE can show an ask before the task-list SSE patches the task state.
   const isPendingAsk = () => props.taskState === "pending" && hasUnansweredAsk();
@@ -693,7 +734,8 @@ export default function TaskDetail(props: Props) {
   const isWaiting = () =>
     props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan" || isPendingAsk();
   const isRecoverable = () => props.taskState === "stopped" || props.taskState === "crashed";
-  const canSendInput = () => isActive() && props.taskState !== "purging";
+  const canSendInput = () => isActive() && props.taskState !== "purging" && !props.inputEditing;
+  const queueOccupied = () => !!props.pendingInput && !repliesImmediately();
   const prURL = () => {
     const owner = props.forgeOwner;
     const repo = props.forgeRepo;
@@ -1501,13 +1543,78 @@ export default function TaskDetail(props: Props) {
         </div>
 
         <ProgressPanel todos={metadata()?.todo?.todos ?? []} />
+        <Show when={props.pendingInput}>
+          {(q) => (
+            <section aria-label="Pending prompt" class={styles.pendingInput}>
+              <Show when={q().delivering || q().error}>
+                <span class={styles.queuedLabel}>{q().delivering ? "Sending…" : "Delivery paused"}</span>
+              </Show>
+              <div class={styles.queuedInput} data-testid="queued-input">
+                <div class={styles.queuedContent}>
+                  <div class={styles.queuedText}>{q().text}</div>
+                  <Show when={q().images.length > 0}>
+                    <div class={styles.queuedImages}>
+                      <For each={q().images.map((image) => image.thumbnailURL)}>
+                        {(src, index) => <QueuedImage src={src} index={index()} />}
+                      </For>
+                    </div>
+                  </Show>
+                  <Show when={q().error}>
+                    <span role="alert" class={styles.queuedError}>
+                      {q().error}
+                    </span>
+                  </Show>
+                </div>
+                <div class={styles.queuedActions}>
+                  <ActionButton
+                    label="Edit pending prompt"
+                    title={
+                      props.inputDraft.trim() || props.inputImages.length
+                        ? "Finish your draft first"
+                        : "Edit pending prompt"
+                    }
+                    disabled={
+                      q().delivering ||
+                      q().delivered ||
+                      sending() ||
+                      props.inputEditing ||
+                      cancelingInput() === q().id ||
+                      !!props.inputDraft.trim() ||
+                      props.inputImages.length > 0
+                    }
+                    onClick={() => void editQueuedInput(q())}
+                  >
+                    <Show
+                      when={!props.inputEditing}
+                      fallback={<LoadingIcon class={styles.promptControlIcon} width="16" height="16" />}
+                    >
+                      <EditIcon class={styles.promptControlIcon} width="16" height="16" />
+                    </Show>
+                  </ActionButton>
+                  <ActionButton
+                    label="Cancel pending prompt"
+                    title="Cancel pending prompt"
+                    disabled={q().delivering || props.inputEditing || cancelingInput() === q().id}
+                    onClick={() => void cancelQueuedInput(q().id)}
+                  >
+                    <CloseIcon class={styles.queuedCancelIcon} width="16" height="16" />
+                  </ActionButton>
+                </div>
+              </div>
+            </section>
+          )}
+        </Show>
 
         <Show when={isActive() || isRecoverable() || !!pendingAction()}>
           <form
-            ref={bindPromptSubmitShortcut}
+            ref={(form) =>
+              bindPromptSubmitShortcut(form, () => {
+                void sendInput(true);
+              })
+            }
             onSubmit={(e) => {
               e.preventDefault();
-              if (canSendInput()) sendInput();
+              if (canSendInput()) sendInput(false);
             }}
             class={styles.inputForm}
             data-testid="task-detail-form"
@@ -1516,9 +1623,17 @@ export default function TaskDetail(props: Props) {
               ref={setPromptRef}
               value={props.inputDraft}
               onInput={props.onInputDraft}
-              onSubmit={sendInput}
+              onSubmit={() => void sendInput(false)}
               onKeyDown={handlePromptNavigation}
-              placeholder={isRecoverable() ? "Revive or fork to continue..." : "Send message to agent..."}
+              placeholder={
+                isRecoverable()
+                  ? "Revive or fork to continue..."
+                  : queueOccupied()
+                    ? "Message to steer now..."
+                    : props.taskState === "running"
+                      ? "Message for next turn..."
+                      : "Send message to agent..."
+              }
               disabled={!canSendInput()}
               class={styles.textInput}
               tabIndex={0}
@@ -1530,16 +1645,63 @@ export default function TaskDetail(props: Props) {
               onAddImages={props.onAddImages}
               onRemoveImage={props.onRemoveImage}
               sendButton={
-                <Button
+                <ActionButton
+                  label={props.taskState === "running" ? "Queue prompt" : "Send prompt"}
                   type="submit"
                   disabled={
-                    !canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)
+                    !canSendInput() ||
+                    queueOccupied() ||
+                    sending() ||
+                    (!props.inputDraft.trim() && props.inputImages.length === 0)
                   }
-                  title="Send"
+                  title={
+                    queueOccupied()
+                      ? "A prompt is already queued"
+                      : props.taskState === "running"
+                        ? "Queue for next turn (Enter)"
+                        : "Send (Enter)"
+                  }
                   data-testid="send-input"
                 >
-                  <SendIcon width="1.1em" height="1.1em" />
-                </Button>
+                  <SendIcon class={styles.promptSendIcon} width="20" height="20" />
+                </ActionButton>
+              }
+              sendMenu={
+                props.taskState === "running" ? (
+                  <Dropdown
+                    open={sendMenuOpen()}
+                    onOpenChange={setSendMenuOpen}
+                    class={styles.sendMenuAnchor}
+                    content={
+                      <div role="menu" aria-label="Send options" class={styles.sendMenu}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          class={styles.sendMenuItem}
+                          disabled={
+                            !canSendInput() || sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)
+                          }
+                          onClick={() => {
+                            setSendMenuOpen(false);
+                            promptRef?.focus();
+                            void sendInput(true);
+                          }}
+                        >
+                          Send now <kbd>Ctrl+Enter</kbd>
+                        </button>
+                      </div>
+                    }
+                  >
+                    <ActionButton
+                      label="Send options"
+                      aria-haspopup="menu"
+                      aria-expanded={sendMenuOpen()}
+                      onClick={() => setSendMenuOpen((open) => !open)}
+                    >
+                      <ExpandIcon class={styles.promptControlIcon} width="20" height="20" />
+                    </ActionButton>
+                  </Dropdown>
+                ) : null
               }
             />
             <Dropdown
@@ -2955,5 +3117,24 @@ function AskQuestionCard(props: {
         </div>
       </Show>
     </div>
+  );
+}
+
+// Queue image URLs identify immutable attachments; errors stay visible until the row leaves.
+function QueuedImage(props: { src: string; index: number }) {
+  const [failed, setFailed] = createSignal(false);
+  return (
+    <Show when={!failed()} fallback={<span>Attachment {props.index + 1}: preview unavailable</span>}>
+      <img
+        class={styles.queuedImage}
+        src={props.src}
+        alt={`Queued attachment ${props.index + 1}`}
+        loading="lazy"
+        decoding="async"
+        width="48"
+        height="48"
+        onError={() => setFailed(true)}
+      />
+    </Show>
   );
 }

@@ -1,4 +1,4 @@
-// Package taskmgr owns independent task preparation, initialized-log publication, lifecycle, and runtime-instance import.
+// Package taskmgr owns task state, lifecycle, task-owned pending prompts and attachments, and runtime import.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task): task.Task / repo.Checkout are domain types, Manager owns
@@ -112,7 +112,19 @@ type instanceImportJob struct {
 	metadataResolved bool
 }
 
-// Manager owns task lifecycle state, runtime import, session watching, and
+// PendingInput is an immutable pending prompt and its delivery state.
+//
+// Callers must not modify its fields or Prompt.Images. State changes publish
+// a new value so a retained pointer remains safe to read.
+type PendingInput struct {
+	ID         ksid.ID
+	Prompt     agent.Prompt
+	Delivering bool
+	Error      string
+	Delivered  bool
+}
+
+// Manager owns task lifecycle state, durable prompt queues, runtime import, session watching, and
 // stats streaming.
 type Manager struct {
 	// Immutable.
@@ -147,6 +159,10 @@ type Manager struct {
 	quotaWatchMu     sync.Mutex
 	quotaWatchers    sync.WaitGroup
 	quotaWatchClosed bool
+
+	// Serializes pending-input persistence and registration.
+	inputMu          sync.Mutex
+	unrestoredInputs map[ksid.ID]taskslog.QueuedPrompt
 
 	background sync.WaitGroup
 
@@ -223,6 +239,19 @@ func New(cfg Config) (*Manager, error) { //nolint:gocritic // Config is a value 
 		preparationLocks:     make(map[string]*sync.Mutex),
 		changed:              make(chan struct{}),
 	}
+	inputs, err := m.logStore.LoadInputQueue()
+	if err != nil {
+		cancelServerCtx()
+		return nil, err
+	}
+	m.unrestoredInputs = make(map[ksid.ID]taskslog.QueuedPrompt, len(inputs))
+	for _, q := range inputs {
+		if _, exists := m.unrestoredInputs[q.TaskID]; exists {
+			cancelServerCtx()
+			return nil, fmt.Errorf("task %s has multiple pending prompts", q.TaskID)
+		}
+		m.unrestoredInputs[q.TaskID] = q
+	}
 	return m, nil
 }
 
@@ -261,6 +290,7 @@ func (m *Manager) Start(scoper TaskMCPScoper) error {
 	events, err := m.Runtimes.WatchEvents(m.serverCtx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
 	m.background.Go(func() { m.watchRuntimeEvents(m.serverCtx, events) })
 	m.background.Go(func() { m.watchStats(m.serverCtx) })
+	m.background.Go(func() { m.watchInputQueue(m.serverCtx) })
 	m.background.Go(func() { m.watchDiskUsage(m.serverCtx) })
 	if err != nil {
 		return fmt.Errorf("watch runtime events: %w", err)
@@ -929,6 +959,31 @@ func (m *Manager) BranchAssociated(repoName, branch string) bool {
 	return false
 }
 
+// updatePendingInputsLocked persists changes before publishing them on entries.
+// The caller holds inputMu; disk I/O never holds an Entry's mu.
+func (m *Manager) updatePendingInputsLocked(updates map[*Entry]*PendingInput) error {
+	entries := make([]taskslog.QueuedPrompt, 0, len(m.unrestoredInputs))
+	for _, q := range m.unrestoredInputs {
+		entries = append(entries, q)
+	}
+	for id, e := range m.Entries() {
+		q, changed := updates[e]
+		if !changed {
+			q = e.PendingInput()
+		}
+		if q != nil {
+			entries = append(entries, taskslog.QueuedPrompt{ID: q.ID, TaskID: id, Prompt: q.Prompt})
+		}
+	}
+	if err := m.logStore.SaveInputQueue(entries); err != nil {
+		return err
+	}
+	for e, q := range updates {
+		e.setPendingInput(q)
+	}
+	return nil
+}
+
 // newTask creates a task and attaches the manager's model pricer.
 func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, baseImage, containerPlatform, title string) (*task.Task, error) {
 	t, err := task.NewTask(ksid.NewID(), prompt, h, model, effort, baseImage, containerPlatform, title)
@@ -945,6 +1000,8 @@ func (m *Manager) newTask(prompt agent.Prompt, h harness.Name, model, effort, ba
 // (plain logs, uncapped) and LoadPurgedTasks (settled logs, pre-capped by the
 // scan).
 func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
+	m.inputMu.Lock()
+	defer m.inputMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	existingBranches := make(map[string]struct{})
@@ -1040,7 +1097,7 @@ func (m *Manager) insertLoadedTasks(lts []*taskslog.LoadedTask) (int, error) {
 		}
 		entry := m.NewEntry(t, lt)
 		entry.Finish(lt.LastTrailer)
-		m.tasks[t.ID] = entry
+		m.replaceEntryLocked(t.ID, entry)
 		loaded++
 	}
 	return loaded, nil
@@ -1743,11 +1800,31 @@ func (m *Manager) handleRuntimeStart(instanceID runtime.ID) {
 
 // insertEntry adds an entry under m.mu and signals the change.
 func (m *Manager) insertEntry(id ksid.ID, entry *Entry) {
+	m.inputMu.Lock()
 	m.mu.Lock()
-	m.tasks[id] = entry
+	m.replaceEntryLocked(id, entry)
 	m.taskChangedLocked()
 	m.mu.Unlock()
+	m.inputMu.Unlock()
 	m.watchRateLimitEvents(entry.Task())
+}
+
+// replaceEntryLocked preserves task-owned input during startup adoption.
+// The caller holds both inputMu and mu.
+func (m *Manager) replaceEntryLocked(id ksid.ID, entry *Entry) {
+	pending := entry.PendingInput()
+	if previous := m.tasks[id]; previous != nil && previous != entry {
+		pending = previous.PendingInput()
+		previous.setPendingInput(nil)
+	}
+	// Claim staged prompts before registration can certify task-list membership.
+	// Pruning then cannot mistake a newly registered task's input for missing.
+	if q, ok := m.unrestoredInputs[id]; ok {
+		pending = &PendingInput{ID: q.ID, Prompt: q.Prompt}
+		delete(m.unrestoredInputs, id)
+	}
+	entry.setPendingInput(pending)
+	m.tasks[id] = entry
 }
 
 // watchRateLimitEvents forwards task quota changes to the shared change
@@ -2246,15 +2323,19 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 	}
 
 	// Register the entry, replacing stale log entries for the same branch.
+	m.inputMu.Lock()
 	m.mu.Lock()
 	if relPath != "" || branch != "" {
 		for _, oldID := range branchIDs[relPath+"\x00"+branch] {
-			delete(m.tasks, oldID)
+			if oldID != t.ID {
+				delete(m.tasks, oldID)
+			}
 		}
 	}
-	m.tasks[t.ID] = entry
+	m.replaceEntryLocked(t.ID, entry)
 	m.taskChangedLocked()
 	m.mu.Unlock()
+	m.inputMu.Unlock()
 	m.watchRateLimitEvents(t)
 
 	m.log.InfoContext(ctx, "instance", "msg", "imported",
@@ -2323,6 +2404,107 @@ func (m *Manager) runtimeTaskID(ctx context.Context, id runtime.ID) (string, err
 		return value, nil
 	}
 	return m.Runtimes.Metadata(ctx, id, runtime.MetadataLegacyTaskID)
+}
+
+func (m *Manager) watchInputQueue(ctx context.Context) {
+	if err := m.WaitForRuntimeImport(ctx); err != nil {
+		return
+	}
+	for {
+		changed := m.Changed()
+		m.drainInputQueue(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-changed:
+		}
+	}
+}
+
+// drainInputQueue reserves at most one prompt per task and starts independent
+// deliveries. A stalled transport must not block another task or queue editing.
+// Once a send begins it runs to completion; a stuck write may delay shutdown.
+func (m *Manager) drainInputQueue(ctx context.Context) {
+	m.inputMu.Lock()
+	defer m.inputMu.Unlock()
+	m.pruneInputQueueLocked(ctx)
+	started := false
+	for _, e := range m.Entries() {
+		q := e.PendingInput()
+		if ctx.Err() != nil {
+			break
+		}
+		if q == nil || q.Delivering || q.Error != "" || e.Task().GetState() != taskslog.StateWaiting {
+			continue
+		}
+		next := *q
+		next.Delivering = true
+		e.setPendingInput(&next)
+		id, p := q.ID, q.Prompt
+		m.background.Go(func() { m.deliverQueuedInput(ctx, e, id, p) })
+		started = true
+	}
+	if started {
+		m.NotifyTaskChange()
+	}
+}
+
+// pruneInputQueueLocked removes registered terminal tasks and, only after full
+// restoration certifies absence, missing tasks. Stopped/crashed tasks may resume.
+// In-flight entries stay reserved until their worker finishes.
+func (m *Manager) pruneInputQueueLocked(ctx context.Context) {
+	removed := make(map[*Entry]*PendingInput)
+	for _, e := range m.Entries() {
+		if q := e.PendingInput(); q != nil && !q.Delivering && e.Task().GetState().IsTerminal() {
+			removed[e] = nil
+		}
+	}
+	var missing map[ksid.ID]taskslog.QueuedPrompt
+	if m.TaskListComplete() {
+		missing = m.unrestoredInputs
+		m.unrestoredInputs = make(map[ksid.ID]taskslog.QueuedPrompt)
+	}
+	if len(removed) == 0 && len(missing) == 0 {
+		return
+	}
+	if err := m.updatePendingInputsLocked(removed); err != nil {
+		maps.Copy(m.unrestoredInputs, missing)
+		m.log.ErrorContext(ctx, "discard obsolete pending input failed", "err", err)
+		return
+	}
+	m.NotifyTaskChange()
+}
+
+func (m *Manager) deliverQueuedInput(ctx context.Context, e *Entry, id ksid.ID, p agent.Prompt) {
+	e.Lifecycle.inputMu.Lock()
+	waiting := e.Task().GetState() == taskslog.StateWaiting
+	var err error
+	if waiting {
+		err = e.Lifecycle.sendInputLocked(ctx, p)
+	}
+	e.Lifecycle.inputMu.Unlock()
+	m.inputMu.Lock()
+	defer m.inputMu.Unlock()
+	// Cancellation rejects in-flight entries, so the reserved prompt still exists.
+	q := *e.PendingInput()
+	q.Delivering = false
+	sent := waiting && err == nil
+	if sent {
+		err = m.updatePendingInputsLocked(map[*Entry]*PendingInput{e: nil})
+		if err != nil {
+			err = fmt.Errorf("prompt sent but pending input removal failed; cancel to prevent replay: %w", err)
+		}
+	}
+	// Acceptance followed by a crash before saved removal can replay a prompt:
+	// the relay transport provides at-least-once delivery.
+	if err != nil && ctx.Err() == nil {
+		q.Error, q.Delivered = err.Error(), sent
+		m.log.WarnContext(ctx, "pending input failed", "task", e.Task().ID, "input", id, "err", err)
+	}
+	if !sent || err != nil {
+		e.setPendingInput(&q)
+	}
+	m.NotifyTaskChange()
 }
 
 // logRelayMessageMerger owns the import-time overlap rules for disk-log

@@ -236,6 +236,8 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
   });
   await form.getByTestId("submit-task").click();
   await page.waitForFunction(() => window.draftProbe.readStarted);
+  await expect(form.getByTestId("submit-task")).toBeDisabled();
+  await expect(form.getByTestId("submit-task")).toHaveAttribute("aria-busy", "true");
   // Let focus restore the editor's caret before fill selects its contents.
   await prompt.click();
   await prompt.fill("edited during conversion");

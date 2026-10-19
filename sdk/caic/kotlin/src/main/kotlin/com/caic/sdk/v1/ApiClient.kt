@@ -148,7 +148,9 @@ class ApiClient(
     suspend fun getTaskInfo(id: String): TaskInfo = request("GET", "/api/caic/v1/tasks/$id/info")
     /** Creates and starts a new coding agent task. */
     suspend fun createTask(req: CreateTaskReq): Task = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
-    /** Sends user input to a running task. */
+    /** Cancels a queued prompt before delivery. */
+    suspend fun cancelQueuedInput(id: String, req: CancelQueuedInputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input/cancel", json.encodeToString(req))
+    /** Sends user input immediately, or queues it for the next waiting turn. */
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/input", json.encodeToString(req))
     /** Restarts a completed or errored task with a new prompt. */
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/restart", json.encodeToString(req))

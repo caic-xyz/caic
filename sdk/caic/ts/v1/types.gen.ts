@@ -1296,6 +1296,22 @@ export interface BotFixCIReq {
   repo: string;
 }
 
+/** PendingInputImage identifies original and thumbnail resources for a pending attachment. */
+export interface PendingInputImage {
+  url: string;
+  thumbnailURL: string;
+}
+
+/** PendingInput is a task's single pending prompt without embedded image payloads. */
+export interface PendingInput {
+  delivered?: boolean;
+  delivering?: boolean;
+  id: string;
+  text: string;
+  images: PendingInputImage[];
+  error?: string;
+}
+
 /** TaskRepo describes a repository associated with a task in the API response. */
 export interface TaskRepo {
   name: string;
@@ -1380,6 +1396,7 @@ export interface TaskRateLimit {
 
 /** Task is the JSON representation sent to the frontend. */
 export interface Task {
+  pendingInput?: PendingInput;
   id: string;
   initialPrompt: string;
   title: string;
@@ -1582,8 +1599,15 @@ export interface CreateTaskReq {
   caicMCP?: boolean;
 }
 
+/** CancelQueuedInputReq identifies a pending prompt to cancel. */
+export interface CancelQueuedInputReq {
+  id: string;
+}
+
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 export interface InputReq {
+  /** Deliver when waiting instead of steering the active turn. */
+  queue?: boolean;
   prompt: Prompt;
 }
 

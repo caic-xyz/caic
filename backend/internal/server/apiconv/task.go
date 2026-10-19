@@ -10,6 +10,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
 
@@ -21,6 +22,7 @@ type TaskInput struct {
 	Repos              []v1.TaskRepo
 	SudoPassword       string
 	ContextWindowLimit int
+	PendingInput       *taskmgr.PendingInput
 	Owner              string
 }
 
@@ -178,6 +180,14 @@ func Task(in *TaskInput) (v1.Task, error) {
 		}
 	}
 	out.Owner = in.Owner
+	if q := in.PendingInput; q != nil {
+		pending := &v1.PendingInput{ID: q.ID, Text: q.Prompt.Text, Images: make([]v1.PendingInputImage, 0, len(q.Prompt.Images)), Delivering: q.Delivering, Error: q.Error, Delivered: q.Delivered}
+		for index := range q.Prompt.Images {
+			url := fmt.Sprintf("/api/caic/v1/tasks/%s/input/%s/images/%d", t.ID, q.ID, index)
+			pending.Images = append(pending.Images, v1.PendingInputImage{URL: url, ThumbnailURL: url + "?w=96"})
+		}
+		out.PendingInput = pending
+	}
 	return out, nil
 }
 

@@ -31,7 +31,8 @@ const promptShortcuts = [
 ];
 
 const taskActionShortcuts = [
-  { keys: "Ctrl + Enter", action: "Send the prompt in the focused form" },
+  { keys: "Shift + Enter", action: "Insert a newline in the prompt" },
+  { keys: "Ctrl + Enter", action: "Steer the task immediately, or submit a new task" },
   { keys: "Shift + Delete", action: "Purge the selected task" },
 ];
 

@@ -1,10 +1,13 @@
-// Tests task HTTP preconditions, lazy diffs, commit metadata, and card-summary refreshes.
+// Tests task HTTP preconditions, queued attachment access, diffs, and card-summary refreshes.
 
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -17,6 +20,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
@@ -367,4 +371,160 @@ func TestGitReadsRefreshTaskSummary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTaskHandlers(t *testing.T) {
+	t.Parallel()
+	t.Run("QueuedInputImage", func(t *testing.T) {
+		t.Run("thumbnail_and_original", func(t *testing.T) {
+			t.Parallel()
+			s := newTestRouter(t, nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Claude)
+			tk.SetState(taskslog.StateAsking)
+			insertTestTask(s, tk.ID, tk)
+			entry, _ := s.taskMgr.GetEntry(tk.ID)
+			data := testJPEG(t, 960, 480)
+			if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "next", Images: []logv3.ImageData{{MediaType: "image/jpeg", Data: base64.StdEncoding.EncodeToString(data)}}}); err != nil {
+				t.Fatal(err)
+			}
+			apiTask, err := testTaskHandlers(s).taskSvc.getTask(t.Context(), entry, &api.EmptyReq{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if apiTask.PendingInput == nil || len(apiTask.PendingInput.Images) != 1 {
+				t.Fatalf("pending input = %+v", apiTask.PendingInput)
+			}
+			attachment := apiTask.PendingInput.Images[0]
+			for _, tc := range []struct {
+				url   string
+				width int
+			}{{attachment.URL, 960}, {attachment.ThumbnailURL, 96}} {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, strings.TrimPrefix(tc.url, "/api/caic/v1"), nil)
+				testTaskHandlers(s).routes().ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					t.Fatalf("image status = %d: %s", w.Code, w.Body.String())
+				}
+				config, _, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+				if err != nil || config.Width != tc.width || config.Height != tc.width/2 {
+					t.Fatalf("image size = %+v, err = %v", config, err)
+				}
+				if tc.width == 960 && !bytes.Equal(w.Body.Bytes(), data) {
+					t.Fatal("original image bytes changed")
+				}
+			}
+		})
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				t.Run(method, func(t *testing.T) {
+					t.Parallel()
+					s := newTestRouter(t, nil)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, "")
+					tk.SetState(taskslog.StateAsking)
+					insertTestTask(s, tk.ID, tk)
+					entry, _ := s.taskMgr.GetEntry(tk.ID)
+					data := bytes.Repeat([]byte("queued attachment bytes"), 1000)
+					if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Images: []logv3.ImageData{{MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(data)}}}); err != nil {
+						t.Fatal(err)
+					}
+					inputID := entry.PendingInput().ID
+					req := httptest.NewRequestWithContext(testHTTPContext(t), method, "/tasks/"+tk.ID.String()+"/input/"+inputID.String()+"/images/0", nil)
+					w := httptest.NewRecorder()
+					testTaskHandlers(s).routes().ServeHTTP(w, req)
+					if w.Code != 200 {
+						t.Fatalf("status=%d: %s", w.Code, w.Body.String())
+					}
+					if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "image/png" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+						t.Fatalf("unsafe headers: %v", w.Header())
+					}
+					if method == http.MethodHead {
+						if w.Body.Len() != 0 {
+							t.Fatal("HEAD sent image payload")
+						}
+					} else if !bytes.Equal(w.Body.Bytes(), data) {
+						t.Fatal("attachment bytes changed")
+					}
+				})
+			}
+		})
+
+		t.Parallel()
+		t.Run("error", func(t *testing.T) {
+			for _, tc := range []struct {
+				name         string
+				index        string
+				method       string
+				foreignOwner bool
+				otherTask    bool
+				cancel       bool
+				corrupt      bool
+				mediaType    string
+				want         int
+			}{
+				{name: "foreign owner", index: "0", foreignOwner: true, want: 403},
+				{name: "other task", index: "0", otherTask: true, want: 404},
+				{name: "canceled", index: "0", cancel: true, want: 404},
+				{name: "negative index", index: "-1", want: 404},
+				{name: "missing index", index: "1", want: 404},
+				{name: "invalid index", index: "no", want: 404},
+				{name: "invalid encoding", index: "0", corrupt: true, want: 500},
+				{name: "unsafe content type", index: "0", mediaType: "text/html", want: 415},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					s := newTestRouter(t, nil)
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, "")
+					tk.OwnerID = "owner"
+					tk.SetState(taskslog.StateAsking)
+					insertTestTask(s, tk.ID, tk)
+					entry, _ := s.taskMgr.GetEntry(tk.ID)
+					// Exercise both the initial read and the streamed continuation.
+					data := bytes.Repeat([]byte("queued attachment bytes"), 1000)
+					mediaType := tc.mediaType
+					if mediaType == "" {
+						mediaType = "image/png"
+					}
+					encoded := base64.StdEncoding.EncodeToString(data)
+					if tc.corrupt {
+						encoded = "invalid!"
+					}
+					if _, err := entry.Lifecycle.QueueInput(t.Context(), agent.Prompt{Images: []logv3.ImageData{{MediaType: mediaType, Data: encoded}}}); err != nil {
+						t.Fatal(err)
+					}
+					inputID := entry.PendingInput().ID
+					if tc.cancel {
+						if err := entry.Lifecycle.CancelQueuedInput(inputID); err != nil {
+							t.Fatal(err)
+						}
+					}
+					taskID := tk.ID
+					if tc.otherTask {
+						other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, "")
+						other.OwnerID = "owner"
+						insertTestTask(s, other.ID, other)
+						taskID = other.ID
+					}
+					userID := "owner"
+					if tc.foreignOwner {
+						userID = "other"
+					}
+					ctx := auth.NewContext(testHTTPContext(t), &auth.User{ID: userID})
+					method := tc.method
+					if method == "" {
+						method = http.MethodGet
+					}
+					req := httptest.NewRequestWithContext(ctx, method, "/tasks/"+taskID.String()+"/input/"+inputID.String()+"/images/"+tc.index, nil)
+					w := httptest.NewRecorder()
+					testTaskHandlers(s).routes().ServeHTTP(w, req)
+					if w.Code != tc.want {
+						t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
+					}
+					if w.Header().Get("Cache-Control") != "no-store" {
+						t.Fatal("attachment may be cached across accounts or cancellation")
+					}
+				})
+			}
+		})
+	})
 }

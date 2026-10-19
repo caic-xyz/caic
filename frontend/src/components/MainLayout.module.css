@@ -1,5 +1,26 @@
 /* Styles for the new-task form in the main layout. */
 
+.submitIcon,
+.submitLoadingIcon {
+  fill: var(--color-primary);
+}
+
+.submitLoadingIcon {
+  animation: submit-loading 1s linear infinite;
+}
+
+@keyframes submit-loading {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .submitLoadingIcon {
+    animation: none;
+  }
+}
+
 .summaryPane {
   display: flex;
   flex: 1;

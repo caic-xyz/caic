@@ -4028,6 +4028,23 @@ describe("account-owned image drafts", () => {
   });
 });
 
+for (const state of ["asking", "has_plan"] as const) {
+  it(`sends Enter answers immediately for ${state} tasks`, async () => {
+    const task = makeTask({ state });
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    renderApp("/task/@task1+task");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const form = await screen.findByTestId("task-detail-form");
+    const prompt = within(form).getByRole("textbox");
+    editDraft(prompt, "answer now");
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    await waitFor(() =>
+      expect(api.sendInput).toHaveBeenCalledWith("task1", { prompt: { text: "answer now" }, queue: false }),
+    );
+  });
+}
+
 it("preserves the task's newer text and attachments after sending its conversion snapshot", async () => {
   const { create, revoke } = enableImageDrafts();
   vi.mocked(api.getTask).mockResolvedValue(makeTask({ state: "waiting" }));
@@ -4052,6 +4069,7 @@ it("preserves the task's newer text and attachments after sending its conversion
   await waitFor(() =>
     expect(api.sendInput).toHaveBeenCalledWith("task1", {
       prompt: { text: "original task prompt", images: [{ mediaType: "image/png", data: "Zmlyc3Q=" }] },
+      queue: true,
     }),
   );
   sent.resolve({ status: "ok" });
@@ -4513,3 +4531,72 @@ it("lets a foreground account menu consume Escape before a hovered health toolti
   expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   expect(menu).toHaveFocus();
 });
+
+for (const outcome of ["download failure", "new draft", "navigation"] as const) {
+  it(`preserves pending prompt ownership during ${outcome}`, async () => {
+    const { revoke } = enableImageDrafts();
+    const queued = {
+      id: "pending1",
+      text: "original pending prompt",
+      images: [
+        {
+          url: "/api/caic/v1/tasks/task1/input/pending1/images/0",
+          thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
+        },
+      ],
+    };
+    const task = makeTask({ state: "running", pendingInput: queued });
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    const download = deferred<Response>();
+    const canceled = deferred<{ status: string }>();
+    const cancel = vi.spyOn(api, "cancelQueuedInput").mockReturnValue(canceled.promise);
+    const fallback = globalThis.fetch;
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input, init) =>
+        String(input).endsWith("/input/pending1/images/0") ? download.promise : fallback(input, init),
+      );
+    const view = renderApp("/task/@task1+task");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({ kind: "snapshot", snapshot: [task] });
+    const form = await screen.findByTestId("task-detail-form");
+    await waitFor(() => expect(within(form).getByTestId("attach-images")).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit pending prompt" }));
+    await waitFor(() =>
+      expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/input/pending1/images/0"))).toBe(true),
+    );
+    if (outcome === "download failure") {
+      download.resolve(new Response(null, { status: 503 }));
+      await screen.findByText("Edit failed: Could not load the pending attachment. Try again.");
+      expect(cancel).not.toHaveBeenCalled();
+      expect(within(form).getByRole("textbox")).toHaveTextContent("");
+      expect(screen.getByRole("region", { name: "Pending prompt" })).toHaveTextContent(queued.text);
+      expect(revoke).not.toHaveBeenCalled();
+    } else if (outcome === "new draft") {
+      // Exercise the owning boundary's second check after asynchronous download.
+      editDraft(within(form).getByRole("textbox"), "newer draft");
+      download.resolve(new Response(new Blob(["image"], { type: "image/png" })));
+      await screen.findByText("Edit failed: Send or clear your draft before editing the pending prompt.");
+      expect(cancel).not.toHaveBeenCalled();
+      expect(within(form).getByRole("textbox")).toHaveTextContent("newer draft");
+      expect(revoke).not.toHaveBeenCalled();
+    } else {
+      download.resolve(new Response(new Blob(["image"], { type: "image/png" })));
+      await waitFor(() => expect(cancel).toHaveBeenCalledWith("task1", { id: queued.id }));
+      view.history.set({ value: "/" });
+      await waitFor(() => expect(screen.queryByTestId("task-detail-form")).not.toBeInTheDocument());
+      view.history.set({ value: "/task/@task1+task" });
+      const restored = await screen.findByTestId("task-detail-form");
+      expect(within(restored).getByRole("textbox")).toHaveAttribute("aria-disabled", "true");
+      canceled.resolve({ status: "canceled" });
+      await waitFor(() => expect(within(restored).getByRole("textbox")).toHaveTextContent(queued.text));
+      expect(within(restored).getByRole("textbox")).not.toHaveAttribute("aria-disabled");
+      expect(within(restored).getByRole("img", { name: "attached" })).toBeInTheDocument();
+      expect(revoke).not.toHaveBeenCalled();
+    }
+    view.unmount();
+    if (outcome === "navigation") expect(revoke).toHaveBeenCalledOnce();
+    cancel.mockRestore();
+    fetch.mockRestore();
+  });
+}

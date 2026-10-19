@@ -1,4 +1,4 @@
-// Lifecycle executes task operations and guarded startup recovery for retained instances.
+// Lifecycle executes task operations, durable prompt queue edits, and guarded startup recovery.
 
 package taskmgr
 
@@ -31,6 +31,8 @@ type Lifecycle struct {
 	agentRuntime task.AgentRuntime
 	ctx          context.Context
 	wg           sync.WaitGroup
+
+	inputMu sync.Mutex // Serializes immediate input and waiting-turn queue delivery.
 
 	operationMu sync.Mutex // Keeps Stop/Revive completion in the same entry incarnation.
 
@@ -255,36 +257,9 @@ func (r *Lifecycle) Compact(ctx context.Context, instructions string) error {
 
 // SendInput forwards prompt to the agent session, reconnecting when needed.
 func (r *Lifecycle) SendInput(ctx context.Context, prompt agent.Prompt) error {
-	if err := r.checkContinuation(); err != nil {
-		return err
-	}
-	t := r.entry.Task()
-	if len(prompt.Images) > 0 {
-		if b := r.manager.Backends[t.Harness]; b != nil && !b.SupportsImages() {
-			return badRequestf("%s does not support images", string(t.Harness))
-		}
-	}
-	if err := t.SendInput(ctx, prompt); err != nil {
-		if !errors.Is(err, task.ErrNoActiveSession) {
-			return conflictErr(err, "send input")
-		}
-		var failedReconnect error
-		if reconnectErr := r.reconnectForInput(); reconnectErr == nil { //nolint:contextcheck // The replacement session belongs to the server lifetime.
-			if retryErr := t.SendInput(ctx, prompt); retryErr == nil {
-				return nil
-			} else if !errors.Is(retryErr, task.ErrNoActiveSession) {
-				return conflictErr(retryErr, "send input")
-			} else {
-				err = retryErr
-			}
-		} else {
-			failedReconnect = reconnectErr
-			r.manager.log.WarnContext(ctx, "reconnect before send input failed", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", t.GetState(), "err", reconnectErr)
-		}
-		r.manager.log.WarnContext(ctx, "no active session", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", t.GetState())
-		return &NoSessionError{Err: err, ReconnectErr: failedReconnect}
-	}
-	return nil
+	r.inputMu.Lock()
+	defer r.inputMu.Unlock()
+	return r.sendInputLocked(ctx, prompt)
 }
 
 // Start starts the runtime and agent session for a newly registered task.
@@ -499,6 +474,102 @@ func (r *Lifecycle) Sync(ctx context.Context, target SyncTarget, force bool) (*S
 		}
 	}
 	return &SyncResult{Status: status, Branch: destinations[0].Branch, DiffStat: ds, SafetyIssues: issues}, nil
+}
+
+// QueueInput sends immediately when waiting, otherwise persists one pending prompt.
+// It reports whether the prompt was queued rather than sent.
+func (r *Lifecycle) QueueInput(ctx context.Context, prompt agent.Prompt) (bool, error) {
+	// Busy tasks can enqueue independently of a blocked transport write. Only
+	// the immediate waiting path needs the same serialization as SendInput.
+	sendNow := r.entry.Task().GetState() == taskslog.StateWaiting
+	if sendNow {
+		r.inputMu.Lock()
+		defer r.inputMu.Unlock()
+	}
+	if err := r.checkContinuation(); err != nil {
+		return false, err
+	}
+	t := r.entry.Task()
+	if len(prompt.Images) > 0 {
+		if b := r.manager.Backends[t.Harness]; b != nil && !b.SupportsImages() {
+			return false, badRequestf("%s does not support images", t.Harness)
+		}
+	}
+	m := r.manager
+	switch t.GetState() {
+	case taskslog.StateBranching, taskslog.StateProvisioning, taskslog.StateStarting, taskslog.StateRunning, taskslog.StateWaiting, taskslog.StateAsking, taskslog.StateHasPlan:
+	default:
+		return false, conflict("task is not ready for queued input")
+	}
+	m.inputMu.Lock()
+	if r.entry.PendingInput() != nil {
+		m.inputMu.Unlock()
+		return false, conflict("task already has a pending prompt; edit or cancel it first")
+	}
+	if sendNow && t.GetState() == taskslog.StateWaiting {
+		m.inputMu.Unlock()
+		return false, r.sendInputLocked(ctx, prompt)
+	}
+	defer m.inputMu.Unlock()
+	prompt.Images = slices.Clone(prompt.Images)
+	q := &PendingInput{ID: ksid.NewID(), Prompt: prompt}
+	if err := m.updatePendingInputsLocked(map[*Entry]*PendingInput{r.entry: q}); err != nil {
+		return false, internalErr(err, "save pending prompt")
+	}
+	m.NotifyTaskChange()
+	return true, nil
+}
+
+// CancelQueuedInput removes a prompt only if it still belongs to this task's queue.
+func (r *Lifecycle) CancelQueuedInput(id ksid.ID) error {
+	m := r.manager
+	m.inputMu.Lock()
+	defer m.inputMu.Unlock()
+	q := r.entry.PendingInput()
+	if q == nil || q.ID != id {
+		return conflict("pending prompt was already sent or canceled")
+	}
+	if q.Delivering {
+		return conflict("pending prompt is being delivered")
+	}
+	if err := m.updatePendingInputsLocked(map[*Entry]*PendingInput{r.entry: nil}); err != nil {
+		return internalErr(err, "cancel pending prompt")
+	}
+	m.NotifyTaskChange()
+	return nil
+}
+
+func (r *Lifecycle) sendInputLocked(ctx context.Context, prompt agent.Prompt) error {
+	if err := r.checkContinuation(); err != nil {
+		return err
+	}
+	t := r.entry.Task()
+	if len(prompt.Images) > 0 {
+		if b := r.manager.Backends[t.Harness]; b != nil && !b.SupportsImages() {
+			return badRequestf("%s does not support images", string(t.Harness))
+		}
+	}
+	if err := t.SendInput(ctx, prompt); err != nil {
+		if !errors.Is(err, task.ErrNoActiveSession) {
+			return conflictErr(err, "send input")
+		}
+		var failedReconnect error
+		if reconnectErr := r.reconnectForInput(); reconnectErr == nil { //nolint:contextcheck // The replacement session belongs to the server lifetime.
+			if retryErr := t.SendInput(ctx, prompt); retryErr == nil {
+				return nil
+			} else if !errors.Is(retryErr, task.ErrNoActiveSession) {
+				return conflictErr(retryErr, "send input")
+			} else {
+				err = retryErr
+			}
+		} else {
+			failedReconnect = reconnectErr
+			r.manager.log.WarnContext(ctx, "reconnect before send input failed", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", t.GetState(), "err", reconnectErr)
+		}
+		r.manager.log.WarnContext(ctx, "no active session", "task", t.ID, "instance", t.RuntimeInstanceID(), "state", t.GetState())
+		return &NoSessionError{Err: err, ReconnectErr: failedReconnect}
+	}
+	return nil
 }
 
 // checkContinuation rejects retained v1 tasks before lifecycle state changes.

@@ -1,4 +1,4 @@
-// Entry wraps a task and its result for the Manager registry.
+// Entry owns a registered task, its pending prompt, and lifecycle results.
 
 package taskmgr
 
@@ -8,6 +8,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/maruel/ksid"
 )
 
 // entryTerminal is an immutable snapshot of an Entry's terminal state for one
@@ -24,9 +26,9 @@ type entryTerminal struct {
 //
 // Concurrency: task, lifecycle, and historyInMemory are immutable after
 // registration. LogPath manages its own synchronization. The terminal state is
-// an immutable snapshot published through term; see entryTerminal. loadedTask,
-// monitorBranch, and cleanupOnce are guarded by mu and must only be accessed
-// through methods.
+// an immutable snapshot published through term; see entryTerminal. pendingInput,
+// loadedTask, monitorBranch, and cleanupOnce are guarded by mu and must only be
+// accessed through methods.
 type Entry struct {
 	// Immutable.
 	Lifecycle *Lifecycle
@@ -45,6 +47,7 @@ type Entry struct {
 	term atomic.Pointer[entryTerminal]
 
 	mu            sync.Mutex
+	pendingInput  *PendingInput
 	loadedTask    *taskslog.LoadedTask
 	monitorBranch string
 	cleanupOnce   sync.Once
@@ -53,6 +56,22 @@ type Entry struct {
 // Task returns the underlying task. The returned *task.Task is itself
 // concurrency-safe via its own internal locking.
 func (e *Entry) Task() *task.Task { return e.task }
+
+// PendingInput returns this task's immutable pending prompt, or nil.
+func (e *Entry) PendingInput() *PendingInput {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pendingInput
+}
+
+// PendingInputImage returns an original attachment only if the pending identity matches.
+func (e *Entry) PendingInputImage(id ksid.ID, index int) (v3.ImageData, bool) {
+	q := e.PendingInput()
+	if q == nil || q.ID != id || index < 0 || index >= len(q.Prompt.Images) {
+		return v3.ImageData{}, false
+	}
+	return q.Prompt.Images[index], true
+}
 
 // LoadedTask returns the on-disk log handle, or nil before a task log has been
 // validated for stored-history reads.
@@ -153,4 +172,11 @@ func (e *Entry) clearResult(expected *taskslog.Result) {
 			return
 		}
 	}
+}
+
+// setPendingInput publishes an immutable value under the entry lock.
+func (e *Entry) setPendingInput(q *PendingInput) {
+	e.mu.Lock()
+	e.pendingInput = q
+	e.mu.Unlock()
 }

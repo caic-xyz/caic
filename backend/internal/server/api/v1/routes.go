@@ -250,8 +250,16 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[Task](),
 	},
 	{
+		Name:   "cancelQueuedInput",
+		Doc:    "Cancels a queued prompt before delivery.",
+		Method: "POST",
+		Path:   "/api/caic/v1/tasks/{id}/input/cancel",
+		Req:    reflect.TypeFor[CancelQueuedInputReq](),
+		Resp:   reflect.TypeFor[StatusResp](),
+	},
+	{
 		Name:   "sendInput",
-		Doc:    "Sends user input to a running task.",
+		Doc:    "Sends user input immediately, or queues it for the next waiting turn.",
 		Method: "POST",
 		Path:   "/api/caic/v1/tasks/{id}/input",
 		Req:    reflect.TypeFor[InputReq](),

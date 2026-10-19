@@ -6,7 +6,10 @@ declare const classes: {
   readonly "hidden": string;
   readonly "promptInput": string;
   readonly "sessionInput": string;
+  readonly "submit-loading": string;
   readonly "submitForm": string;
+  readonly "submitIcon": string;
+  readonly "submitLoadingIcon": string;
   readonly "summaryHidden": string;
   readonly "summaryPane": string;
   readonly "summarySelected": string;

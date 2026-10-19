@@ -1,10 +1,11 @@
 // Default layout: task creation with collapsible features and sidebar/detail panes with voice task numbers.
 
-import { type JSX, For, createSignal, createEffect, onCleanup } from "solid-js";
+import { type JSX, For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { useLocation } from "@solidjs/router";
 import { taskViewMode } from "../taskView";
 import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
+import LoadingIcon from "@material-symbols/svg-400/outlined/progress_activity.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
@@ -14,7 +15,7 @@ import { voiceConnected, getVoiceTaskNumber } from "../voiceTaskState";
 
 import RepoChipStrip from "./RepoChipStrip";
 import PromptInput from "./PromptInput";
-import Button from "./Button";
+import ActionButton from "./ActionButton";
 import TaskList from "./TaskList";
 import { useAppState } from "../AppState";
 import { ControlSelect, HarnessControls, ToggleChip } from "./FormControls";
@@ -49,7 +50,12 @@ export default function MainLayout(props: { children?: JSX.Element }) {
   return (
     <>
       <form
-        ref={bindPromptSubmitShortcut}
+        ref={(form) =>
+          bindPromptSubmitShortcut(form, () => {
+            const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+            if (submit && !submit.disabled) form.requestSubmit(submit);
+          })
+        }
         onSubmit={(e) => {
           e.preventDefault();
           s.submitTask();
@@ -192,10 +198,11 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           onAddImages={s.addPendingImages}
           onRemoveImage={(image) => s.removePendingImages([image])}
           sendButton={
-            <Button
+            <ActionButton
+              label={s.resumeSessionID().trim() ? "Resume session" : "Create task"}
               type="submit"
               disabled={s.initializing() || s.submitting() || (!s.prompt().trim() && s.pendingImages().length === 0)}
-              loading={s.initializing() || s.submitting()}
+              aria-busy={s.initializing() || s.submitting()}
               title={
                 s.resumeSessionID().trim()
                   ? "Resume session in a new container with this prompt"
@@ -203,8 +210,13 @@ export default function MainLayout(props: { children?: JSX.Element }) {
               }
               data-testid="submit-task"
             >
-              <SendIcon width="1.2em" height="1.2em" />
-            </Button>
+              <Show
+                when={!s.initializing() && !s.submitting()}
+                fallback={<LoadingIcon class={styles.submitLoadingIcon} width="20" height="20" />}
+              >
+                <SendIcon class={styles.submitIcon} width="20" height="20" />
+              </Show>
+            </ActionButton>
           }
         />
       </form>

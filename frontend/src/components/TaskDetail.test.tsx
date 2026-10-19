@@ -1,4 +1,4 @@
-// Tests coherent history publication, stable context disclosures, task-owned plans, scoped tools, and SSE lifecycle.
+// Tests parent/child ownership, scoped tools, task navigation, queued attachments, prompts, and SSE lifecycle.
 
 import assert from "node:assert/strict";
 import { historyResponse, historyManifest, fixtureHistoryResponse } from "@tests/history";
@@ -7,7 +7,6 @@ import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-
 import { createSignal } from "solid-js";
 import type { EventMessage, HistoryEvent, ISOTimestamp, TaskPlan } from "@sdk/types.gen";
 import type { HistoryEventsHandlers } from "@sdk/api.gen";
@@ -124,6 +123,8 @@ const baseProps = {
   onAddImages: () => {},
   onRemoveImage: () => {},
   onSendInput: async () => {},
+  inputEditing: false,
+  onEditQueuedInput: async () => {},
   onCancelInputConversion: () => {},
   onError: () => {},
 };
@@ -2406,6 +2407,157 @@ describe("streamed conversation", () => {
     expect(getByText("Compact context")).toHaveFocus();
   });
 
+  it("queues Enter, steers Ctrl+Enter, and preserves newlines and IME composition", async () => {
+    vi.useRealTimers();
+    const send = vi.fn(async (_steer: boolean) => {});
+    renderTaskDetail({ inputDraft: "follow up", autoFocusPrompt: false, onSendInput: send });
+    const prompt = screen.getByTestId("task-detail-prompt");
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(screen.getByTestId("send-input")).toBeEnabled());
+    fireEvent.keyDown(prompt, { key: "Enter", shiftKey: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(prompt, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(send).toHaveBeenLastCalledWith(true));
+    await waitFor(() => expect(screen.getByTestId("send-input")).toBeEnabled());
+    fireEvent.keyDown(prompt, { key: "Enter", isComposing: true });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  for (const taskState of ["asking", "has_plan"]) {
+    it(`answers ${taskState} immediately with Enter`, async () => {
+      vi.useRealTimers();
+      const send = vi.fn(async (_steer: boolean) => {});
+      renderTaskDetail({ taskState, inputDraft: "answer", onSendInput: send });
+      fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter" });
+      await waitFor(() => expect(send).toHaveBeenCalledWith(true));
+    });
+  }
+
+  for (const taskState of ["pending", "running"]) {
+    it(`answers a live ask before the ${taskState} list state updates`, async () => {
+      vi.useRealTimers();
+      const created: FakeES[] = [];
+      const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+      makeSyncReadyMock(created, capturedCb);
+      const send = vi.fn(async (_steer: boolean) => {});
+      renderTaskDetail({ taskState, inputDraft: "answer", onSendInput: send });
+      await waitFor(() => expect(capturedCb.value).not.toBeNull());
+      if (!capturedCb.value) throw new Error("historyEvents callback not captured");
+      capturedCb.value({
+        kind: "ask",
+        ts: 1,
+        ask: { toolUseID: "ask_1", questions: [{ question: "Which option?", options: [{ label: "A" }] }] },
+      });
+      await waitFor(() => expect(screen.getByText("Which option?")).toBeInTheDocument());
+      fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter" });
+      await waitFor(() => expect(send).toHaveBeenCalledWith(true));
+    });
+  }
+
+  it("keeps one pending prompt while allowing steering and editing a cleared draft", async () => {
+    vi.useRealTimers();
+    const queued = { id: "queued1", text: "follow up", images: [] };
+    const [draft, setDraft] = createSignal("another draft");
+    const edit = vi.fn(async () => {});
+    const send = vi.fn(async (_steer: boolean) => {});
+    renderTaskDetail({
+      get inputDraft() {
+        return draft();
+      },
+      pendingInput: queued,
+      onEditQueuedInput: edit,
+      onSendInput: send,
+    });
+    expect(screen.getByRole("button", { name: "Edit pending prompt" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId("task-detail-prompt"), { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(true));
+    setDraft("\n");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit pending prompt" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit pending prompt" }));
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(queued));
+    expect(screen.getByTestId("task-detail-prompt")).toHaveFocus();
+  });
+
+  it("retains attachment elements when queue summaries update", async () => {
+    vi.useRealTimers();
+    const [queue, setQueue] = createSignal({
+      id: "queued1",
+      text: "first",
+      images: [
+        {
+          url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
+          thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
+        },
+      ],
+    });
+    renderTaskDetail({
+      get pendingInput() {
+        return queue();
+      },
+    });
+    const image = screen.getByRole("img", { name: "Queued attachment 1" });
+    setQueue({
+      id: "queued1",
+      text: "updated",
+      images: [
+        {
+          url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
+          thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
+        },
+      ],
+    });
+    await waitFor(() => expect(screen.getByText("updated")).toBeInTheDocument());
+    expect(screen.getByRole("img", { name: "Queued attachment 1" })).toBe(image);
+  });
+
+  it("pauses failed delivery and prevents editing an already delivered prompt", async () => {
+    vi.useRealTimers();
+    renderTaskDetail({
+      pendingInput: {
+        id: "queued1",
+        text: "sent once",
+        images: [],
+        delivered: true,
+        error: "Prompt sent; cancel to prevent replay.",
+      },
+    });
+    expect(screen.getByRole("region", { name: "Pending prompt" })).toHaveTextContent("Delivery paused");
+    expect(screen.getByRole("alert")).toHaveTextContent("cancel to prevent replay");
+    expect(screen.getByRole("button", { name: "Edit pending prompt" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel pending prompt" })).toBeEnabled();
+  });
+
+  it("keeps queued prompts visible when cancellation fails", async () => {
+    vi.useRealTimers();
+    const cancel = vi.spyOn(api, "cancelQueuedInput").mockRejectedValue(new Error("Offline"));
+    renderTaskDetail({
+      pendingInput: {
+        id: "queued1",
+        text: "follow up",
+        images: [
+          {
+            url: "/api/caic/v1/tasks/abc/input/queued1/images/0",
+            thumbnailURL: "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96",
+          },
+        ],
+      },
+    });
+    const queue = screen.getByRole("region", { name: "Pending prompt" });
+    expect(within(queue).getByText("follow up")).toBeInTheDocument();
+    const image = within(queue).getByRole("img", { name: "Queued attachment 1" });
+    expect(image).toHaveAttribute("src", "/api/caic/v1/tasks/abc/input/queued1/images/0?w=96");
+    fireEvent.error(image);
+    expect(within(queue).getByText("Attachment 1: preview unavailable")).toBeInTheDocument();
+    fireEvent.click(within(queue).getByRole("button", { name: "Cancel pending prompt" }));
+    await waitFor(() => expect(screen.getByText("Cancel failed: Offline")).toBeInTheDocument());
+    expect(cancel).toHaveBeenCalledWith("abc", { id: "queued1" });
+    expect(within(queue).getByText("follow up")).toBeInTheDocument();
+    cancel.mockRestore();
+  });
+
   it("sends the reply with Ctrl+Enter from an action button without opening it", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();
@@ -2418,7 +2570,7 @@ describe("streamed conversation", () => {
       await user.keyboard("{Control>}{Enter}{/Control}");
 
       expect(sendInput).toHaveBeenCalledOnce();
-      expect(sendInput).toHaveBeenCalledWith();
+      expect(sendInput).toHaveBeenCalledWith(true);
       expect(screen.queryByRole("menuitem", { name: "Push" })).not.toBeInTheDocument();
     }
   });

@@ -1,4 +1,4 @@
-// HTTP handlers for task-list/global-health SSE and file streams, WebSocket proxying, and route-level task lookup.
+// HTTP handlers for task/global-health SSE, queued attachments, file streams, WebSocket proxying, and task lookup.
 
 package server
 
@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -513,6 +515,8 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/history/{scope}/{version}/{generation}/setup/{through}", hh.handleHistorySetup)
 	m.HandleFunc("GET /tasks/{id}/history/costs", hh.handleHistoryCosts)
 	m.HandleFunc("GET /tasks/{id}/history/events", hh.handleHistoryEvents)
+	m.HandleFunc("GET /tasks/{id}/input/{inputID}/images/{index}", h.handleQueuedInputImage)
+	m.HandleFunc("POST /tasks/{id}/input/cancel", handleWithTask(h, h.taskSvc.cancelQueuedInput))
 	m.HandleFunc("POST /tasks/{id}/input", handleWithTask(h, h.taskSvc.sendInput))
 	m.HandleFunc("POST /tasks/{id}/restart", handleWithTask(h, h.taskSvc.restartTask))
 	m.HandleFunc("POST /tasks/{id}/clear-context", handleWithTask(h, h.taskSvc.clearContext))
@@ -532,6 +536,70 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
 	m.HandleFunc("GET /tasks/{id}/tool/{toolUseID}", h.handleTaskToolInput)
 	return m
+}
+
+// handleQueuedInputImage serves a queued attachment for browser thumbnails.
+// Like task raw files, this binary resource is outside the generated JSON SDK.
+// Decode incrementally: queue summaries never carry the full image payload.
+func (h *taskHandlers) handleQueuedInputImage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	entry, err := h.getTask(r)
+	if err != nil {
+		writeError(r.Context(), w, err)
+		return
+	}
+	id, idErr := ksid.Parse(r.PathValue("inputID"))
+	index, indexErr := strconv.Atoi(r.PathValue("index"))
+	if idErr != nil || indexErr != nil {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "queued image not found"})
+		return
+	}
+	img, ok := entry.PendingInputImage(id, index)
+	if !ok {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "queued image not found"})
+		return
+	}
+	// Persisted image metadata is a separate trust boundary from uploads.
+	if !slices.Contains(v1.ImageUploadConstraints().AllowedMediaTypes, img.MediaType) {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusUnsupportedMediaType, Code: api.CodeBadRequest, Message: "unsupported queued image type"})
+		return
+	}
+	reader := base64.NewDecoder(base64.StdEncoding, strings.NewReader(img.Data))
+	width := r.URL.Query().Get("w")
+	if width != "" && width != "96" {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported pending image width"})
+		return
+	}
+	if width == "96" && len(img.Data) <= base64.StdEncoding.EncodedLen(v1.ImageUploadConstraints().MaxImageBytes) {
+		data, decodeErr := base64.StdEncoding.DecodeString(img.Data)
+		if decodeErr != nil {
+			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "invalid queued image"})
+			return
+		}
+		if thumbnail, resized := downscaleImage(data, img.MediaType, 96); resized {
+			data = thumbnail
+		}
+		reader = bytes.NewReader(data)
+	}
+	var prefix [512]byte
+	n, err := io.ReadFull(reader, prefix[:])
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "invalid queued image"})
+		return
+	}
+	w.Header().Set("Content-Type", img.MediaType)
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err = w.Write(prefix[:n]); err == nil {
+		_, err = io.Copy(w, reader)
+	}
+	if err != nil {
+		h.log.WarnContext(r.Context(), "queued image stream failed", "err", err)
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // handleTaskRaw is a raw browser resource endpoint, like the VNC WebSocket;

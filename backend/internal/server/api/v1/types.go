@@ -344,8 +344,25 @@ type TaskPlan struct {
 	Content   string `json:"content"`
 }
 
+// PendingInputImage identifies original and thumbnail resources for a pending attachment.
+type PendingInputImage struct {
+	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnailURL"`
+}
+
+// PendingInput is a task's single pending prompt without embedded image payloads.
+type PendingInput struct {
+	Delivered  bool                `json:"delivered,omitempty"`
+	Delivering bool                `json:"delivering,omitempty"`
+	ID         ksid.ID             `json:"id"`
+	Text       string              `json:"text"`
+	Images     []PendingInputImage `json:"images"`
+	Error      string              `json:"error,omitempty"`
+}
+
 // Task is the JSON representation sent to the frontend.
 type Task struct {
+	PendingInput                       *PendingInput        `json:"pendingInput"`
 	ID                                 ksid.ID              `json:"id"`
 	InitialPrompt                      string               `json:"initialPrompt"`
 	Title                              string               `json:"title"`
@@ -754,6 +771,7 @@ func (r *BotFixPRReq) Validate() error {
 
 // InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 type InputReq struct {
+	Queue  bool   `json:"queue,omitempty"` // Deliver when waiting instead of steering the active turn.
 	Prompt Prompt `json:"prompt"`
 }
 
@@ -763,6 +781,19 @@ func (r *InputReq) Validate() error {
 		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "prompt or images required"}
 	}
 	return validateImages(r.Prompt.Images)
+}
+
+// CancelQueuedInputReq identifies a pending prompt to cancel.
+type CancelQueuedInputReq struct {
+	ID ksid.ID `json:"id"`
+}
+
+// Validate requires a queued prompt identity.
+func (r *CancelQueuedInputReq) Validate() error {
+	if r.ID.IsZero() {
+		return &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "queued prompt id required"}
+	}
+	return nil
 }
 
 // RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart.

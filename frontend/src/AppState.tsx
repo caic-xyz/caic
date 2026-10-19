@@ -12,6 +12,7 @@ import type {
   HarnessInfo,
   ImageRefreshStatus,
   Repo,
+  PendingInput,
   Task,
   TaskState,
   UsageResp,
@@ -247,6 +248,7 @@ function createAppStore() {
   const accountController = new AbortController();
   const inputConversions = new Map<string, AbortController>();
   const dispatchedInputs = new Set<string>();
+  const [editingInputs, setEditingInputs] = createSignal<ReadonlySet<string>>(new Set());
   const inputRevisions = new Map<string, number>();
   const [pendingImages, setPendingImages] = createSignal<DraftImage[]>([]);
   const [pendingImageGeneration, setPendingImageGeneration] = createSignal(0);
@@ -1605,7 +1607,52 @@ function createAppStore() {
   const cancelInputConversion = (id: string) => {
     if (!dispatchedInputs.has(id)) inputConversions.get(id)?.abort();
   };
-  async function sendTaskInput(id: string) {
+  // Prepare attachments before withdrawing the prompt so download/validation failures
+  // leave the durable pending prompt untouched. Once withdrawn, the account owns
+  // the draft even if the user navigates away during the request.
+  async function editQueuedInput(id: string, queued: PendingInput) {
+    if (inputConversions.has(id) || inputDraft(id).trim() || inputImages(id).length) {
+      throw new Error("Send or clear your draft before editing the pending prompt.");
+    }
+    const controller = new AbortController();
+    inputConversions.set(id, controller);
+    setEditingInputs((current) => new Set(current).add(id));
+    let images: DraftImage[] = [];
+    try {
+      const signal = AbortSignal.any([controller.signal, accountController.signal]);
+      const blobs: Blob[] = [];
+      for (const image of queued.images) {
+        const response = await fetch(image.url, { signal });
+        if (!response.ok) throw new Error("Could not load the pending attachment. Try again.");
+        blobs.push(await response.blob());
+      }
+      signal.throwIfAborted();
+      if (inputDraft(id).trim() || inputImages(id).length) {
+        throw new Error("Send or clear your draft before editing the pending prompt.");
+      }
+      if (blobs.length) images = imageOwner.adopt([], blobs);
+      dispatchedInputs.add(id);
+      await api.cancelQueuedInput(id, { id: queued.id });
+      if (accountController.signal.aborted || !taskMembership.has(id)) return;
+      batch(() => {
+        setInputDraft(id, queued.text);
+        setInputImageDrafts((prev) => new Map(prev).set(id, images));
+        setInputImageGenerations((prev) => new Map(prev).set(id, inputImageGeneration(id) + 1));
+      });
+      images = [];
+    } finally {
+      imageOwner.release(images);
+      dispatchedInputs.delete(id);
+      inputConversions.delete(id);
+      setEditingInputs((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  async function sendTaskInput(id: string, steer: boolean) {
     if (inputConversions.has(id)) {
       if (!accountController.signal.aborted) showWarning("A message is already being sent to this task.");
       return;
@@ -1622,7 +1669,10 @@ function createAppStore() {
       signal.throwIfAborted();
       // Route changes cancel conversion; a dispatched request still owns its original task.
       dispatchedInputs.add(id);
-      await api.sendInput(id, { prompt: { text, ...(images.length ? { images } : {}) } });
+      await api.sendInput(id, {
+        prompt: { text, ...(images.length ? { images } : {}) },
+        queue: !steer,
+      });
       signal.throwIfAborted();
       if ((inputRevisions.get(id) ?? 0) === revision) setInputDraft(id, "");
       removeInputImages(id, drafts);
@@ -1729,6 +1779,8 @@ function createAppStore() {
     removeInputImages,
     inputImageGeneration,
     sendTaskInput,
+    editQueuedInput,
+    inputEditing: (id: string) => editingInputs().has(id),
     cancelInputConversion,
     // warnings
     warnings,

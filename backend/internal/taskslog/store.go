@@ -1,4 +1,4 @@
-// Store owns task-log initialization, preparation rollback, log segments,
+// Store owns task-log initialization, preparation rollback, queued prompts, log segments,
 // sidecar header caches, metadata trailers, terminal compression, and the
 // trimmed startup scans (plain unsettled load, capped settled load, task-ID
 // lookup).
@@ -7,6 +7,7 @@ package taskslog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/taskslog/data/inputqueue"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/usagedb/data"
@@ -35,6 +40,13 @@ const SettledRetention = 14 * 24 * time.Hour
 // before a log is fully decoded, so capped logs cost only a header read. It
 // is the Store's default per-repo cap, selected by the constructors.
 const MaxSettledPerRepo = 5
+
+// QueuedPrompt is a durable prompt awaiting a task's next waiting turn.
+type QueuedPrompt struct {
+	ID     ksid.ID
+	TaskID ksid.ID
+	Prompt agent.Prompt
+}
 
 // Store owns one task-log directory and its files: JSONL log segments, their
 // sidecar header caches, metadata trailers, and terminal compression. Every
@@ -476,6 +488,95 @@ func (s *Store) SettleTerminal(exclude map[string]struct{}) error {
 // yielded only for source-wide failures and terminates the sequence.
 func (s *Store) UsageRows(ctx context.Context, resolver WireResolver) iter.Seq2[data.UsageRow, error] {
 	return storeUsageRows(s, ctx, resolver)
+}
+
+// LoadInputQueue reads pending prompts; an absent file is an empty queue.
+func (s *Store) LoadInputQueue() ([]QueuedPrompt, error) {
+	f, err := os.Open(filepath.Join(s.LogDir, "input-queue.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	dec := json.NewDecoder(f)
+	token, err := dec.Token()
+	if err != nil {
+		return nil, fmt.Errorf("read input queue: %w", err)
+	}
+	if token != json.Delim('[') {
+		return nil, errors.New("input queue must be an array")
+	}
+	var out []QueuedPrompt
+	for dec.More() {
+		var entry inputqueue.Entry
+		if err := dec.Decode(&entry); err != nil {
+			return nil, fmt.Errorf("read queued prompt: %w", err)
+		}
+		id, err := ksid.Parse(entry.ID)
+		if err != nil {
+			return nil, fmt.Errorf("queued prompt id: %w", err)
+		}
+		taskID, err := ksid.Parse(entry.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("queued task id: %w", err)
+		}
+		q := QueuedPrompt{ID: id, TaskID: taskID, Prompt: agent.Prompt{Text: entry.Text}}
+		for _, img := range entry.Images {
+			q.Prompt.Images = append(q.Prompt.Images, v3.ImageData{MediaType: img.MediaType, Data: img.Data})
+		}
+		out = append(out, q)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, fmt.Errorf("close input queue: %w", err)
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, errors.New("unexpected trailing input queue data")
+	}
+	return out, nil
+}
+
+// SaveInputQueue commits a complete replacement before callers publish it.
+func (s *Store) SaveInputQueue(entries []QueuedPrompt) error {
+	if err := os.MkdirAll(s.LogDir, 0o750); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.LogDir, ".input-queue-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	_, err = f.WriteString("[\n")
+	enc := json.NewEncoder(f)
+	for i, q := range entries {
+		if err != nil {
+			break
+		}
+		if i > 0 {
+			_, err = f.WriteString(",\n")
+			if err != nil {
+				break
+			}
+		}
+		entry := inputqueue.Entry{ID: q.ID.String(), TaskID: q.TaskID.String(), Text: q.Prompt.Text}
+		for _, img := range q.Prompt.Images {
+			entry.Images = append(entry.Images, inputqueue.Image{MediaType: img.MediaType, Data: img.Data})
+		}
+		err = enc.Encode(entry)
+	}
+	if err == nil {
+		_, err = f.WriteString("]\n")
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	err = errors.Join(err, f.Close())
+	if err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), filepath.Join(s.LogDir, "input-queue.json"))
 }
 
 func (s *Store) compressTerminalLogs(logs []*LoadedTask, exclude map[string]struct{}) error {

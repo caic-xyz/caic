@@ -61,7 +61,8 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}` | Returns a single task by id (404 if it does not exist). |  | `Task` |
 | GET | `/api/caic/v1/tasks/{id}/info` | Returns recorded and observed runtime metadata for a task. |  | `TaskInfo` |
 | POST | `/api/caic/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `Task` |
-| POST | `/api/caic/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
+| POST | `/api/caic/v1/tasks/{id}/input/cancel` | Cancels a queued prompt before delivery. | `CancelQueuedInputReq` | `StatusResp` |
+| POST | `/api/caic/v1/tasks/{id}/input` | Sends user input immediately, or queues it for the next waiting turn. | `InputReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
 | POST | `/api/caic/v1/tasks/{id}/compact` | Sends a compact command to reduce the agent's context window usage. | `CompactReq` | `StatusResp` |
@@ -940,6 +941,28 @@ The server fetches CI logs, builds a prompt, and creates a fix task.
 |-------|------|-------------|----------|
 | `repo` | `string` |  | yes |
 
+### PendingInputImage
+
+PendingInputImage identifies original and thumbnail resources for a pending attachment.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `url` | `string` |  | yes |
+| `thumbnailURL` | `string` |  | yes |
+
+### PendingInput
+
+PendingInput is a task's single pending prompt without embedded image payloads.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `delivered` | `boolean` |  |  |
+| `delivering` | `boolean` |  |  |
+| `id` | `string` |  | yes |
+| `text` | `string` |  | yes |
+| `images` | `PendingInputImage[]` |  | yes |
+| `error` | `string` |  |  |
+
 ### TaskRepo
 
 TaskRepo describes a repository associated with a task in the API response.
@@ -1037,6 +1060,7 @@ Task is the JSON representation sent to the frontend.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `pendingInput` | `PendingInput` |  |  |
 | `id` | `string` |  | yes |
 | `initialPrompt` | `string` |  | yes |
 | `title` | `string` |  | yes |
@@ -1251,12 +1275,21 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `gitHubToken` | `boolean` |  |  |
 | `caicMCP` | `boolean` | Enables task-scoped CAIC MCP delegation. |  |
 
+### CancelQueuedInputReq
+
+CancelQueuedInputReq identifies a pending prompt to cancel.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+
 ### InputReq
 
 InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `queue` | `boolean` | Deliver when waiting instead of steering the active turn. |  |
 | `prompt` | `Prompt` |  | yes |
 
 ### RestartReq

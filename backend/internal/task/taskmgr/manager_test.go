@@ -1,4 +1,4 @@
-// Tests task manager registry and lifecycle behavior.
+// Tests task manager registry, pending prompt delivery, and lifecycle behavior.
 
 package taskmgr
 
@@ -1529,6 +1529,331 @@ func TestNew(t *testing.T) {
 }
 
 func TestManager(t *testing.T) {
+	t.Run("drainInputQueue", func(t *testing.T) {
+		t.Run("restart_edit_and_deliver", func(t *testing.T) {
+			t.Parallel()
+			store := taskslog.NewStore(testLogger(), t.TempDir())
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateRunning)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			prompt := agent.Prompt{Text: "first", Images: []v3.ImageData{{MediaType: "image/png", Data: "aGVsbG8="}}}
+			if _, err := e.Lifecycle.QueueInput(t.Context(), prompt); err != nil {
+				t.Fatal(err)
+			}
+			original := prompt.Images[0]
+			prompt.Images[0].Data = "caller changed its slice"
+			if got := e.PendingInput().Prompt.Images[0]; got != original {
+				t.Fatalf("caller mutated pending attachment: %+v", got)
+			}
+			prompt.Images[0] = original
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "second"}); err == nil {
+				t.Fatal("accepted a second pending prompt")
+			}
+			m.drainInputQueue(t.Context())
+			if got := e.PendingInput(); got == nil {
+				t.Fatalf("running pending input = %+v", got)
+			}
+			// Reconstruct both the manager and task, preserving only their durable identities.
+			restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			rt := mustNewTask(t, tk.ID, agent.Prompt{Text: "initial"}, harness.Codex, "")
+			rt.SetState(taskslog.StateAsking)
+			re := restored.NewEntry(rt, nil)
+			restored.Insert(rt.ID, re)
+			queue := re.PendingInput()
+			if queue == nil || queue.Prompt.Text != "first" || len(queue.Prompt.Images) != 1 {
+				t.Fatalf("restored queue: %+v", queue)
+			}
+			// Runtime adoption replaces the cold entry after its pending input was exposed.
+			re = restored.NewEntry(rt, nil)
+			restored.Insert(rt.ID, re)
+			if got := re.PendingInput(); got == nil || got.ID != queue.ID {
+				t.Fatalf("adoption lost pending input: %+v", got)
+			}
+			img, ok := re.PendingInputImage(queue.ID, 0)
+			if !ok || img != prompt.Images[0] {
+				t.Fatalf("restored attachment = %+v, found %v", img, ok)
+			}
+			for _, index := range []int{-1, 1} {
+				if _, ok := re.PendingInputImage(queue.ID, index); ok {
+					t.Fatalf("invalid attachment index %d found", index)
+				}
+			}
+			if _, ok := restored.NewEntry(mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, ""), nil).PendingInputImage(queue.ID, 0); ok {
+				t.Fatal("cross-task attachment lookup succeeded")
+			}
+			other := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, "")
+			if err := restored.NewEntry(other, nil).Lifecycle.CancelQueuedInput(queue.ID); err == nil {
+				t.Fatal("cross-task cancellation succeeded")
+			}
+			if err := re.Lifecycle.CancelQueuedInput(queue.ID); err != nil {
+				t.Fatal(err)
+			}
+			prompt.Text = "edited"
+			if _, err := re.Lifecycle.QueueInput(t.Context(), prompt); err != nil {
+				t.Fatal(err)
+			}
+			restored.drainInputQueue(t.Context())
+			if re.PendingInput() == nil {
+				t.Fatal("asking state drained the queue")
+			}
+			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex, Images: true}}
+			t.Cleanup(b.stop)
+			session, err := b.AttachRelay(t.Context(), &agent.Options{Logger: testLogger(), MsgCh: make(chan agent.TimedMessage, 8)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt.AttachSession(&task.SessionHandle{Session: session})
+			rt.SetState(taskslog.StateWaiting)
+			restored.drainInputQueue(t.Context())
+			awaitQueueCondition(t, restored, func() bool { return re.PendingInput() == nil })
+			if rt.GetState() != taskslog.StateRunning {
+				t.Fatalf("delivery state=%v", rt.GetState())
+			}
+			b.mu.Lock()
+			got := append([]agent.Prompt(nil), b.prompts...)
+			b.mu.Unlock()
+			if !reflect.DeepEqual(got, []agent.Prompt{prompt}) {
+				t.Fatalf("delivered prompts = %+v", got)
+			}
+			loaded, err := store.LoadInputQueue()
+			if err != nil || len(loaded) != 0 {
+				t.Fatalf("delivered prompts remained on disk: %+v %v", loaded, err)
+			}
+		})
+		t.Run("purge_discards_queued_attachments_before_restart", func(t *testing.T) {
+			t.Parallel()
+			store := taskslog.NewStore(testLogger(), t.TempDir())
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateRunning)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			recordTestTaskLog(t, m, e)
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "discard me", Images: []v3.ImageData{{MediaType: "image/png", Data: "aGVsbG8="}}}); err != nil {
+				t.Fatal(err)
+			}
+			tk.SetState(taskslog.StateStopped)
+			m.background.Go(func() { m.watchInputQueue(m.serverCtx) })
+			t.Cleanup(func() { m.cancelServerCtx(); m.background.Wait() })
+			if err := e.Lifecycle.Purge(t.Context(), 0); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Lifecycle.Close(); err != nil {
+				t.Fatal(err)
+			}
+			awaitQueueCondition(t, m, func() bool { return e.PendingInput() == nil })
+			restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			re := restored.NewEntry(tk, nil)
+			restored.Insert(tk.ID, re)
+			if got := re.PendingInput(); got != nil {
+				t.Fatalf("purged attachments restored: %+v", got)
+			}
+		})
+		t.Run("startup_discards_missing_tasks_but_retains_stopped_tasks", func(t *testing.T) {
+			t.Parallel()
+			store := taskslog.NewStore(testLogger(), t.TempDir())
+			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			ids := make([]ksid.ID, 0, 2)
+			for range 2 {
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+				tk.SetState(taskslog.StateRunning)
+				e := m.NewEntry(tk, nil)
+				m.Insert(tk.ID, e)
+				if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "retained work"}); err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, tk.ID)
+			}
+			restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+			for _, stage := range []string{"loading", "failed"} {
+				if stage == "failed" {
+					restored.CompleteRestoration(errors.New("partial history scan"))
+				}
+				restored.drainInputQueue(t.Context())
+				q, err := store.LoadInputQueue()
+				if err != nil || len(q) != 2 {
+					t.Fatalf("%s restoration discarded unknown tasks: queue=%+v err=%v", stage, q, err)
+				}
+			}
+			tk := mustNewTask(t, ids[1], agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateStopped)
+			restored.Insert(tk.ID, restored.NewEntry(tk, nil))
+			restored.CompleteRestoration(nil)
+			restored.drainInputQueue(t.Context())
+			q, err := store.LoadInputQueue()
+			if err != nil || len(q) != 1 || q[0].TaskID != tk.ID {
+				t.Fatalf("startup queue=%+v err=%v", q, err)
+			}
+		})
+		t.Run("in_flight_send_isolated_from_other_tasks", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			blocked := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			blocked.SetState(taskslog.StateRunning)
+			e := m.NewEntry(blocked, nil)
+			m.Insert(blocked.ID, e)
+			session, conn := newGatedQueueSession(t)
+			blocked.AttachSession(&task.SessionHandle{Session: session})
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "blocked prompt"}); err != nil {
+				t.Fatal(err)
+			}
+			pending := e.PendingInput()
+			if pending == nil || e.PendingInput() != pending {
+				t.Fatal("pending input was not returned directly")
+			}
+			blocked.SetState(taskslog.StateWaiting)
+			m.drainInputQueue(t.Context())
+			select {
+			case <-conn.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("delivery did not start")
+			}
+			q := e.PendingInput()
+			if q == nil || !q.Delivering {
+				t.Fatalf("in-flight queue=%+v", q)
+			}
+			if pending.Delivering || pending.Error != "" || pending.Delivered {
+				t.Errorf("delivery mutated retained pending input: %+v", pending)
+			}
+			if err := e.Lifecycle.CancelQueuedInput(q.ID); err == nil {
+				t.Fatal("in-flight cancellation succeeded")
+			}
+			b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}}
+			t.Cleanup(b.stop)
+			healthy := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "other"}, harness.Codex, "")
+			healthy.SetState(taskslog.StateWaiting)
+			hs, err := b.AttachRelay(t.Context(), &agent.Options{Logger: testLogger(), MsgCh: make(chan agent.TimedMessage, 8)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			healthy.AttachSession(&task.SessionHandle{Session: hs})
+			he := m.NewEntry(healthy, nil)
+			m.Insert(healthy.ID, he)
+			if _, err := he.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "healthy prompt"}); err != nil {
+				t.Fatal(err)
+			}
+			m.drainInputQueue(t.Context())
+			awaitQueueCondition(t, m, func() bool { return he.PendingInput() == nil })
+			if got := e.PendingInput(); got == nil || !got.Delivering {
+				t.Fatalf("stalled send changed unexpectedly: %+v", got)
+			}
+			close(conn.release)
+			awaitQueueCondition(t, m, func() bool { return e.PendingInput() == nil })
+			if !q.Delivering {
+				t.Fatal("delivery completion mutated retained in-flight input")
+			}
+		})
+		t.Run("failed_import_reconnect_preserves_prompt_gate", func(t *testing.T) {
+			t.Parallel()
+			for _, state := range []taskslog.State{taskslog.StateAsking, taskslog.StateHasPlan} {
+				for _, stage := range []string{"attach", "readiness"} {
+					t.Run(string(state)+"/"+stage, func(t *testing.T) {
+						t.Parallel()
+						store := taskslog.NewStore(testLogger(), t.TempDir())
+						original := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "restore-gate"), runtime.ConnectionTarget{SSHHost: "restore-gate"}, "", "", 0)
+						tk.SetSessionMetadata("saved-session", "", "", "", 0)
+						tk.SetState(state)
+						e := original.NewEntry(tk, nil)
+						original.Insert(tk.ID, e)
+						recordTestTaskLog(t, original, e)
+						if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "deferred work"}); err != nil {
+							t.Fatal(err)
+						}
+						var backend agent.Backend = &agenttest.FakeBackend{HarnessName: harness.Codex}
+						if stage == "readiness" {
+							b := &reconnectInputBackend{FakeBackend: &agenttest.FakeBackend{HarnessName: harness.Codex}, exitImmediately: true}
+							t.Cleanup(b.stop)
+							backend = b
+						}
+						restored := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Backends: agent.Backends{harness.Codex: backend}})
+						re := restored.NewEntry(tk, nil)
+						restored.Insert(tk.ID, re)
+						re.Lifecycle.reconnectImportedSession()
+						re.Lifecycle.wg.Wait()
+						if got := tk.GetState(); got != state {
+							t.Fatalf("failed %s reconnect released %s gate: %s", stage, state, got)
+						}
+						restored.drainInputQueue(t.Context())
+						restored.background.Wait()
+						q := re.PendingInput()
+						if q == nil || q.Delivering || q.Error != "" {
+							t.Fatalf("unresolved %s attempted deferred input: %+v", state, q)
+						}
+						persisted, err := store.LoadInputQueue()
+						if err != nil || len(persisted) != 1 || persisted[0].Prompt.Text != "deferred work" {
+							t.Fatalf("retained queue=%+v err=%v", persisted, err)
+						}
+					})
+				}
+			}
+		})
+		t.Run("accepted_prompt_with_failed_removal_is_not_replayed", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateRunning)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			session, conn := newGatedQueueSession(t)
+			tk.AttachSession(&task.SessionHandle{Session: session})
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "deliver once"}); err != nil {
+				t.Fatal(err)
+			}
+			tk.SetState(taskslog.StateWaiting)
+			m.drainInputQueue(t.Context())
+			select {
+			case <-conn.started:
+			case <-t.Context().Done():
+				t.Fatal(t.Context().Err())
+			}
+			path := filepath.Join(m.logStore.LogDir, "input-queue.json")
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			close(conn.release)
+			awaitQueueCondition(t, m, func() bool { return e.PendingInput().Error != "" })
+			q := e.PendingInput()
+			if !q.Delivered || q.Delivering {
+				t.Fatalf("accepted prompt state=%+v", q)
+			}
+			tk.SetState(taskslog.StateWaiting)
+			m.drainInputQueue(t.Context())
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Lifecycle.CancelQueuedInput(q.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("delivery_failure_remains_visible", func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, Config{ServerCtx: t.Context()})
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+			tk.SetState(taskslog.StateRunning)
+			e := m.NewEntry(tk, nil)
+			m.Insert(tk.ID, e)
+			if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "retry me"}); err != nil {
+				t.Fatal(err)
+			}
+			tk.SetState(taskslog.StateWaiting)
+			m.drainInputQueue(t.Context())
+			awaitQueueCondition(t, m, func() bool { return e.PendingInput().Error != "" })
+			q := e.PendingInput()
+			if q == nil || q.Error == "" {
+				t.Fatalf("failed delivery disappeared: %+v", q)
+			}
+			if err := e.Lifecycle.CancelQueuedInput(q.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
 	t.Parallel()
 
 	t.Run("TaskListComplete", func(t *testing.T) {
@@ -6632,6 +6957,45 @@ func TestManager(t *testing.T) {
 // running tasks are coerced to failed.
 func runLoadUnsettledTasksTests(t *testing.T) {
 	t.Parallel()
+	t.Run("OwnsPendingInputAtRegistration", func(t *testing.T) {
+		t.Parallel()
+		store := taskslog.NewStore(testLogger(), t.TempDir())
+		id := ksid.NewID()
+		queued := taskslog.QueuedPrompt{
+			ID: ksid.NewID(), TaskID: id,
+			Prompt: agent.Prompt{Text: "next", Images: []v3.ImageData{{MediaType: "image/png", Data: "aGVsbG8="}}},
+		}
+		if err := store.SaveInputQueue([]taskslog.QueuedPrompt{queued}); err != nil {
+			t.Fatal(err)
+		}
+		m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store})
+		if err := m.LoadUnsettledTasks([]*taskslog.LoadedTask{{
+			TaskID: id.String(), Prompt: "initial", State: taskslog.StateStopped,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		e, ok := m.GetEntry(id)
+		if !ok {
+			t.Fatal("restored task missing")
+		}
+		// Inspect registration directly: pruning must never see a staged prompt
+		// for a registered task.
+		m.inputMu.Lock()
+		e.mu.Lock()
+		owned := e.pendingInput != nil && e.pendingInput.ID == queued.ID
+		e.mu.Unlock()
+		_, staged := m.unrestoredInputs[id]
+		m.inputMu.Unlock()
+		if !owned || staged {
+			t.Fatalf("registered prompt: task-owned=%v, still staged=%v", owned, staged)
+		}
+		m.CompleteRestoration(nil)
+		m.drainInputQueue(t.Context())
+		persisted, err := store.LoadInputQueue()
+		if err != nil || !reflect.DeepEqual(persisted, []taskslog.QueuedPrompt{queued}) {
+			t.Fatalf("persisted pending prompt = %+v, err=%v", persisted, err)
+		}
+	})
 	t.Run("UncappedPerRepo", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t, Config{ServerCtx: t.Context()})
@@ -7692,4 +8056,63 @@ func TestApplyLoadedSessionMetadata(t *testing.T) {
 	if got := tk.Snapshot().AutoCompactTokenLimit; got != 244800 {
 		t.Fatalf("restored auto-compact threshold = %d, want 244800", got)
 	}
+}
+
+func awaitQueueCondition(t *testing.T, m *Manager, ready func() bool) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	for {
+		changed := m.Changed()
+		if ready() {
+			return
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			t.Fatal("queue condition timed out")
+		}
+	}
+}
+
+// gatedQueueConn pauses a real prompt write to exercise in-flight queue behavior.
+type gatedQueueConn struct {
+	agent.Conn
+
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *gatedQueueConn) SendPrompt(p agent.Prompt, raw []byte) error {
+	close(c.started)
+	<-c.release
+	return c.Conn.SendPrompt(p, raw)
+}
+
+func (*gatedQueueConn) ReadMessages(r io.ReadCloser, _ chan<- agent.TimedMessage, _ agent.MessageInterceptor) error {
+	_, err := io.Copy(io.Discard, r)
+	return err
+}
+
+func newGatedQueueSession(t *testing.T) (*agent.Session, *gatedQueueConn) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cmd := exec.CommandContext(ctx, "cat")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	log := testLogger()
+	conn := &gatedQueueConn{Conn: agent.NewConn(ctx, log, stdin, agent.DiscardLogSink{Version: agent.LogVersionV2}, claudecode.New().NewWire()), started: make(chan struct{}), release: make(chan struct{})}
+	session := agent.NewSession(ctx, cmd, conn, stdout, make(chan agent.TimedMessage, 8), log)
+	t.Cleanup(func() { cancel(); _ = session.Wait() })
+	return session, conn
 }

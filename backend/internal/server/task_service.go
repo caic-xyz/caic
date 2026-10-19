@@ -1,4 +1,4 @@
-// Task commands, shared task-history projections, frontend focus, runtime artifacts, API DTOs, and Git summaries.
+// Task commands, durable prompt queue APIs, accepted input delivery, frontend focus, artifacts, DTOs, and Git summaries.
 
 package server
 
@@ -281,6 +281,7 @@ func taskDTOFromSnapshot(ctx context.Context, entry *taskmgr.Entry, snap *task.S
 		SudoPassword:       taskMgr.SudoPassword(ctx, t),
 		ContextWindowLimit: contextWindowLimit,
 		Owner:              owner,
+		PendingInput:       entry.PendingInput(),
 	})
 }
 
@@ -675,7 +676,15 @@ const (
 	relayNoInstance  relayStatus = "no-instance"  // Task has no runtime instance yet.
 )
 
-// sendInput forwards user input to the agent session. On failure, it probes
+// cancelQueuedInput removes a pending prompt before delivery.
+func (s *taskService) cancelQueuedInput(_ context.Context, entry *taskmgr.Entry, req *v1.CancelQueuedInputReq) (*v1.StatusResp, error) {
+	if err := entry.Lifecycle.CancelQueuedInput(req.ID); err != nil {
+		return nil, toDTO(err)
+	}
+	return &v1.StatusResp{Status: "canceled"}, nil
+}
+
+// sendInput queues deferred prompts or forwards immediate input. On failure, it probes
 // the relay daemon's liveness over SSH and returns diagnostic details in the
 // 409 response so the frontend can show the user what went wrong.
 //
@@ -686,7 +695,16 @@ const (
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
 func (s *taskService) sendInput(ctx context.Context, entry *taskmgr.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
-	err := entry.Lifecycle.SendInput(context.WithoutCancel(ctx), apiconv.PromptToAgent(req.Prompt))
+	var err error
+	if req.Queue {
+		var queued bool
+		queued, err = entry.Lifecycle.QueueInput(context.WithoutCancel(ctx), apiconv.PromptToAgent(req.Prompt))
+		if err == nil && queued {
+			return &v1.StatusResp{Status: "queued"}, nil
+		}
+	} else {
+		err = entry.Lifecycle.SendInput(context.WithoutCancel(ctx), apiconv.PromptToAgent(req.Prompt))
+	}
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
 	}

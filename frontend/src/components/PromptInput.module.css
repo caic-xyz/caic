@@ -29,9 +29,17 @@
   float: right;
 
   /* Match trailing buttons size + gap. */
-  width: 5rem;
+  width: 4.5rem;
   height: 2rem;
   content: "";
+}
+
+.withSendMenu::before {
+  width: 6.5rem;
+}
+
+.attachIcon {
+  fill: currentcolor;
 }
 
 .row:focus-within {

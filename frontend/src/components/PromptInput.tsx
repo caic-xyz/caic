@@ -10,7 +10,7 @@ import type { ImageConstraints } from "@sdk/types.gen";
 
 import { captureScreen, imagesFromClipboard, type DraftImage } from "../images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
-import Button from "./Button";
+import ActionButton from "./ActionButton";
 import CameraCapture from "./CameraCapture";
 import Dropdown from "./Dropdown";
 import styles from "./PromptInput.module.css";
@@ -35,6 +35,8 @@ interface Props {
   onRemoveImage: (image: DraftImage) => void;
   /** Element rendered inside the text field (trailing icon, like Android). */
   sendButton?: JSX.Element;
+  /** Optional menu beside the send action, with space reserved inside the field. */
+  sendMenu?: JSX.Element;
   /** Elements rendered outside the text field row (action buttons). */
   children?: JSX.Element;
 }
@@ -163,7 +165,7 @@ export default function PromptInput(props: Props) {
           class={props.class}
           tabIndex={props.tabIndex}
           data-testid={props["data-testid"]}
-          spacerClass={styles.spacer}
+          spacerClass={`${styles.spacer}${props.sendMenu ? ` ${styles.withSendMenu}` : ""}`}
         />
         <div class={styles.trailing}>
           <Show when={props.supportsImages}>
@@ -214,24 +216,24 @@ export default function PromptInput(props: Props) {
                 </div>
               }
             >
-              <Button
+              <ActionButton
+                label="Attach images"
                 type="button"
-                variant="gray"
                 disabled={props.disabled || !props.imageConstraints}
                 title={
                   props.imageConstraints
                     ? "Attach images"
                     : "Image attachments are unavailable until server limits load"
                 }
-                aria-label="Attach images"
                 onClick={handleAttachClick}
                 data-testid="attach-images"
               >
-                <AttachIcon width="1.2em" height="1.2em" />
-              </Button>
+                <AttachIcon class={styles.attachIcon} width="20" height="20" />
+              </ActionButton>
             </Dropdown>
           </Show>
           {props.sendButton}
+          {props.sendMenu}
         </div>
       </div>
       <Show when={props.children}>

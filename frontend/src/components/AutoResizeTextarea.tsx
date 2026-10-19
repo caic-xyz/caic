@@ -1,7 +1,7 @@
 // Auto-resizing contenteditable prompt with keyboard submission and caret restoration.
 // Uses contenteditable with an optional CSS ::before float spacer so text wraps
 // around absolutely positioned trailing buttons.
-// Enter submits (via onSubmit), Shift+Enter inserts a newline.
+// Enter submits (via onSubmit); Shift+Enter inserts a newline unless overridden.
 
 import { createEffect, onCleanup, onMount } from "solid-js";
 
@@ -98,8 +98,8 @@ export default function AutoResizeTextarea(props: Props) {
 
   function handleKeyDown(e: KeyboardEvent) {
     props.onKeyDown?.(e);
-    if (e.defaultPrevented) return;
-    if (e.key === "Enter" && !e.shiftKey && props.onSubmit) {
+    if (e.defaultPrevented || e.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey && !e.altKey && props.onSubmit) {
       e.preventDefault();
       props.onSubmit();
     }

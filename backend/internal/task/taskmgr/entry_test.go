@@ -5,7 +5,9 @@ package taskmgr
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/maruel/ksid"
 
@@ -37,6 +39,36 @@ func newTestPurgedEntry(t *testing.T, tk *task.Task, r *taskslog.Result, lt *tas
 
 func TestEntry(t *testing.T) {
 	t.Parallel()
+	t.Run("PendingInput", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t, Config{ServerCtx: t.Context()})
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "initial"}, harness.Codex, "")
+		tk.SetState(taskslog.StateRunning)
+		e := m.NewEntry(tk, nil)
+		m.Insert(tk.ID, e)
+		if _, err := e.Lifecycle.QueueInput(t.Context(), agent.Prompt{Text: "next"}); err != nil {
+			t.Fatal(err)
+		}
+		pending := e.PendingInput()
+		m.inputMu.Lock()
+		read := make(chan bool, 1)
+		var workers sync.WaitGroup
+		workers.Go(func() {
+			q := e.PendingInput()
+			_, found := e.PendingInputImage(pending.ID, 0)
+			read <- q == pending && !found
+		})
+		select {
+		case ok := <-read:
+			if !ok {
+				t.Error("pending input changed while persistence was locked")
+			}
+		case <-time.After(time.Second):
+			t.Error("pending input read blocked on manager persistence lock")
+		}
+		m.inputMu.Unlock()
+		workers.Wait()
+	})
 	t.Run("clearResult", func(t *testing.T) {
 		t.Parallel()
 		for _, replaced := range []bool{false, true} {

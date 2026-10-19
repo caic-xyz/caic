@@ -21,7 +21,12 @@ const fakeImage: DraftImage = { id: "test", blob: new Blob(["image"], { type: "i
 function renderPromptWithCamera(onSubmit: () => void) {
   return render(() => (
     <form
-      ref={bindPromptSubmitShortcut}
+      ref={(form) =>
+        bindPromptSubmitShortcut(form, () => {
+          const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+          if (submit && !submit.disabled) form.requestSubmit(submit);
+        })
+      }
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();

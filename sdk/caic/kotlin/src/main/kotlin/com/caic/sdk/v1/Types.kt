@@ -1672,6 +1672,24 @@ data class RepoBranchesResp(val branches: List<BranchInfo>)
 @Serializable
 data class BotFixCIReq(val repo: String)
 
+/** PendingInputImage identifies original and thumbnail resources for a pending attachment. */
+@Serializable
+data class PendingInputImage(
+    val url: String,
+    @SerialName("thumbnailURL") val thumbnailURL: String,
+)
+
+/** PendingInput is a task's single pending prompt without embedded image payloads. */
+@Serializable
+data class PendingInput(
+    val delivered: Boolean? = null,
+    val delivering: Boolean? = null,
+    val id: String,
+    val text: String,
+    val images: List<PendingInputImage>,
+    val error: String? = null,
+)
+
 /** TaskRepo describes a repository associated with a task in the API response. */
 @Serializable
 data class TaskRepo(
@@ -1764,6 +1782,7 @@ data class TaskRateLimit(
 /** Task is the JSON representation sent to the frontend. */
 @Serializable
 data class Task(
+    val pendingInput: PendingInput? = null,
     val id: String,
     val initialPrompt: String,
     val title: String,
@@ -1970,9 +1989,17 @@ data class CreateTaskReq(
     @SerialName("caicMCP") val caicMCP: Boolean? = null,
 )
 
+/** CancelQueuedInputReq identifies a pending prompt to cancel. */
+@Serializable
+data class CancelQueuedInputReq(val id: String)
+
 /** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 @Serializable
-data class InputReq(val prompt: Prompt)
+data class InputReq(
+    /** Deliver when waiting instead of steering the active turn. */
+    val queue: Boolean? = null,
+    val prompt: Prompt,
+)
 
 /** RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart. */
 @Serializable

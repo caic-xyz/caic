@@ -1,4 +1,4 @@
-// Browser coverage for native page zoom, dense quota groups, task cards, and account-menu access.
+// Browser coverage for native page zoom, quotas, task cards, pending prompts, and account-menu access.
 
 import { ok } from "node:assert/strict";
 import { createServer } from "node:http";
@@ -41,7 +41,11 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
   });
   // Other workers create and update tasks on the shared backend. Keep this
   // layout fixture fixed while native zoom and scrolling are being asserted.
-  const snapshot: TaskListEvent = { kind: "snapshot", snapshot: [task], complete: true };
+  const snapshot: TaskListEvent = {
+    kind: "snapshot",
+    snapshot: [{ ...task, state: "running", pendingInput: { id, text: prompt, images: [] } }],
+    complete: true,
+  };
   const events = createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/event-stream", "Access-Control-Allow-Origin": "*" });
     response.write(`data: ${JSON.stringify(snapshot)}\n\n`);
@@ -133,6 +137,32 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
         await settings.press("Escape");
         await expect(avatar).toBeFocused();
       });
+    }
+    // Seeded pending content exercises the same layout with a long prompt;
+    // the queue journey itself is covered against the API in queued-input.spec.ts.
+    await page.goto(`/task/@${id}`);
+    const pending = page.getByRole("region", { name: "Pending prompt" });
+    for (const zoom of [1, 2]) {
+      await worker.evaluate(`chrome.tabs.setZoom(${zoom})`);
+      await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBe(zoom);
+      await expect(pending).toBeVisible();
+      for (const name of ["Edit pending prompt", "Cancel pending prompt"]) {
+        const button = pending.getByRole("button", { name });
+        await expect(button).toBeInViewport({ ratio: 1 });
+        await button.focus();
+        await expect(button).toBeFocused();
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.getByTestId("task-detail-prompt").fill("Please focus on the failing test");
+      await page.getByRole("button", { name: "Send options", exact: true }).click();
+      await expect(page.getByRole("menuitem", { name: /Send now/ })).toBeInViewport({ ratio: 1 });
+      await page.screenshot({ path: testInfo.outputPath(`send-options-${zoom * 100}.png`) });
+      await page.keyboard.press("Escape");
+      await page.screenshot({ path: testInfo.outputPath(`pending-${zoom * 100}.png`) });
+      await page.getByTestId("task-detail-prompt").focus();
+      await page.getByTestId("task-detail-prompt").press("ControlOrMeta+A");
+      await page.getByTestId("task-detail-prompt").press("Backspace");
+      await expect(pending.getByRole("button", { name: "Edit pending prompt" })).toBeEnabled();
     }
     expect(errors).toEqual([]);
   } finally {

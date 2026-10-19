@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, HistoryActivity, HistoryBootstrap, HistoryCheckpoint, HistoryEvent, HistoryManifest, HistoryMetadata, HistoryPosition, HistoryReset, HistoryRoute, HistorySection, HistorySlice, HistoryStats, HistoryToolTiming, HistoryTurn, ISOTimestamp, LocalUsage, LocalWindow, PendingInput, PendingInputImage, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskPlan, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -56,6 +56,26 @@ function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueV
     result[k] = valValidator((v as ObjectValue)[k]);
   }
   return result;
+}
+
+export function validatePendingInputImage(raw: ValidatorInput): PendingInputImage {
+  const obj = asObject(raw, "PendingInputImage");
+  return {
+    url: asString(obj["url"], "PendingInputImage.url"),
+    thumbnailURL: asString(obj["thumbnailURL"], "PendingInputImage.thumbnailURL"),
+  };
+}
+
+export function validatePendingInput(raw: ValidatorInput): PendingInput {
+  const obj = asObject(raw, "PendingInput");
+  return {
+    delivered: (obj["delivered"] === undefined || obj["delivered"] === null ? undefined : asBoolean(obj["delivered"], "PendingInput.delivered")),
+    delivering: (obj["delivering"] === undefined || obj["delivering"] === null ? undefined : asBoolean(obj["delivering"], "PendingInput.delivering")),
+    id: asString(obj["id"], "PendingInput.id"),
+    text: asString(obj["text"], "PendingInput.text"),
+    images: validateArray(obj["images"], "PendingInput.images", validatePendingInputImage) as PendingInputImage[],
+    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "PendingInput.error")),
+  };
 }
 
 export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
@@ -158,6 +178,7 @@ export function validateTaskRateLimit(raw: ValidatorInput): TaskRateLimit {
 export function validateTask(raw: ValidatorInput): Task {
   const obj = asObject(raw, "Task");
   return {
+    pendingInput: (obj["pendingInput"] === undefined || obj["pendingInput"] === null ? undefined : validatePendingInput(obj["pendingInput"])),
     id: asString(obj["id"], "Task.id"),
     initialPrompt: asString(obj["initialPrompt"], "Task.initialPrompt"),
     title: asString(obj["title"], "Task.title"),

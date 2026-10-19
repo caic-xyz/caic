@@ -1,4 +1,4 @@
-// Tests Store initialization, preparation rollback, append authority, terminal compression, and startup scans.
+// Tests for Store: queued prompts, log authority, result trailers, compression, and startup scans.
 
 package taskslog
 
@@ -187,6 +187,26 @@ func TestStore(t *testing.T) {
 		files, err := os.ReadDir(s.LogDir)
 		if err != nil || len(files) != 0 {
 			t.Fatalf("failed header left files: %v, %v", files, err)
+		}
+	})
+	t.Run("LoadInputQueue", func(t *testing.T) {
+		t.Parallel()
+		for _, fixture := range []struct{ name, raw string }{
+			{"truncated", "["},
+			{"trailing", "[] {}"},
+			{"invalid_id", `[{"id":"/","taskID":"/","text":"hello"}]`},
+		} {
+			t.Run(fixture.name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "input-queue.json"), []byte(fixture.raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				store := NewStore(testLogger(), dir)
+				if _, err := store.LoadInputQueue(); err == nil {
+					t.Fatal("corrupt queue accepted")
+				}
+			})
 		}
 	})
 	t.Run("WriteResultTrailerReasoningTokens", func(t *testing.T) {

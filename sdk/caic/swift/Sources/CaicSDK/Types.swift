@@ -1083,6 +1083,22 @@ public struct BotFixCIReq: Codable {
     public let repo: String
 }
 
+/// PendingInputImage identifies original and thumbnail resources for a pending attachment.
+public struct PendingInputImage: Codable {
+    public let url: String
+    public let thumbnailURL: String
+}
+
+/// PendingInput is a task's single pending prompt without embedded image payloads.
+public struct PendingInput: Codable {
+    public let delivered: Bool?
+    public let delivering: Bool?
+    public let id: String
+    public let text: String
+    public let images: [PendingInputImage]
+    public let error: String?
+}
+
 /// TaskRepo describes a repository associated with a task in the API response.
 public struct TaskRepo: Codable {
     public let name: String
@@ -1163,6 +1179,7 @@ public struct TaskRateLimit: Codable {
 
 /// Task is the JSON representation sent to the frontend.
 public struct Task: Codable {
+    public let pendingInput: PendingInput?
     public let id: String
     public let initialPrompt: String
     public let title: String
@@ -1363,8 +1380,15 @@ public struct CreateTaskReq: Codable {
     public let caicMCP: Bool?
 }
 
+/// CancelQueuedInputReq identifies a pending prompt to cancel.
+public struct CancelQueuedInputReq: Codable {
+    public let id: String
+}
+
 /// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 public struct InputReq: Codable {
+    /// Deliver when waiting instead of steering the active turn.
+    public let queue: Bool?
     public let prompt: Prompt
 }
 
