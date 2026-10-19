@@ -102,7 +102,7 @@ fix: custom-gcl frontend-deps
 	@pnpm exec eslint . --fix
 	@pnpm exec prettier --write --log-level warn .
 	@uv run --locked ruff check --quiet --fix .
-	@uv run --locked ruff format --quiet .
+	@uv run --locked ruff format . >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
 	@pnpm exec stylelint --fix "frontend/src/**/*.css"
 	@uv run --locked python scripts/update_agents_file_index.py
@@ -155,7 +155,6 @@ coverage: frontend-deps
 git-hooks:
 	@./scripts/install-git-hooks.sh
 	@git config merge.ours.driver true
-	@echo "✓ Git hooks installed"
 
 frontend-dev: frontend-deps
 	@pnpm --silent dev
