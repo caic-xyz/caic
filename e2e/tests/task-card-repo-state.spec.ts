@@ -179,9 +179,27 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   await page.goto(`/task/@${multiTask.id}`);
   await expect(multiStateRows.nth(1)).toBeVisible();
   await expect(multiStateRows.nth(1).getByRole("img")).toHaveCount(0);
-  const emptyRowHeight = (await multiStateRows.nth(1).boundingBox())!.height;
-  const summaryRowHeight = (await singleCard.getByTestId("task-card-repo-state").boundingBox())!.height;
-  expect(Math.abs(emptyRowHeight - summaryRowHeight)).toBeLessThan(1);
+  // Live task updates can replace repository rows. Read both heights together
+  // and retry missing or unsettled rows instead of keeping stale element handles.
+  await expect
+    .poll(() =>
+      page.getByTestId("task-list").evaluate(
+        (list, { single, multi }) => {
+          const emptyRow = list
+            .querySelector(`[data-task-id="${multi}"]`)
+            ?.querySelectorAll('[data-testid="task-card-repo-state"]')
+            .item(1);
+          const summaryRow = list.querySelector(`[data-task-id="${single}"] [data-testid="task-card-repo-state"]`);
+          const emptyHeight = emptyRow?.getBoundingClientRect().height ?? 0;
+          const summaryHeight = summaryRow?.getBoundingClientRect().height ?? 0;
+          return emptyHeight > 0 && summaryHeight > 0
+            ? Math.abs(emptyHeight - summaryHeight)
+            : Number.POSITIVE_INFINITY;
+        },
+        { single: singleTask.id, multi: multiTask.id },
+      ),
+    )
+    .toBeLessThan(1);
 });
 
 test("turn completion and diff agree on a waiting task card", async ({ page, api, uniquePrompt }) => {
