@@ -22,7 +22,7 @@ VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 # methodfilecheck (see .golangci.yml) is a golangci-lint module plugin, so Go
 # linting must run through the custom binary built from the published plugin
 # module; the plain binary is fine for `fmt`.
-VERIFY_GO = ./custom-gcl run --show-stats=false ./...
+VERIFY_GO = ./custom-gcl run --show-stats=false ./... && go mod tidy -diff
 VERIFY_GOBUILD = uv run --locked python scripts/lint_build_tags.py
 VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && node scripts/lint_frontend_styles.mjs
 VERIFY_TS = pnpm --silent typecheck
