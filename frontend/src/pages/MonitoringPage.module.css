@@ -1,0 +1,59 @@
+/* Styles for the shared Monitoring frame and section navigation. */
+
+.page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.5rem 0 2rem;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.panel {
+  width: 100%;
+  max-width: 64rem;
+  padding-top: 0.25rem;
+  margin-inline: auto;
+}
+
+.title {
+  margin: 0 0 1.25rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.sections {
+  display: flex;
+  gap: 0.25rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.sections a {
+  padding: 0.65rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-align: center;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.sections a:hover {
+  background: var(--color-bg-hover);
+}
+
+.sections a[aria-current="page"] {
+  color: var(--color-on-primary-container);
+  background: var(--color-primary-container);
+}
+
+.sections a:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}

@@ -169,6 +169,7 @@ var Routes = []Route{
 		Path:   "/api/caic/v1/server/cache-sizes",
 		Resp:   reflect.TypeFor[CacheSizesResp](),
 	},
+	{Name: "getSystemStats", Doc: "Returns recent whole-machine utilization samples.", Method: "GET", Path: "/api/caic/v1/server/system-stats", Resp: reflect.TypeFor[SystemStatsResp]()},
 	{
 		Name:   "getMetrics",
 		Doc:    "Returns aggregated operation latency statistics.",

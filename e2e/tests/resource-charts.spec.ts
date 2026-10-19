@@ -3,6 +3,61 @@
 import { createTaskAPI, expect, test } from "../helpers";
 import type { EventMessage } from "../../sdk/caic/ts/v1/types.gen";
 
+test("task CPU configured ceilings and metadata failures stay distinct", async ({ page, api }, testInfo) => {
+  const id = await createTaskAPI(api, "Inspect fractional CPU constraints");
+  const ts = Date.UTC(2026, 9, 4);
+  const event = {
+    kind: "stats",
+    ts,
+    stats: {
+      ts,
+      cpuPerc: 150,
+      cpuCeiling: 1.5,
+      cpuQuota: 1.5 as number | null,
+      runtimeCPUs: 8,
+      cpuError: "",
+      memUsed: 512,
+      memLimit: 1024,
+      memPerc: 50,
+      netRx: 0,
+      netTx: 0,
+      blockRead: 0,
+      blockWrite: 0,
+      diskUsed: -1,
+    },
+  };
+  await page.route(`**/api/caic/v1/tasks/${id}/events*`, (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify(event)}\n\nevent: ready\ndata: {}\n\n`,
+    }),
+  );
+  await page.goto(`/task/@${id}/stats`);
+  const resources = page.getByTestId("resource-charts");
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(resources).toContainText("150.0% · 1.50 CPUs");
+    await expect(resources).toContainText("effective capacity unknown · configured ceiling ≤ 1.5 CPUs");
+    await expect(resources).toContainText("Runtime: 8 CPUs · quota 1.5 CPUs");
+    await expect(resources).toContainText("Inherited CPU limits and process affinity are unreported.");
+    await expect(resources).not.toContainText("of capacity");
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await resources.screenshot({ path: testInfo.outputPath(`cpu-capacity-${width}.png`) });
+  }
+  await resources.getByText("Exact samples").click();
+  await expect(resources.getByRole("table")).toContainText("Configured CPU ceiling");
+  await expect(resources.getByRole("table")).toContainText("CPU quota");
+  await expect(resources.getByRole("table")).toContainText("1.5");
+  event.stats.cpuQuota = null;
+  event.stats.cpuCeiling = 8;
+  event.stats.cpuError = "inspect unavailable";
+  await page.reload();
+  await expect(resources).toContainText("quota unknown");
+  await expect(resources).toContainText("configured ceiling ≤ 8 CPUs");
+  await resources.getByText("CPU metadata warning").click();
+  await expect(resources.getByText("inspect unavailable")).toBeVisible();
+});
+
 for (const history of ["clustered", "live"] as const) {
   test(`resource charts read ${history} samples through the crosshair`, async ({ page, api }) => {
     const id = await createTaskAPI(api, "Seed the resource charts");
@@ -16,7 +71,10 @@ for (const history of ["clustered", "live"] as const) {
         ts: start + offset,
         stats: {
           ts: start + offset,
-          cpuPerc: 18 + index,
+          cpuPerc: 118 + index,
+          cpuCeiling: 4,
+          cpuQuota: 0,
+          runtimeCPUs: 4,
           memUsed: 512,
           memLimit: 1024,
           memPerc: 50,
@@ -41,6 +99,7 @@ for (const history of ["clustered", "live"] as const) {
 
     const resources = page.getByTestId("resource-charts");
     await expect(resources).toBeVisible();
+    await expect(resources).toContainText("configured ceiling ≤ 4 CPUs");
     // The fake runtime streams a paced sample history; wait until the chart holds
     // more than the first sample before reading values from it.
     await expect

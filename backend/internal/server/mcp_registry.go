@@ -75,7 +75,7 @@ If the client provides a bounded current-task snapshot at session start, use it 
 - When an agent is asking, read the question and options clearly, wait for the verbal answer, then call task_answer_question.
 - When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness from saved preferences; omitted model and effort use the selected harness defaults. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
 - Refer to tasks by title.
-- Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
+- Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_system_stats, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
 - For safety issues during sync, describe each issue and ask whether to force.`
 
@@ -436,6 +436,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("task_purge", "Purge task", "Stop a task and schedule its container for deletion after the recovery window. Reviving the task during the window cancels deletion.", m.handleTaskPurge), mcp.ToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped or crashed task, restarting its container and agent session.", m.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
 		forkSpec,
+		annotateTool(mcp.NewToolSpec("get_system_stats", "Get system stats", "Read whole-machine CPU, memory, network, and working-filesystem utilization for the caic server. Returns up to 60 five-second samples, including timestamps and capacity totals, plus any sampling warning. The cpus array reports each logical CPU ID and 0–100% usage; sum those percentages for total usage (100% per fully busy CPU). Memory excludes available pages; network sums all interfaces. Works without opening the UI.", m.handleGetSystemStats), mcp.ToolAnnotations{Title: "Get system stats", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", m.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", m.handleCloneRepo), mcp.ToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", m.handleAgentLastMessage), mcp.ToolAnnotations{Title: "Get last agent message", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
@@ -1182,6 +1183,10 @@ func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) 
 		return m.taskForkToolError(args, entry.Task(), err)
 	}
 	return mcp.TypedToolResult(mcpTaskForkOutput{Result: fmt.Sprintf("Forked task #%d. New task ID: %s", num, resp.ID.String()), TaskID: resp.ID.String()})
+}
+
+func (m *mcpRegistry) handleGetSystemStats(_ context.Context, _ struct{}) mcp.ToolResult[v1.SystemStatsResp] {
+	return mcp.TypedToolResult(m.serverConfig.systemStats.snapshot())
 }
 
 func (m *mcpRegistry) handleGetUsage(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
@@ -2143,6 +2148,7 @@ var mcpToolScopes = map[string]string{
 	"task_get_detail":            mcpScopeTasksRead,
 	"agent_last_message":         mcpScopeTasksRead,
 	"get_usage":                  mcpScopeRead,
+	"get_system_stats":           mcpScopeRead,
 	"task_send_message":          mcpScopeTasksWrite,
 	"task_answer_question":       mcpScopeTasksWrite,
 	"task_create":                mcpScopeTasksCreate,
@@ -2446,10 +2452,10 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 func authorizeToolScope(ctx context.Context, name string) (string, bool) {
 	if _, ok := taskMCPTaskID(ctx); ok {
 		switch name {
-		case "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":
+		case "get_system_stats", "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":
 			return "allow", true
 		}
-		return "task-scoped MCP only permits task_create, tasks_list, task_get_detail, task_fork, task_stop, and task_purge", false
+		return "task-scoped MCP only permits get_system_stats, task_create, tasks_list, task_get_detail, task_fork, task_stop, and task_purge", false
 	}
 	required := requiredScopeForTool(name)
 	if required == "" {

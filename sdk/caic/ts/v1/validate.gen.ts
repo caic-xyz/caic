@@ -376,6 +376,10 @@ export function validateEventStats(raw: ValidatorInput): EventStats {
   return {
     ts: asNumber(obj["ts"], "EventStats.ts"),
     cpuPerc: asNumber(obj["cpuPerc"], "EventStats.cpuPerc"),
+    cpuCeiling: (obj["cpuCeiling"] === undefined || obj["cpuCeiling"] === null ? undefined : asNumber(obj["cpuCeiling"], "EventStats.cpuCeiling")),
+    cpuQuota: (obj["cpuQuota"] === undefined || obj["cpuQuota"] === null ? undefined : asNumber(obj["cpuQuota"], "EventStats.cpuQuota")),
+    runtimeCPUs: (obj["runtimeCPUs"] === undefined || obj["runtimeCPUs"] === null ? undefined : asNumber(obj["runtimeCPUs"], "EventStats.runtimeCPUs")),
+    cpuError: (obj["cpuError"] === undefined || obj["cpuError"] === null ? undefined : asString(obj["cpuError"], "EventStats.cpuError")),
     memUsed: asNumber(obj["memUsed"], "EventStats.memUsed"),
     memLimit: asNumber(obj["memLimit"], "EventStats.memLimit"),
     memPerc: asNumber(obj["memPerc"], "EventStats.memPerc"),

@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/andybalholm/brotli v1.2.6
 	github.com/buger/jsonparser v1.6.1
-	github.com/caic-xyz/md v0.18.6
+	github.com/caic-xyz/md v0.18.7-0.20261020222431-d80cbe7923c3
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.1
@@ -23,6 +23,7 @@ require (
 	github.com/oschwald/maxminddb-golang/v2 v2.6.0
 	github.com/pb33f/ordered-map/v2 v2.3.2
 	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/shirou/gopsutil/v4 v4.26.9
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/net v0.59.0
 	golang.org/x/sync v0.23.0
@@ -88,6 +89,7 @@ require (
 	github.com/dave/dst v0.27.3 // indirect
 	github.com/denis-tingaikin/go-header v0.5.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/ettle/strcase v0.2.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
@@ -95,6 +97,7 @@ require (
 	github.com/fzipp/gocyclo v0.6.0 // indirect
 	github.com/ghostiam/protogetter v1.0.1 // indirect
 	github.com/go-critic/go-critic v0.15.0 // indirect
+	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
 	github.com/go-toolsmith/astequal v1.2.0 // indirect
@@ -150,6 +153,7 @@ require (
 	github.com/ldez/usetesting v0.5.0 // indirect
 	github.com/leonklingele/grouper v1.1.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
+	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/macabu/inamedparam v0.2.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/manuelarte/embeddedstructfieldcheck v0.4.0 // indirect
@@ -189,6 +193,7 @@ require (
 	github.com/pion/transport/v4 v4.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.1 // indirect
 	github.com/pion/webrtc/v4 v4.2.20 // indirect
+	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
 	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
@@ -227,6 +232,8 @@ require (
 	github.com/tetafro/godot v1.5.6 // indirect
 	github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c // indirect
 	github.com/timonwong/loggercheck v0.12.0 // indirect
+	github.com/tklauser/go-sysconf v0.4.0 // indirect
+	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.12.0 // indirect
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1 // indirect
 	github.com/ultraware/funlen v0.2.0 // indirect
@@ -239,6 +246,7 @@ require (
 	github.com/yagipy/maintidx v1.0.0 // indirect
 	github.com/yeya24/promlinter v0.3.0 // indirect
 	github.com/ykadowak/zerologlint v0.1.5 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	gitlab.com/bosi/decorder v0.4.2 // indirect
 	go-simpler.org/musttag v0.14.0 // indirect
 	go-simpler.org/sloglint v0.12.0 // indirect

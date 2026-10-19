@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
@@ -116,11 +117,11 @@ func (a mdClientAdapter) Get(ctx context.Context, name string) (mdContainer, err
 }
 
 func (a mdClientAdapter) List(ctx context.Context) ([]runtime.Instance, error) {
-	containers, err := a.c.List(ctx)
+	cts, err := a.c.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return InstancesFromMD(ctx, containers), nil
+	return InstancesFromMD(ctx, cts), nil
 }
 
 func (a mdClientAdapter) Inspect(ctx context.Context, id runtime.InstanceID) (*runtime.InstanceInspect, error) {
@@ -207,23 +208,56 @@ func (a mdClientAdapter) WatchStats(ctx context.Context, ids []runtime.InstanceI
 		return nil, err
 	}
 	return func(yield func(runtime.StatsSample, error) bool) {
+		// Runtime info and inspect may be remote. Keep usage flowing while
+		// metadata refreshes, and cancel and join the observer on stream exit.
+		ctx, cancel := context.WithCancel(ctx)
+		var mu sync.Mutex
+		var metadata map[string]cpuInfo
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				observed := a.readCPUInfo(ctx, names)
+				mu.Lock()
+				metadata = observed
+				mu.Unlock()
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+		defer func() {
+			cancel()
+			<-done
+		}()
 		for sample, err := range stats {
 			if err != nil {
 				_ = yield(runtime.StatsSample{}, err)
 				return
 			}
+			mu.Lock()
+			info := metadata[sample.Name]
+			mu.Unlock()
 			out := runtime.StatsSample{
 				InstanceID: runtime.ID(sample.Name),
 				Stats: runtime.Stats{
-					CPUPerc:    sample.Stats.CPUPerc,
-					MemUsed:    sample.Stats.MemUsed,
-					MemLimit:   sample.Stats.MemLimit,
-					MemPerc:    sample.Stats.MemPerc,
-					NetRx:      sample.Stats.NetRx,
-					NetTx:      sample.Stats.NetTx,
-					BlockRead:  sample.Stats.BlockRead,
-					BlockWrite: sample.Stats.BlockWrite,
-					DiskUsed:   sample.Stats.DiskUsed,
+					CPUPerc:     sample.Stats.CPUPerc,
+					CPUCeiling:  info.ceiling,
+					CPUQuota:    info.quota,
+					RuntimeCPUs: info.runtimeCPUs,
+					CPUError:    info.err,
+					MemUsed:     sample.Stats.MemUsed,
+					MemLimit:    sample.Stats.MemLimit,
+					MemPerc:     sample.Stats.MemPerc,
+					NetRx:       sample.Stats.NetRx,
+					NetTx:       sample.Stats.NetTx,
+					BlockRead:   sample.Stats.BlockRead,
+					BlockWrite:  sample.Stats.BlockWrite,
+					DiskUsed:    sample.Stats.DiskUsed,
 				},
 			}
 			if !yield(out, nil) {
@@ -271,6 +305,53 @@ func (a mdClientAdapter) WatchEvents(ctx context.Context, filter runtime.EventFi
 		}
 	}()
 	return out, nil
+}
+
+// cpuInfo contains runtime-reported CPU configuration. Its ceiling excludes
+// inherited cgroup limits and process-specific affinity, which are unobserved.
+type cpuInfo struct {
+	ceiling     float64
+	quota       *float64
+	runtimeCPUs int
+	err         string
+}
+
+// readCPUInfo bounds metadata latency without terminating usage collection.
+// Runtime.Info belongs to the owning runtime, including remote servers and VMs.
+func (a mdClientAdapter) readCPUInfo(ctx context.Context, names []string) map[string]cpuInfo {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	info, infoErr := a.c.Runtime.Info(ctx)
+	if infoErr == nil && info.CPUs <= 0 {
+		infoErr = errors.New("runtime logical CPU count unavailable")
+	}
+	if infoErr != nil && ctx.Err() == nil {
+		a.log.WarnContext(ctx, "read runtime CPU info", "err", infoErr)
+	}
+	out := make(map[string]cpuInfo, len(names))
+	for _, name := range names {
+		c := cpuInfo{}
+		if infoErr == nil {
+			c.runtimeCPUs = info.CPUs
+			c.ceiling = float64(info.CPUs)
+		}
+		ins, err := a.c.Runtime.InspectInfo(ctx, name)
+		if err == nil {
+			c.quota = new(ins.CPULimit)
+			for _, limit := range []float64{ins.CPULimit, float64(len(ins.CPUSet))} {
+				if limit > 0 && (c.ceiling == 0 || limit < c.ceiling) {
+					c.ceiling = limit
+				}
+			}
+		} else {
+			err = fmt.Errorf("inspect CPU configuration: %w", err)
+		}
+		if err := errors.Join(infoErr, err); err != nil {
+			c.err = err.Error()
+		}
+		out[name] = c
+	}
+	return out
 }
 
 // mdContainerAdapter adapts *md.Container to mdContainer.

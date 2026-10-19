@@ -1,0 +1,48 @@
+/* Styles for Monitoring's whole-machine resource history and CPU meters. */
+
+.page {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.page h2 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+.description {
+  max-width: 64rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.error {
+  color: var(--color-error);
+}
+
+.cpuDetails {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+}
+
+.cpuGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.5rem 1rem;
+  max-height: 20rem;
+  margin-top: 0.75rem;
+  overflow: auto;
+}
+
+.cpuRow {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) 3.5rem;
+  gap: 0.5rem;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.cpuRow meter {
+  width: 100%;
+}

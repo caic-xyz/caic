@@ -1,17 +1,14 @@
-// UsagePage is the /usage route for cross-task daily usage analytics.
+// UsagePage shows cross-task analytics in Monitoring with URL-backed range and subject filters.
 
-import { createMemo, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createMemo, createSignal, For, lazy, onMount, Show, Suspense } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 
 import type { UsageDashboardResp } from "@sdk/types.gen";
 
 import { api } from "../api";
 import Button from "../components/Button";
-import { Layout } from "../components/Layout";
 import { formatCost, formatTokens } from "../formatting";
 import {
-  drilldownEqual,
-  drilldownFromHash,
-  hashFromDrilldown,
   summarizeUsageDays,
   usageCacheHitRate,
   usageDailySeries,
@@ -43,8 +40,13 @@ function formatUsageDuration(ms: number): string {
 
 export default function UsagePage() {
   const [dashboard, setDashboard] = createSignal<UsageDashboardResp | null>(null);
-  const [range, setRange] = createSignal<UsageRange>("30");
-  const [drilldown, setDrilldown] = createSignal<UsageDrilldown | null>(null);
+  const [search, setSearch] = useSearchParams();
+  const range = () => usageRangeFrom(typeof search.range === "string" ? search.range : "30");
+  const drilldown = createMemo<UsageDrilldown | null>(() => {
+    const harness = typeof search.harness === "string" ? search.harness : undefined;
+    const model = typeof search.model === "string" ? search.model : undefined;
+    return harness || model ? { harness, model } : null;
+  });
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
 
@@ -70,20 +72,9 @@ export default function UsagePage() {
   const cacheHitRate = () => usageCacheHitRate(summary().tokens);
   const dataSince = () => formatDay(dashboard()?.dataSince);
 
-  // applyDrilldown keeps the location hash fragment in sync so a filtered
-  // view can be shared or restored after a reload; history navigation and
-  // manual hash edits flow back through the hashchange listener.
+  // Router-owned filters restore on reload and browser history navigation.
   const applyDrilldown = (next: UsageDrilldown | null) => {
-    setDrilldown(next);
-    const fragment = hashFromDrilldown(next);
-    const url = fragment || `${window.location.pathname}${window.location.search}`;
-    if (!window.location.href.endsWith(url)) {
-      window.history.pushState(null, "", url);
-    }
-  };
-  const onHashChange = () => {
-    const next = drilldownFromHash(window.location.hash);
-    if (!drilldownEqual(next, drilldown())) setDrilldown(next);
+    setSearch({ harness: next?.harness, model: next?.model }, { replace: false, scroll: false });
   };
   const selectModel = (name: string) => applyDrilldown({ ...(drilldown() ?? {}), model: name });
   const selectHarness = (name: string) => applyDrilldown({ ...(drilldown() ?? {}), harness: name });
@@ -96,158 +87,145 @@ export default function UsagePage() {
     return parts.join(" in ");
   };
 
-  onMount(() => {
-    void refresh();
-    setDrilldown(drilldownFromHash(window.location.hash));
-    window.addEventListener("hashchange", onHashChange);
-    window.addEventListener("popstate", onHashChange);
-  });
-  onCleanup(() => {
-    window.removeEventListener("hashchange", onHashChange);
-    window.removeEventListener("popstate", onHashChange);
-  });
-
   return (
-    <Layout>
-      <main class={styles.page}>
-        <div class={styles.header}>
-          <div>
-            <h1>Usage</h1>
-            <p>Cross-task activity from the daily usage rollup. Repository counts are distinct task-days.</p>
-          </div>
-          <div class={styles.controls}>
-            <label>
-              <span class={styles.controlLabel}>Range</span>
-              <select
-                aria-label="Usage date range"
-                value={range()}
-                onChange={(event) => setRange(usageRangeFrom(event.currentTarget.value))}
-              >
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
-                <option value="all">All retained days</option>
-              </select>
-            </label>
-            <Button type="button" variant="gray" loading={loading()} onClick={() => void refresh()}>
-              {loading() ? "Refreshing…" : "Refresh"}
-            </Button>
-          </div>
+    <section aria-label="Usage">
+      <div class={styles.header}>
+        <div>
+          <h2>Usage</h2>
+          <p>Cross-task activity from the daily usage rollup. Repository counts are distinct task-days.</p>
         </div>
+        <div class={styles.controls}>
+          <label>
+            <span class={styles.controlLabel}>Range</span>
+            <select
+              aria-label="Usage date range"
+              value={range()}
+              onChange={(event) => setSearch({ range: event.currentTarget.value }, { replace: false, scroll: false })}
+            >
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="all">All retained days</option>
+            </select>
+          </label>
+          <Button type="button" variant="gray" loading={loading()} onClick={() => void refresh()}>
+            {loading() ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
+      </div>
 
-        <Show when={dataSince()}>
-          <p class={styles.meta}>
-            Data since {dataSince()} · {rangeLabel(range())}
-            <Show when={drillLabel()}> · filtered to {drillLabel()}</Show>
-          </p>
-        </Show>
-        <Show when={error()}>
-          <p class={styles.error} role="alert">
-            {error()}
-          </p>
-        </Show>
+      <Show when={dataSince()}>
+        <p class={styles.meta}>
+          Data since {dataSince()} · {rangeLabel(range())}
+          <Show when={drillLabel()}> · filtered to {drillLabel()}</Show>
+        </p>
+      </Show>
+      <Show when={error()}>
+        <p class={styles.error} role="alert">
+          {error()}
+        </p>
+      </Show>
 
-        <Show
-          when={dashboard()}
-          fallback={<p class={styles.empty}>{loading() ? "Loading usage…" : "Usage data is unavailable."}</p>}
-        >
-          <Show when={days().length > 0} fallback={<p class={styles.empty}>No usage was recorded in this range.</p>}>
-            <Show when={drilldown()}>
-              <p class={styles.drilldown} role="status">
-                Showing usage for <strong>{drillLabel()}</strong>
-                {" · "}
-                <button type="button" class={styles.clearLink} onClick={() => applyDrilldown(null)}>
-                  Show all usage
-                </button>
-              </p>
-            </Show>
-            <section class={styles.metrics} aria-label="Usage summary">
-              <div>
-                <span>Total tokens</span>
-                <strong>{formatTokens(summary().totalTokens)}</strong>
-              </div>
-              <div>
-                <span>Turns</span>
-                <strong>{summary().turns}</strong>
-              </div>
-              <div>
-                <span>Cache hit rate</span>
-                <strong>{(cacheHitRate() * 100).toFixed(1)}%</strong>
-              </div>
-              <div>
-                <span>Reported cost</span>
-                <strong>{formatCost(summary().costUSD)}</strong>
-              </div>
-              <div>
-                <span>Skill task-days</span>
-                <strong>{summary().skills.reduce((total, skill) => total + skill.count, 0)}</strong>
-              </div>
-              <div>
-                <span>Compactions</span>
-                <strong>{summary().compactions}</strong>
-              </div>
-              <div>
-                <span>API time</span>
-                <strong>{formatUsageDuration(summary().apiMs)}</strong>
-              </div>
-              <div>
-                <span>Turn wall time</span>
-                <strong>{formatUsageDuration(summary().wallMs)}</strong>
-              </div>
-              <div>
-                <span>Errored turns</span>
-                <strong>{summary().erroredTurns}</strong>
-              </div>
-              <div>
-                <span>Subagent spawns</span>
-                <strong>{summary().subagentSpawns}</strong>
-              </div>
-            </section>
-
-            <Suspense fallback={<p class={styles.empty}>Loading charts…</p>}>
-              <UsageCharts points={points()} subject={drillLabel()} />
-            </Suspense>
-
-            <div class={styles.lowerGrid}>
-              <section class={styles.panel}>
-                <h2>Models</h2>
-                <p>
-                  Tokens, turns, and reported cost over the selected range. Select a row to drill every panel down to
-                  that model.
-                </p>
-                <Leaderboard entries={summary().models} showCost kind="model" onSelect={selectModel} />
-              </section>
-              <section class={styles.panel}>
-                <h2>Harnesses</h2>
-                <p>
-                  Tokens, turns, reported cost, and cached input over the selected range. Select a row to drill every
-                  panel down to that harness.
-                </p>
-                <Leaderboard entries={summary().harnesses} showCost showCache kind="harness" onSelect={selectHarness} />
-              </section>
-              <section class={styles.panel}>
-                <h2>Tools</h2>
-                <p>
-                  Calls count on their start day; timed calls and duration count on completion day. Total time sums
-                  concurrent calls, and average uses measured calls only.
-                </p>
-                <ToolTable entries={summary().tools} />
-              </section>
-              <section class={styles.panel}>
-                <h2>Repositories</h2>
-                <p>Task-days over the selected range.</p>
-                <CountList entries={summary().repos} empty="No repository activity." />
-              </section>
-              <section class={styles.panel}>
-                <h2>Skills</h2>
-                <p>Task-days over the selected range.</p>
-                <CountList entries={summary().skills} empty="No skill use." />
-              </section>
-            </div>
+      <Show
+        when={dashboard()}
+        fallback={<p class={styles.empty}>{loading() ? "Loading usage…" : "Usage data is unavailable."}</p>}
+      >
+        <Show when={days().length > 0} fallback={<p class={styles.empty}>No usage was recorded in this range.</p>}>
+          <Show when={drilldown()}>
+            <p class={styles.drilldown} role="status">
+              Showing usage for <strong>{drillLabel()}</strong>
+              {" · "}
+              <button type="button" class={styles.clearLink} onClick={() => applyDrilldown(null)}>
+                Show all usage
+              </button>
+            </p>
           </Show>
+          <section class={styles.metrics} aria-label="Usage summary">
+            <div>
+              <span>Total tokens</span>
+              <strong>{formatTokens(summary().totalTokens)}</strong>
+            </div>
+            <div>
+              <span>Turns</span>
+              <strong>{summary().turns}</strong>
+            </div>
+            <div>
+              <span>Cache hit rate</span>
+              <strong>{(cacheHitRate() * 100).toFixed(1)}%</strong>
+            </div>
+            <div>
+              <span>Reported cost</span>
+              <strong>{formatCost(summary().costUSD)}</strong>
+            </div>
+            <div>
+              <span>Skill task-days</span>
+              <strong>{summary().skills.reduce((total, skill) => total + skill.count, 0)}</strong>
+            </div>
+            <div>
+              <span>Compactions</span>
+              <strong>{summary().compactions}</strong>
+            </div>
+            <div>
+              <span>API time</span>
+              <strong>{formatUsageDuration(summary().apiMs)}</strong>
+            </div>
+            <div>
+              <span>Turn wall time</span>
+              <strong>{formatUsageDuration(summary().wallMs)}</strong>
+            </div>
+            <div>
+              <span>Errored turns</span>
+              <strong>{summary().erroredTurns}</strong>
+            </div>
+            <div>
+              <span>Subagent spawns</span>
+              <strong>{summary().subagentSpawns}</strong>
+            </div>
+          </section>
+
+          <Suspense fallback={<p class={styles.empty}>Loading charts…</p>}>
+            <UsageCharts points={points()} subject={drillLabel()} />
+          </Suspense>
+
+          <div class={styles.lowerGrid}>
+            <section class={styles.panel}>
+              <h2>Models</h2>
+              <p>
+                Tokens, turns, and reported cost over the selected range. Select a row to drill every panel down to that
+                model.
+              </p>
+              <Leaderboard entries={summary().models} showCost kind="model" onSelect={selectModel} />
+            </section>
+            <section class={styles.panel}>
+              <h2>Harnesses</h2>
+              <p>
+                Tokens, turns, reported cost, and cached input over the selected range. Select a row to drill every
+                panel down to that harness.
+              </p>
+              <Leaderboard entries={summary().harnesses} showCost showCache kind="harness" onSelect={selectHarness} />
+            </section>
+            <section class={styles.panel}>
+              <h2>Tools</h2>
+              <p>
+                Calls count on their start day; timed calls and duration count on completion day. Total time sums
+                concurrent calls, and average uses measured calls only.
+              </p>
+              <ToolTable entries={summary().tools} />
+            </section>
+            <section class={styles.panel}>
+              <h2>Repositories</h2>
+              <p>Task-days over the selected range.</p>
+              <CountList entries={summary().repos} empty="No repository activity." />
+            </section>
+            <section class={styles.panel}>
+              <h2>Skills</h2>
+              <p>Task-days over the selected range.</p>
+              <CountList entries={summary().skills} empty="No skill use." />
+            </section>
+          </div>
         </Show>
-      </main>
-    </Layout>
+      </Show>
+    </section>
   );
 }
 

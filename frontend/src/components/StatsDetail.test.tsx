@@ -47,6 +47,7 @@ const turns: TurnTiming[] = [
 const stats: EventStats[] = [
   {
     ts: 1_000,
+    cpuCeiling: 4,
     cpuPerc: 10,
     memUsed: 1_024,
     memLimit: 4_096,
@@ -59,6 +60,7 @@ const stats: EventStats[] = [
   },
   {
     ts: 2_000,
+    cpuCeiling: 4,
     cpuPerc: 140.25,
     memUsed: 2_048,
     memLimit: 4_096,
@@ -71,6 +73,7 @@ const stats: EventStats[] = [
   },
   {
     ts: 3_000,
+    cpuCeiling: 4,
     cpuPerc: 50,
     memUsed: 3_072,
     memLimit: 4_096,
@@ -152,7 +155,8 @@ describe("StatsContent", () => {
       <StatsContent events={[]} stats={stats} turns={[]} usage={usage} />
     ));
     const resources = await findByTestId("resource-charts");
-    expect(resources).toHaveTextContent("CPU50.0% · max 140.25%");
+    expect(resources).toHaveTextContent("CPU50.0% · 0.50 CPUs");
+    expect(resources).toHaveTextContent("configured ceiling ≤ 4 CPUs");
     expect(resources).toHaveTextContent("Memory3.0 KiB / 4.0 KiB");
     expect(resources).toHaveTextContent("NetworkRX 3.0 KiB · TX 1.0 KiB");
     expect(resources).toHaveTextContent("DiskUnavailable");
@@ -165,7 +169,7 @@ describe("StatsContent", () => {
       cpuChart.querySelectorAll('[aria-label="y-axis tick label"] text'),
       (label) => label.textContent,
     );
-    expect(cpuScaleLabels).toEqual(["0%", "141%"]);
+    expect(cpuScaleLabels).toEqual(["0%", "400%"]);
     expect(await findByLabelText("Memory utilization over time")).toBeInTheDocument();
     const rxChart = await findByLabelText("Network receive throughput over time");
     const txChart = await findByLabelText("Network transmit throughput over time");
@@ -199,6 +203,70 @@ describe("StatsContent", () => {
     expect(table).toHaveTextContent("RX/s");
     expect(table).toHaveTextContent("2.0 KiB/s (2048 B/s)");
     expect(table).toHaveTextContent("1.0 MiB (1048576 B)");
+  });
+
+  it("shows CPU equivalents without inventing unknown capacity", async () => {
+    const { findByTestId } = render(() => (
+      <StatsContent
+        events={[]}
+        stats={[{ ...stats[0], cpuPerc: 150, cpuCeiling: undefined }]}
+        turns={[]}
+        usage={usage}
+      />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("CPU150.0% · 1.50 CPUs");
+    expect(resources).toHaveTextContent("capacity unknown");
+    expect(resources).toHaveTextContent("quota unknown");
+  });
+
+  it("distinguishes a fractional quota and configured ceiling from effective capacity", async () => {
+    const { findByTestId } = render(() => (
+      <StatsContent
+        events={[]}
+        stats={[
+          {
+            ...stats[0],
+            cpuPerc: 150,
+            cpuCeiling: 1.5,
+            cpuQuota: 1.5,
+            runtimeCPUs: 8,
+          },
+        ]}
+        turns={[]}
+        usage={usage}
+      />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("effective capacity unknown · configured ceiling ≤ 1.5 CPUs");
+    expect(resources).toHaveTextContent("Runtime: 8 CPUs · quota 1.5 CPUs");
+    expect(resources).toHaveTextContent("Inherited CPU limits and process affinity are unreported.");
+    expect(resources).not.toHaveTextContent("of capacity");
+  });
+
+  it("keeps an unrestricted quota distinct from the configured ceiling", async () => {
+    const { findByTestId } = render(() => (
+      <StatsContent events={[]} stats={[{ ...stats[0], cpuQuota: 0, runtimeCPUs: 8 }]} turns={[]} usage={usage} />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("no explicit quota");
+    expect(resources).toHaveTextContent("configured ceiling ≤ 4 CPUs");
+  });
+
+  it("explains a metadata failure while preserving usage and the runtime ceiling", async () => {
+    const { findByTestId } = render(() => (
+      <StatsContent
+        events={[]}
+        stats={[{ ...stats[0], cpuQuota: undefined, runtimeCPUs: 4, cpuError: "inspect unavailable" }]}
+        turns={[]}
+        usage={usage}
+      />
+    ));
+    const resources = await findByTestId("resource-charts");
+    expect(resources).toHaveTextContent("quota unknown");
+    const warning = within(resources).getByText("CPU metadata warning");
+    await userEvent.click(warning);
+    expect(resources).toHaveTextContent("inspect unavailable");
   });
 
   it("reads resource samples through the crosshair without clipping the readout", async () => {

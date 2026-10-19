@@ -14,8 +14,7 @@ import StatsPage from "./pages/StatsPage";
 import TaskInfoPage from "./pages/TaskInfoPage";
 import VncPage from "./pages/VncPage";
 import SettingsPage from "./pages/SettingsPage";
-import MetricsPage from "./pages/MetricsPage";
-import UsagePage from "./pages/UsagePage";
+import MonitoringPage from "./pages/MonitoringPage";
 
 /**
  * The application's route definitions. Returned as JSX (not a component) so it can be
@@ -38,8 +37,7 @@ export function appRoutes(): JSX.Element {
         </Route>
       </Route>
       <Route path="/settings" component={SettingsPage} />
-      <Route path="/metrics" component={MetricsPage} />
-      <Route path="/usage" component={UsagePage} />
+      <Route path="/monitoring" component={MonitoringPage} />
     </Route>
   );
 }

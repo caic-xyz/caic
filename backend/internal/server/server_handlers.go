@@ -1,4 +1,4 @@
-// HTTP handlers for server configuration, preferences, repos, harnesses, caches, and voice token.
+// HTTP handlers for server configuration, preferences, repos, harnesses, caches, metrics, and voice token.
 
 package server
 
@@ -52,6 +52,7 @@ type serverHandlers struct {
 	taskMgr            *taskmgr.Manager
 	cacheSizes         *CacheSizeStore
 	metrics            *metrics.Store
+	systemStats        *systemStats
 	harnessModels      *HarnessModels
 	imageRefresh       *ImageRefresh
 	authStore          *auth.Store
@@ -496,6 +497,11 @@ func (h *serverHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.
 	return &v1.CacheSizesResp{WellKnown: h.cacheSizes.Snapshot()}, nil
 }
 
+func (h *serverHandlers) getSystemStats(_ context.Context, _ *api.EmptyReq) (*v1.SystemStatsResp, error) {
+	snapshot := h.systemStats.snapshot()
+	return &snapshot, nil
+}
+
 func (h *serverHandlers) getMetrics(_ context.Context, _ *api.EmptyReq) (*v1.MetricsResp, error) {
 	series := h.metrics.Snapshot()
 	out := make([]v1.MetricSeries, 0, len(series))
@@ -731,6 +737,7 @@ func (h *serverHandlers) routes() http.Handler {
 	m.HandleFunc("GET /server/caches", handle(h.listCaches))
 	m.HandleFunc("GET /server/cache-sizes", handle(h.getCacheSizes))
 	m.HandleFunc("GET /server/metrics", handle(h.getMetrics))
+	m.HandleFunc("GET /server/system-stats", handle(h.getSystemStats))
 	m.HandleFunc("GET /server/repos", handle(h.listRepos))
 	m.HandleFunc("POST /server/repos", handle(h.cloneRepo))
 	m.HandleFunc("POST /server/update", handle(h.triggerUpdate))

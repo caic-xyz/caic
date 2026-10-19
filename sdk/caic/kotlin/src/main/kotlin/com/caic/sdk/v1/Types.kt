@@ -1488,6 +1488,40 @@ data class CacheSize(
 @Serializable
 data class CacheSizesResp(val wellKnown: List<CacheSize>)
 
+/** CPUUsage measures one logical CPU over the sampling interval. */
+@Serializable
+data class CPUUsage(
+    val id: String,
+    /** 100% means this logical CPU was fully busy. */
+    val usagePerc: Double,
+)
+
+/**
+ * SystemSample measures the machine running caic, including all processes.
+ * Memory excludes available/reclaimable pages. Network sums all interfaces,
+ * including virtual interfaces; traffic crossing several interfaces is counted on each.
+ * Disk measures the filesystem containing the server working directory.
+ */
+@Serializable
+data class SystemSample(
+    val time: Instant,
+    val cpus: List<CPUUsage>,
+    val memUsed: Long,
+    val memTotal: Long,
+    val memPerc: Double,
+    val netRx: Long,
+    val netTx: Long,
+    val diskUsed: Long,
+    val diskTotal: Long,
+)
+
+/**
+ * SystemStatsResp contains up to five minutes of five-second samples.
+ * Error describes the most recent sampling failure; retained samples remain available.
+ */
+@Serializable
+data class SystemStatsResp(val samples: List<SystemSample>, val error: String? = null)
+
 /** MetricResource identifies the process that produced the observations. */
 @Serializable
 data class MetricResource(
@@ -1859,7 +1893,7 @@ data class TaskInfoObservedRuntime(
     @SerialName("imageID") val imageID: String? = null,
     val os: String? = null,
     val cpuArchitecture: String? = null,
-    val cpuLimit: Int? = null,
+    val cpuLimit: Double? = null,
     val mounts: List<TaskInfoMount>? = null,
     val caches: List<TaskInfoCacheMount>? = null,
 )
@@ -2214,7 +2248,16 @@ data class EventRateLimit(
 @Serializable
 data class EventStats(
     val ts: Long,
+    /** 100% is one fully busy logical CPU. */
     val cpuPerc: Double,
+    /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+    val cpuCeiling: Double? = null,
+    /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+    val cpuQuota: Double? = null,
+    /** Owning runtime's logical CPU count; null when unknown. */
+    @SerialName("runtimeCPUs") val runtimeCPUs: Int? = null,
+    /** Runtime CPU metadata observation failure; usage samples remain usable. */
+    val cpuError: String? = null,
     val memUsed: Long,
     val memLimit: Long,
     val memPerc: Double,

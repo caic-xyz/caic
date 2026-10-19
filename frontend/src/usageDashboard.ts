@@ -43,32 +43,6 @@ export interface UsageDrilldown {
   model?: string;
 }
 
-// drilldownFromHash parses a location hash fragment ("#harness=x&model=y")
-// into a drill-down filter, or null when the fragment holds no filter.
-export function drilldownFromHash(hash: string): UsageDrilldown | null {
-  const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
-  const harness = params.get("harness") ?? undefined;
-  const model = params.get("model") ?? undefined;
-  if (!harness && !model) return null;
-  return { harness, model };
-}
-
-// hashFromDrilldown serializes a drill-down filter into a location hash
-// fragment; the empty string clears the fragment.
-export function hashFromDrilldown(drilldown: UsageDrilldown | null): string {
-  if (!drilldown) return "";
-  const params = new URLSearchParams();
-  if (drilldown.harness) params.set("harness", drilldown.harness);
-  if (drilldown.model) params.set("model", drilldown.model);
-  const query = params.toString();
-  return query ? `#${query}` : "";
-}
-
-// drilldownEqual reports whether two filters select the same subject.
-export function drilldownEqual(a: UsageDrilldown | null, b: UsageDrilldown | null): boolean {
-  return a?.harness === b?.harness && a?.model === b?.model;
-}
-
 // UsageDailyPoint is one day's tokens and cost for the trend charts, already
 // resolved through any active drill-down.
 export interface UsageDailyPoint {
@@ -175,9 +149,9 @@ export function usageDaysForRange(days: readonly UsageDashboardDay[], range: Usa
   return days.filter((day) => day.day >= start);
 }
 
-// usageRangeFrom accepts only the range values represented by the UI control.
+// usageRangeFrom accepts known ranges and defaults stale URL values to 30 days.
 export function usageRangeFrom(value: string): UsageRange {
-  return value === "7" || value === "30" || value === "90" ? value : "all";
+  return value === "7" || value === "90" || value === "all" ? value : "30";
 }
 
 // summarizeUsageDays folds selected per-day rollups into dashboard metrics,

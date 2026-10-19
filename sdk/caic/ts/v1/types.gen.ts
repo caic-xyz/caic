@@ -431,7 +431,16 @@ export interface EventRateLimit {
 /** EventStats is a runtime resource usage snapshot emitted periodically. */
 export interface EventStats {
   ts: number /* int64 */;
+  /** 100% is one fully busy logical CPU. */
   cpuPerc: number /* float64 */;
+  /** Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. */
+  cpuCeiling?: number /* float64 */;
+  /** Explicit quota in CPU units; zero is unrestricted, null is unknown. */
+  cpuQuota?: number /* float64 */;
+  /** Owning runtime's logical CPU count; null when unknown. */
+  runtimeCPUs?: number /* int */;
+  /** Runtime CPU metadata observation failure; usage samples remain usable. */
+  cpuError?: string;
   memUsed: number /* uint64 */;
   memLimit: number /* uint64 */;
   memPerc: number /* float64 */;
@@ -1093,6 +1102,40 @@ export interface CacheSizesResp {
   wellKnown: CacheSize[];
 }
 
+/** CPUUsage measures one logical CPU over the sampling interval. */
+export interface CPUUsage {
+  id: string;
+  /** 100% means this logical CPU was fully busy. */
+  usagePerc: number /* float64 */;
+}
+
+/**
+ * SystemSample measures the machine running caic, including all processes.
+ * Memory excludes available/reclaimable pages. Network sums all interfaces,
+ * including virtual interfaces; traffic crossing several interfaces is counted on each.
+ * Disk measures the filesystem containing the server working directory.
+ */
+export interface SystemSample {
+  time: ISOTimestamp;
+  cpus: CPUUsage[];
+  memUsed: number /* uint64 */;
+  memTotal: number /* uint64 */;
+  memPerc: number /* float64 */;
+  netRx: number /* uint64 */;
+  netTx: number /* uint64 */;
+  diskUsed: number /* uint64 */;
+  diskTotal: number /* uint64 */;
+}
+
+/**
+ * SystemStatsResp contains up to five minutes of five-second samples.
+ * Error describes the most recent sampling failure; retained samples remain available.
+ */
+export interface SystemStatsResp {
+  samples: SystemSample[];
+  error?: string;
+}
+
 /** MetricResource identifies the process that produced the observations. */
 export interface MetricResource {
   /** ServiceName is the emitting binary, such as "caic". */
@@ -1447,7 +1490,7 @@ export interface TaskInfoObservedRuntime {
   imageID?: string;
   os?: string;
   cpuArchitecture?: string;
-  cpuLimit?: number /* int */;
+  cpuLimit?: number /* float64 */;
   mounts?: TaskInfoMount[];
   caches?: TaskInfoCacheMount[];
 }

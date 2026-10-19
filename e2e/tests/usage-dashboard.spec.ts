@@ -12,7 +12,7 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   }).toPass({ timeout: 10_000, intervals: [250] });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/usage");
+  await page.goto("/monitoring");
 
   await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
   await expect(page.getByLabel("Usage date range")).toHaveValue("30");
@@ -32,27 +32,40 @@ test("usage dashboard shows rollup activity and stays contained on mobile", asyn
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   // Drill into the fake task's model: the banner confirms the filter, the
-  // URL hash carries it, and clearing restores the unfiltered leaderboard.
+  // URL query carries it, and clearing restores the unfiltered leaderboard.
   const modelRow = page.getByRole("button", { name: "fake-model" });
   await expect(modelRow).toBeVisible();
   await modelRow.click();
   await expect(page.getByText("Showing usage for")).toBeVisible();
   await expect(page.getByRole("region", { name: "Usage summary" })).toBeVisible();
   await expect(page.getByTestId("usage-charts")).toBeVisible();
-  await expect(page).toHaveURL(/#model=fake-model$/);
+  await expect(page).toHaveURL(/range=all&model=fake-model$/);
   await page.getByRole("button", { name: "Show all usage" }).click();
   await expect(page.getByText("Showing usage for")).toBeHidden();
-  await expect(page).toHaveURL(/^[^#]*$/);
+  await expect(page).toHaveURL(/\/monitoring\?range=all$/);
   await expect(modelRow).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByLabel("Usage date range")).toHaveValue("all");
+  await page.getByRole("navigation", { name: "Monitoring sections" }).getByRole("link", { name: "System" }).click();
+  await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Monitoring sections" }).getByRole("link", { name: "Usage" }).click();
+  await expect(page.getByLabel("Usage date range")).toHaveValue("all");
 
   // Drill into a harness: the model list stays visible through the
   // harness-by-model cross product, and selecting a model narrows to the pair.
-  const harnessPanel = page.locator("section", { has: page.getByRole("heading", { name: "Harnesses" }) });
+  const harnessPanel = page.getByRole("heading", { name: "Harnesses" }).locator("..");
   await harnessPanel.getByRole("button").first().click();
-  await expect(page).toHaveURL(/#harness=/);
+  await expect(page).toHaveURL(/range=all&harness=/);
   await expect(modelRow).toBeVisible();
   await modelRow.click();
-  await expect(page).toHaveURL(/#harness=.+&model=fake-model$/);
+  await expect(page).toHaveURL(/range=all&harness=.+&model=fake-model$/);
   await expect(page.getByText("Showing usage for")).toContainText("harness");
   await expect(page.getByText("Showing usage for")).toContainText("model fake-model");
+  await page.reload();
+  await expect(page.getByText("Showing usage for")).toContainText("model fake-model");
+  await page.getByRole("button", { name: "Show all usage" }).click();
+  await page.goBack();
+  await expect(page.getByText("Showing usage for")).toContainText("model fake-model");
+  await expect(page.getByLabel("Usage date range")).toHaveValue("all");
 });

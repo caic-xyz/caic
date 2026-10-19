@@ -1596,19 +1596,13 @@ describe("App keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus());
 
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Metrics" })).toHaveFocus();
-
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Usage" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Monitoring" })).toHaveFocus();
 
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveFocus();
 
     await user.keyboard("{ArrowUp}");
-    expect(screen.getByRole("menuitem", { name: "Usage" })).toHaveFocus();
-
-    await user.keyboard("{ArrowUp}");
-    expect(screen.getByRole("menuitem", { name: "Metrics" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Monitoring" })).toHaveFocus();
 
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
@@ -2289,34 +2283,27 @@ describe("App repo chips: No repository", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Check failed: offline");
   });
 
-  it("links to the metrics page from the user menu", async () => {
+  it("opens Monitoring on Usage and only loads the selected section", async () => {
     const user = userEvent.setup();
     const { history } = renderApp("/");
 
     await user.click(screen.getByRole("button", { name: "Menu" }));
-    const metricsLink = screen.getByRole("menuitem", { name: "Metrics" });
-
-    expect(metricsLink).toHaveAttribute("href", "/metrics");
-
-    await user.click(metricsLink);
-
-    expect(history.get()).toBe("/metrics");
-    expect(screen.getByRole("heading", { name: "Metrics" })).toBeInTheDocument();
-  });
-
-  it("links to the usage dashboard from the user menu", async () => {
-    const user = userEvent.setup();
-    const { history } = renderApp("/");
-
-    await user.click(screen.getByRole("button", { name: "Menu" }));
-    const usageLink = screen.getByRole("menuitem", { name: "Usage" });
-
-    expect(usageLink).toHaveAttribute("href", "/usage");
-
-    await user.click(usageLink);
-
-    expect(history.get()).toBe("/usage");
-    expect(screen.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
+    const link = screen.getByRole("menuitem", { name: "Monitoring" });
+    expect(link).toHaveAttribute("href", "/monitoring");
+    await user.click(link);
+    expect(history.get()).toBe("/monitoring");
+    expect(await screen.findByRole("heading", { name: "Monitoring" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Usage" })).toBeInTheDocument();
+    await waitFor(() => expect(api.getUsageDashboard).toHaveBeenCalledOnce());
+    expect(api.getMetrics).not.toHaveBeenCalled();
+    const nav = screen.getByRole("navigation", { name: "Monitoring sections" });
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    expect(within(nav).getByRole("link", { name: "Usage" })).toHaveAttribute("aria-current", "page");
+    await user.click(within(nav).getByRole("link", { name: "Metrics" }));
+    expect(history.get()).toBe("/monitoring?section=metrics");
+    expect(await screen.findByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+    await waitFor(() => expect(api.getMetrics).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("heading", { name: "Usage" })).not.toBeInTheDocument();
   });
 
   it("renders operation latency as a routed page", async () => {
@@ -2370,9 +2357,9 @@ describe("App repo chips: No repository", () => {
       ],
     });
 
-    renderApp("/metrics");
+    renderApp("/monitoring?section=metrics");
 
-    expect(screen.getByRole("heading", { name: "Metrics" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Metrics" })).toBeInTheDocument();
     expect(await screen.findByText(/caic 1\.2\.3 on host-1\./)).toBeInTheDocument();
     const table = await screen.findByRole("table");
     const createRow = within(table).getByRole("rowheader", { name: "container.launch" }).closest("tr");

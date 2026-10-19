@@ -4,6 +4,8 @@
 
 RESTful JSON API served at `/api/caic/v1/`. SSE endpoints stream newline-delimited JSON events.
 
+The read-only MCP tool `get_system_stats` takes `{}` and returns `SystemStatsResp`, the same snapshot as `GET /api/caic/v1/server/system-stats` (SDK method `getSystemStats`). It is available to `caic:mcp.read` clients and task-scoped agents, without a browser or UI. `samples` contains up to 60 five-second observations, oldest first; the array is empty until the first successful collection. Optional `error` reports a sampling warning while retained samples remain readable. Each `cpus` entry has a stable logical CPU ID and `usagePerc` from 0–100%. Its array length is the online CPU count; sum the percentages for total usage (100% per fully busy CPU), or divide that sum by 100 for CPU equivalents. Task `EventStats.cpuPerc` uses the same total-usage convention; `cpuCeiling` is the configured upper bound in fractional CPU units, derived from the owning runtime logical CPU count, explicit quota, and configured CPU set; null means unknown. Inherited cgroup limits and process affinity are unreported, so effective task capacity is unknown. `runtimeCPUs` is the owning runtime logical CPU count, including remote/VM runtimes; null means unknown. `cpuQuota` preserves the explicit fractional quota: zero means no explicit quota, null means unknown. `cpuError` reports runtime metadata observation failures while usage remains readable. CPU configuration refreshes every 30 seconds during active streams; task aggregate stats do not reveal per-CPU distribution. Memory excludes available/reclaimable pages. Memory, network counters, and filesystem capacities use bytes. Network sums all interfaces and can count traffic on multiple interfaces; disk covers the server working-directory filesystem.
+
 Type notation: `JSONValue` means any valid JSON value.
 
 ## Server
@@ -21,6 +23,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/server/runtimes/{runtime}/image/refresh` | Returns one runtime's specialized image refresh progress. |  | `ImageRefreshStatus` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
 | GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
+| GET | `/api/caic/v1/server/system-stats` | Returns recent whole-machine utilization samples. |  | `SystemStatsResp` |
 | GET | `/api/caic/v1/server/metrics` | Returns aggregated operation latency statistics. |  | `MetricsResp` |
 | GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
 | POST | `/api/caic/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
@@ -754,6 +757,44 @@ CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
 |-------|------|-------------|----------|
 | `wellKnown` | `CacheSize[]` |  | yes |
 
+### CPUUsage
+
+CPUUsage measures one logical CPU over the sampling interval.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `usagePerc` | `float64` | 100% means this logical CPU was fully busy. | yes |
+
+### SystemSample
+
+SystemSample measures the machine running caic, including all processes.
+Memory excludes available/reclaimable pages. Network sums all interfaces,
+including virtual interfaces; traffic crossing several interfaces is counted on each.
+Disk measures the filesystem containing the server working directory.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `time` | `ISOTimestamp` |  | yes |
+| `cpus` | `CPUUsage[]` |  | yes |
+| `memUsed` | `uint64` |  | yes |
+| `memTotal` | `uint64` |  | yes |
+| `memPerc` | `float64` |  | yes |
+| `netRx` | `uint64` |  | yes |
+| `netTx` | `uint64` |  | yes |
+| `diskUsed` | `uint64` |  | yes |
+| `diskTotal` | `uint64` |  | yes |
+
+### SystemStatsResp
+
+SystemStatsResp contains up to five minutes of five-second samples.
+Error describes the most recent sampling failure; retained samples remain available.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `samples` | `SystemSample[]` |  | yes |
+| `error` | `string` |  |  |
+
 ### MetricResource
 
 MetricResource identifies the process that produced the observations.
@@ -1108,7 +1149,7 @@ TaskInfoObservedRuntime describes runtime-observed instance details from the run
 | `imageID` | `string` |  |  |
 | `os` | `string` |  |  |
 | `cpuArchitecture` | `string` |  |  |
-| `cpuLimit` | `int` |  |  |
+| `cpuLimit` | `float64` |  |  |
 | `mounts` | `TaskInfoMount[]` |  |  |
 | `caches` | `TaskInfoCacheMount[]` |  |  |
 
@@ -1522,7 +1563,11 @@ EventStats is a runtime resource usage snapshot emitted periodically.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `ts` | `int64` |  | yes |
-| `cpuPerc` | `float64` |  | yes |
+| `cpuPerc` | `float64` | 100% is one fully busy logical CPU. | yes |
+| `cpuCeiling` | `float64` | Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity. |  |
+| `cpuQuota` | `float64` | Explicit quota in CPU units; zero is unrestricted, null is unknown. |  |
+| `runtimeCPUs` | `int` | Owning runtime's logical CPU count; null when unknown. |  |
+| `cpuError` | `string` | Runtime CPU metadata observation failure; usage samples remain usable. |  |
 | `memUsed` | `uint64` |  | yes |
 | `memLimit` | `uint64` |  | yes |
 | `memPerc` | `float64` |  | yes |

@@ -67,8 +67,8 @@ function imageText(recorded?: string, observed?: string): string {
 }
 
 function cpuText(recorded?: number, observed?: number): string {
-  if (recorded && observed && recorded !== observed) return `${recorded} requested, ${observed} running`;
-  return String(observed || recorded || "");
+  const quota = observed === undefined ? "quota unknown" : observed === 0 ? "no explicit quota" : `${observed} CPUs`;
+  return recorded && recorded !== observed ? `${recorded} requested, ${quota}` : quota;
 }
 
 function Field(props: { label: string; value?: string | number | boolean; code?: boolean }) {
@@ -310,7 +310,10 @@ export default function TaskInfo(props: Props) {
                     value={runtimeText(data.recorded.containerCPUArchitecture, data.observed?.cpuArchitecture)}
                     code
                   />
-                  <Field label="CPUs" value={cpuText(data.recorded.maxCPUs, data.observed?.cpuLimit)} />
+                  <Field
+                    label="CPU quota"
+                    value={cpuText(data.recorded.maxCPUs, data.observed ? (data.observed.cpuLimit ?? 0) : undefined)}
+                  />
                   <Field label="Tailscale" value={boolText(data.recorded.capabilities.tailscale)} />
                   <Field label="USB" value={boolText(data.recorded.capabilities.usb)} />
                   <Field label="Display" value={boolText(data.recorded.capabilities.display)} />

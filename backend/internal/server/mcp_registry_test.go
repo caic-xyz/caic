@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/invopop/jsonschema"
@@ -53,6 +54,76 @@ func (f *staticUsageFetcher) AuthKind() usage.AuthKind { return f.quota.AuthKind
 func (*staticUsageFetcher) UsageURL() string { return "" }
 
 func (f *staticUsageFetcher) Get(context.Context) *usage.ProviderQuota { return &f.quota }
+
+func TestCaicToolRegistryHandleGetSystemStats(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		snapshot v1.SystemStatsResp
+	}{
+		{name: "warming_up", snapshot: v1.SystemStatsResp{Samples: []v1.SystemSample{}}},
+		{name: "ready", snapshot: v1.SystemStatsResp{Samples: []v1.SystemSample{{Time: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 25}}, MemUsed: 512, MemTotal: 1024, MemPerc: 50, NetRx: 200, NetTx: 100, DiskUsed: 2048, DiskTotal: 4096}}}},
+		{name: "sampling_warning", snapshot: v1.SystemStatsResp{Samples: []v1.SystemSample{{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 25}}}}, Error: "memory unavailable"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Only the sampler is needed; no HTTP server, UI, runtime, or tasks.
+			c := &mcpRegistry{serverConfig: &serverHandlers{systemStats: &systemStats{samples: tc.snapshot.Samples, err: tc.snapshot.Error}}, metrics: metrics.NewStore(metrics.Resource{ServiceName: "caic"})}
+			for _, caller := range []struct {
+				name string
+				ctx  context.Context
+			}{
+				{"read_scope", newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeRead}})},
+				{"task", newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true, TaskID: ksid.NewID()})},
+			} {
+				t.Run(caller.name, func(t *testing.T) {
+					t.Parallel()
+					result, err := c.CallTool(caller.ctx, "get_system_stats", json.RawMessage(`{}`))
+					if err != nil || result.IsError {
+						t.Fatalf("CallTool: %+v, %v", result, err)
+					}
+					got, ok := result.Structured.(v1.SystemStatsResp)
+					if !ok || !reflect.DeepEqual(got, tc.snapshot) {
+						t.Fatalf("snapshot = %#v, want %#v", result.Structured, tc.snapshot)
+					}
+				})
+			}
+		})
+	}
+	t.Run("read_only_catalog", func(t *testing.T) {
+		t.Parallel()
+		c := &mcpRegistry{}
+		tools, err := c.Tools(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range tools {
+			if tool.Name != "get_system_stats" {
+				continue
+			}
+			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint || !tool.Annotations.IdempotentHint || tool.Annotations.DestructiveHint || tool.Annotations.OpenWorldHint {
+				t.Fatalf("annotations: %+v", tool.Annotations)
+			}
+			if tool.OutputSchema == nil || tool.InputSchema == nil || tool.InputSchema.Type != "object" {
+				t.Fatalf("missing system stats schemas: %+v", tool)
+			}
+			return
+		}
+		t.Fatal("get_system_stats is not advertised")
+	})
+	t.Run("scope_denied", func(t *testing.T) {
+		t.Parallel()
+		c := &mcpRegistry{}
+		ctx := newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeTasksRead}})
+		result, err := c.CallTool(ctx, "get_system_stats", json.RawMessage(`{}`))
+		if err != nil || !result.IsError {
+			t.Fatalf("CallTool: %+v, %v", result, err)
+		}
+		if result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeUnauthorized) {
+			t.Fatalf("error metadata: %+v", result.Meta)
+		}
+	})
+}
 
 func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
 	t.Parallel()
@@ -1700,6 +1771,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		}
 		assertMCPToolVisibility(t, tools, "repos_list", true)
 		assertMCPToolVisibility(t, tools, "harnesses_list", true)
+		assertMCPToolVisibility(t, tools, "get_system_stats", true)
 		assertMCPToolVisibility(t, tools, "task_create", false)
 		assertMCPToolVisibility(t, tools, "tasks_list", false)
 	})
@@ -1714,6 +1786,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			t.Fatalf("Tools() error: %v", err)
 		}
 		assertMCPToolVisibility(t, tools, "repos_list", false)
+		assertMCPToolVisibility(t, tools, "get_system_stats", false)
 		assertMCPToolVisibility(t, tools, "task_create", true)
 		assertMCPToolVisibility(t, tools, "task_fork", false)
 	})
@@ -1752,14 +1825,15 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Tools() error: %v", err)
 			}
-			if len(tools) != 6 {
-				t.Fatalf("Tools() = %#v, want six task-scoped tools", tools)
+			if len(tools) != 7 {
+				t.Fatalf("Tools() = %#v, want seven task-scoped tools", tools)
 			}
 			assertMCPToolVisibility(t, tools, "task_create", true)
 			assertMCPToolVisibility(t, tools, "tasks_list", true)
 			assertMCPToolVisibility(t, tools, "task_fork", true)
 			assertMCPToolVisibility(t, tools, "task_stop", true)
 			assertMCPToolVisibility(t, tools, "task_purge", true)
+			assertMCPToolVisibility(t, tools, "get_system_stats", true)
 			assertMCPToolVisibility(t, tools, "task_get_detail", true)
 			var create, detail mcp.ToolDescriptor
 			for _, tool := range tools {
@@ -1833,6 +1907,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		assertMCPToolVisibility(t, tools, "task_fork", true)
 		assertMCPToolVisibility(t, tools, "task_stop", true)
 		assertMCPToolVisibility(t, tools, "task_purge", true)
+		assertMCPToolVisibility(t, tools, "get_system_stats", true)
 		assertMCPToolVisibility(t, tools, "task_get_detail", true)
 		assertMCPToolVisibility(t, tools, "repos_list", false)
 		t.Run("error", func(t *testing.T) {

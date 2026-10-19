@@ -1,4 +1,4 @@
-// MetricsPage is the /metrics route for server measurements.
+// MetricsPage shows server operation measurements in Monitoring.
 
 import { For, Show, createSignal, onMount } from "solid-js";
 
@@ -7,7 +7,6 @@ import type { MetricSeries, MetricsResp } from "@sdk/types.gen";
 import { api } from "../api";
 import Button from "../components/Button";
 import MetricDistribution from "../components/MetricDistribution";
-import { Layout } from "../components/Layout";
 import { formatBytes, formatDuration } from "../formatting";
 import styles from "./MetricsPage.module.css";
 
@@ -88,79 +87,77 @@ export default function MetricsPage() {
   const meta = () => [identity(), since()].filter(Boolean).join(" ");
 
   return (
-    <Layout>
-      <div class={styles.metricsPage}>
-        <div class={styles.metricsPanel}>
-          <h2 class={styles.metricsPanelTitle}>Metrics</h2>
-          <p class={styles.metricsDescription}>
-            Measurements of server operations and resources. A histogram is read through its percentiles, a counter
-            through its total, and a gauge through its current value and observed range. Percentiles and totals cover
-            the most recent retained measurements per series, and the spread column marks each histogram's median and
-            95th percentile on a zero-based scale that ends at its observed maximum.
+    <section aria-label="Metrics">
+      <div class={styles.metricsPanel}>
+        <h2 class={styles.metricsPanelTitle}>Metrics</h2>
+        <p class={styles.metricsDescription}>
+          Measurements of server operations and resources. A histogram is read through its percentiles, a counter
+          through its total, and a gauge through its current value and observed range. Percentiles and totals cover the
+          most recent retained measurements per series, and the spread column marks each histogram's median and 95th
+          percentile on a zero-based scale that ends at its observed maximum.
+        </p>
+        <Show when={meta()}>
+          <p class={styles.metricsMeta}>{meta()}</p>
+        </Show>
+        <Show when={error()}>
+          <p class={styles.metricsError} role="alert">
+            {error()}
           </p>
-          <Show when={meta()}>
-            <p class={styles.metricsMeta}>{meta()}</p>
-          </Show>
-          <Show when={error()}>
-            <p class={styles.metricsError} role="alert">
-              {error()}
-            </p>
-          </Show>
-          <Show when={series().length > 0} fallback={<p class={styles.metricsDescription}>Nothing recorded yet.</p>}>
-            <div class={styles.tableScroll}>
-              <table class={styles.table}>
-                <thead>
-                  <tr>
-                    <th scope="col">Name</th>
-                    <th scope="col">Kind</th>
-                    <th scope="col">Outcome</th>
-                    <th scope="col">Attributes</th>
-                    <th scope="col">Count</th>
-                    <th scope="col">Total</th>
-                    <th scope="col">Spread</th>
-                    <th scope="col">p50</th>
-                    <th scope="col">p95</th>
-                    <th scope="col">Max</th>
-                    <th scope="col">Last</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={series()}>
-                    {(metric) => (
-                      <tr>
-                        <th scope="row">{metric.name}</th>
-                        <td>{metric.kind}</td>
-                        <td>{metric.outcome}</td>
-                        <td>{formatAttrs(metric.attrs)}</td>
-                        <td>{metric.count}</td>
-                        <td>{formatStat(metric, "sum")}</td>
-                        <td class={styles.spreadCell}>
-                          <MetricDistribution
-                            percentiles={hasStat(metric.kind, "p95")}
-                            format={(value) => formatAmount(value, metric.unit)}
-                            p50={metric.p50}
-                            p95={metric.p95}
-                            max={metric.max}
-                          />
-                        </td>
-                        <td>{formatStat(metric, "p50")}</td>
-                        <td>{formatStat(metric, "p95")}</td>
-                        <td>{formatStat(metric, "max")}</td>
-                        <td>{formatStat(metric, "last")}</td>
-                      </tr>
-                    )}
-                  </For>
-                </tbody>
-              </table>
-            </div>
-          </Show>
-          <div class={styles.actions}>
-            <Button type="button" variant="gray" loading={loading()} onClick={() => void refresh()}>
-              {loading() ? "Refreshing…" : "Refresh"}
-            </Button>
+        </Show>
+        <Show when={series().length > 0} fallback={<p class={styles.metricsDescription}>Nothing recorded yet.</p>}>
+          <div class={styles.tableScroll}>
+            <table class={styles.table}>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Outcome</th>
+                  <th scope="col">Attributes</th>
+                  <th scope="col">Count</th>
+                  <th scope="col">Total</th>
+                  <th scope="col">Spread</th>
+                  <th scope="col">p50</th>
+                  <th scope="col">p95</th>
+                  <th scope="col">Max</th>
+                  <th scope="col">Last</th>
+                </tr>
+              </thead>
+              <tbody>
+                <For each={series()}>
+                  {(metric) => (
+                    <tr>
+                      <th scope="row">{metric.name}</th>
+                      <td>{metric.kind}</td>
+                      <td>{metric.outcome}</td>
+                      <td>{formatAttrs(metric.attrs)}</td>
+                      <td>{metric.count}</td>
+                      <td>{formatStat(metric, "sum")}</td>
+                      <td class={styles.spreadCell}>
+                        <MetricDistribution
+                          percentiles={hasStat(metric.kind, "p95")}
+                          format={(value) => formatAmount(value, metric.unit)}
+                          p50={metric.p50}
+                          p95={metric.p95}
+                          max={metric.max}
+                        />
+                      </td>
+                      <td>{formatStat(metric, "p50")}</td>
+                      <td>{formatStat(metric, "p95")}</td>
+                      <td>{formatStat(metric, "max")}</td>
+                      <td>{formatStat(metric, "last")}</td>
+                    </tr>
+                  )}
+                </For>
+              </tbody>
+            </table>
           </div>
+        </Show>
+        <div class={styles.actions}>
+          <Button type="button" variant="gray" loading={loading()} onClick={() => void refresh()}>
+            {loading() ? "Refreshing…" : "Refresh"}
+          </Button>
         </div>
       </div>
-    </Layout>
+    </section>
   );
 }

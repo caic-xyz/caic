@@ -918,6 +918,36 @@ public struct CacheSizesResp: Codable {
     public let wellKnown: [CacheSize]
 }
 
+/// CPUUsage measures one logical CPU over the sampling interval.
+public struct CPUUsage: Codable {
+    public let id: String
+    /// 100% means this logical CPU was fully busy.
+    public let usagePerc: Double
+}
+
+/// SystemSample measures the machine running caic, including all processes.
+/// Memory excludes available/reclaimable pages. Network sums all interfaces,
+/// including virtual interfaces; traffic crossing several interfaces is counted on each.
+/// Disk measures the filesystem containing the server working directory.
+public struct SystemSample: Codable {
+    public let time: ISOTimestamp
+    public let cpus: [CPUUsage]
+    public let memUsed: Int
+    public let memTotal: Int
+    public let memPerc: Double
+    public let netRx: Int
+    public let netTx: Int
+    public let diskUsed: Int
+    public let diskTotal: Int
+}
+
+/// SystemStatsResp contains up to five minutes of five-second samples.
+/// Error describes the most recent sampling failure; retained samples remain available.
+public struct SystemStatsResp: Codable {
+    public let samples: [SystemSample]
+    public let error: String?
+}
+
 /// MetricResource identifies the process that produced the observations.
 public struct MetricResource: Codable {
     /// ServiceName is the emitting binary, such as "caic".
@@ -1254,7 +1284,7 @@ public struct TaskInfoObservedRuntime: Codable {
     public let imageID: String?
     public let os: String?
     public let cpuArchitecture: String?
-    public let cpuLimit: Int?
+    public let cpuLimit: Double?
     public let mounts: [TaskInfoMount]?
     public let caches: [TaskInfoCacheMount]?
 }
@@ -1583,7 +1613,16 @@ public struct EventRateLimit: Codable {
 /// EventStats is a runtime resource usage snapshot emitted periodically.
 public struct EventStats: Codable {
     public let ts: Int
+    /// 100% is one fully busy logical CPU.
     public let cpuPerc: Double
+    /// Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
+    public let cpuCeiling: Double?
+    /// Explicit quota in CPU units; zero is unrestricted, null is unknown.
+    public let cpuQuota: Double?
+    /// Owning runtime's logical CPU count; null when unknown.
+    public let runtimeCPUs: Int?
+    /// Runtime CPU metadata observation failure; usage samples remain usable.
+    public let cpuError: String?
     public let memUsed: Int
     public let memLimit: Int
     public let memPerc: Double

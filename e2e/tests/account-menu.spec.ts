@@ -10,22 +10,17 @@ test("account-menu highlights stay within the dropdown", async ({ page }) => {
 
   const menu = page.getByTestId("account-menu");
   const settings = menu.getByRole("menuitem", { name: "Settings" });
-  const metrics = menu.getByRole("menuitem", { name: "Metrics" });
-  const usage = menu.getByRole("menuitem", { name: "Usage" });
+  const monitoring = menu.getByRole("menuitem", { name: "Monitoring" });
   const shortcuts = menu.getByRole("menuitem", { name: "Keyboard shortcuts" });
   await expect(menu).toBeVisible();
   await expect(settings).toBeFocused();
   await settings.press("ArrowDown");
-  await expect(metrics).toBeFocused();
-  await metrics.press("ArrowDown");
-  await expect(usage).toBeFocused();
-  await usage.press("ArrowDown");
+  await expect(monitoring).toBeFocused();
+  await monitoring.press("ArrowDown");
   await expect(shortcuts).toBeFocused();
   await shortcuts.press("ArrowUp");
-  await expect(usage).toBeFocused();
-  await usage.press("ArrowUp");
-  await expect(metrics).toBeFocused();
-  await metrics.press("ArrowUp");
+  await expect(monitoring).toBeFocused();
+  await monitoring.press("ArrowUp");
   await expect(settings).toBeFocused();
   await settings.hover();
 

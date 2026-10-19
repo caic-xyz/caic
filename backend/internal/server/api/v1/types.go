@@ -486,7 +486,7 @@ type TaskInfoObservedRuntime struct {
 	ImageID         string               `json:"imageID,omitempty"`
 	OS              string               `json:"os,omitempty"`
 	CPUArchitecture string               `json:"cpuArchitecture,omitempty"`
-	CPULimit        int                  `json:"cpuLimit,omitempty"`
+	CPULimit        float64              `json:"cpuLimit,omitempty"`
 	Mounts          []TaskInfoMount      `json:"mounts,omitempty"`
 	Caches          []TaskInfoCacheMount `json:"caches,omitempty"`
 }
@@ -1538,3 +1538,32 @@ type EmptyReq = api.EmptyReq
 
 // ErrorResponse is the JSON envelope for error responses.
 type ErrorResponse = api.ErrorResponse
+
+// CPUUsage measures one logical CPU over the sampling interval.
+type CPUUsage struct {
+	ID        string  `json:"id"`
+	UsagePerc float64 `json:"usagePerc"` // 100% means this logical CPU was fully busy.
+}
+
+// SystemSample measures the machine running caic, including all processes.
+// Memory excludes available/reclaimable pages. Network sums all interfaces,
+// including virtual interfaces; traffic crossing several interfaces is counted on each.
+// Disk measures the filesystem containing the server working directory.
+type SystemSample struct {
+	Time      time.Time  `json:"time"`
+	CPUs      []CPUUsage `json:"cpus"`
+	MemUsed   uint64     `json:"memUsed"`
+	MemTotal  uint64     `json:"memTotal"`
+	MemPerc   float64    `json:"memPerc"`
+	NetRx     uint64     `json:"netRx"`
+	NetTx     uint64     `json:"netTx"`
+	DiskUsed  uint64     `json:"diskUsed"`
+	DiskTotal uint64     `json:"diskTotal"`
+}
+
+// SystemStatsResp contains up to five minutes of five-second samples.
+// Error describes the most recent sampling failure; retained samples remain available.
+type SystemStatsResp struct {
+	Samples []SystemSample `json:"samples"`
+	Error   string         `json:"error,omitempty"`
+}

@@ -314,17 +314,27 @@ func TestStatsEvent(t *testing.T) {
 	t.Parallel()
 
 	ts := time.Date(2026, time.March, 20, 10, 30, 0, 0, time.UTC)
-	stats := &runtime.Stats{Ts: ts, CPUPerc: 12.5, MemUsed: 100, MemLimit: 200, MemPerc: 50, NetRx: 300, NetTx: 400, BlockRead: 500, BlockWrite: 600, DiskUsed: 700}
+	stats := &runtime.Stats{Ts: ts, CPUPerc: 12.5, CPUCeiling: 1.5, CPUQuota: new(2.5), RuntimeCPUs: 8, MemUsed: 100, MemLimit: 200, MemPerc: 50, NetRx: 300, NetTx: 400, BlockRead: 500, BlockWrite: 600, DiskUsed: 700}
 	want := v1.EventMessage{
 		Kind: v1.EventKindStats,
 		Ts:   ts.UnixMilli(),
 		Stats: &v1.EventStats{
-			Ts: ts.UnixMilli(), CPUPerc: 12.5, MemUsed: 100, MemLimit: 200,
+			Ts: ts.UnixMilli(), CPUPerc: 12.5, CPUCeiling: new(1.5), CPUQuota: new(2.5), RuntimeCPUs: new(8), MemUsed: 100, MemLimit: 200,
 			MemPerc: 50, NetRx: 300, NetTx: 400, BlockRead: 500, BlockWrite: 600, DiskUsed: 700,
 		},
 	}
 	if got := StatsEvent(stats); !reflect.DeepEqual(got, want) {
 		t.Errorf("StatsEvent() = %#v, want %#v", got, want)
+	}
+	stats.CPUQuota = new(0.0)
+	stats.CPUError = "runtime CPU info unavailable"
+	got := StatsEvent(stats).Stats
+	if got.CPUQuota == nil || *got.CPUQuota != 0 || got.CPUCeiling == nil || *got.CPUCeiling != 1.5 || got.CPUError != "runtime CPU info unavailable" {
+		t.Fatalf("configured ceiling with unrestricted quota = %+v", got)
+	}
+	got = StatsEvent(&runtime.Stats{}).Stats
+	if got.CPUCeiling != nil || got.CPUQuota != nil || got.RuntimeCPUs != nil {
+		t.Fatalf("unknown observations must be null: %+v", got)
 	}
 }
 

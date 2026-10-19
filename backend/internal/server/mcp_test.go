@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
@@ -1078,6 +1079,40 @@ func TestMCPHandlers(t *testing.T) {
 		case <-done:
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for subscription iterator to stop")
+		}
+	})
+
+	t.Run("systemStatsMatchesHTTP", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		s.serverHandlers.systemStats = &systemStats{samples: []v1.SystemSample{{Time: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 25}}, MemUsed: 512, MemTotal: 1024, MemPerc: 50, NetRx: 200, NetTx: 100, DiskUsed: 2048, DiskTotal: 4096}}, err: "memory unavailable"}
+		w := httptest.NewRecorder()
+		s.serverHandlers.routes().ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/server/system-stats", http.NoBody))
+		if w.Code != http.StatusOK {
+			t.Fatalf("REST status: %d", w.Code)
+		}
+		var rest v1.SystemStatsResp
+		if err := json.Unmarshal(w.Body.Bytes(), &rest); err != nil {
+			t.Fatal(err)
+		}
+		body := mcpRequestJSON("tools/call", `"name":"get_system_stats","arguments":{}`)
+		w, resp := postMCP(t, s.mcpHandlers.protocol, "tools/call", "get_system_stats", body)
+		if w.Code != http.StatusOK || resp.Error != nil {
+			t.Fatalf("MCP response: %d, %+v", w.Code, resp.Error)
+		}
+		data, err := json.Marshal(resp.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			StructuredContent v1.SystemStatsResp `json:"structuredContent"`
+			IsError           bool               `json:"isError"`
+		}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.IsError || !reflect.DeepEqual(result.StructuredContent, rest) {
+			t.Fatalf("MCP = %+v, REST = %+v", result, rest)
 		}
 	})
 

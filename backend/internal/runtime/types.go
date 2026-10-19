@@ -210,7 +210,7 @@ type InstanceInspect struct {
 	ImageID         string
 	OS              string
 	CPUArchitecture string
-	CPULimit        int
+	CPULimit        float64
 	Mounts          []Mount
 	Caches          []CacheMount
 }
@@ -251,16 +251,20 @@ type ProcessInfo struct {
 
 // Stats is a snapshot of runtime resource usage.
 type Stats struct {
-	Ts         time.Time
-	CPUPerc    float64
-	MemUsed    uint64
-	MemLimit   uint64
-	MemPerc    float64
-	NetRx      uint64
-	NetTx      uint64
-	BlockRead  uint64
-	BlockWrite uint64
-	DiskUsed   int64
+	Ts          time.Time
+	CPUPerc     float64  // 100% is one fully busy logical CPU.
+	CPUCeiling  float64  // Configured upper bound in CPU units; zero when unknown. Excludes inherited limits and process affinity.
+	CPUQuota    *float64 // Explicit quota in CPU units; zero is unrestricted, nil is unknown.
+	RuntimeCPUs int      // Logical CPUs on the owning runtime; zero when unknown.
+	CPUError    string   // Runtime CPU metadata observation failure.
+	MemUsed     uint64
+	MemLimit    uint64
+	MemPerc     float64
+	NetRx       uint64
+	NetTx       uint64
+	BlockRead   uint64
+	BlockWrite  uint64
+	DiskUsed    int64
 }
 
 // StatsSample is a streamed runtime resource usage snapshot for one instance.

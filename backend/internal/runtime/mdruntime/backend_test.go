@@ -19,9 +19,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/containers"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -217,8 +219,214 @@ func newTestBackend(c mdClient) *Backend {
 	return &Backend{log: slog.New(slog.DiscardHandler), client: c, containers: make(map[string]mdContainer), vncPorts: make(map[string]int32)}
 }
 
+type statsCapacityClient struct {
+	fakeMDClient
+}
+
+func (*statsCapacityClient) WatchStats(context.Context, []runtime.InstanceID) (iter.Seq2[runtime.StatsSample, error], error) {
+	return func(yield func(runtime.StatsSample, error) bool) {
+		for range 2 {
+			if !yield(runtime.StatsSample{InstanceID: "task", Stats: runtime.Stats{CPUPerc: 150, CPUCeiling: 2.5, CPUQuota: new(2.5), RuntimeCPUs: 8}}, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+// cpuInfoRuntime is the foreign md runtime boundary; its changing observations
+// reproduce an update and then an observation failure without restarting stats.
+type cpuInfoRuntime struct {
+	containers.Runtime
+
+	infoCalls  int
+	names      []string
+	delay      time.Duration
+	infoErr    error
+	inspectErr error
+	inspect    *containers.InspectInfo
+}
+
+func (*cpuInfoRuntime) Name() string { return "docker" }
+
+func (r *cpuInfoRuntime) Info(ctx context.Context) (containers.Info, error) {
+	r.infoCalls++
+	if r.infoErr != nil {
+		return containers.Info{}, r.infoErr
+	}
+	if r.delay > 0 {
+		select {
+		case <-time.After(r.delay):
+		case <-ctx.Done():
+			return containers.Info{}, ctx.Err()
+		}
+	}
+	if r.infoCalls == 3 {
+		return containers.Info{}, errors.New("runtime unavailable")
+	}
+	return containers.Info{CPUs: 8}, nil
+}
+
+func (r *cpuInfoRuntime) InspectInfo(_ context.Context, name string) (*containers.InspectInfo, error) {
+	if r.inspectErr != nil {
+		return nil, r.inspectErr
+	}
+	if r.inspect != nil {
+		return r.inspect, nil
+	}
+	if name != "task" {
+		return nil, fmt.Errorf("expected local instance name, got %q", name)
+	}
+	if r.infoCalls == 3 {
+		return nil, errors.New("inspect unavailable")
+	}
+	quota := 2.5
+	if r.infoCalls == 2 {
+		quota = 0.5
+	}
+	return &containers.InspectInfo{CPULimit: quota, CPUSet: []int{1, 3}}, nil
+}
+
+func (r *cpuInfoRuntime) WatchStats(_ context.Context, names []string) (iter.Seq2[containers.StatsSample, error], error) {
+	r.names = names
+	return func(yield func(containers.StatsSample, error) bool) {
+		for i := range 3 {
+			if i > 0 {
+				time.Sleep(31 * time.Second)
+			}
+			synctest.Wait()
+			if !yield(containers.StatsSample{Name: "task", Stats: &containers.Stats{CPUPerc: 150}}, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func TestMDClientAdapter(t *testing.T) {
+	t.Parallel()
+	t.Run("metadata_observations", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			r       cpuInfoRuntime
+			ceiling float64
+			cpus    int
+			quota   *float64
+			err     string
+		}{
+			{name: "unrestricted", r: cpuInfoRuntime{inspect: &containers.InspectInfo{}}, ceiling: 8, cpus: 8, quota: new(0.0)},
+			{name: "runtime_failure", r: cpuInfoRuntime{infoErr: errors.New("runtime unavailable"), inspect: &containers.InspectInfo{CPULimit: 1.5}}, ceiling: 1.5, quota: new(1.5), err: "runtime unavailable"},
+			{name: "inspect_failure", r: cpuInfoRuntime{inspectErr: errors.New("inspect unavailable")}, ceiling: 8, cpus: 8, err: "inspect unavailable"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					log := slog.New(slog.DiscardHandler)
+					a := mdClientAdapter{log: log, c: &md.Client{Runtime: &tc.r, Logger: log}}
+					seq, err := a.WatchStats(t.Context(), []runtime.InstanceID{"task"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for sample, err := range seq {
+						if err != nil {
+							t.Fatal(err)
+						}
+						s := sample.Stats
+						if s.CPUCeiling != tc.ceiling || s.RuntimeCPUs != tc.cpus || !reflect.DeepEqual(s.CPUQuota, tc.quota) || !strings.Contains(s.CPUError, tc.err) || (tc.err == "" && s.CPUError != "") {
+							t.Fatalf("metadata = %+v", s)
+						}
+						break
+					}
+				})
+			})
+		}
+	})
+	t.Run("WatchStats", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			r := &cpuInfoRuntime{}
+			log := slog.New(slog.DiscardHandler)
+			a := mdClientAdapter{log: log, c: &md.Client{Runtime: r, Logger: log}}
+			b := newTestBackend(a)
+			seq, err := b.WatchStats(t.Context(), []runtime.ID{"docker:task"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var samples []runtime.Stats
+			for sample, err := range seq {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if sample.InstanceID != "docker:task" || sample.Stats.CPUPerc != 150 {
+					t.Fatalf("identity or unclamped usage = %+v", sample)
+				}
+				samples = append(samples, sample.Stats)
+			}
+			if len(samples) != 3 || r.infoCalls != 3 || !slices.Equal(r.names, []string{"task"}) {
+				t.Fatalf("samples %d, runtime queries %d, names %v", len(samples), r.infoCalls, r.names)
+			}
+			for i, want := range []float64{2, 0.5} {
+				s := samples[i]
+				if s.CPUCeiling != want || s.RuntimeCPUs != 8 || s.CPUQuota == nil || s.CPUError != "" {
+					t.Fatalf("sample %d = %+v", i, s)
+				}
+			}
+			if *samples[0].CPUQuota != 2.5 || *samples[1].CPUQuota != 0.5 {
+				t.Fatalf("explicit quota changed or rounded: %+v", samples)
+			}
+			s := samples[2]
+			if s.CPUCeiling != 0 || s.CPUQuota != nil || s.RuntimeCPUs != 0 || s.CPUError == "" {
+				t.Fatalf("failure retained stale capacity: %+v", s)
+			}
+		})
+	})
+	t.Run("slow_cpu_metadata", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			r := &cpuInfoRuntime{delay: 5 * time.Second}
+			log := slog.New(slog.DiscardHandler)
+			a := mdClientAdapter{log: log, c: &md.Client{Runtime: r, Logger: log}}
+			start := time.Now()
+			seq, err := a.WatchStats(t.Context(), []runtime.InstanceID{"task"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for sample, err := range seq {
+				if err != nil || sample.Stats.CPUPerc != 150 || sample.Stats.CPUCeiling != 0 || sample.Stats.RuntimeCPUs != 0 {
+					t.Fatalf("usage during blocked metadata observation: %+v, %v", sample, err)
+				}
+				break
+			}
+			if elapsed := time.Since(start); elapsed != 0 {
+				t.Fatalf("metadata observation delayed usage or cancellation by %v", elapsed)
+			}
+		})
+	})
+}
+
 func TestBackend(t *testing.T) {
 	t.Parallel()
+	t.Run("WatchStats", func(t *testing.T) {
+		t.Parallel()
+		b := newTestBackend(&statsCapacityClient{})
+		stream, err := b.WatchStats(t.Context(), []runtime.ID{"docker:task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for sample, err := range stream {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sample.InstanceID != "docker:task" || sample.Stats.CPUPerc != 150 || sample.Stats.CPUCeiling != 2.5 || sample.Stats.RuntimeCPUs != 8 || sample.Stats.CPUQuota == nil || *sample.Stats.CPUQuota != 2.5 {
+				t.Fatalf("sample = %+v", sample)
+			}
+			count++
+		}
+		if count != 2 {
+			t.Fatalf("samples %d", count)
+		}
+	})
+
 	t.Run("ReadFile", func(t *testing.T) {
 		t.Parallel()
 		if goruntime.GOOS != "linux" {

@@ -20,6 +20,27 @@ function renderWithRouter(ui: () => JSX.Element) {
 const getTaskInfoMock = vi.spyOn(api, "getTaskInfo");
 
 describe("TaskInfo", () => {
+  for (const observed of [undefined, 0, 1.5]) {
+    it(`distinguishes requested CPUs from ${observed === undefined ? "unknown" : observed === 0 ? "unrestricted" : "fractional"} quota`, async () => {
+      getTaskInfoMock.mockResolvedValueOnce({
+        id: "task-1",
+        recorded: { state: "running", harness: "claude", capabilities: {}, runtime: { id: "md-test" }, maxCPUs: 4 },
+        observed:
+          observed === undefined ? undefined : { runtime: "docker", ...(observed > 0 ? { cpuLimit: observed } : {}) },
+      });
+      const { findByText } = renderWithRouter(() => (
+        <TaskInfo taskId="task-1" repo="repo" branch="branch" taskPath="/task/task-1" />
+      ));
+      const text =
+        observed === undefined
+          ? "4 requested, quota unknown"
+          : observed === 0
+            ? "4 requested, no explicit quota"
+            : "4 requested, 1.5 CPUs";
+      expect(await findByText(text)).toBeInTheDocument();
+    });
+  }
+
   it("shows the runtime OS and CPU architecture as separate fields", async () => {
     getTaskInfoMock.mockResolvedValueOnce({
       id: "task-1",

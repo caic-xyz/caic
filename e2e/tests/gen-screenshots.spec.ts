@@ -613,7 +613,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
     await captureScreenshot(page, layout, "task-resources.png");
   }
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/usage");
+  await page.goto("/monitoring");
   await expect(page.getByTestId("usage-charts")).toBeVisible();
   await captureScreenshot(page, "desktop", "usage.png");
   await page.setViewportSize({ width: 390, height: 844 });

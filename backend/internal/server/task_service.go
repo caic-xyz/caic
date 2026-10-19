@@ -455,8 +455,8 @@ func taskInfoCompareWarnings(recorded *v1.TaskInfoRecorded, observed *v1.TaskInf
 	if recorded.ContainerCPUArchitecture != "" && observed.CPUArchitecture != "" && recorded.ContainerCPUArchitecture != observed.CPUArchitecture {
 		warnings = append(warnings, fmt.Sprintf("observed CPU architecture %q differs from recorded CPU architecture %q", observed.CPUArchitecture, recorded.ContainerCPUArchitecture))
 	}
-	if recorded.MaxCPUs > 0 && observed.CPULimit > 0 && recorded.MaxCPUs != observed.CPULimit {
-		warnings = append(warnings, fmt.Sprintf("observed CPU limit %d differs from recorded max CPUs %d", observed.CPULimit, recorded.MaxCPUs))
+	if recorded.MaxCPUs > 0 && observed.CPULimit > 0 && float64(recorded.MaxCPUs) != observed.CPULimit {
+		warnings = append(warnings, fmt.Sprintf("observed CPU quota %g differs from recorded max CPUs %d", observed.CPULimit, recorded.MaxCPUs))
 	}
 	for _, recordedMount := range recorded.Mounts {
 		if !taskInfoMountsContain(hostHome, observed.Mounts, recordedMount) {

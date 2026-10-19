@@ -170,6 +170,10 @@ public final class ApiClient {
     public func getCacheSizes() async throws -> CacheSizesResp {
         try await request("GET", path: "/api/caic/v1/server/cache-sizes")
     }
+    /// Returns recent whole-machine utilization samples.
+    public func getSystemStats() async throws -> SystemStatsResp {
+        try await request("GET", path: "/api/caic/v1/server/system-stats")
+    }
     /// Returns aggregated operation latency statistics.
     public func getMetrics() async throws -> MetricsResp {
         try await request("GET", path: "/api/caic/v1/server/metrics")

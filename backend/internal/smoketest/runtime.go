@@ -317,13 +317,16 @@ func (b *RuntimeBackend) WatchStats(ctx context.Context, ids []runtime.ID) (iter
 			for i := range statsStreamSize {
 				memUsed := uint64(memStart + i*memStep)
 				stats := runtime.Stats{
-					CPUPerc:  float64(b.nextStatsSeq()%statsCPUPeriod + 1),
-					MemUsed:  memUsed,
-					MemLimit: memLimit,
-					MemPerc:  float64(memUsed) / float64(memLimit) * 100,
-					NetRx:    uint64(i) * (64 << 10),
-					NetTx:    uint64(i) * (16 << 10),
-					DiskUsed: int64(diskStart + i*diskStep),
+					CPUPerc:     float64(b.nextStatsSeq()%statsCPUPeriod + 1),
+					CPUCeiling:  4,
+					CPUQuota:    new(0.0),
+					RuntimeCPUs: 4,
+					MemUsed:     memUsed,
+					MemLimit:    memLimit,
+					MemPerc:     float64(memUsed) / float64(memLimit) * 100,
+					NetRx:       uint64(i) * (64 << 10),
+					NetTx:       uint64(i) * (16 << 10),
+					DiskUsed:    int64(diskStart + i*diskStep),
 				}
 				for _, id := range ids {
 					if !yield(runtime.StatsSample{InstanceID: id, Stats: stats}, nil) {

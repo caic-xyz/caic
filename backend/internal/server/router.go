@@ -215,6 +215,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
 			metrics:            d.Metrics,
+			systemStats:        newSystemStats(ctx),
 			harnessModels:      d.HarnessModels,
 			imageRefresh:       d.ImageRefresh,
 			authStore:          d.AuthStore,

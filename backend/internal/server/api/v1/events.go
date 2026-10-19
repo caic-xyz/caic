@@ -454,14 +454,18 @@ const (
 
 // EventStats is a runtime resource usage snapshot emitted periodically.
 type EventStats struct {
-	Ts         int64   `json:"ts"`
-	CPUPerc    float64 `json:"cpuPerc"`
-	MemUsed    uint64  `json:"memUsed"`
-	MemLimit   uint64  `json:"memLimit"`
-	MemPerc    float64 `json:"memPerc"`
-	NetRx      uint64  `json:"netRx"`
-	NetTx      uint64  `json:"netTx"`
-	BlockRead  uint64  `json:"blockRead"`
-	BlockWrite uint64  `json:"blockWrite"`
-	DiskUsed   int64   `json:"diskUsed"`
+	Ts          int64    `json:"ts"`
+	CPUPerc     float64  `json:"cpuPerc"`            // 100% is one fully busy logical CPU.
+	CPUCeiling  *float64 `json:"cpuCeiling"`         // Configured upper bound in CPU units; null when unknown. Excludes inherited limits and process affinity.
+	CPUQuota    *float64 `json:"cpuQuota"`           // Explicit quota in CPU units; zero is unrestricted, null is unknown.
+	RuntimeCPUs *int     `json:"runtimeCPUs"`        // Owning runtime's logical CPU count; null when unknown.
+	CPUError    string   `json:"cpuError,omitempty"` // Runtime CPU metadata observation failure; usage samples remain usable.
+	MemUsed     uint64   `json:"memUsed"`
+	MemLimit    uint64   `json:"memLimit"`
+	MemPerc     float64  `json:"memPerc"`
+	NetRx       uint64   `json:"netRx"`
+	NetTx       uint64   `json:"netTx"`
+	BlockRead   uint64   `json:"blockRead"`
+	BlockWrite  uint64   `json:"blockWrite"`
+	DiskUsed    int64    `json:"diskUsed"`
 }

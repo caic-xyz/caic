@@ -1,17 +1,7 @@
-/* Styles for the MetricsPage server operation latency view. */
-
-.metricsPage {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  padding: 0.25rem 0 2rem;
-  overflow: auto;
-}
+/* Styles for Monitoring's server operation measurement tables. */
 
 .metricsPanel {
   width: 100%;
-  max-width: 64rem;
-  padding: 0.25rem 0 2rem;
 }
 
 .metricsPanelTitle {

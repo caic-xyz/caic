@@ -5,15 +5,7 @@ import { expect } from "@tests/expect";
 
 import type { UsageDashboardDay } from "@sdk/types.gen";
 
-import {
-  drilldownEqual,
-  drilldownFromHash,
-  hashFromDrilldown,
-  summarizeUsageDays,
-  usageCacheHitRate,
-  usageDailySeries,
-  usageDaysForRange,
-} from "./usageDashboard";
+import { summarizeUsageDays, usageCacheHitRate, usageDailySeries, usageDaysForRange } from "./usageDashboard";
 
 function day(value: string, overrides: Partial<UsageDashboardDay> = {}): UsageDashboardDay {
   return {
@@ -296,23 +288,5 @@ describe("summarizeUsageDays drill-down", () => {
       { day: "2026-01-24", tokens: 100, costUSD: 0.2, inProgress: false },
       { day: "2026-01-25", tokens: 100, costUSD: 0.2, inProgress: false },
     ]);
-  });
-
-  it("round-trips the drill-down through the location hash", () => {
-    expect(hashFromDrilldown(null)).toBe("");
-    expect(hashFromDrilldown({ model: "model-a" })).toBe("#model=model-a");
-    expect(hashFromDrilldown({ harness: "claude" })).toBe("#harness=claude");
-    expect(hashFromDrilldown({ harness: "claude", model: "model-a" })).toBe("#harness=claude&model=model-a");
-
-    expect(drilldownFromHash("")).toBe(null);
-    expect(drilldownFromHash("#model=model-a")).toEqual({ model: "model-a" });
-    expect(drilldownFromHash("#harness=claude")).toEqual({ harness: "claude" });
-    expect(drilldownFromHash("#harness=claude&model=model-a")).toEqual({ harness: "claude", model: "model-a" });
-    // Field order in the fragment does not matter.
-    expect(drilldownFromHash("#model=model-a&harness=claude")).toEqual({ harness: "claude", model: "model-a" });
-
-    expect(drilldownEqual({ model: "a" }, { model: "a" })).toBe(true);
-    expect(drilldownEqual({ model: "a" }, { model: "a", harness: "h" })).toBe(false);
-    expect(drilldownEqual(null, null)).toBe(true);
   });
 });

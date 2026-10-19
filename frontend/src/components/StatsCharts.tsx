@@ -1,4 +1,4 @@
-// Compact task charts for resource history, token composition, and cumulative tool time.
+// Shared resource history charts plus task token composition and cumulative tool-time charts.
 
 import * as Plot from "@observablehq/plot";
 import { createMemo, createSignal, Show } from "solid-js";
@@ -199,10 +199,21 @@ function drawResourceChart(data: readonly ResourceDatum[], width: number, option
   });
 }
 
-function ResourceCharts(props: { stats: readonly EventStats[] }) {
+export interface ResourceSample extends EventStats {
+  cpuCount?: number;
+  diskTotal?: number;
+}
+
+export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope: "machine" | "task" }) {
   const latest = () => props.stats.at(-1);
   const cpuObservedMax = () => Math.max(...props.stats.map((sample) => sample.cpuPerc));
-  const cpuScaleMax = () => Math.max(100, Math.ceil(cpuObservedMax()));
+  const cpuScaleMax = () =>
+    Math.max(
+      100,
+      Math.ceil(cpuObservedMax()),
+      ...props.stats.map((sample) => (sample.cpuCount ?? sample.cpuCeiling ?? 0) * 100),
+    );
+  const cpuCount = () => latest()?.cpuCount ?? null;
   const timeRange = () => {
     const first = props.stats[0];
     const last = props.stats.at(-1);
@@ -227,6 +238,14 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
       .map(({ rate, sample }) => [
         formatExactSampleTime(sample.ts),
         `${String(sample.cpuPerc)}%`,
+        ...(props.scope === "machine" ? [sample.cpuCount === undefined ? "Unknown" : String(sample.cpuCount)] : []),
+        ...(props.scope === "task"
+          ? [
+              sample.cpuCeiling === undefined ? "Unknown" : String(sample.cpuCeiling),
+              sample.cpuQuota === undefined ? "Unknown" : sample.cpuQuota === 0 ? "None" : String(sample.cpuQuota),
+              sample.runtimeCPUs === undefined ? "Unknown" : String(sample.runtimeCPUs),
+            ]
+          : []),
         `${String(sample.memPerc)}%`,
         rate.rxBytesPerSecond === null ? "—" : formatExactBytes(rate.rxBytesPerSecond, true),
         rate.txBytesPerSecond === null ? "—" : formatExactBytes(rate.txBytesPerSecond, true),
@@ -239,11 +258,13 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
         <div class={styles.resourceHeader}>
           <strong>CPU</strong>
           <span>
-            {latest()?.cpuPerc.toFixed(1)}%<Show when={cpuObservedMax() > 100}> · max {String(cpuObservedMax())}%</Show>
+            {latest()?.cpuPerc.toFixed(1)}% · {(Number(latest()?.cpuPerc ?? 0) / 100).toFixed(2)}
+            <Show when={cpuCount() !== null}> / {cpuCount()}</Show> CPUs
           </span>
         </div>
         <PlotHost
           label="CPU utilization over time"
+          description="100% is one fully busy logical CPU. The scale includes the machine CPU count or configured task ceiling. Task ceilings exclude inherited limits and process affinity."
           draw={(width) =>
             drawResourceChart(cpu(), width, {
               axisAnchor: "left",
@@ -256,6 +277,35 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
             })
           }
         />
+        <div class={styles.note}>
+          100% = 1 logical CPU
+          <Show when={cpuCount()}>
+            {(capacity) => <> · {((latest()?.cpuPerc ?? 0) / capacity()).toFixed(1)}% of capacity</>}
+          </Show>
+          <Show when={props.scope === "task"}>
+            {" · effective capacity unknown"}
+            <Show when={latest()?.cpuCeiling}>{(ceiling) => <> · configured ceiling ≤ {ceiling()} CPUs</>}</Show>
+          </Show>
+        </div>
+        <Show when={props.scope === "task"}>
+          <div class={styles.note}>
+            Runtime: {latest()?.runtimeCPUs ?? "unknown"} CPUs ·{" "}
+            {latest()?.cpuQuota === undefined
+              ? "quota unknown"
+              : latest()?.cpuQuota === 0
+                ? "no explicit quota"
+                : `quota ${latest()?.cpuQuota} CPUs`}
+          </div>
+          <div class={styles.note}>Inherited CPU limits and process affinity are unreported.</div>
+          <Show when={latest()?.cpuError}>
+            {(warning) => (
+              <details class={styles.note}>
+                <summary>CPU metadata warning</summary>
+                {warning()}
+              </details>
+            )}
+          </Show>
+        </Show>
       </div>
       <div class={styles.resourceRow}>
         <div class={styles.resourceHeader}>
@@ -346,7 +396,13 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
       <div class={styles.resourceRow}>
         <div class={styles.resourceHeader}>
           <strong>Disk</strong>
-          <span>{(latest()?.diskUsed ?? -1) >= 0 ? formatBytes(latest()?.diskUsed ?? 0) : "Unavailable"}</span>
+          <span>
+            {(latest()?.diskUsed ?? -1) >= 0 ? formatBytes(latest()?.diskUsed ?? 0) : "Unavailable"}
+            <Show when={(latest()?.diskUsed ?? -1) >= 0 && latest()?.diskTotal !== undefined}>
+              {" / "}
+              {formatBytes(latest()?.diskTotal ?? 0)}
+            </Show>
+          </span>
         </div>
         <Show
           when={disk().some((sample) => sample.value !== null)}
@@ -372,7 +428,15 @@ function ResourceCharts(props: { stats: readonly EventStats[] }) {
       <ChartDataTable
         caption="Exact samples"
         class={styles.sampleDetails}
-        columns={["Time", "CPU", "Memory", "RX/s", "TX/s", "Disk"]}
+        columns={[
+          "Time",
+          "CPU (100% per CPU)",
+          ...(props.scope === "machine" ? ["CPUs"] : ["Configured CPU ceiling", "CPU quota", "Runtime CPUs"]),
+          "Memory",
+          "RX/s",
+          "TX/s",
+          "Disk",
+        ]}
         regionLabel="Exact resource samples"
         rows={exactSampleRows()}
       />
@@ -447,7 +511,7 @@ export default function StatsCharts(props: {
   return (
     <>
       <Show when={stats().length > 0}>
-        <ResourceCharts stats={stats()} />
+        <ResourceCharts stats={stats()} scope="task" />
       </Show>
       <Show when={turns().length > 0}>
         <div class={styles.figure} data-testid="turn-token-chart">
