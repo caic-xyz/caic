@@ -16,9 +16,10 @@ its recent activity, output, or state. Use `agent_last_message` to check what a
 waiting or asking agent needs. Send follow-up work with `task_send_message`,
 and answer an agent's question with `task_answer_question`.
 
-Create tasks with `task_create`. Confirm the repository and prompt before
-creating one. Omit harness, model, and effort unless the user explicitly asks
-to override the saved defaults. Use `harnesses_list` to see the models and
+Create tasks with `task_create`. Confirm the prompt and any repositories before
+creating one; a task may have zero or more repositories. Omit harness, model,
+and effort unless the user explicitly asks to override the saved defaults.
+Use `harnesses_list` to see the models and
 effort levels each harness accepts before overriding a default. Use `task_fork`
 to continue a task's workspace on a new branch.
 

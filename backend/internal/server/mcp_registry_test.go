@@ -239,6 +239,18 @@ func TestMCPToolSchemas(t *testing.T) {
 					t.Fatalf("header for %q = %q, want %q", property, got[property], header)
 				}
 			}
+			if spec.Name == "task_create" {
+				if slices.Contains(spec.InputSchema.Required, "repos") {
+					t.Fatal("repos must be optional")
+				}
+				repos, ok := spec.InputSchema.Properties.Get("repos")
+				if !ok || repos.Type != "array" || repos.Items == nil || repos.Items.Type != "string" {
+					t.Fatal("repos must be an array of repository paths")
+				}
+				if repos.MinItems != nil && *repos.MinItems > 0 {
+					t.Fatal("repos must allow an empty array")
+				}
+			}
 		})
 	}
 
@@ -829,6 +841,44 @@ func TestMCPResultBounds(t *testing.T) {
 
 func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 	t.Parallel()
+
+	t.Run("repository lists", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			name string
+			args string
+			want []string
+		}{
+			{name: "omitted", args: `{"prompt":"do the task"}`},
+			{name: "empty", args: `{"prompt":"do the task","repos":[]}`},
+			{name: "one", args: `{"prompt":"do the task","repos":["myrepo"]}`, want: []string{"myrepo"}},
+			{name: "many", args: `{"prompt":"do the task","repos":["otherrepo","myrepo"]}`, want: []string{"otherrepo", "myrepo"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				s := newMCPTaskCreateTestRouter(t)
+				registerRouterCheckout(t, s.taskMgr.Checkouts, "otherrepo", newRouterTestCheckout(t.TempDir()))
+				registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
+				result, err := registry.CallTool(t.Context(), "task_create", json.RawMessage(tc.args))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if result.IsError {
+					t.Fatalf("task_create returned tool error: %+v", result.Structured)
+				}
+				created := singleCreatedTask(t, s)
+				got := make([]string, 0, len(created.Repos))
+				for _, repo := range created.Repos {
+					got = append(got, repo.Name)
+				}
+				if !slices.Equal(got, tc.want) {
+					t.Fatalf("created repositories = %v, want %v", got, tc.want)
+				}
+			})
+		}
+	})
 
 	t.Run("enables CAIC MCP by default", func(t *testing.T) {
 		t.Parallel()

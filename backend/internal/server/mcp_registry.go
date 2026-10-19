@@ -411,7 +411,7 @@ func (m *mcpRegistry) voiceSessionDefaults(ctx context.Context) string {
 // hint carried from this catalog through ToolDeclaration to the adapter; see
 // github.com/maruel/gomode/voicegateway/voicertc/AGENTS.md.
 func (m *mcpRegistry) specs() []mcp.ToolSpec {
-	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
+	createSpec := mcp.NewToolSpec("task_create", "Create task", "Create a new coding task with zero or more repositories. Confirm repositories and prompt with the user before calling. Omit harness, model, and effort unless the user explicitly asks for an override; caic resolves an omitted harness from saved preferences and leaves omitted model/effort to harness defaults.", m.handleTaskCreate)
 	createSpec.InputSchema = buildTaskCreateSchema()
 	createSpec.Annotations = &mcp.ToolAnnotations{Title: "Create task", DestructiveHint: true, OpenWorldHint: false}
 
@@ -797,7 +797,7 @@ type mcpTaskCreatedOutput struct {
 
 type mcpTaskCreateArgs struct {
 	Prompt      string   `json:"prompt"                jsonschema_description:"The task description/prompt for the coding agent"`
-	Repos       []string `json:"repos"                 jsonschema:"minItems=1"                                                                   jsonschema_description:"Repositories to work in (one or more)"`
+	Repos       []string `json:"repos,omitempty"       jsonschema_description:"Repositories to work in (zero or more); omit or pass an empty list for a task without repositories"`
 	Harness     string   `json:"harness,omitempty"     jsonschema_description:"Agent harness to use (optional)"`
 	Model       string   `json:"model,omitempty"       jsonschema_description:"Model to use (optional)"`
 	Effort      string   `json:"effort,omitempty"      jsonschema_description:"Thinking effort to use (optional)"`
@@ -822,9 +822,6 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
 		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: "Created child task: " + resp.ID.String(), TaskID: resp.ID.String()})
-	}
-	if len(args.Repos) == 0 {
-		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: repos"})
 	}
 	apiHarness, err := m.resolveTaskCreateHarness(ctx, args.Harness)
 	if err != nil {
@@ -1404,10 +1401,9 @@ func invalidTaskNumberError() *api.Error {
 // demand by resources and tool handlers instead of embedded in tool schemas.
 
 func buildTaskCreateSchema() *jsonschema.Schema {
-	minOne := uint64(1)
 	props := orderedmap.New[string, *jsonschema.Schema]()
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The task description/prompt for the coding agent"})
-	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (one or more). Call repos_list first if you need the current repository list.", Items: &jsonschema.Schema{Type: "string"}, MinItems: &minOne})
+	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (zero or more). Omit or pass an empty list for a task without repositories. Call repos_list first if you need the current repository list.", Items: &jsonschema.Schema{Type: "string"}})
 	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model override (optional). Omit unless the user explicitly chose a model; omitted means the selected harness default."})
 	props.Set("effort", &jsonschema.Schema{Type: "string", Description: "Thinking effort override (optional). Omit unless the user explicitly chose an effort; omitted means the selected harness default."})
 	props.Set("harness", &jsonschema.Schema{Type: "string", Description: "Agent harness override (optional). Omit to use the saved default harness."})
@@ -1417,7 +1413,7 @@ func buildTaskCreateSchema() *jsonschema.Schema {
 	props.Set("usb", &jsonschema.Schema{Type: "boolean", Description: "Enable USB passthrough for this task"})
 	props.Set("sudo", &jsonschema.Schema{Type: "boolean", Description: "Enable root access via sudo with a random password"})
 	props.Set("gitHubToken", &jsonschema.Schema{Type: "boolean", Description: "Enable GitHub token injection for this task"})
-	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"prompt", "repos"}}
+	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"prompt"}}
 }
 
 func buildDelegatedTaskCreateSchema() *jsonschema.Schema {
