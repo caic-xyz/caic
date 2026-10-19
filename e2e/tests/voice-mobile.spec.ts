@@ -1,6 +1,55 @@
-// Browser coverage for native voice focus, mobile task cards, and detail navigation.
+// Browser coverage for voice choice compatibility, shared errors, native focus, and mobile task navigation.
 
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
+import type { Config } from "../../sdk/caic/ts/v1/types.gen";
+
+test("browser voice selects a text choice on mobile and displays a failed choice once", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 851 });
+  await page.addInitScript(() => {
+    localStorage.setItem(`gomode.voiceChoice.${location.origin}`, "gemini");
+  });
+  await page.route("**/api/caic/v1/server/config", async (route) => {
+    const response = await route.fetch();
+    const config = (await response.json()) as Config;
+    await route.fulfill({ json: { ...config, voiceGateway: { mode: "embedded" } } });
+  });
+  await page.route("**/.well-known/gomode.json", (route) =>
+    route.fulfill({ json: { service: "caic", webShell: { voiceGateway: { url: "/" } } } }),
+  );
+  let includeTextChoice = true;
+  await page.route("**/api/voicegateway/v1/voice/choices", (route) =>
+    route.fulfill({
+      json: {
+        choices: [
+          { id: "gemini", label: "Gemini Live", transports: ["webrtc"] },
+          ...(includeTextChoice ? [{ id: "text", label: "Text model", transports: ["text"] }] : []),
+        ],
+        defaultChoiceID: "gemini",
+      },
+    }),
+  );
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  const overlay = page.getByTestId("voice-overlay");
+  await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
+  const choice = overlay.getByRole("combobox", { name: "Voice choice", exact: true });
+  await expect(choice).toHaveValue("gemini");
+  await overlay.getByRole("radio", { name: "Browser speech", exact: true }).check();
+  await expect(choice).toBeEnabled();
+  await expect(choice).toHaveValue("text");
+  await expect(overlay.getByRole("alert")).toBeEmpty();
+  await overlay.getByRole("button", { name: "Close voice settings", exact: true }).click();
+  includeTextChoice = false;
+  await overlay.getByRole("button", { name: "Connect voice assistant", exact: true }).click();
+  const failure = overlay.getByText("The selected voice choice is unavailable. Choose another voice choice.", {
+    exact: true,
+  });
+  await expect(failure.filter({ visible: true })).toHaveCount(1);
+  await overlay.getByRole("button", { name: "Voice settings", exact: true }).click();
+  await expect(failure.filter({ visible: true })).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
 
 test("mobile voice task links open details and browser back restores the voice list", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
