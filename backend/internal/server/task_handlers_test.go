@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	logv3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
 	"github.com/maruel/ksid"
@@ -71,7 +72,7 @@ func newTaskDiffTestRouter(t *testing.T) (*testRouter, *diffRuntimeBackend, ksid
 	s := newTestRouter(t, nil)
 	testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, backend)
 	registerRouterCheckout(t, s.checkouts, "repo", newRouterTestCheckout(t.TempDir()))
-	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 	tk.Repos = []taskslog.RepoMount{{Name: "repo", Branch: "caic-1", ContainerPath: "/workspace/repo"}}
 	tk.SetRuntimeConnectionInfo("test-runtime:ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 	insertTestTask(s, tk.ID, tk)
@@ -211,7 +212,7 @@ func TestTaskHandlersVNCWithoutDisplay(t *testing.T) {
 	t.Parallel()
 
 	s := newTestRouter(t, nil)
-	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "")
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude)
 	insertTestTask(s, tk.ID, tk)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(testHTTPContext(t), http.MethodGet, "/tasks/t1/vnc/ws", nil)

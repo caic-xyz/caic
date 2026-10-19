@@ -8,6 +8,7 @@ import (
 	"iter"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
@@ -290,3 +291,27 @@ func (f *FakeBackend) normalizeID(id runtime.ID) runtime.ID {
 // Ensure the fake satisfies the interface at compile time.
 var _ runtime.Lifecycle = (*FakeBackend)(nil)
 var _ runtime.Repository = (*FakeBackend)(nil)
+
+// RepositorySpy records repository reads around FakeBackend. Configure it before use.
+type RepositorySpy struct {
+	*FakeBackend
+
+	StatusReads atomic.Int32
+	PatchReads  atomic.Int32
+	StatusErr   error
+}
+
+// RepositoryStatus records a read and delegates unless an error is configured.
+func (s *RepositorySpy) RepositoryStatus(ctx context.Context, id runtime.ID, i int) (runtime.RepositoryStatus, error) {
+	s.StatusReads.Add(1)
+	if s.StatusErr != nil {
+		return runtime.RepositoryStatus{}, s.StatusErr
+	}
+	return s.FakeBackend.RepositoryStatus(ctx, id, i)
+}
+
+// FileDiff records a patch read and delegates to the fake.
+func (s *RepositorySpy) FileDiff(ctx context.Context, id runtime.ID, i int, sha, p, old string) (string, error) {
+	s.PatchReads.Add(1)
+	return s.FakeBackend.FileDiff(ctx, id, i, sha, p, old)
+}

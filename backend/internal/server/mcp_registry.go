@@ -1,4 +1,4 @@
-// MCP tool and Skills registries, schemas, resource catalog, subscription invalidation, and keepalives.
+// MCP tool and Skills registries, bounded task diffstats, schemas, resources, subscriptions, and keepalives.
 
 package server
 
@@ -65,7 +65,7 @@ A task has a prompt (what to build), a repo, a branch, and a state:
 - failed: unrecoverable failure; error has the reason
 
 ## Context you have
-If the client provides a bounded current-task snapshot at session start, use it to answer questions about listed task status without calling tasks_list first. When that snapshot says tasks were omitted, call tasks_list and follow nextCursor until it is absent. Without a snapshot, call tasks_list. Call task_get_detail when the user asks for specifics (recent events, diffs).
+If the client provides a bounded current-task snapshot at session start, use it to answer questions about listed task status without calling tasks_list first. When that snapshot says tasks were omitted, call tasks_list and follow nextCursor until it is absent. Without a snapshot, call tasks_list. Call task_get_detail when the user asks for specifics. For committed changes or upstream divergence, set include_diffstat.
 
 ## Behavior guidelines
 - Stick to the current task being discussed; only talk about one task at a time.
@@ -428,7 +428,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("repos_list", "List repositories", "List repositories in stable path order. Defaults to at most 200 repositories; a response-size limit may shorten the page, so pass nextCursor as cursor until it is absent.", m.handleReposList), mcp.ToolAnnotations{Title: "List repositories", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("harnesses_list", "List harnesses", "List available coding-agent harnesses and the models each accepts, with the reasoning effort values every model supports. Call this to choose a valid model or effort for task_create.", m.handleHarnessesList), mcp.ToolAnnotations{Title: "List harnesses", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details by task number from tasks_list, or by stable task ID.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(mcp.NewToolSpec("task_get_detail", "Get task detail", "Get task status by task number or stable ID. Optionally include committed and uncommitted file diffstats with branch and upstream divergence. Output is limited to 32 KiB with an explicit truncation notice.", m.handleTaskGetDetail), mcp.ToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", m.handleTaskSendMessage), mcp.ToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", m.handleTaskAnswerQuestion), mcp.ToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's existing commits to GitHub. Push to task branch (default) or directly to main without rewriting commits.", m.handleTaskPushBranchToRemote), mcp.ToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
@@ -954,7 +954,38 @@ func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskGetDe
 		}
 		lines = append(lines, changed)
 	}
-	return boundedTextToolResult(strings.TrimSpace(strings.Join(lines, "\n")))
+	// Repository probes happen only when explicitly requested.
+	txt := strings.ToValidUTF8(strings.TrimSpace(strings.Join(lines, "\n")), "\ufffd")
+	if !args.IncludeDiffstat {
+		return boundedTextToolResult(txt)
+	}
+	ent, ok := m.inspectableTaskEntry(ctx, t.ID)
+	if !ok {
+		return domainToolError[mcp.TextOutput](taskNotFoundError())
+	}
+	idx, err := m.taskSvc.taskDiffIndex(ctx, ent)
+	if err != nil {
+		msg, code := err.Error(), api.CodeInternalError
+		if e, ok := errors.AsType[*api.Error](err); ok {
+			msg, code = e.Error(), e.Code
+		}
+		msg, cut := truncateMCPText(strings.ToValidUTF8(msg, "\ufffd"))
+		res := mcp.ToolErrorWithMeta[mcp.TextOutput](msg, mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(code)})
+		if cut {
+			res.Meta[mcpTruncatedMetaKey] = true
+		}
+		return res
+	}
+	d := mcpTaskDiffstat{}
+	d.out.WriteString(truncateUTF8(txt, 4<<10))
+	d.truncated = d.out.Len() != len(txt)
+	d.out.WriteString("\n\nDiffstat:\n")
+	d.append(idx)
+	res := mcp.TextToolResult(d.out.String())
+	if d.truncated {
+		res.Meta = mcp.MetaObject{mcpTruncatedMetaKey: true}
+	}
+	return res
 }
 
 type mcpTaskSendMessageArgs struct {
@@ -2180,6 +2211,114 @@ func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string
 	return "allow", true
 }
 
+type mcpTaskGetDetailArgs struct {
+	Task            taskID `json:"task" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number from tasks_list (for example 1 or #1) or stable task ID; use your stable task ID to inspect your own workspace"`
+	IncludeDiffstat bool   `json:"include_diffstat,omitempty" jsonschema_description:"Include committed and uncommitted file diffstats, branch, upstream, and ahead/behind counts"`
+}
+
+// mcpTaskDiffstat renders repository metadata and file counts within the MCP text budget.
+type mcpTaskDiffstat struct {
+	out       strings.Builder
+	limit     int
+	omitLine  bool
+	truncated bool
+}
+
+func (d *mcpTaskDiffstat) append(idx *v1.TaskDiffIndexResp) {
+	// Count the complete comparison before limiting the rendered detail rows.
+	var files, added, deleted, binaryFiles int
+	for i := range idx.Repositories {
+		r := &idx.Repositories[i]
+		for j := range r.Commits {
+			for _, f := range r.Commits[j].Stat {
+				files++
+				added += f.LinesAdded
+				deleted += f.LinesDeleted
+				if f.OldSize >= 0 || f.NewSize >= 0 {
+					binaryFiles++
+				}
+			}
+		}
+		for _, f := range r.Uncommitted {
+			files++
+			added += f.LinesAdded
+			deleted += f.LinesDeleted
+			if f.OldSize >= 0 || f.NewSize >= 0 {
+				binaryFiles++
+			}
+		}
+	}
+	footer := fmt.Sprintf("\nTotal (all compared commits and working trees): %d file changes, %d insertions(+), %d deletions(-), %d binary file changes.\n", files, added, deleted, binaryFiles)
+	const notice = "[Diffstat output truncated]\n"
+	d.limit = mcpTextOutputMaxBytes - len(footer) - len(notice)
+
+repositories:
+	for i := range idx.Repositories {
+		r := &idx.Repositories[i]
+		if !d.write("\nRepository %s: branch %s, upstream %s, ahead %d, behind %d\n", d.field(r.Name), d.field(r.Branch), d.field(r.Upstream), r.Ahead, r.Behind) {
+			break repositories
+		}
+		for j := range r.Commits {
+			c := &r.Commits[j]
+			label := "Local commit"
+			if c.Behind {
+				label = "Missing upstream commit"
+			}
+			if !d.write("%s %s: %s\n", label, d.field(c.SHA), d.field(c.Subject)) {
+				break repositories
+			}
+			for _, f := range c.Stat {
+				if !d.file(f.Path, "", f.LinesAdded, f.LinesDeleted, f.OldSize, f.NewSize) {
+					break repositories
+				}
+			}
+		}
+		if !d.write("Uncommitted files: %d\n", len(r.Uncommitted)) {
+			break repositories
+		}
+		for _, f := range r.Uncommitted {
+			if !d.file(f.Path, f.OriginalPath, f.LinesAdded, f.LinesDeleted, f.OldSize, f.NewSize) {
+				break repositories
+			}
+		}
+	}
+	if d.truncated {
+		d.out.WriteString(notice)
+	}
+	d.out.WriteString(footer)
+}
+
+func (d *mcpTaskDiffstat) file(p, prev string, add, del int, old, size int64) bool {
+	name := d.field(p)
+	if prev != "" {
+		name = d.field(prev) + " -> " + name
+	}
+	if old >= 0 || size >= 0 {
+		return d.write("  %s: binary (%d -> %d bytes)\n", name, old, size)
+	}
+	return d.write("  %s: +%d -%d\n", name, add, del)
+}
+
+// field quotes metadata and marks rows with oversized fields for omission.
+func (d *mcpTaskDiffstat) field(s string) string {
+	if len(s) > d.limit-d.out.Len() {
+		d.omitLine = true
+		return ""
+	}
+	s = strings.ToValidUTF8(s, "\ufffd")
+	return strconv.Quote(s)
+}
+
+func (d *mcpTaskDiffstat) write(format string, args ...any) bool {
+	s := fmt.Sprintf(format, args...)
+	if d.omitLine || d.out.Len()+len(s) > d.limit {
+		d.truncated = true
+		return false
+	}
+	d.out.WriteString(s)
+	return true
+}
+
 func mcpTaskResourceID(uri string) (ksid.ID, error) {
 	rawID, ok := strings.CutPrefix(uri, "caic://tasks/")
 	if !ok {
@@ -2190,10 +2329,6 @@ func mcpTaskResourceID(uri string) (ksid.ID, error) {
 
 type mcpTaskNumberArgs struct {
 	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number (for example 1 or \"#1\") or stable task ID"`
-}
-
-type mcpTaskGetDetailArgs struct {
-	Task taskID `json:"task" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number from tasks_list (for example 1 or \"#1\") or stable task ID"`
 }
 
 var errNotTaskNumber = errors.New("not a task number")

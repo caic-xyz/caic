@@ -1,4 +1,4 @@
-// Tests MCP tool and resource authorization, task focus, and catalog behavior.
+// Tests MCP tool schemas, authorization, task focus, catalogs, and bounded task diffstats.
 
 package server
 
@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,6 +30,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repo"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/runtimetest"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -1784,22 +1787,23 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal detail schema: %v", err)
 			}
-			var detailDecoded struct {
-				Properties map[string]json.RawMessage `json:"properties"`
-			}
+			var detailDecoded mcpToolInputSchema
 			if err := json.Unmarshal(detailSchema, &detailDecoded); err != nil {
 				t.Fatalf("decode detail schema: %v", err)
 			}
-			var taskReference struct {
-				OneOf []struct {
-					Type string `json:"type"`
-				} `json:"oneOf"`
-			}
+			var taskReference jsonschema.Schema
 			if err := json.Unmarshal(detailDecoded.Properties["task"], &taskReference); err != nil {
 				t.Fatalf("decode task reference schema: %v", err)
 			}
-			if len(detailDecoded.Properties) != 1 || len(taskReference.OneOf) != 2 || taskReference.OneOf[0].Type != "integer" || taskReference.OneOf[1].Type != "string" {
-				t.Fatalf("task detail schema = %s, want one task integer-or-string reference", detailSchema)
+			if len(taskReference.OneOf) != 2 || taskReference.OneOf[0].Type != "integer" || taskReference.OneOf[1].Type != "string" {
+				t.Fatalf("task detail schema = %s, want a task integer-or-string reference", detailSchema)
+			}
+			if len(detailDecoded.Properties) != 2 || detailDecoded.Properties["include_diffstat"] == nil {
+				t.Fatalf("task detail schema = %s, want task and include_diffstat", detailSchema)
+			}
+
+			if !slices.Equal(detailDecoded.Required, []string{"task"}) {
+				t.Fatalf("detail required arguments=%v, want only task", detailDecoded.Required)
 			}
 		})
 		t.Run("error_extra_task_properties", func(t *testing.T) {
@@ -1880,6 +1884,225 @@ func assertMCPToolVisibility(t *testing.T, tools []mcp.ToolDescriptor, name stri
 	if want {
 		t.Fatalf("tool %q is hidden, want visible", name)
 	}
+}
+
+// mcpToolInputSchema decodes the input contract exercised by tool schema tests.
+type mcpToolInputSchema struct {
+	Properties map[string]json.RawMessage `json:"properties"`
+	Required   []string                   `json:"required"`
+}
+
+func TestMCPTaskDetailDiffstat(t *testing.T) {
+	t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		t.Run("repository and file summaries", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: "image.png", Binary: true, OldSize: 12, NewSize: 24})
+			ent, _ := s.taskMgr.GetEntry(id)
+			ent.Task().Repos = append(ent.Task().Repos, taskslog.RepoMount{Name: "other", Branch: "other-work", ContainerPath: "/workspace/other"})
+			res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+			if res.IsError {
+				t.Fatal(res)
+			}
+			txt := taskDetailText(t, res.Structured)
+			for _, exp := range []string{`Repository "repo": branch "caic-1", upstream "origin/main", ahead 1, behind 1`, `Repository "other"`, "Local commit", "Missing upstream commit", "Add API", "Missing upstream change", `"committed.go": +4 -1`, `"upstream.go": +1 -0`, `"old.go" -> "renamed.go": +2 -0`, `"image.png": binary (12 -> 24 bytes)`} {
+				if !strings.Contains(txt, exp) {
+					t.Errorf("missing %q in %s", exp, txt)
+				}
+			}
+			if rt.StatusReads.Load() != 2 || rt.PatchReads.Load() != 0 {
+				t.Fatalf("reads: %d status, %d patches", rt.StatusReads.Load(), rt.PatchReads.Load())
+			}
+			if !strings.HasSuffix(txt, "Total (all compared commits and working trees): 8 file changes, 14 insertions(+), 2 deletions(-), 2 binary file changes.\n") {
+				t.Fatalf("missing complete totals: %s", txt)
+			}
+		})
+		t.Run("default avoids repository reads", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpTaskGetDetailArgs{Task: taskID(id.String())})
+			if res.IsError || rt.StatusReads.Load() != 0 || rt.PatchReads.Load() != 0 {
+				t.Fatalf("default result=%+v, status=%d, patches=%d", res, rt.StatusReads.Load(), rt.PatchReads.Load())
+			}
+		})
+		t.Run("truncation retains complete rows", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			rt.RepositoryStatusValue.Commits = nil
+			rt.RepositoryStatusValue.Uncommitted = nil
+			for i := range 80 {
+				rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: fmt.Sprintf("%03d-", i) + strings.Repeat("\u754c", 700), LinesAdded: 1})
+			}
+			got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+			txt := got.Result.StructuredContent.Result
+			if got.Result.IsError || len(txt) > 32768 || !utf8.ValidString(txt) {
+				t.Fatalf("invalid diffstat: error=%v, bytes=%d", got.Result.IsError, len(txt))
+			}
+			if !strings.Contains(txt, `  "000-`+strings.Repeat("\u754c", 700)+`": +1 -0`+"\n") {
+				t.Fatal("first file row was shortened")
+			}
+			before, after, ok := strings.Cut(txt, "[Diffstat output truncated]\n")
+			if !ok || !strings.HasSuffix(before, "\": +1 -0\n") || after != "\nTotal (all compared commits and working trees): 80 file changes, 80 insertions(+), 0 deletions(-), 0 binary file changes.\n" {
+				t.Fatal("truncation marker must replace complete rows before the totals")
+			}
+		})
+		t.Run("serialized output remains bounded", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			rt.RepositoryStatusValue.Commits[0].Subject = strings.Repeat("huge\xffsubject", 10000)
+			for i := range 500 {
+				p := fmt.Sprintf("%03d/", i) + strings.Repeat("\xff\u754c/", 500)
+				rt.RepositoryStatusValue.Uncommitted = append(rt.RepositoryStatusValue.Uncommitted, runtime.GitFileStatus{Path: p, LinesAdded: 1})
+				rt.RepositoryStatusValue.DiffStat = append(rt.RepositoryStatusValue.DiffStat, runtime.GitFileStat{Path: p, LinesAdded: 1})
+			}
+			got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+			if got.Result.IsError {
+				t.Fatal(got)
+			}
+			txt := got.Result.StructuredContent.Result
+			if len(txt) > 32768 || !utf8.ValidString(txt) || !strings.Contains(txt, "[Diffstat output truncated]") || got.Result.Meta[mcpTruncatedMetaKey] != true {
+				t.Fatalf("bad bounded output: %d bytes", len(txt))
+			}
+			if len(got.Result.Content) != 1 || got.Result.Content[0].Text != txt {
+				t.Fatal("text and structured output disagree")
+			}
+			if !strings.Contains(txt, `Repository "repo"`) || !strings.HasSuffix(txt, "[Diffstat output truncated]\n\nTotal (all compared commits and working trees): 503 file changes, 507 insertions(+), 1 deletions(-), 0 binary file changes.\n") {
+				t.Fatal("middle truncation must preserve the beginning and complete totals")
+			}
+			// The live read updates cached paths, whose invalid bytes must also
+			// stay bounded when later serialized without a diffstat request.
+			got = taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String())})
+			if got.Result.IsError || len(got.Result.StructuredContent.Result) > 32768 {
+				t.Fatalf("cached output: error=%v, bytes=%d", got.Result.IsError, len(got.Result.StructuredContent.Result))
+			}
+		})
+		for _, name := range []string{"owner", "self"} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				s, rt, id := newMCPDiffstatRouter(t)
+				ent, _ := s.taskMgr.GetEntry(id)
+				ent.Task().OwnerID = "owner"
+				ctx := auth.NewContext(t.Context(), &auth.User{ID: "owner"})
+				reg := s.mcpHandlers.protocol.Registry
+				if name == "self" {
+					ctx = t.Context()
+					reg = s.TaskMCPScoper.ForTask(id)
+				}
+				res, err := reg.CallTool(ctx, "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q,"include_diffstat":true}`, id.String())))
+				if err != nil || res.IsError || rt.StatusReads.Load() != 1 {
+					t.Fatalf("result=%+v, err=%v, reads=%d", res, err, rt.StatusReads.Load())
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		t.Run("oversized repository diagnostics", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			rt.StatusErr = errors.New(strings.Repeat("bad\xffrecord", 20000))
+			got := taskDetailWire(t, s, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+			if !got.Result.IsError || got.Result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeInternalError) || got.Result.Meta[mcpTruncatedMetaKey] != true {
+				t.Fatalf("missing bounded error metadata: %+v", got.Result.Meta)
+			}
+			if len(got.Result.Content) != 1 {
+				t.Fatalf("error content blocks: %d", len(got.Result.Content))
+			}
+			txt := got.Result.Content[0].Text
+			if len(txt) > 32768 || !utf8.ValidString(txt) || !strings.Contains(txt, "Output truncated") {
+				t.Fatalf("bad bounded error: %d bytes", len(txt))
+			}
+		})
+		t.Run("repository failure", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			rt.StatusErr = errors.New("status unavailable")
+			res := callTaskDetail(t, s.mcpHandlers.protocol.Registry, mcpTaskGetDetailArgs{Task: taskID(id.String()), IncludeDiffstat: true})
+			if !res.IsError || res.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeInternalError) {
+				t.Fatalf("missing repository error: %+v", res)
+			}
+		})
+		t.Run("another owner", func(t *testing.T) {
+			t.Parallel()
+			s, rt, id := newMCPDiffstatRouter(t)
+			ent, _ := s.taskMgr.GetEntry(id)
+			ent.Task().OwnerID = "owner"
+			ctx := auth.NewContext(t.Context(), &auth.User{ID: "other"})
+			res, err := s.mcpHandlers.protocol.Registry.CallTool(ctx, "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q,"include_diffstat":true}`, id.String())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.IsError || rt.StatusReads.Load() != 0 || rt.PatchReads.Load() != 0 {
+				t.Fatalf("unauthorized result=%+v, reads=%d/%d", res, rt.StatusReads.Load(), rt.PatchReads.Load())
+			}
+		})
+	})
+}
+
+func newMCPDiffstatRouter(t *testing.T) (*testRouter, *runtimetest.RepositorySpy, ksid.ID) {
+	s, rt, id := newTaskDiffTestRouter(t)
+	spy := &runtimetest.RepositorySpy{FakeBackend: rt.FakeBackend}
+	testTaskHandlers(s).taskSvc.runtimes = newTestRuntime(t, spy)
+	return s, spy, id
+}
+
+func taskDetailText(t *testing.T, v any) string {
+	out, ok := v.(mcp.TextOutput)
+	if !ok {
+		t.Fatalf("result type=%T, want mcp.TextOutput", v)
+	}
+	return out.Result
+}
+
+func callTaskDetail(t *testing.T, reg mcp.Registry, a mcpTaskGetDetailArgs) mcp.RawToolResult {
+	buf, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := reg.CallTool(t.Context(), "task_get_detail", buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+type mcpTaskDetailWireResponse struct {
+	Result mcpTaskDetailWireResult `json:"result"`
+	Error  json.RawMessage         `json:"error"`
+}
+
+type mcpTaskDetailWireResult struct {
+	Meta              mcp.MetaObject     `json:"_meta"`
+	IsError           bool               `json:"isError"`
+	Content           []mcp.ContentBlock `json:"content"`
+	StructuredContent mcp.TextOutput     `json:"structuredContent"`
+}
+
+func taskDetailWire(t *testing.T, s *testRouter, a mcpTaskGetDetailArgs) mcpTaskDetailWireResponse {
+	buf, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txt := mcpRequestJSON("tools/call", fmt.Sprintf(`"name":"task_get_detail","arguments":%s`, buf))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(txt))
+	r.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+	r.Header.Set("Mcp-Method", "tools/call")
+	r.Header.Set("Mcp-Name", "task_get_detail")
+	w := httptest.NewRecorder()
+	s.mcpHandlers.protocol.HandleMCP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("HTTP status=%d, want 200", w.Code)
+	}
+	var got mcpTaskDetailWireResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Error) != 0 {
+		t.Fatalf("unexpected protocol error: %s", got.Error)
+	}
+	return got
 }
 
 func TestMCPTaskToolFocus(t *testing.T) {

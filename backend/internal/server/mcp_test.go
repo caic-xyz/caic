@@ -32,7 +32,7 @@ import (
 	"github.com/maruel/gomode/oauth"
 )
 
-var mcpSkillToolNameRE = regexp.MustCompile("`([a-z][a-z0-9_]*_[a-z0-9_]+)`")
+var mcpSkillNameRE = regexp.MustCompile("`([a-z][a-z0-9_]*_[a-z0-9_]+)`")
 
 func mcpRequestJSON(method, paramsFields string) string {
 	if paramsFields == "{}" || paramsFields == "" {
@@ -466,16 +466,28 @@ func TestMCPHandlers(t *testing.T) {
 			t.Fatal(err)
 		}
 		availableTools := make(map[string]struct{}, len(tools))
+		// Inline code can name tools or arguments. Validate both against the catalog.
 		for _, tool := range tools {
 			availableTools[tool.Name] = struct{}{}
+			data, err := json.Marshal(tool.InputSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sch mcpToolInputSchema
+			if err := json.Unmarshal(data, &sch); err != nil {
+				t.Fatal(err)
+			}
+			for name := range sch.Properties {
+				availableTools[name] = struct{}{}
+			}
 		}
-		referencedTools := mcpSkillToolNameRE.FindAllStringSubmatch(mcpTasksSkillMarkdown, -1)
+		referencedTools := mcpSkillNameRE.FindAllStringSubmatch(mcpTasksSkillMarkdown, -1)
 		if len(referencedTools) == 0 {
 			t.Fatal("MCP task skill does not reference any tools")
 		}
 		for _, match := range referencedTools {
 			if _, ok := availableTools[match[1]]; !ok {
-				t.Errorf("MCP task skill references unavailable tool %q", match[1])
+				t.Errorf("MCP task skill references unavailable tool or argument %q", match[1])
 			}
 		}
 
