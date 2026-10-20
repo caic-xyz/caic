@@ -254,7 +254,7 @@ func MCPRequestResult(ctx context.Context, registry mcp.Registry, req MCPRequest
 		return MCPToolsListResponse{Tools: tools}, err
 	}
 	if req.Method == mcp.MethodToolsCall {
-		result, err := registry.CallTool(ctx, req.Name, req.Arguments)
+		result, err := registry.CallTool(ctx, &mcp.ToolsCallParams{Name: req.Name, Arguments: req.Arguments})
 		if err != nil {
 			return nil, err
 		}

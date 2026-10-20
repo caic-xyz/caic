@@ -1,4 +1,4 @@
-// Tests MCP tool schemas, authorization, task focus, catalogs, and bounded task diffstats.
+// Tests MCP quota formatting, schemas, authorization, task focus, catalogs, and bounded task diffstats.
 
 package server
 
@@ -78,7 +78,7 @@ func TestCaicToolRegistryHandleGetSystemStats(t *testing.T) {
 			} {
 				t.Run(caller.name, func(t *testing.T) {
 					t.Parallel()
-					result, err := c.CallTool(caller.ctx, "get_system_stats", json.RawMessage(`{}`))
+					result, err := c.CallTool(caller.ctx, &mcp.ToolsCallParams{Name: "get_system_stats", Arguments: json.RawMessage(`{}`)})
 					if err != nil || result.IsError {
 						t.Fatalf("CallTool: %+v, %v", result, err)
 					}
@@ -115,7 +115,7 @@ func TestCaicToolRegistryHandleGetSystemStats(t *testing.T) {
 		t.Parallel()
 		c := &mcpRegistry{}
 		ctx := newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeTasksRead}})
-		result, err := c.CallTool(ctx, "get_system_stats", json.RawMessage(`{}`))
+		result, err := c.CallTool(ctx, &mcp.ToolsCallParams{Name: "get_system_stats", Arguments: json.RawMessage(`{}`)})
 		if err != nil || !result.IsError {
 			t.Fatalf("CallTool: %+v, %v", result, err)
 		}
@@ -134,17 +134,104 @@ func TestCaicToolRegistryHandleGetUsage(t *testing.T) {
 		Label:    "Anthropic",
 		AuthKind: usage.AuthKindOAuth,
 		RateLimits: []usage.QuotaRateLimit{
-			{Window: "5h", Utilization: 0.12},
+			{Window: "5h", Utilization: 0.12, ResetsAt: time.Date(2099, 10, 19, 15, 30, 0, 0, time.FixedZone("UTC+2", 2*60*60))},
+			{Window: "7d", Utilization: 0.25, ResetsAt: time.Date(2099, 10, 25, 0, 0, 0, 0, time.UTC)},
+		},
+	}}, &staticUsageFetcher{quota: usage.ProviderQuota{
+		Provider: agent.QuotaProviderCodex,
+		Label:    "OpenAI",
+		AuthKind: usage.AuthKindOAuth,
+		RateLimits: []usage.QuotaRateLimit{
+			{Window: "5h", Utilization: 1},
 		},
 	}}}
 	c := &mcpRegistry{usage: s.usageHandlers}
-	result := c.handleGetUsage(t.Context(), struct{}{})
+	result := c.handleGetUsage(t.Context(), &mcp.ToolRequest[struct{}]{Arguments: struct{}{}})
 	output, ok := result.Structured.(mcp.TextOutput)
 	if !ok {
 		t.Fatalf("get_usage result type = %T, want mcp.TextOutput", result.Structured)
 	}
-	if !strings.Contains(output.Result, "Anthropic: 5h: 88% remaining") {
-		t.Fatalf("get_usage result = %q, want remaining quota", output.Result)
+	for _, want := range []string{
+		"Anthropic: 5h: 88% remaining (resets at 2099-10-19T13:30:00+00:00), 7d: 75% remaining (resets at 2099-10-25T00:00:00+00:00)",
+		"OpenAI: 5h: 0% remaining",
+	} {
+		if !slices.Contains(strings.Split(output.Result, "\n"), want) {
+			t.Errorf("get_usage result = %q, want %q", output.Result, want)
+		}
+	}
+}
+
+func TestGetUsageTimezone(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, location, winter, summer string
+	}{
+		{"Toronto", `{"timezone":"America/Toronto"}`, "2099-01-19T08:30:00-05:00", "2099-07-19T09:30:00-04:00"},
+		{"Kolkata", `{"timezone":"Asia/Kolkata"}`, "2099-01-19T19:00:00+05:30", "2099-07-19T19:00:00+05:30"},
+		{"UTC", `{"timezone":"UTC"}`, "", ""},
+		{"missing", "", "", ""},
+		{"null", `null`, "", ""},
+		{"missing timezone", `{}`, "", ""},
+		{"null timezone", `{"timezone":null}`, "", ""},
+		{"empty timezone", `{"timezone":""}`, "", ""},
+		{"invalid timezone", `{"timezone":"Invalid/Zone"}`, "", ""},
+		{"server local", `{"timezone":"Local"}`, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, native := range []bool{false, true} {
+				t.Run(fmt.Sprintf("native=%t", native), func(t *testing.T) {
+					t.Parallel()
+					s := newTestRouter(t, nil)
+					s.usageHandlers.fetchers = []usage.ProviderFetcher{&staticUsageFetcher{quota: usage.ProviderQuota{
+						Provider: agent.QuotaProviderCodex,
+						Label:    "OpenAI",
+						AuthKind: usage.AuthKindOAuth,
+						Balance:  usage.QuotaBalance{Currency: "USD", Total: 12.5},
+						RateLimits: []usage.QuotaRateLimit{
+							{Window: "winter", Utilization: 0.12, ResetsAt: time.Date(2099, 1, 19, 13, 30, 0, 0, time.UTC)},
+							{Window: "summer", Utilization: 0.25, ResetsAt: time.Date(2099, 7, 19, 13, 30, 0, 0, time.UTC)},
+							{Window: "unknown", Utilization: 1},
+						},
+					}}}
+					body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_usage","arguments":{}`
+					if tc.location != "" {
+						body += `,"_meta":{"openai/userLocation":` + tc.location + `}`
+					}
+					body += `}}`
+					if native {
+						body = mcpRequestJSON("tools/call", `"name":"get_usage","arguments":{}`)
+						if tc.location != "" {
+							body = strings.Replace(body, `"_meta":{`, `"_meta":{"openai/userLocation":`+tc.location+`,`, 1)
+						}
+					}
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", strings.NewReader(body))
+					if native {
+						req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+						req.Header.Set("Mcp-Method", "tools/call")
+						req.Header.Set("Mcp-Name", "get_usage")
+					}
+					w := httptest.NewRecorder()
+					s.mcpHandlers.protocol.HandleMCP(w, req)
+					var response struct {
+						Result struct {
+							StructuredContent mcp.TextOutput `json:"structuredContent"`
+						} `json:"result"`
+					}
+					if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+						t.Fatal(err)
+					}
+					winter, summer := tc.winter, tc.summer
+					if winter == "" {
+						winter, summer = "2099-01-19T13:30:00+00:00", "2099-07-19T13:30:00+00:00"
+					}
+					want := "OpenAI: $12.50, winter: 88% remaining (resets at " + winter + "), summer: 75% remaining (resets at " + summer + "), unknown: 0% remaining"
+					if got := response.Result.StructuredContent.Result; !slices.Contains(strings.Split(got, "\n"), want) {
+						t.Fatalf("response = %s; want line %q", w.Body.String(), want)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -372,7 +459,7 @@ func TestCaicToolRegistryHandleReposList(t *testing.T) {
 	registerRouterCheckout(t, s.checkouts, "repo2", &repo.Checkout{BaseBranch: "develop", Dir: t.TempDir()})
 	c := &mcpRegistry{serverConfig: s.serverHandlers}
 
-	result := c.handleReposList(t.Context(), mcpRepoListArgs{})
+	result := c.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
 	if result.IsError {
 		t.Fatalf("handleReposList() returned tool error: %+v", result.Structured)
 	}
@@ -390,7 +477,7 @@ func TestCaicToolRegistryHandleReposList(t *testing.T) {
 	if got[1].Path != "repo2" || got[1].BaseBranch.Name != "develop" {
 		t.Errorf("repositories[1] = %+v, want repo2 on develop", got[1])
 	}
-	invalid := c.handleReposList(t.Context(), mcpRepoListArgs{Limit: mcpRepoPageSizeMax + 1})
+	invalid := c.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{Limit: mcpRepoPageSizeMax + 1}})
 	if !invalid.IsError || invalid.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeBadRequest) {
 		t.Fatalf("invalid limit result = %#v, meta = %#v, want bad request", invalid.Structured, invalid.Meta)
 	}
@@ -402,7 +489,7 @@ func TestCaicToolRegistryHandleHarnessesList(t *testing.T) {
 	s := newMCPTaskCreateTestRouter(t)
 	c := &mcpRegistry{serverConfig: s.serverHandlers}
 
-	result := c.handleHarnessesList(t.Context(), struct{}{})
+	result := c.handleHarnessesList(t.Context(), &mcp.ToolRequest[struct{}]{Arguments: struct{}{}})
 	if result.IsError {
 		t.Fatalf("handleHarnessesList() returned tool error: %+v", result.Structured)
 	}
@@ -438,7 +525,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 	insertTestTask(s, runningID, running)
 	registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
 
-	first := registry.handleTasksList(t.Context(), mcpTaskListArgs{Limit: 1})
+	first := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Limit: 1}})
 	firstOutput, ok := first.Structured.(mcpTaskListOutput)
 	if first.IsError || !ok {
 		t.Fatalf("first page = %#v, want task-list output", first.Structured)
@@ -447,7 +534,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		t.Fatalf("first page = %#v, want running task and a next cursor", firstOutput)
 	}
 
-	second := registry.handleTasksList(t.Context(), mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1})
+	second := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
 	secondOutput, ok := second.Structured.(mcpTaskListOutput)
 	if second.IsError || !ok {
 		t.Fatalf("second page = %#v, want task-list output", second.Structured)
@@ -456,7 +543,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		t.Fatalf("second page = %#v, want stopped task without cursor", secondOutput)
 	}
 	stopped.SetState(taskslog.StateRunning)
-	stale := registry.handleTasksList(t.Context(), mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1})
+	stale := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{Cursor: firstOutput.NextCursor, Limit: 1}})
 	if !stale.IsError {
 		t.Fatal("tasks_list accepted a cursor after another task changed ordering partition")
 	}
@@ -467,7 +554,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 	} {
 		t.Run("invalid "+name, func(t *testing.T) {
 			t.Parallel()
-			result := registry.handleTasksList(t.Context(), args)
+			result := registry.handleTasksList(t.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: args})
 			if !result.IsError || result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeBadRequest) {
 				t.Fatalf("result = %#v, meta = %#v, want bad-request tool error", result.Structured, result.Meta)
 			}
@@ -496,7 +583,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		insertTestTask(s, grandchildID, grandchild)
 
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{TaskID: parentID, Remote: true})
-		result := registry.handleTasksList(ctx, mcpTaskListArgs{})
+		result := registry.handleTasksList(ctx, &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{}})
 		output, ok := result.Structured.(mcpTaskListOutput)
 		if result.IsError || !ok {
 			t.Fatalf("task-scoped list = %#v, want task-list output", result.Structured)
@@ -512,7 +599,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("task-scoped task IDs = %#v, want %#v", got, want)
 		}
-		detail := registry.handleTaskGetDetail(ctx, mcpTaskGetDetailArgs{Task: taskID(strconv.Itoa(output.Tasks[0].TaskNumber))})
+		detail := registry.handleTaskGetDetail(ctx, &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(strconv.Itoa(output.Tasks[0].TaskNumber))}})
 		if detail.IsError {
 			t.Fatalf("task detail = %#v, want listed child detail", detail.Structured)
 		}
@@ -597,7 +684,7 @@ func TestCaicToolRegistryHandleTasksList(t *testing.T) {
 		target.ParentTaskID = ksid.NewID()
 		insertTestTask(s, targetID, target)
 
-		result, err := registry.ForTask(callerID).CallTool(t.Context(), "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q}`, targetID.String())))
+		result, err := registry.ForTask(callerID).CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_get_detail", Arguments: json.RawMessage(fmt.Sprintf(`{"task":%q}`, targetID.String()))})
 		if err != nil {
 			t.Fatalf("CallTool() error: %v", err)
 		}
@@ -741,7 +828,7 @@ func TestMCPResultBounds(t *testing.T) {
 		}
 		registerRouterCheckout(t, s.checkouts, "bounded-repo", checkout)
 		registry := &mcpRegistry{serverConfig: s.serverHandlers}
-		result := registry.handleReposList(t.Context(), mcpRepoListArgs{})
+		result := registry.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
 		output, ok := result.Structured.(mcpRepoListOutput)
 		if result.IsError || !ok || len(output.Repositories) != 1 {
 			t.Fatalf("handleReposList() result = %#v", result)
@@ -935,7 +1022,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 				s := newMCPTaskCreateTestRouter(t)
 				registerRouterCheckout(t, s.taskMgr.Checkouts, "otherrepo", newRouterTestCheckout(t.TempDir()))
 				registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc, metrics: metrics.Nop{}}
-				result, err := registry.CallTool(t.Context(), "task_create", json.RawMessage(tc.args))
+				result, err := registry.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_create", Arguments: json.RawMessage(tc.args)})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -959,7 +1046,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 
 		s := newMCPTaskCreateTestRouter(t)
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "delegate the review", Repos: []string{"myrepo"}})
+		result := registry.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "delegate the review", Repos: []string{"myrepo"}}})
 		if result.IsError {
 			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
 		}
@@ -973,10 +1060,10 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 
 		s := newMCPTaskCreateTestRouter(t)
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		result := registry.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
 			Prompt: strings.Repeat("€", maxMCPTaskTitle),
 			Repos:  []string{"myrepo"},
-		})
+		}})
 		output, ok := result.Structured.(mcpTaskCreatedOutput)
 		if result.IsError || !ok {
 			t.Fatalf("handleTaskCreate() result = %#v", result)
@@ -1009,11 +1096,11 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		}
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
 			Prompt:  "do the task",
 			Repos:   []string{"myrepo"},
 			Harness: string(harness.Pi),
-		})
+		}})
 		if result.IsError {
 			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
 		}
@@ -1050,10 +1137,10 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		}
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
 			Prompt: "do the task",
 			Repos:  []string{"myrepo"},
-		})
+		}})
 		if result.IsError {
 			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
 		}
@@ -1089,7 +1176,7 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 				continue
 			}
 			found = true
-			raw, err := spec.Handler(t.Context(), json.RawMessage(`{"prompt":"do the task","repos":["myrepo"]}`))
+			raw, err := spec.Handler(t.Context(), &mcp.ToolsCallParams{Arguments: json.RawMessage(`{"prompt":"do the task","repos":["myrepo"]}`)})
 			if err != nil {
 				t.Fatalf("task_create handler returned error: %v", err)
 			}
@@ -1127,11 +1214,11 @@ func TestCaicToolRegistryHandleTaskCreate(t *testing.T) {
 		}
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
 			Prompt:  "do the task",
 			Repos:   []string{"myrepo"},
 			Harness: string(harness.Pi),
-		})
+		}})
 		if result.IsError {
 			t.Fatalf("handleTaskCreate() returned tool error: %+v", result.Structured)
 		}
@@ -1177,7 +1264,7 @@ func TestCaicToolRegistryHandleTaskCreateUnknownRepository(t *testing.T) {
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: tt.scopes, Remote: true})
 			ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
 
-			result := c.handleTaskCreate(ctx, mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"mistyped"}})
+			result := c.handleTaskCreate(ctx, &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"mistyped"}}})
 			if !result.IsError {
 				t.Fatal("handleTaskCreate() did not return a tool error")
 			}
@@ -1223,7 +1310,7 @@ func TestCaicToolRegistryHandleBotFixCIUnknownRepository(t *testing.T) {
 			ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: tt.scopes, Remote: true})
 			ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
 
-			result := c.handleBotFixCI(ctx, mcpBotFixCIArgs{Repo: "mistyped"})
+			result := c.handleBotFixCI(ctx, &mcp.ToolRequest[mcpBotFixCIArgs]{Arguments: mcpBotFixCIArgs{Repo: "mistyped"}})
 			if !result.IsError {
 				t.Fatal("handleBotFixCI() did not return a tool error")
 			}
@@ -1278,7 +1365,7 @@ func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 
 				s := newMCPTaskCreateTestRouter(t)
 				c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-				result := c.handleTaskCreate(t.Context(), tt.args)
+				result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: tt.args})
 				if !result.IsError {
 					t.Fatal("handleTaskCreate() did not return a tool error")
 				}
@@ -1301,12 +1388,12 @@ func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 
 		s := newMCPTaskCreateTestRouter(t)
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
 			Prompt:  "do the task",
 			Repos:   []string{"myrepo"},
 			Harness: "mistyped",
 			Model:   "pi-default",
-		})
+		}})
 		if !result.IsError {
 			t.Fatal("handleTaskCreate() did not return a tool error")
 		}
@@ -1328,12 +1415,12 @@ func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 		s := newMCPTaskCreateTestRouter(t)
 		s.taskMgr.Runtimes = &runtime.Router{}
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{
 			Prompt:      "do the task",
 			Repos:       []string{"myrepo"},
 			Harness:     "claude",
 			RuntimeName: "mistyped",
-		})
+		}})
 		if !result.IsError {
 			t.Fatal("handleTaskCreate() did not return a tool error")
 		}
@@ -1359,7 +1446,7 @@ func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
 		if !result.IsError {
 			t.Fatal("handleTaskCreate() did not return a tool error")
 		}
@@ -1385,7 +1472,7 @@ func TestCaicToolRegistryHandleTaskCreateErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}})
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Prompt: "do the task", Repos: []string{"myrepo"}}})
 		if !result.IsError {
 			t.Fatal("handleTaskCreate() did not return a tool error")
 		}
@@ -1410,25 +1497,25 @@ func TestCaicToolRegistryToolErrorCodes(t *testing.T) {
 	t.Run("malformed task request", func(t *testing.T) {
 		t.Parallel()
 
-		result := c.handleTaskCreate(t.Context(), mcpTaskCreateArgs{Repos: []string{"myrepo"}})
+		result := c.handleTaskCreate(t.Context(), &mcp.ToolRequest[mcpTaskCreateArgs]{Arguments: mcpTaskCreateArgs{Repos: []string{"myrepo"}}})
 		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 	})
 	t.Run("invalid task number", func(t *testing.T) {
 		t.Parallel()
 
-		result := c.handleTaskGetDetail(t.Context(), mcpTaskGetDetailArgs{Task: taskID("-1")})
+		result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID("-1")}})
 		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 	})
 	t.Run("invalid task reference", func(t *testing.T) {
 		t.Parallel()
 
-		result := c.handleTaskGetDetail(t.Context(), mcpTaskGetDetailArgs{Task: taskID("!")})
+		result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID("!")}})
 		assertMCPToolErrorCode(t, result, api.CodeBadRequest)
 	})
 	t.Run("missing task", func(t *testing.T) {
 		t.Parallel()
 
-		result := c.handleTaskGetDetail(t.Context(), mcpTaskGetDetailArgs{Task: taskID(ksid.NewID().String())})
+		result := c.handleTaskGetDetail(t.Context(), &mcp.ToolRequest[mcpTaskGetDetailArgs]{Arguments: mcpTaskGetDetailArgs{Task: taskID(ksid.NewID().String())}})
 		assertMCPToolErrorCode(t, result, api.CodeNotFound)
 	})
 	t.Run("unclassified failure", func(t *testing.T) {
@@ -1482,7 +1569,7 @@ func TestCaicToolRegistryHandleTaskForkSelectionErrors(t *testing.T) {
 			insertTestTask(s, tk.ID, tk)
 			c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
 
-			result := c.handleTaskFork(t.Context(), tt.args)
+			result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: tt.args})
 			if !result.IsError {
 				t.Fatal("handleTaskFork() did not return a tool error")
 			}
@@ -1510,7 +1597,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeRecovery(t *testing.T
 	tk.SetState(taskslog.StateWaiting)
 	insertTestTask(s, tk.ID, tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"})
+	result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped", Model: "pi-default"}})
 	if !result.IsError {
 		t.Fatal("handleTaskFork() did not return a tool error")
 	}
@@ -1537,7 +1624,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestRecoveryForRetiredSourceMod
 	tk.SetState(taskslog.StateWaiting)
 	insertTestTask(s, tk.ID, tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"})
+	result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "mistyped"}})
 	if !result.IsError {
 		t.Fatal("handleTaskFork() did not return a tool error")
 	}
@@ -1564,7 +1651,7 @@ func TestCaicToolRegistryHandleTaskForkDoesNotSuggestUnsafeModelRecovery(t *test
 	tk.SetState(taskslog.StateWaiting)
 	insertTestTask(s, tk.ID, tk)
 	c := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-	result := c.handleTaskFork(t.Context(), mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"})
+	result := c.handleTaskFork(t.Context(), &mcp.ToolRequest[mcpTaskForkArgs]{Arguments: mcpTaskForkArgs{TaskNumber: taskID("1"), Prompt: "fork", Harness: "pi", Model: "mistyped"}})
 	if !result.IsError {
 		t.Fatal("handleTaskFork() did not return a tool error")
 	}
@@ -1590,7 +1677,7 @@ func TestCaicToolRegistryHandleCloneRepoPathConflict(t *testing.T) {
 	s := newCheckoutConstructionTestServer(t, root).server
 	registry := &mcpRegistry{serverConfig: s.serverHandlers}
 
-	result := registry.handleCloneRepo(t.Context(), mcpCloneRepoArgs{URL: "https://example.com/repo.git", Path: "taken"})
+	result := registry.handleCloneRepo(t.Context(), &mcp.ToolRequest[mcpCloneRepoArgs]{Arguments: mcpCloneRepoArgs{URL: "https://example.com/repo.git", Path: "taken"}})
 	if !result.IsError {
 		t.Fatal("handleCloneRepo() did not return a tool error")
 	}
@@ -1638,7 +1725,7 @@ func TestCaicToolRegistryAuthorizeTool(t *testing.T) {
 		c := &mcpRegistry{metrics: metrics.NewStore(metrics.Resource{ServiceName: "caic"})}
 		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true})
 		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
-		result, err := c.CallTool(ctx, "task_create", nil)
+		result, err := c.CallTool(ctx, &mcp.ToolsCallParams{Name: "task_create", Arguments: nil})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1884,7 +1971,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			t.Parallel()
 			registry := &mcpRegistry{metrics: metrics.NewStore(metrics.Resource{ServiceName: "caic"})}
 			scopedRegistry := registry.ForTask(ksid.NewID())
-			result, err := scopedRegistry.CallTool(t.Context(), "task_create", json.RawMessage(`{"prompt":"child","repos":["repo"]}`))
+			result, err := scopedRegistry.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_create", Arguments: json.RawMessage(`{"prompt":"child","repos":["repo"]}`)})
 			if err != nil {
 				t.Fatalf("CallTool() error: %v", err)
 			}
@@ -2065,7 +2152,7 @@ func TestMCPTaskDetailDiffstat(t *testing.T) {
 					ctx = t.Context()
 					reg = s.TaskMCPScoper.ForTask(id)
 				}
-				res, err := reg.CallTool(ctx, "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q,"include_diffstat":true}`, id.String())))
+				res, err := reg.CallTool(ctx, &mcp.ToolsCallParams{Name: "task_get_detail", Arguments: json.RawMessage(fmt.Sprintf(`{"task":%q,"include_diffstat":true}`, id.String()))})
 				if err != nil || res.IsError || rt.StatusReads.Load() != 1 {
 					t.Fatalf("result=%+v, err=%v, reads=%d", res, err, rt.StatusReads.Load())
 				}
@@ -2105,7 +2192,7 @@ func TestMCPTaskDetailDiffstat(t *testing.T) {
 			ent, _ := s.taskMgr.GetEntry(id)
 			ent.Task().OwnerID = "owner"
 			ctx := auth.NewContext(t.Context(), &auth.User{ID: "other"})
-			res, err := s.mcpHandlers.protocol.Registry.CallTool(ctx, "task_get_detail", json.RawMessage(fmt.Sprintf(`{"task":%q,"include_diffstat":true}`, id.String())))
+			res, err := s.mcpHandlers.protocol.Registry.CallTool(ctx, &mcp.ToolsCallParams{Name: "task_get_detail", Arguments: json.RawMessage(fmt.Sprintf(`{"task":%q,"include_diffstat":true}`, id.String()))})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2136,7 +2223,7 @@ func callTaskDetail(t *testing.T, reg mcp.Registry, a mcpTaskGetDetailArgs) mcp.
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := reg.CallTool(t.Context(), "task_get_detail", buf)
+	res, err := reg.CallTool(t.Context(), &mcp.ToolsCallParams{Name: "task_get_detail", Arguments: buf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2208,7 +2295,7 @@ func TestMCPTaskToolFocus(t *testing.T) {
 					args := json.RawMessage(fmt.Sprintf(`{%q:%s}`, field, value))
 					for _, spec := range registry.specs() {
 						if spec.Name == name {
-							if _, err := spec.Handler(t.Context(), args); err != nil {
+							if _, err := spec.Handler(t.Context(), &mcp.ToolsCallParams{Name: name, Arguments: args}); err != nil {
 								t.Fatal(err)
 							}
 							break

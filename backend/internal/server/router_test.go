@@ -985,7 +985,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: taskID("1")})
+		result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
 		if result.IsError {
 			t.Fatalf("agent_last_message error = %#v", result.Structured)
 		}
@@ -1021,7 +1021,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: taskID("1")})
+		result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
 		output, ok := result.Structured.(mcp.TextOutput)
 		if result.IsError || !ok || output.Result != "Last message from task #1: live result" {
 			t.Fatalf("agent_last_message = %#v", result.Structured)
@@ -1043,7 +1043,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		}
 
 		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: testTaskHandlers(s).taskSvc}
-		result := registry.handleAgentLastMessage(t.Context(), mcpTaskNumberArgs{TaskNumber: taskID("1")})
+		result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
 		if !result.IsError || !strings.Contains(fmt.Sprint(result.Structured), "history is unavailable") {
 			t.Fatalf("agent_last_message = %#v, want explicit history-unavailable error", result.Structured)
 		}

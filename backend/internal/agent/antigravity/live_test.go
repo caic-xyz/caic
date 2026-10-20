@@ -328,10 +328,10 @@ type liveTaskRegistry struct {
 	calls int
 }
 
-func (r *liveTaskRegistry) CallTool(_ context.Context, name string, args json.RawMessage) (mcp.RawToolResult, error) {
+func (r *liveTaskRegistry) CallTool(_ context.Context, params *mcp.ToolsCallParams) (mcp.RawToolResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if name != "echo" || string(args) != "{}" {
+	if params.Name != "echo" || string(params.Arguments) != "{}" {
 		return mcp.RawToolResult{}, mcp.ErrInvalidParams("expected task echo with empty arguments")
 	}
 	r.calls++

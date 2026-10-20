@@ -110,7 +110,7 @@ func BenchmarkMCPTaskListPage(b *testing.B) {
 	b.ReportMetric(mcpTaskPageSizeDefault, "tasks/op")
 	b.ResetTimer()
 	for b.Loop() {
-		result := registry.handleTasksList(b.Context(), mcpTaskListArgs{})
+		result := registry.handleTasksList(b.Context(), &mcp.ToolRequest[mcpTaskListArgs]{Arguments: mcpTaskListArgs{}})
 		output, ok := result.Structured.(mcpTaskListOutput)
 		if result.IsError || !ok || len(output.Tasks) != mcpTaskPageSizeDefault {
 			b.Fatal("task-list page has unexpected size")
@@ -134,7 +134,7 @@ func BenchmarkMCPRepoListPage(b *testing.B) {
 	b.ReportMetric(mcpRepoPageSizeDefault, "repos/op")
 	b.ResetTimer()
 	for b.Loop() {
-		result := registry.handleReposList(b.Context(), mcpRepoListArgs{})
+		result := registry.handleReposList(b.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
 		output, ok := result.Structured.(mcpRepoListOutput)
 		if result.IsError || !ok || len(output.Repositories) != mcpRepoPageSizeDefault {
 			b.Fatal("repository-list page has unexpected size")

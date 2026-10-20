@@ -187,20 +187,20 @@ func (m *mcpRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
 	return tools, nil
 }
 
-func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.RawMessage) (mcp.RawToolResult, error) {
+func (m *mcpRegistry) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (mcp.RawToolResult, error) {
 	for _, s := range m.specs() {
-		if s.Name != name {
+		if s.Name != params.Name {
 			continue
 		}
-		if authResult, ok := m.authorizeTool(ctx, name); !ok {
-			m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
+		if authResult, ok := m.authorizeTool(ctx, params.Name); !ok {
+			m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: authResult})
 			return mcp.RawToolResult{Meta: mcp.MetaObject{
-				"mcp/www_authenticate":   []string{mcpScopeChallenge(requiredScopeForTool(name))},
+				"mcp/www_authenticate":   []string{mcpScopeChallenge(requiredScopeForTool(params.Name))},
 				mcp.ToolErrorCodeMetaKey: string(api.CodeUnauthorized),
 			}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
 		}
 		start := time.Now()
-		res, err := s.Handler(ctx, argsJSON)
+		res, err := s.Handler(ctx, params)
 		// TODO(observability): Record pre-wire logical result size and truncation,
 		// keyed by tool name and outcome, at this registry boundary. Final encoded
 		// response bytes belong to the MCP transport writer.
@@ -212,11 +212,11 @@ func (m *mcpRegistry) CallTool(ctx context.Context, name string, argsJSON json.R
 		case res.IsError:
 			status, outcome = "tool_error", metrics.OutcomeError
 		}
-		m.metrics.Record(ctx, "mcp.tool."+name, outcome, metrics.Duration(time.Since(start)))
-		m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
+		m.metrics.Record(ctx, "mcp.tool."+params.Name, outcome, metrics.Duration(time.Since(start)))
+		m.audit.record(ctx, &audit.Event{Operation: "tools/call", Name: params.Name, Args: auditArgsSummary(params.Arguments), Decision: "allow", Status: status})
 		return res, err
 	}
-	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", name)
+	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", params.Name)
 }
 
 func (m *mcpRegistry) ListResources(ctx context.Context, cursor string) (mcp.ResourcesListResult, error) {
@@ -256,7 +256,8 @@ func (m *mcpRegistry) ResourceTemplates(context.Context) ([]mcp.ResourceTemplate
 	}, nil
 }
 
-func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
+func (m *mcpRegistry) ReadResource(ctx context.Context, params *mcp.ResourcesReadParams) (mcp.ResourcesReadResult, error) {
+	uri := params.URI
 	if authResult, ok := m.authorizeResource(ctx, uri); !ok {
 		m.audit.record(ctx, &audit.Event{Operation: "resources/read", Name: uri, Decision: authResult})
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
@@ -266,7 +267,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		return m.skillResource(uri), nil
 	case uri == "caic://usage":
 		usage := m.usage.buildResp(ctx)
-		return m.resourceJSON(ctx, uri, usage)
+		return m.resourceJSON(ctx, uri, mcpUsageInLocation(usage, mcpRequestLocation(&params.Meta)))
 	case uri == "gomode://items":
 		taskList := m.taskSvc.taskListSnapshot(ctx)
 		items, err := boundedServiceItems(taskList, mcpResourceJSONMaxBytes)
@@ -277,7 +278,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 	case uri == "gomode://notifications":
 		taskList := m.taskSvc.taskListSnapshot(ctx)
 		notifications := m.notifications.notifications(ctx, taskList, m.usage.buildResp(ctx))
-		return m.resourceJSON(ctx, uri, notifications)
+		return m.resourceJSON(ctx, uri, mcpNotificationsInLocation(notifications, mcpRequestLocation(&params.Meta)))
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
 		if err != nil {
@@ -310,7 +311,7 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, uri string) (mcp.Resourc
 		if err != nil {
 			return mcp.ResourcesReadResult{}, err
 		}
-		return m.resourceJSON(ctx, uri, task)
+		return m.resourceJSON(ctx, uri, mcpTaskInLocation(&task, mcpRequestLocation(&params.Meta)))
 	default:
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("unknown resource: %s", uri)
 	}
@@ -437,7 +438,7 @@ func (m *mcpRegistry) specs() []mcp.ToolSpec {
 		annotateTool(mcp.NewToolSpec("task_revive", "Revive task", "Revive a stopped or crashed task, restarting its container and agent session.", m.handleTaskRevive), mcp.ToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
 		forkSpec,
 		annotateTool(mcp.NewToolSpec("get_system_stats", "Get system stats", "Read whole-machine CPU, memory, network, and working-filesystem utilization for the caic server. Returns up to 60 five-second samples, including timestamps and capacity totals, plus any sampling warning. The cpus array reports each logical CPU ID and 0–100% usage; sum those percentages for total usage (100% per fully busy CPU). Memory excludes available pages; network sums all interfaces. Works without opening the UI.", m.handleGetSystemStats), mcp.ToolAnnotations{Title: "Get system stats", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
-		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", m.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
+		annotateTool(mcp.NewToolSpec("get_usage", "Get usage", "Check current API quota utilization, limits, and reset times for each provider.", m.handleGetUsage), mcp.ToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", m.handleCloneRepo), mcp.ToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
 		annotateTool(mcp.NewToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", m.handleAgentLastMessage), mcp.ToolAnnotations{Title: "Get last agent message", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		annotateTool(mcp.NewToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", m.handleTaskFixPR), mcp.ToolAnnotations{Title: "Fix task PR", DestructiveHint: true, OpenWorldHint: true}),
@@ -556,8 +557,8 @@ type mcpTaskListOutput struct {
 	NextCursor string           `json:"nextCursor,omitempty" jsonschema_description:"Opaque cursor for the next page"`
 }
 
-func (m *mcpRegistry) handleTasksList(ctx context.Context, args mcpTaskListArgs) mcp.ToolResult[mcpTaskListOutput] {
-	pageSize := args.Limit
+func (m *mcpRegistry) handleTasksList(ctx context.Context, call *mcp.ToolRequest[mcpTaskListArgs]) mcp.ToolResult[mcpTaskListOutput] {
+	pageSize := call.Arguments.Limit
 	if pageSize == 0 {
 		pageSize = mcpTaskPageSizeDefault
 	}
@@ -565,7 +566,7 @@ func (m *mcpRegistry) handleTasksList(ctx context.Context, args mcpTaskListArgs)
 		return mcp.ToolErrorWithMeta[mcpTaskListOutput]("Invalid limit. Use an integer from 1 through 50.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeBadRequest)})
 	}
 	keys, revision := m.taskKeys(ctx)
-	page, next, start, err := paginateMCPTaskKeys(keys, revision, args.Cursor, pageSize)
+	page, next, start, err := paginateMCPTaskKeys(keys, revision, call.Arguments.Cursor, pageSize)
 	if err != nil {
 		return mcp.ToolErrorWithMeta[mcpTaskListOutput]("Invalid cursor. Omit cursor to restart task listing.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeBadRequest)})
 	}
@@ -607,15 +608,15 @@ type mcpRepoListOutput struct {
 	FieldsTruncated bool             `json:"fieldsTruncated,omitempty" jsonschema_description:"Whether presentation-only repository fields were shortened to the MCP response limit"`
 }
 
-func (m *mcpRegistry) handleReposList(_ context.Context, args mcpRepoListArgs) mcp.ToolResult[mcpRepoListOutput] {
-	pageSize := args.Limit
+func (m *mcpRegistry) handleReposList(_ context.Context, call *mcp.ToolRequest[mcpRepoListArgs]) mcp.ToolResult[mcpRepoListOutput] {
+	pageSize := call.Arguments.Limit
 	if pageSize == 0 {
 		pageSize = mcpRepoPageSizeDefault
 	}
 	if pageSize < 1 || pageSize > mcpRepoPageSizeMax {
 		return mcp.ToolErrorWithMeta[mcpRepoListOutput]("Invalid limit. Use an integer from 1 through 200.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeBadRequest)})
 	}
-	page, next, err := paginateMCPRepositories(m.repositoryPaths(), args.Cursor, pageSize)
+	page, next, err := paginateMCPRepositories(m.repositoryPaths(), call.Arguments.Cursor, pageSize)
 	if err != nil {
 		return mcp.ToolErrorWithMeta[mcpRepoListOutput]("Invalid cursor. Omit cursor to restart repository listing.", mcp.MetaObject{mcp.ToolErrorCodeMetaKey: string(api.CodeBadRequest)})
 	}
@@ -658,7 +659,7 @@ type mcpHarnessListOutput struct {
 
 // handleHarnessesList reports every available harness with its model inventory
 // so a client can correct an unsupported model or effort override.
-func (m *mcpRegistry) handleHarnessesList(ctx context.Context, _ struct{}) mcp.ToolResult[mcpHarnessListOutput] {
+func (m *mcpRegistry) handleHarnessesList(ctx context.Context, _ *mcp.ToolRequest[struct{}]) mcp.ToolResult[mcpHarnessListOutput] {
 	harnesses, err := m.serverConfig.listHarnesses(ctx, nil)
 	if err != nil {
 		return domainToolError[mcpHarnessListOutput](err)
@@ -810,42 +811,42 @@ type mcpTaskCreateArgs struct {
 	GitHubToken bool     `json:"gitHubToken,omitempty" jsonschema_description:"Enable GitHub token injection for this task"`
 }
 
-func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateArgs) mcp.ToolResult[mcpTaskCreatedOutput] { //nolint:gocritic // MCP tool handlers receive decoded argument values by API contract.
-	if args.Prompt == "" {
+func (m *mcpRegistry) handleTaskCreate(ctx context.Context, call *mcp.ToolRequest[mcpTaskCreateArgs]) mcp.ToolResult[mcpTaskCreatedOutput] {
+	if call.Arguments.Prompt == "" {
 		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: prompt"})
 	}
 	if _, ok := taskMCPTaskID(ctx); ok {
-		if len(args.Repos) != 0 || args.Harness != "" || args.Model != "" || args.Effort != "" || args.RuntimeName != "" || args.Display || args.Tailscale || args.USB || args.Sudo || args.GitHubToken {
+		if len(call.Arguments.Repos) != 0 || call.Arguments.Harness != "" || call.Arguments.Model != "" || call.Arguments.Effort != "" || call.Arguments.RuntimeName != "" || call.Arguments.Display || call.Arguments.Tailscale || call.Arguments.USB || call.Arguments.Sudo || call.Arguments.GitHubToken {
 			return mcp.ToolError[mcpTaskCreatedOutput]("Task-scoped MCP may only set prompt")
 		}
-		resp, err := m.taskSvc.createTask(ctx, &v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: args.Prompt}})
+		resp, err := m.taskSvc.createTask(ctx, &v1.CreateTaskReq{InitialPrompt: v1.Prompt{Text: call.Arguments.Prompt}})
 		if err != nil {
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
 		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: "Created child task: " + resp.ID.String(), TaskID: resp.ID.String()})
 	}
-	apiHarness, err := m.resolveTaskCreateHarness(ctx, args.Harness)
+	apiHarness, err := m.resolveTaskCreateHarness(ctx, call.Arguments.Harness)
 	if err != nil {
-		if args.Harness == "" {
+		if call.Arguments.Harness == "" {
 			return domainToolError[mcpTaskCreatedOutput](err)
 		}
-		return m.taskCreateToolError(ctx, args, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
+		return m.taskCreateToolError(ctx, call.Arguments, &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: err.Error()})
 	}
 	req := &v1.CreateTaskReq{
-		InitialPrompt: v1.Prompt{Text: args.Prompt},
-		Repos:         make([]v1.RepoSpec, len(args.Repos)),
+		InitialPrompt: v1.Prompt{Text: call.Arguments.Prompt},
+		Repos:         make([]v1.RepoSpec, len(call.Arguments.Repos)),
 		Harness:       apiHarness,
-		Model:         args.Model,
-		Effort:        args.Effort,
-		RuntimeName:   args.RuntimeName,
-		Display:       args.Display,
-		Tailscale:     args.Tailscale,
-		USB:           args.USB,
-		Sudo:          args.Sudo,
-		GitHubToken:   args.GitHubToken,
+		Model:         call.Arguments.Model,
+		Effort:        call.Arguments.Effort,
+		RuntimeName:   call.Arguments.RuntimeName,
+		Display:       call.Arguments.Display,
+		Tailscale:     call.Arguments.Tailscale,
+		USB:           call.Arguments.USB,
+		Sudo:          call.Arguments.Sudo,
+		GitHubToken:   call.Arguments.GitHubToken,
 		CaicMCP:       true,
 	}
-	for i, repo := range args.Repos {
+	for i, repo := range call.Arguments.Repos {
 		req.Repos[i] = v1.RepoSpec{Name: repo}
 	}
 	if err := req.Validate(); err != nil {
@@ -853,7 +854,7 @@ func (m *mcpRegistry) handleTaskCreate(ctx context.Context, args mcpTaskCreateAr
 	}
 	resp, err := m.taskSvc.createTask(ctx, req)
 	if err != nil {
-		return m.taskCreateToolError(ctx, args, err)
+		return m.taskCreateToolError(ctx, call.Arguments, err)
 	}
 	taskList := m.taskSvc.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())
@@ -904,9 +905,9 @@ func (m *mcpRegistry) firstHarness(ctx context.Context) (v1.Harness, error) {
 	return (*harnesses)[0].Name, nil
 }
 
-func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskGetDetailArgs) mcp.ToolResult[mcp.TextOutput] {
+func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, call *mcp.ToolRequest[mcpTaskGetDetailArgs]) mcp.ToolResult[mcp.TextOutput] {
 	keys, _ := m.taskKeys(ctx)
-	id, number, err := args.Task.Decode(len(keys))
+	id, number, err := call.Arguments.Task.Decode(len(keys))
 	if err != nil {
 		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: err.Error()})
 	}
@@ -957,7 +958,7 @@ func (m *mcpRegistry) handleTaskGetDetail(ctx context.Context, args mcpTaskGetDe
 	}
 	// Repository probes happen only when explicitly requested.
 	txt := strings.ToValidUTF8(strings.TrimSpace(strings.Join(lines, "\n")), "\ufffd")
-	if !args.IncludeDiffstat {
+	if !call.Arguments.IncludeDiffstat {
 		return boundedTextToolResult(txt)
 	}
 	ent, ok := m.inspectableTaskEntry(ctx, t.ID)
@@ -994,8 +995,8 @@ type mcpTaskSendMessageArgs struct {
 	Message    string `json:"message"     jsonschema_description:"The message to send to the agent"`
 }
 
-func (m *mcpRegistry) handleTaskSendMessage(ctx context.Context, args mcpTaskSendMessageArgs) mcp.ToolResult[mcp.TextOutput] {
-	return m.sendTaskInput(ctx, mcpTaskInputArgs(args), "message", "Sent message to task #%d.")
+func (m *mcpRegistry) handleTaskSendMessage(ctx context.Context, call *mcp.ToolRequest[mcpTaskSendMessageArgs]) mcp.ToolResult[mcp.TextOutput] {
+	return m.sendTaskInput(ctx, mcpTaskInputArgs(call.Arguments), "message", "Sent message to task #%d.")
 }
 
 type mcpTaskAnswerQuestionArgs struct {
@@ -1003,8 +1004,8 @@ type mcpTaskAnswerQuestionArgs struct {
 	Answer     string `json:"answer"      jsonschema_description:"The answer to the agent's question"`
 }
 
-func (m *mcpRegistry) handleTaskAnswerQuestion(ctx context.Context, args mcpTaskAnswerQuestionArgs) mcp.ToolResult[mcp.TextOutput] {
-	return m.sendTaskInput(ctx, mcpTaskInputArgs{TaskNumber: args.TaskNumber, Message: args.Answer}, "answer", "Answered task #%d.")
+func (m *mcpRegistry) handleTaskAnswerQuestion(ctx context.Context, call *mcp.ToolRequest[mcpTaskAnswerQuestionArgs]) mcp.ToolResult[mcp.TextOutput] {
+	return m.sendTaskInput(ctx, mcpTaskInputArgs{TaskNumber: call.Arguments.TaskNumber, Message: call.Arguments.Answer}, "answer", "Answered task #%d.")
 }
 
 type mcpTaskPushBranchArgs struct {
@@ -1013,16 +1014,16 @@ type mcpTaskPushBranchArgs struct {
 	Target     string `json:"target,omitempty" jsonschema:"enum=branch,enum=default,enum=main,enum=master" jsonschema_description:"Where to push: branch (default) or main"`
 }
 
-func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcpTaskPushBranchArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, call *mcp.ToolRequest[mcpTaskPushBranchArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
-	targetRaw := args.Target
+	targetRaw := call.Arguments.Target
 	if targetRaw == "main" || targetRaw == "master" {
 		targetRaw = string(v1.SyncTargetDefault)
 	}
-	req := &v1.SyncReq{Force: args.Force, Target: v1.SyncTarget(targetRaw)}
+	req := &v1.SyncReq{Force: call.Arguments.Force, Target: v1.SyncTarget(targetRaw)}
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1048,8 +1049,8 @@ func (m *mcpRegistry) handleTaskPushBranchToRemote(ctx context.Context, args mcp
 	return boundedTextToolResult(verb + " with safety issues:\n" + strings.Join(issueLines, "\n"))
 }
 
-func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+func (m *mcpRegistry) handleTaskStop(ctx context.Context, call *mcp.ToolRequest[mcpTaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1060,8 +1061,8 @@ func (m *mcpRegistry) handleTaskStop(ctx context.Context, args mcpTaskNumberArgs
 	return mcp.TextToolResult(fmt.Sprintf("Stopping task #%d.", num))
 }
 
-func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+func (m *mcpRegistry) handleTaskPurge(ctx context.Context, call *mcp.ToolRequest[mcpTaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1072,8 +1073,8 @@ func (m *mcpRegistry) handleTaskPurge(ctx context.Context, args mcpTaskNumberArg
 	return mcp.TextToolResult(fmt.Sprintf("Stopped task #%d and scheduled it for purge.", num))
 }
 
-func (m *mcpRegistry) handleTaskRevive(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+func (m *mcpRegistry) handleTaskRevive(ctx context.Context, call *mcp.ToolRequest[mcpTaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1158,38 +1159,40 @@ func (m *mcpRegistry) forkWithoutModelValid(source *taskpkg.Task, harnessOverrid
 	return ok && (source.RequestedModel == "" || slices.Contains(backend.ModelInventory().IDs(), source.RequestedModel))
 }
 
-func (m *mcpRegistry) handleTaskFork(ctx context.Context, args mcpTaskForkArgs) mcp.ToolResult[mcpTaskForkOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, true)
+func (m *mcpRegistry) handleTaskFork(ctx context.Context, call *mcp.ToolRequest[mcpTaskForkArgs]) mcp.ToolResult[mcpTaskForkOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, true)
 	if err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
-	if args.Prompt == "" {
+	if call.Arguments.Prompt == "" {
 		return domainToolError[mcpTaskForkOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: prompt"})
 	}
 	var harness v1.Harness
-	if args.Harness != "" {
+	if call.Arguments.Harness != "" {
 		var conversionErr error
-		harness, conversionErr = apiconv.ParseHarness(args.Harness)
+		harness, conversionErr = apiconv.ParseHarness(call.Arguments.Harness)
 		if conversionErr != nil {
-			return m.taskForkToolError(args, entry.Task(), &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: conversionErr.Error()})
+			return m.taskForkToolError(call.Arguments, entry.Task(), &api.Error{Status: http.StatusBadRequest, Code: api.CodeUnknownHarness, Message: conversionErr.Error()})
 		}
 	}
-	req := &v1.ForkTaskReq{Prompt: v1.Prompt{Text: args.Prompt}, Harness: harness, Model: args.Model}
+	req := &v1.ForkTaskReq{Prompt: v1.Prompt{Text: call.Arguments.Prompt}, Harness: harness, Model: call.Arguments.Model}
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcpTaskForkOutput](err)
 	}
 	resp, err := m.taskSvc.forkTask(ctx, entry, req)
 	if err != nil {
-		return m.taskForkToolError(args, entry.Task(), err)
+		return m.taskForkToolError(call.Arguments, entry.Task(), err)
 	}
 	return mcp.TypedToolResult(mcpTaskForkOutput{Result: fmt.Sprintf("Forked task #%d. New task ID: %s", num, resp.ID.String()), TaskID: resp.ID.String()})
 }
 
-func (m *mcpRegistry) handleGetSystemStats(_ context.Context, _ struct{}) mcp.ToolResult[v1.SystemStatsResp] {
-	return mcp.TypedToolResult(m.serverConfig.systemStats.snapshot())
+func (m *mcpRegistry) handleGetSystemStats(_ context.Context, call *mcp.ToolRequest[struct{}]) mcp.ToolResult[v1.SystemStatsResp] {
+	return mcp.TypedToolResult(mcpSystemStatsInLocation(m.serverConfig.systemStats.snapshot(), mcpRequestLocation(&call.Params.Meta)))
 }
 
-func (m *mcpRegistry) handleGetUsage(ctx context.Context, _ struct{}) mcp.ToolResult[mcp.TextOutput] {
+func (m *mcpRegistry) handleGetUsage(ctx context.Context, call *mcp.ToolRequest[struct{}]) mcp.ToolResult[mcp.TextOutput] {
+	// Client metadata is only a display hint. Never use the server's local zone.
+	loc := mcpRequestLocation(&call.Params.Meta)
 	usage := m.usage.buildResp(ctx)
 	var lines []string
 	for _, w := range usage.Local.Windows {
@@ -1202,7 +1205,11 @@ func (m *mcpRegistry) handleGetUsage(ctx context.Context, _ struct{}) mcp.ToolRe
 			parts = append(parts, formatBalance(pq.Balance.Currency, pq.Balance.Total))
 		}
 		for _, rl := range pq.RateLimits {
-			parts = append(parts, fmt.Sprintf("%s: %.0f%% remaining", rl.Window, (1-rl.Utilization)*100))
+			part := fmt.Sprintf("%s: %.0f%% remaining", rl.Window, (1-rl.Utilization)*100)
+			if !rl.ResetsAt.IsZero() {
+				part += " (resets at " + rl.ResetsAt.In(loc).Format("2006-01-02T15:04:05-07:00") + ")"
+			}
+			parts = append(parts, part)
 		}
 		if len(parts) > 0 {
 			lines = append(lines, pq.Label+": "+strings.Join(parts, ", "))
@@ -1219,11 +1226,11 @@ type mcpCloneRepoArgs struct {
 	Path string `json:"path,omitempty" jsonschema_description:"Local directory name (optional, derived from URL if omitted)"`
 }
 
-func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs) mcp.ToolResult[mcp.TextOutput] {
-	if args.URL == "" {
+func (m *mcpRegistry) handleCloneRepo(ctx context.Context, call *mcp.ToolRequest[mcpCloneRepoArgs]) mcp.ToolResult[mcp.TextOutput] {
+	if call.Arguments.URL == "" {
 		return domainToolError[mcp.TextOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: url"})
 	}
-	req := &v1.CloneRepoReq{URL: args.URL, Path: args.Path}
+	req := &v1.CloneRepoReq{URL: call.Arguments.URL, Path: call.Arguments.Path}
 	if err := req.Validate(); err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1241,8 +1248,8 @@ func (m *mcpRegistry) handleCloneRepo(ctx context.Context, args mcpCloneRepoArgs
 	return mcp.TextToolResult(fmt.Sprintf("Cloned **%s** (base: %s).", repo.Path, base))
 }
 
-func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, args mcpTaskNumberArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, call *mcp.ToolRequest[mcpTaskNumberArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1302,8 +1309,8 @@ type mcpTaskFixPRArgs struct {
 	TaskNumber taskID `json:"task_number" jsonschema:"oneof_type=integer;string" jsonschema_description:"Task number or stable task ID whose PR CI should be fixed"`
 }
 
-func (m *mcpRegistry) handleTaskFixPR(ctx context.Context, args mcpTaskFixPRArgs) mcp.ToolResult[mcp.TextOutput] {
-	num, entry, err := m.entryByTaskRef(ctx, args.TaskNumber, false)
+func (m *mcpRegistry) handleTaskFixPR(ctx context.Context, call *mcp.ToolRequest[mcpTaskFixPRArgs]) mcp.ToolResult[mcp.TextOutput] {
+	num, entry, err := m.entryByTaskRef(ctx, call.Arguments.TaskNumber, false)
 	if err != nil {
 		return domainToolError[mcp.TextOutput](err)
 	}
@@ -1318,11 +1325,11 @@ type mcpBotFixCIArgs struct {
 	Repo string `json:"repo" jsonschema_description:"Repository to fix CI for"`
 }
 
-func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) mcp.ToolResult[mcpTaskCreatedOutput] {
-	if args.Repo == "" {
+func (m *mcpRegistry) handleBotFixCI(ctx context.Context, call *mcp.ToolRequest[mcpBotFixCIArgs]) mcp.ToolResult[mcpTaskCreatedOutput] {
+	if call.Arguments.Repo == "" {
 		return domainToolError[mcpTaskCreatedOutput](&api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "Missing required parameter: repo"})
 	}
-	resp, err := m.ci.fixCI(ctx, &v1.BotFixCIReq{Repo: args.Repo})
+	resp, err := m.ci.fixCI(ctx, &v1.BotFixCIReq{Repo: call.Arguments.Repo})
 	if err != nil {
 		if apiErr, ok := errors.AsType[*api.Error](err); ok && apiErr.Code == api.CodeUnknownRepository {
 			message := repositoryRecoveryMessage(ctx, apiErr.Error(), "bot_fix_ci")
@@ -1333,9 +1340,9 @@ func (m *mcpRegistry) handleBotFixCI(ctx context.Context, args mcpBotFixCIArgs) 
 	taskList := m.taskSvc.taskListSnapshot(ctx)
 	num := taskNumberForID(taskList, resp.ID.String())
 	if num > 0 {
-		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created fix-CI task #%d for %s.", num, args.Repo), TaskNumber: num, TaskID: resp.ID.String()})
+		return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created fix-CI task #%d for %s.", num, call.Arguments.Repo), TaskNumber: num, TaskID: resp.ID.String()})
 	}
-	return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created fix-CI task for %s.", args.Repo), TaskID: resp.ID.String()})
+	return mcp.TypedToolResult(mcpTaskCreatedOutput{Result: fmt.Sprintf("Created fix-CI task for %s.", call.Arguments.Repo), TaskID: resp.ID.String()})
 }
 
 type mcpTaskInputArgs struct {
@@ -2401,8 +2408,8 @@ func (r scopedMCPRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, err
 	return r.Registry.Tools(r.scopedContext(ctx))
 }
 
-func (r scopedMCPRegistry) CallTool(ctx context.Context, name string, args json.RawMessage) (mcp.RawToolResult, error) {
-	return r.Registry.CallTool(r.scopedContext(ctx), name, args)
+func (r scopedMCPRegistry) CallTool(ctx context.Context, params *mcp.ToolsCallParams) (mcp.RawToolResult, error) {
+	return r.Registry.CallTool(r.scopedContext(ctx), params)
 }
 
 func (r scopedMCPRegistry) ListResources(ctx context.Context, cursor string) (mcp.ResourcesListResult, error) {
@@ -2433,8 +2440,8 @@ func (r scopedMCPRegistry) GetSkill(ctx context.Context, uri string) (mcp.Skills
 	return registry.GetSkill(r.scopedContext(ctx), uri)
 }
 
-func (r scopedMCPRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
-	return r.Registry.ReadResource(r.scopedContext(ctx), uri)
+func (r scopedMCPRegistry) ReadResource(ctx context.Context, params *mcp.ResourcesReadParams) (mcp.ResourcesReadResult, error) {
+	return r.Registry.ReadResource(r.scopedContext(ctx), params)
 }
 
 func (r scopedMCPRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.SubscriptionFilter) (iter.Seq2[mcp.ResourceUpdate, error], error) {

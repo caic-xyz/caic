@@ -139,14 +139,14 @@ func TestTaskAccessTransportMatrix(t *testing.T) {
 
 	t.Run("MCP resource read", func(t *testing.T) {
 		t.Parallel()
-		result, err := registry.ReadResource(mcpCtx, mineURI)
+		result, err := registry.ReadResource(mcpCtx, &mcp.ResourcesReadParams{URI: mineURI})
 		if err != nil {
 			t.Fatalf("read owned task resource: %v", err)
 		}
 		if len(result.Contents) != 1 || !strings.Contains(result.Contents[0].Text, mineID.String()) {
 			t.Fatalf("owned task resource = %+v, want %s", result.Contents, mineID)
 		}
-		if _, err := registry.ReadResource(mcpCtx, foreignURI); err == nil {
+		if _, err := registry.ReadResource(mcpCtx, &mcp.ResourcesReadParams{URI: foreignURI}); err == nil {
 			t.Fatalf("read foreign task resource succeeded")
 		}
 	})
