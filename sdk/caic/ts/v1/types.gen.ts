@@ -1812,6 +1812,24 @@ export interface TaskListRestorationStatus {
 }
 
 /**
+ * ServerHealth is compact current machine health. Time is omitted before the first
+ * successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
+ * the whole-machine capacity. High flags require 15 seconds at >=90% of machine
+ * capacity and clear below 85%. Errors or samples at least 15 seconds old clear
+ * both flags; retained readings describe Time, not a current measurement.
+ */
+export interface ServerHealth {
+  time?: ISOTimestamp;
+  cpuPerc: number /* float64 */;
+  cpuCount: number /* int */;
+  memUsed: number /* uint64 */;
+  memTotal: number /* uint64 */;
+  cpuHigh: boolean;
+  memHigh: boolean;
+  error?: string;
+}
+
+/**
  * TaskListEvent is a discriminated-union event for the task list SSE stream.
  * kind=="snapshot": Snapshot carries task data on connect and when restoration becomes complete.
  * Complete is present on snapshots only: false preserves prior membership and drafts;
@@ -1822,6 +1840,7 @@ export interface TaskListRestorationStatus {
  * kind=="delete":   Delete holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
  * kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
+ * kind=="health": Health holds current machine CPU/memory health for server administrators.
  * kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
  */
 export interface TaskListEvent {
@@ -1835,6 +1854,7 @@ export interface TaskListEvent {
   repos?: Repo[];
   warning?: Warning;
   status?: TaskListRestorationStatus;
+  health?: ServerHealth;
 }
 
 /** QuotaRateLimit is a single rate-limit window snapshot from any provider. */

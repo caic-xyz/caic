@@ -1,4 +1,4 @@
-// Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, and preferences.
+// Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, server health, and preferences.
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
@@ -478,6 +478,8 @@ it("destroys account A task and repo state before rendering confirmed account B"
     enabled: true,
   });
 
+  dispatchSSE({ kind: "health", health: highHealth });
+  expect(screen.getByRole("link", { name: /High CPU and memory/ })).toBeInTheDocument();
   const user = userEvent.setup();
   await user.click(screen.getByTitle("account-a"));
   await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
@@ -493,6 +495,7 @@ it("destroys account A task and repo state before rendering confirmed account B"
 
   checkedIdentity.resolve({ id: "b", provider: "github", username: "account-b" });
   await waitFor(() => expect(screen.getByTitle("account-b")).toBeInTheDocument());
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
   expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
   expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
   expect(vi.mocked(api.listRepos)).toHaveBeenCalledTimes(2);
@@ -570,6 +573,7 @@ it("ignores an old account's delayed /auth/me probe after switching accounts", a
   await Promise.resolve();
 
   expect(screen.getByTitle("account-b")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
   expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).not.toBeInTheDocument();
 });
@@ -4067,4 +4071,100 @@ it("rejects task image adoption at the owner boundary before SSE introduction an
   } finally {
     view.unmount();
   }
+});
+
+const highHealth = {
+  time: "2026-01-01T00:00:00Z" as ISOTimestamp,
+  cpuPerc: 750,
+  cpuCount: 8,
+  memUsed: 30 * 2 ** 30,
+  memTotal: 32 * 2 ** 30,
+  cpuHigh: true,
+  memHigh: true,
+};
+
+it("shows server-selected alarms and readings and clears failed or empty samples", async () => {
+  renderApp();
+  await waitForTaskEventsSubscription();
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
+  dispatchSSE({ kind: "health", health: highHealth });
+  const link = screen.getByRole("link", { name: "High CPU and memory usage — open System" });
+  expect(link).toHaveAttribute("href", "/monitoring?section=system");
+  const menu = screen.getByRole("button", { name: "Menu" });
+  menu.focus();
+  fireEvent.mouseEnter(link);
+  expect(screen.getByRole("tooltip")).toBeInTheDocument();
+  fireEvent.keyDown(menu, { key: "Escape" });
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  expect(menu).toHaveFocus();
+  fireEvent.focus(link);
+  expect(screen.getByRole("tooltip")).toHaveTextContent("750.0% · 7.50 / 8 CPUs · 93.8% of capacity");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("30 GiB / 32 GiB · 93.8%");
+  fireEvent.keyDown(link, { key: "Escape" });
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  dispatchSSE({ kind: "health", health: { ...highHealth, cpuHigh: false } });
+  expect(screen.getByRole("link", { name: "High memory usage — open System" })).toBe(link);
+  dispatchSSE({ kind: "health", health: { ...highHealth, memHigh: false } });
+  expect(screen.getByRole("link", { name: "High CPU usage — open System" })).toBe(link);
+  for (const health of [
+    { ...highHealth, cpuHigh: false, memHigh: false },
+    { ...highHealth, error: "sampling failed" },
+    { ...highHealth, time: undefined },
+  ]) {
+    dispatchSSE({ kind: "health", health });
+    expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  }
+});
+
+it("expires server health by arrival time without extending it for task or usage traffic", async () => {
+  vi.useFakeTimers();
+  const view = renderApp();
+  await vi.waitFor(() => expect(taskEventSubscriptions).toBeGreaterThan(0));
+  dispatchSSE({ kind: "health", health: highHealth });
+  expect(screen.getByRole("link", { name: /High CPU and memory/ })).toBeInTheDocument();
+  vi.advanceTimersByTime(14_000);
+  dispatchSSE({ kind: "status", status: { loading: false, error: "" } });
+  dispatchUsageSSE({ providers: [] });
+  expect(screen.getByRole("link", { name: /High CPU and memory/ })).toBeInTheDocument();
+  vi.advanceTimersByTime(1000);
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
+  view.unmount();
+});
+
+it("clears health on task disconnect despite usage opening and ignores retired stream messages", async () => {
+  renderApp();
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "health", health: highHealth });
+  const retired = [...fakeESListeners];
+  const taskStream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value as FakeEventSource;
+  taskStream.onerror?.(new Event("error"));
+  dispatchOpen();
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
+  fireEvent(window, new Event("online"));
+  await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+  retired.forEach((listener) => listener({ data: JSON.stringify({ kind: "health", health: highHealth }) }));
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
+  dispatchSSE({ kind: "health", health: highHealth });
+  expect(screen.getByRole("link", { name: /High CPU and memory/ })).toBeInTheDocument();
+  fireEvent(window, new Event("offline"));
+  expect(screen.queryByRole("link", { name: /High .* usage/ })).not.toBeInTheDocument();
+});
+
+it("lets a foreground account menu consume Escape before a hovered health tooltip", async () => {
+  renderApp();
+  await waitForTaskEventsSubscription();
+  dispatchSSE({ kind: "health", health: highHealth });
+  const link = screen.getByRole("link", { name: /High CPU and memory/ });
+  const menu = screen.getByRole("button", { name: "Menu" });
+  menu.focus();
+  fireEvent.mouseEnter(link);
+  fireEvent.click(menu);
+  expect(screen.getByRole("menu")).toBeInTheDocument();
+  fireEvent.keyDown(menu, { key: "Escape" });
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(screen.getByRole("tooltip")).toBeInTheDocument();
+  fireEvent.keyDown(menu, { key: "Escape" });
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  expect(menu).toHaveFocus();
 });

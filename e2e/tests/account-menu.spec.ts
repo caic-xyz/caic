@@ -98,34 +98,32 @@ test("quota pills use the space beside the connection word", async ({ page }) =>
   }
 });
 
-test("desktop quota pills start beside the subtitle while the avatar stays at the edge", async ({ page }) => {
+test("desktop quota pills sit beside the header actions while the avatar stays at the edge", async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 720 });
   await page.goto("/");
 
   const header = page.locator("header");
-  const subtitle = page.getByText("Coding Agents in Containers");
-  const firstPill = page.getByTestId("provider-usage").first();
+  const lastPill = page.getByTestId("provider-usage").last();
   const avatar = page.getByRole("button", { name: "Menu" });
-  await expect(firstPill).toBeVisible();
+  await expect(lastPill).toBeVisible();
 
   await expect
     .poll(async () => {
-      const [headerBox, subtitleBox, pillBox, avatarBox] = await Promise.all([
+      const [headerBox, pillBox, avatarBox] = await Promise.all([
         header.boundingBox(),
-        subtitle.boundingBox(),
-        firstPill.boundingBox(),
+        lastPill.boundingBox(),
         avatar.boundingBox(),
       ]);
-      if (!headerBox || !subtitleBox || !pillBox || !avatarBox) return false;
+      if (!headerBox || !pillBox || !avatarBox) return false;
       return (
-        pillBox.x - (subtitleBox.x + subtitleBox.width) <= 20 &&
+        avatarBox.x - (pillBox.x + pillBox.width) <= 32 &&
         Math.abs(headerBox.x + headerBox.width - avatarBox.x - avatarBox.width) <= 2
       );
     })
     .toBe(true);
 });
 
-test("a dense desktop quota row keeps its last pill beside the avatar", async ({ page }) => {
+test("a dense desktop quota row keeps its last pill beside the header actions", async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 720 });
   await page.goto("/");
 
@@ -140,7 +138,8 @@ test("a dense desktop quota row keeps its last pill beside the avatar", async ({
     const row = pill?.parentElement;
     const avatar = document.querySelector('button[aria-controls="account-menu"]');
     if (!pill || !row || !avatar) throw new Error("Header controls are not visible");
-    const widths = [147, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
+    // Reserve the health slot in this full-row fixture.
+    const widths = [115, 77, 83, 77, 84, 36, 35, 131, 34, 33, 35, 35];
     const items = widths.map((width) => {
       const item = document.createElement("span");
       item.className = pill.className;
@@ -206,7 +205,10 @@ test("mobile quota lines use the space below the avatar", async ({ page }) => {
   expect(firstLineY).toBeDefined();
   const firstLine = boxes.filter((box) => box.y === firstLineY);
   const lowerLines = boxes.filter((box) => box.y > (firstLineY ?? 0));
-  expect(boxes[3]?.y).toBe(firstLineY);
+  // Three pills fit beside the fixed health and avatar slots; later rows
+  // regain the full header width.
+  expect(boxes[2]?.y).toBe(firstLineY);
+  expect(boxes[3]?.y).toBeGreaterThan(firstLineY ?? 0);
   expect(firstLine.every((box) => box.x + box.width <= avatarBox.x)).toBe(true);
   expect(avatarBox.x - Math.max(...firstLine.map((box) => box.x + box.width))).toBeGreaterThanOrEqual(4);
   expect(lowerLines.some((box) => box.x + box.width > avatarBox.x)).toBe(true);

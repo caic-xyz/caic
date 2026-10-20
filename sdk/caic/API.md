@@ -4,7 +4,7 @@
 
 RESTful JSON API served at `/api/caic/v1/`. SSE endpoints stream newline-delimited JSON events.
 
-The read-only MCP tool `get_system_stats` takes `{}` and returns `SystemStatsResp`, the same snapshot as `GET /api/caic/v1/server/system-stats` (SDK method `getSystemStats`). It is available to `caic:mcp.read` clients and task-scoped agents, without a browser or UI. `samples` contains up to 60 five-second observations, oldest first; the array is empty until the first successful collection. Optional `error` reports a sampling warning while retained samples remain readable. Each `cpus` entry has a stable logical CPU ID and `usagePerc` from 0–100%. Its array length is the online CPU count; sum the percentages for total usage (100% per fully busy CPU), or divide that sum by 100 for CPU equivalents. Task `EventStats.cpuPerc` uses the same total-usage convention; `cpuCeiling` is the configured upper bound in fractional CPU units, derived from the owning runtime logical CPU count, explicit quota, and configured CPU set; null means unknown. Inherited cgroup limits and process affinity are unreported, so effective task capacity is unknown. `runtimeCPUs` is the owning runtime logical CPU count, including remote/VM runtimes; null means unknown. `cpuQuota` preserves the explicit fractional quota: zero means no explicit quota, null means unknown. `cpuError` reports runtime metadata observation failures while usage remains readable. CPU configuration refreshes every 30 seconds during active streams; task aggregate stats do not reveal per-CPU distribution. Memory excludes available/reclaimable pages. Memory, network counters, and filesystem capacities use bytes. Network sums all interfaces and can count traffic on multiple interfaces; disk covers the server working-directory filesystem.
+The read-only MCP tool `get_system_stats` takes `{}` and returns `SystemStatsResp`, the same snapshot as `GET /api/caic/v1/server/system-stats` (SDK method `getSystemStats`). It requires the explicitly granted `caic:server.admin` OAuth scope and is unavailable to task-scoped agents. Browser sessions and auth-disabled local clients retain full permissions. The global task-list SSE emits compact `health` events with `ServerHealth` on connection and each five-second collection, only to clients with server-admin permission; no health data enters individual task streams or logs. `cpuPerc` sums logical-CPU utilization (100% per CPU); `cpuCount` is machine capacity. CPU and memory high flags require at least 90% of machine capacity for 15 seconds and clear below 85%. Sampling errors or samples at least 15 seconds old clear the flags; `time` is omitted before the first success. Retained readings accompany errors but do not represent current utilization. `samples` contains up to 60 five-second observations, oldest first; the array is empty until the first successful collection. Optional `error` reports a sampling warning while retained samples remain readable. Each `cpus` entry has a stable logical CPU ID and `usagePerc` from 0–100%. Its array length is the online CPU count; sum the percentages for total usage (100% per fully busy CPU), or divide that sum by 100 for CPU equivalents. Task `EventStats.cpuPerc` uses the same total-usage convention; `cpuCeiling` is the configured upper bound in fractional CPU units, derived from the owning runtime logical CPU count, explicit quota, and configured CPU set; null means unknown. Inherited cgroup limits and process affinity are unreported, so effective task capacity is unknown. `runtimeCPUs` is the owning runtime logical CPU count, including remote/VM runtimes; null means unknown. `cpuQuota` preserves the explicit fractional quota: zero means no explicit quota, null means unknown. `cpuError` reports runtime metadata observation failures while usage remains readable. CPU configuration refreshes every 30 seconds during active streams; task aggregate stats do not reveal per-CPU distribution. Memory excludes available/reclaimable pages. Memory, network counters, and filesystem capacities use bytes. Network sums all interfaces and can count traffic on multiple interfaces; disk covers the server working-directory filesystem.
 
 Type notation: `JSONValue` means any valid JSON value.
 
@@ -1978,6 +1978,25 @@ Error is non-empty when any stage leaves task membership incomplete.
 | `loading` | `boolean` |  | yes |
 | `error` | `string` |  | yes |
 
+### ServerHealth
+
+ServerHealth is compact current machine health. Time is omitted before the first
+successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
+the whole-machine capacity. High flags require 15 seconds at >=90% of machine
+capacity and clear below 85%. Errors or samples at least 15 seconds old clear
+both flags; retained readings describe Time, not a current measurement.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `time` | `ISOTimestamp` |  |  |
+| `cpuPerc` | `float64` |  | yes |
+| `cpuCount` | `int` |  | yes |
+| `memUsed` | `uint64` |  | yes |
+| `memTotal` | `uint64` |  | yes |
+| `cpuHigh` | `boolean` |  | yes |
+| `memHigh` | `boolean` |  | yes |
+| `error` | `string` |  |  |
+
 ### TaskListEvent
 
 TaskListEvent is a discriminated-union event for the task list SSE stream.
@@ -1990,6 +2009,7 @@ kind=="focus":    Focus holds the stable task ID selected by a user-directed too
 kind=="delete":   Delete holds the string ID of the removed task.
 kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
 kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
+kind=="health": Health holds current machine CPU/memory health for server administrators.
 kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
 
 | Field | Type | Description | Required |
@@ -2004,6 +2024,7 @@ kind=="status":   Status holds runtime/history restoration state, emitted on con
 | `repos` | `Repo[]` |  |  |
 | `warning` | `Warning` |  |  |
 | `status` | `TaskListRestorationStatus` |  |  |
+| `health` | `ServerHealth` |  |  |
 
 ### QuotaRateLimit
 

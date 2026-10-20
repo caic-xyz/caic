@@ -1,11 +1,21 @@
-// Application state for task membership and focus, REST detail, settings, warnings, actions, caches, and image drafts.
+// Application state for task membership and focus, REST detail, settings, server health, warnings, actions, caches, and image drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
-import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
+import {
+  batch,
+  createContext,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  useContext,
+  type JSX,
+} from "solid-js";
 import { createStore } from "solid-js/store";
 import { useNavigate, useLocation } from "@solidjs/router";
 
 import type {
+  ServerHealth,
   Config,
   Harness,
   HarnessInfo,
@@ -774,6 +784,15 @@ function createAppStore() {
   // On reconnect, check if the frontend was rebuilt and reload if so.
   // Pauses reconnection when tab is hidden or browser goes offline.
   const [connected, setConnected] = createSignal(true);
+  const [healthReading, setHealthReading] = createSignal<{ value: ServerHealth; received: number } | null>(null);
+  // Freshness belongs to the health stream, independently of task traffic or
+  // the usage stream's connection state. Arrival time avoids clock skew.
+  const serverHealth = createMemo(() => {
+    const reading = healthReading();
+    return reading && now() - reading.received < 15_000 && reading.value.time && !reading.value.error
+      ? reading.value
+      : null;
+  });
   {
     let taskES: EventSource | null = null;
     let usageES: EventSource | null = null;
@@ -808,6 +827,7 @@ function createAppStore() {
     }
 
     function connectTasks() {
+      setHealthReading(null);
       const streamGeneration = ++taskStreamGeneration;
       setTaskStreamReady(false);
       setTaskSnapshotComplete(false);
@@ -818,7 +838,9 @@ function createAppStore() {
       taskES = api.globalTaskEvents({
         onMessage: (event) => {
           if (!currentStream()) return;
-          if (event.kind === "snapshot" && event.snapshot) {
+          if (event.kind === "health" && event.health) {
+            setHealthReading({ value: event.health, received: Date.now() });
+          } else if (event.kind === "snapshot" && event.snapshot) {
             const snapshot = event.snapshot;
             const snapshotByID = new Map(snapshot.map((task) => [task.id, task]));
             const complete = event.complete === true;
@@ -934,6 +956,7 @@ function createAppStore() {
       });
       taskES.onerror = () => {
         if (!currentStream()) return;
+        setHealthReading(null);
         taskStreamGeneration++;
         setTaskStreamReady(false);
         setTaskSnapshotComplete(false);
@@ -978,6 +1001,7 @@ function createAppStore() {
     }
 
     function closeAll() {
+      setHealthReading(null);
       generation++;
       taskStreamGeneration++;
       setTaskStreamReady(false);
@@ -1669,6 +1693,7 @@ function createAppStore() {
     voiceGatewayAvailable,
     // sidebar + actions
     now,
+    serverHealth,
     actionId,
     handleStop,
     handlePurge,

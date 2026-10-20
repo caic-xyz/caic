@@ -11,6 +11,7 @@ import { currentErrorReport } from "./errorReport";
 import { AppStateProvider, useAppState } from "./AppState";
 import { useAuth } from "./AuthContext";
 import LoginPage from "./pages/LoginPage";
+import ServerHealthIndicator from "./components/ServerHealthIndicator";
 import AccountMenu from "./components/AccountMenu";
 import Button from "./components/Button";
 import ForkDialog from "./components/ForkDialog";
@@ -162,7 +163,10 @@ function Shell(props: { children?: JSX.Element }) {
               </span>
               <span class={styles.subtitle}>Coding Agents in Containers</span>
               <UsageBadges usage={s.usage} now={s.now} />
-              <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
+              <div class={styles.headerActions}>
+                <ServerHealthIndicator health={s.serverHealth()} />
+                <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
+              </div>
             </header>
 
             <ErrorBoundary fallback={(error, reset) => <ErrorFallback error={error} reset={reset} />}>

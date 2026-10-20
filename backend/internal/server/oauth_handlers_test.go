@@ -1,4 +1,4 @@
-// Tests OAuth token lifecycles and authenticated MCP task focus delivery.
+// Tests OAuth grants, server-stat authorization, token lifecycles, and authenticated task focus delivery.
 
 package server
 
@@ -238,7 +238,7 @@ func TestOAuthServer(t *testing.T) {
 				"code_challenge":        {challenge},
 				"code_challenge_method": {"S256"},
 				"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
-				"scope":                 {mcpAuthDefaultScope},
+				"scope":                 {mcpAuthDefaultScope + " " + mcpScopeServerAdmin},
 			}
 			jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
 			if err != nil {
@@ -294,6 +294,9 @@ func TestOAuthServer(t *testing.T) {
 			}
 
 			// Verify scope descriptions.
+			if !strings.Contains(flat, "caic:server.admin") || !strings.Contains(flat, "Read server machine statistics and health") {
+				t.Error("body missing server-admin scope and description")
+			}
 			if !strings.Contains(flat, "caic:mcp.read") {
 				t.Error("body missing scope caic:mcp.read")
 			}
@@ -542,7 +545,7 @@ func authorizeMCPClientWithScopes(t *testing.T, h http.Handler, user *auth.User,
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 		"resource":              {resource},
-		"scope":                 {mcpAuthDefaultScope},
+		"scope":                 {mcpAuthDefaultScope + " " + mcpScopeServerAdmin},
 	}
 	jwt, err := auth.IssueToken(user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
 	if err != nil {
@@ -716,6 +719,58 @@ func TestMCPToolFocusAuthenticated(t *testing.T) {
 				}
 			default:
 				t.Fatalf("tool did not publish focus to authenticated user: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+func TestMCPSystemStatsAuthorization(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		scopes  []string
+		allowed bool
+	}{
+		{"basic_read", []string{mcpScopeRead, mcpScopeTasksRead}, false},
+		{"server_admin", []string{mcpScopeServerAdmin}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, h, user, registered := newMCPOAuthLifecycleRouter(t)
+			token := authorizeMCPClientWithScopes(t, h, &user, &registered, "https://claude.ai/api/mcp/auth_callback", tc.scopes)
+			// Rotation must preserve the chosen scopes rather than adding newly
+			// advertised permissions to existing basic-read grants.
+			for _, access := range []string{token.AccessToken, refreshMCPToken(t, h, registered.ClientID, token.RefreshToken, http.StatusOK).AccessToken} {
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", `"name":"get_system_stats","arguments":{}`)))
+				req.Host = "caic.example.com"
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+				req.Header.Set("Mcp-Method", "tools/call")
+				req.Header.Set("Mcp-Name", "get_system_stats")
+				req.Header.Set("Authorization", "Bearer "+access)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				var resp mcp.JSONRPCResponse
+				if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+					t.Fatal(err)
+				}
+				if w.Code != http.StatusOK || resp.Error != nil {
+					t.Fatalf("tool status=%d, error=%+v: %s", w.Code, resp.Error, w.Body.String())
+				}
+				raw, err := json.Marshal(resp.Result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result struct {
+					IsError           bool                `json:"isError"`
+					StructuredContent *v1.SystemStatsResp `json:"structuredContent"`
+				}
+				if err := json.Unmarshal(raw, &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.IsError == tc.allowed || (result.StructuredContent != nil) != tc.allowed {
+					t.Fatalf("tool result=%s", raw)
+				}
 			}
 		})
 	}

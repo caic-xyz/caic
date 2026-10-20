@@ -1976,6 +1976,22 @@ public struct TaskListRestorationStatus: Codable {
     public let error: String
 }
 
+/// ServerHealth is compact current machine health. Time is omitted before the first
+/// successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
+/// the whole-machine capacity. High flags require 15 seconds at >=90% of machine
+/// capacity and clear below 85%. Errors or samples at least 15 seconds old clear
+/// both flags; retained readings describe Time, not a current measurement.
+public struct ServerHealth: Codable {
+    public let time: ISOTimestamp?
+    public let cpuPerc: Double
+    public let cpuCount: Int
+    public let memUsed: Int
+    public let memTotal: Int
+    public let cpuHigh: Bool
+    public let memHigh: Bool
+    public let error: String?
+}
+
 /// TaskListEvent is a discriminated-union event for the task list SSE stream.
 /// kind=="snapshot": Snapshot carries task data on connect and when restoration becomes complete.
 /// Complete is present on snapshots only: false preserves prior membership and drafts;
@@ -1986,6 +2002,7 @@ public struct TaskListRestorationStatus: Codable {
 /// kind=="delete":   Delete holds the string ID of the removed task.
 /// kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
 /// kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
+/// kind=="health": Health holds current machine CPU/memory health for server administrators.
 /// kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
 public struct TaskListEvent: Codable {
     public let focus: String?
@@ -1998,6 +2015,7 @@ public struct TaskListEvent: Codable {
     public let repos: [Repo]?
     public let warning: Warning?
     public let status: TaskListRestorationStatus?
+    public let health: ServerHealth?
 }
 
 /// QuotaRateLimit is a single rate-limit window snapshot from any provider.

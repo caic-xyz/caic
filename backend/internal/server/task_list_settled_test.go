@@ -24,9 +24,19 @@ import (
 	"github.com/maruel/ksid"
 )
 
-// readNextTaskListEvent blocks until one SSE event with a data payload is
-// delivered and returns the decoded TaskListEvent.
+// readNextTaskListEvent reads task-list changes, skipping independent machine
+// health updates so task-replay assertions remain independent of collection.
 func readNextTaskListEvent(t *testing.T, r *bufio.Reader) v1.TaskListEvent {
+	for {
+		e := readTaskListEvent(t, r)
+		if e.Kind != "health" {
+			return e
+		}
+	}
+}
+
+// readTaskListEvent reads one SSE data event.
+func readTaskListEvent(t *testing.T, r *bufio.Reader) v1.TaskListEvent {
 	var data []string
 	for {
 		line, err := r.ReadString('\n')

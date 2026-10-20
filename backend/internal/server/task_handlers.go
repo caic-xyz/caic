@@ -1,4 +1,4 @@
-// HTTP handlers for task SSE and file streams, WebSocket proxying, and route-level task lookup.
+// HTTP handlers for task/global-health SSE and file streams, WebSocket proxying, and route-level task lookup.
 
 package server
 
@@ -51,7 +51,8 @@ type taskHandlers struct {
 	ciSvc      *ci.Service
 	taskSvc    *taskService
 
-	warnings *WarningStore
+	warnings    *WarningStore
+	systemStats *systemStats
 }
 
 func (h *taskHandlers) notifyTaskChange() {
@@ -435,6 +436,22 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	// Seed CI status immediately on connect (once); subsequent updates come from
 	// webhooks (App) or the ciTicker (polling).
 	ctx := r.Context()
+	var healthChanged <-chan struct{}
+	healthTimer := time.NewTimer(time.Hour)
+	healthTimer.Stop()
+	defer healthTimer.Stop()
+	var healthExpired <-chan time.Time
+	emitHealth := func() error {
+		health, changed := h.systemStats.health()
+		healthChanged = changed
+		healthTimer.Stop()
+		healthExpired = nil
+		if !health.Time.IsZero() && health.Error == "" {
+			healthTimer.Reset(time.Until(health.Time.Add(systemHealthMaxAge)))
+			healthExpired = healthTimer.C
+		}
+		return emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "health", Health: &health})
+	}
 	if h.ciSvc != nil {
 		go h.ciSvc.PollCIForActiveRepos(context.WithoutCancel(ctx))
 	}
@@ -512,6 +529,12 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			prevReposJSON = reposJSON
 			prevSettledLoading = settledLoading
 			prevSettledError = settledError
+			if mcpHasScope(ctx, mcpScopeServerAdmin) {
+				if err := emitHealth(); err != nil {
+					h.log.WarnContext(ctx, "emit server health", "err", err)
+					return
+				}
+			}
 			first = false
 		} else {
 			// Emit a status event when runtime/history restoration transitions
@@ -629,18 +652,33 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 			lastWarnSeq = warn.seq
 		}
 
-		select {
-		case <-r.Context().Done():
-			return
-		case id := <-focusCh:
-			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "focus", Focus: id}); err != nil {
-				h.log.WarnContext(ctx, "emit task focus", "err", err)
+	waitForTaskChange:
+		for {
+			select {
+			case <-r.Context().Done():
 				return
+			case <-healthChanged:
+				if err := emitHealth(); err != nil {
+					h.log.WarnContext(ctx, "emit server health", "err", err)
+					return
+				}
+			case <-healthExpired:
+				if err := emitHealth(); err != nil {
+					h.log.WarnContext(ctx, "emit stale server health", "err", err)
+					return
+				}
+			case id := <-focusCh:
+				if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "focus", Focus: id}); err != nil {
+					h.log.WarnContext(ctx, "emit task focus", "err", err)
+					return
+				}
+			case <-ch:
+				break waitForTaskChange
+			case <-ticker.C:
+				break waitForTaskChange
+			case <-ciTickerC:
+				go h.ciSvc.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
 			}
-		case <-ch:
-		case <-ticker.C:
-		case <-ciTickerC:
-			go h.ciSvc.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
 		}
 	}
 }

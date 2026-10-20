@@ -501,6 +501,7 @@ type TaskInfoObservedRuntime struct {
 // kind=="delete":   Delete holds the string ID of the removed task.
 // kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
 // kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
+// kind=="health": Health holds current machine CPU/memory health for server administrators.
 // kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
 type TaskListEvent struct {
 	Focus    string                     `json:"focus,omitempty"`
@@ -513,6 +514,7 @@ type TaskListEvent struct {
 	Repos    []Repo                     `json:"repos,omitzero"`
 	Warning  *Warning                   `json:"warning,omitempty"`
 	Status   *TaskListRestorationStatus `json:"status,omitempty"`
+	Health   *ServerHealth              `json:"health,omitempty"`
 }
 
 // MarshalJSON preserves the discriminated-union contract for empty snapshot
@@ -527,6 +529,22 @@ func (e TaskListEvent) MarshalJSON() ([]byte, error) { //nolint:gocritic // json
 		e.Repos = []Repo{}
 	}
 	return json.Marshal(taskListEvent(e))
+}
+
+// ServerHealth is compact current machine health. Time is omitted before the first
+// successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
+// the whole-machine capacity. High flags require 15 seconds at >=90% of machine
+// capacity and clear below 85%. Errors or samples at least 15 seconds old clear
+// both flags; retained readings describe Time, not a current measurement.
+type ServerHealth struct {
+	Time     time.Time `json:"time,omitzero"`
+	CPUPerc  float64   `json:"cpuPerc"`
+	CPUCount int       `json:"cpuCount"`
+	MemUsed  uint64    `json:"memUsed"`
+	MemTotal uint64    `json:"memTotal"`
+	CPUHigh  bool      `json:"cpuHigh"`
+	MemHigh  bool      `json:"memHigh"`
+	Error    string    `json:"error,omitempty"`
 }
 
 // WarningCategory identifies a warning independently of translated display text.

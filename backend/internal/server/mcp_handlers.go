@@ -143,6 +143,7 @@ const (
 	mcpScopeTasksWrite  = "caic:tasks.write"
 	mcpScopeTasksAdmin  = "caic:tasks.admin"
 	mcpScopeReposWrite  = "caic:repos.write"
+	mcpScopeServerAdmin = "caic:server.admin"
 )
 
 // mcpScopeLabels maps MCP scope identifiers to human-readable labels
@@ -154,6 +155,7 @@ var mcpScopeLabels = map[string]string{
 	mcpScopeTasksWrite:  "Interact with and manage existing tasks",
 	mcpScopeTasksAdmin:  "Administer tasks (cancel, delete)",
 	mcpScopeReposWrite:  "Manage repositories",
+	mcpScopeServerAdmin: "Read server machine statistics and health",
 }
 
 type mcpPrincipalContextKey struct{}
@@ -191,9 +193,6 @@ func taskMCPTaskID(ctx context.Context) (ksid.ID, bool) {
 func mcpHasScope(ctx context.Context, scope string) bool {
 	if p, ok := mcpPrincipalFromContext(ctx); ok && p.TaskID != 0 {
 		return scope == mcpScopeTasksCreate
-	}
-	if _, ok := auth.UserFromContext(ctx); !ok {
-		return true
 	}
 	p, ok := mcpPrincipalFromContext(ctx)
 	if !ok || !p.Remote {

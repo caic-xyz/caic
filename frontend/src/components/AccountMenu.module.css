@@ -95,11 +95,3 @@
 .dropdownItem:hover {
   background: var(--color-bg-hover);
 }
-
-@media (width <= 480px) {
-  .userMenu {
-    position: absolute;
-    top: 0;
-    right: 0;
-  }
-}

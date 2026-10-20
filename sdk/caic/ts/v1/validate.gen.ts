@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -716,6 +716,20 @@ export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskList
   };
 }
 
+export function validateServerHealth(raw: ValidatorInput): ServerHealth {
+  const obj = asObject(raw, "ServerHealth");
+  return {
+    time: (obj["time"] === undefined || obj["time"] === null ? undefined : asString(obj["time"], "ServerHealth.time") as ISOTimestamp),
+    cpuPerc: asNumber(obj["cpuPerc"], "ServerHealth.cpuPerc"),
+    cpuCount: asNumber(obj["cpuCount"], "ServerHealth.cpuCount"),
+    memUsed: asNumber(obj["memUsed"], "ServerHealth.memUsed"),
+    memTotal: asNumber(obj["memTotal"], "ServerHealth.memTotal"),
+    cpuHigh: asBoolean(obj["cpuHigh"], "ServerHealth.cpuHigh"),
+    memHigh: asBoolean(obj["memHigh"], "ServerHealth.memHigh"),
+    error: (obj["error"] === undefined || obj["error"] === null ? undefined : asString(obj["error"], "ServerHealth.error")),
+  };
+}
+
 export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
   const obj = asObject(raw, "TaskListEvent");
   return {
@@ -729,6 +743,7 @@ export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
     repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[]),
     warning: (obj["warning"] === undefined || obj["warning"] === null ? undefined : validateWarning(obj["warning"])),
     status: (obj["status"] === undefined || obj["status"] === null ? undefined : validateTaskListRestorationStatus(obj["status"])),
+    health: (obj["health"] === undefined || obj["health"] === null ? undefined : validateServerHealth(obj["health"])),
   };
 }
 

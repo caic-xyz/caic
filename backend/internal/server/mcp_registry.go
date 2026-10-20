@@ -75,7 +75,7 @@ If the client provides a bounded current-task snapshot at session start, use it 
 - When an agent is asking, read the question and options clearly, wait for the verbal answer, then call task_answer_question.
 - When creating a task, omit harness, model, and effort unless the user explicitly asks for an override. caic fills an omitted harness from saved preferences; omitted model and effort use the selected harness defaults. Never pair one harness's model or effort with another harness. Confirm repo and prompt before creating.
 - Refer to tasks by title.
-- Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_system_stats, get_usage. Call them whenever useful without asking.
+- Free tools: agent_last_message, harnesses_list, repos_list, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
 - When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
 - For safety issues during sync, describe each issue and ask whether to force.`
 
@@ -2155,7 +2155,7 @@ var mcpToolScopes = map[string]string{
 	"task_get_detail":            mcpScopeTasksRead,
 	"agent_last_message":         mcpScopeTasksRead,
 	"get_usage":                  mcpScopeRead,
-	"get_system_stats":           mcpScopeRead,
+	"get_system_stats":           mcpScopeServerAdmin,
 	"task_send_message":          mcpScopeTasksWrite,
 	"task_answer_question":       mcpScopeTasksWrite,
 	"task_create":                mcpScopeTasksCreate,
@@ -2459,10 +2459,10 @@ func (r scopedMCPRegistry) scopedContext(ctx context.Context) context.Context {
 func authorizeToolScope(ctx context.Context, name string) (string, bool) {
 	if _, ok := taskMCPTaskID(ctx); ok {
 		switch name {
-		case "get_system_stats", "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":
+		case "task_create", "tasks_list", "task_get_detail", "task_fork", "task_stop", "task_purge":
 			return "allow", true
 		}
-		return "task-scoped MCP only permits get_system_stats, task_create, tasks_list, task_get_detail, task_fork, task_stop, and task_purge", false
+		return "task-scoped MCP only permits task_create, tasks_list, task_get_detail, task_fork, task_stop, and task_purge", false
 	}
 	required := requiredScopeForTool(name)
 	if required == "" {

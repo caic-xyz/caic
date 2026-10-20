@@ -1,4 +1,4 @@
-// Samples per-logical-CPU utilization, memory, network, and filesystem usage into bounded machine history.
+// Samples bounded machine history and publishes current CPU/memory pressure without additional sampling.
 
 package server
 
@@ -20,15 +20,73 @@ import (
 )
 
 type systemStats struct {
-	mu      sync.Mutex
-	samples []v1.SystemSample
-	err     string
+	mu          sync.Mutex
+	samples     []v1.SystemSample
+	err         string
+	changed     chan struct{}
+	cpuPressure systemPressure
+	memPressure systemPressure
 }
 
 func newSystemStats(ctx context.Context) *systemStats {
-	s := &systemStats{samples: make([]v1.SystemSample, 0, 60)}
+	s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
 	go s.run(ctx)
 	return s
+}
+
+// health subscribes before returning the current observation, preventing missed
+// updates. One broadcast channel serves every stream; slow readers coalesce.
+func (s *systemStats) health() (h v1.ServerHealth, changed <-chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h = v1.ServerHealth{Error: s.err}
+	if len(s.samples) == 0 {
+		if h.Error == "" {
+			h.Error = "Waiting for the first system sample"
+		}
+		return h, s.changed
+	}
+	v := &s.samples[len(s.samples)-1]
+	h.Time = v.Time
+	h.CPUCount = len(v.CPUs)
+	for _, c := range v.CPUs {
+		h.CPUPerc += c.UsagePerc
+	}
+	h.MemUsed, h.MemTotal = v.MemUsed, v.MemTotal
+	if h.Error == "" && time.Since(v.Time) >= systemHealthMaxAge {
+		h.Error = "System sample is stale"
+	}
+	if h.Error == "" {
+		h.CPUHigh, h.MemHigh = s.cpuPressure.high, s.memPressure.high
+	}
+	return h, s.changed
+}
+
+func (s *systemStats) record(sample *v1.SystemSample, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.err = err.Error()
+		s.cpuPressure, s.memPressure = systemPressure{}, systemPressure{}
+	} else {
+		s.err = ""
+		if len(s.samples) > 0 && sample.Time.Sub(s.samples[len(s.samples)-1].Time) >= systemHealthMaxAge {
+			s.cpuPressure, s.memPressure = systemPressure{}, systemPressure{}
+		}
+		var total float64
+		for _, c := range sample.CPUs {
+			total += c.UsagePerc
+		}
+		s.cpuPressure.update(sample.Time, total/float64(len(sample.CPUs)))
+		s.memPressure.update(sample.Time, sample.MemPerc)
+		if len(s.samples) == cap(s.samples) {
+			copy(s.samples, s.samples[1:])
+			s.samples = s.samples[:len(s.samples)-1]
+		}
+		s.samples = append(s.samples, *sample)
+	}
+	close(s.changed)
+	s.changed = make(chan struct{})
 }
 
 func (s *systemStats) snapshot() v1.SystemStatsResp {
@@ -45,9 +103,7 @@ func (s *systemStats) run(ctx context.Context) {
 	// Establish a CPU baseline before publishing the first interval.
 	previous, err := cpu.TimesWithContext(ctx, true)
 	if err != nil {
-		s.mu.Lock()
-		s.err = fmt.Sprintf("CPU: %v", err)
-		s.mu.Unlock()
+		s.record(&v1.SystemSample{}, fmt.Errorf("CPU: %w", err))
 	}
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -58,20 +114,35 @@ func (s *systemStats) run(ctx context.Context) {
 		case <-ticker.C:
 			sample, next, err := readSystemSample(ctx, previous)
 			previous = next
-			s.mu.Lock()
-			if err != nil {
-				s.err = err.Error()
-			} else {
-				s.err = ""
-				if len(s.samples) == cap(s.samples) {
-					copy(s.samples, s.samples[1:])
-					s.samples = s.samples[:len(s.samples)-1]
-				}
-				s.samples = append(s.samples, sample)
-			}
-			s.mu.Unlock()
+			s.record(&sample, err)
 		}
 	}
+}
+
+const systemHealthMaxAge = 15 * time.Second
+
+// systemPressure holds the start of a sustained pressure episode.
+type systemPressure struct {
+	since time.Time
+	high  bool
+}
+
+func (p *systemPressure) update(at time.Time, percent float64) {
+	if percent < 85 {
+		*p = systemPressure{}
+		return
+	}
+	if p.high {
+		return
+	}
+	if percent < 90 {
+		p.since = time.Time{}
+		return
+	}
+	if p.since.IsZero() {
+		p.since = at
+	}
+	p.high = at.Sub(p.since) >= 15*time.Second
 }
 
 func readSystemSample(ctx context.Context, previous []cpu.TimesStat) (v1.SystemSample, []cpu.TimesStat, error) {

@@ -169,6 +169,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 	}
 	audit := &auditStore{log: log.With("scope", "audit"), path: d.AuditLogPath}
 	rateLimiter := newRateLimiter(120, time.Minute)
+	systemStats := newSystemStats(ctx)
 
 	s := &Router{
 		log: log,
@@ -215,7 +216,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			taskMgr:            d.TaskMgr,
 			cacheSizes:         d.CacheSizes,
 			metrics:            d.Metrics,
-			systemStats:        newSystemStats(ctx),
+			systemStats:        systemStats,
 			harnessModels:      d.HarnessModels,
 			imageRefresh:       d.ImageRefresh,
 			authStore:          d.AuthStore,
@@ -225,14 +226,15 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			voiceGateway:       voiceMetadata,
 		},
 		taskHandlers: &taskHandlers{
-			log:        log.With("handler", "tasks"),
-			taskMgr:    d.TaskMgr,
-			checkouts:  d.Checkouts,
-			repoStatus: d.RepoStatus,
-			forgeMgr:   d.ForgeMgr,
-			ciSvc:      d.CIService,
-			warnings:   d.Warnings,
-			taskSvc:    svc,
+			systemStats: systemStats,
+			log:         log.With("handler", "tasks"),
+			taskMgr:     d.TaskMgr,
+			checkouts:   d.Checkouts,
+			repoStatus:  d.RepoStatus,
+			forgeMgr:    d.ForgeMgr,
+			ciSvc:       d.CIService,
+			warnings:    d.Warnings,
+			taskSvc:     svc,
 		},
 		usageHandlers:    &usageHandlers{log: log.With("handler", "usage"), taskMgr: d.TaskMgr, rollup: d.UsageRollup, fetchers: d.UsageFetchers, quotaTracker: d.TaskMgr.QuotaTracker},
 		voiceGateway:     d.VoiceGateway,
@@ -261,7 +263,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 			ResourceURLPath:         "/api/caic/v1/mcp",
 			ResourceMetadataURLPath: "/.well-known/oauth-protected-resource/api/caic/v1/mcp",
 			ClientIDPrefix:          "caic_",
-			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksCreate, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite},
+			SupportedScopes:         []string{mcpScopeRead, mcpScopeTasksRead, mcpScopeTasksCreate, mcpScopeTasksWrite, mcpScopeTasksAdmin, mcpScopeReposWrite, mcpScopeServerAdmin},
 			DefaultScopes:           []string{mcpScopeRead, mcpScopeTasksRead},
 			ScopeLabels:             mcpScopeLabels,
 			Session:                 &caicSessionManager{store: d.AuthStore},

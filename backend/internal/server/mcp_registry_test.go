@@ -73,8 +73,8 @@ func TestCaicToolRegistryHandleGetSystemStats(t *testing.T) {
 				name string
 				ctx  context.Context
 			}{
-				{"read_scope", newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeRead}})},
-				{"task", newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true, TaskID: ksid.NewID()})},
+				{"admin_scope", newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeServerAdmin}})},
+				{"browser", auth.NewContext(t.Context(), &auth.User{ID: "user-1"})},
 			} {
 				t.Run(caller.name, func(t *testing.T) {
 					t.Parallel()
@@ -114,13 +114,24 @@ func TestCaicToolRegistryHandleGetSystemStats(t *testing.T) {
 	t.Run("scope_denied", func(t *testing.T) {
 		t.Parallel()
 		c := &mcpRegistry{}
-		ctx := newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeTasksRead}})
-		result, err := c.CallTool(ctx, &mcp.ToolsCallParams{Name: "get_system_stats", Arguments: json.RawMessage(`{}`)})
-		if err != nil || !result.IsError {
-			t.Fatalf("CallTool: %+v, %v", result, err)
-		}
-		if result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeUnauthorized) {
-			t.Fatalf("error metadata: %+v", result.Meta)
+		for _, p := range []mcpPrincipal{
+			{Remote: true, Scopes: []string{mcpScopeRead}},
+			{Remote: true, Scopes: []string{mcpScopeTasksRead}},
+			{Remote: true, TaskID: ksid.NewID(), Scopes: []string{mcpScopeServerAdmin}},
+		} {
+			ctx := newMCPPrincipalContext(auth.NewContext(t.Context(), &auth.User{ID: "user-1"}), &p)
+			result, err := c.CallTool(ctx, &mcp.ToolsCallParams{Name: "get_system_stats", Arguments: json.RawMessage(`{}`)})
+			if err != nil || !result.IsError {
+				t.Fatalf("CallTool for %+v: %+v, %v", p, result, err)
+			}
+			if result.Meta[mcp.ToolErrorCodeMetaKey] != string(api.CodeUnauthorized) {
+				t.Fatalf("error metadata: %+v", result.Meta)
+			}
+			tools, err := c.Tools(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertMCPToolVisibility(t, tools, "get_system_stats", false)
 		}
 	})
 }
@@ -1871,7 +1882,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		}
 		assertMCPToolVisibility(t, tools, "repos_list", true)
 		assertMCPToolVisibility(t, tools, "harnesses_list", true)
-		assertMCPToolVisibility(t, tools, "get_system_stats", true)
+		assertMCPToolVisibility(t, tools, "get_system_stats", false)
 		assertMCPToolVisibility(t, tools, "task_create", false)
 		assertMCPToolVisibility(t, tools, "tasks_list", false)
 	})
@@ -1925,15 +1936,15 @@ func TestCaicToolRegistryTools(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Tools() error: %v", err)
 			}
-			if len(tools) != 7 {
-				t.Fatalf("Tools() = %#v, want seven task-scoped tools", tools)
+			if len(tools) != 6 {
+				t.Fatalf("Tools() = %#v, want six task-scoped tools", tools)
 			}
 			assertMCPToolVisibility(t, tools, "task_create", true)
 			assertMCPToolVisibility(t, tools, "tasks_list", true)
 			assertMCPToolVisibility(t, tools, "task_fork", true)
 			assertMCPToolVisibility(t, tools, "task_stop", true)
 			assertMCPToolVisibility(t, tools, "task_purge", true)
-			assertMCPToolVisibility(t, tools, "get_system_stats", true)
+			assertMCPToolVisibility(t, tools, "get_system_stats", false)
 			assertMCPToolVisibility(t, tools, "task_get_detail", true)
 			var create, detail mcp.ToolDescriptor
 			for _, tool := range tools {
@@ -2007,7 +2018,7 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		assertMCPToolVisibility(t, tools, "task_fork", true)
 		assertMCPToolVisibility(t, tools, "task_stop", true)
 		assertMCPToolVisibility(t, tools, "task_purge", true)
-		assertMCPToolVisibility(t, tools, "get_system_stats", true)
+		assertMCPToolVisibility(t, tools, "get_system_stats", false)
 		assertMCPToolVisibility(t, tools, "task_get_detail", true)
 		assertMCPToolVisibility(t, tools, "repos_list", false)
 		t.Run("error", func(t *testing.T) {
