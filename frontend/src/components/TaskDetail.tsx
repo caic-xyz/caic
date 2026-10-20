@@ -1192,19 +1192,19 @@ export default function TaskDetail(props: Props) {
             </section>
           )}
         </Show>
-        <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
-          {(prompt) => (
-            <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
-              <h4 id="task-prompt-title" class={styles.taskPromptTitle}>
-                Prompt
-              </h4>
-              <div class={styles.userInputMsg}>
-                <Markdown text={prompt} />
-              </div>
-            </section>
-          )}
-        </Show>
         <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
+          <Show when={!hasInitialPromptEvent() && props.initialPrompt} keyed>
+            {(prompt) => (
+              <section class={styles.taskPrompt} aria-labelledby="task-prompt-title">
+                <h4 id="task-prompt-title" class={styles.taskPromptTitle}>
+                  Prompt
+                </h4>
+                <div class={styles.userInputMsg}>
+                  <Markdown text={prompt} />
+                </div>
+              </section>
+            )}
+          </Show>
           <Show when={setupLogLines().length > 0}>
             <details class={styles.taskSetup} open={!hasSessionStarted()} data-testid="task-setup">
               <summary class={styles.taskSetupTitle}>
