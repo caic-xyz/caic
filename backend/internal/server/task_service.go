@@ -1,4 +1,4 @@
-// Task commands, accepted input delivery, runtime artifacts, API DTOs, and Git summary refreshes.
+// Task commands, frontend focus notifications, runtime artifacts, API DTOs, and Git summary refreshes.
 
 package server
 
@@ -15,6 +15,7 @@ import (
 	"runtime/trace"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/md"
@@ -58,6 +59,47 @@ type taskService struct {
 	fakeCI    FakeCIHook
 	runtimes  *runtime.Router
 	metrics   metrics.Recorder
+
+	focusMu          sync.Mutex
+	focusSubscribers map[chan string]string
+}
+
+// subscribeTaskFocus delivers live user-directed tool focus changes. Only the
+// latest pending selection matters; focus is never replayed on reconnect.
+func (s *taskService) subscribeTaskFocus(ctx context.Context) (events <-chan string, unsubscribe func()) {
+	ch := make(chan string, 1)
+	ownerID := taskAccessFromContext(ctx).userID
+	s.focusMu.Lock()
+	if s.focusSubscribers == nil {
+		s.focusSubscribers = make(map[chan string]string)
+	}
+	s.focusSubscribers[ch] = ownerID
+	s.focusMu.Unlock()
+	return ch, func() {
+		s.focusMu.Lock()
+		delete(s.focusSubscribers, ch)
+		s.focusMu.Unlock()
+	}
+}
+
+func (s *taskService) focusTask(ctx context.Context, id ksid.ID) {
+	// Agent delegation runs in the background and must not redirect the user's UI.
+	if _, ok := taskMCPTaskID(ctx); ok {
+		return
+	}
+	ownerID := taskAccessFromContext(ctx).userID
+	s.focusMu.Lock()
+	defer s.focusMu.Unlock()
+	for ch, owner := range s.focusSubscribers {
+		if owner != ownerID {
+			continue
+		}
+		select {
+		case <-ch:
+		default:
+		}
+		ch <- id.String()
+	}
 }
 
 func (s *taskService) runtimeNameForCreate(requested string, settings *preferences.Settings) runtime.Name {

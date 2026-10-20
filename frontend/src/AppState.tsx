@@ -1,4 +1,4 @@
-// Application state store for SSE-owned task membership, selected REST detail, settings, warnings, actions, caches, and Blob image drafts.
+// Application state for task membership and focus, REST detail, settings, warnings, actions, caches, and image drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
 import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
@@ -33,6 +33,7 @@ import { useHostMode } from "@maruel/gomode/web/HostMode";
 
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
+import { focusedVoiceTask, setFocusedVoiceTask } from "./voiceTaskState";
 import { notifications } from "@maruel/gomode/web/notifications";
 import { QuotaRecoveryTracker, quotaDismissalKey } from "./quota";
 import { quotaRecoveryTargets } from "./quotaTargets";
@@ -110,6 +111,7 @@ function createAppStore() {
     promptRevision++;
     setPromptValue(value);
   };
+  const [taskFocusRequest, setTaskFocusRequest] = createSignal<string | null>(null, { equals: false });
   const [tasks, setTasks] = createSignal<Task[]>([]);
   // Only SSE introduces list membership. REST detail is bounded to the selected
   // route and cannot enable task image drafts before the stream introduces it.
@@ -831,6 +833,8 @@ function createAppStore() {
             }
             batch(() => {
               if (complete) {
+                const focused = focusedVoiceTask();
+                if (focused !== null && !snapshotByID.has(focused)) setFocusedVoiceTask(null);
                 for (const id of taskMembership) {
                   if (!snapshotByID.has(id)) {
                     removeTaskDrafts(id);
@@ -852,6 +856,8 @@ function createAppStore() {
               setTaskStreamReady(true);
               notifyQuotaRecoveries(reconciled);
             });
+          } else if (event.kind === "focus" && event.focus) {
+            setTaskFocusRequest(event.focus);
           } else if (event.kind === "upsert" && event.upsert) {
             const task = event.upsert;
             taskMembership.add(task.id);
@@ -875,6 +881,7 @@ function createAppStore() {
             }
             applyTaskPatch(id, patch);
           } else if (event.kind === "delete" && event.delete) {
+            if (focusedVoiceTask() === event.delete) setFocusedVoiceTask(null);
             taskMembership.delete(event.delete);
             if (detailTask()?.id === event.delete) setDetailTask(null);
             // Authoritative removal: if the deleted task is the one being viewed,
@@ -1671,6 +1678,7 @@ function createAppStore() {
     dismissQuotaWarning,
     isQuotaWarningDismissed,
     navigateToTask,
+    taskFocusRequest,
     fixCI,
     // input drafts
     inputDraft,

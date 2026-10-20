@@ -715,6 +715,7 @@ export function validateTaskListRestorationStatus(raw: ValidatorInput): TaskList
 export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
   const obj = asObject(raw, "TaskListEvent");
   return {
+    focus: (obj["focus"] === undefined || obj["focus"] === null ? undefined : asString(obj["focus"], "TaskListEvent.focus")),
     complete: (obj["complete"] === undefined || obj["complete"] === null ? undefined : asBoolean(obj["complete"], "TaskListEvent.complete")),
     kind: asString(obj["kind"], "TaskListEvent.kind"),
     snapshot: (obj["snapshot"] === undefined || obj["snapshot"] === null ? undefined : validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[]),

@@ -1,4 +1,4 @@
-// Tests task-list restoration status, complete snapshots, and registered membership during DTO failures.
+// Tests task-list restoration, complete snapshots, tool focus, and registered membership during DTO failures.
 
 package server
 
@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
+	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
 )
 
@@ -242,4 +244,33 @@ func TestTaskListIncompleteDTOOnConnect(t *testing.T) {
 		}
 	}
 	t.Fatal("missing snapshot")
+}
+
+func TestTaskListToolFocus(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	id := ksid.NewID()
+	target := mustNewTask(t, id, agent.Prompt{Text: "focus target"}, harness.Claude)
+	insertTestTask(s, id, target)
+	r := connectTaskListStream(t, s)
+	for readNextTaskListEvent(t, r).Kind != "snapshot" {
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", fmt.Sprintf(`"name":"task_get_detail","arguments":{"task":%q}`, id.String()))))
+	req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+	req.Header.Set("Mcp-Method", "tools/call")
+	req.Header.Set("Mcp-Name", "task_get_detail")
+	w := httptest.NewRecorder()
+	s.mcpHandlers.protocol.HandleMCP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d: %s", w.Code, w.Body.String())
+	}
+	for {
+		ev := readNextTaskListEvent(t, r)
+		if ev.Kind == "focus" {
+			if ev.Focus != id.String() {
+				t.Fatalf("focus = %q, want %q", ev.Focus, id)
+			}
+			break
+		}
+	}
 }

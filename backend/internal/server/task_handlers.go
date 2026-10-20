@@ -449,6 +449,8 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
+	focusCh, unsubscribeFocus := h.taskSvc.subscribeTaskFocus(ctx)
+	defer unsubscribeFocus()
 	var lastWarnSeq uint64
 	var prevSettledLoading bool
 	var prevSettledError string
@@ -630,6 +632,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 		select {
 		case <-r.Context().Done():
 			return
+		case id := <-focusCh:
+			if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "focus", Focus: id}); err != nil {
+				h.log.WarnContext(ctx, "emit task focus", "err", err)
+				return
+			}
 		case <-ch:
 		case <-ticker.C:
 		case <-ciTickerC:

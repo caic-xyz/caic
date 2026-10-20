@@ -1,4 +1,4 @@
-// Tests for MCP tool and resource authorization policy.
+// Tests MCP tool and resource authorization, task focus, and catalog behavior.
 
 package server
 
@@ -1879,5 +1879,83 @@ func assertMCPToolVisibility(t *testing.T, tools []mcp.ToolDescriptor, name stri
 	}
 	if want {
 		t.Fatalf("tool %q is hidden, want visible", name)
+	}
+}
+
+func TestMCPTaskToolFocus(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"agent_last_message", "task_answer_question", "task_fix_pr", "task_fork", "task_get_detail", "task_purge", "task_push_branch_to_remote", "task_revive", "task_send_message", "task_stop"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, ref := range []string{"1", `"#1"`, "id", `"missing"`} {
+				t.Run(ref, func(t *testing.T) {
+					t.Parallel()
+					s := newTestRouter(t, nil)
+					svc := testTaskHandlers(s).taskSvc
+					id := ksid.NewID()
+					target := mustNewTask(t, id, agent.Prompt{Text: "focus target"}, harness.Claude)
+					target.SetState(taskslog.StateStopped)
+					insertTestTask(s, id, target)
+					ch, cancel := svc.subscribeTaskFocus(t.Context())
+					t.Cleanup(cancel)
+					registry := &mcpRegistry{taskSvc: svc, ci: s.ciHandlers}
+					value := ref
+					if ref == "id" {
+						value = fmt.Sprintf("%q", id.String())
+					}
+					field := "task_number"
+					if name == "task_get_detail" {
+						field = "task"
+					}
+					args := json.RawMessage(fmt.Sprintf(`{%q:%s}`, field, value))
+					for _, spec := range registry.specs() {
+						if spec.Name == name {
+							if _, err := spec.Handler(t.Context(), args); err != nil {
+								t.Fatal(err)
+							}
+							break
+						}
+					}
+					select {
+					case got := <-ch:
+						if ref == `"missing"` || got != id.String() {
+							t.Fatalf("focus = %q for reference %s", got, ref)
+						}
+					default:
+						if ref != `"missing"` {
+							t.Fatal("tool did not focus the target task")
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTaskServiceFocusIsolation(t *testing.T) {
+	t.Parallel()
+	s := newTestRouter(t, nil)
+	svc := testTaskHandlers(s).taskSvc
+	ctx := auth.NewContext(t.Context(), &auth.User{ID: "owner"})
+	ch, cancel := svc.subscribeTaskFocus(ctx)
+	t.Cleanup(cancel)
+	other, cancelOther := svc.subscribeTaskFocus(t.Context())
+	t.Cleanup(cancelOther)
+	id := ksid.NewID()
+	svc.focusTask(ctx, ksid.NewID())
+	svc.focusTask(ctx, id)
+	if got := <-ch; got != id.String() {
+		t.Fatalf("focus = %q, want latest %q", got, id)
+	}
+	svc.focusTask(newMCPPrincipalContext(ctx, &mcpPrincipal{TaskID: id}), id)
+	select {
+	case got := <-ch:
+		t.Fatalf("background task changed focus to %q", got)
+	default:
+	}
+	select {
+	case got := <-other:
+		t.Fatalf("other user's focus changed to %q", got)
+	default:
 	}
 }

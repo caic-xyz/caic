@@ -1,4 +1,4 @@
-// Tests for OAuth token lifecycle behavior.
+// Tests OAuth token lifecycles and authenticated MCP task focus delivery.
 
 package server
 
@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemgr"
@@ -29,9 +32,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task/taskmgr"
 	"github.com/caic-xyz/caic/metrics"
+	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/oauth/oauthserver"
+	"github.com/maruel/ksid"
 )
 
 const mcpAuthDefaultScope = mcpScopeRead + " " + mcpScopeTasksRead + " " + mcpScopeTasksCreate + " " + mcpScopeTasksWrite + " " + mcpScopeTasksAdmin + " " + mcpScopeReposWrite
@@ -671,4 +676,47 @@ func refreshMCPToken(t *testing.T, h http.Handler, clientID, refreshToken string
 		}
 	}
 	return tokenResp
+}
+
+func TestMCPToolFocusAuthenticated(t *testing.T) {
+	t.Parallel()
+	for _, transport := range []string{"browser session", "native bearer"} {
+		t.Run(transport, func(t *testing.T) {
+			t.Parallel()
+			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+			token := authorizeMCPClient(t, h, &user, &registered)
+			id := ksid.NewID()
+			target := mustNewTask(t, id, agent.Prompt{Text: "focus target"}, harness.Claude)
+			target.OwnerID = user.ID
+			insertTestTask(s, id, target)
+			svc := testTaskHandlers(s).taskSvc
+			ch, cancel := svc.subscribeTaskFocus(auth.NewContext(t.Context(), &user))
+			t.Cleanup(cancel)
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", fmt.Sprintf(`"name":"task_get_detail","arguments":{"task":%q}`, id.String()))))
+			req.Host = "caic.example.com"
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
+			req.Header.Set("Mcp-Method", "tools/call")
+			req.Header.Set("Mcp-Name", "task_get_detail")
+			if transport == "browser session" {
+				addTestSessionCookie(t, req, &user)
+			} else {
+				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("tool status = %d: %s", w.Code, w.Body.String())
+			}
+			select {
+			case got := <-ch:
+				if got != id.String() {
+					t.Fatalf("focus = %q, want %q", got, id)
+				}
+			default:
+				t.Fatalf("tool did not publish focus to authenticated user: %s", w.Body.String())
+			}
+		})
+	}
 }

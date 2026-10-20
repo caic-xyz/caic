@@ -1775,12 +1775,14 @@ export interface TaskListRestorationStatus {
  * true certifies omissions after successful runtime/history restoration and DTO conversion.
  * kind=="upsert":   Upsert holds a newly created task.
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
+ * kind=="focus":    Focus holds the stable task ID selected by a user-directed tool call.
  * kind=="delete":   Delete holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
  * kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
  * kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
  */
 export interface TaskListEvent {
+  focus?: string;
   complete?: boolean;
   kind: string;
   snapshot?: Task[];

@@ -1335,6 +1335,7 @@ func (m *mcpRegistry) taskByID(ctx context.Context, id ksid.ID) (v1.Task, error)
 	if !ok {
 		return v1.Task{}, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "task not found"}
 	}
+	m.taskSvc.focusTask(ctx, id)
 	return m.taskDTO(ctx, entry)
 }
 
@@ -1349,7 +1350,13 @@ func (m *mcpRegistry) taskDTO(ctx context.Context, entry *taskmgr.Entry) (v1.Tas
 // entryByTaskRef resolves a task reference — a number, a "#N" string, or a
 // stable task ID — to its current list position and entry. When allowSelf is
 // set in a task-scoped session, a zero reference resolves to the calling task.
-func (m *mcpRegistry) entryByTaskRef(ctx context.Context, ref taskID, allowSelf bool) (int, *taskmgr.Entry, error) {
+// Successful user-directed resolution also selects the task in connected frontends.
+func (m *mcpRegistry) entryByTaskRef(ctx context.Context, ref taskID, allowSelf bool) (num int, resolved *taskmgr.Entry, err error) {
+	defer func() {
+		if err == nil {
+			m.taskSvc.focusTask(ctx, resolved.Task().ID)
+		}
+	}()
 	raw := strings.TrimSpace(string(ref))
 	keys, _ := m.taskKeys(ctx)
 	delegatingTaskID, taskScoped := taskMCPTaskID(ctx)

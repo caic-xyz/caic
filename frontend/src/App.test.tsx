@@ -2053,6 +2053,56 @@ describe("App repo chips: No repository", () => {
     expect(screen.getByTestId("detail-pane")).toBeInTheDocument();
   });
 
+  it("selects a task requested by a service tool", async () => {
+    const { history } = renderApp("/task/@task1");
+    await waitForTaskEventsSubscription();
+    dispatchSSE({
+      kind: "snapshot",
+      snapshot: [makeTask({ id: "task1", title: "Review output" }), makeTask({ id: "task2", title: "Other task" })],
+    });
+    await waitFor(() => expect(screen.getByTestId("detail-pane")).toBeInTheDocument());
+    dispatchSSE({ kind: "focus", focus: "task2" });
+    await waitFor(() => expect(history.get()).toContain("@task2"));
+    expect(screen.getByTestId("detail-pane")).toBeInTheDocument();
+  });
+
+  it("retains mobile tool focus until its upsert and clears authoritative removals", async () => {
+    window.goModeHost = { isVoiceConnected: () => true };
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: query === "(max-width: 768px)",
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    renderApp();
+    await waitForTaskEventsSubscription();
+    const first = makeTask({ id: "task1", title: "First task", state: "waiting" });
+    dispatchSSE({ kind: "snapshot", snapshot: [first], complete: true });
+    const voiceView = await screen.findByTestId("mobile-voice-tasks");
+    dispatchSSE({ kind: "focus", focus: "task2" });
+    expect(focusedVoiceTask()).toBe("task2");
+    dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "task2", title: "Second task", state: "waiting" }) });
+    const second = within(voiceView).getByRole("link", { name: /Second task/ });
+    expect(second).toHaveAttribute("aria-current", "true");
+    dispatchSSE({ kind: "delete", delete: "task2" });
+    expect(focusedVoiceTask()).toBeNull();
+
+    dispatchSSE({ kind: "focus", focus: "task3" });
+    dispatchSSE({ kind: "snapshot", snapshot: [first], complete: false });
+    expect(focusedVoiceTask()).toBe("task3");
+    dispatchSSE({ kind: "upsert", upsert: makeTask({ id: "task3", title: "Third task", state: "waiting" }) });
+    expect(within(voiceView).getByRole("link", { name: /Third task/ })).toHaveAttribute("aria-current", "true");
+    dispatchSSE({ kind: "snapshot", snapshot: [first], complete: true });
+    expect(focusedVoiceTask()).toBeNull();
+    dispatchSSE({ kind: "focus", focus: "task4" });
+    dispatchSSE({ kind: "snapshot", snapshot: [first], complete: true });
+    expect(focusedVoiceTask()).toBeNull();
+  });
+
   it("does not mount browser voice when the server disables the voice gateway", async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       imageConstraints: {

@@ -1,12 +1,11 @@
-// Frontend voice task focus and native task-number synchronization across all routes.
+// Frontend task selection for service and voice tools, and native voice task numbering.
 
-import { createEffect, onCleanup, type Accessor } from "solid-js";
+import { createEffect, on, onCleanup, type Accessor } from "solid-js";
 import { registerFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
 import { useHostMode } from "@maruel/gomode/web/HostMode";
 import { TaskNumberMap } from "./TaskNumberMap";
 import { useAppState } from "./AppState";
 import {
-  focusedVoiceTask,
   setFocusedVoiceTask,
   voiceConnected,
   getVoiceTaskId,
@@ -38,11 +37,28 @@ export default function VoiceTaskFocus(props: { mobile: Accessor<boolean> }) {
     setVoiceTaskNumberMap(null);
   });
 
+  function focusTask(id: string) {
+    if (voiceConnected()) setFocusedVoiceTask(id);
+    if (props.mobile() && voiceConnected()) s.navigate("/");
+    else s.navigateToTask(id);
+  }
+
+  createEffect(
+    on(
+      s.taskFocusRequest,
+      (id) => {
+        if (id !== null) focusTask(id);
+      },
+      { defer: true },
+    ),
+  );
+
   const unregister = registerFrontendVoiceTool({
     declaration: {
       name: "focus_task",
       description:
-        "Call whenever you switch your conversational focus to a specific task, before discussing it or acting on it. " +
+        "Select a task when switching conversational focus without calling a task-scoped service tool. " +
+        "Task-scoped service tools automatically select their target task. " +
         "Use the task number or stable task ID from the task context or service tools. This selects the task in the user's frontend.",
       parameters: {
         type: "object",
@@ -63,16 +79,15 @@ export default function VoiceTaskFocus(props: { mobile: Accessor<boolean> }) {
       if (!voiceConnected() || !id || !s.tasks().some((task) => task.id === id)) {
         throw new Error("Unknown task reference or disconnected voice session. Read the current tasks and try again.");
       }
-      setFocusedVoiceTask(id);
-      if (props.mobile()) s.navigate("/");
-      else s.navigateToTask(id);
+      focusTask(id);
       return { task_id: id };
     },
   });
 
   createEffect(() => {
-    const id = focusedVoiceTask();
-    if (!voiceConnected() || (id !== null && !s.tasks().some((task) => task.id === id))) {
+    // A service focus event may precede its task's upsert. Membership removals
+    // clear focus in AppState; absence from the current list is not a removal.
+    if (!voiceConnected()) {
       setFocusedVoiceTask(null);
     }
   });
