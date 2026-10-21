@@ -139,41 +139,53 @@ func TestDoTranscode(t *testing.T) {
 func TestTranscode(t *testing.T) {
 	t.Parallel()
 	data := bytes.Repeat([]byte("cached static asset\n"), 20_000)
-	for _, fail := range []bool{false, true} {
-		name := "success"
-		var readErr error
-		if fail {
-			name = "failure"
-			readErr = errors.New("source failure")
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		dist := &transcodeFS{FS: fstest.MapFS{"asset.js.br": {Data: brCompress(t, data)}}}
+		var cache sync.Map
+		for _, enc := range []string{"gzip", "identity", "zstd"} {
+			const callers = 12
+			outputs := make([][]byte, callers)
+			errs := make([]error, callers)
+			var wg sync.WaitGroup
+			for i := range callers {
+				wg.Go(func() { outputs[i], errs[i] = transcode(&cache, dist, "asset.js", enc) })
+			}
+			wg.Wait()
+			for i := range callers {
+				if errs[i] != nil || !bytes.Equal(outputs[i], outputs[0]) || len(outputs[i]) == 0 {
+					t.Fatal("concurrent successful output was inconsistent")
+				}
+			}
 		}
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			dist := &transcodeFS{FS: fstest.MapFS{"asset.js.br": {Data: brCompress(t, data)}}, readErr: readErr}
-			var cache sync.Map
-			for _, enc := range []string{"gzip", "identity", "zstd"} {
-				const callers = 12
-				outputs := make([][]byte, callers)
-				errs := make([]error, callers)
-				var wg sync.WaitGroup
-				for i := range callers {
-					wg.Go(func() { outputs[i], errs[i] = transcode(&cache, dist, "asset.js", enc) })
-				}
-				wg.Wait()
-				for i := range callers {
-					if fail {
-						if outputs[i] != nil || !errors.Is(errs[i], readErr) {
-							t.Fatal("concurrent failure was inconsistent")
-						}
-					} else {
-						if errs[i] != nil || !bytes.Equal(outputs[i], outputs[0]) || len(outputs[i]) == 0 {
-							t.Fatal("concurrent successful output was inconsistent")
-						}
-					}
+		if dist.opens != 3 || dist.closes != 3 {
+			t.Fatalf("opens=%d closes=%d; expected one computation per encoding", dist.opens, dist.closes)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		readErr := errors.New("source failure")
+		dist := &transcodeFS{FS: fstest.MapFS{"asset.js.br": {Data: brCompress(t, data)}}, readErr: readErr}
+		var cache sync.Map
+		for _, enc := range []string{"gzip", "identity", "zstd"} {
+			const callers = 12
+			outputs := make([][]byte, callers)
+			errs := make([]error, callers)
+			var wg sync.WaitGroup
+			for i := range callers {
+				wg.Go(func() { outputs[i], errs[i] = transcode(&cache, dist, "asset.js", enc) })
+			}
+			wg.Wait()
+			for i := range callers {
+				if outputs[i] != nil || !errors.Is(errs[i], readErr) {
+					t.Fatal("concurrent failure was inconsistent")
 				}
 			}
-			if dist.opens != 3 || dist.closes != 3 {
-				t.Fatalf("opens=%d closes=%d; expected one computation per encoding", dist.opens, dist.closes)
-			}
-		})
-	}
+		}
+		if dist.opens != 3 || dist.closes != 3 {
+			t.Fatalf("opens=%d closes=%d; expected one computation per encoding", dist.opens, dist.closes)
+		}
+	})
 }

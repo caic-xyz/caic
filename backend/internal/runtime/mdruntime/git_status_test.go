@@ -1016,49 +1016,64 @@ func TestTurnGitCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pending.txt"), []byte("pending\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		name, from, to  string
-		count           int
-		available, fail bool
-	}{
-		{name: "committed delta", from: from, to: to, count: 2, available: true},
-		{name: "initial baseline", to: to},
-		{name: "rewritten baseline removed", from: strings.Repeat("f", 40), to: to},
-		{name: "clean committed delta", from: to, to: to, available: true},
-		{name: "HEAD moved after fetch", from: from, to: from, fail: true},
-		{name: "invalid object ID", from: "bad", to: to, fail: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			cmd, err := turnGitCommand(dir, "origin", "main", tc.from, tc.to)
-			var out []byte
-			if err == nil {
-				out, err = newIsolatedGitCommand(t, "bash", "-c", cmd).Output()
-			}
-			if tc.fail {
-				if err == nil {
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, from, to string
+			count          int
+			available      bool
+		}{
+			{name: "committed delta", from: from, to: to, count: 2, available: true},
+			{name: "initial baseline", to: to},
+			{name: "rewritten baseline removed", from: strings.Repeat("f", 40), to: to},
+			{name: "clean committed delta", from: to, to: to, available: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				cmd, err := turnGitCommand(dir, "origin", "main", tc.from, tc.to)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, err := newIsolatedGitCommand(t, "bash", "-c", cmd).Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				status, delta, err := parseTurnGit(string(out))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(status.DiffStat) != 3 {
+					t.Fatalf("branch summary lost committed or pending work: %+v", status.DiffStat)
+				}
+				if (delta != nil) != tc.available || len(delta) != tc.count {
+					t.Fatalf("turn delta = %+v", delta)
+				}
+				if tc.count == 2 && (!delta[0].Binary || delta[1].Path != "turn file.txt") {
+					t.Fatalf("binary/name parsing failed: %+v", delta)
+				}
+			})
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name, from, to string
+		}{
+			{name: "HEAD moved after fetch", from: from, to: from},
+			{name: "invalid object ID", from: "bad", to: to},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				cmd, err := turnGitCommand(dir, "origin", "main", tc.from, tc.to)
+				if err != nil {
+					return
+				}
+				if _, err := newIsolatedGitCommand(t, "bash", "-c", cmd).Output(); err == nil {
 					t.Fatal("invalid snapshot succeeded")
 				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			status, delta, err := parseTurnGit(string(out))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(status.DiffStat) != 3 {
-				t.Fatalf("branch summary lost committed or pending work: %+v", status.DiffStat)
-			}
-			if (delta != nil) != tc.available || len(delta) != tc.count {
-				t.Fatalf("turn delta = %+v", delta)
-			}
-			if tc.count == 2 && (!delta[0].Binary || delta[1].Path != "turn file.txt") {
-				t.Fatalf("binary/name parsing failed: %+v", delta)
-			}
-		})
-	}
+			})
+		}
+	})
 }
 
 func TestTurnGitCommandRewrittenExistingTip(t *testing.T) {

@@ -55,28 +55,31 @@ func TestLogExcerptLongLineAndANSI(t *testing.T) {
 
 func TestLogExcerptErrors(t *testing.T) {
 	t.Parallel()
-	sentinel := errors.New("late read failure")
-	got, err := ReadLogExcerpt(t.Context(), io.MultiReader(strings.NewReader(strings.Repeat("noise\n", 30000)), excerptErrorReader{sentinel}), false)
-	if got != "" || !errors.Is(err, sentinel) {
-		t.Fatalf("partial success: %q %v", got, err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if got, err := ReadLogExcerpt(ctx, strings.NewReader("log"), false); got != "" || !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancellation: %q %v", got, err)
-	}
-	if _, err := ReadLogExcerpt(t.Context(), strings.NewReader("\x1b["+strings.Repeat("1", 100)+"m"), false); err == nil {
-		t.Fatal("oversized ANSI accepted")
-	}
-	for _, n := range []int64{MaxLogBytes, MaxLogBytes + 1} {
-		got, err := ReadLogExcerpt(t.Context(), io.LimitReader(excerptRepeatReader{}, n), false)
-		if (err != nil) != (n > MaxLogBytes) {
-			t.Fatalf("source size %d: %v", n, err)
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		if _, err := ReadLogExcerpt(t.Context(), io.LimitReader(excerptRepeatReader{}, MaxLogBytes), false); err != nil {
+			t.Fatalf("source size %d: %v", MaxLogBytes, err)
 		}
-		if err != nil && got != "" {
-			t.Fatal("oversized source returned partial log")
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		sentinel := errors.New("late read failure")
+		got, err := ReadLogExcerpt(t.Context(), io.MultiReader(strings.NewReader(strings.Repeat("noise\n", 30000)), excerptErrorReader{sentinel}), false)
+		if got != "" || !errors.Is(err, sentinel) {
+			t.Fatalf("partial success: %q %v", got, err)
 		}
-	}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if got, err := ReadLogExcerpt(ctx, strings.NewReader("log"), false); got != "" || !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation: %q %v", got, err)
+		}
+		if _, err := ReadLogExcerpt(t.Context(), strings.NewReader("\x1b["+strings.Repeat("1", 100)+"m"), false); err == nil {
+			t.Fatal("oversized ANSI accepted")
+		}
+		if got, err := ReadLogExcerpt(t.Context(), io.LimitReader(excerptRepeatReader{}, MaxLogBytes+1), false); err == nil || got != "" {
+			t.Fatalf("oversized source returned got=%q err=%v", got, err)
+		}
+	})
 }
 
 type excerptErrorReader struct{ err error }

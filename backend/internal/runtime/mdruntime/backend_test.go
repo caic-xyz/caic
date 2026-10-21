@@ -681,26 +681,30 @@ func TestBackend(t *testing.T) {
 
 	t.Run("RefreshRefs", func(t *testing.T) {
 		t.Parallel()
-		for _, fail := range []bool{false, true} {
-			t.Run(fmt.Sprintf("error=%v", fail), func(t *testing.T) {
-				t.Parallel()
-				ctr := &fakeMDContainer{repo: []md.Repo{{ContainerPath: "/repo/one"}, {ContainerPath: "/repo/two"}}}
-				if fail {
-					ctr.syncErr = errors.New("upstream sync failed")
-				}
-				b := newTestBackend(&fakeMDClient{getResult: ctr})
-				err := b.RefreshRefs(t.Context(), "docker:ctr-1")
-				if fail && (!errors.Is(err, ctr.syncErr) || !strings.Contains(err.Error(), "/repo/one")) {
-					t.Fatalf("refresh must surface repository error: %v", err)
-				}
-				if !fail && err != nil {
-					t.Fatal(err)
-				}
-				if !slices.Equal(ctr.calls, []string{"SyncDefaultBranch:0", "SyncDefaultBranch:1"}) {
-					t.Fatalf("refresh must sync every repository without committing: %v", ctr.calls)
-				}
-			})
-		}
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			ctr := &fakeMDContainer{repo: []md.Repo{{ContainerPath: "/repo/one"}, {ContainerPath: "/repo/two"}}}
+			b := newTestBackend(&fakeMDClient{getResult: ctr})
+			if err := b.RefreshRefs(t.Context(), "docker:ctr-1"); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(ctr.calls, []string{"SyncDefaultBranch:0", "SyncDefaultBranch:1"}) {
+				t.Fatalf("refresh must sync every repository without committing: %v", ctr.calls)
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			syncErr := errors.New("upstream sync failed")
+			ctr := &fakeMDContainer{repo: []md.Repo{{ContainerPath: "/repo/one"}, {ContainerPath: "/repo/two"}}, syncErr: syncErr}
+			b := newTestBackend(&fakeMDClient{getResult: ctr})
+			err := b.RefreshRefs(t.Context(), "docker:ctr-1")
+			if !errors.Is(err, syncErr) || !strings.Contains(err.Error(), "/repo/one") {
+				t.Fatalf("refresh must surface repository error: %v", err)
+			}
+			if !slices.Equal(ctr.calls, []string{"SyncDefaultBranch:0", "SyncDefaultBranch:1"}) {
+				t.Fatalf("refresh must sync every repository without committing: %v", ctr.calls)
+			}
+		})
 	})
 
 	t.Run("Fetch", func(t *testing.T) {
@@ -1159,37 +1163,49 @@ func TestTurnSnapshotBackend(t *testing.T) {
 	t.Parallel()
 	dir := initStatusRepo(t)
 	tip := runTestGitOutput(t, dir, "rev-parse", "HEAD")
-	for _, invalid := range []bool{false, true} {
-		t.Run(fmt.Sprintf("invalid fetched tip %v", invalid), func(t *testing.T) {
-			t.Parallel()
-			fetched := tip
-			if invalid {
-				fetched = strings.Repeat("f", 40)
-			}
-			ct := &gitCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: fetched}}}}
-			backend := newTestBackend(&fakeMDClient{getResult: ct})
-			measured, err := backend.TurnSnapshot(t.Context(), "docker:ctr", []runtime.FetchedBranch{{RepositoryPath: dir, BranchName: "main", CommitHash: tip}})
-			if (err != nil) != invalid {
-				t.Fatalf("measurement error = %v", err)
-			}
-			if len(measured) != 1 || len(measured[0].Branches) != 1 || measured[0].Branches[0].CommitHash != fetched {
-				t.Fatalf("fetched tips lost: %+v", measured)
-			}
-			if invalid {
-				if measured[0].StatusErr == nil {
-					t.Fatal("moving HEAD was published as current")
-				}
-			} else {
-				if measured[0].TurnDiff == nil || len(measured[0].TurnDiff) != 0 {
-					t.Fatalf("clean delta unavailable: %+v", measured[0])
-				}
-			}
-			if !slices.Equal(ct.calls, []string{"Fetch"}) {
-				t.Fatalf("duplicated reference synchronization: %v", ct.calls)
-			}
-			if ct.fetchOpts.Commit {
-				t.Fatal("turn snapshot committed pending work")
-			}
-		})
-	}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		ct := &gitCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: tip}}}}
+		backend := newTestBackend(&fakeMDClient{getResult: ct})
+		measured, err := backend.TurnSnapshot(t.Context(), "docker:ctr", []runtime.FetchedBranch{{RepositoryPath: dir, BranchName: "main", CommitHash: tip}})
+		if err != nil {
+			t.Fatalf("measurement error = %v", err)
+		}
+		if len(measured) != 1 || len(measured[0].Branches) != 1 || measured[0].Branches[0].CommitHash != tip {
+			t.Fatalf("fetched tips lost: %+v", measured)
+		}
+		if measured[0].TurnDiff == nil || len(measured[0].TurnDiff) != 0 {
+			t.Fatalf("clean delta unavailable: %+v", measured[0])
+		}
+		if !slices.Equal(ct.calls, []string{"Fetch"}) {
+			t.Fatalf("duplicated reference synchronization: %v", ct.calls)
+		}
+		if ct.fetchOpts.Commit {
+			t.Fatal("turn snapshot committed pending work")
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		fetched := strings.Repeat("f", 40)
+		ct := &gitCommandContainer{repo: []md.Repo{{GitRoot: dir, ContainerPath: dir, Branches: []string{"main"}, DefaultRemote: "origin", DefaultBranch: "main"}}, fetchResults: [][]md.FetchedBranch{{{BranchName: "main", CommitHash: fetched}}}}
+		backend := newTestBackend(&fakeMDClient{getResult: ct})
+		measured, err := backend.TurnSnapshot(t.Context(), "docker:ctr", []runtime.FetchedBranch{{RepositoryPath: dir, BranchName: "main", CommitHash: tip}})
+		if err == nil {
+			t.Fatal("measurement error = nil, want error")
+		}
+		if len(measured) != 1 || len(measured[0].Branches) != 1 || measured[0].Branches[0].CommitHash != fetched {
+			t.Fatalf("fetched tips lost: %+v", measured)
+		}
+		if measured[0].StatusErr == nil {
+			t.Fatal("moving HEAD was published as current")
+		}
+		if !slices.Equal(ct.calls, []string{"Fetch"}) {
+			t.Fatalf("duplicated reference synchronization: %v", ct.calls)
+		}
+		if ct.fetchOpts.Commit {
+			t.Fatal("turn snapshot committed pending work")
+		}
+	})
 }

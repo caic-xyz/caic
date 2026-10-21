@@ -1678,23 +1678,71 @@ func testRunnerSessions(t *testing.T) {
 		})
 		t.Run("task_mcp", func(t *testing.T) {
 			t.Parallel()
-			for _, tc := range []struct {
-				name     string
-				enabled  bool
-				registry mcp.Registry
-				wantErr  bool
-			}{
-				{name: "enabled", enabled: true, registry: &mcptest.FakeRegistry{}},
-				{name: "disabled", registry: &mcptest.FakeRegistry{}},
-				{name: "unavailable", enabled: true, wantErr: true},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
+			t.Run("valid", func(t *testing.T) {
+				t.Parallel()
+				for _, tc := range []struct {
+					name     string
+					enabled  bool
+					registry mcp.Registry
+				}{
+					{name: "enabled", enabled: true, registry: &mcptest.FakeRegistry{}},
+					{name: "disabled", registry: &mcptest.FakeRegistry{}},
+				} {
+					t.Run(tc.name, func(t *testing.T) {
+						t.Parallel()
+						backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
+						r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{harness.Antigravity: backend})
+						r.MCPRegistry = tc.registry
+						tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Antigravity, "", "")
+						tk.CaicMCP = tc.enabled
+						log, err := r.openLog(tk)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := log.Close(); err != nil {
+							t.Fatal(err)
+						}
+						tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
+						tk.SetState(taskslog.StateWaiting)
+						ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
+						t.Cleanup(cancel)
+						h, err := r.Reconnect(ctx, tk)
+						if h != nil {
+							t.Cleanup(func() {
+								ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+								defer cancel()
+								if err := h.GracefulStop(ctx, time.Second); err != nil {
+									t.Errorf("stop reconnected session: %v", err)
+								}
+								if err := h.Drain(); err != nil {
+									t.Errorf("drain reconnected session: %v", err)
+								}
+								if err := h.Log.Close(); err != nil {
+									t.Errorf("close reconnected log: %v", err)
+								}
+							})
+						}
+						if err != nil {
+							t.Fatal(err)
+						}
+						var want mcp.Registry
+						if tc.enabled {
+							want = tc.registry
+						}
+						if backend.capturedAttachOpts.MCP != want {
+							t.Fatal("reconnect passed the wrong task registry")
+						}
+					})
+				}
+			})
+			t.Run("error", func(t *testing.T) {
+				t.Parallel()
+				t.Run("unavailable", func(t *testing.T) {
 					t.Parallel()
 					backend := &attachCaptureBackend{FakeBackend: &agenttest.FakeBackend{}}
 					r := newTestAgentRuntime(t, nil, filepath.Join(t.TempDir(), "logs"), map[harness.Name]agent.Backend{harness.Antigravity: backend})
-					r.MCPRegistry = tc.registry
 					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Antigravity, "", "")
-					tk.CaicMCP = tc.enabled
+					tk.CaicMCP = true
 					log, err := r.openLog(tk)
 					if err != nil {
 						t.Fatal(err)
@@ -1722,30 +1770,17 @@ func testRunnerSessions(t *testing.T) {
 							}
 						})
 					}
-					if tc.wantErr {
-						if err == nil || !strings.Contains(err.Error(), "task-scoped MCP is unavailable") {
-							t.Fatalf("Reconnect error = %v, want unavailable registry", err)
-						}
-						if h != nil || tk.HasSession() || backend.capturedAttachOpts.Log != nil {
-							t.Fatal("reconnect attached without required task registry")
-						}
-						if tk.GetState() != taskslog.StateWaiting {
-							t.Fatal("registry failure changed task state")
-						}
-						return
+					if err == nil || !strings.Contains(err.Error(), "task-scoped MCP is unavailable") {
+						t.Fatalf("Reconnect error = %v, want unavailable registry", err)
 					}
-					if err != nil {
-						t.Fatal(err)
+					if h != nil || tk.HasSession() || backend.capturedAttachOpts.Log != nil {
+						t.Fatal("reconnect attached without required task registry")
 					}
-					var want mcp.Registry
-					if tc.enabled {
-						want = tc.registry
-					}
-					if backend.capturedAttachOpts.MCP != want {
-						t.Fatal("reconnect passed the wrong task registry")
+					if tk.GetState() != taskslog.StateWaiting {
+						t.Fatal("registry failure changed task state")
 					}
 				})
-			}
+			})
 		})
 		t.Run("missing_log_fails_closed", func(t *testing.T) {
 			t.Parallel()

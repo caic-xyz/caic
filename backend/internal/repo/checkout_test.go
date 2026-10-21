@@ -902,12 +902,9 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("Push", func(t *testing.T) {
 		t.Parallel()
-		for _, diverged := range []bool{false, true} {
-			name := "PreservesCommits"
-			if diverged {
-				name = "RejectsNonFastForward"
-			}
-			t.Run(name, func(t *testing.T) {
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			t.Run("PreservesCommits", func(t *testing.T) {
 				t.Parallel()
 				clone := initTestRepo(t, "main")
 				g := &git.Checkout{Root: clone, Logger: logtest.Logger(t)}
@@ -925,14 +922,6 @@ func TestCheckout(t *testing.T) {
 				id := runtime.NewID("test-runtime", "ctr-1")
 				runGit(t, clone, "update-ref", runtimeRemoteRef(id, "caic-1"), tip)
 				runGit(t, clone, "checkout", "main")
-				if diverged {
-					if err := os.WriteFile(filepath.Join(clone, "other.txt"), []byte("remote change\n"), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					runGit(t, clone, "add", "other.txt")
-					runGit(t, clone, "commit", "-m", "Remote advanced")
-					runGit(t, clone, "push", "origin", "main")
-				}
 				before, err := g.RevParse(t.Context(), "main")
 				if err != nil {
 					t.Fatal(err)
@@ -942,34 +931,85 @@ func TestCheckout(t *testing.T) {
 				sc := newRecordingContainer()
 				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
 				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget(), []PushDestination{{Remote: "origin", Branch: "main", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
 				if fetches := sc.Fetches(); len(fetches) != 1 || fetches[0].Commit {
 					t.Fatalf("fetch must leave task history and pending edits untouched: %+v", fetches)
 				}
 				if len(issues) != 0 {
 					t.Fatalf("unexpected safety issues: %+v", issues)
 				}
-				want := tip
-				if diverged {
-					if err == nil {
-						t.Fatal("diverged main push succeeded")
-					}
-					want = before
-				} else if err != nil {
-					t.Fatal(err)
-				}
 				if err := g.Fetch(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 				got, err := g.RevParse(t.Context(), "origin/main")
-				if err != nil || got != want {
-					t.Fatalf("origin/main = %q, %v; want %q", got, err, want)
+				if err != nil || got != tip {
+					t.Fatalf("origin/main = %q, %v; want %q", got, err, tip)
 				}
 				got, err = g.RevParse(t.Context(), "HEAD")
 				if err != nil || got != before {
 					t.Fatalf("host HEAD = %q, %v; want %q", got, err, before)
 				}
 			})
-		}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			t.Run("RejectsNonFastForward", func(t *testing.T) {
+				t.Parallel()
+				clone := initTestRepo(t, "main")
+				g := &git.Checkout{Root: clone, Logger: logtest.Logger(t)}
+				runGit(t, clone, "checkout", "-b", "caic-1")
+				for _, content := range []string{"first change\n", "second change\n"} {
+					if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte(content), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					runGit(t, clone, "commit", "-am", content)
+				}
+				tip, err := g.RevParse(t.Context(), "HEAD")
+				if err != nil {
+					t.Fatal(err)
+				}
+				id := runtime.NewID("test-runtime", "ctr-1")
+				runGit(t, clone, "update-ref", runtimeRemoteRef(id, "caic-1"), tip)
+				runGit(t, clone, "checkout", "main")
+				if err := os.WriteFile(filepath.Join(clone, "other.txt"), []byte("remote change\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, clone, "add", "other.txt")
+				runGit(t, clone, "commit", "-m", "Remote advanced")
+				runGit(t, clone, "push", "origin", "main")
+				before, err := g.RevParse(t.Context(), "main")
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := newInitializedTestCheckout(t, clone)
+				tv := &fakeTaskView{instanceID: id, repo: []runtime.Repo{{GitRoot: clone, Branch: "caic-1", ContainerPath: "/repo"}}}
+				sc := newRecordingContainer()
+				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
+				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), tv.GitTarget(), []PushDestination{{Remote: "origin", Branch: "main", BaseRef: "refs/remotes/origin/main"}}, PushOptions{})
+				if err == nil {
+					t.Fatal("diverged main push succeeded")
+				}
+				if fetches := sc.Fetches(); len(fetches) != 1 || fetches[0].Commit {
+					t.Fatalf("fetch must leave task history and pending edits untouched: %+v", fetches)
+				}
+				if len(issues) != 0 {
+					t.Fatalf("unexpected safety issues: %+v", issues)
+				}
+				if err := g.Fetch(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				got, err := g.RevParse(t.Context(), "origin/main")
+				if err != nil || got != before {
+					t.Fatalf("origin/main = %q, %v; want %q", got, err, before)
+				}
+				got, err = g.RevParse(t.Context(), "HEAD")
+				if err != nil || got != before {
+					t.Fatalf("host HEAD = %q, %v; want %q", got, err, before)
+				}
+			})
+		})
 	})
 	t.Run("PushDestinations", func(t *testing.T) {
 		t.Parallel()
@@ -1174,30 +1214,74 @@ func TestCheckout(t *testing.T) {
 	})
 	t.Run("PushPolicies", func(t *testing.T) {
 		t.Parallel()
-		for _, tc := range []struct {
-			name     string
-			opts     PushOptions
-			secret   bool
-			diverged bool
-			blocked  bool
-			wantErr  bool
-		}{
-			{name: "CommitPending", opts: PushOptions{CommitPending: true}},
-			{name: "SafetyBlocksForce", opts: PushOptions{Force: true}, secret: true, blocked: true},
-			{name: "BypassSafety", opts: PushOptions{BypassSafety: true}, secret: true},
-			{name: "BypassDoesNotForce", opts: PushOptions{BypassSafety: true}, diverged: true, wantErr: true},
-			{name: "Force", opts: PushOptions{Force: true}, diverged: true},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name     string
+				opts     PushOptions
+				secret   bool
+				diverged bool
+				blocked  bool
+			}{
+				{name: "CommitPending", opts: PushOptions{CommitPending: true}},
+				{name: "SafetyBlocksForce", opts: PushOptions{Force: true}, secret: true, blocked: true},
+				{name: "BypassSafety", opts: PushOptions{BypassSafety: true}, secret: true},
+				{name: "Force", opts: PushOptions{Force: true}, diverged: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					root := initTestRepo(t, "main")
+					g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
+					runGit(t, root, "checkout", "-b", "caic-1")
+					content := "safe task change\n"
+					if tc.secret {
+						content = "sk-" + strings.Repeat("a", 24) + "\n"
+					}
+					if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(content), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					runGit(t, root, "commit", "-am", "task change")
+					tip, err := g.RevParse(t.Context(), "HEAD")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if tc.diverged {
+						runGit(t, root, "checkout", "main")
+						runGit(t, root, "commit", "--allow-empty", "-m", "divergent destination")
+						runGit(t, root, "push", "origin", "HEAD:caic-1")
+					}
+					sc := newRecordingContainer()
+					sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
+					w := newInitializedTestCheckout(t, root)
+					target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
+					_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, tc.opts)
+					if err != nil || (len(issues) != 0) != tc.secret {
+						t.Fatalf("issues=%+v err=%v", issues, err)
+					}
+					if got := sc.Fetches(); len(got) != 1 || got[0].Commit != tc.opts.CommitPending {
+						t.Fatalf("commit policy: %+v", got)
+					}
+					out, err := g.RunGit(t.Context(), "ls-remote", "origin", "refs/heads/caic-1")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if tc.blocked && out != "" {
+						t.Fatalf("blocked push published branch: %q", out)
+					}
+					if !tc.blocked && !strings.HasPrefix(out, tip+"\t") {
+						t.Fatalf("push did not preserve task commit: %q", out)
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			t.Run("BypassDoesNotForce", func(t *testing.T) {
 				t.Parallel()
 				root := initTestRepo(t, "main")
 				g := &git.Checkout{Root: root, Logger: logtest.Logger(t)}
 				runGit(t, root, "checkout", "-b", "caic-1")
-				content := "safe task change\n"
-				if tc.secret {
-					content = "sk-" + strings.Repeat("a", 24) + "\n"
-				}
-				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(content), 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("safe task change\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				runGit(t, root, "commit", "-am", "task change")
@@ -1205,34 +1289,30 @@ func TestCheckout(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if tc.diverged {
-					runGit(t, root, "checkout", "main")
-					runGit(t, root, "commit", "--allow-empty", "-m", "divergent destination")
-					runGit(t, root, "push", "origin", "HEAD:caic-1")
-				}
+				runGit(t, root, "checkout", "main")
+				runGit(t, root, "commit", "--allow-empty", "-m", "divergent destination")
+				runGit(t, root, "push", "origin", "HEAD:caic-1")
+
 				sc := newRecordingContainer()
 				sc.FetchedBranches = []runtime.FetchedBranch{{RepositoryPath: "/repo", BranchName: "caic-1", CommitHash: tip}}
 				w := newInitializedTestCheckout(t, root)
 				target := GitTarget{InstanceID: runtime.NewID("test-runtime", "ctr-1"), Repos: []runtime.Repo{{GitRoot: root, ContainerPath: "/repo", Branch: "caic-1"}}}
-				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, tc.opts)
-				if (err != nil) != tc.wantErr || (len(issues) != 0) != tc.secret {
-					t.Fatalf("issues=%+v err=%v", issues, err)
+				_, issues, err := w.Push(t.Context(), logtest.Logger(t), newTestRuntime(t, sc), target, []PushDestination{{Remote: "origin", Branch: "caic-1", BaseRef: "refs/remotes/origin/main"}}, PushOptions{BypassSafety: true})
+				if err == nil || len(issues) != 0 {
+					t.Fatalf("issues=%+v err=%v, want push error", issues, err)
 				}
-				if got := sc.Fetches(); len(got) != 1 || got[0].Commit != tc.opts.CommitPending {
+				if got := sc.Fetches(); len(got) != 1 || got[0].Commit {
 					t.Fatalf("commit policy: %+v", got)
 				}
 				out, err := g.RunGit(t.Context(), "ls-remote", "origin", "refs/heads/caic-1")
 				if err != nil {
 					t.Fatal(err)
 				}
-				if tc.blocked && out != "" {
-					t.Fatalf("blocked push published branch: %q", out)
-				}
-				if !tc.blocked && !tc.wantErr && !strings.HasPrefix(out, tip+"\t") {
-					t.Fatalf("push did not preserve task commit: %q", out)
+				if strings.HasPrefix(out, tip+"\t") {
+					t.Fatalf("failed push updated remote branch: %q", out)
 				}
 			})
-		}
+		})
 	})
 	t.Run("NewCheckout", func(t *testing.T) {
 		t.Parallel()
@@ -1938,39 +2018,44 @@ func (b *summaryProbeBackend) RepositoryStatus(_ context.Context, id runtime.ID,
 
 func TestRepositoryStatusesSnapshot(t *testing.T) {
 	t.Parallel()
-	for _, fails := range []bool{false, true} {
-		t.Run(fmt.Sprintf("probe failure %v", fails), func(t *testing.T) {
-			t.Parallel()
-			checkout := newTestCheckout(t.TempDir())
-			tv := &fakeTaskView{instanceID: "test-runtime:original", repo: []runtime.Repo{{Branch: "feature", ContainerPath: "/workspace/repo"}}}
-			var readID runtime.ID
-			backend := &summaryProbeBackend{
-				FakeBackend: &runtimetest.FakeBackend{RepositoryStatusValue: runtime.RepositoryStatus{
-					Branch: "feature", Behind: 2, DiffStat: []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 4}},
-				}},
-				read: func(id runtime.ID) { readID = id; tv.instanceID = "test-runtime:replacement" },
-			}
-			if fails {
-				backend.err = errors.New("read failed")
-			}
-			snapshot, err := checkout.RepositoryStatuses(t.Context(), newTestRuntime(t, backend), tv.GitTarget())
-			if fails {
-				if err == nil || snapshot.Read.NewerThan(GitRead{}) || len(snapshot.Statuses) != 0 {
-					t.Fatalf("failed read returned publishable snapshot: %+v, %v", snapshot, err)
-				}
-				return
-			}
-			if err != nil || len(snapshot.Statuses) != 1 {
-				t.Fatalf("snapshot=%+v, err=%v", snapshot, err)
-			}
-			if snapshot.Read.InstanceID != readID || readID != "test-runtime:original" {
-				t.Errorf("snapshot instance %q differs from read %q", snapshot.Read.InstanceID, readID)
-			}
-			if len(snapshot.DiffStat) != 1 || snapshot.DiffStat[0].Path != "fresh.go" || len(snapshot.RepoStates) != 1 || snapshot.RepoStates[0].Behind != 2 || snapshot.RepoStates[0].LinesAdded != 4 {
-				t.Errorf("summary differs from read snapshot: %+v", snapshot)
-			}
-		})
-	}
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		checkout := newTestCheckout(t.TempDir())
+		tv := &fakeTaskView{instanceID: "test-runtime:original", repo: []runtime.Repo{{Branch: "feature", ContainerPath: "/workspace/repo"}}}
+		var readID runtime.ID
+		backend := &summaryProbeBackend{
+			FakeBackend: &runtimetest.FakeBackend{RepositoryStatusValue: runtime.RepositoryStatus{
+				Branch: "feature", Behind: 2, DiffStat: []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 4}},
+			}},
+			read: func(id runtime.ID) { readID = id; tv.instanceID = "test-runtime:replacement" },
+		}
+		snapshot, err := checkout.RepositoryStatuses(t.Context(), newTestRuntime(t, backend), tv.GitTarget())
+		if err != nil || len(snapshot.Statuses) != 1 {
+			t.Fatalf("snapshot=%+v, err=%v", snapshot, err)
+		}
+		if snapshot.Read.InstanceID != readID || readID != "test-runtime:original" {
+			t.Errorf("snapshot instance %q differs from read %q", snapshot.Read.InstanceID, readID)
+		}
+		if len(snapshot.DiffStat) != 1 || snapshot.DiffStat[0].Path != "fresh.go" || len(snapshot.RepoStates) != 1 || snapshot.RepoStates[0].Behind != 2 || snapshot.RepoStates[0].LinesAdded != 4 {
+			t.Errorf("summary differs from read snapshot: %+v", snapshot)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		checkout := newTestCheckout(t.TempDir())
+		tv := &fakeTaskView{instanceID: "test-runtime:original", repo: []runtime.Repo{{Branch: "feature", ContainerPath: "/workspace/repo"}}}
+		backend := &summaryProbeBackend{
+			FakeBackend: &runtimetest.FakeBackend{RepositoryStatusValue: runtime.RepositoryStatus{
+				Branch: "feature", Behind: 2, DiffStat: []runtime.GitFileStat{{Path: "fresh.go", LinesAdded: 4}},
+			}},
+			read: func(id runtime.ID) { tv.instanceID = "test-runtime:replacement" },
+			err:  errors.New("read failed"),
+		}
+		snapshot, err := checkout.RepositoryStatuses(t.Context(), newTestRuntime(t, backend), tv.GitTarget())
+		if err == nil || snapshot.Read.NewerThan(GitRead{}) || len(snapshot.Statuses) != 0 {
+			t.Fatalf("failed read returned publishable snapshot: %+v, %v", snapshot, err)
+		}
+	})
 }
 
 func TestGitProbeCompletionOrder(t *testing.T) {

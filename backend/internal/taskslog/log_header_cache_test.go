@@ -175,34 +175,58 @@ func TestHeaderCache(t *testing.T) {
 	})
 	t.Run("StateValidation", func(t *testing.T) {
 		t.Parallel()
-		for _, tc := range []struct {
-			name, body string
-			valid      bool
-		}{
-			{"omitted", `{}`, true},
-			{"unknown", `{"state":"future"}`, false},
-			{"empty", `{"state":""}`, false},
-			{"null", `{"state":null}`, false},
-			{"result_unknown", `{"state":"purged","result":{"state":"future"}}`, false},
-			{"result_null", `{"state":"purged","result":{"state":null}}`, false},
-			{"result_omitted", `{"state":"purged","result":{}}`, true},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				path := filepath.Join(t.TempDir(), "task.jsonl")
-				writeLogFile(t, filepath.Dir(path), filepath.Base(path), `{"type":"caic_meta","version":1,"harness":"claude","prompt":"rebuild","repos":[]}`, `{"type":"caic_result","state":"purged"}`)
-				info, err := os.Stat(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				body := fmt.Sprintf(`{"version":6,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
-				if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				if _, ok := readHeaderCache(path); ok != tc.valid {
-					t.Fatalf("cache accepted = %t, want %t", ok, tc.valid)
-				}
-				if !tc.valid {
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name, body string
+			}{
+				{"omitted", `{}`},
+				{"result_omitted", `{"state":"purged","result":{}}`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					path := filepath.Join(t.TempDir(), "task.jsonl")
+					writeLogFile(t, filepath.Dir(path), filepath.Base(path), `{"type":"caic_meta","version":1,"harness":"claude","prompt":"rebuild","repos":[]}`, `{"type":"caic_result","state":"purged"}`)
+					info, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body := fmt.Sprintf(`{"version":6,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if _, ok := readHeaderCache(path); !ok {
+						t.Fatal("cache rejected valid header")
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name, body string
+			}{
+				{"unknown", `{"state":"future"}`},
+				{"empty", `{"state":""}`},
+				{"null", `{"state":null}`},
+				{"result_unknown", `{"state":"purged","result":{"state":"future"}}`},
+				{"result_null", `{"state":"purged","result":{"state":null}}`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					path := filepath.Join(t.TempDir(), "task.jsonl")
+					writeLogFile(t, filepath.Dir(path), filepath.Base(path), `{"type":"caic_meta","version":1,"harness":"claude","prompt":"rebuild","repos":[]}`, `{"type":"caic_result","state":"purged"}`)
+					info, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body := fmt.Sprintf(`{"version":6,"log_size":%d,"log_mtime_unix_nano":%d,"task":%s}`, info.Size(), info.ModTime().UnixNano(), tc.body)
+					if err := os.WriteFile(logHeaderCachePath(path), []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if _, ok := readHeaderCache(path); ok {
+						t.Fatal("cache accepted invalid header")
+					}
 					got, err := loadLogHeader(testLogger(), path, true)
 					if err != nil || got.Prompt != "rebuild" {
 						t.Fatalf("rebuild = %+v, %v", got, err)
@@ -214,8 +238,8 @@ func TestHeaderCache(t *testing.T) {
 					if strings.Contains(string(raw), `"future"`) {
 						t.Fatal("corrupt snapshot survived rebuild")
 					}
-				}
-			})
-		}
+				})
+			}
+		})
 	})
 }

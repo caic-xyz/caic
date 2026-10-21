@@ -15,37 +15,51 @@ func TestPreferencesPersistence(t *testing.T) {
 	t.Parallel()
 	t.Run("settings_defaults", func(t *testing.T) {
 		t.Parallel()
-		for _, tc := range []struct {
-			name, settings string
-			valid          bool
-		}{
-			{"missing", "", false},
-			{"null", `,"settings":null`, true},
-			{"empty", `,"settings":{}`, true},
-			{"null_delay", `,"settings":{"purgeDelay":null}`, true},
-			{"zero_delay", `,"settings":{"purgeDelay":0}`, false},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				p := filepath.Join(t.TempDir(), "preferences.json")
-				if err := os.WriteFile(p, []byte(`{"users":{"fixture":{"version":1`+tc.settings+`}}}`), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				s, err := Open(p)
-				if !tc.valid {
-					if err == nil {
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name, settings string
+			}{
+				{"null", `,"settings":null`},
+				{"empty", `,"settings":{}`},
+				{"null_delay", `,"settings":{"purgeDelay":null}`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					p := filepath.Join(t.TempDir(), "preferences.json")
+					if err := os.WriteFile(p, []byte(`{"users":{"fixture":{"version":1`+tc.settings+`}}}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					s, err := Open(p)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := s.Get("fixture").Settings.PurgeDelay; got != 15*time.Second {
+						t.Fatalf("purge delay = %s", got)
+					}
+				})
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				name, settings string
+			}{
+				{"missing", ""},
+				{"zero_delay", `,"settings":{"purgeDelay":0}`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					p := filepath.Join(t.TempDir(), "preferences.json")
+					if err := os.WriteFile(p, []byte(`{"users":{"fixture":{"version":1`+tc.settings+`}}}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := Open(p); err == nil {
 						t.Fatal("expected invalid purge delay")
 					}
-					return
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got := s.Get("fixture").Settings.PurgeDelay; got != 15*time.Second {
-					t.Fatalf("purge delay = %s", got)
-				}
-			})
-		}
+				})
+			}
+		})
 	})
 	t.Run("historical_round_trip", func(t *testing.T) {
 		t.Parallel()

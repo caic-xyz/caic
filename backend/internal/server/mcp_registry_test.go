@@ -238,75 +238,88 @@ func TestGetUsageTimezone(t *testing.T) {
 func TestTaskIDDecode(t *testing.T) {
 	t.Parallel()
 
-	stableID := ksid.NewID()
-	for _, test := range []struct {
-		name       string
-		ref        taskID
-		max        int
-		wantID     ksid.ID
-		wantNumber int
-		wantErr    bool
-	}{
-		{name: "task number", ref: "2", max: 2, wantNumber: 2},
-		{name: "hashtag task number", ref: taskID("#2"), max: 2, wantNumber: 2},
-		{name: "stable ID", ref: taskID(stableID.String()), max: 2, wantID: stableID},
-		{name: "out of range number", ref: "3", max: 2, wantErr: true},
-		{name: "out of range hashtag number", ref: taskID("#3"), max: 2, wantErr: true},
-		{name: "invalid reference", ref: "not a task", max: 2, wantErr: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		stableID := ksid.NewID()
+		for _, tc := range []struct {
+			name       string
+			ref        taskID
+			max        int
+			wantID     ksid.ID
+			wantNumber int
+		}{
+			{name: "task number", ref: "2", max: 2, wantNumber: 2},
+			{name: "hashtag task number", ref: taskID("#2"), max: 2, wantNumber: 2},
+			{name: "stable ID", ref: taskID(stableID.String()), max: 2, wantID: stableID},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				gotID, gotNumber, err := tc.ref.Decode(tc.max)
+				if err != nil {
+					t.Fatalf("Decode() error: %v", err)
+				}
+				if gotID != tc.wantID || gotNumber != tc.wantNumber {
+					t.Fatalf("Decode() = (%q, %d), want (%q, %d)", gotID, gotNumber, tc.wantID, tc.wantNumber)
+				}
+			})
+		}
+	})
 
-			gotID, gotNumber, err := test.ref.Decode(test.max)
-			if test.wantErr {
-				if err == nil {
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			ref  taskID
+			max  int
+		}{
+			{name: "out of range number", ref: "3", max: 2},
+			{name: "out of range hashtag number", ref: taskID("#3"), max: 2},
+			{name: "invalid reference", ref: "not a task", max: 2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if _, _, err := tc.ref.Decode(tc.max); err == nil {
 					t.Fatal("Decode() error = nil, want error")
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Decode() error: %v", err)
-			}
-			if gotID != test.wantID || gotNumber != test.wantNumber {
-				t.Fatalf("Decode() = (%q, %d), want (%q, %d)", gotID, gotNumber, test.wantID, test.wantNumber)
-			}
-		})
-	}
+			})
+		}
+	})
 }
 
 func TestTaskIDUnmarshalJSON(t *testing.T) {
 	t.Parallel()
 
-	for _, test := range []struct {
-		name    string
-		raw     string
-		want    taskID
-		wantErr bool
-	}{
-		{name: "integer", raw: "3", want: "3"},
-		{name: "number string", raw: `"3"`, want: "3"},
-		{name: "hashtag string", raw: `"#3"`, want: "#3"},
-		{name: "object", raw: `{}`, wantErr: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			var got taskID
-			err := json.Unmarshal([]byte(test.raw), &got)
-			if test.wantErr {
-				if err == nil {
-					t.Fatal("Unmarshal() error = nil, want error")
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			raw  string
+			want taskID
+		}{
+			{name: "integer", raw: "3", want: "3"},
+			{name: "number string", raw: `"3"`, want: "3"},
+			{name: "hashtag string", raw: `"#3"`, want: "#3"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				var got taskID
+				if err := json.Unmarshal([]byte(tc.raw), &got); err != nil {
+					t.Fatalf("Unmarshal() error: %v", err)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Unmarshal() error: %v", err)
-			}
-			if got != test.want {
-				t.Fatalf("Unmarshal() = %q, want %q", got, test.want)
-			}
-		})
-	}
+				if got != tc.want {
+					t.Fatalf("Unmarshal() = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		var got taskID
+		if err := json.Unmarshal([]byte(`{}`), &got); err == nil {
+			t.Fatal("Unmarshal() error = nil, want error")
+		}
+	})
 }
 
 // TestMCPTaskNumberSchema checks that task numbers are advertised as an

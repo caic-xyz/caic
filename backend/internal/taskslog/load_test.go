@@ -441,90 +441,102 @@ func TestNeedsV1InventoryParse(t *testing.T) {
 
 func TestDecodeDiscriminatorProbe(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name     string
-		line     string
-		version  agent.LogVersion
-		wantTyp  string
-		wantCand bool
-		wantErr  bool
-	}{
-		{
-			name:    "V1 canonical non-meta",
-			line:    `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
-			version: agent.LogVersionV1,
-			wantTyp: "assistant",
-		},
-		{
-			name:     "V1 canonical meta",
-			line:     `{"type":"caic_meta","version":1,"harness":"claude"}`,
-			version:  agent.LogVersionV1,
-			wantTyp:  "caic_meta",
-			wantCand: true,
-		},
-		{
-			name:    "V2 canonical non-meta",
-			line:    `{"t":"system","ts":1.5,"model":"claude"}`,
-			version: agent.LogVersionV2,
-			wantTyp: "system",
-		},
-		{
-			name:     "V2 canonical meta",
-			line:     `{"t":"caic_meta","v":2}`,
-			version:  agent.LogVersionV2,
-			wantTyp:  "caic_meta",
-			wantCand: true,
-		},
-		{
-			name:     "V1 reordered keys still probed",
-			line:     `{"prompt":"x","type":"caic_meta"}`,
-			version:  agent.LogVersionV1,
-			wantTyp:  "caic_meta",
-			wantCand: true,
-		},
-		{
-			name:     "V1 whitespace before value",
-			line:     `{"type": "caic_meta"}`,
-			version:  agent.LogVersionV1,
-			wantTyp:  "caic_meta",
-			wantCand: true,
-		},
-		{
-			name:    "V1 escaped value falls through",
-			line:    `{"type":"a\"b","x":1}`,
-			version: agent.LogVersionV1,
-			wantTyp: "a\"b",
-		},
-		{
-			name:    "V2 line keyed by type falls through",
-			line:    `{"type":"system","t":"agent"}`,
-			version: agent.LogVersionV2,
-			wantTyp: "",
-		},
-		{
-			name:     "V1 meta type with later t",
-			line:     `{"type":"caic_meta","t":"system"}`,
-			version:  agent.LogVersionV1,
-			wantTyp:  "caic_meta",
-			wantCand: true,
-		},
-		{
-			name:    "non-object line",
-			line:    `42`,
-			version: agent.LogVersionV1,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			typ, cand, err := decodeDiscriminatorProbe([]byte(tc.line), tc.version)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("decodeDiscriminatorProbe error = %v, wantErr %t", err, tc.wantErr)
-			}
-			if typ != tc.wantTyp || cand != tc.wantCand {
-				t.Errorf("decodeDiscriminatorProbe = (%q, %t), want (%q, %t)", typ, cand, tc.wantTyp, tc.wantCand)
-			}
-		})
-	}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name     string
+			line     string
+			version  agent.LogVersion
+			wantTyp  string
+			wantCand bool
+		}{
+			{
+				name:    "V1 canonical non-meta",
+				line:    `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
+				version: agent.LogVersionV1,
+				wantTyp: "assistant",
+			},
+			{
+				name:     "V1 canonical meta",
+				line:     `{"type":"caic_meta","version":1,"harness":"claude"}`,
+				version:  agent.LogVersionV1,
+				wantTyp:  "caic_meta",
+				wantCand: true,
+			},
+			{
+				name:    "V2 canonical non-meta",
+				line:    `{"t":"system","ts":1.5,"model":"claude"}`,
+				version: agent.LogVersionV2,
+				wantTyp: "system",
+			},
+			{
+				name:     "V2 canonical meta",
+				line:     `{"t":"caic_meta","v":2}`,
+				version:  agent.LogVersionV2,
+				wantTyp:  "caic_meta",
+				wantCand: true,
+			},
+			{
+				name:     "V1 reordered keys still probed",
+				line:     `{"prompt":"x","type":"caic_meta"}`,
+				version:  agent.LogVersionV1,
+				wantTyp:  "caic_meta",
+				wantCand: true,
+			},
+			{
+				name:     "V1 whitespace before value",
+				line:     `{"type": "caic_meta"}`,
+				version:  agent.LogVersionV1,
+				wantTyp:  "caic_meta",
+				wantCand: true,
+			},
+			{
+				name:    "V1 escaped value falls through",
+				line:    `{"type":"a\"b","x":1}`,
+				version: agent.LogVersionV1,
+				wantTyp: "a\"b",
+			},
+			{
+				name:    "V2 line keyed by type falls through",
+				line:    `{"type":"system","t":"agent"}`,
+				version: agent.LogVersionV2,
+				wantTyp: "",
+			},
+			{
+				name:     "V1 meta type with later t",
+				line:     `{"type":"caic_meta","t":"system"}`,
+				version:  agent.LogVersionV1,
+				wantTyp:  "caic_meta",
+				wantCand: true,
+			},
+			{
+				name:    "non-object line",
+				line:    `42`,
+				version: agent.LogVersionV1,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				typ, cand, err := decodeDiscriminatorProbe([]byte(tc.line), tc.version)
+				if err != nil {
+					t.Fatalf("decodeDiscriminatorProbe error = %v", err)
+				}
+				if typ != tc.wantTyp || cand != tc.wantCand {
+					t.Errorf("decodeDiscriminatorProbe = (%q, %t), want (%q, %t)", typ, cand, tc.wantTyp, tc.wantCand)
+				}
+			})
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		deep := strings.Repeat(`{"k":`, maxJSONNesting+2) + `1` + strings.Repeat(`}`, maxJSONNesting+2)
+		line := `{"type":` + deep + `}`
+		if _, _, err := decodeDiscriminatorProbe([]byte(line), agent.LogVersionV1); !errors.Is(err, errJSONNesting) {
+			t.Fatalf("decodeDiscriminatorProbe error = %v, want errJSONNesting", err)
+		}
+	})
 }
 
 // inventoryJSON renders LoadedTask's JSON projection for testing comparison,

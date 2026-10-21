@@ -6972,14 +6972,14 @@ func TestLoadersConcurrentWithNotify(t *testing.T) {
 type importedRecoveryBackend struct {
 	reconnectInputBackend
 
-	started chan *agent.Options
-	fail    bool
+	started  chan *agent.Options
+	startErr error
 }
 
 func (b *importedRecoveryBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.started <- opts
-	if b.fail {
-		return nil, errors.New("resume rejected")
+	if b.startErr != nil {
+		return nil, b.startErr
 	}
 	return b.AttachRelay(ctx, opts)
 }
@@ -6997,227 +6997,316 @@ func (b *importedRecoveryBackend) NewWire() agent.WireFormat {
 	}
 }
 
+type importedRecoverySetup struct {
+	harness      harness.Name
+	runtimeState string
+	statusErr    error
+	alive        bool
+	state        taskslog.State
+	reason       string
+	startErr     error
+}
+
+type importedRecoveryTestEnv struct {
+	m          *Manager
+	backend    *importedRecoveryBackend
+	rb         *runtimetest.FakeBackend
+	id         ksid.ID
+	instanceID runtime.ID
+	entries    []*Entry
+	err        error
+}
+
+func setupImportedRecovery(t *testing.T, s *importedRecoverySetup) *importedRecoveryTestEnv {
+	h := s.harness
+	if h == "" {
+		h = harness.Pi
+	}
+	runtimeState := s.runtimeState
+	if runtimeState == "" {
+		runtimeState = "running"
+	}
+	id := ksid.NewID()
+	instanceID := runtime.NewID("test-runtime", "md-agent-recovery")
+	backend := &importedRecoveryBackend{started: make(chan *agent.Options, 1), startErr: s.startErr}
+	backend.FakeBackend = &agenttest.FakeBackend{HarnessName: h}
+	rb := &runtimetest.FakeBackend{}
+	info := &runtimetest.FakeInfo{Meta: map[string]string{
+		"md-agent-recovery\x00caic.id":      id.String(),
+		"md-agent-recovery\x00caic.harness": string(h),
+	}}
+	store := taskslog.NewStore(testLogger(), t.TempDir())
+	m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: info, backend: rb}), Backends: map[harness.Name]agent.Backend{h: backend}})
+	// Exercise the startup fence used by Manager.Start without launching
+	// unrelated stats and runtime watcher goroutines.
+	m.importing = true
+	m.importDone = make(chan struct{})
+	m.pendingRuntimeEvents = []runtime.Event{{Kind: runtime.EventDie, InstanceID: instanceID}}
+	t.Cleanup(func() { _ = m.Close(); backend.stop() })
+	m.relay = fakeRelayReader{
+		statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
+			return s.alive, "probe", s.statusErr
+		},
+		readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
+			return agent.ParsedTimeline{}, 0, errors.New("relay output lost")
+		},
+		readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
+	}
+	tk, err := task.NewTask(id, agent.Prompt{Text: "accepted prompt"}, h, "", "", "", "", "existing title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.AppendMessage(&agent.UserInputMessage{Text: "accepted prompt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteResultTrailer(log, "existing title", &taskslog.Result{State: s.state, Err: errors.New(s.reason)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Compress(path, log, s.state); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := store.LoadForTaskIDs([]string{id.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: runtimeState, AgentTarget: runtime.ConnectionTarget{SSHHost: "recovery"}}}, logs)
+	return &importedRecoveryTestEnv{
+		m:          m,
+		backend:    backend,
+		rb:         rb,
+		id:         id,
+		instanceID: instanceID,
+		entries:    entries,
+		err:        err,
+	}
+}
+
+func assertImportedRecoveryHistory(t *testing.T, m *Manager, logPath string) {
+	if strings.HasSuffix(logPath, ".zst") {
+		t.Fatal("recovery did not restore the archived log")
+	}
+	loaded, err := taskslog.LoadHistorySource(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.LoadMessagesWithResolver(m); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msg := range loaded.Timeline {
+		if input, ok := msg.Message.(*agent.UserInputMessage); ok && input.Text == "accepted prompt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("recovery lost original history")
+	}
+}
+
 func TestManagerImportedRecovery(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name         string
-		harness      harness.Name
-		runtimeState string
-		fail         bool
-		sendInput    bool
-		statusErr    error
-		alive        bool
-		state        taskslog.State
-		reason       string
-		recover      bool
-	}{
-		{name: "input_during_readiness", sendInput: true, state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
-		{name: "success", state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
-		{name: "resume_failure", fail: true, state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
-		{name: "running_uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateRunning},
-		{name: "live_relay_missing_output", alive: true, state: taskslog.StateRunning},
-		{name: "uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateFailed, reason: "revive instance: missing host branch"},
-		{name: "deliberately_stopped", state: taskslog.StateStopped},
-		{name: "relay_crash", state: taskslog.StateRunning, recover: true},
-		{name: "waiting_relay_crash", state: taskslog.StateWaiting, recover: true},
-		{name: "claude_oom_runtime_exit", harness: harness.Claude, runtimeState: "exited", state: taskslog.StateCrashed, reason: "runtime instance ran out of memory", recover: true},
-		{name: "codex_relay_crash", harness: harness.Codex, state: taskslog.StateRunning, recover: true},
-		{name: "opencode_runtime_exit", harness: harness.OpenCode, runtimeState: "exited", state: taskslog.StateRunning, recover: true},
-		{name: "persisted_stop_intent", state: taskslog.StateStopping},
-		{name: "live_persisted_stop_intent", alive: true, state: taskslog.StateStopping},
-		{name: "uncertain_persisted_stop_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StateStopping},
-		{name: "live_persisted_purge_intent", alive: true, state: taskslog.StatePurging},
-		{name: "uncertain_persisted_purge_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StatePurging},
-		{name: "persisted_purge_intent", state: taskslog.StatePurging},
-		{name: "ordinary_failure", state: taskslog.StateFailed, reason: "agent startup failed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name         string
+			harness      harness.Name
+			runtimeState string
+			sendInput    bool
+			statusErr    error
+			alive        bool
+			state        taskslog.State
+			reason       string
+			recover      bool
+		}{
+			{name: "input_during_readiness", sendInput: true, state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
+			{name: "success", state: taskslog.StateFailed, reason: "revive instance: missing host branch", recover: true},
+			{name: "deliberately_stopped", state: taskslog.StateStopped},
+			{name: "relay_crash", state: taskslog.StateRunning, recover: true},
+			{name: "waiting_relay_crash", state: taskslog.StateWaiting, recover: true},
+			{name: "claude_oom_runtime_exit", harness: harness.Claude, runtimeState: "exited", state: taskslog.StateCrashed, reason: "runtime instance ran out of memory", recover: true},
+			{name: "codex_relay_crash", harness: harness.Codex, state: taskslog.StateRunning, recover: true},
+			{name: "opencode_runtime_exit", harness: harness.OpenCode, runtimeState: "exited", state: taskslog.StateRunning, recover: true},
+			{name: "persisted_stop_intent", state: taskslog.StateStopping},
+			{name: "live_persisted_stop_intent", alive: true, state: taskslog.StateStopping},
+			{name: "uncertain_persisted_stop_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StateStopping},
+			{name: "live_persisted_purge_intent", alive: true, state: taskslog.StatePurging},
+			{name: "uncertain_persisted_purge_intent", statusErr: errors.New("SSH unavailable"), state: taskslog.StatePurging},
+			{name: "persisted_purge_intent", state: taskslog.StatePurging},
+			{name: "ordinary_failure", state: taskslog.StateFailed, reason: "agent startup failed"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				env := setupImportedRecovery(t, &importedRecoverySetup{
+					harness:      tc.harness,
+					runtimeState: tc.runtimeState,
+					statusErr:    tc.statusErr,
+					alive:        tc.alive,
+					state:        tc.state,
+					reason:       tc.reason,
+				})
+				if env.err != nil || len(env.entries) != 1 {
+					t.Fatalf("import entries=%v err=%v", env.entries, env.err)
+				}
+				shutdownIntent := tc.state == taskslog.StateStopping || tc.state == taskslog.StatePurging || tc.state == taskslog.StateStopped || tc.state == taskslog.StatePurged
+				if !tc.recover {
+					if shutdownIntent && (env.entries[0].Task().GetState() != taskslog.StateStopped || env.rb.Status(env.instanceID) != runtimetest.StatusStopped) {
+						t.Fatal("persisted shutdown intent was not completed")
+					}
+					select {
+					case <-env.backend.started:
+						t.Fatal("ineligible task was automatically resumed")
+					default:
+					}
+					return
+				}
+				select {
+				case opts := <-env.backend.started:
+					if opts.ResumeSessionID != "original-session" || opts.InitialPrompt.Text != "" {
+						t.Fatalf("resume options = %#v", opts)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("saved session was not resumed")
+				}
+				env.m.handleRuntimeInstanceExit(t.Context(), env.instanceID)
+				entry := env.entries[0]
+				if tc.sendInput {
+					deadline := time.After(time.Second)
+					for !entry.Task().HasSession() {
+						select {
+						case <-deadline:
+							t.Fatal("session was not attached")
+						case <-time.After(time.Millisecond):
+						}
+					}
+					if err := entry.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "new prompt during readiness"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				want := taskslog.StateWaiting
+				if tc.sendInput {
+					want = taskslog.StateRunning
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+				defer cancel()
+				for entry.Task().GetState() != want {
+					select {
+					case <-ctx.Done():
+						t.Fatalf("state=%s want=%s", entry.Task().GetState(), want)
+					case <-time.After(time.Millisecond):
+					}
+				}
+				func() {
+					entry.Lifecycle.operationMu.Lock()
+					defer entry.Lifecycle.operationMu.Unlock()
+				}()
+				env.m.handleRuntimeInstanceExit(t.Context(), env.instanceID)
+				if entry.Task().GetState() != want || !entry.Task().HasSession() {
+					t.Fatal("delayed death detached revived session")
+				}
+				if tc.sendInput {
+					func() {
+						entry.Lifecycle.operationMu.Lock()
+						defer entry.Lifecycle.operationMu.Unlock()
+						if entry.Task().GetState() != taskslog.StateRunning {
+							t.Fatal("readiness overwrote the new prompt's running state")
+						}
+					}()
+				}
+				if entry.Task().ID != env.id || entry.Task().Title() != "existing title" {
+					t.Fatal("recovery replaced task identity or title")
+				}
+				assertImportedRecoveryHistory(t, env.m, entry.LogPath.Get())
+			})
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		t.Run("unverified_snapshot", func(t *testing.T) {
 			t.Parallel()
-			h := tc.harness
-			if h == "" {
-				h = harness.Pi
+			for _, tc := range []struct {
+				name      string
+				state     taskslog.State
+				statusErr error
+				alive     bool
+			}{
+				{name: "running_uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateRunning},
+				{name: "live_relay_missing_output", alive: true, state: taskslog.StateRunning},
+				{name: "uncertain_liveness", statusErr: errors.New("SSH unavailable"), state: taskslog.StateFailed},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					env := setupImportedRecovery(t, &importedRecoverySetup{
+						state:     tc.state,
+						statusErr: tc.statusErr,
+						alive:     tc.alive,
+						reason:    "revive instance: missing host branch",
+					})
+					if env.err == nil || len(env.entries) != 0 {
+						t.Fatalf("unverified snapshot import entries=%v err=%v", env.entries, env.err)
+					}
+					if env.rb.Status(env.instanceID) == runtimetest.StatusStopped {
+						t.Fatal("unverified live runtime was stopped")
+					}
+					select {
+					case <-env.backend.started:
+						t.Fatal("unverified relay was resumed")
+					default:
+					}
+				})
 			}
-			runtimeState := tc.runtimeState
-			if runtimeState == "" {
-				runtimeState = "running"
-			}
-			id := ksid.NewID()
-			instanceID := runtime.NewID("test-runtime", "md-agent-recovery")
-			backend := &importedRecoveryBackend{started: make(chan *agent.Options, 1), fail: tc.fail}
-			backend.FakeBackend = &agenttest.FakeBackend{HarnessName: h}
-			rb := &runtimetest.FakeBackend{}
-			info := &runtimetest.FakeInfo{Meta: map[string]string{
-				"md-agent-recovery\x00caic.id":      id.String(),
-				"md-agent-recovery\x00caic.harness": string(h),
-			}}
-			store := taskslog.NewStore(testLogger(), t.TempDir())
-			m := newTestManager(t, Config{ServerCtx: t.Context(), LogStore: store, Runtimes: newTestRuntime(t, rb, &observedRuntimeInfo{FakeInfo: info, backend: rb}), Backends: map[harness.Name]agent.Backend{h: backend}})
-			// Exercise the startup fence used by Manager.Start without launching
-			// unrelated stats and runtime watcher goroutines.
-			m.importing = true
-			m.importDone = make(chan struct{})
-			m.pendingRuntimeEvents = []runtime.Event{{Kind: runtime.EventDie, InstanceID: instanceID}}
-			t.Cleanup(func() { _ = m.Close(); backend.stop() })
-			m.relay = fakeRelayReader{
-				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
-					return tc.alive, "probe", tc.statusErr
-				},
-				readTailFn: func(context.Context, runtime.ConnectionTarget, *agent.LogRecordParser, int64) (agent.ParsedTimeline, int64, error) {
-					return agent.ParsedTimeline{}, 0, errors.New("relay output lost")
-				},
-				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "" },
-			}
-			tk, err := task.NewTask(id, agent.Prompt{Text: "accepted prompt"}, h, "", "", "", "", "existing title")
-			if err != nil {
-				t.Fatal(err)
-			}
-			log, path, err := store.Open(tk.LogFilename(), tk.LogHeader())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := log.AppendMessage(&agent.UserInputMessage{Text: "accepted prompt"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := log.AppendMessage(&agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "original-session"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := store.WriteResultTrailer(log, "existing title", &taskslog.Result{State: tc.state, Err: errors.New(tc.reason)}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := store.Compress(path, log, tc.state); err != nil {
-				t.Fatal(err)
-			}
-			logs, err := store.LoadForTaskIDs([]string{id.String()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			entries, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: instanceID, State: runtimeState, AgentTarget: runtime.ConnectionTarget{SSHHost: "recovery"}}}, logs)
-			shutdownIntent := tc.state == taskslog.StateStopping || tc.state == taskslog.StatePurging || tc.state == taskslog.StateStopped || tc.state == taskslog.StatePurged
-			if !shutdownIntent && (tc.statusErr != nil || tc.alive) {
-				if err == nil || len(entries) != 0 {
-					t.Fatalf("unverified snapshot import entries=%v err=%v", entries, err)
-				}
-				if rb.Status(instanceID) == runtimetest.StatusStopped {
-					t.Fatal("unverified live runtime was stopped")
-				}
-				select {
-				case <-backend.started:
-					t.Fatal("unverified relay was resumed")
-				default:
-				}
-				return
-			}
-			if err != nil || len(entries) != 1 {
-				t.Fatalf("import entries=%v err=%v", entries, err)
-			}
-			if !tc.recover {
-				if shutdownIntent && (entries[0].Task().GetState() != taskslog.StateStopped || rb.Status(instanceID) != runtimetest.StatusStopped) {
-					t.Fatal("persisted shutdown intent was not completed")
-				}
-				select {
-				case <-backend.started:
-					t.Fatal("ineligible task was automatically resumed")
-				default:
-				}
-				return
+		})
+
+		t.Run("resume_failure", func(t *testing.T) {
+			t.Parallel()
+			env := setupImportedRecovery(t, &importedRecoverySetup{
+				state:    taskslog.StateFailed,
+				reason:   "revive instance: missing host branch",
+				startErr: errors.New("resume rejected"),
+			})
+			if env.err != nil || len(env.entries) != 1 {
+				t.Fatalf("import entries=%v err=%v", env.entries, env.err)
 			}
 			select {
-			case opts := <-backend.started:
+			case opts := <-env.backend.started:
 				if opts.ResumeSessionID != "original-session" || opts.InitialPrompt.Text != "" {
 					t.Fatalf("resume options = %#v", opts)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("saved session was not resumed")
 			}
-			// A delayed die event from recovery's own Stop must not detach
-			// the session while revival owns the lifecycle operation.
-			if !tc.fail {
-				m.handleRuntimeInstanceExit(t.Context(), instanceID)
-			}
-			entry := entries[0]
-			if tc.sendInput {
-				deadline := time.After(time.Second)
-				for !entry.Task().HasSession() {
-					select {
-					case <-deadline:
-						t.Fatal("session was not attached")
-					case <-time.After(time.Millisecond):
-					}
-				}
-				if err := entry.Lifecycle.SendInput(t.Context(), agent.Prompt{Text: "new prompt during readiness"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			want := taskslog.StateWaiting
-			if tc.sendInput {
-				want = taskslog.StateRunning
-			}
-			if tc.fail {
-				want = taskslog.StateCrashed
-			}
+			entry := env.entries[0]
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
-			for entry.Task().GetState() != want {
+			for entry.Task().GetState() != taskslog.StateCrashed {
 				select {
 				case <-ctx.Done():
-					t.Fatalf("state=%s want=%s", entry.Task().GetState(), want)
+					t.Fatalf("state=%s want=%s", entry.Task().GetState(), taskslog.StateCrashed)
 				case <-time.After(time.Millisecond):
 				}
 			}
-			if tc.fail {
-				select {
-				case <-entry.Done():
-				case <-ctx.Done():
-					t.Fatal("failed recovery did not finish")
-				}
+			select {
+			case <-entry.Done():
+			case <-ctx.Done():
+				t.Fatal("failed recovery did not finish")
 			}
-			if !tc.fail {
-				func() {
-					entry.Lifecycle.operationMu.Lock()
-					defer entry.Lifecycle.operationMu.Unlock()
-				}()
-				m.handleRuntimeInstanceExit(t.Context(), instanceID)
-				if entry.Task().GetState() != want || !entry.Task().HasSession() {
-					t.Fatal("delayed death detached revived session")
-				}
-			}
-			if tc.sendInput {
-				// Completion of the lifecycle lock means readiness has finished.
-				func() {
-					entry.Lifecycle.operationMu.Lock()
-					defer entry.Lifecycle.operationMu.Unlock()
-					if entry.Task().GetState() != taskslog.StateRunning {
-						t.Fatal("readiness overwrote the new prompt's running state")
-					}
-				}()
-			}
-			if entry.Task().ID != id || entry.Task().Title() != "existing title" {
+			if entry.Task().ID != env.id || entry.Task().Title() != "existing title" {
 				t.Fatal("recovery replaced task identity or title")
 			}
-			if strings.HasSuffix(entry.LogPath.Get(), ".zst") {
-				t.Fatal("recovery did not restore the archived log")
-			}
-			loaded, err := taskslog.LoadHistorySource(entry.LogPath.Get())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := loaded.LoadMessagesWithResolver(m); err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for _, msg := range loaded.Timeline {
-				if input, ok := msg.Message.(*agent.UserInputMessage); ok && input.Text == "accepted prompt" {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatal("recovery lost original history")
-			}
-			if tc.fail && rb.Status(instanceID) != runtimetest.StatusStopped {
+			assertImportedRecoveryHistory(t, env.m, entry.LogPath.Get())
+			if env.rb.Status(env.instanceID) != runtimetest.StatusStopped {
 				t.Fatal("failed recovery left runtime running")
 			}
 		})
-	}
+	})
 }
 
 func TestCanRecoverImportedTask(t *testing.T) {
