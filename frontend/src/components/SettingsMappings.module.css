@@ -97,16 +97,15 @@
 .remove {
   grid-area: remove;
   height: var(--mapping-control-height);
-  padding: 0;
-  font-size: 1.25rem;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
 }
 
-.remove:hover {
+.remove svg,
+.add svg {
+  width: 20px;
+  height: 20px;
+}
+
+.row .remove:hover:not(:disabled, [aria-disabled="true"]) {
   color: var(--color-danger);
   background: var(--color-danger-surface);
 }
@@ -117,19 +116,6 @@
 
 .add {
   justify-self: start;
-  width: 2.5rem;
-  min-height: 2.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 1.5rem;
-  color: var(--color-link);
-  cursor: pointer;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.add:hover {
-  background: var(--color-bg-hover);
 }
 
 .row input:focus-visible,

@@ -1,5 +1,10 @@
 /* Styles for the SettingsPage full-page settings view. */
 
+.actionIcon {
+  width: 20px;
+  height: 20px;
+}
+
 .settingsPage {
   flex: 1;
   min-width: 0;

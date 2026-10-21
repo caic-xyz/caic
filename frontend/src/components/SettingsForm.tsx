@@ -23,8 +23,10 @@ import CloudOffIcon from "@material-symbols/svg-400/outlined/cloud_off.svg?solid
 import CloudUploadIcon from "@material-symbols/svg-400/outlined/cloud_upload.svg?solid";
 import EditNoteIcon from "@material-symbols/svg-400/outlined/edit_note.svg?solid";
 import ErrorIcon from "@material-symbols/svg-400/outlined/error.svg?solid";
+import RefreshIcon from "@material-symbols/svg-400/outlined/refresh.svg?solid";
 import type { AppStore } from "../AppState";
 import Button from "./Button";
+import ActionButton from "./ActionButton";
 import SettingsMappings, { containerSortPath } from "./SettingsMappings";
 
 import { formatDuration, parseDuration } from "../duration";
@@ -268,19 +270,14 @@ export default function SettingsForm(props: SettingsFormProps) {
                     />
                   </label>
                   <div class={styles.runtimeRefresh}>
-                    <Button
-                      type="button"
-                      variant="gray"
-                      aria-label={`Refresh image and coding agents for ${rt.name}`}
+                    <ActionButton
+                      label={`Refresh image and coding agents for ${rt.name}`}
                       disabled={props.imageRefreshStatus(rt.name).state === "running"}
-                      loading={
-                        props.imageRefreshStatus(rt.name).state === "running" &&
-                        !props.imageRefreshStatus(rt.name).scheduled
-                      }
+                      aria-busy={props.imageRefreshStatus(rt.name).state === "running"}
                       onClick={() => void props.startImageRefresh(rt.name)}
                     >
-                      Refresh image and coding agents
-                    </Button>
+                      <RefreshIcon class={styles.actionIcon} aria-hidden="true" />
+                    </ActionButton>
                     <Show when={props.imageRefreshStatus(rt.name).state !== "idle"}>
                       <p class={styles.settingsDescription} role="status">
                         {props.imageRefreshStatus(rt.name).state === "running"

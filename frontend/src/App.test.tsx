@@ -2533,7 +2533,7 @@ describe("App repo chips: No repository", () => {
     expect(await screen.findByText("Scheduled image warmup is running on this runtime…")).toBeInTheDocument();
     const refresh = screen.getByRole("button", { name: "Refresh image and coding agents for docker" });
     expect(refresh).toBeDisabled();
-    expect(refresh.querySelector("span")).toBeNull();
+    expect(refresh).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("button", { name: "Refresh image and coding agents for podman" })).toBeEnabled();
   });
 

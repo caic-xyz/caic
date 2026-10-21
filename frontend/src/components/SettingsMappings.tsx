@@ -2,6 +2,9 @@
 
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import type { CacheMappingResp, MountMappingResp } from "@sdk/types.gen";
+import AddIcon from "@material-symbols/svg-400/outlined/add.svg?solid";
+import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
+import ActionButton from "./ActionButton";
 import styles from "./SettingsMappings.module.css";
 
 type Mapping = CacheMappingResp & { readOnly?: boolean };
@@ -180,18 +183,17 @@ export default function SettingsMappings(props: SettingsMappingsProps) {
                         <span class={styles.readOnlyText}>Read only</span>
                       </label>
                     </Show>
-                    <button
-                      type="button"
+                    <ActionButton
                       class={styles.remove}
-                      aria-label={props.mounts ? "Remove mount" : "Remove cache"}
+                      label={props.mounts ? "Remove mount" : "Remove cache"}
                       onClick={() => {
                         setEditing(false);
                         const items = props.items.filter((_, i) => i !== index);
                         write(items, true);
                       }}
                     >
-                      ×
-                    </button>
+                      <CloseIcon aria-hidden="true" />
+                    </ActionButton>
                   </div>
                 );
               }}
@@ -199,11 +201,9 @@ export default function SettingsMappings(props: SettingsMappingsProps) {
           );
         }}
       </For>
-      <button
-        type="button"
+      <ActionButton
         class={styles.add}
-        aria-label={props.mounts ? "Add mount" : "Add cache"}
-        title={props.mounts ? "Add mount" : "Add cache"}
+        label={props.mounts ? "Add mount" : "Add cache"}
         onClick={() => {
           const index = props.items.length;
           setEditing(false);
@@ -217,8 +217,8 @@ export default function SettingsMappings(props: SettingsMappingsProps) {
           queueMicrotask(() => hostInputs.get(index)?.focus());
         }}
       >
-        <span aria-hidden="true">+</span>
-      </button>
+        <AddIcon aria-hidden="true" />
+      </ActionButton>
     </div>
   );
 }
