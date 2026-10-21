@@ -24,6 +24,7 @@ import (
 
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/containers"
+	"github.com/caic-xyz/md/git"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -818,7 +819,25 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Revive", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repo: []md.Repo{{GitRoot: "/repo", Branches: []string{"caic-0"}, ContainerPath: "/repo"}}}
+		dir := t.TempDir()
+		g := &git.Checkout{Root: dir, Logger: slog.Default()}
+		runGit := func(args ...string) string {
+			out, err := g.RunGit(t.Context(), args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return out
+		}
+		runGit("init", "-q", "--initial-branch=main")
+		runGit("config", "user.name", "Test")
+		runGit("config", "user.email", "test@test")
+		runGit("commit", "-q", "--allow-empty", "-m", "main")
+		runGit("remote", "add", "upstream", "https://example.com/repo.git")
+		want := runGit("rev-parse", "HEAD")
+		runGit("update-ref", "refs/remotes/upstream/main", want)
+		runGit("branch", "--track", "caic-0", "upstream/main")
+		runGit("branch", "-D", "caic-0")
+		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repo: []md.Repo{{GitRoot: dir, Branches: []string{"caic-0"}, ContainerPath: "/repo", DefaultRemote: "upstream", DefaultBranch: "main"}}}
 		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
 		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
@@ -833,8 +852,36 @@ func TestBackend(t *testing.T) {
 		if !slices.Contains(ctr.calls, "Revive") {
 			t.Errorf("Revive not called, calls=%v", ctr.calls)
 		}
+		if got := runGit("rev-parse", "caic-0"); got != want {
+			t.Errorf("recreated branch = %q, want %q", got, want)
+		}
+		if got := runGit("rev-parse", "--abbrev-ref", "caic-0@{upstream}"); got != "upstream/main" {
+			t.Errorf("upstream = %q, want upstream/main", got)
+		}
 		if b.vncPorts["ctr-1"] != 5903 {
 			t.Errorf("revived vncPort = %d, want 5903", b.vncPorts["ctr-1"])
+		}
+		// Repeated revival must preserve existing work on the host branch.
+		runGit("checkout", "-q", "caic-0")
+		runGit("commit", "-q", "--allow-empty", "-m", "host work")
+		hostTip := runGit("rev-parse", "HEAD")
+		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
+			t.Fatal(err)
+		}
+		if got := runGit("rev-parse", "caic-0"); got != hostTip {
+			t.Errorf("existing branch moved to %q, want %q", got, hostTip)
+		}
+		runGit("checkout", "-q", "main")
+		runGit("branch", "-D", "caic-0")
+		runGit("update-ref", "-d", "refs/remotes/upstream/main")
+		// A same-named local branch must not stand in for a missing remote ref.
+		runGit("branch", "upstream/main", "main")
+		ctr.calls = nil
+		if err := b.Revive(t.Context(), "docker:ctr-1"); err == nil {
+			t.Fatal("expected missing upstream error")
+		}
+		if slices.Contains(ctr.calls, "Revive") {
+			t.Fatal("container revived without recovering host branch")
 		}
 	})
 

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/git"
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
@@ -761,6 +762,38 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 		return err
 	}
 	ctRepos := ct.Repos()
+	// Branch creation belongs to the caller; md's Container requires every
+	// mapped host branch to exist even when its stopped checkout is preserved.
+	for i := range ctRepos {
+		r := &ctRepos[i]
+		g := &git.Checkout{Root: r.GitRoot, Logger: b.log}
+		for _, branch := range r.Branches {
+			exists, err := g.RefExists(ctx, "refs/heads/"+branch)
+			if err != nil {
+				return fmt.Errorf("check host branch %q in %s: %w", branch, r.GitRoot, err)
+			}
+			if exists {
+				continue
+			}
+			remote := r.DefaultRemote
+			if remote == "" {
+				remote, err = g.DefaultRemote(ctx)
+				if err != nil {
+					return fmt.Errorf("resolve upstream remote in %s: %w", r.GitRoot, err)
+				}
+			}
+			base := r.DefaultBranch
+			if base == "" {
+				base, err = g.DefaultBranch(ctx, remote)
+				if err != nil {
+					return fmt.Errorf("resolve upstream branch in %s: %w", r.GitRoot, err)
+				}
+			}
+			if err := g.CreateBranch(ctx, branch, "refs/remotes/"+remote+"/"+base, true); err != nil {
+				return fmt.Errorf("recreate host branch %q in %s: %w", branch, r.GitRoot, err)
+			}
+		}
+	}
 	if len(ctRepos) > 0 {
 		b.log.InfoContext(ctx, "md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", primaryBranch(&ctRepos[0]))
 	} else {
