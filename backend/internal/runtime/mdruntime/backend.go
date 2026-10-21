@@ -762,8 +762,8 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 		return err
 	}
 	ctRepos := ct.Repos()
-	// Branch creation belongs to the caller; md's Container requires every
-	// mapped host branch to exist even when its stopped checkout is preserved.
+	// Branch creation and upstream repair belong to the caller; md's Container
+	// requires mapped host branches with upstreams even when its checkout is preserved.
 	for i := range ctRepos {
 		r := &ctRepos[i]
 		g := &git.Checkout{Root: r.GitRoot, Logger: b.log}
@@ -773,7 +773,20 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 				return fmt.Errorf("check host branch %q in %s: %w", branch, r.GitRoot, err)
 			}
 			if exists {
-				continue
+				configured := false
+				for _, key := range []string{"remote", "merge"} {
+					_, err := g.RunGit(ctx, "config", "--get", "branch."+branch+"."+key)
+					if err == nil {
+						configured = true
+						break
+					}
+					if e, ok := errors.AsType[*exec.ExitError](err); !ok || e.ExitCode() != 1 {
+						return fmt.Errorf("read upstream for host branch %q in %s: %w", branch, r.GitRoot, err)
+					}
+				}
+				if configured {
+					continue
+				}
 			}
 			remote := r.DefaultRemote
 			if remote == "" {
@@ -789,7 +802,14 @@ func (b *Backend) Revive(ctx context.Context, id runtime.ID) error {
 					return fmt.Errorf("resolve upstream branch in %s: %w", r.GitRoot, err)
 				}
 			}
-			if err := g.CreateBranch(ctx, branch, "refs/remotes/"+remote+"/"+base, true); err != nil {
+			upstream := "refs/remotes/" + remote + "/" + base
+			if exists {
+				if _, err := g.RunGit(ctx, "branch", "--set-upstream-to="+upstream, branch); err != nil {
+					return fmt.Errorf("configure upstream for host branch %q in %s: %w", branch, r.GitRoot, err)
+				}
+				continue
+			}
+			if err := g.CreateBranch(ctx, branch, upstream, true); err != nil {
 				return fmt.Errorf("recreate host branch %q in %s: %w", branch, r.GitRoot, err)
 			}
 		}

@@ -865,11 +865,33 @@ func TestBackend(t *testing.T) {
 		runGit("checkout", "-q", "caic-0")
 		runGit("commit", "-q", "--allow-empty", "-m", "host work")
 		hostTip := runGit("rev-parse", "HEAD")
+		runGit("branch", "--unset-upstream", "caic-0")
 		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
 			t.Fatal(err)
 		}
 		if got := runGit("rev-parse", "caic-0"); got != hostTip {
 			t.Errorf("existing branch moved to %q, want %q", got, hostTip)
+		}
+		if got := runGit("rev-parse", "--abbrev-ref", "caic-0@{upstream}"); got != "upstream/main" {
+			t.Errorf("repaired upstream = %q, want upstream/main", got)
+		}
+		// Preserve an explicitly configured upstream, including local tracking.
+		runGit("branch", "--set-upstream-to=main", "caic-0")
+		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
+			t.Fatal(err)
+		}
+		if got := runGit("rev-parse", "--abbrev-ref", "caic-0@{upstream}"); got != "main" {
+			t.Errorf("configured upstream changed to %q, want main", got)
+		}
+		// Fetch filtering must not make explicit tracking look unconfigured.
+		runGit("config", "remote.upstream.fetch", "+refs/heads/main:refs/remotes/upstream/main")
+		runGit("config", "branch.caic-0.remote", "upstream")
+		runGit("config", "branch.caic-0.merge", "refs/heads/unfetched")
+		if err := b.Revive(t.Context(), "docker:ctr-1"); err != nil {
+			t.Fatal(err)
+		}
+		if got := runGit("config", "--get", "branch.caic-0.merge"); got != "refs/heads/unfetched" {
+			t.Errorf("configured merge changed to %q", got)
 		}
 		runGit("checkout", "-q", "main")
 		runGit("branch", "-D", "caic-0")
