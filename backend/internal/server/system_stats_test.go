@@ -1,4 +1,4 @@
-// Tests whole-machine history, sustained pressure, shared health updates, staleness, and scoped access.
+// Tests whole-machine history, immediate pressure, retained warnings, shared health updates, and scoped access.
 
 package server
 
@@ -128,7 +128,7 @@ func TestSystemCPUUsage(t *testing.T) {
 
 func TestSystemStats(t *testing.T) {
 	t.Parallel()
-	t.Run("sustained_pressure_and_failure", func(t *testing.T) {
+	t.Run("immediate_pressure_and_failure", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
@@ -136,36 +136,31 @@ func TestSystemStats(t *testing.T) {
 			if !h.Time.IsZero() || h.Error == "" || h.CPUHigh || h.MemHigh {
 				t.Fatalf("warmup = %+v", h)
 			}
-			sample := v1.SystemSample{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 100}, {ID: "cpu1", UsagePerc: 80}}, MemUsed: 900, MemTotal: 1000, MemPerc: 90}
-			for i := range 4 {
-				sample.Time = time.Now()
-				s.record(&sample, nil)
-				h, _ = s.health()
-				if h.CPUHigh != (i == 3) || h.MemHigh != (i == 3) {
-					t.Fatalf("sample %d = %+v", i, h)
-				}
-				if i < 3 {
-					time.Sleep(5 * time.Second)
-				}
+			sample := v1.SystemSample{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 100}, {ID: "cpu1", UsagePerc: 60}}, MemUsed: 800, MemTotal: 1000, MemPerc: 80}
+			sample.Time = time.Now()
+			s.record(&sample, nil)
+			h, _ = s.health()
+			if !h.CPUHigh || !h.MemHigh {
+				t.Fatalf("first high sample = %+v", h)
 			}
 			select {
 			case <-ch:
 			default:
 				t.Fatal("collection did not notify initial subscriber")
 			}
-			if h.CPUPerc != 180 || h.CPUCount != 2 || h.MemUsed != 900 {
+			if h.CPUPerc != 160 || h.CPUCount != 2 || h.MemUsed != 800 {
 				t.Fatalf("aggregate units = %+v", h)
 			}
-			sample.CPUs[1].UsagePerc = 70
-			sample.MemPerc = 85
+			sample.CPUs[1].UsagePerc = 50
+			sample.MemPerc = 75
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
 			if !h.CPUHigh || !h.MemHigh {
 				t.Fatalf("hysteresis = %+v", h)
 			}
-			sample.CPUs[1].UsagePerc = 69
-			sample.MemPerc = 84
+			sample.CPUs[1].UsagePerc = 49
+			sample.MemPerc = 74
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
@@ -179,43 +174,43 @@ func TestSystemStats(t *testing.T) {
 			}
 		})
 	})
-	t.Run("stale_and_collection_gap", func(t *testing.T) {
+	t.Run("warnings_survive_silence_errors_and_gaps", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
 			sample := v1.SystemSample{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 95}}, MemPerc: 95, MemUsed: 950, MemTotal: 1000}
-			for range 4 {
-				sample.Time = time.Now()
-				s.record(&sample, nil)
-				time.Sleep(5 * time.Second)
-			}
+			sample.Time = time.Now()
+			s.record(&sample, nil)
 			h, _ := s.health()
 			if !h.CPUHigh || !h.MemHigh {
 				t.Fatalf("high = %+v", h)
 			}
-			time.Sleep(10 * time.Second)
+			time.Sleep(time.Minute)
 			h, _ = s.health()
-			if h.Error == "" || h.CPUHigh || h.MemHigh {
-				t.Fatalf("stale = %+v", h)
+			if h.Error != "" || !h.CPUHigh || !h.MemHigh {
+				t.Fatalf("retained warning after silence = %+v", h)
 			}
+			s.record(&v1.SystemSample{}, errors.New("sampler failed"))
+			h, _ = s.health()
+			if h.Error != "sampler failed" || !h.CPUHigh || !h.MemHigh {
+				t.Fatalf("retained warning after error = %+v", h)
+			}
+			sample.CPUs[0].UsagePerc, sample.MemPerc = 77, 77
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
-			if h.Error != "" || h.CPUHigh || h.MemHigh {
-				t.Fatalf("fresh baseline after gap = %+v", h)
+			if h.Error != "" || !h.CPUHigh || !h.MemHigh {
+				t.Fatalf("fresh high sample after gap = %+v", h)
 			}
 		})
 	})
-	t.Run("interrupted_pressure_and_single_busy_cpu", func(t *testing.T) {
+	t.Run("single_busy_cpu_and_error_recovery", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
 			sample := v1.SystemSample{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 100}, {ID: "cpu1", UsagePerc: 0}}, MemPerc: 95}
-			for range 5 {
-				sample.Time = time.Now()
-				s.record(&sample, nil)
-				time.Sleep(5 * time.Second)
-			}
+			sample.Time = time.Now()
+			s.record(&sample, nil)
 			h, _ := s.health()
 			if h.CPUHigh || !h.MemHigh {
 				t.Fatalf("whole machine pressure = %+v", h)
@@ -224,8 +219,8 @@ func TestSystemStats(t *testing.T) {
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
-			if h.MemHigh {
-				t.Fatalf("failure did not reset episode = %+v", h)
+			if !h.MemHigh {
+				t.Fatalf("first high sample after failure = %+v", h)
 			}
 		})
 	})
@@ -249,20 +244,22 @@ func TestSystemStats(t *testing.T) {
 			t.Fatal("history no longer bounded")
 		}
 	})
-	t.Run("pressure_must_be_continuous", func(t *testing.T) {
+	t.Run("threshold_crossings", func(t *testing.T) {
 		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
-			for i, percent := range []float64{95, 95, 88, 95, 95, 95, 95} {
-				sample := v1.SystemSample{Time: time.Now(), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: percent}}, MemPerc: percent}
-				s.record(&sample, nil)
-				h, _ := s.health()
-				if h.CPUHigh != (i == 6) || h.MemHigh != (i == 6) {
-					t.Fatalf("sample %d = %+v", i, h)
-				}
-				time.Sleep(5 * time.Second)
+		s := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
+		for i, tc := range []struct {
+			percent float64
+			high    bool
+		}{
+			{79.9, false}, {80, true}, {75, true}, {74.9, false}, {79.9, false}, {80.1, true},
+		} {
+			sample := v1.SystemSample{Time: time.Now(), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: tc.percent}}, MemPerc: tc.percent}
+			s.record(&sample, nil)
+			h, _ := s.health()
+			if h.CPUHigh != tc.high || h.MemHigh != tc.high {
+				t.Fatalf("sample %d (%v%%) = %+v", i, tc.percent, h)
 			}
-		})
+		}
 	})
 }
 
@@ -344,22 +341,18 @@ func TestTaskListServerHealth(t *testing.T) {
 			})
 		}
 	})
-	t.Run("collector_stall_expires_stream_warning", func(t *testing.T) {
+	t.Run("collector_stall_keeps_warning_and_sends_heartbeats", func(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := newTestRouter(t, nil)
 			stats := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
-			sample := v1.SystemSample{CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 95}}, MemPerc: 95}
-			for range 4 {
-				sample.Time = time.Now()
-				stats.record(&sample, nil)
-				time.Sleep(5 * time.Second)
-			}
+			stats.record(&v1.SystemSample{Time: time.Now(), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 95}}, MemPerc: 95}, nil)
 			testTaskHandlers(s).systemStats = stats
 			ctx, cancel := context.WithCancel(testHTTPContext(t))
 			t.Cleanup(cancel)
 			w := &flushRecordingWriter{ResponseRecorder: httptest.NewRecorder()}
-			var events []v1.ServerHealth
+			var health []v1.ServerHealth
+			var heartbeats int
 			w.onWrite = func(raw []byte) {
 				for line := range strings.SplitSeq(string(raw), "\n") {
 					data, ok := strings.CutPrefix(line, "data: ")
@@ -371,16 +364,19 @@ func TestTaskListServerHealth(t *testing.T) {
 						t.Fatal(err)
 					}
 					if event.Health != nil {
-						events = append(events, *event.Health)
-						if event.Health.Error != "" {
+						health = append(health, *event.Health)
+					}
+					if event.Kind == "heartbeat" {
+						heartbeats++
+						if heartbeats == 3 {
 							cancel()
 						}
 					}
 				}
 			}
 			testTaskHandlers(s).handleTaskListEvents(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/tasks/events", nil))
-			if len(events) != 2 || !events[0].CPUHigh || events[1].CPUHigh || events[1].MemHigh || events[1].Error == "" {
-				t.Fatalf("stall health = %+v", events)
+			if len(health) != 1 || !health[0].CPUHigh || !health[0].MemHigh || heartbeats != 3 {
+				t.Fatalf("health=%+v, heartbeats=%d", health, heartbeats)
 			}
 		})
 	})

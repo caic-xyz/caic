@@ -1,16 +1,7 @@
-// Application state for task membership and focus, REST detail, settings, server health, warnings, actions, caches, and image drafts.
+// Application state for task membership, connection liveness, retained server health, settings, actions, caches, and drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
-import {
-  batch,
-  createContext,
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  useContext,
-  type JSX,
-} from "solid-js";
+import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { createStore } from "solid-js/store";
 import { useNavigate, useLocation } from "@solidjs/router";
 
@@ -784,18 +775,12 @@ function createAppStore() {
   // On reconnect, check if the frontend was rebuilt and reload if so.
   // Pauses reconnection when tab is hidden or browser goes offline.
   const [connected, setConnected] = createSignal(true);
-  const [healthReading, setHealthReading] = createSignal<{ value: ServerHealth; received: number } | null>(null);
-  // Freshness belongs to the health stream, independently of task traffic or
-  // the usage stream's connection state. Arrival time avoids clock skew.
-  const serverHealth = createMemo(() => {
-    const reading = healthReading();
-    return reading && now() - reading.received < 15_000 && reading.value.time && !reading.value.error
-      ? reading.value
-      : null;
-  });
+  // Resource warnings retain the last observation; connection liveness is separate.
+  const [serverHealth, setServerHealth] = createSignal<ServerHealth | null>(null);
   {
     let taskES: EventSource | null = null;
     let usageES: EventSource | null = null;
+    let taskWatchdog: ReturnType<typeof setTimeout> | null = null;
     let taskTimer: ReturnType<typeof setTimeout> | null = null;
     let usageTimer: ReturnType<typeof setTimeout> | null = null;
     let taskDelay = 500;
@@ -822,12 +807,7 @@ function createAppStore() {
     }
     const initialScriptSrc = document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
 
-    function onOpen() {
-      setConnected(true);
-    }
-
     function connectTasks() {
-      setHealthReading(null);
       const streamGeneration = ++taskStreamGeneration;
       setTaskStreamReady(false);
       setTaskSnapshotComplete(false);
@@ -835,11 +815,24 @@ function createAppStore() {
       setDetailTask(null);
       const currentStream = () =>
         active && !accountController.signal.aborted && streamGeneration === taskStreamGeneration;
+      // Any task-stream event proves liveness. Usage traffic cannot keep a
+      // stalled task connection alive. Three missed 15-second heartbeats retry.
+      const armWatchdog = () => {
+        if (taskWatchdog !== null) clearTimeout(taskWatchdog);
+        taskWatchdog = setTimeout(() => {
+          if (currentStream()) disconnectTasks();
+        }, 45_000);
+      };
       taskES = api.globalTaskEvents({
         onMessage: (event) => {
           if (!currentStream()) return;
+          armWatchdog();
+          setConnected(true);
           if (event.kind === "health" && event.health) {
-            setHealthReading({ value: event.health, received: Date.now() });
+            const health = event.health;
+            setServerHealth((previous) =>
+              health.time ? health : previous ? { ...previous, error: health.error } : null,
+            );
           } else if (event.kind === "snapshot" && event.snapshot) {
             const snapshot = event.snapshot;
             const snapshotByID = new Map(snapshot.map((task) => [task.id, task]));
@@ -939,7 +932,8 @@ function createAppStore() {
       });
       taskES.addEventListener("open", () => {
         if (!currentStream()) return;
-        onOpen();
+        armWatchdog();
+        setConnected(true);
         void refreshServerConfig(currentStream);
         taskDelay = 500;
         // Check if frontend was rebuilt while disconnected.
@@ -954,9 +948,10 @@ function createAppStore() {
           })
           .catch(() => {});
       });
-      taskES.onerror = () => {
+      function disconnectTasks() {
         if (!currentStream()) return;
-        setHealthReading(null);
+        if (taskWatchdog !== null) clearTimeout(taskWatchdog);
+        taskWatchdog = null;
         taskStreamGeneration++;
         setTaskStreamReady(false);
         setTaskSnapshotComplete(false);
@@ -972,7 +967,9 @@ function createAppStore() {
           taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
           taskDelay = Math.min(taskDelay * 1.5, 30_000);
         });
-      };
+      }
+      taskES.onerror = disconnectTasks;
+      armWatchdog();
     }
 
     function connectUsage() {
@@ -984,7 +981,6 @@ function createAppStore() {
         },
       });
       usageES.addEventListener("open", () => {
-        onOpen();
         usageDelay = 500;
       });
       usageES.onerror = () => {
@@ -1001,7 +997,8 @@ function createAppStore() {
     }
 
     function closeAll() {
-      setHealthReading(null);
+      if (taskWatchdog !== null) clearTimeout(taskWatchdog);
+      taskWatchdog = null;
       generation++;
       taskStreamGeneration++;
       setTaskStreamReady(false);
@@ -1057,6 +1054,7 @@ function createAppStore() {
         active = false;
         generation++;
         closeAll();
+        setServerHealth(null);
         document.removeEventListener("visibilitychange", onVisibilityChange);
         window.removeEventListener("online", onOnline);
         window.removeEventListener("offline", onOffline);

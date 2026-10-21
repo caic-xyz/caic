@@ -1,4 +1,4 @@
-// Stacked CPU and memory alarms link to System with keyboard-accessible current readings.
+// Stacked CPU and memory alarms link to System with keyboard-accessible last-observed readings and sampling/connection status.
 
 import { createEffect, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 import CPUIcon from "@material-symbols/svg-400/outlined/memory.svg?solid";
@@ -8,7 +8,7 @@ import type { ServerHealth } from "@sdk/types.gen";
 import { formatBytes } from "../formatting";
 import styles from "./ServerHealthIndicator.module.css";
 
-export default function ServerHealthIndicator(props: { health: ServerHealth | null }) {
+export default function ServerHealthIndicator(props: { health: ServerHealth | null; connected: boolean }) {
   const [open, setOpen] = createSignal(false);
   const id = createUniqueId();
   const high = () => !!props.health && (props.health.cpuHigh || props.health.memHigh);
@@ -17,7 +17,14 @@ export default function ServerHealthIndicator(props: { health: ServerHealth | nu
     if (!h) return "";
     const cpu = h.cpuCount > 0 ? `${(h.cpuPerc / h.cpuCount).toFixed(1)}% of capacity` : "capacity unknown";
     const memory = h.memTotal > 0 ? `${((h.memUsed / h.memTotal) * 100).toFixed(1)}%` : "capacity unknown";
-    return `CPU: ${h.cpuPerc.toFixed(1)}% · ${(h.cpuPerc / 100).toFixed(2)} / ${h.cpuCount} CPUs · ${cpu}\nMemory: ${formatBytes(h.memUsed)} / ${formatBytes(h.memTotal)} · ${memory}`;
+    const status = [
+      h.time ? `Last sampled: ${new Date(h.time).toLocaleString()}` : "",
+      h.error ? `Sampling error: ${h.error}` : "",
+      !props.connected ? "Updates unavailable" : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return `CPU: ${h.cpuPerc.toFixed(1)}% · ${(h.cpuPerc / 100).toFixed(2)} / ${h.cpuCount} CPUs · ${cpu}\nMemory: ${formatBytes(h.memUsed)} / ${formatBytes(h.memTotal)} · ${memory}\n${status}`;
   };
   const label = () =>
     `High ${props.health?.cpuHigh && props.health.memHigh ? "CPU and memory" : props.health?.cpuHigh ? "CPU" : "memory"} usage — open System`;

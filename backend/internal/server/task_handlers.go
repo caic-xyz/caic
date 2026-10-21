@@ -437,19 +437,11 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	// webhooks (App) or the ciTicker (polling).
 	ctx := r.Context()
 	var healthChanged <-chan struct{}
-	healthTimer := time.NewTimer(time.Hour)
-	healthTimer.Stop()
-	defer healthTimer.Stop()
-	var healthExpired <-chan time.Time
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
 	emitHealth := func() error {
 		health, changed := h.systemStats.health()
 		healthChanged = changed
-		healthTimer.Stop()
-		healthExpired = nil
-		if !health.Time.IsZero() && health.Error == "" {
-			healthTimer.Reset(time.Until(health.Time.Add(systemHealthMaxAge)))
-			healthExpired = healthTimer.C
-		}
 		return emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "health", Health: &health})
 	}
 	if h.ciSvc != nil {
@@ -662,9 +654,9 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 					h.log.WarnContext(ctx, "emit server health", "err", err)
 					return
 				}
-			case <-healthExpired:
-				if err := emitHealth(); err != nil {
-					h.log.WarnContext(ctx, "emit stale server health", "err", err)
+			case <-heartbeatTicker.C:
+				if err := emitTaskListEvent(stream, &v1.TaskListEvent{Kind: "heartbeat"}); err != nil {
+					h.log.WarnContext(ctx, "emit task-list heartbeat", "err", err)
 					return
 				}
 			case id := <-focusCh:

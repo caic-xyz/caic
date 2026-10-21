@@ -265,6 +265,12 @@ func (m *mcpRegistry) ReadResource(ctx context.Context, params *mcp.ResourcesRea
 	switch {
 	case m.hasSkill(uri):
 		return m.skillResource(uri), nil
+	case uri == "caic://system/health":
+		health, _ := m.serverConfig.systemStats.health()
+		health.Time = mcpTimeInLocation(health.Time, mcpRequestLocation(&params.Meta))
+		result, err := m.resourceJSON(ctx, uri, health)
+		result.TTLMS = 5000
+		return result, err
 	case uri == "caic://usage":
 		usage := m.usage.buildResp(ctx)
 		return m.resourceJSON(ctx, uri, mcpUsageInLocation(usage, mcpRequestLocation(&params.Meta)))
@@ -325,6 +331,7 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 	taskC := sources.taskC
 	repoC := sources.repoC
 	repoStatusC := sources.repoStatusC
+	healthC := sources.healthC
 	return func(yield func(mcp.ResourceUpdate, error) bool) {
 		heartbeatTicker := time.NewTicker(subscriptionHeartbeatInterval)
 		defer heartbeatTicker.Stop()
@@ -368,6 +375,11 @@ func (m *mcpRegistry) SubscribeResourceUpdates(ctx context.Context, filter mcp.S
 				repoStatusC = m.serverConfig.repoStatus.Changed()
 			case <-usageC:
 				if !yield(sources.usageUpdate(), nil) {
+					return
+				}
+			case <-healthC:
+				_, healthC = m.serverConfig.systemStats.health()
+				if !yield(mcp.ResourceUpdate{ResourceURIs: []string{"caic://system/health"}}, nil) {
 					return
 				}
 			case <-heartbeatTicker.C:
@@ -500,6 +512,8 @@ func (m *mcpRegistry) subscriptionSources(ctx context.Context, filter mcp.Subscr
 			sources.repoC = m.serverConfig.checkouts.Changed()
 			sources.repoStatusC = m.serverConfig.repoStatus.Changed()
 			sources.repoResourceURIs = append(sources.repoResourceURIs, uri)
+		case uri == "caic://system/health":
+			_, sources.healthC = m.serverConfig.systemStats.health()
 		case uri == "gomode://items":
 			sources.taskVersion, sources.taskC = m.taskSvc.taskMgr.ChangeSnapshot()
 			sources.taskUpdateURIs = append(sources.taskUpdateURIs, uri)
@@ -1597,6 +1611,7 @@ func (m *mcpRegistry) skillResource(uri string) mcp.ResourcesReadResult {
 
 func mcpStaticResources() []mcp.ResourceDescriptor {
 	return []mcp.ResourceDescriptor{
+		{URI: "caic://system/health", Name: "system-health", Title: "System health", Description: "Last-observed machine CPU and memory usage, overload warnings, and sampling errors", MimeType: "application/json"},
 		{URI: "caic://usage", Name: "usage", Title: "Usage", Description: "Local and provider usage", MimeType: "application/json"},
 		{URI: "gomode://items", Name: "items", Title: "Items", Description: "Generic service item status for native clients", MimeType: "application/json"},
 		{URI: "gomode://notifications", Name: "notifications", Title: "Notifications", Description: "Service notifications for native clients", MimeType: "application/json"},
@@ -2215,6 +2230,9 @@ func (m *mcpRegistry) authorizeResource(ctx context.Context, uri string) (string
 		return "allow", true
 	}
 	required := mcpScopeRead
+	if uri == "caic://system/health" {
+		required = mcpScopeServerAdmin
+	}
 	if uri == "gomode://items" || uri == "gomode://notifications" {
 		required = mcpScopeTasksRead
 	}
@@ -2505,6 +2523,7 @@ func mcpScopeChallenge(scope string) string {
 }
 
 type subscriptionSources struct {
+	healthC      <-chan struct{}
 	taskC        <-chan struct{}
 	taskVersion  uint64
 	repoC        <-chan struct{}

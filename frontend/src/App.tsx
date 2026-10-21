@@ -164,7 +164,7 @@ function Shell(props: { children?: JSX.Element }) {
               <span class={styles.subtitle}>Coding Agents in Containers</span>
               <UsageBadges usage={s.usage} now={s.now} />
               <div class={styles.headerActions}>
-                <ServerHealthIndicator health={s.serverHealth()} />
+                <ServerHealthIndicator health={s.serverHealth()} connected={s.connected()} />
                 <AccountMenu onKeyboardShortcuts={() => setShortcutsOpen(true)} />
               </div>
             </header>

@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -2367,4 +2368,123 @@ func TestTaskServiceFocusIsolation(t *testing.T) {
 		t.Fatalf("other user's focus changed to %q", got)
 	default:
 	}
+}
+
+func TestMCPSystemHealthResource(t *testing.T) {
+	t.Parallel()
+	const uri = "caic://system/health"
+	t.Run("read_subscribe_recovery_and_keepalive", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			s := newTestRouter(t, nil)
+			registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+			if !ok {
+				t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+			}
+			stats := &systemStats{samples: make([]v1.SystemSample, 0, 60), changed: make(chan struct{})}
+			registry.serverConfig.systemStats = stats
+			ctx, cancel := context.WithCancel(newMCPPrincipalContext(t.Context(), &mcpPrincipal{Remote: true, Scopes: []string{mcpScopeServerAdmin}}))
+			t.Cleanup(cancel)
+			resources, err := registry.ListResources(ctx, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.ContainsFunc(resources.Resources, func(r mcp.ResourceDescriptor) bool { return r.URI == uri }) {
+				t.Fatal("health resource is not advertised")
+			}
+			read := func() v1.ServerHealth {
+				result, err := registry.ReadResource(ctx, &mcp.ResourcesReadParams{URI: uri})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if result.CacheScope != mcp.CacheScopePrivate || len(result.Contents) != 1 {
+					t.Fatalf("result = %+v", result)
+				}
+				var health v1.ServerHealth
+				if err := json.Unmarshal([]byte(result.Contents[0].Text), &health); err != nil {
+					t.Fatal(err)
+				}
+				return health
+			}
+			if h := read(); !h.Time.IsZero() || h.Error == "" {
+				t.Fatalf("warmup=%+v", h)
+			}
+			changes, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{uri}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sample := v1.SystemSample{Time: time.Now(), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: 85}}, MemPerc: 85, MemUsed: 850, MemTotal: 1000}
+			stats.record(&sample, nil)
+			count := 0
+			for update, err := range changes {
+				if err != nil {
+					t.Fatal(err)
+				}
+				count++
+				if count == 4 {
+					if !update.KeepAlive || len(update.ResourceURIs) != 0 {
+						t.Fatalf("keepalive=%+v", update)
+					}
+					cancel()
+					continue
+				}
+				if !slices.Equal(update.ResourceURIs, []string{uri}) {
+					t.Fatalf("update=%+v", update)
+				}
+				h := read()
+				switch count {
+				case 1:
+					if !h.CPUHigh || !h.MemHigh || h.CPUCount != 1 || h.CPUPerc != 85 {
+						t.Fatalf("first sample=%+v", h)
+					}
+					// Update while delivering an earlier notification, proving rearming.
+					stats.record(&v1.SystemSample{}, errors.New("sampler unavailable"))
+				case 2:
+					if !h.CPUHigh || !h.MemHigh || h.Error != "sampler unavailable" {
+						t.Fatalf("failure=%+v", h)
+					}
+					sample.Time = time.Now()
+					sample.CPUs[0].UsagePerc, sample.MemPerc = 70, 70
+					stats.record(&sample, nil)
+				case 3:
+					if h.CPUHigh || h.MemHigh || h.Error != "" {
+						t.Fatalf("recovery=%+v", h)
+					}
+				default:
+					t.Fatalf("unexpected update=%+v", update)
+				}
+			}
+			if count != 4 {
+				t.Fatalf("updates=%d", count)
+			}
+		})
+	})
+	t.Run("scope_denied", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
+		if !ok {
+			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
+		}
+		for _, p := range []mcpPrincipal{
+			{Remote: true, Scopes: []string{mcpScopeRead}},
+			{Remote: true, Scopes: []string{mcpScopeTasksRead}},
+			{Remote: true, TaskID: ksid.NewID(), Scopes: []string{mcpScopeServerAdmin}},
+		} {
+			ctx := newMCPPrincipalContext(t.Context(), &p)
+			if _, err := registry.ReadResource(ctx, &mcp.ResourcesReadParams{URI: uri}); err == nil {
+				t.Fatalf("read allowed for %+v", p)
+			}
+			if _, err := registry.SubscribeResourceUpdates(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{uri}}); err == nil {
+				t.Fatalf("subscribe allowed for %+v", p)
+			}
+			resources, err := registry.ListResources(ctx, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.ContainsFunc(resources.Resources, func(r mcp.ResourceDescriptor) bool { return r.URI == uri }) {
+				t.Fatalf("resource advertised for %+v", p)
+			}
+		}
+	})
 }

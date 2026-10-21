@@ -1,4 +1,4 @@
-// Samples bounded machine history and publishes current CPU/memory pressure without additional sampling.
+// Samples bounded machine history and publishes last-observed CPU/memory pressure without additional sampling.
 
 package server
 
@@ -53,12 +53,7 @@ func (s *systemStats) health() (h v1.ServerHealth, changed <-chan struct{}) {
 		h.CPUPerc += c.UsagePerc
 	}
 	h.MemUsed, h.MemTotal = v.MemUsed, v.MemTotal
-	if h.Error == "" && time.Since(v.Time) >= systemHealthMaxAge {
-		h.Error = "System sample is stale"
-	}
-	if h.Error == "" {
-		h.CPUHigh, h.MemHigh = s.cpuPressure.high, s.memPressure.high
-	}
+	h.CPUHigh, h.MemHigh = s.cpuPressure.high, s.memPressure.high
 	return h, s.changed
 }
 
@@ -67,18 +62,14 @@ func (s *systemStats) record(sample *v1.SystemSample, err error) {
 	defer s.mu.Unlock()
 	if err != nil {
 		s.err = err.Error()
-		s.cpuPressure, s.memPressure = systemPressure{}, systemPressure{}
 	} else {
 		s.err = ""
-		if len(s.samples) > 0 && sample.Time.Sub(s.samples[len(s.samples)-1].Time) >= systemHealthMaxAge {
-			s.cpuPressure, s.memPressure = systemPressure{}, systemPressure{}
-		}
 		var total float64
 		for _, c := range sample.CPUs {
 			total += c.UsagePerc
 		}
-		s.cpuPressure.update(sample.Time, total/float64(len(sample.CPUs)))
-		s.memPressure.update(sample.Time, sample.MemPerc)
+		s.cpuPressure.update(total / float64(len(sample.CPUs)))
+		s.memPressure.update(sample.MemPerc)
 		if len(s.samples) == cap(s.samples) {
 			copy(s.samples, s.samples[1:])
 			s.samples = s.samples[:len(s.samples)-1]
@@ -119,30 +110,17 @@ func (s *systemStats) run(ctx context.Context) {
 	}
 }
 
-const systemHealthMaxAge = 15 * time.Second
-
-// systemPressure holds the start of a sustained pressure episode.
+// systemPressure raises warnings immediately at 80% and clears below 75%.
 type systemPressure struct {
-	since time.Time
-	high  bool
+	high bool
 }
 
-func (p *systemPressure) update(at time.Time, percent float64) {
-	if percent < 85 {
-		*p = systemPressure{}
-		return
+func (p *systemPressure) update(percent float64) {
+	if percent < 75 {
+		p.high = false
+	} else if percent >= 80 {
+		p.high = true
 	}
-	if p.high {
-		return
-	}
-	if percent < 90 {
-		p.since = time.Time{}
-		return
-	}
-	if p.since.IsZero() {
-		p.since = at
-	}
-	p.high = at.Sub(p.since) >= 15*time.Second
 }
 
 func readSystemSample(ctx context.Context, previous []cpu.TimesStat) (v1.SystemSample, []cpu.TimesStat, error) {

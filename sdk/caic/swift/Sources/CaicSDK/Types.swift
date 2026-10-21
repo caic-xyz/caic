@@ -1976,11 +1976,12 @@ public struct TaskListRestorationStatus: Codable {
     public let error: String
 }
 
-/// ServerHealth is compact current machine health. Time is omitted before the first
+/// ServerHealth is compact last-observed machine health. Time is omitted before the first
 /// successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
-/// the whole-machine capacity. High flags require 15 seconds at >=90% of machine
-/// capacity and clear below 85%. Errors or samples at least 15 seconds old clear
-/// both flags; retained readings describe Time, not a current measurement.
+/// the whole-machine capacity. High flags trigger immediately at >=80% of machine
+/// capacity and clear below 75%. Sampling errors and collection gaps retain both
+/// flags and readings until a successful sample updates them. Error reports sampling
+/// failures separately; Time identifies the last successful measurement.
 public struct ServerHealth: Codable {
     public let time: ISOTimestamp?
     public let cpuPerc: Double
@@ -2002,7 +2003,8 @@ public struct ServerHealth: Codable {
 /// kind=="delete":   Delete holds the string ID of the removed task.
 /// kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
 /// kind=="warning": Warning holds a categorized alert with identity and diagnostic details.
-/// kind=="health": Health holds current machine CPU/memory health for server administrators.
+/// kind=="health": Health holds last-observed machine CPU/memory health for server administrators.
+/// kind=="heartbeat": Keeps the stream observable every 15 seconds even if sampling stalls.
 /// kind=="status":   Status holds runtime/history restoration state, emitted on connect and again whenever restoration transitions (in-progress -> completed | failed).
 public struct TaskListEvent: Codable {
     public let focus: String?

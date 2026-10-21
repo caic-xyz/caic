@@ -1,4 +1,4 @@
-// Browser coverage for stacked server alarms, live SSE readings, stale clearing, and header containment.
+// Browser coverage for retained server warnings, live SSE readings, stream liveness, and header containment.
 
 import { createServer, type ServerResponse } from "node:http";
 import type { ServerHealth, TaskListEvent, ISOTimestamp } from "../../sdk/caic/ts/v1/types.gen";
@@ -100,18 +100,29 @@ for (const width of [320, 390, 1280]) {
       await expect(memory).toBeHidden();
       expect(await cpu.boundingBox()).toEqual(cpuBox);
       update({ error: "sample failed" });
-      await expect(link).toBeHidden();
+      const retained = page.getByRole("link", { name: "High CPU usage — open System" });
+      await expect(retained).toBeVisible();
+      await avatar.focus();
+      await retained.focus();
+      await expect(tooltip).toContainText("Sampling error: sample failed");
       expect(await avatar.boundingBox()).toEqual(before);
       update({ error: "", cpuHigh: true, memHigh: true });
       await expect(link).toBeVisible();
-      await page.clock.fastForward(15_000);
-      await expect(link).toBeHidden();
+      await page.clock.fastForward(30_000);
+      await expect(link).toBeVisible();
+      for (const client of clients) send(client, { kind: "heartbeat" });
+      await expect(page.getByTestId("new-task-button")).toHaveAttribute("data-status", "connected");
+      await page.clock.fastForward(30_000);
+      await expect(link).toBeVisible();
       expect(requests.filter((url) => url.includes("/server/system-stats"))).toHaveLength(0);
       // One shared task stream, plus the existing usage stream. Health adds none.
       expect(requests.filter((url) => url.endsWith("/tasks/events"))).toHaveLength(1);
       expect(requests.filter((url) => url.endsWith("/usage/events"))).toHaveLength(1);
-      update({});
+      await page.clock.fastForward(15_000);
+      await expect(page.getByTestId("new-task-button")).toHaveAttribute("data-status", "disconnected");
       await expect(link).toBeVisible();
+      await link.focus();
+      await expect(tooltip).toContainText("Updates unavailable");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await link.focus();
       await link.press("Enter");
