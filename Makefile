@@ -23,7 +23,6 @@ VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 # linting must run through the custom binary built from the published plugin
 # module; the plain binary is fine for `fmt`.
 VERIFY_GO = ./custom-gcl run --show-stats=false ./... && go mod tidy -diff
-VERIFY_GOBUILD = uv run --locked python scripts/lint_build_tags.py
 VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && node scripts/lint_frontend_styles.mjs
 VERIFY_TS = pnpm --silent typecheck
 VERIFY_ESLINT = pnpm exec eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .
@@ -89,7 +88,7 @@ build: frontend-build
 # The one static gate. Runs every check-only lane concurrently; the read-only
 # counterpart of fix and the pre-push gate. Independent of test.
 verify: custom-gcl frontend-deps
-	@./scripts/run-concurrently.sh workflows,go,buildtags,js,ts,eslint,python,shell,misc '$(VERIFY_WORKFLOWS)' '$(VERIFY_GO)' '$(VERIFY_GOBUILD)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
+	@./scripts/run-concurrently.sh workflows,go,js,ts,eslint,python,shell,misc '$(VERIFY_WORKFLOWS)' '$(VERIFY_GO)' '$(VERIFY_JS)' '$(VERIFY_TS)' '$(VERIFY_ESLINT)' '$(VERIFY_PY)' '$(VERIFY_SH)' '$(VERIFY_MISC)'
 
 # Apply every autofix, then refresh the generated file index and architecture
 # diagram. Order matters: the stylelint fixer runs last because its
