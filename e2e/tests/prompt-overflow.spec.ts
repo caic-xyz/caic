@@ -5,7 +5,9 @@ import { test, expect, fillContentEditable, createTaskAPI, waitForTaskState } fr
 for (const width of [390, 1280]) {
   test(`long recorded prompt stays in the conversation viewport at ${width}px`, async ({ page, api, uniquePrompt }) => {
     await page.setViewportSize({ width, height: 844 });
-    const prompt = uniquePrompt("Long prompt") + "\n\nDescribe the change and its expected behavior.".repeat(250);
+    // The fake agent treats each nonempty input line as a turn. Keep this a
+    // single long line so replay tests overflow without rendering 251 turns.
+    const prompt = uniquePrompt("Long prompt") + " Describe the change and its expected behavior.".repeat(250);
     const id = await createTaskAPI(api, prompt);
     await waitForTaskState(api, id, "waiting");
     const eventsURL = `**/api/caic/v1/tasks/${id}/events*`;
