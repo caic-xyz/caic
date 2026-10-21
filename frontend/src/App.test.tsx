@@ -4102,8 +4102,8 @@ it("shows server-selected alarms and retains warnings on sampling failures", asy
   expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   expect(menu).toHaveFocus();
   fireEvent.focus(link);
-  expect(screen.getByRole("tooltip")).toHaveTextContent("750.0% · 7.50 / 8 CPUs · 93.8% of capacity");
-  expect(screen.getByRole("tooltip")).toHaveTextContent("30 GiB / 32 GiB · 93.8%");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("750.0% · 7.50 / 8 CPUs (93.8%)");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("RAM: 30 GiB / 32 GiB (93.8%)");
   fireEvent.keyDown(link, { key: "Escape" });
   expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   dispatchSSE({ kind: "health", health: { ...highHealth, cpuHigh: false } });
@@ -4114,7 +4114,6 @@ it("shows server-selected alarms and retains warnings on sampling failures", asy
   expect(screen.getByRole("link", { name: /High CPU and memory/ })).toBe(link);
   fireEvent.focus(link);
   expect(screen.getByRole("tooltip")).toHaveTextContent("Sampling error: sampling failed");
-  expect(screen.getByRole("tooltip")).toHaveTextContent("Last sampled:");
   dispatchSSE({ kind: "health", health: { ...highHealth, time: undefined, error: "Waiting for first sample" } });
   expect(screen.getByRole("link", { name: /High CPU and memory/ })).toBe(link);
   dispatchSSE({ kind: "health", health: { ...highHealth, cpuHigh: false, memHigh: false } });

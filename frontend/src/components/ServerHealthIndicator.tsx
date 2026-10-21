@@ -15,16 +15,12 @@ export default function ServerHealthIndicator(props: { health: ServerHealth | nu
   const description = () => {
     const h = props.health;
     if (!h) return "";
-    const cpu = h.cpuCount > 0 ? `${(h.cpuPerc / h.cpuCount).toFixed(1)}% of capacity` : "capacity unknown";
+    const cpu = h.cpuCount > 0 ? `${(h.cpuPerc / h.cpuCount).toFixed(1)}%` : "capacity unknown";
     const memory = h.memTotal > 0 ? `${((h.memUsed / h.memTotal) * 100).toFixed(1)}%` : "capacity unknown";
-    const status = [
-      h.time ? `Last sampled: ${new Date(h.time).toLocaleString()}` : "",
-      h.error ? `Sampling error: ${h.error}` : "",
-      !props.connected ? "Updates unavailable" : "",
-    ]
+    const status = [h.error ? `Sampling error: ${h.error}` : "", !props.connected ? "Updates unavailable" : ""]
       .filter(Boolean)
       .join("\n");
-    return `CPU: ${h.cpuPerc.toFixed(1)}% · ${(h.cpuPerc / 100).toFixed(2)} / ${h.cpuCount} CPUs · ${cpu}\nMemory: ${formatBytes(h.memUsed)} / ${formatBytes(h.memTotal)} · ${memory}\n${status}`;
+    return `CPU: ${h.cpuPerc.toFixed(1)}% · ${(h.cpuPerc / 100).toFixed(2)} / ${h.cpuCount} CPUs (${cpu})\nRAM: ${formatBytes(h.memUsed)} / ${formatBytes(h.memTotal)} (${memory})${status ? `\n${status}` : ""}`;
   };
   const label = () =>
     `High ${props.health?.cpuHigh && props.health.memHigh ? "CPU and memory" : props.health?.cpuHigh ? "CPU" : "memory"} usage — open System`;
