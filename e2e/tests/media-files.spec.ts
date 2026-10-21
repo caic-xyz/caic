@@ -53,7 +53,7 @@ for (const width of [390, 1280]) {
     for (const [kind, label, path, broken] of [
       ["audio", "Recording", "/recording.wav", "/broken.mp3"],
       ["video", "Clip", "/clip.webm", "/broken.webm"],
-    ]) {
+    ] as const) {
       await test.step(`${kind} autoplays and stops on close`, async () => {
         await page.getByRole("link", { name: label, exact: true }).click();
         const media = page.getByLabel(path, { exact: true });

@@ -1,5 +1,6 @@
 // Browser coverage for settings layout, destination ordering, and mapping edits.
 
+import { ok } from "node:assert/strict";
 import { expect, test } from "../helpers";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 
@@ -76,12 +77,14 @@ test("desktop settings tabs keep a consistent frame", async ({ page }, testInfo)
     frames.push({ heading, navigation, panel });
     await page.screenshot({ path: testInfo.outputPath(`settings-tab-${section.toLowerCase()}-desktop.png`) });
   }
+  const first = frames[0];
+  ok(first);
   for (const frame of frames.slice(1)) {
-    expect(frame.heading).toEqual(frames[0].heading);
-    expect(frame.navigation).toEqual(frames[0].navigation);
-    expect(frame.panel.x).toBe(frames[0].panel.x);
-    expect(frame.panel.y).toBe(frames[0].panel.y);
-    expect(frame.panel.width).toBe(frames[0].panel.width);
+    expect(frame.heading).toEqual(first.heading);
+    expect(frame.navigation).toEqual(first.navigation);
+    expect(frame.panel.x).toBe(first.panel.x);
+    expect(frame.panel.y).toBe(first.panel.y);
+    expect(frame.panel.width).toBe(first.panel.width);
   }
 });
 
@@ -331,7 +334,7 @@ test("settings tabs navigate in the same document", async ({ page }) => {
     ["Storage", "/settings?section=storage"],
     ["Server", "/settings?section=server"],
     ["General", "/settings"],
-  ]) {
+  ] as const) {
     const tab = page.getByRole("link", { name: section, exact: true });
     await tab.click();
     await expect(tab).toHaveAttribute("aria-current", "page");

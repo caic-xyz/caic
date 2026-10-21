@@ -1,5 +1,6 @@
 // Tests app-shell task creation, workspace navigation, account isolation, image drafts, warnings, server health, and preferences.
 
+import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
@@ -1320,7 +1321,9 @@ describe("App keyboard shortcuts", () => {
       expect(found).toHaveLength(2);
       return found;
     });
+    assert.ok(cards[0] !== undefined);
     const firstId = cards[0].dataset.taskId;
+    assert.ok(cards[1] !== undefined);
     const secondId = cards[1].dataset.taskId;
     cards[0].focus();
 
@@ -1379,7 +1382,7 @@ describe("App keyboard shortcuts", () => {
       return found;
     });
     expect(cards.map((card) => card.tabIndex)).toEqual([0, -1]);
-
+    assert.ok(cards[1] !== undefined);
     history.set({ value: `/task/@${cards[1].dataset.taskId}+selected` });
     await waitFor(() => expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0]));
 
@@ -3315,7 +3318,9 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByTestId("submit-task"));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
-    const call = vi.mocked(api.createTask).mock.calls[0][0];
+    const createCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(createCall !== undefined);
+    const call = createCall[0];
     expect(call.repos).toBeUndefined();
   });
 
@@ -3343,12 +3348,16 @@ describe("App repo chips: No repository", () => {
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByTestId("submit-task")).not.toBeDisabled());
     expect(input).toHaveValue("  session:not-a-guid  ");
-    expect(vi.mocked(api.createTask).mock.calls[0][0].resumeSessionID).toBe("session:not-a-guid");
+    const firstCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(firstCall !== undefined);
+    expect(firstCall[0].resumeSessionID).toBe("session:not-a-guid");
 
     await user.click(screen.getByTestId("submit-task"));
     await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(input).toHaveValue(""));
-    expect(vi.mocked(api.createTask).mock.calls[1][0].resumeSessionID).toBe("session:not-a-guid");
+    const retryCall = vi.mocked(api.createTask).mock.calls[1];
+    assert.ok(retryCall !== undefined);
+    expect(retryCall[0].resumeSessionID).toBe("session:not-a-guid");
   });
 
   it("enables CAIC MCP delegation by default", async () => {
@@ -3359,8 +3368,10 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByTestId("submit-task"));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
-    expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBe(true);
-    expect(vi.mocked(api.createTask).mock.calls[0][0].resumeSessionID).toBeUndefined();
+    const createCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(createCall !== undefined);
+    expect(createCall[0].caicMCP).toBe(true);
+    expect(createCall[0].resumeSessionID).toBeUndefined();
   });
 
   it("omits the CAIC MCP delegation grant when disabled", async () => {
@@ -3373,7 +3384,9 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByTestId("submit-task"));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
-    expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBeUndefined();
+    const createCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(createCall !== undefined);
+    expect(createCall[0].caicMCP).toBeUndefined();
   });
 
   it("submits with Ctrl+Enter from a feature toggle without changing the toggle", async () => {
@@ -3392,8 +3405,10 @@ describe("App repo chips: No repository", () => {
     await user.keyboard("{Control>}{Enter}{/Control}");
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
     expect(toggle).not.toBeChecked();
-    expect(vi.mocked(api.createTask).mock.calls[0][0].initialPrompt.text).toBe("review the change");
-    expect(vi.mocked(api.createTask).mock.calls[0][0].caicMCP).toBeUndefined();
+    const createCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(createCall !== undefined);
+    expect(createCall[0].initialPrompt.text).toBe("review the change");
+    expect(createCall[0].caicMCP).toBeUndefined();
   });
 });
 
@@ -3656,7 +3671,9 @@ describe("account-owned image drafts", () => {
     chooseDraftImage(form, new File(["second"], "second.png", { type: "image/png" }));
     read.resolve(new TextEncoder().encode("first").buffer);
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
-    expect(vi.mocked(api.createTask).mock.calls[0][0].initialPrompt).toEqual({
+    const createCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(createCall !== undefined);
+    expect(createCall[0].initialPrompt).toEqual({
       text: "first prompt",
       images: [{ mediaType: "image/png", data: "Zmlyc3Q=" }],
     });
@@ -3664,6 +3681,7 @@ describe("account-owned image drafts", () => {
     await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
     expect(prompt).toHaveTextContent("new prompt");
     expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(1);
+    assert.ok(create.mock.results[0] !== undefined);
     expect(revoke).toHaveBeenCalledWith(create.mock.results[0].value);
     view.unmount();
     expect(revoke).toHaveBeenCalledTimes(2);
@@ -3686,9 +3704,11 @@ describe("account-owned image drafts", () => {
     expect(within(form).getByRole("img", { name: "attached" })).toBeInTheDocument();
     fireEvent.click(within(form).getByTestId("submit-task"));
     await waitFor(() => expect(revoke).toHaveBeenCalledOnce());
-    expect(vi.mocked(api.createTask).mock.calls[1][0].initialPrompt).toEqual(
-      vi.mocked(api.createTask).mock.calls[0][0].initialPrompt,
-    );
+    const firstCall = vi.mocked(api.createTask).mock.calls[0];
+    assert.ok(firstCall !== undefined);
+    const retryCall = vi.mocked(api.createTask).mock.calls[1];
+    assert.ok(retryCall !== undefined);
+    expect(firstCall[0].initialPrompt).toEqual(retryCall[0].initialPrompt);
     expect(prompt).toHaveTextContent("");
     view.unmount();
     expect(revoke).toHaveBeenCalledOnce();
@@ -3743,7 +3763,9 @@ it("preserves the task's newer text and attachments after sending its conversion
     }),
   );
   sent.resolve({ status: "ok" });
-  await waitFor(() => expect(revoke).toHaveBeenCalledWith(create.mock.results[0].value));
+  const firstResult = create.mock.results[0];
+  assert.ok(firstResult !== undefined);
+  await waitFor(() => expect(revoke).toHaveBeenCalledWith(firstResult.value));
   expect(prompt).toHaveTextContent("next task prompt");
   expect(within(form).getAllByRole("img", { name: "attached" })).toHaveLength(1);
   await waitForTaskEventsSubscription();
@@ -3816,7 +3838,9 @@ it("releases hidden task drafts omitted by a complete reconnect snapshot", async
     expect(within(screen.getByTestId("task-detail-form")).getByRole("textbox")).toHaveTextContent(""),
   );
   dispatchSSE({ kind: "snapshot", snapshot: [second] });
-  await waitFor(() => expect(revoke).toHaveBeenCalledWith(create.mock.results[0].value));
+  const firstResult = create.mock.results[0];
+  assert.ok(firstResult !== undefined);
+  await waitFor(() => expect(revoke).toHaveBeenCalledWith(firstResult.value));
   dispatchSSE({ kind: "upsert", upsert: first });
   view.history.set({ value: "/task/@task1+task" });
   const restored = await screen.findByTestId("task-detail-form");

@@ -57,7 +57,7 @@ function resolvedParents(byPID: ReadonlyMap<number, ProcessNode>): Map<number, n
       if (onPath.has(cur)) {
         // Cut the cycle at its lowest PID so the cycle keeps a single root.
         const cycle = path.slice(path.indexOf(cur));
-        let cut = cycle[0];
+        let cut = cur;
         for (const pid of cycle) {
           if (pid < cut) cut = pid;
         }
@@ -80,12 +80,10 @@ function resolvedParents(byPID: ReadonlyMap<number, ProcessNode>): Map<number, n
 // ever-longer prefixes. Only rendered rows enumerate these persistent links.
 function assignTreeLayout(roots: ProcessNode[]): void {
   const queue: ProcessNode[] = [...roots];
-  for (let i = 0; i < queue.length; i++) {
-    const node = queue[i];
+  for (const node of queue) {
     const continuations =
       node.depth > 0 && !node.lastChild ? { column: node.depth - 1, parent: node.continuations } : node.continuations;
-    for (let j = 0; j < node.children.length; j++) {
-      const child = node.children[j];
+    for (const [j, child] of node.children.entries()) {
       child.depth = node.depth + 1;
       child.lastChild = j === node.children.length - 1;
       child.continuations = continuations;
@@ -123,17 +121,16 @@ export function buildTree(procs: ProcessInfo[]): ProcessNode[] {
 // without growing the call stack.
 export function visibleProcesses(roots: ProcessNode[], isCollapsed: (node: ProcessNode) => boolean): ProcessNode[] {
   const visible: ProcessNode[] = [];
-  const stack: ProcessNode[] = [];
-  for (let i = roots.length - 1; i >= 0; i--) {
-    stack.push(roots[i]);
-  }
+  const stack = [...roots].reverse();
   while (stack.length > 0) {
     const node = stack.pop();
     if (node === undefined) break;
     visible.push(node);
     if (isCollapsed(node)) continue;
     for (let i = node.children.length - 1; i >= 0; i--) {
-      stack.push(node.children[i]);
+      const child = node.children[i];
+      if (!child) throw new Error("Missing process child");
+      stack.push(child);
     }
   }
   return visible;
@@ -175,7 +172,7 @@ interface RowProps {
 function ProcessRow(props: RowProps) {
   const hasChildren = () => props.node.children.length > 0;
   const name = () => {
-    const executable = props.node.command.trim().split(/\s+/, 1)[0];
+    const executable = props.node.command.trim().match(/^\S*/)?.[0] ?? "";
     return executable.slice(executable.lastIndexOf("/") + 1);
   };
 
@@ -198,9 +195,9 @@ function ProcessRow(props: RowProps) {
           </For>
           <Show when={props.node.depth > 0}>
             <span
-              class={`${styles.treeLane} ${styles.treeStem} ${styles.treeBranch}`}
+              class={`${styles.treeLane} ${styles.treeStem} ${styles.treeBranch} ${props.node.lastChild ? styles.treeEnd : ""}`}
               data-testid="process-parent-lane"
-              classList={{ [styles.treeEnd]: props.node.lastChild }}
+
               style={{ "--tree-column": `${props.node.depth - 1}` }}
             />
           </Show>
@@ -225,7 +222,7 @@ function ProcessRow(props: RowProps) {
               title={props.collapsed ? "Expand children" : "Collapse children"}
             >
               <span>{name()}</span>
-              <span class={styles.disclosure} classList={{ [styles.expanded]: !props.collapsed }} aria-hidden="true">
+              <span class={`${styles.disclosure} ${!props.collapsed ? styles.expanded : ""}`} aria-hidden="true">
                 <ChevronRightIcon width={12} height={12} />
               </span>
             </button>

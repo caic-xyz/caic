@@ -41,6 +41,7 @@ export class IncrementalEventTimingTracker {
     }
     for (let i = this.processed; i < events.length; i++) {
       const event = events[i];
+      if (!event) throw new Error("Missing timeline event");
       if (event.ts > 0) {
         if (event.ts < this.start) this.firstTimedEvent = event;
         this.start = Math.min(this.start, event.ts);
@@ -84,7 +85,11 @@ export class IncrementalTaskTimingTracker {
 
   derive(messages: readonly EventMessage[], reset: boolean): TaskTimings {
     if (reset || messages.length < this.processed) this.clear();
-    for (let i = this.processed; i < messages.length; i++) this.append(messages[i]);
+    for (let i = this.processed; i < messages.length; i++) {
+      const event = messages[i];
+      if (!event) throw new Error("Missing timeline event");
+      this.append(event);
+    }
     this.processed = messages.length;
     return {
       previousEventTs: this.previousEventTs,

@@ -134,7 +134,9 @@ function drawTokenChart(turns: readonly TurnTiming[], width: number, asShare: bo
 }
 
 function drawResourceChart(data: readonly ResourceDatum[], width: number, options: ResourceChartOptions): Element {
-  const domain = data.length > 0 ? [data[0].ts, data[data.length - 1].ts] : undefined;
+  const first = data[0];
+  const last = data.at(-1);
+  const domain: [number, number] | undefined = first && last ? [first.ts, last.ts] : undefined;
   const available = data.filter((sample): sample is ResourceDatum & { value: number } => sample.value !== null);
   const showAxis = options.axisAnchor !== null && options.axisFormat !== null && options.maxValue !== null;
   // Plot does not enlarge margins for tick text. At the fixed 10 px chart font,
@@ -233,7 +235,11 @@ export function ResourceCharts(props: { stats: readonly ResourceSample[]; scope:
   const tx = () => networkRates().map((sample) => ({ ts: sample.ts, value: sample.txBytesPerSecond }));
   const exactSampleRows = () =>
     props.stats
-      .map((sample, index) => ({ rate: networkRates()[index], sample }))
+      .map((sample, index) => {
+        const rate = networkRates()[index];
+        if (!rate) throw new Error("Resource sample has no matching network rate");
+        return { rate, sample };
+      })
       .reverse()
       .map(({ rate, sample }) => [
         formatExactSampleTime(sample.ts),

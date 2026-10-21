@@ -1,4 +1,5 @@
 // Multi-turn interaction and concurrent task tests.
+import { ok } from "node:assert/strict";
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 test("multi-turn: send input cycles to next joke", async ({ page, api }) => {
@@ -57,7 +58,11 @@ test("concurrent tasks run independently", async ({ api }) => {
   ]);
 
   expect(task1.id).not.toBe(task2.id);
-  expect(task1.repos![0].branch).not.toBe(task2.repos![0].branch);
+  const firstRepo = task1.repos?.[0];
+  const secondRepo = task2.repos?.[0];
+  ok(firstRepo);
+  ok(secondRepo);
+  expect(firstRepo.branch).not.toBe(secondRepo.branch);
 
   // Purge both.
   await Promise.all([api.purgeTask(id1), api.purgeTask(id2)]);

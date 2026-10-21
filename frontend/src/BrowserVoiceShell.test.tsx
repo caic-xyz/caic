@@ -1,5 +1,6 @@
 // Tests for caic-owned browser voice task updates and numbering.
 
+import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { render, waitFor } from "@solidjs/testing-library";
@@ -52,7 +53,7 @@ function task(id: string, title: string): Task {
 describe("VoiceTaskUpdates", () => {
   it("seeds existing tasks and numbers new tasks without injecting creation feedback", async () => {
     voiceSession.setState((s) => ({ ...s, connected: true }));
-    const [tasks, setTasks] = createSignal([task("a-task", "Existing work")]);
+    const [tasks, setTasks] = createSignal<[Task, ...Task[]]>([task("a-task", "Existing work")]);
     const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
     expect(injectTextMock).not.toHaveBeenCalled();
     expect(getVoiceTaskNumber("a-task")).toBe(1);
@@ -66,7 +67,7 @@ describe("VoiceTaskUpdates", () => {
   });
 
   it("reports attention and CI changes without replaying the connection baseline", () => {
-    const [tasks, setTasks] = createSignal([task("a-task", "Existing work")]);
+    const [tasks, setTasks] = createSignal<[Task, ...Task[]]>([task("a-task", "Existing work")]);
     const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
     voiceSession.setState((s) => ({ ...s, connected: true }));
     expect(injectTextMock).not.toHaveBeenCalled();
@@ -86,12 +87,19 @@ describe("VoiceTaskUpdates", () => {
   });
 
   it("numbers task updates only while multiple tasks are alive", () => {
-    const [tasks, setTasks] = createSignal([task("a-task", "First work"), task("b-task", "Second work")]);
+    const [tasks, setTasks] = createSignal<[Task, ...Task[]]>([
+      task("a-task", "First work"),
+      task("b-task", "Second work"),
+    ]);
     const view = render(() => <VoiceTaskUpdates tasks={tasks} />);
     voiceSession.setState((s) => ({ ...s, connected: true }));
     expect(injectTextMock).not.toHaveBeenCalled();
 
-    setTasks((current) => [current[0], { ...current[1], state: "waiting" }]);
+    setTasks((current) => {
+      const second = current[1];
+      assert.ok(second !== undefined);
+      return [current[0], { ...second, state: "waiting" }];
+    });
     expect(injectTextMock).toHaveBeenCalledWith("[Task #2 (Second work) — waiting]");
 
     setTasks((current) => [current[0]]);

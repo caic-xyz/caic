@@ -81,10 +81,10 @@ class History {
   }
 
   discardBefore(offset: number): void {
-    while (
-      this.first < this.chunks.length &&
-      this.chunks[this.first].start + this.chunks[this.first].bytes.length <= offset
-    ) {
+    while (this.first < this.chunks.length) {
+      const chunk = this.chunks[this.first];
+      if (!chunk) throw new Error("Missing compressed STEP history chunk");
+      if (chunk.start + chunk.bytes.length > offset) break;
       this.first++;
     }
     if (this.first > 128 && this.first > this.chunks.length / 2) {
@@ -99,9 +99,14 @@ class History {
     while (low <= high) {
       const middle = (low + high) >>> 1;
       const chunk = this.chunks[middle];
+      if (!chunk) throw new Error("Invalid compressed STEP metadata offset");
       if (offset < chunk.start) high = middle - 1;
       else if (offset >= chunk.start + chunk.bytes.length) low = middle + 1;
-      else return chunk.bytes[offset - chunk.start];
+      else {
+        const byte = chunk.bytes[offset - chunk.start];
+        if (byte === undefined) throw new Error("Invalid compressed STEP metadata offset");
+        return byte;
+      }
     }
     throw new Error("Invalid compressed STEP metadata offset");
   }
@@ -246,11 +251,12 @@ class ZipStep {
   }
 
   push(chunk: Bytes): void {
-    const start = this.history.end;
+    let offset = this.history.end;
     this.history.push(chunk);
-    for (let index = 0; index < chunk.length; index++) {
-      this.signature = ((this.signature >>> 8) | (chunk[index] << 24)) >>> 0;
-      if (this.directoryStart === null && this.signature === 0x02014b50) this.directoryStart = start + index - 3;
+    for (const byte of chunk) {
+      this.signature = ((this.signature >>> 8) | (byte << 24)) >>> 0;
+      if (this.directoryStart === null && this.signature === 0x02014b50) this.directoryStart = offset - 3;
+      offset++;
     }
     // Keep enough suffix for EOCD's maximum comment. Once a possible central
     // signature appears, retain it until the authoritative EOF directory offset
@@ -385,6 +391,11 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
 });
 
 function updateCrc(crc: number, chunk: Uint8Array): number {
-  for (const byte of chunk) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+  // The masked index is in the complete 256-entry table.
+  for (const byte of chunk) {
+    const entry = crcTable[(crc ^ byte) & 0xff];
+    if (entry === undefined) throw new Error("Missing CRC table entry");
+    crc = (crc >>> 8) ^ entry;
+  }
   return crc;
 }

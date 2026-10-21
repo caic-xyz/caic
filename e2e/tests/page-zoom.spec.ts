@@ -1,5 +1,6 @@
 // Browser coverage for native page zoom, dense quota groups, task cards, and account-menu access.
 
+import { ok } from "node:assert/strict";
 import { chromium } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -40,6 +41,7 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
   try {
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const page = context.pages()[0];
+    ok(page);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const usage: UsageResp = {

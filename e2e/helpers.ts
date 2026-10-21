@@ -1,4 +1,5 @@
 // Shared e2e test helpers: typed API client and utilities.
+import { ok } from "node:assert/strict";
 import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -13,8 +14,11 @@ import type { Task } from "../sdk/caic/ts/v1/types.gen";
 export async function collectStepTimings(page: Page): Promise<StepLoadTimingReport[]> {
   const reports: StepLoadTimingReport[] = [];
   page.on("console", async (message) => {
-    if (message.type() === "debug" && message.text().startsWith("Observed STEP timing"))
-      reports.push((await message.args()[1].jsonValue()) as StepLoadTimingReport);
+    if (message.type() === "debug" && message.text().startsWith("Observed STEP timing")) {
+      const detail = message.args()[1];
+      ok(detail);
+      reports.push((await detail.jsonValue()) as StepLoadTimingReport);
+    }
   });
   await page.addInitScript(() => {
     new PerformanceObserver((list) => {
@@ -100,12 +104,14 @@ export async function fillContentEditable(locator: import("@playwright/test").Lo
 
 export async function createTaskAPI(api: APIClient, prompt: string): Promise<string> {
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
   expect(repos.length).toBeGreaterThan(0);
   const harnesses = await api.listHarnesses();
   expect(harnesses.length).toBeGreaterThan(0);
   const resp = await api.createTask({
     initialPrompt: { text: prompt },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "claude",
   });
   expect(resp.id).toBeTruthy();

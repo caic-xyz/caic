@@ -1,4 +1,6 @@
 // Generates faceted STEP assemblies, dense tetrahedra, rigid frames, and polygon prisms for import checks.
+import assert from "node:assert/strict";
+import { Vector3 } from "three";
 export function createFacetedStep(parts: number, reusePart: boolean): Uint8Array<ArrayBuffer> {
   return createAssembly(parts, reusePart, 1);
 }
@@ -49,6 +51,7 @@ function createAssembly(parts: number, reusePart: boolean, subdivisions: number)
   const instances: { representation: number; product: number; placement: number }[] = [];
   for (let i = 0; i < parts; i++) {
     if (reusePart && i > 0) {
+      assert.ok(instances[0] !== undefined);
       instances.push({ ...instances[0], placement: placement(point(i * 5, 0, 0), z, i % 2 ? y : x) });
       continue;
     }
@@ -57,15 +60,15 @@ function createAssembly(parts: number, reusePart: boolean, subdivisions: number)
       [1, 0, 0],
       [0, 1, 0],
       [0, 0, 1],
-    ];
-    const vertices = [zero, point(1, 0, 0), point(0, 1, 0), point(0, 0, 1)];
+    ] as const;
+    const vertices = [zero, point(1, 0, 0), point(0, 1, 0), point(0, 0, 1)] as const;
     const faces: number[] = [];
     const specs = [
       { points: [0, 2, 1], normal: [0, 0, -1], tangent: [0, 1, 0] },
       { points: [0, 1, 3], normal: [0, -1, 0], tangent: [1, 0, 0] },
       { points: [0, 3, 2], normal: [-1, 0, 0], tangent: [0, 0, 1] },
       { points: [1, 2, 3], normal: [1, 1, 1], tangent: [-1, 1, 0] },
-    ];
+    ] as const;
     for (const spec of specs) {
       const n = direction(spec.normal[0], spec.normal[1], spec.normal[2]);
       const t = direction(spec.tangent[0], spec.tangent[1], spec.tangent[2]);
@@ -80,23 +83,35 @@ function createAssembly(parts: number, reusePart: boolean, subdivisions: number)
         triangle(spec.points.map((v) => vertices[v]));
         continue;
       }
-      const [a, b, c] = spec.points.map((v) => coordinates[v]);
+      const a = new Vector3(...coordinates[spec.points[0]]);
+      const b = new Vector3(...coordinates[spec.points[1]]).sub(a);
+      const c = new Vector3(...coordinates[spec.points[2]]).sub(a);
       const rows: number[][] = [];
       for (let row = 0; row <= subdivisions; row++) {
         const points: number[] = [];
         for (let column = 0; column <= subdivisions - row; column++) {
-          const position = a.map(
-            (value, axis) => value + ((b[axis] - value) * row + (c[axis] - value) * column) / subdivisions,
-          );
-          points.push(point(position[0], position[1], position[2]));
+          const position = a
+            .clone()
+            .addScaledVector(b, row / subdivisions)
+            .addScaledVector(c, column / subdivisions);
+          points.push(point(position.x, position.y, position.z));
         }
         rows.push(points);
       }
       for (let row = 0; row < subdivisions; row++) {
         for (let column = 0; column < subdivisions - row; column++) {
-          triangle([rows[row][column], rows[row + 1][column], rows[row][column + 1]]);
+          const top = rows[row],
+            bottom = rows[row + 1];
+          assert.ok(top !== undefined && bottom !== undefined);
+          const a = top[column],
+            b = bottom[column],
+            c = top[column + 1];
+          assert.ok(a !== undefined && b !== undefined && c !== undefined);
+          triangle([a, b, c]);
           if (column < subdivisions - row - 1) {
-            triangle([rows[row + 1][column], rows[row + 1][column + 1], rows[row][column + 1]]);
+            const d = bottom[column + 1];
+            assert.ok(d !== undefined);
+            triangle([b, d, c]);
           }
         }
       }
@@ -152,18 +167,20 @@ export function createPolygonStep(contour: readonly [number, number][], reversed
     records.push(`#${id}=${entity};`);
     return id;
   };
-  const coordinates = [0, 1].flatMap((z) => contour.map(([x, y]) => [x, y, z]));
+  const coordinates = [0, 1].flatMap((z) => contour.map(([x, y]): [number, number, number] => [x, y, z]));
   const points = coordinates.map((p) => emit(`CARTESIAN_POINT('',(${p.join(",")}))`));
   const n = contour.length;
   const loops = [Array.from({ length: n }, (_, i) => n - i - 1), Array.from({ length: n }, (_, i) => n + i)];
   for (let i = 0; i < n; i++) loops.push([i, (i + 1) % n, ((i + 1) % n) + n, i + n]);
   const faces = loops.map((indices) => {
     const [a, b, c] = indices.map((i) => coordinates[i]);
-    const ab = b.map((v, i) => v - a[i]);
-    const ac = c.map((v, i) => v - a[i]);
-    const normal = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    assert.ok(a !== undefined && b !== undefined && c !== undefined);
+    const ab = new Vector3(...b).sub(new Vector3(...a));
+    const ac = new Vector3(...c).sub(new Vector3(...a));
+    const normal = ab.clone().cross(ac).toArray();
     const z = emit(`DIRECTION('',(${normal.map((v) => (reversed ? -v : v)).join(",")}))`);
-    const x = emit(`DIRECTION('',(${ab.join(",")}))`);
+    const x = emit(`DIRECTION('',(${ab.toArray().join(",")}))`);
+    assert.ok(indices[0] !== undefined);
     const placement = emit(`AXIS2_PLACEMENT_3D('',#${points[indices[0]]},#${z},#${x})`);
     const plane = emit(`PLANE('',#${placement})`);
     const loop = emit(`POLY_LOOP('',(${indices.map((i) => `#${points[i]}`).join(",")}))`);

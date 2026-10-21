@@ -1,5 +1,6 @@
 // Tests quota-aware harness ordering and conservative availability labels.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
@@ -76,9 +77,10 @@ describe("quotaRecoveryTargets", () => {
     [0, 1],
     [0, 0],
     [1, 1],
-  ]) {
+  ] as const) {
     it(`does not infer Antigravity harness capacity without a model (${gemini}, ${thirdParty})`, () => {
       const data = usage([{ provider: "antigravity", utilization: 0 }]);
+      assert.ok(data.providers[0] !== undefined);
       data.providers[0].rateLimits = [
         { label: "7d", window: "gemini-weekly", utilization: gemini },
         { label: "5h", window: "gemini-5h", utilization: gemini },
@@ -92,6 +94,7 @@ describe("quotaRecoveryTargets", () => {
         "antigravity",
         now,
       );
+      assert.ok(target !== undefined);
       expect(target.status).toBe("unknown");
       expect(target.label).toBe("Quota status unknown");
       expect(target.recommended).toBe(false);
@@ -121,7 +124,7 @@ describe("quotaRecoveryTargets", () => {
       "codex",
       now,
     );
-
+    assert.ok(target !== undefined);
     expect(target.status).toBe("unknown");
     expect(target.label).toBe("Quota status unknown");
   });
@@ -135,7 +138,7 @@ describe("quotaRecoveryTargets", () => {
         "codex",
         now,
       );
-
+      assert.ok(target !== undefined);
       expect(target.status).toBe("unknown");
       expect(target.recommended).toBe(false);
       expect(target.label).toBe("Quota status unknown");

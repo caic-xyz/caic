@@ -1,13 +1,18 @@
 // E2E tests task-card repository-state summaries and refreshes without agent activity.
 
+import { ok } from "node:assert/strict";
 import { expect, test, waitForTaskState } from "../helpers";
 import type { TaskListEvent } from "../../sdk/caic/ts/v1/types.gen";
 
 test("task-card cost tooltip stays open after the first touch tap", async ({ browser, baseURL, api, uniquePrompt }) => {
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
+  const secondRepo = repos[1];
+  ok(secondRepo);
   const task = await api.createTask({
     initialPrompt: { text: uniquePrompt("FAKE_DEMO touch tooltip") },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "claude",
   });
   await waitForTaskState(api, task.id, "waiting");
@@ -40,7 +45,13 @@ test("task-card cost tooltip stays open after the first touch tap", async ({ bro
 
 test("task cards keep single- and multi-repository states coherent", async ({ page, api, uniquePrompt }, testInfo) => {
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
+  const secondRepo = repos[1];
+  ok(secondRepo);
   const harnesses = await api.listHarnesses();
+  const harness = harnesses[0];
+  ok(harness);
   expect(repos.length).toBeGreaterThanOrEqual(2);
   expect(harnesses.length).toBeGreaterThan(0);
 
@@ -48,18 +59,28 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
   // backend's post-tool repository-state probe the cards render.
   const singleTask = await api.createTask({
     initialPrompt: { text: uniquePrompt("FAKE_DEMO single repository state") },
-    repos: [{ name: repos[0].path }],
-    harness: harnesses[0].name,
+    repos: [{ name: firstRepo.path }],
+    harness: harness.name,
   });
   const multiTask = await api.createTask({
     initialPrompt: { text: uniquePrompt("FAKE_DEMO mapped repository state") },
-    repos: [{ name: repos[0].path }, { name: repos[1].path }],
-    harness: harnesses[0].name,
+    repos: [{ name: firstRepo.path }, { name: secondRepo.path }],
+    harness: harness.name,
   });
   await waitForTaskState(api, singleTask.id, "waiting");
   await waitForTaskState(api, multiTask.id, "waiting");
   const singleRepoStatus = await api.getTaskRepoStatus(singleTask.id);
   const multiRepoStatus = await api.getTaskRepoStatus(multiTask.id);
+  const singleStatus = singleRepoStatus.repositories[0];
+  const firstStatus = multiRepoStatus.repositories[0];
+  const secondStatus = multiRepoStatus.repositories[1];
+  const firstTaskRepo = multiTask.repos?.[0];
+  const secondTaskRepo = multiTask.repos?.[1];
+  ok(singleStatus);
+  ok(firstStatus);
+  ok(secondStatus);
+  ok(firstTaskRepo);
+  ok(secondTaskRepo);
 
   await page.goto(`/task/@${multiTask.id}`);
 
@@ -80,19 +101,15 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
       name: "2 changed files, 9 additions, 5 deletions, 2 uncommitted files, 1 commit behind upstream",
     }),
   ).toBeVisible();
-  await expect(multiCard).toContainText(repos[0].path);
-  await expect(multiCard).toContainText(repos[1].path);
+  await expect(multiCard).toContainText(firstRepo.path);
+  await expect(multiCard).toContainText(secondRepo.path);
   await expect(singleCard.getByTestId("task-card-repo-state")).toHaveCount(1);
   await expect(multiCard.getByTestId("task-card-repo-state")).toHaveCount(2);
 
   const multiStateRows = multiCard.getByTestId("task-card-repo-state");
-  await expect(singleCard.getByTestId("task-card-repo-state")).toContainText(singleRepoStatus.repositories[0].branch);
-  await expect(multiStateRows.nth(0)).toContainText(
-    `${multiTask.repos![0].name} · ${multiRepoStatus.repositories[0].branch}`,
-  );
-  await expect(multiStateRows.nth(1)).toContainText(
-    `${multiTask.repos![1].name} · ${multiRepoStatus.repositories[1].branch}`,
-  );
+  await expect(singleCard.getByTestId("task-card-repo-state")).toContainText(singleStatus.branch);
+  await expect(multiStateRows.nth(0)).toContainText(`${firstTaskRepo.name} · ${firstStatus.branch}`);
+  await expect(multiStateRows.nth(1)).toContainText(`${secondTaskRepo.name} · ${secondStatus.branch}`);
   await expect
     .poll(async () => {
       const row = await singleCard.getByTestId("task-card-repo-state").boundingBox();
@@ -144,8 +161,11 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
       const rows = Array.from(card.querySelectorAll('[data-testid="task-card-repo-state"]'));
       const group = card.querySelector('[data-testid="task-card-repo-states"]')!.parentElement!;
       const metadata = group.previousElementSibling!;
-      const first = rows[0].getBoundingClientRect();
-      const second = rows[1].getBoundingClientRect();
+      const firstRow = rows[0];
+      const secondRow = rows[1];
+      if (!firstRow || !secondRow) throw new Error("Repository rows are missing");
+      const first = firstRow.getBoundingClientRect();
+      const second = secondRow.getBoundingClientRect();
       return {
         heights: rows.map((row) => row.getBoundingClientRect().height),
         textSizes: [
@@ -161,8 +181,12 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
       };
     });
     expect(new Set(rhythm.textSizes).size).toBe(1);
-    expect(Math.abs(rhythm.heights[0] - rhythm.lineHeight)).toBeLessThan(1);
-    expect(Math.abs(rhythm.heights[1] - rhythm.heights[0])).toBeLessThan(1);
+    const firstHeight = rhythm.heights[0];
+    const secondHeight = rhythm.heights[1];
+    ok(firstHeight !== undefined);
+    ok(secondHeight !== undefined);
+    expect(Math.abs(firstHeight - rhythm.lineHeight)).toBeLessThan(1);
+    expect(Math.abs(secondHeight - firstHeight)).toBeLessThan(1);
     expect(Math.abs(rhythm.groupGap - rhythm.rowGap)).toBeLessThan(1);
     expect(rhythm.rowGap).toBeGreaterThan(0);
     expect(rhythm.rowGap).toBeLessThanOrEqual(3);
@@ -204,9 +228,13 @@ test("task cards keep single- and multi-repository states coherent", async ({ pa
 
 test("turn completion and diff agree on a waiting task card", async ({ page, api, uniquePrompt }) => {
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
+  const secondRepo = repos[1];
+  ok(secondRepo);
   const task = await api.createTask({
     initialPrompt: { text: uniquePrompt("Refresh repository summary") },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "claude",
   });
   await waitForTaskState(api, task.id, "waiting");
@@ -227,9 +255,13 @@ test("failed refreshes retain counts and show a stale marker at desktop and mobi
   uniquePrompt,
 }) => {
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
+  const secondRepo = repos[1];
+  ok(secondRepo);
   const task = await api.createTask({
     initialPrompt: { text: uniquePrompt("FAKE_DEMO stale summary") },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "claude",
   });
   await waitForTaskState(api, task.id, "waiting");

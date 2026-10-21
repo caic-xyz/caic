@@ -1,5 +1,6 @@
 // Tests for the task statistics charts, resource samples, and their text alternatives.
 
+import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { render, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
@@ -18,7 +19,7 @@ const usage: TaskUsageSummary = {
   outputTokens: 500,
 };
 
-const turns: TurnTiming[] = [
+const turns: [TurnTiming] = [
   {
     event: { kind: "result", ts: 2_000 },
     result: {
@@ -44,7 +45,7 @@ const turns: TurnTiming[] = [
   },
 ];
 
-const stats: EventStats[] = [
+const stats: [EventStats, EventStats, EventStats] = [
   {
     ts: 1_000,
     cpuCeiling: 4,
@@ -297,7 +298,7 @@ describe("StatsContent", () => {
 
   it("preserves irregular exact sample values in the accessible table", async () => {
     const user = userEvent.setup();
-    const irregularStats: EventStats[] = [
+    const irregularStats: [EventStats, EventStats] = [
       {
         ...stats[0],
         ts: 1_234,
@@ -330,6 +331,7 @@ describe("StatsContent", () => {
 
   it("does not infer network throughput from one sample", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    assert.ok(stats[0] !== undefined);
     const { findByTestId } = render(() => <StatsContent events={[]} stats={[stats[0]]} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("Waiting for another sample");

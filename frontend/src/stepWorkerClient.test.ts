@@ -1,4 +1,5 @@
 // Tests STEP worker progress, transferred results, cancellation, failures, and cleanup with controlled messages.
+import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { stubStepWorkers } from "../tests/step-worker";
@@ -14,8 +15,10 @@ describe("STEP worker client", () => {
     const progress = vi.fn();
     const loaded = loadStep("task", "/part.stpz", controller.signal, progress);
     const worker = workers[0];
+    assert.ok(worker !== undefined);
     expect(worker.postMessage).toHaveBeenCalledWith({ taskId: "task", path: "/part.stpz" });
     for (const stage of ["download", "parse"] as const) {
+      assert.ok(worker !== undefined);
       worker.send({ type: "progress", progress: { stage, completed: null, total: null } });
       expect(progress).toHaveBeenLastCalledWith({ stage, completed: null, total: null });
       expect(worker.terminate).not.toHaveBeenCalled();
@@ -39,6 +42,7 @@ describe("STEP worker client", () => {
     const workers = stubStepWorkers();
     const controller = new AbortController();
     const loaded = loadStep("task", "/part.step", controller.signal, vi.fn());
+    assert.ok(workers[0] !== undefined);
     workers[0].send({ type: "progress", progress: { stage: "parse", completed: null, total: null } });
     controller.abort();
     await expect(loaded).rejects.toBe(controller.signal.reason);
@@ -49,6 +53,7 @@ describe("STEP worker client", () => {
     const workers = stubStepWorkers();
     const controller = new AbortController();
     const loaded = loadStep("task", "/broken.step", controller.signal, vi.fn());
+    assert.ok(workers[0] !== undefined);
     workers[0].send({ type: "error", message: "Invalid STEP geometry" });
     await expect(loaded).rejects.toThrow("Invalid STEP geometry");
     controller.abort();
@@ -60,6 +65,7 @@ describe("STEP worker client", () => {
       const workers = stubStepWorkers();
       const loaded = loadStep("task", "/part.step", new AbortController().signal, vi.fn());
       const event = new window.ErrorEvent("error", { cancelable: true, message });
+      assert.ok(workers[0] !== undefined);
       workers[0].onerror?.(event);
       await expect(loaded).rejects.toThrow(message || "Failed to start STEP import worker");
       expect(event.defaultPrevented).toBe(true);
@@ -70,6 +76,7 @@ describe("STEP worker client", () => {
   it("rejects unreadable worker messages and releases the worker", async () => {
     const workers = stubStepWorkers();
     const loaded = loadStep("task", "/part.step", new AbortController().signal, vi.fn());
+    assert.ok(workers[0] !== undefined);
     workers[0].onmessageerror?.();
     await expect(loaded).rejects.toThrow("Could not read STEP import worker response");
     expect(workers[0].terminate).toHaveBeenCalledTimes(1);

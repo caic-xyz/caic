@@ -28,7 +28,9 @@ async function fetchTaskFile(taskId: string, path: string, signal: AbortSignal):
 export async function readTaskFilePreview(taskId: string, path: string, signal: AbortSignal): Promise<TaskFilePreview> {
   const res = await fetchTaskFile(taskId, path, signal);
   const mediaType = res.headers.get("Content-Type") ?? "application/octet-stream";
-  const contentType = mediaType.split(";")[0].trim();
+  const contentType = mediaType
+    .slice(0, mediaType.indexOf(";") === -1 ? mediaType.length : mediaType.indexOf(";"))
+    .trim();
   const textFile = contentType.startsWith("text/");
   if (!textFile) {
     await res.body?.cancel();

@@ -1,4 +1,5 @@
 // Deterministic API fixtures for documentation resource charts and usage trends.
+import { ok } from "node:assert/strict";
 import type { EventMessage, UsageDashboardResp, UsageDashboardDay } from "../sdk/caic/ts/v1/types.gen";
 
 export const visualEpoch = Date.UTC(2026, 8, 2, 12);
@@ -7,6 +8,7 @@ export function resourceHistory(): EventMessage[] {
   return Array.from({ length: 24 }, (_, index) => {
     const ts = visualEpoch + index * 5000;
     const cpu = [12, 18, 38, 52, 66, 71, 58, 44, 27, 16, 22, 34][index % 12];
+    ok(cpu !== undefined);
     const memory = (384 + index * 8) * 1024 * 1024;
     return {
       kind: "stats",
@@ -75,5 +77,7 @@ export function usageHistory(): UsageDashboardResp {
       harnesses: [{ ...base, harness: "claude", models }],
     };
   });
-  return { dataSince: days[0].day, days };
+  const first = days[0];
+  ok(first);
+  return { dataSince: first.day, days };
 }

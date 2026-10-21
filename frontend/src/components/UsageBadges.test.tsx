@@ -1,5 +1,6 @@
 // Tests for UsageBadges component.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 import { render } from "@solidjs/testing-library";
@@ -301,7 +302,9 @@ describe("UsageBadges", () => {
       );
       const el = pricingIcon(container);
       expect(el?.getAttribute("data-pricing-phase")).toBe("peak");
+      assert.ok(styles.pricingPeak !== undefined);
       expect(hasClass(el, styles.pricingPeak)).toBe(true);
+      assert.ok(styles.pricingPeakSoon !== undefined);
       expect(hasClass(el, styles.pricingPeakSoon)).toBe(false);
       expect(container.textContent).toContain("peak pricing");
     });
@@ -313,7 +316,9 @@ describe("UsageBadges", () => {
       );
       const el = pricingIcon(container);
       expect(el?.getAttribute("data-pricing-phase")).toBe("peak-soon");
+      assert.ok(styles.pricingPeakSoon !== undefined);
       expect(hasClass(el, styles.pricingPeakSoon)).toBe(true);
+      assert.ok(styles.pricingPeak !== undefined);
       expect(hasClass(el, styles.pricingPeak)).toBe(false);
       expect(container.textContent).toContain("peak pricing soon");
     });
@@ -322,7 +327,9 @@ describe("UsageBadges", () => {
       const { container } = renderAt(Date.parse("2026-09-19T02:00:00Z"), withPhase("off-peak", undefined));
       const el = pricingIcon(container);
       expect(el?.getAttribute("data-pricing-phase")).toBe("off-peak");
+      assert.ok(styles.pricingPeak !== undefined);
       expect(hasClass(el, styles.pricingPeak)).toBe(false);
+      assert.ok(styles.pricingPeakSoon !== undefined);
       expect(hasClass(el, styles.pricingPeakSoon)).toBe(false);
       expect(container.textContent).toContain("off-peak pricing");
     });
@@ -334,7 +341,9 @@ describe("UsageBadges", () => {
       });
       const el = pricingIcon(container);
       expect(el?.hasAttribute("data-pricing-phase")).toBe(false);
+      assert.ok(styles.pricingPeak !== undefined);
       expect(hasClass(el, styles.pricingPeak)).toBe(false);
+      assert.ok(styles.pricingPeakSoon !== undefined);
       expect(hasClass(el, styles.pricingPeakSoon)).toBe(false);
     });
   });

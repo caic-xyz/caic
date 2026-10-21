@@ -400,12 +400,7 @@ function FileDiffRow(props: FileDiffRowProps) {
   });
 
   return (
-    <div
-      class={styles.fileChange}
-      classList={{
-        [styles.uncommittedFileChange]: props.variant === "uncommitted",
-      }}
-    >
+    <div class={`${styles.fileChange} ${props.variant === "uncommitted" ? styles.uncommittedFileChange : ""}`}>
       <button
         type="button"
         class={styles.fileChangeButton}

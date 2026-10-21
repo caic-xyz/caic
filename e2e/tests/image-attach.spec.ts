@@ -1,4 +1,5 @@
 // E2E tests for image drafts: API compatibility, captures, limits, retry, task switching, and preview cleanup.
+import { ok } from "node:assert/strict";
 import { validateTask } from "../../sdk/caic/ts/v1/validate.gen";
 import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
 
@@ -225,6 +226,7 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
     window.draftProbe.resume?.();
   });
   await expect(page.getByText("Task creation failed: Please retry this image")).toBeVisible();
+  ok(requests[0]);
   expect(requests[0].initialPrompt).toEqual({
     text: "first image draft",
     images: [{ mediaType: "image/png", data: TINY_PNG_B64 }],
@@ -241,6 +243,7 @@ test("UI: Blob drafts reject oversized selections and preserve edits through fai
   await form.getByTestId("submit-task").click();
   const created = validateTask(await (await createdResponse).json());
   await expect(thumbnail).toHaveCount(0);
+  ok(requests[1]);
   expect(requests[1].initialPrompt.images).toHaveLength(2);
   const urls = await page.evaluate(() => ({ created: window.draftProbe.created, revoked: window.draftProbe.revoked }));
   expect(urls.revoked).toEqual(urls.created);
@@ -305,6 +308,7 @@ test("UI: unavailable attachment policy keeps text-only task creation working", 
     }),
   );
   await page.goto("/");
+  await page.getByRole("combobox", { name: "Harness", exact: true }).selectOption("claude");
   const form = page.locator("form").filter({ has: page.getByTestId("prompt-input") });
   await expect(form.getByTestId("attach-images")).toBeDisabled();
   await expect(form.getByRole("status")).toHaveText("Image attachments are unavailable until server limits load.");

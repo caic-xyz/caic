@@ -1,5 +1,6 @@
 // Tests canonical native and background-command lifecycle folding, replay identity, timing, and partial observability.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 import type { EventBackgroundCommand, EventMessage, EventNativeSubagent } from "@sdk/types.gen";
@@ -62,10 +63,16 @@ describe("NativeActivityTracker", () => {
     const spawn = event("a", "running", 100, {});
     const heartbeat = event("a", "running", 500, {});
     const done = event("a", "completed", 900, { result: "done" });
-    expect(tracker.derive([spawn])[0].anchorTs).toBe(100);
+    const spawnActivity = tracker.derive([spawn])[0];
+    assert.ok(spawnActivity !== undefined);
+    expect(spawnActivity.anchorTs).toBe(100);
     // A running heartbeat must not drag an active card toward newer content.
-    expect(tracker.derive([spawn, heartbeat])[0].anchorTs).toBe(100);
-    expect(tracker.derive([spawn, heartbeat, done])[0].anchorTs).toBe(900);
+    const runningActivity = tracker.derive([spawn, heartbeat])[0];
+    assert.ok(runningActivity !== undefined);
+    expect(runningActivity.anchorTs).toBe(100);
+    const completedActivity = tracker.derive([spawn, heartbeat, done])[0];
+    assert.ok(completedActivity !== undefined);
+    expect(completedActivity.anchorTs).toBe(900);
   });
 
   it("does not infer running or success from metadata, parent result, or settled state", () => {
@@ -75,7 +82,9 @@ describe("NativeActivityTracker", () => {
       event("unfinished", "running", 2, {}),
       { kind: "result", ts: 3 },
     ]);
+    assert.ok(folded[0] !== undefined);
     expect(folded[0].startedAt).toBeNull();
+    assert.ok(folded[1] !== undefined);
     expect(folded[1].status).toBe("running");
     expect(nativeActivityStatus(folded[1], true)).toBe("Last observed running · outcome unknown");
     expect(nativeActivityStatus(folded[0], false)).toBe("Status unknown");
@@ -87,6 +96,7 @@ describe("NativeActivityTracker", () => {
       event("child", "running", 1000, { background: true }),
       event("child", "paused", 2000, {}),
     ]);
+    assert.ok(folded[0] !== undefined);
     expect(folded[0].background).toBe(true);
     expect(folded[0].status).toBe("paused");
   });
@@ -99,6 +109,7 @@ describe("NativeActivityTracker", () => {
       event("wf", "completed", 3000, { result: "the actual joke" }),
       event("wf", "completed", 4000, { result: "a noisier repeat" }),
     ]);
+    assert.ok(folded[0] !== undefined);
     expect(folded[0].status).toBe("completed");
     expect(folded[0].result).toBe("the actual joke");
   });
@@ -110,6 +121,7 @@ describe("NativeActivityTracker", () => {
       event("wf", "running", 2000, { scope: "batch" }),
       event("wf", "paused", 3000, { scope: "batch" }),
     ]);
+    assert.ok(folded[0] !== undefined);
     expect(folded[0].status).toBe("paused");
     expect(nativeActivityStatus(folded[0], false)).toBe("Paused");
     // A later running observation resumes the same orchestration.
@@ -119,6 +131,7 @@ describe("NativeActivityTracker", () => {
       event("wf", "paused", 3000, { scope: "batch" }),
       event("wf", "running", 4000, { scope: "batch" }),
     ]);
+    assert.ok(resumed[0] !== undefined);
     expect(resumed[0].status).toBe("running");
   });
 
@@ -242,14 +255,21 @@ describe("BackgroundCommandTracker", () => {
     const spawn = bgEvent("cmd", "running", 100, {});
     const repeat = bgEvent("cmd", "running", 500, {});
     const done = bgEvent("cmd", "completed", 900, { exitCode: 0 });
-    expect(tracker.derive([spawn])[0].anchorTs).toBe(100);
-    expect(tracker.derive([spawn, repeat])[0].anchorTs).toBe(100);
-    expect(tracker.derive([spawn, repeat, done])[0].anchorTs).toBe(900);
+    const spawnActivity = tracker.derive([spawn])[0];
+    assert.ok(spawnActivity !== undefined);
+    expect(spawnActivity.anchorTs).toBe(100);
+    const runningActivity = tracker.derive([spawn, repeat])[0];
+    assert.ok(runningActivity !== undefined);
+    expect(runningActivity.anchorTs).toBe(100);
+    const completedActivity = tracker.derive([spawn, repeat, done])[0];
+    assert.ok(completedActivity !== undefined);
+    expect(completedActivity.anchorTs).toBe(900);
   });
 
   it("never invents a terminal outcome when the parent settles first", () => {
     const tracker = new BackgroundCommandTracker();
     const folded = tracker.derive([bgEvent("cmd", "running", 1, {}), { kind: "result", ts: 3 } as EventMessage]);
+    assert.ok(folded[0] !== undefined);
     expect(folded[0].status).toBe("running");
     expect(backgroundCommandStatus(folded[0], true)).toBe("Last observed running · outcome unknown");
     expect(backgroundCommandStatus(folded[0], false)).toBe("Running");
@@ -272,6 +292,7 @@ describe("BackgroundCommandTracker", () => {
       bgEvent("cmd", "running", 1000, { result: "started" }),
       bgEvent("cmd", "completed", 2000, { result: "completed (exit code 0)" }),
     ]);
+    assert.ok(folded[0] !== undefined);
     expect(folded[0].result).toBe("completed (exit code 0)");
   });
 

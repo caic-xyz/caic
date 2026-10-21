@@ -1,4 +1,5 @@
 // Browser coverage for STEP loading controls, cancellation, retry, and worker cleanup using gated downloads.
+import { ok } from "node:assert/strict";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { zipSync } from "three/addons/libs/fflate.module.js";
@@ -56,6 +57,7 @@ for (const width of [390, 1280]) {
       await expect(page.getByText("12 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
       await closed;
       await expect.poll(() => diagnostics.length).toBe(1);
+      ok(diagnostics[0]);
       expect(diagnostics[0].stages.occtParseMs).toBeGreaterThan(0);
       expect(diagnostics[0].stages.firstFrameMs).toBeGreaterThan(0);
       expect(diagnostics[0].unaccountedMs).toBeGreaterThanOrEqual(0);
@@ -110,6 +112,7 @@ for (const width of [390, 1280]) {
       await expect(page.getByText("12 triangles", { exact: true })).toBeVisible();
       await retryClosed;
       await expect.poll(() => diagnostics.length).toBe(1);
+      ok(diagnostics[0]);
       expect(loads).toBe(2);
       await page.keyboard.press("Escape");
       const switchedStarted = nextStepWorker(page);

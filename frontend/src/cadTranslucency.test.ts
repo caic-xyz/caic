@@ -1,4 +1,5 @@
 // Tests translucent material restoration, shared materials, and geometry ownership.
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BoxGeometry, Group, Mesh, MeshPhongMaterial, MeshStandardMaterial, PerspectiveCamera } from "three";
 import { expect } from "@tests/expect";
@@ -7,7 +8,8 @@ import { CadTranslucency } from "./cadTranslucency";
 describe("CadTranslucency", () => {
   it("preserves geometry, colors, and existing transparency when toggled", () => {
     const geometry = new BoxGeometry();
-    const positions = geometry.attributes.position.array;
+    assert.ok(geometry.getAttribute("position") !== undefined);
+    const positions = geometry.getAttribute("position").array;
     const indices = geometry.index;
     const opaque = new MeshStandardMaterial({ color: 0x124578 });
     const transparent = new MeshPhongMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
@@ -32,7 +34,8 @@ describe("CadTranslucency", () => {
       expect(transparent.depthWrite).toBe(false);
       expect(transparent.opacity).toBe(0.6);
       expect(opaque.color.getHex()).toBe(0x124578);
-      expect(geometry.attributes.position.array).toBe(positions);
+      assert.ok(geometry.getAttribute("position") !== undefined);
+      expect(geometry.getAttribute("position").array).toBe(positions);
       expect(geometry.index).toBe(indices);
     }
     geometry.dispose();

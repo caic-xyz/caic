@@ -2,6 +2,7 @@
 //
 // Run with: make screenshots-check (or make screenshots-update to accept changes)
 // Output: e2e/screenshots/frontend/{desktop,mobile}/
+import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState, waitForCISettle, convertPngsToWebp } from "../helpers";
 import { captureScreenshot, prepareVisualPage, screenshotDir, screenshotRoot, waitForVisualReadiness } from "../visual";
 import type { Locator } from "@playwright/test";
@@ -119,11 +120,15 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Create the showcase in reverse because the sidebar orders active tasks by
   // descending ID: Codex waiting, Claude asking, Pi waiting, Antigravity running.
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
+  const secondRepo = repos[1];
+  ok(secondRepo);
   expect(repos.length).toBeGreaterThanOrEqual(2);
   const createTask = async (prompt: string) => {
     const task = await api.createTask({
       initialPrompt: { text: prompt },
-      repos: [{ name: repos[0].path }],
+      repos: [{ name: firstRepo.path }],
       harness: "claude",
       model: "opus-5.5",
       effort: "high",
@@ -133,7 +138,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   };
   const runningTask = await api.createTask({
     initialPrompt: { text: "Implement rate limiting for API endpoints" },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "antigravity",
     model: "gemini-3.8-flash-high",
   });
@@ -142,7 +147,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
 
   const widgetTask = await api.createTask({
     initialPrompt: { text: "Explain light refraction in water with an interactive diagram" },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "pi",
     model: "deepseek/deepseek-flashh",
     effort: "medium",
@@ -153,7 +158,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Claude Code owns the asking-state example.
   const askTask = await api.createTask({
     initialPrompt: { text: "Which storage backend should we use for session data?" },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "claude",
     model: "opus-5.5",
     effort: "high",
@@ -165,7 +170,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // detail-header layouts in the completed Codex example.
   const detailTask = await api.createTask({
     initialPrompt: { text: "Fix OAuth security hardening and migration across service boundaries" },
-    repos: [{ name: repos[0].path }, { name: repos[1].path }],
+    repos: [{ name: firstRepo.path }, { name: secondRepo.path }],
     harness: "codex",
     model: "gpt-6.1-sol",
     effort: "high",
@@ -235,7 +240,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   expect(page.viewportSize()).toEqual({ width: 800, height: 720 });
   await expect(page.getByText("Repository changes", { exact: true })).toBeVisible();
   expect(settledDetail.repos).toHaveLength(2);
-  await expect(page.getByText(settledDetail.repos![0].branch, { exact: true }).first()).toBeVisible();
+  const detailRepo = settledDetail.repos?.[0];
+  ok(detailRepo);
+  await expect(page.getByText(detailRepo.branch, { exact: true }).first()).toBeVisible();
   await expect(page.getByText("origin/main", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("1 commit ahead", { exact: true })).toBeVisible();
   await expect(page.getByText("Commits ahead (1)", { exact: true })).toBeVisible();
@@ -404,7 +411,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Screenshot 6: VNC display — fake IDE screenshot in noVNC viewer.
   const vncResp = await api.createTask({
     initialPrompt: { text: "Show the VNC display" },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "claude",
     model: "opus-5.5",
     effort: "high",

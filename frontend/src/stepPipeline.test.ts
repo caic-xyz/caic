@@ -1,4 +1,5 @@
 // Tests early STEP indexing, bounded pulls, cancellation, and atomic validation before geometry import.
+import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { gzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { expect, vi } from "@tests/expect";
@@ -99,12 +100,17 @@ describe("streamed STEP input", () => {
     );
     const decoded = updates.filter((value) => (value.decodedBytes ?? 0) > 0);
     expect(decoded.length).toBeGreaterThan(1);
+    assert.ok(decoded[0] !== undefined);
     expect(decoded[0].decodedBytes).toBeLessThan(model.length);
     expect(decoded.at(-1)?.decodedBytes).toBe(model.length);
     expect(decoded.every((value) => value.completed === model.length && value.total === model.length)).toBe(true);
     for (let i = 1; i < decoded.length; i++) {
-      expect(decoded[i].decodedBytes).toBeGreaterThan(decoded[i - 1].decodedBytes ?? 0);
-      expect(decoded[i].indexedRecords).toBeGreaterThanOrEqual(decoded[i - 1].indexedRecords ?? 0);
+      const previous = decoded[i - 1];
+      assert.ok(previous !== undefined);
+      const current = decoded[i];
+      assert.ok(current !== undefined);
+      expect(current.decodedBytes).toBeGreaterThan(previous.decodedBytes ?? 0);
+      expect(current.indexedRecords).toBeGreaterThanOrEqual(previous.indexedRecords ?? 0);
     }
     expect(await importStep(reader)).toHaveLength(256);
   });
@@ -156,7 +162,7 @@ describe("streamed STEP input", () => {
         break;
       }
     if (central < 0) throw new Error("ZIP fixture has no central directory");
-    archive[central + 16] ^= 1;
+    view.setUint8(central + 16, view.getUint8(central + 16) ^ 1);
     const indexed = Promise.withResolvers<void>();
     const gate = Promise.withResolvers<void>();
     let pulls = 0;

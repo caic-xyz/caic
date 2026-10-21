@@ -1,5 +1,6 @@
 // Tests for groupMessages and groupTurns logic.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
@@ -78,6 +79,8 @@ describe("groupMessages", () => {
     ]);
 
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].events[0] !== undefined);
     expect(groups[0].events[0].kind).toBe("result");
   });
 
@@ -90,6 +93,7 @@ describe("groupMessages", () => {
   it("consecutive tool uses form one group", () => {
     const groups = groupMessages([toolUseEvent("t1", "Read"), toolUseEvent("t2", "Bash")]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(2);
   });
@@ -98,12 +102,17 @@ describe("groupMessages", () => {
     // First call is done (agent moved to second); last call is still pending.
     const groups = groupMessages([toolUseEvent("t1", "Bash"), toolUseEvent("t2", "Read")]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(groups[0].toolCalls[0].done).toBe(true);
+    assert.ok(groups[0].toolCalls[1] !== undefined);
     expect(groups[0].toolCalls[1].done).toBe(false);
   });
 
   it("tool is marked done when its toolResult arrives", () => {
     const groups = groupMessages([toolUseEvent("t1", "Bash"), toolResultEvent("t1")]);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(groups[0].toolCalls[0].done).toBe(true);
     expect(groups[0].toolCalls[0].result?.toolUseID).toBe("t1");
   });
@@ -111,7 +120,9 @@ describe("groupMessages", () => {
   it("toolResult matches backwards across groups", () => {
     const groups = groupMessages([toolUseEvent("t1", "Bash"), textDeltaEvent("text"), toolResultEvent("t1")]);
     expect(groups).toHaveLength(2);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("action");
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(groups[0].toolCalls[0].done).toBe(true);
     expect(groups[0].toolCalls[0].result?.toolUseID).toBe("t1");
   });
@@ -125,7 +136,10 @@ describe("groupMessages", () => {
     ]);
     // After merge pass: [TOOL(Read, Bash), TEXT]
     expect(groups).toHaveLength(2);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(groups[0].toolCalls[0].done).toBe(true); // Read
+    assert.ok(groups[0].toolCalls[1] !== undefined);
     expect(groups[0].toolCalls[1].done).toBe(true); // Bash (implicit from non-last-group pass)
   });
 
@@ -140,6 +154,7 @@ describe("groupMessages", () => {
       toolUseEvent("t3", "Edit"),
     ]);
     expect(groups).toHaveLength(3); // [TOOL(t1+t2+t3), TEXT, TEXT]
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(3);
   });
@@ -184,6 +199,7 @@ describe("groupMessages", () => {
     expect(groups.some((g) => g.kind === "other")).toBe(false);
     expect(groups).toHaveLength(1);
     const toolGroup = groups[0];
+    assert.ok(toolGroup !== undefined);
     expect(toolGroup.kind).toBe("action");
     expect(toolGroup.toolCalls).toHaveLength(1);
     expect(toolGroup.events.some((e) => e.kind === "thinkingDelta")).toBe(true);
@@ -198,6 +214,7 @@ describe("groupMessages", () => {
       { kind: "thinkingDelta", ts: 0, thinkingDelta: { text: "analyzing..." } },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(1);
     expect(groups[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
@@ -229,6 +246,7 @@ describe("groupMessages", () => {
       textDeltaEvent("hello"),
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("text");
     expect(groups[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
     expect(groups[0].events.some((e) => e.kind === "textDelta")).toBe(true);
@@ -250,6 +268,7 @@ describe("groupMessages", () => {
     const groups = groupMessages(events);
     expect(groups).toHaveLength(2);
     const textGroup = groups[0];
+    assert.ok(textGroup !== undefined);
     expect(textGroup.kind).toBe("text");
     // Final events consolidated into the delta group (not a second group).
     expect(textGroup.events.some((e) => e.kind === "thinkingDelta")).toBe(true);
@@ -258,6 +277,7 @@ describe("groupMessages", () => {
     expect(textGroup.events.some((e) => e.kind === "text")).toBe(true);
     // Tool stays in its own group, no duplicate tool card.
     const toolGroup = groups[1];
+    assert.ok(toolGroup !== undefined);
     expect(toolGroup.kind).toBe("action");
     expect(toolGroup.toolCalls).toHaveLength(1);
 
@@ -268,6 +288,7 @@ describe("groupMessages", () => {
     inc = grouper.group(events);
     expect(inc).toEqual(groupMessages(events));
     expect(inc).toHaveLength(2);
+    assert.ok(inc[0] !== undefined);
     expect(inc[0].kind).toBe("text");
   });
 
@@ -290,16 +311,20 @@ describe("groupMessages", () => {
     const groups = groupMessages(events);
     expect(groups).toHaveLength(3);
     const holder = groups[0];
+    assert.ok(holder !== undefined);
     expect(holder.kind).toBe("action");
     expect(holder.toolCalls).toHaveLength(0);
     expect(holder.events.filter(isThinking)).toHaveLength(6);
     // The holder's first event is the run's first thinking event, so the
     // card's open state (keyed by first event ts) survives regrouping.
+    assert.ok(holder.events[0] !== undefined);
     expect(holder.events[0].ts).toBe(1);
     const toolGroup = groups[1];
+    assert.ok(toolGroup !== undefined);
     expect(toolGroup.kind).toBe("action");
     expect(toolGroup.toolCalls).toHaveLength(3);
     expect(toolGroup.events.some(isThinking)).toBe(false);
+    assert.ok(groups[2] !== undefined);
     expect(groups[2].kind).toBe("other");
   });
 
@@ -323,10 +348,12 @@ describe("groupMessages", () => {
     ]);
 
     expect(groups).toHaveLength(2);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(0);
     expect(groups[0].timingSegments).toHaveLength(2);
     expect(groups[0].timingSegments?.flat().filter((event) => event.kind === "usage")).toHaveLength(1);
+    assert.ok(groups[1] !== undefined);
     expect(groups[1].kind).toBe("text");
   });
 
@@ -359,14 +386,18 @@ describe("groupMessages", () => {
     const groups = groupMessages(events);
     expect(groups).toHaveLength(5);
     // Holder: turn 1 and turn 2 thinking (turn 2's thinking precedes its text).
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("action");
     expect(groups[0].toolCalls).toHaveLength(0);
     expect(groups[0].events.filter(isThinking)).toHaveLength(4);
+    assert.ok(groups[1] !== undefined);
     expect(groups[1].toolCalls).toHaveLength(3);
+    assert.ok(groups[2] !== undefined);
     expect(groups[2].kind).toBe("text");
     expect(groups[2].events.findLast((e) => e.kind === "text")?.text?.text).toBe("I read the file.");
     expect(groups[2].events.some(isThinking)).toBe(false);
     // Turn 3 has no coalescing partner: stays its own thinking+text group.
+    assert.ok(groups[3] !== undefined);
     expect(groups[3].kind).toBe("text");
     expect(groups[3].events.filter(isThinking)).toHaveLength(2);
 
@@ -389,6 +420,7 @@ describe("groupMessages", () => {
     let full = groupMessages(toolThenThinking);
     expect(inc).toEqual(full);
     expect(inc).toHaveLength(1);
+    assert.ok(inc[0] !== undefined);
     expect(inc[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
 
     const thinkingThenText = [
@@ -402,8 +434,10 @@ describe("groupMessages", () => {
     full = groupMessages(thinkingThenText);
     expect(inc).toEqual(full);
     expect(inc).toHaveLength(1);
-    expect(inc[0].kind).toBe("text");
-    expect(inc[0].events.map((e) => e.kind)).toEqual(["thinkingDelta", "textDelta"]);
+    const incItem = inc[0];
+    assert.ok(incItem !== undefined);
+    expect(incItem.kind).toBe("text");
+    expect(incItem.events.map((e) => e.kind)).toEqual(["thinkingDelta", "textDelta"]);
   });
 
   it("incremental grouping completes tool calls when text starts", () => {
@@ -414,7 +448,11 @@ describe("groupMessages", () => {
     const updated = grouper.group(events);
 
     expect(updated).toEqual(groupMessages(events));
+    assert.ok(updated[0] !== undefined);
+    assert.ok(updated[0].toolCalls[0] !== undefined);
     expect(updated[0].toolCalls[0].done).toBe(true);
+    assert.ok(firstSnapshot[0] !== undefined);
+    assert.ok(firstSnapshot[0].toolCalls[0] !== undefined);
     expect(firstSnapshot[0].toolCalls[0].done).toBe(false);
   });
 
@@ -429,6 +467,8 @@ describe("groupMessages", () => {
     const updated = grouper.group(events);
 
     expect(updated).toEqual(groupMessages(events));
+    assert.ok(updated[0] !== undefined);
+    assert.ok(updated[0].toolCalls[0] !== undefined);
     expect(updated[0].toolCalls[0].done).toBe(true);
   });
 
@@ -443,7 +483,9 @@ describe("groupMessages", () => {
 
     expect(updated).not.toBe(firstSnapshot);
     expect(updated[0]).not.toBe(firstSnapshot[0]);
+    assert.ok(firstSnapshot[0] !== undefined);
     expect(firstSnapshot[0].events).toEqual([firstEvent]);
+    assert.ok(updated[0] !== undefined);
     expect(updated[0].events.map((event) => event.textDelta?.text)).toEqual(["first", " second"]);
   });
 
@@ -453,6 +495,7 @@ describe("groupMessages", () => {
       { kind: "widgetDelta", ts: 0, widgetDelta: { toolUseID: "w1", delta: "Hi</h1>" } },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("widget");
     expect(groups[0].widgetToolUseID).toBe("w1");
     expect(groups[0].widgetHTML).toBe("<h1>Hi</h1>");
@@ -465,6 +508,7 @@ describe("groupMessages", () => {
       { kind: "widget", ts: 0, widget: { toolUseID: "w1", title: "Chart", html: "<h1>Done</h1>" } },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("widget");
     expect(groups[0].widgetHTML).toBe("<h1>Done</h1>");
     expect(groups[0].widgetTitle).toBe("Chart");
@@ -475,6 +519,7 @@ describe("groupMessages", () => {
       { kind: "widget", ts: 0, widget: { toolUseID: "w1", title: "Test", html: "<p>hi</p>" } },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("widget");
     expect(groups[0].widgetHTML).toBe("<p>hi</p>");
     expect(groups[0].widgetTitle).toBe("Test");
@@ -486,6 +531,7 @@ describe("groupMessages", () => {
       { kind: "toolResult", ts: 0, toolResult: { toolUseID: "w1", duration: 0.1 } },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("widget");
     expect(groups[0].widgetDone).toBe(true);
   });
@@ -513,6 +559,7 @@ describe("groupMessages", () => {
       },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("other");
   });
 
@@ -617,6 +664,7 @@ describe("groupMessages", () => {
       },
     ]);
     expect(groups).toHaveLength(1);
+    assert.ok(groups[0] !== undefined);
     expect(groups[0].kind).toBe("other");
   });
 });
@@ -654,8 +702,10 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(2);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent?.kind).toBe("init");
     expect(sessions[0].turns).toHaveLength(1);
+    assert.ok(sessions[1] !== undefined);
     expect(sessions[1].boundaryEvent?.kind).toBe("init");
     expect(sessions[1].turns).toHaveLength(1);
   });
@@ -681,6 +731,7 @@ describe("groupSessions", () => {
           resultEvent(),
         ]);
         expect(sessions).toHaveLength(2);
+        assert.ok(sessions[1] !== undefined);
         expect(sessions[1].boundaryEvent).toBe(boundary);
         const events = sessions[1].turns.flatMap((turn) => turn.groups.flatMap((group) => group.events));
         expect(events).toContain(prompt);
@@ -713,7 +764,9 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(2);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent?.kind).toBe("init");
+    assert.ok(sessions[1] !== undefined);
     expect(sessions[1].boundaryEvent?.system?.subtype).toBe("compact_boundary");
   });
 
@@ -721,6 +774,7 @@ describe("groupSessions", () => {
     const msgs: EventMessage[] = [textDeltaEvent("hello"), resultEvent(), textDeltaEvent("world")];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent).toBeUndefined();
     expect(sessions[0].turns).toHaveLength(2);
   });
@@ -746,6 +800,7 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].boundaryEvent?.kind).toBe("init");
     // The userInput event must be in this session's segment
     const allEvents = sessions[0].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
@@ -787,7 +842,9 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(2);
+    assert.ok(sessions[0] !== undefined);
     const s1Events = sessions[0].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
+    assert.ok(sessions[1] !== undefined);
     const s2Events = sessions[1].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
     expect(s1Events.some((e) => e.kind === "userInput")).toBe(false);
     expect(s2Events.some((e) => e.kind === "userInput")).toBe(true);
@@ -829,7 +886,9 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(2);
+    assert.ok(sessions[1] !== undefined);
     const lastTurn = sessions[1].turns[sessions[1].turns.length - 1];
+    assert.ok(lastTurn !== undefined);
     expect(lastTurn.textCount).toBeGreaterThan(0);
   });
 
@@ -856,6 +915,7 @@ describe("groupSessions", () => {
       ];
       const sessions = groupSessions(msgs);
       expect(sessions).toHaveLength(2);
+      assert.ok(sessions[1] !== undefined);
       expect(sessions[1].boundaryEvent?.system?.subtype).toBe(subtype);
       const s2Events = sessions[1].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
       expect(s2Events.some((e) => e.kind === "userInput")).toBe(true);
@@ -897,6 +957,7 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].turns).toHaveLength(2);
   });
 
@@ -917,6 +978,7 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].turns).toHaveLength(0);
   });
 
@@ -941,6 +1003,7 @@ describe("groupSessions", () => {
     ];
     const sessions = groupSessions(msgs);
     expect(sessions).toHaveLength(1);
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].toolCount).toBe(1);
     expect(sessions[0].textCount).toBe(1);
   });
@@ -973,7 +1036,7 @@ describe("groupSessions", () => {
       textDeltaEvent("second response"),
       secondResult,
     ]);
-
+    assert.ok(sessions[0] !== undefined);
     expect(sessions[0].durationMs).toBe(5_000);
   });
 });
@@ -988,6 +1051,7 @@ describe("groupTurns", () => {
     );
 
     expect(turns).toHaveLength(1);
+    assert.ok(turns[0] !== undefined);
     expect(turns[0].textCount).toBe(1);
     expect(turnSummary(turns[0])).toBe("1 message");
   });
@@ -1002,8 +1066,10 @@ describe("groupTurns", () => {
     const groups = groupMessages(events);
     const turns = groupTurns(groups);
     expect(turns).toHaveLength(2);
+    assert.ok(turns[0] !== undefined);
     expect(turns[0].toolCount).toBe(1);
     expect(turns[0].textCount).toBe(1);
+    assert.ok(turns[1] !== undefined);
     expect(turns[1].toolCount).toBe(0);
     expect(turns[1].textCount).toBe(1);
   });
@@ -1013,6 +1079,7 @@ describe("groupTurns", () => {
     const groups = groupMessages(events);
     const turns = groupTurns(groups);
     expect(turns).toHaveLength(1);
+    assert.ok(turns[0] !== undefined);
     expect(turns[0].durationMs).toBe(1000); // resultEvent() has duration: 1.0s
   });
 
@@ -1026,6 +1093,7 @@ describe("groupTurns", () => {
       end,
     ];
     const turns = groupTurns(groupMessages(events));
+    assert.ok(turns[0] !== undefined);
     expect(turns[0].durationMs).toBe(5_500);
   });
 
@@ -1041,7 +1109,7 @@ describe("groupTurns", () => {
     ];
 
     const turns = groupTurns(groupMessages(events));
-
+    assert.ok(turns[0] !== undefined);
     expect(turns[0].durationMs).toBe(5_500);
   });
 
@@ -1076,7 +1144,9 @@ describe("groupTurns", () => {
     const groups = groupMessages(events);
     const turns = groupTurns(groups);
     expect(turns).toHaveLength(2);
+    assert.ok(turns[0] !== undefined);
     expect(turns[0].durationMs).toBe(1000); // 1.0s → 1000ms
+    assert.ok(turns[1] !== undefined);
     expect(turns[1].durationMs).toBe(3000); // 3.0s → 3000ms
   });
 
@@ -1092,6 +1162,8 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Bash", input: {} } },
       { kind: "toolResult", ts: 2_000, toolResult: { toolUseID: "t1", duration: 0.125 } },
     ]);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(125);
   });
 
@@ -1100,6 +1172,8 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 1_000, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
       { kind: "toolResult", ts: 1_037, toolResult: { toolUseID: "t1", duration: 0 } },
     ]);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBe(37);
   });
 
@@ -1108,6 +1182,8 @@ describe("toolCallDurationMs", () => {
       { kind: "toolUse", ts: 0, toolUse: { toolUseID: "t1", name: "Read", input: {} } },
       { kind: "toolResult", ts: 0, toolResult: { toolUseID: "t1", duration: 0 } },
     ]);
+    assert.ok(groups[0] !== undefined);
+    assert.ok(groups[0].toolCalls[0] !== undefined);
     expect(toolCallDurationMs(groups[0].toolCalls[0], toolCallDurations(groups[0].events))).toBeNull();
   });
 });
@@ -1126,9 +1202,12 @@ describe("buildTurnItems", () => {
   it("expanded turn emits header + group items", () => {
     const events: EventMessage[] = [textDeltaEvent("text"), resultEvent()];
     const turns = groupTurns(groupMessages(events));
+    assert.ok(turns[0] !== undefined);
     const turnKey = `session:0::turn:0:${turns[0].groups[0]?.events[0]?.ts ?? ""}`;
     const items = buildTurnItems(turns, new Set([turnKey]), "session:0:");
+    assert.ok(items[0] !== undefined);
     expect(items[0].kind).toBe("expandedHeader");
+    assert.ok(items[1] !== undefined);
     expect(items[1].kind).toBe("group");
   });
 
@@ -1147,7 +1226,11 @@ describe("buildTurnItems", () => {
     const b = buildTurnItems(turns, expanded, sessionKey);
     expect(a.length).toBe(b.length);
     for (let i = 0; i < a.length; i++) {
-      expect(a[i].key).toBe(b[i].key);
+      const bItem = b[i];
+      assert.ok(bItem !== undefined);
+      const aItem = a[i];
+      assert.ok(aItem !== undefined);
+      expect(aItem.key).toBe(bItem.key);
     }
   });
 
@@ -1172,6 +1255,7 @@ describe("buildTurnItems", () => {
     const events: EventMessage[] = [textDeltaEvent("text"), resultEvent()];
     const turns = groupTurns(groupMessages(events));
     const sessionKey = "session:1:";
+    assert.ok(turns[0] !== undefined);
     const turnKey = `${sessionKey}turn:0:${turns[0].groups[0]?.events[0]?.ts ?? ""}`;
     const items = buildTurnItems(turns, new Set([turnKey]), sessionKey);
     for (const item of items) {
@@ -1218,7 +1302,11 @@ describe("buildPastSessionItems", () => {
     const b = buildPastSessionItems(sessions, new Set(), new Set());
     expect(a.length).toBe(b.length);
     for (let i = 0; i < a.length; i++) {
-      expect(a[i].key).toBe(b[i].key);
+      const bItem = b[i];
+      assert.ok(bItem !== undefined);
+      const aItem = a[i];
+      assert.ok(aItem !== undefined);
+      expect(aItem.key).toBe(bItem.key);
     }
   });
 

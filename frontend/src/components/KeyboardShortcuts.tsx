@@ -131,7 +131,8 @@ export default function KeyboardShortcuts(props: Props) {
     if (cards.length === 0) return;
     const current = cards.findIndex((el) => el.dataset.taskId === currentTaskId);
     const next = current === -1 ? (delta > 0 ? 0 : cards.length - 1) : (current + delta + cards.length) % cards.length;
-    openTaskFromCard(cards[next], focusPrompt);
+    const card = cards[next];
+    if (card) openTaskFromCard(card, focusPrompt);
   }
 
   function purgeSelectedTask() {

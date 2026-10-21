@@ -1,5 +1,6 @@
 // Tests for the PromptInput component.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { render, fireEvent } from "@solidjs/testing-library";
@@ -261,8 +262,10 @@ describe("PromptInput", () => {
     fireEvent.drop(wrapper, { dataTransfer });
     // Wait for async file processing.
     await vi.waitFor(() => expect(onImagesChange).toHaveBeenCalled());
+    assert.ok(onImagesChange.mock.calls[0] !== undefined);
     const imgs = onImagesChange.mock.calls[0][0] as Blob[];
     expect(imgs).toHaveLength(1);
+    assert.ok(imgs[0] !== undefined);
     expect(imgs[0].type).toBe("image/png");
   });
 
@@ -288,8 +291,10 @@ describe("PromptInput", () => {
     };
     fireEvent.paste(textarea, { clipboardData });
     await vi.waitFor(() => expect(onImagesChange).toHaveBeenCalled());
+    assert.ok(onImagesChange.mock.calls[0] !== undefined);
     const imgs = onImagesChange.mock.calls[0][0] as Blob[];
     expect(imgs).toHaveLength(1);
+    assert.ok(imgs[0] !== undefined);
     expect(imgs[0].type).toBe("image/png");
   });
 

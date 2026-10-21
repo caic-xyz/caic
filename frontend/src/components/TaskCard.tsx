@@ -313,7 +313,7 @@ export default function TaskCard(props: TaskCardProps) {
             {/* Mobile exposes revive without selection; purge still requires selection. */}
             <Show when={props.state === "stopped" || props.state === "crashed"}>
               <Show when={props.onRevive}>
-                <span class={styles.reviveBtn} classList={{ [styles.mobileRevive]: !props.selected }}>
+                <span class={`${styles.reviveBtn} ${!props.selected ? styles.mobileRevive : ""}`}>
                   <button
                     class={styles.reviveIcon}
                     disabled={props.actionLoading}

@@ -17,13 +17,7 @@ export default function UnifiedDiffBlock(props: Props) {
     return props.hideFileHeader ? annotated.filter((line) => line.kind !== "header") : annotated;
   });
   return (
-    <pre
-      class={styles.block}
-      classList={{
-        [styles.compact]: props.compact,
-        [styles.lineWrap]: props.lineWrap,
-      }}
-    >
+    <pre class={`${styles.block} ${props.compact ? styles.compact : ""} ${props.lineWrap ? styles.lineWrap : ""}`}>
       <For each={lines()}>{(line) => <UnifiedDiffLine line={line} />}</For>
     </pre>
   );
@@ -33,7 +27,7 @@ function UnifiedDiffLine(props: { line: DiffLine }) {
   return <div class={`${styles.line} ${diffLineClass(props.line)}`}>{props.line.text}</div>;
 }
 
-function diffLineClass(line: DiffLine): string {
+function diffLineClass(line: DiffLine): string | undefined {
   switch (line.kind) {
     case "added":
       return line.whitespaceOnly ? styles.lineAddedWhitespace : styles.lineAdded;

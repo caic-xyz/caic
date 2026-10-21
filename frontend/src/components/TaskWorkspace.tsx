@@ -59,14 +59,14 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
           onError={state.showWarning}
         >
           <div
-            class={styles.workspace}
-            classList={{ [styles.fullscreen]: mode() === "fullscreen" }}
+            class={`${styles.workspace} ${mode() === "fullscreen" ? styles.fullscreen : ""}`}
+
             data-testid="task-workspace"
           >
             <div
               ref={bindConversation}
-              class={styles.conversation}
-              classList={{ [styles.hidden]: conversationHidden() }}
+              class={`${styles.conversation} ${conversationHidden() ? styles.hidden : ""}`}
+
               inert={conversationHidden()}
               aria-hidden={conversationHidden()}
               data-testid="conversation-pane"
@@ -75,8 +75,8 @@ export default function TaskWorkspace(props: { children?: JSX.Element }) {
               <TaskDetailPage />
             </div>
             <div
-              class={styles.subview}
-              classList={{ [styles.hidden]: mode() === "closed" }}
+              class={`${styles.subview} ${mode() === "closed" ? styles.hidden : ""}`}
+
               data-testid="task-view-pane"
             >
               {props.children}

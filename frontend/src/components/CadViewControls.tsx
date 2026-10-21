@@ -136,8 +136,8 @@ export default function CadViewControls(props: {
       {props.children}
       <div
         ref={corner}
-        class={styles.corner}
-        classList={{ [styles.compact]: !props.axesVisible }}
+        class={`${styles.corner} ${!props.axesVisible ? styles.compact : ""}`}
+
         onFocusIn={() => setOpen(true)}
         onFocusOut={(event) => {
           if (!hovered && !pinned && !corner?.contains(event.relatedTarget as Node | null)) setOpen(false);

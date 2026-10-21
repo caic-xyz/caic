@@ -18,7 +18,7 @@ const usage: TaskUsageSummary = {
   outputTokens: 500,
 };
 
-const stats: EventStats[] = [
+const stats: [EventStats] = [
   {
     ts: 1_000,
     cpuPerc: 10,

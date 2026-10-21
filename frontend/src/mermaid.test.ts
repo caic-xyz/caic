@@ -1,5 +1,6 @@
 // Tests Pele diagram compatibility, security limits, cached accessibility, streaming replacement, and source toggling.
 
+import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
@@ -47,6 +48,7 @@ describe("mermaid", () => {
     ["architecture", "architecture-beta\nservice api(server)[API]\nservice db(database)[Database]\napi:R -- L:db"],
   ]) {
     it(`renders ${name} diagrams`, async () => {
+      assert.ok(code !== undefined);
       expect(await renderMermaidDiagram(code)).toContain("<svg");
     });
   }

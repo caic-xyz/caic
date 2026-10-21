@@ -1,5 +1,6 @@
 // Tests true-depth process hierarchy, shared continuation lanes, name disclosures, and local start times.
 
+import assert from "node:assert/strict";
 import type { JSX } from "solid-js";
 import { describe, it } from "node:test";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
@@ -105,6 +106,7 @@ describe("buildTree", () => {
     const procs = [p(1, 0, "bash")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].pid).toBe(1);
     expect(tree[0].children).toEqual([]);
   });
@@ -119,6 +121,7 @@ describe("buildTree", () => {
     expect(bash).toBeDefined();
     if (!bash) throw new Error("unreachable");
     expect(bash.children).toHaveLength(1);
+    assert.ok(bash.children[0] !== undefined);
     expect(bash.children[0].pid).toBe(10);
     expect(bash.children[0].children).toEqual([]);
     const ssh = tree.find((n) => n.pid === 2);
@@ -131,19 +134,25 @@ describe("buildTree", () => {
     const procs = [p(1, 0, "init"), p(10, 1, "bash"), p(100, 10, "make"), p(1000, 100, "gcc")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].pid).toBe(1);
     expect(tree[0].children).toHaveLength(1);
+    assert.ok(tree[0].children[0] !== undefined);
     expect(tree[0].children[0].pid).toBe(10);
     expect(tree[0].children[0].children).toHaveLength(1);
+    assert.ok(tree[0].children[0].children[0] !== undefined);
     expect(tree[0].children[0].children[0].pid).toBe(100);
     expect(tree[0].children[0].children[0].children).toHaveLength(1);
-    expect(tree[0].children[0].children[0].children[0].pid).toBe(1000);
+    const treeItem = tree[0].children[0].children[0].children[0];
+    assert.ok(treeItem !== undefined);
+    expect(treeItem.pid).toBe(1000);
   });
 
   it("multiple children under same parent", () => {
     const procs = [p(1, 0, "bash"), p(10, 1, "make"), p(11, 1, "gcc"), p(12, 1, "ld")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].children).toHaveLength(3);
     expect(tree[0].children.map((c) => c.pid).sort()).toEqual([10, 11, 12]);
   });
@@ -153,13 +162,16 @@ describe("buildTree", () => {
     const procs = [p(10, 999, "orphan"), p(11, 10, "child-of-orphan")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].pid).toBe(10);
     expect(tree[0].children).toHaveLength(1);
+    assert.ok(tree[0].children[0] !== undefined);
     expect(tree[0].children[0].pid).toBe(11);
   });
 
   it("preserves all ProcessInfo fields on tree nodes", () => {
     const procs = [p(5, 0, "myprocess")];
+    assert.ok(procs[0] !== undefined);
     procs[0].user = "root";
     procs[0].state = "R";
     procs[0].cpu = 12.5;
@@ -169,6 +181,7 @@ describe("buildTree", () => {
     procs[0].startedAt = "2026-03-20T10:30:00Z" as ISOTimestamp;
     const tree = buildTree(procs);
     const node = tree[0];
+    assert.ok(node !== undefined);
     expect(node.pid).toBe(5);
     expect(node.ppid).toBe(0);
     expect(node.user).toBe("root");
@@ -186,11 +199,13 @@ describe("buildTree", () => {
     const procs = [p(100, 10, "gcc"), p(10, 1, "make"), p(1, 0, "bash"), p(11, 1, "ld")];
     const tree = buildTree(procs);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].pid).toBe(1);
     expect(tree[0].children.map((c) => c.pid).sort()).toEqual([10, 11]);
     const makeNode = tree[0].children.find((c) => c.pid === 10);
     expect(makeNode).toBeDefined();
     if (!makeNode) throw new Error("unreachable");
+    assert.ok(makeNode.children[0] !== undefined);
     expect(makeNode.children[0].pid).toBe(100);
   });
 
@@ -209,9 +224,13 @@ describe("buildTree", () => {
   it("continues open sibling branches through descendants and ends the final sibling", () => {
     const tree = buildTree([p(1, 0, "init"), p(2, 1, "a"), p(3, 2, "b"), p(4, 1, "c")]);
     const [root, first, descendant, last] = visibleProcesses(tree, () => false);
+    assert.ok(root !== undefined);
     expect(root.continuations).toBeNull();
+    assert.ok(first !== undefined);
     expect(first.lastChild).toBe(false);
+    assert.ok(descendant !== undefined);
     expect(descendant.continuations).toEqual({ column: 0, parent: null });
+    assert.ok(last !== undefined);
     expect(last.lastChild).toBe(true);
     expect(last.continuations).toBeNull();
   });
@@ -226,6 +245,7 @@ describe("buildTree", () => {
   it("treats a self-parent process as a root", () => {
     const tree = buildTree([p(7, 7, "loop")]);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].pid).toBe(7);
     expect(tree[0].children).toEqual([]);
   });
@@ -233,8 +253,10 @@ describe("buildTree", () => {
   it("cuts a parent cycle at its lowest PID", () => {
     const tree = buildTree([p(1, 2, "a"), p(2, 1, "b"), p(3, 2, "c")]);
     expect(tree).toHaveLength(1);
+    assert.ok(tree[0] !== undefined);
     expect(tree[0].pid).toBe(1);
     expect(tree[0].children.map((n) => n.pid)).toEqual([2]);
+    assert.ok(tree[0].children[0] !== undefined);
     expect(tree[0].children[0].children.map((n) => n.pid)).toEqual([3]);
   });
 
@@ -245,8 +267,11 @@ describe("buildTree", () => {
     expect(tree).toHaveLength(1);
     let node = tree[0];
     let depth = 0;
+    assert.ok(node !== undefined);
     while (node.children.length > 0) {
-      node = node.children[0];
+      const child: ProcessNode | undefined = node.children[0];
+      assert.ok(child !== undefined);
+      node = child;
       depth += 1;
     }
     expect(depth).toBe(19_999);
@@ -277,8 +302,11 @@ describe("visibleProcesses", () => {
   it("flattens a 50,000-deep chain without overflowing the call stack", () => {
     const visible = visibleProcesses(buildTree(chain(50_000)), () => false);
     expect(visible).toHaveLength(50_000);
+    assert.ok(visible[0] !== undefined);
     expect(visible[0].depth).toBe(0);
-    expect(visible[visible.length - 1].depth).toBe(49_999);
+    const last = visible[visible.length - 1];
+    assert.ok(last !== undefined);
+    expect(last.depth).toBe(49_999);
   });
 });
 

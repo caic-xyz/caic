@@ -1,11 +1,14 @@
 // API-only tests for repos and harnesses endpoints.
+import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState } from "../helpers";
 
 test("Antigravity task selection survives creation and retrieval", async ({ api }) => {
   const repos = await api.listRepos();
+  const firstRepo = repos[0];
+  ok(firstRepo);
   const created = await api.createTask({
     initialPrompt: { text: "Antigravity selection" },
-    repos: [{ name: repos[0].path }],
+    repos: [{ name: firstRepo.path }],
     harness: "antigravity",
   });
   expect(created.harness).toBe("antigravity");
@@ -17,6 +20,7 @@ test("list repos returns the fake repo", async ({ api }) => {
   const repos = await api.listRepos();
   expect(repos.length).toBeGreaterThan(0);
   const repo = repos[0];
+  ok(repo);
   expect(repo.path).toBeTruthy();
   expect(repo.baseBranch.name).toBe("main");
 });

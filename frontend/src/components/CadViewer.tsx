@@ -257,7 +257,7 @@ export default function CadViewer(props: Props) {
       <div class={styles.content}>
         <Show when={error() || cancelled()}>
           <div class={styles.loading}>
-            <p classList={{ [styles.errorText]: Boolean(error()) }} role={error() ? "alert" : "status"}>
+            <p class={`${error() ? styles.errorText : ""}`} role={error() ? "alert" : "status"}>
               {error() ?? "Model loading cancelled."}
             </p>
             <ActionButton ref={retryRef} label="Retry" onClick={() => void loadModelData(props.taskId, props.path)}>
@@ -308,8 +308,7 @@ export default function CadViewer(props: Props) {
           ref={(el) => {
             wrapRef = el;
           }}
-          class={styles.canvasWrap}
-          classList={{ [styles.hidden]: loading() || cancelled() || Boolean(error()) || !webglAvailable() }}
+          class={`${styles.canvasWrap} ${loading() || cancelled() || Boolean(error()) || !webglAvailable() ? styles.hidden : ""}`}
         >
           <CadViewControls axesVisible={axesVisible()} onToggleAxes={toggleAxes} onResetView={resetCamera}>
             <canvas

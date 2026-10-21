@@ -35,7 +35,8 @@ function printingPlates(config: Document, area: unknown): CadPlate[] {
       throw new Error("Invalid printable area in 3MF metadata");
     }
     const [x, y] = point.split("x").map(Number);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Invalid printable area in 3MF metadata");
+    if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y))
+      throw new Error("Invalid printable area in 3MF metadata");
     return { x, y };
   });
   const width = Math.max(...outline.map((p) => p.x)) - Math.min(...outline.map((p) => p.x));
@@ -85,7 +86,9 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
   }
   const colors: string[] = palette;
   const facePainter = new BambuFacePainter(colors);
-  const rels = parseXml(files["_rels/.rels"]);
+  const relationships = files["_rels/.rels"];
+  if (!relationships) throw new Error("Missing 3MF model relationship");
+  const rels = parseXml(relationships);
   const target = Array.from(rels.querySelectorAll("Relationship"))
     .find((rel) => rel.getAttribute("Type")?.endsWith("/3dmodel"))
     ?.getAttribute("Target");
@@ -119,8 +122,9 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
 
   function paint(node: THREE.Object3D, index: number | null) {
     if (index === null) return;
-    const color = colors[index - 1];
-    if (color === undefined) throw new Error("Extruder exceeds filament palette in 3MF color metadata");
+    const resolved = colors[index - 1];
+    if (resolved === undefined) throw new Error("Extruder exceeds filament palette in 3MF color metadata");
+    const color: string = resolved;
     node.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       function material(source: THREE.Material): THREE.Material {
@@ -159,9 +163,11 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
     // The pinned ThreeMFLoader preserves build/component order in Group.children.
     if (components.length !== node.children.length) throw new Error("3MF component color mapping mismatch");
     components.forEach((component, i) => {
+      const child = node.children[i];
+      if (!child) throw new Error("3MF component color mapping mismatch");
       const componentPath = component.getAttributeNS(productionNamespace, "path");
       walk(
-        node.children[i],
+        child,
         componentPath ? componentPath.replace(/^\//, "") : path,
         component.getAttribute("objectid") ?? "",
         effective,
@@ -178,7 +184,9 @@ export function applyBambuMetadata(group: THREE.Group, buffer: ArrayBuffer): Cad
     if (!object) return;
     const parts = new Map<string, number | null>();
     object.querySelectorAll("part").forEach((part) => parts.set(part.getAttribute("id") ?? "", extruder(part)));
-    walk(group.children[i], rootPath, id, extruder(object), parts);
+    const child = group.children[i];
+    if (!child) throw new Error("3MF build color mapping mismatch");
+    walk(child, rootPath, id, extruder(object), parts);
   });
   return plates;
 }

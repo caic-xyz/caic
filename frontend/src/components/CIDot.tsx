@@ -7,7 +7,7 @@ import type { CIStatus, ForgeCheck } from "@sdk/types.gen";
 import Tooltip from "./Tooltip";
 import styles from "./CIDot.module.css";
 
-const DOT_CLASS: Record<string, string> = {
+const DOT_CLASS: Record<string, string | undefined> = {
   pending: styles.dot_pending,
   success: styles.dot_success,
   failure: styles.dot_failure,

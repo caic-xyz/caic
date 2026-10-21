@@ -7,8 +7,6 @@ import { createEffect, onCleanup, onMount } from "solid-js";
 
 import styles from "./AutoResizeTextarea.module.css";
 
-const emptyClass = styles.empty;
-
 interface Props {
   value: string;
   onInput: (value: string) => void;
@@ -26,6 +24,8 @@ interface Props {
 }
 
 export default function AutoResizeTextarea(props: Props) {
+  const emptyClass = styles.empty;
+  if (emptyClass === undefined) throw new Error("Missing empty textarea style");
   let editable!: HTMLDivElement;
   let focusGeneration = 0;
   let pointerFocus = false;
@@ -82,20 +82,20 @@ export default function AutoResizeTextarea(props: Props) {
       editable.textContent = "";
       if (v) {
         const lines = v.split("\n");
-        for (let i = 0; i < lines.length; i++) {
+        for (const [i, line] of lines.entries()) {
           if (i > 0) editable.appendChild(document.createElement("br"));
-          if (lines[i]) editable.appendChild(document.createTextNode(lines[i]));
+          if (line) editable.appendChild(document.createTextNode(line));
         }
       }
       editable.classList.toggle(emptyClass, v.length === 0);
     }
   });
 
-  function handleInput() {
+  const handleInput = () => {
     const text = getText(editable);
     editable.classList.toggle(emptyClass, text.length === 0);
     props.onInput(text);
-  }
+  };
 
   function handleKeyDown(e: KeyboardEvent) {
     props.onKeyDown?.(e);

@@ -89,9 +89,8 @@ export async function createStepGroup(
   let start = performance.now();
   progress({ stage: "meshes", completed: 0, total: meshes.length });
   try {
-    for (let index = 0; index < meshes.length; index++) {
+    for (const [index, source] of meshes.entries()) {
       signal.throwIfAborted();
-      const source = meshes[index];
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(source.positions, 3));
       geometry.setAttribute("normal", new THREE.BufferAttribute(source.normals, 3));
@@ -221,6 +220,7 @@ function createPlateGrid(outline: CadPlate["outline"]): THREE.BufferGeometry {
       for (let i = 0; i < outline.length; i++) {
         const a = outline[i];
         const b = outline[(i + 1) % outline.length];
+        if (!a || !b) throw new Error("Invalid printing plate outline");
         // Half-open crossings count vertices once and exclude parallel edges.
         if ((a[axis] <= coordinate && b[axis] > coordinate) || (b[axis] <= coordinate && a[axis] > coordinate)) {
           intersections.push(a[other] + ((coordinate - a[axis]) / (b[axis] - a[axis])) * (b[other] - a[other]));
@@ -523,6 +523,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadScene {
     setViewMode(mode: CadViewMode) {
       if (!currentGroup) return;
       const model = currentGroup.children[0];
+      if (!model) return;
       if (mode === "translucent" && !translucency) translucency = new CadTranslucency(model);
       translucency?.setEnabled(mode === "translucent");
       translucency?.update(camera);

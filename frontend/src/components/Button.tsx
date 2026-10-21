@@ -6,7 +6,7 @@ import styles from "./Button.module.css";
 
 type Variant = "primary" | "gray" | "red" | "green";
 
-const VARIANT_CLASS: Record<Variant, string> = {
+const VARIANT_CLASS: Record<Variant, string | undefined> = {
   primary: styles.primary,
   gray: styles.gray,
   red: styles.red,

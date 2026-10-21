@@ -1,5 +1,6 @@
 // Tests compressed STEP selection, container detection, corruption, and expansion limits.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { gzipSync } from "node:zlib";
 import { Zip, ZipDeflate, zipSync, strToU8 } from "three/addons/libs/fflate.module.js";
@@ -25,6 +26,11 @@ async function decompressStep(
   return result;
 }
 
+function flipByte(bytes: Uint8Array, index: number) {
+  const value = bytes[index];
+  assert.ok(value !== undefined);
+  bytes[index] = value ^ 1;
+}
 describe("StepDecompressor", () => {
   it("accepts an empty plain STEP stream", async () => {
     const buffer = new ArrayBuffer(0);
@@ -59,7 +65,7 @@ describe("StepDecompressor", () => {
     expect(new TextDecoder().decode(await decompressStep(gzip, "part.stpz", null))).toBe("STEP data");
     for (const trailer of [first.length - 8, gzip.length - 8]) {
       const corrupt = gzip.slice();
-      corrupt[trailer] ^= 1;
+      flipByte(corrupt, trailer);
       await expect(decompressStep(corrupt, "part.stp.gz", null)).rejects.toThrow("CRC checksum mismatch");
     }
   });
@@ -87,7 +93,7 @@ describe("StepDecompressor", () => {
       await expect(decompressStep(bytes.buffer as ArrayBuffer, "part.stpz", null)).rejects.toThrow();
     }
     const gzip = Uint8Array.from(gzipSync("STEP data"));
-    gzip[gzip.length - 8] ^= 1;
+    flipByte(gzip, gzip.length - 8);
     await expect(decompressStep(gzip.buffer, "part.stp.gz", null)).rejects.toThrow();
   });
 
@@ -101,7 +107,7 @@ describe("StepDecompressor", () => {
     const zip = zipSync({ "part.stp": strToU8("STEP data") }, { level: 0 });
     const view = new DataView(zip.buffer);
     const dataOffset = 30 + view.getUint16(26, true) + view.getUint16(28, true);
-    zip[dataOffset] ^= 1;
+    flipByte(zip, dataOffset);
     await expect(decompressStep(zip.buffer as ArrayBuffer, "part.stpz", null)).rejects.toThrow("CRC checksum mismatch");
   });
 
@@ -212,10 +218,11 @@ describe("streaming archive boundaries", () => {
     const last = gzipSync("last");
     const filename = Buffer.alloc(8000, 97);
     const header = Buffer.from(last.subarray(0, 10));
+    assert.ok(header[3] !== undefined);
     header[3] |= 8;
     const bytes = Uint8Array.from(Buffer.concat([first, header, filename, Buffer.from([0]), last.subarray(10)]));
     for (const size of [1, 17, 1024, 65536]) expect(streamed(bytes, "part.stpz", size)).toBe("first last");
-    bytes[first.length - 8] ^= 1;
+    flipByte(bytes, first.length - 8);
     expect(() => streamed(bytes, "part.stpz", 17)).toThrow("CRC checksum mismatch");
   });
 
@@ -237,7 +244,7 @@ describe("streaming archive boundaries", () => {
     expect(() => decoder.finish()).toThrow();
     for (const delta of [8, 10, 12, 16]) {
       const corrupt = bytes.slice();
-      corrupt[corrupt.length - 22 + delta] ^= 1;
+      flipByte(corrupt, corrupt.length - 22 + delta);
       expect(() => streamed(corrupt, "part.stpz", 1)).toThrow();
     }
   });
@@ -257,7 +264,7 @@ describe("streaming archive boundaries", () => {
     const corrupt = bytes.slice();
     for (let offset = 0; offset < corrupt.length - 4; offset++) {
       if (new DataView(corrupt.buffer).getUint32(offset, true) === 0x02014b50) {
-        corrupt[offset + 16] ^= 1;
+        flipByte(corrupt, offset + 16);
         break;
       }
     }
@@ -269,7 +276,7 @@ describe("streaming archive boundaries", () => {
     for (const size of [1, 3, 1024]) expect(streamed(bytes, "part.stpz", size)).toBe("ZIP64 model");
     const corrupt = bytes.slice();
     const locator = corrupt.length - 22 - 20;
-    corrupt[locator + 8] ^= 1;
+    flipByte(corrupt, locator + 8);
     expect(() => streamed(corrupt, "part.stpz", 1)).toThrow();
   });
 

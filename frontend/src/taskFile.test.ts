@@ -1,4 +1,5 @@
 // Tests bounded text and compressed STEP reads, sniffed previews, and transfer cancellation.
+import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { streamTaskStepFile, readTaskFilePreview } from "./taskFile";
@@ -14,7 +15,7 @@ describe("readTaskFilePreview", () => {
     ["video/mp4", "video"],
     ["video/ogg", "video"],
     ["video/webm", "video"],
-  ]) {
+  ] as const) {
     it(`identifies ${contentType} by MIME and cancels its preview stream`, async () => {
       let cancelled = false;
       fetchMock.mockResolvedValue(
@@ -214,9 +215,12 @@ describe("streamTaskStepFile", () => {
       "/part.stpz",
       new AbortController().signal,
       (chunk) => {
-        if (!size) first = chunk[0];
+        const start = chunk[0],
+          end = chunk[chunk.length - 1];
+        assert.ok(start !== undefined && end !== undefined);
+        if (!size) first = start;
         size += chunk.length;
-        last = chunk[chunk.length - 1];
+        last = end;
         expect(chunk.length).toBeLessThanOrEqual(65536);
       },
       () => {},

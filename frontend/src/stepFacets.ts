@@ -151,7 +151,8 @@ class Scanner {
     const bytes = this.bytes;
     let p = this.start;
     while (p < end) {
-      if (bytes.byte(p) <= 32) p++;
+      const byte = bytes.byte(p);
+      if (byte !== undefined && byte <= 32) p++;
       else if (bytes.byte(p) === 47 && bytes.byte(p + 1) === 42) {
         p += 2;
         while (p < end && !(bytes.byte(p) === 42 && bytes.byte(p + 1) === 47)) p++;
@@ -163,9 +164,18 @@ class Scanner {
       let id = 0;
       p++;
       const digits = p;
-      while (bytes.byte(p) >= 48 && bytes.byte(p) <= 57) id = id * 10 + bytes.byte(p++) - 48;
+      while (true) {
+        const digit = bytes.byte(p);
+        if (digit === undefined || digit < 48 || digit > 57) break;
+        id = id * 10 + digit - 48;
+        p++;
+      }
       requireSupported(p > digits && id > 0 && id <= 0xffffffff);
-      while (bytes.byte(p) <= 32) p++;
+      while (true) {
+        const byte = bytes.byte(p);
+        if (byte === undefined || byte > 32) break;
+        p++;
+      }
       requireSupported(bytes.byte(p++) === 61);
       this.visit(id, p, end);
     } else {
@@ -183,14 +193,19 @@ class Scanner {
         requireSupported(this.section === 2);
         const header = new Arguments(statement).read();
         requireSupported(
-          header.length === 1 && ["FILE_DESCRIPTION", "FILE_NAME", "FILE_SCHEMA"].includes(header[0].name),
+          header.length === 1 &&
+            header[0] !== undefined &&
+            ["FILE_DESCRIPTION", "FILE_NAME", "FILE_SCHEMA"].includes(header[0].name),
         );
       }
     }
   }
   finish() {
     requireSupported((this.state === "normal" || this.state === "after-quote") && this.section === 6);
-    for (let i = this.start; i < this.offset; i++) requireSupported(this.bytes.byte(i) <= 32);
+    for (let i = this.start; i < this.offset; i++) {
+      const byte = this.bytes.byte(i);
+      requireSupported(byte !== undefined && byte <= 32);
+    }
   }
 }
 
@@ -295,7 +310,7 @@ class Records {
     this.scanner = new Scanner(bytes, (id, start, end) => {
       const head = bytes.text(start, Math.min(start + 128, end));
       const match = /^\s*([A-Z_][A-Z_0-9]*|\()/.exec(head);
-      requireSupported(match);
+      requireSupported(match && match[1] !== undefined);
       const name = match[1] === "(" ? "" : match[1];
       requireSupported(name === "" || Object.hasOwn(supported, name));
       if (!geometryTypes.has(name)) {
@@ -306,6 +321,7 @@ class Records {
       if (this.count && id <= this.field(this.count - 1, 0)) this.sorted = false;
       if (this.count % indexPageSize === 0) this.pages.push(new Uint32Array(indexPageSize * 3));
       const page = this.pages[this.pages.length - 1];
+      requireSupported(page);
       const offset = (this.count % indexPageSize) * 3;
       page[offset] = id;
       page[offset + 1] = start;
@@ -320,7 +336,11 @@ class Records {
     return this.count;
   }
   private field(index: number, field: number): number {
-    return this.pages[Math.floor(index / indexPageSize)][(index % indexPageSize) * 3 + field];
+    const page = this.pages[Math.floor(index / indexPageSize)];
+    requireSupported(page);
+    const value = page[(index % indexPageSize) * 3 + field];
+    requireSupported(value !== undefined);
+    return value;
   }
   finish() {
     this.scanner.finish();
@@ -360,8 +380,9 @@ class Records {
   }
   get(id: number, name: string): Value[] {
     const entities = this.read(id);
-    requireSupported(entities.length === 1 && entities[0].name === name);
-    return entities[0].args;
+    const entity = entities[0];
+    requireSupported(entities.length === 1 && entity?.name === name);
+    return entity.args;
   }
   entries(name: string): number[] {
     return this.metadata.get(name) ?? [];
@@ -480,8 +501,9 @@ class FacetedAssembly {
         MILLI: 1,
         NANO: 0.000001,
       };
-      requireSupported(Object.hasOwn(factor, prefix));
-      scale = factor[prefix];
+      const value = factor[prefix];
+      requireSupported(Object.hasOwn(factor, prefix) && value !== undefined);
+      scale = value;
     }
     requireSupported(scale !== null);
     return scale;
@@ -490,9 +512,10 @@ class FacetedAssembly {
     requireSupported(!path.has(id));
     path.add(id);
     const entities = this.records.read(id);
-    requireSupported(entities.length === 1);
-    const { name, args } = entities[0];
-    let children: Value[];
+    const entity = entities[0];
+    requireSupported(entities.length === 1 && entity);
+    const { name, args } = entity;
+    let children: (Value | undefined)[];
     if (name === "COLOUR_RGB") {
       const rgb = args.slice(1).map(number) as [number, number, number];
       requireSupported(rgb.every((c) => c >= 0 && c <= 1));
@@ -510,9 +533,10 @@ class FacetedAssembly {
     else throw new Unsupported();
     requireSupported(children.length > 0 && path.size < 32);
     const colors = children.map((child) => this.color(reference(child), path));
-    requireSupported(colors.every((c) => c.every((v, i) => v === colors[0][i])));
+    const first = colors[0];
+    requireSupported(first && colors.every((c) => c.every((v, i) => v === first[i])));
     path.delete(id);
-    return colors[0];
+    return first;
   }
   meshes(): StepMesh[] {
     const r = this.records;
@@ -521,9 +545,10 @@ class FacetedAssembly {
       const target = reference(args[2]);
       r.get(target, "FACETED_BREP");
       const styles = list(args[1]).map((style) => this.color(reference(style), new Set()));
-      requireSupported(styles.length > 0 && !this.colors.has(target));
-      requireSupported(styles.every((c) => c.every((v, i) => v === styles[0][i])));
-      this.colors.set(target, styles[0]);
+      const first = styles[0];
+      requireSupported(first && !this.colors.has(target));
+      requireSupported(styles.every((c) => c.every((v, i) => v === first[i])));
+      this.colors.set(target, first);
     }
     const representations = new Map<
       number,
@@ -540,10 +565,11 @@ class FacetedAssembly {
         const items = list(args[1]).map(reference);
         for (const item of items) {
           const entity = r.read(item);
-          requireSupported(entity.length === 1);
-          if (entity[0].name === "FACETED_BREP") bodies.push(item);
+          const first = entity[0];
+          requireSupported(entity.length === 1 && first);
+          if (first.name === "FACETED_BREP") bodies.push(item);
           else {
-            requireSupported(entity[0].name === "AXIS2_PLACEMENT_3D");
+            requireSupported(first.name === "AXIS2_PLACEMENT_3D");
             this.placement(item);
           }
         }
@@ -703,8 +729,9 @@ class FacetedAssembly {
   }
   private triangles(id: number): Vector3[] {
     const entities = this.records.read(id);
-    requireSupported(entities.length === 1);
-    const { name, args } = entities[0];
+    const entity = entities[0];
+    requireSupported(entities.length === 1 && entity);
+    const { name, args } = entity;
     requireSupported(name === "FACE" || name === "FACE_SURFACE");
     const bounds = list(args[1]);
     requireSupported(bounds.length === 1);
@@ -714,21 +741,21 @@ class FacetedAssembly {
     // ambiguous contours use OCCT wholesale rather than risking worker stalls.
     requireSupported(points.length >= 3 && points.length <= 256);
     const triangle = points.map((value) => this.point(reference(value)));
+    const [first, second, third] = triangle;
+    requireSupported(first && second && third);
     requireSupported(flag(bound[2]));
-    const cross = new Vector3()
-      .subVectors(triangle[1], triangle[0])
-      .cross(new Vector3().subVectors(triangle[2], triangle[0]));
+    const cross = new Vector3().subVectors(second, first).cross(new Vector3().subVectors(third, first));
     if (triangle.length > 3) {
       cross.set(0, 0, 0);
-      for (let i = 1; i < triangle.length - 1; i++)
-        cross.add(
-          new Vector3()
-            .subVectors(triangle[i], triangle[0])
-            .cross(new Vector3().subVectors(triangle[i + 1], triangle[0])),
-        );
+      for (let i = 1; i < triangle.length - 1; i++) {
+        const point = triangle[i];
+        const next = triangle[i + 1];
+        requireSupported(point && next);
+        cross.add(new Vector3().subVectors(point, first).cross(new Vector3().subVectors(next, first)));
+      }
     }
     requireSupported(cross.lengthSq() > 0 && Number.isFinite(cross.lengthSq()));
-    let planeOrigin = triangle[0];
+    let planeOrigin = first;
     if (name === "FACE_SURFACE") {
       const plane = this.records.get(reference(args[2]), "PLANE");
       const placement = this.records.get(reference(plane[1]), "AXIS2_PLACEMENT_3D");
@@ -741,7 +768,7 @@ class FacetedAssembly {
       }
       requireSupported(cross.clone().normalize().dot(normal) > 1 - 1e-5);
       planeOrigin = this.point(reference(placement[1]));
-      requireSupported(Math.abs(new Vector3().subVectors(triangle[0], planeOrigin).dot(normal)) < 1e-5);
+      requireSupported(Math.abs(new Vector3().subVectors(first, planeOrigin).dot(normal)) < 1e-5);
       if (triangle.length > 3) cross.copy(normal);
     }
     if (triangle.length === 3) return triangle;
@@ -752,6 +779,7 @@ class FacetedAssembly {
     this.polygonChecks += (n * (n - 3)) / 2;
     requireSupported(this.polygonChecks <= 2000000);
     const origin = points[0];
+    requireSupported(origin);
     const extent = Math.max(...points.map((p) => p.distanceTo(origin)));
     const magnitude = Math.max(...points.flatMap((p) => [Math.abs(p.x), Math.abs(p.y), Math.abs(p.z)]));
     const roundoff = magnitude * Number.EPSILON * 16;
@@ -776,11 +804,14 @@ class FacetedAssembly {
     for (let i = 0; i < n; i++) {
       const a = contour[i],
         b = contour[(i + 1) % n];
-      requireSupported(Math.abs(turn(a, b, contour[(i + 2) % n])) > epsilon);
+      const next = contour[(i + 2) % n];
+      requireSupported(a && b && next);
+      requireSupported(Math.abs(turn(a, b, next)) > epsilon);
       for (let j = i + 2; j < n; j++) {
         if (i === 0 && j === n - 1) continue;
         const c = contour[j],
           d = contour[(j + 1) % n];
+        requireSupported(c && d);
         if (
           Math.max(a.x, b.x) < Math.min(c.x, d.x) - epsilon ||
           Math.max(c.x, d.x) < Math.min(a.x, b.x) - epsilon ||
@@ -809,15 +840,20 @@ class FacetedAssembly {
     const result: Vector3[] = [];
     let covered = 0;
     for (const [a, b, c] of faces) {
-      const triangleArea = Math.abs(turn(contour[a], contour[b], contour[c])) / 2;
+      requireSupported(a !== undefined && b !== undefined && c !== undefined);
+      const ca = contour[a],
+        cb = contour[b],
+        cc = contour[c];
+      const pa = points[a],
+        pb = points[b],
+        pc = points[c];
+      requireSupported(ca && cb && cc && pa && pb && pc);
+      const triangleArea = Math.abs(turn(ca, cb, cc)) / 2;
       requireSupported(triangleArea > epsilon);
       covered += triangleArea;
-      const direction = new Vector3()
-        .subVectors(points[b], points[a])
-        .cross(new Vector3().subVectors(points[c], points[a]))
-        .dot(normal);
+      const direction = new Vector3().subVectors(pb, pa).cross(new Vector3().subVectors(pc, pa)).dot(normal);
       requireSupported(Number.isFinite(direction) && direction !== 0);
-      result.push(points[a], points[direction > 0 ? b : c], points[direction > 0 ? c : b]);
+      result.push(pa, direction > 0 ? pb : pc, direction > 0 ? pc : pb);
     }
     requireSupported(Math.abs(covered - area) <= Math.max(epsilon, area * 1e-9));
     return result;

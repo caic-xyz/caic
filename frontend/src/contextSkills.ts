@@ -27,6 +27,7 @@ export class ContextSkillsTracker {
     let closed = this.snapshot.closed;
     for (let i = this.processed; i < messages.length; i++) {
       const ev = messages[i];
+      if (!ev) throw new Error("Missing timeline event");
       if (
         ev.kind === "system" &&
         (ev.system?.subtype === "compact_boundary" || ev.system?.subtype === "context_cleared")
@@ -45,7 +46,8 @@ export class ContextSkillsTracker {
         current = [];
         for (const entry of this.loads) {
           const paths = entry.path ? [] : this.loads.filter((known) => known.path && known.skill === entry.skill);
-          const resolved = paths.length === 1 ? paths[0] : entry;
+          const [path] = paths;
+          const resolved = paths.length === 1 && path ? path : entry;
           if (
             !current.some((seen) =>
               resolved.path ? seen.path === resolved.path : !seen.path && seen.skill === resolved.skill,

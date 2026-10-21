@@ -88,12 +88,12 @@ export default function PdfPreview(props: { taskId: string; path: string }) {
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.floor(pageViewport.width * ratio));
         canvas.height = Math.max(1, Math.floor(pageViewport.height * ratio));
-        canvas.className = styles.canvas;
+        canvas.className = `${styles.canvas}`;
         canvas.setAttribute("aria-hidden", "true");
         const layer = document.createElement("div");
-        layer.className = styles.textLayer;
+        layer.className = `${styles.textLayer}`;
         const container = document.createElement("div");
-        container.className = styles.page;
+        container.className = `${styles.page}`;
         container.style.setProperty("--pdf-width", `${pageViewport.width}px`);
         container.style.setProperty("--pdf-height", `${pageViewport.height}px`);
         container.style.setProperty("--total-scale-factor", String(pageViewport.scale));
@@ -178,7 +178,7 @@ export default function PdfPreview(props: { taskId: string; path: string }) {
         </div>
       </Show>
       <div ref={viewport} class={styles.viewport} tabindex="0" role="region" aria-label="PDF page" aria-busy={busy()}>
-        <div ref={pageHost} class={styles.pageHost} classList={{ [styles.hidden]: busy() || Boolean(error()) }} />
+        <div ref={pageHost} class={`${styles.pageHost} ${busy() || Boolean(error()) ? styles.hidden : ""}`} />
       </div>
     </div>
   );

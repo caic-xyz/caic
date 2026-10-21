@@ -25,7 +25,7 @@ export function nativeTerminal(status: EventNativeSubagent["status"]): boolean {
 export function nativeActivityStatus(activity: NativeActivity, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
   if (activity.status === "unknown") return "Status unknown";
-  return activity.status[0].toUpperCase() + activity.status.slice(1);
+  return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);
 }
 
 export class NativeActivityTracker {
@@ -46,6 +46,7 @@ export class NativeActivityTracker {
     }
     for (let i = this.previous.length; i < messages.length; i++) {
       const ev = messages[i];
+      if (!ev) throw new Error("Missing timeline event");
       const s = ev.nativeSubagent;
       if (ev.kind !== "nativeSubagent" || !s?.id) continue;
       const old = this.byID.get(s.id);
@@ -145,8 +146,9 @@ export function assignNativeAnchors<T extends { anchorTs: number }>(
     anchors.push({ key: item.key, endTs: clamped });
     previousEndTs = clamped;
   }
-  if (anchors.length === 0) return byAnchor;
-  const fallback = anchors[0].key;
+  const first = anchors[0];
+  if (!first) return byAnchor;
+  const fallback = first.key;
   for (const activity of activities) {
     let key = fallback;
     for (const anchor of anchors) {
@@ -178,7 +180,7 @@ export function backgroundTerminal(status: EventBackgroundCommand["status"]): bo
 // makes its last running observation stale; it never invents a terminal outcome.
 export function backgroundCommandStatus(activity: BackgroundCommandActivity, settled: boolean): string {
   if (settled && activity.status === "running") return "Last observed running · outcome unknown";
-  return activity.status[0].toUpperCase() + activity.status.slice(1);
+  return activity.status.charAt(0).toUpperCase() + activity.status.slice(1);
 }
 
 export class BackgroundCommandTracker {
@@ -199,6 +201,7 @@ export class BackgroundCommandTracker {
     }
     for (let i = this.previous.length; i < messages.length; i++) {
       const ev = messages[i];
+      if (!ev) throw new Error("Missing timeline event");
       const s = ev.backgroundCommand;
       if (ev.kind !== "backgroundCommand" || !s?.id) continue;
       const old = this.byID.get(s.id);

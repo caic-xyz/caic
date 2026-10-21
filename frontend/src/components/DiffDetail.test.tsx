@@ -1,5 +1,6 @@
 // Tests for DiffDetail repository status rendering and diff parsing utilities.
 
+import assert from "node:assert/strict";
 import type { JSX } from "solid-js";
 import { beforeEach, describe, it } from "node:test";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
@@ -84,6 +85,7 @@ describe("DiffDetail", () => {
   it("groups missing upstream commits separately and loads their patches on demand", async () => {
     const user = userEvent.setup();
     const index = diffIndexFixture();
+    assert.ok(index.repositories[0] !== undefined);
     index.repositories[0].behind = 1;
     index.repositories[0].commits.push({
       sha: "abcdef1234567890abcdef1234567890abcdef12",
@@ -244,6 +246,7 @@ describe("DiffDetail", () => {
 
   it("refreshes stale metadata while retaining an expanded loaded row", async () => {
     const refreshed = diffIndexFixture();
+    assert.ok(refreshed.repositories[0] !== undefined);
     refreshed.repositories[0].behind = 2;
     let resolveRefresh: (response: TaskDiffIndexResp) => void = () => undefined;
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockReturnValueOnce(
@@ -385,7 +388,9 @@ describe("DiffDetail", () => {
     renderWithRouter(() => <DiffDetail taskId="task-1" taskPath="/task/task-1" />);
     const row = await screen.findByRole("button", { name: "committed.go" });
     fireEvent.click(row);
-    const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+    const firstCall = getTaskFileDiffMock.mock.calls[0];
+    assert.ok(firstCall !== undefined);
+    const [taskId, repository, commit, path, originalPath] = firstCall;
     const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
     fireEvent.click(row);
     pending.resolve({ diff: "@@ -0,0 +1 @@\n+" + "oversized".repeat(120_000) });
@@ -408,7 +413,9 @@ describe("DiffDetail", () => {
       ));
       const row = await screen.findByRole("button", { name: "committed.go" });
       fireEvent.click(row);
-      const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+      const firstCall = getTaskFileDiffMock.mock.calls[0];
+      assert.ok(firstCall !== undefined);
+      const [taskId, repository, commit, path, originalPath] = firstCall;
       const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
       fireEvent.click(row);
       pending.reject(Object.assign(new Error("obsolete collapsed failure"), { status }));
@@ -440,7 +447,9 @@ describe("DiffDetail", () => {
       <DiffDetail taskId="task-1" taskPath="/task/task-1" onTaskRefreshError={onTaskRefreshError} />
     ));
     fireEvent.click(await screen.findByRole("button", { name: "committed.go" }));
-    const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+    const firstCall = getTaskFileDiffMock.mock.calls[0];
+    assert.ok(firstCall !== undefined);
+    const [taskId, repository, commit, path, originalPath] = firstCall;
     const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
     old.unmount();
     taskDiffCache.clear();
@@ -459,6 +468,7 @@ describe("DiffDetail", () => {
       resolveFirstPatch = resolve;
     });
     const refreshed = diffIndexFixture();
+    assert.ok(refreshed.repositories[0] !== undefined);
     refreshed.repositories[0].behind = 2;
     getTaskDiffIndexMock.mockResolvedValueOnce(diffIndexFixture()).mockResolvedValueOnce(refreshed);
     getTaskFileDiffMock.mockReturnValueOnce(firstPatch).mockResolvedValueOnce({ diff: "@@ -1 +1 @@\n-old\n+current" });
@@ -468,7 +478,9 @@ describe("DiffDetail", () => {
     });
     fireEvent.click(row);
     expect(getTaskFileDiffMock).toHaveBeenCalledTimes(1);
-    const [taskId, repository, commit, path, originalPath] = getTaskFileDiffMock.mock.calls[0];
+    const firstCall = getTaskFileDiffMock.mock.calls[0];
+    assert.ok(firstCall !== undefined);
+    const [taskId, repository, commit, path, originalPath] = firstCall;
     const settled = taskDiffCache.loadPatch({ taskId, repository, commit, path, originalPath });
 
     taskDiffCache.invalidate("task-1");
@@ -584,16 +596,21 @@ describe("DiffDetail", () => {
     expect(await screen.findByText("origin/main")).toBeInTheDocument();
     expect(screen.getByText(/2 commits ahead/)).toHaveTextContent("2 commits ahead · 1 behind");
     expect(screen.getByText("Commits ahead (2)")).toBeInTheDocument();
+    assert.ok(styles.commitSha !== undefined);
     expect(screen.getByText("12345678")).toHaveClass(styles.commitSha);
     expect(screen.getByText("2026-09-03")).toHaveAttribute("datetime", "2026-09-03");
+    assert.ok(styles.commitDecorations !== undefined);
     expect(screen.getByText("HEAD -> caic-42, host/caic-42, tag: v1.2.3")).toHaveClass(styles.commitDecorations);
     expect(screen.getByText("Surface git status")).toBeInTheDocument();
+    assert.ok(styles.added !== undefined);
     expect(screen.getByText("+10")).toHaveClass(styles.added);
     expect(screen.getAllByText("1 file changed")).toHaveLength(2);
     expect(screen.getByText("Uncommitted changes (3)")).toBeInTheDocument();
     expect(screen.getByText("staged: added")).toBeInTheDocument();
     expect(screen.getByText("untracked")).toBeInTheDocument();
+    assert.ok(styles.added !== undefined);
     expect(screen.getByText("+2")).toHaveClass(styles.added);
+    assert.ok(styles.deleted !== undefined);
     expect(screen.getByText("−1")).toHaveClass(styles.deleted);
 
     const committedFile = screen.getByRole("button", {
@@ -920,8 +937,9 @@ describe("annotateDiffLines", () => {
     ].join("\n");
 
     const movedDeleted = annotateDiffLines(diff).filter((line) => line.kind === "movedDeleted");
-
+    assert.ok(movedDeleted[0] !== undefined);
     expect(movedDeleted[0].movedVariant).toBe(0);
+    assert.ok(movedDeleted[3] !== undefined);
     expect(movedDeleted[3].movedVariant).toBe(1);
   });
 });
@@ -948,7 +966,9 @@ describe("splitDiff", () => {
     const files = splitDiff(raw);
 
     expect(files).toHaveLength(2);
+    assert.ok(files[0] !== undefined);
     expect(files[0].lines.filter((line) => line.kind === "movedDeleted")).toHaveLength(3);
+    assert.ok(files[1] !== undefined);
     expect(files[1].lines.filter((line) => line.kind === "movedAdded")).toHaveLength(3);
   });
 });

@@ -1,4 +1,5 @@
 // Browser coverage for faceted STEP geometry, rigid assemblies, polygons, and responsive dense loading.
+import { ok } from "node:assert/strict";
 import { zipSync } from "three/addons/libs/fflate.module.js";
 import {
   createDenseFacetedStep,
@@ -48,6 +49,7 @@ for (const width of [390, 1280]) {
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: test.info().outputPath("faceted-assembly.png") });
     await expect.poll(() => diagnostics.length).toBe(1);
+    ok(diagnostics[0]);
     expect(diagnostics[0].stages.occtInitMs).toBe(0);
     expect(diagnostics[0].stages.occtParseMs).toBe(0);
     expect(diagnostics[0].stages.directParseMs).toBeGreaterThan(0);
@@ -125,6 +127,7 @@ test("dense faceted STEP assembly imports and releases its worker", async ({ pag
   await expect(page.getByText("193,600 triangles", { exact: true })).toBeVisible({ timeout: 30_000 });
   const loadMs = performance.now() - start;
   await expect.poll(() => diagnostics.length).toBe(1);
+  ok(diagnostics[0]);
   console.log(JSON.stringify({ facetedAssembly: { loadMs, diagnostics: diagnostics[0] } }));
   await expect.poll(() => page.workers().filter((worker) => worker.url().includes("stepWorker"))).toHaveLength(0);
   await expect(page.getByLabel(/^3D model/)).toBeVisible();

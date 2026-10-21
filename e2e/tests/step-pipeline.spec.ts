@@ -1,4 +1,5 @@
 // Exercises STEP indexing before network completion, cancellation, and late archive validation over gated HTTP streams.
+import { ok } from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { zipSync } from "three/addons/libs/fflate.module.js";
@@ -100,6 +101,7 @@ test.describe("streaming STEP", () => {
         }
         await expect(page.getByText("32 triangles", { exact: true })).toBeVisible();
         await expect.poll(() => diagnostics.length).toBe(1);
+        ok(diagnostics[0]);
         expect(diagnostics[0].stages.occtParseMs).toBe(0);
         await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.screenshot({ path: test.info().outputPath("streamed-step.png") });

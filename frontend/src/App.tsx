@@ -132,11 +132,8 @@ function Shell(props: { children?: JSX.Element }) {
     <Show when={auth.ready() || auth.providers().length === 0} fallback={<SessionCheckPage />}>
       <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
         <div
-          class={styles.app}
-          classList={{
-            [styles.subviewOpen]: taskView() !== "closed",
-            [styles.subviewFullscreen]: taskView() === "fullscreen",
-          }}
+          class={`${styles.app} ${taskView() !== "closed" ? styles.subviewOpen : ""} ${taskView() === "fullscreen" ? styles.subviewFullscreen : ""}`}
+
           data-testid="app-shell"
         >
           <div
@@ -144,7 +141,7 @@ function Shell(props: { children?: JSX.Element }) {
             aria-hidden={mobileVoice()}
             data-testid="normal-content"
           >
-            <header class={styles.navbar} classList={{ [styles.chromeHidden]: taskView() === "fullscreen" }}>
+            <header class={`${styles.navbar} ${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}>
               <h1 class={styles.title}>
                 <button
                   class={styles.titleButton}
@@ -203,7 +200,7 @@ function Shell(props: { children?: JSX.Element }) {
           />
           <VoiceTaskFocus mobile={mobile} />
           <div
-            classList={{ [styles.chromeHidden]: taskView() === "fullscreen" }}
+            class={`${taskView() === "fullscreen" ? styles.chromeHidden : ""}`}
             inert={taskView() === "fullscreen"}
             aria-hidden={taskView() === "fullscreen"}
           >

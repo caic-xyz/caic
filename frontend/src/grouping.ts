@@ -161,9 +161,10 @@ function groupMessagesAfter(
             // recent action group with tool calls to coalesce into.
             let coalesced = false;
             for (let i = groups.length - 1; i >= 0; i--) {
-              if (groups[i].kind === "action" && groups[i].toolCalls.length > 0) {
-                groups[i].events.push(ev);
-                groups[i].toolCalls.push(call);
+              const group = groups[i];
+              if (group?.kind === "action" && group.toolCalls.length > 0) {
+                group.events.push(ev);
+                group.toolCalls.push(call);
                 coalesced = true;
                 break;
               }
@@ -186,6 +187,7 @@ function groupMessagesAfter(
           let matched = false;
           for (let i = groups.length - 1; i >= 0; i--) {
             const g = groups[i];
+            if (!g) throw new Error("Missing message group");
             if (g.kind === "widget" && g.widgetToolUseID === tr.toolUseID) {
               g.widgetDone = true;
               g.events.push(ev);
@@ -198,6 +200,7 @@ function groupMessagesAfter(
             // arrive after intervening text/other groups, not just the last group.
             for (let i = groups.length - 1; i >= 0; i--) {
               const g = groups[i];
+              if (!g) throw new Error("Missing message group");
               if (g.kind !== "action") continue;
               const tc = g.toolCalls.find((c) => c.use.toolUseID === tr.toolUseID && !c.result);
               if (tc) {
@@ -227,6 +230,7 @@ function groupMessagesAfter(
         let askGroup: MessageGroup | undefined;
         for (let i = groups.length - 1; i >= 0; i--) {
           const g = groups[i];
+          if (!g) throw new Error("Missing message group");
           if (g.kind === "ask" && !g.answerText) {
             askGroup = g;
             break;
@@ -303,6 +307,7 @@ function groupMessagesAfter(
         if (id) {
           for (let i = groups.length - 1; i >= 0; i--) {
             const g = groups[i];
+            if (!g) throw new Error("Missing message group");
             if (g.kind !== "action") continue;
             if (g.toolCalls.some((c) => c.use.toolUseID === id)) {
               g.events.push(ev);
@@ -328,8 +333,9 @@ function groupMessagesAfter(
           // Find or create a widget group for this toolUseID.
           let widgetGroup: MessageGroup | undefined;
           for (let i = groups.length - 1; i >= 0; i--) {
-            if (groups[i].kind === "widget" && groups[i].widgetToolUseID === id) {
-              widgetGroup = groups[i];
+            const group = groups[i];
+            if (group?.kind === "widget" && group.widgetToolUseID === id) {
+              widgetGroup = group;
               break;
             }
           }
@@ -355,8 +361,9 @@ function groupMessagesAfter(
           // Find existing widget group or create a new one.
           let widgetGroup: MessageGroup | undefined;
           for (let i = groups.length - 1; i >= 0; i--) {
-            if (groups[i].kind === "widget" && groups[i].widgetToolUseID === id) {
-              widgetGroup = groups[i];
+            const group = groups[i];
+            if (group?.kind === "widget" && group.widgetToolUseID === id) {
+              widgetGroup = group;
               break;
             }
           }
@@ -429,6 +436,7 @@ function groupMessagesAfter(
       let anchor: MessageGroup | undefined;
       for (let i = merged.length - 1; i >= 0; i--) {
         const m = merged[i];
+        if (!m) throw new Error("Missing message group");
         if (m.kind === "text" || (m.kind === "action" && m.toolCalls.length === 0)) continue;
         anchor = m;
         break;
@@ -437,7 +445,7 @@ function groupMessagesAfter(
       const thinkingEvents: EventMessage[] = [];
       while (merged.length > 0) {
         const last = merged[merged.length - 1];
-        if (last.kind !== "action" || last.toolCalls.length > 0) break;
+        if (!last || last.kind !== "action" || last.toolCalls.length > 0) break;
         thinkingEvents.unshift(...(merged.pop()?.events ?? []));
       }
       if (anchor && anchor.kind === "action") {
@@ -542,6 +550,7 @@ function groupMessagesAfter(
       // (e.g. its tool calls) stays right after the holder.
       const firstIdx = pendingIdx;
       const first = finalGroups[firstIdx];
+      if (!first) throw new Error("Missing pending thinking group");
       const fRest = first.events.filter((e) => !isThinkingEv(e));
       const dropFirstRest = droppableEmptyGroup(first, fRest);
       const h: MessageGroup = {
@@ -571,13 +580,14 @@ function groupMessagesAfter(
   // the canonical completion card, but retain preceding text when it differs.
   for (let i = 1; i < finalGroups.length; i++) {
     const group = finalGroups[i];
+    if (!group) throw new Error("Missing result group");
     const result = group.events.find((event) => event.kind === "result")?.result;
     const previous = finalGroups[i - 1];
     if (
       result &&
       !result.isError &&
       result.result.trim() !== "" &&
-      previous.kind === "text" &&
+      previous?.kind === "text" &&
       renderedText(previous).trim() === result.result.trim()
     ) {
       group.resultReplacesText = true;
@@ -590,15 +600,15 @@ function groupMessagesAfter(
   // Within a group, every non-last non-background call is done (the agent
   // moved on to the next call). Entire non-last groups are fully done.
   const lastActionGroupIdx = finalGroups.findLastIndex((g) => g.kind === "action" && g.toolCalls.length > 0);
-  for (let i = 0; i < finalGroups.length; i++) {
-    const g = finalGroups[i];
+  for (const [i, g] of finalGroups.entries()) {
     if (g.kind !== "action" || g.toolCalls.length === 0) continue;
     if (i < lastActionGroupIdx || i < finalGroups.length - 1) {
       for (const tc of g.toolCalls) tc.done = true;
     } else {
       // Last action group: mark all but the final non-background call as done.
       for (let j = 0; j < g.toolCalls.length - 1; j++) {
-        if (!g.toolCalls[j].use.background) g.toolCalls[j].done = true;
+        const call = g.toolCalls[j];
+        if (call && !call.use.background) call.done = true;
       }
     }
   }
@@ -644,6 +654,7 @@ export class IncrementalMessageGrouper {
         const result = [...previous];
         const mutableGroup = (index: number): MessageGroup => {
           const group = result[index];
+          if (!group) throw new Error("Missing mutable message group");
           if (group !== previous[index]) return group;
           const copy = { ...group, events: [...group.events] };
           result[index] = copy;
@@ -652,7 +663,7 @@ export class IncrementalMessageGrouper {
         const appendGroup = (group: MessageGroup): void => {
           const previousGroupIndex = result.length - 1;
           const previousGroup = result[previousGroupIndex];
-          if (previousGroup.kind === "action" && previousGroup.toolCalls.some((call) => !call.done)) {
+          if (previousGroup?.kind === "action" && previousGroup.toolCalls.some((call) => !call.done)) {
             const mutable = mutableGroup(previousGroupIndex);
             mutable.toolCalls = mutable.toolCalls.map((call) => (call.done ? call : { ...call, done: true }));
           }
@@ -662,6 +673,7 @@ export class IncrementalMessageGrouper {
         for (const ev of newEvents) {
           const lastGroupIndex = result.length - 1;
           const lastGroup = result[lastGroupIndex];
+          if (!lastGroup) throw new Error("Missing streaming message group");
           if (ev.kind === "thinkingDelta") {
             if (lastGroup.kind === "action") {
               mutableGroup(lastGroupIndex).events.push(ev);
@@ -684,6 +696,7 @@ export class IncrementalMessageGrouper {
               let found = false;
               for (let i = result.length - 1; i >= 0; i--) {
                 const group = result[i];
+                if (!group) throw new Error("Missing message group");
                 if (group.kind !== "action") continue;
                 if (group.toolCalls.some((call) => call.use.toolUseID === id)) {
                   mutableGroup(i).events.push(ev);
@@ -699,6 +712,7 @@ export class IncrementalMessageGrouper {
               let found = false;
               for (let i = result.length - 1; i >= 0; i--) {
                 const group = result[i];
+                if (!group) throw new Error("Missing message group");
                 if (group.kind === "widget" && group.widgetToolUseID === id) {
                   const mutable = mutableGroup(i);
                   mutable.events.push(ev);
@@ -892,8 +906,7 @@ export function buildTurnItems(
   inPastSession = false,
 ): MsgItem[] {
   const items: MsgItem[] = [];
-  for (let i = 0; i < turns.length; i++) {
-    const turn = turns[i];
+  for (const [i, turn] of turns.entries()) {
     const turnKey = `${sessionKey}:turn:${i}:${turn.groups[0]?.events[0]?.ts ?? ""}`;
     if (expandedTurnKeys.has(turnKey)) {
       items.push({
@@ -903,10 +916,10 @@ export function buildTurnItems(
         key: `hdr:${turnKey}`,
         ...(inPastSession ? { indent: "session" as const } : {}),
       });
-      for (let j = 0; j < turn.groups.length; j++) {
+      for (const [j, group] of turn.groups.entries()) {
         items.push({
           kind: "group",
-          group: turn.groups[j],
+          group,
           isLive: false,
           key: `${turnKey}-g${j}`,
           indent: "turn",
@@ -932,8 +945,7 @@ export function buildPastSessionItems(
   expandedTurnKeys: ReadonlySet<string>,
 ): MsgItem[] {
   const items: MsgItem[] = [];
-  for (let i = 0; i < sessions.length; i++) {
-    const session = sessions[i];
+  for (const [i, session] of sessions.entries()) {
     const sessionKey = `session:${i}:${session.boundaryEvent?.ts ?? ""}`;
     if (expandedSessionKeys.has(sessionKey)) {
       items.push({ kind: "sessionHeader", session, sessionKey, key: `hdr:${sessionKey}` });

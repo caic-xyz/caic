@@ -1,4 +1,5 @@
 // Tests STEP worker geometry packing, compressed inputs, zero-copy assembly, and cancelled mesh setup.
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { BufferGeometry, Mesh } from "three";
@@ -32,8 +33,9 @@ describe("STEP import", () => {
     const mesh = group.children[0];
     expect(mesh).toBeInstanceOf(Mesh);
     if (!(mesh instanceof Mesh)) throw new Error("Missing mesh");
-    expect(mesh.geometry.attributes.position.array).toBe(data[0].positions);
-    expect(mesh.geometry.attributes.normal.array).toBe(data[0].normals);
+    assert.ok(data[0] !== undefined);
+    expect(mesh.geometry.getAttribute("position").array).toBe(data[0].positions);
+    expect(mesh.geometry.getAttribute("normal").array).toBe(data[0].normals);
     expect(mesh.geometry.index?.array).toBe(data[0].indices);
     expect(mesh.geometry.boundingBox).not.toBeNull();
     expect(mesh.geometry.boundingSphere).not.toBeNull();
@@ -45,6 +47,7 @@ describe("STEP import", () => {
       const compressed = path.endsWith(".gz") ? gzipSync(cube) : zipSync({ "models/cube.STP": cube });
       const data = await importStep(input(compressed, path));
       expect(data).toHaveLength(1);
+      assert.ok(data[0] !== undefined);
       expect(data[0].indices?.length).toBe(36);
     }
   });
@@ -52,6 +55,8 @@ describe("STEP import", () => {
   it("handles concatenated gzip members before importing the complete model", async () => {
     const middle = Math.floor(cube.length / 2);
     const members = [gzipSync(cube.subarray(0, middle)), gzipSync(cube.subarray(middle))];
+    assert.ok(members[0] !== undefined);
+    assert.ok(members[1] !== undefined);
     const joined = new Uint8Array(members[0].length + members[1].length);
     joined.set(members[0]);
     joined.set(members[1], members[0].length);
@@ -60,13 +65,15 @@ describe("STEP import", () => {
 
   it("yields while assembling many meshes and disposes a cancelled partial model", async () => {
     const data = await importStep(input(cube, "cube.step"));
+    const first = data[0];
+    assert.ok(first !== undefined);
     const controller = new AbortController();
     const disposed = vi.spyOn(BufferGeometry.prototype, "dispose");
     const timer = setTimeout(() => controller.abort(), 0);
     try {
       await expect(
         createStepGroup(
-          Array.from({ length: 2000 }, () => data[0]),
+          Array.from({ length: 2000 }, () => first),
           controller.signal,
           () => {},
         ),

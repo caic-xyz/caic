@@ -175,7 +175,7 @@ interface Props {
 
 type CIStatus = "pending" | "success" | "failure";
 
-const CI_STATUS_CLASS: Record<CIStatus, string> = {
+const CI_STATUS_CLASS: Record<CIStatus, string | undefined> = {
   pending: styles.ciStatus_pending,
   success: styles.ciStatus_success,
   failure: styles.ciStatus_failure,
@@ -460,7 +460,7 @@ export default function TaskDetail(props: Props) {
       if (taskChanged) userScrolledUp = false;
     }
     for (let i = idx; i < msgs.length; i++) {
-      if (msgs[i].kind === "result") idx = i + 1;
+      if (msgs[i]?.kind === "result") idx = i + 1;
     }
     if (reset || idx !== previousIdx) {
       setSplitIdx(idx);
@@ -502,7 +502,7 @@ export default function TaskDetail(props: Props) {
   const hasInitialPromptEvent = createMemo(() => {
     const history = messages();
     const firstInput = history.findIndex((event) => event.kind === "userInput");
-    if (firstInput < 0 || history[firstInput].userInput?.text !== props.initialPrompt) return false;
+    if (firstInput < 0 || history[firstInput]?.userInput?.text !== props.initialPrompt) return false;
     return !history
       .slice(0, firstInput)
       .some(
@@ -538,6 +538,7 @@ export default function TaskDetail(props: Props) {
     }
     for (let i = setupProcessed; i < history.length; i++) {
       const event = history[i];
+      if (!event) continue;
       if (event.kind === "log" && event.log) setupLogs.push(event);
       if (firstInit === null && event.kind === "init") firstInit = event;
       if ((event.kind === "init" || event.kind === "userInput") && event.ts > 0) {
@@ -573,7 +574,7 @@ export default function TaskDetail(props: Props) {
   // Current session: the last session in completedMsgs (contains its completed turns + boundary event).
   const currentSessionEntry = createMemo((): Session | null => {
     const sessions = allCompletedSessions();
-    return sessions.length > 0 ? sessions[sessions.length - 1] : null;
+    return sessions.at(-1) ?? null;
   });
   const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
   // Boundary event for the current session from completed messages.
@@ -668,7 +669,7 @@ export default function TaskDetail(props: Props) {
     const liveGroups = currentGroups();
     return liveGroups.map((g, j) => {
       const event = g.events[0];
-      if (g.kind === "other" && g.events.length === 1 && event.kind === "system" && isSessionBoundary(event)) {
+      if (g.kind === "other" && g.events.length === 1 && event?.kind === "system" && isSessionBoundary(event)) {
         return { kind: "sessionBoundary", event, key: `g:${j}` };
       }
       return { kind: "group", group: g, isLive: true, key: `g:${j}` };
@@ -693,7 +694,8 @@ export default function TaskDetail(props: Props) {
   const lastAskGroup = createMemo((): MessageGroup | null => {
     const groups = allGroups();
     for (let i = groups.length - 1; i >= 0; i--) {
-      if (groups[i].kind === "ask") return groups[i];
+      const group = groups[i];
+      if (group?.kind === "ask") return group;
     }
     return null;
   });
@@ -1093,8 +1095,10 @@ export default function TaskDetail(props: Props) {
                   if (props.sudoPassword) {
                     navigator.clipboard.writeText(props.sudoPassword);
                   }
-                  btn.classList.add(styles.copied);
-                  setTimeout(() => btn.classList.remove(styles.copied), 1500);
+                  const copiedClass = styles.copied;
+                  if (copiedClass === undefined) throw new Error("Missing copied password style");
+                  btn.classList.add(copiedClass);
+                  setTimeout(() => btn.classList.remove(copiedClass), 1500);
                 }}
               >
                 <CopyIcon width={14} height={14} class={styles.copyIcon} />
@@ -1952,21 +1956,25 @@ function ToolMessageGroup(props: {
       <Show
         when={calls().length > 1}
         fallback={
-          <ToolCallCard
-            call={calls()[0]}
-            taskId={props.taskId}
-            durationMs={toolCallDurationMs(calls()[0], durations())}
-            thinkingEvents={thinkingEvents()}
-            outputDeltaEvents={outputDeltaEvents(calls()[0].use.toolUseID)}
-            open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
-            onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)}
-            onClearAndExecutePlan={props.onClearAndExecutePlan}
-            pendingAction={props.pendingAction}
-            nativeActivity={props.nativeByToolUseID().get(calls()[0].use.toolUseID)}
-            nativeSettled={props.nativeSettled}
-            backgroundCommands={props.backgroundByToolUseID().get(calls()[0].use.toolUseID)}
-            backgroundSettled={props.backgroundSettled}
-          />
+          <Show when={calls()[0]}>
+            {(call) => (
+              <ToolCallCard
+                call={call()}
+                taskId={props.taskId}
+                durationMs={toolCallDurationMs(call(), durations())}
+                thinkingEvents={thinkingEvents()}
+                outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
+                open={detailsOpenState.get(call().use.toolUseID) ?? false}
+                onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
+                onClearAndExecutePlan={props.onClearAndExecutePlan}
+                pendingAction={props.pendingAction}
+                nativeActivity={props.nativeByToolUseID().get(call().use.toolUseID)}
+                nativeSettled={props.nativeSettled}
+                backgroundCommands={props.backgroundByToolUseID().get(call().use.toolUseID)}
+                backgroundSettled={props.backgroundSettled}
+              />
+            )}
+          </Show>
         }
       >
         <>
@@ -2049,7 +2057,7 @@ function ThinkingCard(props: { events: EventMessage[] }) {
   });
   const excerpt = createMemo(() => {
     const t = text();
-    return t ? t.split("\n")[0].trim() : "";
+    return t ? (t.split("\n", 1)[0] ?? "").trim() : "";
   });
   const key = () => "thinking:" + (props.events[0]?.ts ?? 0);
   const isOpen = () => detailsOpenState.get(key()) ?? false;
@@ -2422,7 +2430,7 @@ function AskQuestionCard(props: {
       if (qs.length === 1) {
         parts.push(answer);
       } else {
-        parts.push(`${q.header ?? `Q${i + 1}`}: ${answer}`);
+        parts.push(`${q?.header ?? `Q${i + 1}`}: ${answer}`);
       }
     }
     return parts.join("\n");

@@ -1,4 +1,5 @@
 // Tests Bambu painted-face inheritance, subdivision geometry, extended selectors, and malformed streams.
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Mesh, MeshPhongMaterial, Vector3 } from "three";
 import type { Group } from "three";
@@ -45,6 +46,7 @@ function areaByColor(mesh: Mesh): Map<number, number> {
 describe("Bambu face paint", () => {
   it("keeps unpainted faces on each instance's inherited filament while sharing indexed geometry", async () => {
     const files = unzipSync(archive("8"));
+    assert.ok(files["3D/Objects/parts.model"] !== undefined);
     files["3D/Objects/parts.model"] = strToU8(
       strFromU8(files["3D/Objects/parts.model"]).replace(
         'paint_color="8"/>',
@@ -53,12 +55,14 @@ describe("Bambu face paint", () => {
     );
     const { group } = await parseCad(zipSync(files).buffer, "mixed-paint.3mf");
     const all = meshes(group);
+    assert.ok(all[0] !== undefined);
     expect(areaByColor(all[0])).toEqual(
       new Map([
         [0xffffff, 100],
         [0xe4bd68, 100],
       ]),
     );
+    assert.ok(all[3] !== undefined);
     expect(areaByColor(all[3])).toEqual(new Map([[0xe4bd68, 200]]));
     expect(all[0].geometry).toBe(all[3].geometry);
     expect(all[0].geometry.getAttribute("position").count).toBe(3);
@@ -73,6 +77,7 @@ describe("Bambu face paint", () => {
     it(`decodes one-side subdivision ${selector} with correct midpoint, colors, and winding`, async () => {
       const { group } = await parseCad(archive(selector).buffer, "split.3mf");
       const mesh = meshes(group)[0];
+      assert.ok(mesh !== undefined);
       expect(areaByColor(mesh)).toEqual(
         new Map([
           [0xffffff, 50],
@@ -88,7 +93,9 @@ describe("Bambu face paint", () => {
 
   it("decodes two-side subdivision in reverse serialized child order", async () => {
     const { group } = await parseCad(archive("4842").buffer, "split.3mf");
-    expect(areaByColor(meshes(group)[0])).toEqual(
+    const meshesItem = meshes(group)[0];
+    assert.ok(meshesItem !== undefined);
+    expect(areaByColor(meshesItem)).toEqual(
       new Map([
         [0xffffff, 75],
         [0xe4bd68, 25],
@@ -98,7 +105,9 @@ describe("Bambu face paint", () => {
 
   it("decodes four-child subdivision without changing surface area or source triangle metrics", async () => {
     const { group } = await parseCad(archive("48483").buffer, "split.3mf");
-    expect(areaByColor(meshes(group)[0])).toEqual(
+    const meshesItem = meshes(group)[0];
+    assert.ok(meshesItem !== undefined);
+    expect(areaByColor(meshesItem)).toEqual(
       new Map([
         [0xffffff, 50],
         [0xe4bd68, 50],
@@ -109,7 +118,9 @@ describe("Bambu face paint", () => {
 
   it("decodes nested splits without reversing the painted region", async () => {
     const { group } = await parseCad(archive("44811").buffer, "nested.3mf");
-    expect(areaByColor(meshes(group)[0])).toEqual(
+    const meshesItem = meshes(group)[0];
+    assert.ok(meshesItem !== undefined);
+    expect(areaByColor(meshesItem)).toEqual(
       new Map([
         [0xffffff, 75],
         [0xe4bd68, 25],
@@ -120,18 +131,28 @@ describe("Bambu face paint", () => {
   it("uses the object filament for state zero and decodes an extended filament state", async () => {
     const unpainted = await parseCad(archive("0").buffer, "zero.3mf");
     const all = meshes(unpainted.group);
+    assert.ok(all[0] !== undefined);
     expect(areaByColor(all[0])).toEqual(new Map([[0xffffff, 100]]));
+    assert.ok(all[3] !== undefined);
     expect(areaByColor(all[3])).toEqual(new Map([[0xe4bd68, 100]]));
     const purple = await parseCad(archive("0C").buffer, "extended.3mf");
-    expect(areaByColor(meshes(purple.group)[0])).toEqual(new Map([[0x482960, 100]]));
+    const meshesItem1 = meshes(purple.group)[0];
+    assert.ok(meshesItem1 !== undefined);
+    expect(areaByColor(meshesItem1)).toEqual(new Map([[0x482960, 100]]));
 
     const files = unzipSync(archive("0FC"));
+    assert.ok(files["Metadata/project_settings.config"] !== undefined);
     const project = JSON.parse(strFromU8(files["Metadata/project_settings.config"])) as { filament_colour: string[] };
     const colors = project.filament_colour;
-    project.filament_colour = Array.from({ length: 18 }, (_, i) => colors[i === 17 ? 2 : 0]);
+    const base = colors[0],
+      extendedColor = colors[2];
+    assert.ok(base !== undefined && extendedColor !== undefined);
+    project.filament_colour = Array.from({ length: 18 }, (_, i) => (i === 17 ? extendedColor : base));
     files["Metadata/project_settings.config"] = strToU8(JSON.stringify(project));
     const extended = await parseCad(zipSync(files).buffer, "extended.3mf");
-    expect(areaByColor(meshes(extended.group)[0])).toEqual(new Map([[0x482960, 100]]));
+    const meshesItem2 = meshes(extended.group)[0];
+    assert.ok(meshesItem2 !== undefined);
+    expect(areaByColor(meshesItem2)).toEqual(new Map([[0x482960, 100]]));
   });
 
   for (const selector of ["00", "C", "D", "F", "X", "1", "9C"]) {

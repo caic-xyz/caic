@@ -1,4 +1,5 @@
 // API-only tests for task lifecycle and repository status endpoints (no browser UI).
+import { ok } from "node:assert/strict";
 import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
 
 test("create task and reach waiting state via API", async ({ api }) => {
@@ -13,13 +14,15 @@ test("create task and reach waiting state via API", async ({ api }) => {
 test("task diff reports repository git status", async ({ api }) => {
   const id = await createTaskAPI(api, "api git status test");
   const task = await waitForTaskState(api, id, "waiting");
+  const primaryRepo = task.repos?.[0];
+  ok(primaryRepo);
 
   const diff = await api.getTaskDiff(id, "");
   expect(diff.diff).toBe("");
   expect(diff.repositories).toHaveLength(1);
   expect(diff.repositories[0]).toEqual({
-    name: task.repos![0].name,
-    branch: task.repos![0].branch,
+    name: primaryRepo.name,
+    branch: primaryRepo.branch,
     upstream: "origin/main",
     ahead: 1,
     behind: 0,
@@ -57,12 +60,14 @@ test("task diff reports repository git status", async ({ api }) => {
 test("task repository status reports compact git state", async ({ api }) => {
   const id = await createTaskAPI(api, "api compact git status test");
   const task = await waitForTaskState(api, id, "waiting");
+  const primaryRepo = task.repos?.[0];
+  ok(primaryRepo);
 
   const status = await api.getTaskRepoStatus(id);
   expect(status).toEqual({
     repositories: [
       {
-        name: task.repos![0].name,
+        name: primaryRepo.name,
         branch: expect.stringMatching(/^caic-\d+$/),
         ahead: 1,
         behind: 0,
@@ -133,15 +138,19 @@ test("list tasks includes created task", async ({ api }) => {
 
   const tasks = await api.listTasks();
   const found = tasks.find((t) => t.id === id);
-  expect(found).toBeTruthy();
-  expect(found!.initialPrompt).toBe("api list test");
-  expect(found!.repos![0].name).toBeTruthy();
-  expect(found!.repos![0].branch).toBeTruthy();
+  ok(found);
+  const primaryRepo = found.repos?.[0];
+  ok(primaryRepo);
+  expect(found.initialPrompt).toBe("api list test");
+  expect(primaryRepo.name).toBeTruthy();
+  expect(primaryRepo.branch).toBeTruthy();
 });
 
 test("task sync preserves default and task branch result contracts", async ({ api }) => {
   const id = await createTaskAPI(api, "api sync contract test");
   const task = await waitForTaskState(api, id, "waiting");
+  const primaryRepo = task.repos?.[0];
+  ok(primaryRepo);
 
   const defaultResult = await api.syncTask(id, { target: "default" });
   expect(defaultResult.status).toBe("empty");
@@ -150,6 +159,6 @@ test("task sync preserves default and task branch result contracts", async ({ ap
 
   const taskResult = await api.syncTask(id, { target: "branch" });
   expect(taskResult.status).toBe("empty");
-  expect(taskResult.branch).toBe(task.repos![0].branch);
+  expect(taskResult.branch).toBe(primaryRepo.branch);
   expect(taskResult.safetyIssues ?? []).toEqual([]);
 });

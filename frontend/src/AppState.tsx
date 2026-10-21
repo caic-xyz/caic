@@ -198,8 +198,9 @@ function createAppStore() {
 
   createEffect(() => {
     const available = runtimes();
-    if (available.length > 0 && !available.some((rt) => rt.name === selectedRuntimeName())) {
-      setSelectedRuntimeName(available[0].name);
+    const firstRuntime = available[0];
+    if (firstRuntime && !available.some((rt) => rt.name === selectedRuntimeName())) {
+      setSelectedRuntimeName(firstRuntime.name);
     }
   });
 
@@ -368,8 +369,9 @@ function createAppStore() {
     setImageConstraints(config.imageConstraints);
     const availableRuntimes = config.runtimes ?? [];
     setRuntimes(availableRuntimes);
-    if (availableRuntimes.length > 0 && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
-      setSelectedRuntimeName(availableRuntimes[0].name);
+    const firstRuntime = availableRuntimes[0];
+    if (firstRuntime && !availableRuntimes.some((rt) => rt.name === selectedRuntimeName())) {
+      setSelectedRuntimeName(firstRuntime.name);
     }
     setTailscaleAvailable(config.tailscaleAvailable);
     setUSBAvailable(config.usbAvailable);
@@ -747,8 +749,9 @@ function createAppStore() {
         const ordered = [...recentRepos, ...rest];
         setRepos(ordered);
         setRecentCount(recentRepos.length);
-        if (ordered.length > 0) {
-          const first = recentRepos[0]?.path ?? ordered[0].path;
+        const firstRepo = ordered[0];
+        if (firstRepo) {
+          const first = firstRepo.path;
           setSelectedRepos([{ path: first, branch: "" }]);
         }
         {
@@ -942,7 +945,7 @@ function createAppStore() {
           .then((html) => {
             if (!currentStream()) return;
             const m = html.match(/<script[^>]+src="([^"]*\/assets\/[^"]+)"/);
-            if (m && initialScriptSrc && !initialScriptSrc.endsWith(m[1])) {
+            if (m?.[1] && initialScriptSrc && !initialScriptSrc.endsWith(m[1])) {
               window.location.reload();
             }
           })
@@ -1337,8 +1340,9 @@ function createAppStore() {
       if (primary) {
         const current = repos();
         const idx = current.findIndex((r) => r.path === primary);
-        if (idx > 0) {
-          setRepos([current[idx], ...current.slice(0, idx), ...current.slice(idx + 1)]);
+        const primaryRepo = current[idx];
+        if (idx > 0 && primaryRepo) {
+          setRepos([primaryRepo, ...current.slice(0, idx), ...current.slice(idx + 1)]);
         }
         setRecentCount(Math.min(recentCount() + (idx > recentCount() - 1 ? 1 : 0), current.length));
       }

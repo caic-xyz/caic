@@ -18,7 +18,7 @@ function todoStatusIcon(status: string): string {
   }
 }
 
-function todoStatusClass(status: string): string {
+function todoStatusClass(status: string): string | undefined {
   switch (status) {
     case "completed":
       return styles.completed;
@@ -34,7 +34,7 @@ const DETAILS_KEY = "progress";
 export default function ProgressPanel(props: { messages: EventMessage[] }) {
   const todos = createMemo(() => {
     for (let i = props.messages.length - 1; i >= 0; i--) {
-      const todo = props.messages[i].todo;
+      const todo = props.messages[i]?.todo;
       if (todo) return todo.todos;
     }
     return [];

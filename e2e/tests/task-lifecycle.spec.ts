@@ -1,4 +1,5 @@
 // End-to-end tests for the task lifecycle using a fake backend.
+import { ok } from "node:assert/strict";
 import { test, expect, waitForTaskState, fillContentEditable, createTaskAPI } from "../helpers";
 
 test("create task, verify streaming text and result, then purge", async ({ page, api, uniquePrompt }) => {
@@ -101,6 +102,8 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   const config = await api.getConfig();
   const runtimes = config.runtimes;
   if (!runtimes?.length) throw new Error("Fake server must expose a runtime");
+  const runtimeConfig = runtimes[0];
+  ok(runtimeConfig);
   await page.route("**/server/config", (route) =>
     route.fulfill({
       json: { ...config, runtimes: [...runtimes, { name: "standby" }] },
@@ -134,7 +137,7 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   await expect(disclosure).toHaveAttribute("aria-expanded", "true");
   await expect(input).toBeVisible();
   await expect(runtime).toBeVisible();
-  await runtime.selectOption(runtimes[0].name);
+  await runtime.selectOption(runtimeConfig.name);
   await expect(input).toHaveAttribute("placeholder", "Session ID to resume");
   await expect(input).not.toHaveAttribute("maxlength");
   await disclosure.focus();
@@ -161,7 +164,7 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   await expect(page.getByRole("button", { name: "Show features" })).toBeFocused();
   await page.getByRole("button", { name: "Show features" }).click();
   await expect(input).toHaveValue(`  ${sessionID}  `);
-  await expect(runtime).toHaveValue(runtimes[0].name);
+  await expect(runtime).toHaveValue(runtimeConfig.name);
   await expect(toggle).not.toBeChecked();
   await page.getByRole("button", { name: "Hide features" }).click();
 
@@ -170,7 +173,7 @@ test("collapsed task features preserve opaque session IDs on desktop and mobile"
   const request = page.waitForRequest((req) => req.method() === "POST" && req.url().endsWith("/api/caic/v1/tasks"));
   await page.getByTestId("submit-task").click();
   const body = (await request).postDataJSON();
-  expect(body).toMatchObject({ resumeSessionID: sessionID, runtimeName: runtimes[0].name });
+  expect(body).toMatchObject({ resumeSessionID: sessionID, runtimeName: runtimeConfig.name });
   expect(body.caicMCP).toBeUndefined();
   await expect(page).toHaveURL(/\/task\//);
   const tasks = await api.listTasks();

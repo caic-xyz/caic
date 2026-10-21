@@ -10,7 +10,7 @@ import type { BackgroundCommandActivity, NativeActivity } from "../nativeSubagen
 
 afterEach(cleanup);
 
-const activities: NativeActivity[] = [
+const activities: [NativeActivity, NativeActivity, NativeActivity, NativeActivity, NativeActivity, NativeActivity] = [
   {
     id: "joker-1",
     toolUseID: "spawn",
@@ -109,7 +109,7 @@ describe("NativeAgents", () => {
 
 afterEach(cleanup);
 
-const commands: BackgroundCommandActivity[] = [
+const commands: [BackgroundCommandActivity, BackgroundCommandActivity, BackgroundCommandActivity] = [
   {
     id: "claude:shell:b3xwrrd6m",
     toolUseID: "toolu_lint",

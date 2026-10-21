@@ -1,4 +1,5 @@
 // Tests complete planar faceted STEP imports, polygon coverage, placements, colors, units, winding, and conservative fallback.
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { Vector3 } from "three";
@@ -36,15 +37,21 @@ function match(pattern: RegExp): RegExpMatchArray {
 
 function canonicalTriples(values: ArrayLike<number>): string[] {
   const directions = new Set<string>();
-  for (let i = 0; i < values.length; i += 3)
-    directions.add(JSON.stringify([0, 1, 2].map((j) => Math.round(values[i + j] * 1e5) / 1e5 + 0)));
+  for (let i = 0; i < values.length; i += 3) {
+    const point = new Vector3().fromArray(values, i);
+    directions.add(JSON.stringify(point.toArray().map((value) => Math.round(value * 1e5) / 1e5 + 0)));
+  }
   return [...directions].sort();
 }
 
 function surfaceAreas(positions: ArrayLike<number>, indices: ArrayLike<number> | null) {
   const patches = new Map<string, number>();
   const count = indices?.length ?? positions.length / 3;
-  const point = (i: number) => new Vector3().fromArray(positions, (indices ? indices[i] : i) * 3);
+  const point = (i: number) => {
+    const index = indices ? indices[i] : i;
+    assert.ok(index !== undefined);
+    return new Vector3().fromArray(positions, index * 3);
+  };
   for (let i = 0; i < count; i += 3) {
     const a = point(i),
       b = point(i + 1),
@@ -65,29 +72,36 @@ async function matchesOcct(value: string) {
   const expected = occt.ReadStepFile(new TextEncoder().encode(value), null);
   expect(expected.success).toBe(true);
   expect(expected.meshes).toHaveLength(meshes.length);
-  for (let i = 0; i < meshes.length; i++) {
-    const positions = expected.meshes[i].attributes.position.array;
-    const min = [Infinity, Infinity, Infinity];
-    const max = [-Infinity, -Infinity, -Infinity];
-    for (let j = 0; j < positions.length; j++) {
-      min[j % 3] = Math.min(min[j % 3], positions[j]);
-      max[j % 3] = Math.max(max[j % 3], positions[j]);
+  for (const [i, mesh] of meshes.entries()) {
+    const reference = expected.meshes[i];
+    assert.ok(reference !== undefined);
+    const positions = reference.attributes.position.array;
+    const min = new Vector3(Infinity, Infinity, Infinity);
+    const max = new Vector3(-Infinity, -Infinity, -Infinity);
+    for (let j = 0; j < positions.length; j += 3) {
+      const point = new Vector3().fromArray(positions, j);
+      min.min(point);
+      max.max(point);
     }
-    for (let j = 0; j < 3; j++) {
-      expect((meshes[i].min[j] - min[j]) / Math.max(1, Math.abs(min[j]))).toBeCloseTo(0, 6);
-      expect((meshes[i].max[j] - max[j]) / Math.max(1, Math.abs(max[j]))).toBeCloseTo(0, 6);
+    for (const j of [0, 1, 2] as const) {
+      expect((mesh.min[j] - min.getComponent(j)) / Math.max(1, Math.abs(min.getComponent(j)))).toBeCloseTo(0, 6);
+      expect((mesh.max[j] - max.getComponent(j)) / Math.max(1, Math.abs(max.getComponent(j)))).toBeCloseTo(0, 6);
     }
-    const patches = surfaceAreas(meshes[i].positions, meshes[i].indices);
-    const expectedPatches = surfaceAreas(positions, expected.meshes[i].index?.array ?? null);
+    const patches = surfaceAreas(mesh.positions, mesh.indices);
+    const expectedPatches = surfaceAreas(positions, reference.index?.array ?? null);
     expect([...patches.keys()].sort()).toEqual([...expectedPatches.keys()].sort());
     for (const [key, area] of expectedPatches) expect((patches.get(key) ?? 0) / area).toBeCloseTo(1, 5);
-    const normals = expected.meshes[i].attributes.normal?.array;
-    if (!normals) throw new Error("Missing OCCT normals");
-    expect(canonicalTriples(meshes[i].normals)).toEqual(canonicalTriples(normals));
-    const actualColor = meshes[i].color;
-    const expectedColor = expected.meshes[i].color;
-    if (!actualColor || !expectedColor) throw new Error("Missing STEP part color");
-    for (let j = 0; j < 3; j++) expect(actualColor[j]).toBeCloseTo(expectedColor[j]);
+    const normals = reference.attributes.normal?.array;
+    assert.ok(normals !== undefined);
+    expect(canonicalTriples(mesh.normals)).toEqual(canonicalTriples(normals));
+    const actualColor = mesh.color;
+    const expectedColor = reference.color;
+    assert.ok(actualColor && expectedColor);
+    for (const j of [0, 1, 2] as const) {
+      const color: number | undefined = expectedColor[j];
+      assert.ok(color !== undefined);
+      expect(actualColor[j]).toBeCloseTo(color);
+    }
   }
 }
 
@@ -106,6 +120,7 @@ describe("faceted STEP", () => {
     expect(meshes).toHaveLength(70);
     expect([...new Set(updates.map((value) => value.parseStep))]).toEqual(["geometry"]);
     const faces = updates.filter((value) => value.parseStep === "geometry");
+    assert.ok(faces[0] !== undefined);
     expect(faces[0].completed).toBe(0);
     expect(faces.at(-1)?.completed).toBe(280);
     expect(updates).toContainEqual({ stage: "parse", parseStep: "geometry", completed: 256, total: 280 });
@@ -119,7 +134,9 @@ describe("faceted STEP", () => {
     for (let offset = 0; offset < source.length; offset += 1237) reader.push(source.subarray(offset, offset + 1237));
     const meshes = reader.meshes(undefined, undefined);
     expect(meshes).toHaveLength(2);
-    expect(meshes?.[0].max).toEqual([1, 1, 1]);
+    const firstMesh = meshes?.[0];
+    assert.ok(firstMesh !== undefined);
+    expect(firstMesh.max).toEqual([1, 1, 1]);
   });
 
   it("counts shell faces without treating quoted names or comments as references", () => {
@@ -146,6 +163,7 @@ describe("faceted STEP", () => {
     const loops = [...plain.matchAll(/POLY_LOOP\('',\(([^)]+)\)\)/g)];
     const last = loops.at(-1);
     if (!last) throw new Error("Missing final face loop");
+    assert.ok(last[1] !== undefined);
     const points = last[1].split(",");
     const changed = plain.replace(last[0], `POLY_LOOP('',(${points.join(",")},${points[0]}))`);
     const meshes = await importStep(input(new TextEncoder().encode(changed)), undefined, (value) =>
@@ -190,13 +208,18 @@ describe("faceted STEP", () => {
             // A tilted right-handed frame exercises projection and winding on
             // non-axis-aligned planes while assembly placements stay unchanged.
             const c = Math.SQRT1_2;
+            assert.ok(x !== undefined);
+            assert.ok(y !== undefined);
             return record.replace(coordinates, [z, (x - y) * c, (x + y) * c].join(","));
           },
         );
         await matchesOcct(rotated);
         // Removing plane metadata still leaves an explicitly oriented FACE.
         const plain = imported(prism.replace(/FACE_SURFACE\(''?,\((#[0-9]+)\),#[0-9]+,\.[TF]\.\)/g, "FACE('',($1))"));
-        expect(surfaceAreas(plain[0].positions, null)).toEqual(surfaceAreas(imported(prism)[0].positions, null));
+        assert.ok(plain[0] !== undefined);
+        const reference = imported(prism)[0];
+        assert.ok(reference !== undefined);
+        expect(surfaceAreas(plain[0].positions, null)).toEqual(surfaceAreas(reference.positions, null));
       }
     }
     const mesh = imported(
@@ -213,16 +236,16 @@ describe("faceted STEP", () => {
         1,
       ),
     )[0];
+    assert.ok(mesh !== undefined);
     expect(mesh.positions.length / 9).toBe(20);
     for (let i = 0; i < mesh.positions.length; i += 9) {
-      const v = mesh.positions.slice(i, i + 9);
-      const x = (v[0] + v[3] + v[6]) / 3,
-        y = (v[1] + v[4] + v[7]) / 3;
+      const a = new Vector3().fromArray(mesh.positions, i);
+      const b = new Vector3().fromArray(mesh.positions, i + 3);
+      const c = new Vector3().fromArray(mesh.positions, i + 6);
+      const center = a.clone().add(b).add(c).divideScalar(3);
       // No triangle may fill the missing upper-right quadrant of the L.
-      expect(x <= 1 + 1e-7 || y <= 1 + 1e-7).toBe(true);
-      const cross = new Vector3(v[3] - v[0], v[4] - v[1], v[5] - v[2])
-        .cross(new Vector3(v[6] - v[0], v[7] - v[1], v[8] - v[2]))
-        .normalize();
+      expect(center.x <= 1 + 1e-7 || center.y <= 1 + 1e-7).toBe(true);
+      const cross = b.sub(a).cross(c.sub(a)).normalize();
       expect(cross.dot(new Vector3().fromArray(mesh.normals, i))).toBeCloseTo(1, 6);
     }
   });
@@ -339,6 +362,7 @@ describe("faceted STEP", () => {
     const two = new TextDecoder().decode(createFacetedStep(2, false));
     const loop = [...two.matchAll(/POLY_LOOP\('',\(([^)]+)\)\)/g)].at(-1);
     if (!loop) throw new Error("Missing final loop");
+    assert.ok(loop[1] !== undefined);
     expect(parse(two.replace(loop[0], `POLY_LOOP('',(${loop[1]},${loop[1].split(",")[0]}))`))).toBeNull();
   });
 
@@ -371,9 +395,11 @@ describe("faceted STEP", () => {
   it("imports every triangular body with assembly rotation, translation, and colors", async () => {
     const meshes = imported(text);
     expect(meshes).toHaveLength(2);
+    assert.ok(meshes[0] !== undefined);
     expect(meshes[0].positions.length / 9).toBe(4);
     expect(meshes[0].min).toEqual([0, 0, 0]);
     expect(meshes[0].max).toEqual([1, 1, 1]);
+    assert.ok(meshes[1] !== undefined);
     expect(meshes[1].min).toEqual([4, 0, 0]);
     expect(meshes[1].max).toEqual([5, 1, 1]);
     expect(meshes[0].color?.[0]).toBeCloseTo(0.0331048, 6);
@@ -383,6 +409,7 @@ describe("faceted STEP", () => {
 
   it("supports SI length scaling and forward, reordered, and sparse entity references", () => {
     const meters = imported(text.replace(".MILLI.,.METRE.", "$,.METRE."));
+    assert.ok(meters[1] !== undefined);
     expect(meters[1].min).toEqual([4000, 0, 0]);
     expect(meters[1].max).toEqual([5000, 1000, 1000]);
     const lines = text.split("\n");
@@ -454,9 +481,13 @@ describe("faceted STEP", () => {
     const reversed = imported(reversedText);
     await matchesOcct(reversedText);
     const original = imported(text);
+    assert.ok(reversed[0] !== undefined);
+    assert.ok(original[0] !== undefined);
+    assert.ok(original[0].normals[2] !== undefined);
     expect(reversed[0].normals[2]).toBeCloseTo(original[0].normals[2]);
     expect(reversed[0].max).toEqual(original[0].max);
     const faces = imported(text.replace(/FACE_SURFACE\('',\((#\d+)\),#\d+,\.T\.\)/g, "FACE('',($1))"));
+    assert.ok(faces[0] !== undefined);
     expect(Array.from(faces[0].normals.slice(0, 3))).toEqual([0, 0, -1]);
   });
 
@@ -497,10 +528,16 @@ describe("faceted STEP", () => {
           expect(actualGeometry.map((m) => m.vertices)).toEqual(expectedGeometry.map((m) => m.vertices));
           expect(actualGeometry.map((m) => m.normals)).toEqual(expectedGeometry.map((m) => m.normals));
           for (let i = 0; i < actualGeometry.length; i++) {
-            const color = actualGeometry[i].color;
-            const expectedColor = expectedGeometry[i].color;
+            const actualPart = actualGeometry[i];
+            assert.ok(actualPart !== undefined);
+            const color = actualPart.color;
+            const expectedPart = expectedGeometry[i];
+            assert.ok(expectedPart !== undefined);
+            const expectedColor = expectedPart.color;
             if (!color || !expectedColor) throw new Error("Missing assembly color");
-            for (let j = 0; j < 3; j++) expect(color[j]).toBeCloseTo(expectedColor[j], 6);
+            for (const [j, channel] of expectedColor.entries()) {
+              expect(color[j]).toBeCloseTo(channel, 6);
+            }
           }
           // Literal bounds make incorrect multiplication order independently visible.
           expect(actual.map((m) => [m.min, m.max])).toEqual(

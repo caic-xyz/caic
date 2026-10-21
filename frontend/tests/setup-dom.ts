@@ -77,8 +77,11 @@ for (const timer of [
   if (globalTarget[timer] !== undefined) {
     Object.defineProperty(dom.window, timer, {
       configurable: true,
-      value: (...args: unknown[]) =>
-        (globalThis as unknown as Record<string, (...args: unknown[]) => unknown>)[timer](...args),
+      value: (...args: unknown[]) => {
+        const fn = (globalThis as unknown as Record<string, (...args: unknown[]) => unknown>)[timer];
+        if (!fn) throw new Error(`Missing global timer: ${timer}`);
+        return fn(...args);
+      },
     });
   }
 }

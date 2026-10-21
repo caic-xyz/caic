@@ -51,7 +51,11 @@ export class IncrementalToolTimingTracker {
     if (events.length < this.processed || (this.processed > 0 && events[this.processed - 1] !== this.lastProcessed)) {
       this.clear();
     }
-    for (let i = this.processed; i < events.length; i++) this.append(events[i]);
+    for (let i = this.processed; i < events.length; i++) {
+      const event = events[i];
+      if (!event) throw new Error("Missing task statistics event");
+      this.append(event);
+    }
     this.processed = events.length;
     this.lastProcessed = events.at(-1) ?? null;
     if (this.dirty) {

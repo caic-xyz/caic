@@ -1,5 +1,6 @@
 // Tests for TaskDetail navigation, runtime file links, prompts, and SSE connection behaviour.
 
+import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
@@ -559,7 +560,9 @@ describe("TaskDetail", () => {
     expect(strips.map((strip) => within(strip).getByRole("link").textContent)).toEqual(["review", "quality"]);
     const first = screen.getByText("First compacted response", { exact: true });
     const second = screen.getByText("Second compacted response", { exact: true });
+    assert.ok(strips[0] !== undefined);
     expect(strips[0].compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    assert.ok(strips[1] !== undefined);
     expect(second.compareDocumentPosition(strips[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(
       strips[1].compareDocumentPosition(
@@ -896,6 +899,7 @@ describe("TaskDetail", () => {
 
     const timing = getAllByLabelText("Timing details");
     expect(timing).toHaveLength(1);
+    assert.ok(timing[0] !== undefined);
     expect(timing[0].querySelector("svg")).toBeNull();
   });
 
@@ -1066,6 +1070,7 @@ describe("TaskDetail", () => {
     const [collapsedTurn] = screen.getAllByRole("button", {
       name: "Turn invocation details",
     });
+    assert.ok(collapsedTurn !== undefined);
     await user.click(collapsedTurn);
     expect(screen.getByTestId("turn-invocation-dialog")).toHaveTextContent("collapsed-model");
     expect(screen.queryByText("collapsed response")).not.toBeInTheDocument();
@@ -1484,6 +1489,7 @@ describe("SSE connection", () => {
 
     expect(created).toHaveLength(1);
     const es = created[0];
+    assert.ok(es !== undefined);
     if (!es.onerror) throw new Error("onerror not set");
     es.onerror(new Event("error"));
     es.onerror(new Event("error"));
@@ -1500,6 +1506,7 @@ describe("SSE connection", () => {
     makeManualReadyMock(created, capturedCb, readyHandler);
 
     renderTaskDetail();
+    assert.ok(created[0] !== undefined);
     if (!capturedCb.value || !readyHandler.value || !created[0].onerror) {
       throw new Error("SSE callbacks not captured");
     }
@@ -1601,6 +1608,7 @@ describe("SSE connection", () => {
     historyError({ message: "task history is unavailable" });
 
     expect(onError).toHaveBeenCalledWith("Task history error: task history is unavailable");
+    assert.ok(created[0] !== undefined);
     expect(created[0].close).toHaveBeenCalledOnce();
     if (!created[0].onerror) throw new Error("onerror not set");
     created[0].onerror(new Event("error"));
@@ -1618,6 +1626,7 @@ describe("SSE connection", () => {
 
     renderTaskDetail({ taskState: "stopped" });
     const es = created[0];
+    assert.ok(es !== undefined);
     if (!es.onerror) throw new Error("onerror not set");
     es.onerror(new Event("error"));
 
@@ -1643,6 +1652,7 @@ describe("SSE connection", () => {
     });
 
     renderTaskDetail();
+    assert.ok(readyHandlers[0] !== undefined);
     readyHandlers[0]();
 
     document.dispatchEvent(new Event("visibilitychange"));
@@ -1650,8 +1660,9 @@ describe("SSE connection", () => {
     window.dispatchEvent(new Event("online"));
 
     expect(created).toHaveLength(1);
+    assert.ok(created[0] !== undefined);
     expect(created[0].close).not.toHaveBeenCalled();
-
+    assert.ok(callbacks[0] !== undefined);
     callbacks[0]({
       kind: "userInput",
       ts: 1,
@@ -2100,6 +2111,7 @@ describe("SSE connection", () => {
 
     // ready fired synchronously; now simulate SSE close (server closes after ready for failed tasks).
     const es1 = created[0];
+    assert.ok(es1 !== undefined);
     if (!es1.onerror) throw new Error("onerror not set");
     es1.onerror(new Event("error"));
 
@@ -2126,6 +2138,7 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(20);
 
     const es1 = created[0];
+    assert.ok(es1 !== undefined);
     if (!es1.onerror) throw new Error("onerror not set");
     es1.onerror(new Event("error"));
 

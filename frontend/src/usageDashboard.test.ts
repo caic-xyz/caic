@@ -1,5 +1,6 @@
 // Tests usage dashboard range selection and additive rollup aggregation.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
@@ -122,11 +123,13 @@ describe("summarizeUsageDays", () => {
     expect(summary.skills).toEqual([{ name: "review", count: 4 }]);
     expect(summary.models[0]).toMatchObject({ name: "model-a", tokens: 70, turns: 2 });
     expect(usageCacheHitRate(summary.tokens)).toBeCloseTo(2 / 3);
+    assert.ok(summary.harnesses[0] !== undefined);
     expect(summary.harnesses[0].cacheHitRate).toBeCloseTo(2 / 3);
   });
 
   it("weights harness cache hit rate by input tokens across days", () => {
     const first = day("2026-01-24");
+    assert.ok(first.harnesses[0] !== undefined);
     const second = day("2026-01-25", {
       harnesses: [
         {
@@ -136,6 +139,7 @@ describe("summarizeUsageDays", () => {
       ],
     });
     const summary = summarizeUsageDays([first, second]);
+    assert.ok(summary.harnesses[0] !== undefined);
     expect(summary.harnesses[0].cacheHitRate).toBeCloseTo(20 / 100);
   });
 });
@@ -230,6 +234,7 @@ describe("summarizeUsageDays drill-down", () => {
     // The harness-by-model cross product ranks the harnesses that used the
     // model with that model's numbers instead of the harness totals.
     expect(summary.harnesses.map((entry) => entry.name)).toEqual(["claude"]);
+    assert.ok(summary.harnesses[0] !== undefined);
     expect(summary.harnesses[0].tokens).toBe(100);
   });
 
@@ -240,9 +245,11 @@ describe("summarizeUsageDays drill-down", () => {
     expect(summary.turns).toBe(2);
     expect(summary.skills).toEqual([{ name: "review", count: 1 }]);
     expect(summary.harnesses.map((entry) => entry.name)).toEqual(["claude"]);
+    assert.ok(summary.harnesses[0] !== undefined);
     expect(summary.harnesses[0].tokens).toBe(100);
     // Models used under the harness stay visible through the cross product.
     expect(summary.models.map((entry) => entry.name)).toEqual(["model-a"]);
+    assert.ok(summary.models[0] !== undefined);
     expect(summary.models[0].tokens).toBe(100);
   });
 

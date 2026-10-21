@@ -1,4 +1,5 @@
 // Creates standard and Bambu 3MF archives with colored component instances for tests.
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { strFromU8, strToU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 
@@ -19,6 +20,7 @@ export function create3mfFixture(): Uint8Array<ArrayBuffer> {
 
 export function createPaintedBambu3mfFixture(selector: string): Uint8Array<ArrayBuffer> {
   const files = unzipSync(createBambu3mfFixture());
+  assert.ok(files["3D/Objects/parts.model"] !== undefined);
   files["3D/Objects/parts.model"] = strToU8(
     strFromU8(files["3D/Objects/parts.model"]).replace(
       '<triangle v1="0" v2="1" v3="2"/>',

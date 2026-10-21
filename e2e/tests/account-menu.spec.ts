@@ -150,9 +150,12 @@ test("a dense desktop quota row keeps its last pill beside the header actions", 
       return item;
     });
     row.replaceChildren(...items);
+    const first = items[0];
+    const last = items.at(-1);
+    if (!first || !last) throw new Error("Quota row is empty");
     return {
-      firstBox: items[0].getBoundingClientRect().toJSON(),
-      lastBox: items[items.length - 1].getBoundingClientRect().toJSON(),
+      firstBox: first.getBoundingClientRect().toJSON(),
+      lastBox: last.getBoundingClientRect().toJSON(),
       avatarBox: avatar.getBoundingClientRect().toJSON(),
     };
   });

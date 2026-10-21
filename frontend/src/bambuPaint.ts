@@ -62,7 +62,9 @@ export function readBambuMeshInfo(bytes: Uint8Array): Map<string, BambuMeshInfo>
   return objects;
 }
 
-type PaintNode = { kind: "leaf"; state: number } | { kind: "split"; side: number; children: PaintNode[] };
+type PaintChildren =
+  [PaintNode, PaintNode] | [PaintNode, PaintNode, PaintNode] | [PaintNode, PaintNode, PaintNode, PaintNode];
+type PaintNode = { kind: "leaf"; state: number } | { kind: "split"; side: number; children: PaintChildren };
 
 // Bambu serializes nibbles right-to-left, with child triangles in reverse order.
 // Low bits describe a split; high bits describe its special side or leaf filament.
@@ -73,7 +75,7 @@ function decodePaint(text: string, paletteSize: number): PaintNode {
   let offset = text.length - 1;
   function nibble(): number {
     if (offset < 0) throw new Error("Truncated Bambu paint selector");
-    return Number.parseInt(text[offset--], 16);
+    return Number.parseInt(text.charAt(offset--), 16);
   }
   function node(depth: number): PaintNode {
     if (depth > 64) throw new Error("Bambu paint subdivision exceeds 64 levels");
@@ -97,7 +99,8 @@ function decodePaint(text: string, paletteSize: number): PaintNode {
     if (side > 2 || (split === 3 && side !== 0)) throw new Error("Invalid Bambu paint split side");
     const children: PaintNode[] = new Array<PaintNode>(split + 1);
     for (let i = split; i >= 0; i--) children[i] = node(depth + 1);
-    return { kind: "split", side, children };
+    // split is 1, 2, or 3, and the descending loop filled every child.
+    return { kind: "split", side, children: children as PaintChildren };
   }
   const root = node(0);
   if (offset !== -1) throw new Error("Trailing data in Bambu paint selector");
@@ -139,7 +142,9 @@ export class BambuFacePainter {
     mesh.material = painted.states.map((state) => {
       if (state === 0) return base;
       const material = base.clone();
-      material.color.copy(this.colors[state - 1]);
+      const color = this.colors[state - 1];
+      if (!color) throw new Error("Bambu face paint exceeds filament palette");
+      material.color.copy(color);
       return material;
     });
     mesh.geometry = painted.geometry;
@@ -182,7 +187,12 @@ export class BambuFacePainter {
         for (let i = 0; i < position.count; i++) vertices.push(position.getX(i), position.getY(i), position.getZ(i));
       }
       const id = vertices.length / 3;
-      for (let axis = 0; axis < 3; axis++) vertices.push((vertices[a * 3 + axis] + vertices[b * 3 + axis]) / 2);
+      for (let axis = 0; axis < 3; axis++) {
+        const first = vertices[a * 3 + axis];
+        const second = vertices[b * 3 + axis];
+        if (first === undefined || second === undefined) throw new Error("Invalid Bambu paint vertex");
+        vertices.push((first + second) / 2);
+      }
       return id;
     }
     function visit(a: number, b: number, c: number, node: PaintNode) {
@@ -190,28 +200,29 @@ export class BambuFacePainter {
         emit(a, b, c, node.state);
         return;
       }
-      const corners = [a, b, c];
-      const x = corners[node.side];
-      const y = corners[(node.side + 1) % 3];
-      const z = corners[(node.side + 2) % 3];
+      const [x, y, z] =
+        node.side === 0 ? ([a, b, c] as const) : node.side === 1 ? ([b, c, a] as const) : ([c, a, b] as const);
       if (node.children.length === 2) {
+        const [first, second] = node.children;
         const yz = midpoint(y, z);
-        visit(x, y, yz, node.children[0]);
-        visit(yz, z, x, node.children[1]);
+        visit(x, y, yz, first);
+        visit(yz, z, x, second);
       } else if (node.children.length === 3) {
+        const [first, second, third] = node.children;
         const xy = midpoint(x, y);
         const zx = midpoint(z, x);
-        visit(x, xy, zx, node.children[0]);
-        visit(xy, y, zx, node.children[1]);
-        visit(y, z, zx, node.children[2]);
+        visit(x, xy, zx, first);
+        visit(xy, y, zx, second);
+        visit(y, z, zx, third);
       } else {
+        const [first, second, third, fourth] = node.children;
         const xy = midpoint(x, y);
         const yz = midpoint(y, z);
         const zx = midpoint(z, x);
-        visit(x, xy, zx, node.children[0]);
-        visit(xy, y, yz, node.children[1]);
-        visit(yz, z, zx, node.children[2]);
-        visit(xy, yz, zx, node.children[3]);
+        visit(x, xy, zx, first);
+        visit(xy, y, yz, second);
+        visit(yz, z, zx, third);
+        visit(xy, yz, zx, fourth);
       }
     }
     for (let face = 0; face < info.triangleCount; face++) {
@@ -238,8 +249,7 @@ export class BambuFacePainter {
       offset += size;
     });
     const ordered = new Uint32Array(triangles.length);
-    for (let face = 0; face < count; face++) {
-      const state = assignments[face];
+    for (const [face, state] of assignments.entries()) {
       const start = offsets.get(state);
       if (start === undefined) throw new Error("Missing Bambu paint material range");
       ordered.set(triangles.subarray(face * 3, face * 3 + 3), start);

@@ -54,8 +54,8 @@ export default function ServerHealthIndicator(props: { health: ServerHealth | nu
     >
       <a
         link
-        class={styles.link}
-        classList={{ [styles.hidden]: !high() }}
+        class={`${styles.link} ${!high() ? styles.hidden : ""}`}
+
         href="/monitoring?section=system"
         aria-label={label()}
         aria-hidden={!high()}
@@ -66,9 +66,13 @@ export default function ServerHealthIndicator(props: { health: ServerHealth | nu
         onBlur={() => setOpen(false)}
         onClick={() => setOpen(false)}
       >
-        <CPUIcon classList={{ [styles.inactive]: !props.health?.cpuHigh }} aria-hidden="true" data-testid="cpu-alarm" />
+        <CPUIcon
+          class={`${!props.health?.cpuHigh ? styles.inactive : ""}`}
+          aria-hidden="true"
+          data-testid="cpu-alarm"
+        />
         <MemoryIcon
-          classList={{ [styles.inactive]: !props.health?.memHigh }}
+          class={`${!props.health?.memHigh ? styles.inactive : ""}`}
           aria-hidden="true"
           data-testid="memory-alarm"
         />

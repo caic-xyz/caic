@@ -9,14 +9,15 @@ import type { HarnessInfo } from "@sdk/types.gen";
 import { HarnessControls, ToggleChip } from "./FormControls";
 
 it("preserves the selected harness when quota updates reorder its options", () => {
-  const choices: HarnessInfo[] = (["claude", "codex", "pi"] as const).map((name) => ({
+  const choice = (name: HarnessInfo["name"]): HarnessInfo => ({
     name,
     models: [],
     supportsImages: false,
     supportsCompact: false,
     supportsModelRefresh: false,
-  }));
-  const [harnesses, setHarnesses] = createSignal(choices);
+  });
+  const choices = [choice("claude"), choice("codex"), choice("pi")] as const;
+  const [harnesses, setHarnesses] = createSignal<HarnessInfo[]>([...choices]);
   const [harness, setHarness] = createSignal("claude");
   render(() => (
     <HarnessControls
@@ -36,7 +37,7 @@ it("preserves the selected harness when quota updates reorder its options", () =
     [0, 1, 2],
     [1, 0, 2],
     [2, 1, 0],
-  ]) {
+  ] as const) {
     setHarnesses(order.map((index) => choices[index]));
     expect(select).toHaveValue("claude");
   }

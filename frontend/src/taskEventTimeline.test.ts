@@ -1,5 +1,6 @@
 // Focused tests for task SSE replay buffering, native retry ownership, and cleanup.
 
+import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createRoot, createSignal } from "solid-js";
 import { expect, vi } from "@tests/expect";
@@ -65,6 +66,7 @@ describe("createTaskEventTimeline", () => {
         onError: vi.fn(),
       }),
     }));
+    assert.ok(connections[0] !== undefined);
     const handlers = connections[0].handlers;
 
     handlers.onMessage(textEvent("history", 1));
@@ -96,6 +98,7 @@ describe("createTaskEventTimeline", () => {
         onError: vi.fn(),
       }),
     }));
+    assert.ok(connections[0] !== undefined);
     const handlers = connections[0].handlers;
     const backwardMessage = textEvent("latest", 3);
     const tailEvent = textEvent("!", 5);
@@ -103,6 +106,7 @@ describe("createTaskEventTimeline", () => {
     handlers.onBackward?.({ message: backwardMessage, eventId: "v1/timeline/memory/4/0" });
     expect(timeline.messages()).toEqual([backwardMessage]);
     expect(connections).toHaveLength(2);
+    assert.ok(connections[1] !== undefined);
     const tail = connections[1].handlers;
     tail.onMessage(tailEvent);
     expect(timeline.messages()).toEqual([backwardMessage, tailEvent]);
@@ -135,11 +139,13 @@ describe("createTaskEventTimeline", () => {
         onError: vi.fn(),
       }),
     }));
+    assert.ok(connections[0] !== undefined);
     const handlers = connections[0].handlers;
     const stale = textEvent("stale", 1);
     const replacement = textEvent("replacement", 2);
 
     handlers.onBackward?.({ message: stale, eventId: "v1/stale/memory/1/0" });
+    assert.ok(connections[1] !== undefined);
     const tail = connections[1].handlers;
     tail.onReset?.();
     tail.onMessage(replacement);
@@ -160,6 +166,7 @@ describe("createTaskEventTimeline", () => {
       return rootDispose;
     });
     const connection = connections[0];
+    assert.ok(connection !== undefined);
     connection.handlers.onReady?.();
     if (!connection.source.onerror) throw new Error("native error handler not registered");
 
@@ -187,8 +194,10 @@ describe("createTaskEventTimeline", () => {
     });
 
     owner.setState("failed");
+    assert.ok(connections[0] !== undefined);
     expect(connections[0].source.close).toHaveBeenCalledOnce();
     const terminalConnection = connections[1];
+    assert.ok(terminalConnection !== undefined);
     if (!terminalConnection.source.onerror) throw new Error("native error handler not registered");
 
     terminalConnection.source.onerror(new Event("error"));
@@ -200,6 +209,7 @@ describe("createTaskEventTimeline", () => {
 
     owner.setState("running");
     expect(connections).toHaveLength(3);
+    assert.ok(connections[2] !== undefined);
     expect(connections[2].source.close).not.toHaveBeenCalled();
     owner.dispose();
   });
@@ -215,6 +225,7 @@ describe("createTaskEventTimeline", () => {
       });
       return rootDispose;
     });
+    assert.ok(connections[0] !== undefined);
     connections[0].handlers.onHistoryError?.({ message: "unavailable" });
 
     expect(connections[0].source.close).toHaveBeenCalledOnce();
@@ -237,6 +248,7 @@ describe("createTaskEventTimeline", () => {
       };
     });
     const first = connections[0];
+    assert.ok(first !== undefined);
     first.handlers.onMessage(textEvent("first", 1));
     first.handlers.onReady?.();
 
@@ -246,6 +258,7 @@ describe("createTaskEventTimeline", () => {
     expect(owner.messages()).toEqual([]);
 
     first.handlers.onMessage(textEvent("stale", 2));
+    assert.ok(connections[1] !== undefined);
     connections[1].handlers.onMessage(textEvent("second", 3));
     connections[1].handlers.onReady?.();
     expect(owner.messages()).toEqual([textEvent("second", 3)]);

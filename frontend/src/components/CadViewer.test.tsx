@@ -1,5 +1,6 @@
 // Tests CAD viewer loading stages, elapsed feedback, cancellation, retry, model metrics, failures, and keyboard navigation.
 
+import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
@@ -39,6 +40,7 @@ describe("CadViewer", () => {
     renderViewer("/models/part.stpz");
     await waitFor(() => expect(workers).toHaveLength(1));
     const worker = workers[0];
+    assert.ok(worker !== undefined);
     worker.send({ type: "progress", progress: { stage: "download", completed: 25, total: 100 } });
     const download = screen.getByRole("progressbar", { name: "Downloading model" });
     expect(download).toHaveAttribute("value", "25");
@@ -68,6 +70,7 @@ describe("CadViewer", () => {
     const workers = stubStepWorkers();
     renderViewer("/models/part.stpz");
     await waitFor(() => expect(workers).toHaveLength(1));
+    assert.ok(workers[0] !== undefined);
     workers[0].send({ type: "progress", progress: { stage: "parse", completed: null, total: null } });
     await user.click(screen.getByRole("button", { name: "Cancel loading" }));
     expect(screen.getByRole("status")).toHaveTextContent("Model loading cancelled.");
@@ -76,6 +79,7 @@ describe("CadViewer", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(workers).toHaveLength(2));
     expect(screen.getByRole("progressbar", { name: "Downloading model" })).toBeInTheDocument();
+    assert.ok(workers[1] !== undefined);
     workers[1].complete([createStepMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), null, null, null)]);
     expect(await screen.findByText("1 triangles")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -99,6 +103,7 @@ describe("CadViewer", () => {
     renderViewer("/models/assembly.step");
     await waitFor(() => expect(workers).toHaveLength(1));
     const worker = workers[0];
+    assert.ok(worker !== undefined);
     worker.progress({
       type: "progress",
       progress: { stage: "download", completed: 128, total: 1024, decodedBytes: 2048, indexedRecords: 12 },
@@ -127,6 +132,7 @@ describe("CadViewer", () => {
     expect(screen.getByRole("progressbar", { name: "Downloading model" })).not.toHaveAttribute("value");
     expect(screen.queryByText("280 / 280 faces")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel loading" }));
+    assert.ok(workers[1] !== undefined);
     expect(workers[1].terminate).toHaveBeenCalledTimes(1);
   });
 
@@ -226,6 +232,7 @@ endsolid sample
     expect(screen.getByRole("progressbar", { name: "Downloading model" })).not.toHaveAttribute("value");
     await user.click(screen.getByRole("button", { name: "Cancel loading" }));
     expect(screen.getByRole("status")).toHaveTextContent("Model loading cancelled");
+    assert.ok(fetchMock.mock.calls[0] !== undefined);
     expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
     expect(screen.getByRole("button", { name: "Retry" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Retry" }));

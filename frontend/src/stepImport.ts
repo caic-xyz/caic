@@ -59,8 +59,8 @@ function packStepMeshes(result: OcctResult): StepMesh[] {
   // can be collected instead of retaining two complete geometry representations.
   while (result.meshes.length) {
     const index = result.meshes.length - 1;
-    const source = result.meshes[index];
-    result.meshes.pop();
+    const source = result.meshes.pop();
+    if (!source) throw new Error("Missing STEP mesh");
     const positions =
       source.attributes.position.array instanceof Float32Array
         ? source.attributes.position.array

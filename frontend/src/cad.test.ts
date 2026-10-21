@@ -1,5 +1,6 @@
 // Tests CAD parsing, Bambu filament assignments, printing-plate layouts, transforms, and model metrics.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
@@ -38,7 +39,8 @@ endsolid test_triangle
 
     const geometry = parseStl(buffer);
     expect(geometry).not.toBeNull();
-    expect(geometry.attributes.position.count).toBe(3);
+    assert.ok(geometry.getAttribute("position") !== undefined);
+    expect(geometry.getAttribute("position").count).toBe(3);
 
     const group = createStlGroup(geometry);
     const info = computeModelInfo(group);
@@ -81,6 +83,7 @@ endsolid test_triangle
 
   it("preserves a standard base material whose name matches the loader fallback", async () => {
     const files = unzipSync(createBambu3mfFixture());
+    assert.ok(files["3D/Objects/parts.model"] !== undefined);
     files["3D/Objects/parts.model"] = strToU8(
       strFromU8(files["3D/Objects/parts.model"]).replace('name="Red"', 'name="__DEFAULT"'),
     );
@@ -94,6 +97,7 @@ endsolid test_triangle
 
   it("colors only the fallback mesh of a mixed-material part", async () => {
     const files = unzipSync(createBambu3mfFixture());
+    assert.ok(files["3D/Objects/parts.model"] !== undefined);
     const xml = strFromU8(files["3D/Objects/parts.model"])
       .replace('id="5" type="model" pid="10" pindex="0"', 'id="5" type="model"')
       .replace(
@@ -138,7 +142,9 @@ endsolid test_triangle
     group.traverse((child) => {
       if (child instanceof Mesh && child.material instanceof MeshPhongMaterial) sources.push(child.material);
     });
+    assert.ok(sources[0] !== undefined);
     expect(sources[0].color.getHex()).toBe(0);
+    assert.ok(group.children[0] !== undefined);
     group.add(group.children[0].clone()); // Shared instances must receive the same display material.
     prepareModelShading(group);
     const displayed: MeshPhongMaterial[] = [];
@@ -146,6 +152,7 @@ endsolid test_triangle
       if (child instanceof Mesh && child.material instanceof MeshPhongMaterial) displayed.push(child.material);
     });
     expect(displayed[0]).not.toBe(sources[0]);
+    assert.ok(displayed[0] !== undefined);
     expect(displayed[0].color.r).toBeGreaterThan(0);
     expect(displayed[0].color.r).toBeLessThan(0.03);
     expect(displayed[0].specular.r).toBeGreaterThan(sources[0].specular.r);
@@ -161,7 +168,9 @@ endsolid test_triangle
       [2, "Frame"],
       [3, "Spare"],
     ]);
+    assert.ok(plates[1] !== undefined);
     expect(plates[1].outline[0]).toEqual({ x: 60, y: 0 });
+    assert.ok(plates[2] !== undefined);
     expect(plates[2].outline[0]).toEqual({ x: 0, y: -48 });
     const beds = createPlateGroup(plates);
     expect(beds.children).toHaveLength(9); // Each bed has a surface, outline, and grid.
@@ -236,6 +245,7 @@ endsolid test_triangle
 
   it("shows no inferred plates without a printable area and rejects malformed outlines", async () => {
     const files = unzipSync(createBambu3mfFixture());
+    assert.ok(files["Metadata/project_settings.config"] !== undefined);
     const project = JSON.parse(strFromU8(files["Metadata/project_settings.config"])) as Record<string, unknown>;
     delete project.printable_area;
     files["Metadata/project_settings.config"] = strToU8(JSON.stringify(project));
@@ -251,6 +261,7 @@ endsolid test_triangle
     await expect(parseCad(zipSync(files).buffer, "bambu.3mf")).rejects.toThrow("Invalid filament palette");
 
     const outOfRange = unzipSync(createBambu3mfFixture());
+    assert.ok(outOfRange["Metadata/model_settings.config"] !== undefined);
     outOfRange["Metadata/model_settings.config"] = strToU8(
       strFromU8(outOfRange["Metadata/model_settings.config"]).replace('value="3"', 'value="9"'),
     );

@@ -1,5 +1,6 @@
 // Browser coverage for camera-depth translucency, icon controls, mode changes, and render timings.
 import type { Locator, Page } from "@playwright/test";
+import { ok } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { strToU8, unzipSync, zipSync } from "three/addons/libs/fflate.module.js";
 import { create3mfFixture } from "../../frontend/tests/cad-fixture";
@@ -56,10 +57,15 @@ async function planeOpacities(page: Page, solid: Buffer, translucent: Buffer) {
       const after = await pixels(translucent);
       const { width, height, data } = before;
       const seen = new Uint8Array(width * height);
-      const background = data[1];
+      function channel(data: Uint8ClampedArray, index: number): number {
+        const value = data[index];
+        if (value === undefined) throw new Error(`Image channel ${index} is missing`);
+        return value;
+      }
+      const background = channel(data, 1);
       const planes: { y: number; opacity: number }[] = [];
       function red(index: number) {
-        return data[index * 4] > 80 && data[index * 4 + 1] < 80 && data[index * 4 + 2] < 80;
+        return channel(data, index * 4) > 80 && channel(data, index * 4 + 1) < 80 && channel(data, index * 4 + 2) < 80;
       }
       for (let index = 0; index < seen.length; index++) {
         if (seen[index] || !red(index)) continue;
@@ -69,8 +75,9 @@ async function planeOpacities(page: Page, solid: Buffer, translucent: Buffer) {
         let opacity = 0;
         for (let offset = 0; offset < queue.length; offset++) {
           const pixel = queue[offset];
+          if (pixel === undefined) throw new Error("Plane traversal queue is incomplete");
           y += Math.floor(pixel / width);
-          opacity += (background - after.data[pixel * 4 + 1]) / (background - data[pixel * 4 + 1]);
+          opacity += (background - channel(after.data, pixel * 4 + 1)) / (background - channel(data, pixel * 4 + 1));
           for (const neighbor of [pixel - width, pixel + width, pixel - 1, pixel + 1]) {
             if (neighbor < 0 || neighbor >= width * height || seen[neighbor] || !red(neighbor)) continue;
             seen[neighbor] = 1;
@@ -126,6 +133,8 @@ for (const width of [390, 1280]) {
     const transparent = await stableFrame(canvas);
     const planes = await planeOpacities(page, solid, transparent);
     expect(planes).toHaveLength(2);
+    ok(planes[0]);
+    ok(planes[1]);
     expect(planes[0].opacity).toBeGreaterThan(planes[1].opacity + 0.2);
     expect(planes[1].opacity).toBeGreaterThan(0.1);
     expect(planes[0].opacity).toBeLessThan(0.85);
@@ -147,7 +156,11 @@ for (const width of [390, 1280]) {
     const zoomedSolid = await stableFrame(canvas);
     const zoomed = await planeOpacities(page, zoomedSolid, zoomedTransparent);
     expect(zoomed).toHaveLength(2);
-    for (let i = 0; i < planes.length; i++) expect(Math.abs(zoomed[i].opacity - planes[i].opacity)).toBeLessThan(0.04);
+    for (const [i, plane] of planes.entries()) {
+      const zoomedPlane = zoomed[i];
+      ok(zoomedPlane);
+      expect(Math.abs(zoomedPlane.opacity - plane.opacity)).toBeLessThan(0.04);
+    }
     await mode.click();
     await mode.click();
     await page.getByRole("button", { name: "Full screen", exact: true }).click();

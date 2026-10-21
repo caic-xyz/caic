@@ -1,5 +1,6 @@
 // Tests Blob draft admission, URL ownership, bounded encoding, and cancellation.
 
+import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { ImageDraftOwner, imagesToAPI } from "./images";
@@ -33,6 +34,7 @@ describe("ImageDraftOwner", () => {
   it("releases removed and disposed previews once and prevents late adoption", () => {
     const { drafts, revoke } = owner();
     const images = drafts.adopt([], [blob(1, "image/png"), blob(2, "image/png")]);
+    assert.ok(images[0] !== undefined);
     drafts.release([images[0]]);
     drafts.release([images[0]]);
     drafts.dispose();

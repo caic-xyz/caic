@@ -102,7 +102,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
             width="1.2em"
             height="1.2em"
             aria-hidden="true"
-            classList={{ [styles.featureArrowOpen]: s.featuresOpen() }}
+            class={`${s.featuresOpen() ? styles.featureArrowOpen : ""}`}
           />
         </button>
         <div id="new-task-features" class={styles.featurePanel} hidden={!s.featuresOpen()}>
@@ -211,8 +211,8 @@ export default function MainLayout(props: { children?: JSX.Element }) {
 
       <Layout>
         <div
-          class={styles.summaryPane}
-          classList={{ [styles.summarySelected]: s.selectedId() !== null, [styles.summaryHidden]: fullscreen() }}
+          class={`${styles.summaryPane} ${s.selectedId() !== null ? styles.summarySelected : ""} ${fullscreen() ? styles.summaryHidden : ""}`}
+
           inert={fullscreen()}
           aria-hidden={fullscreen()}
           data-testid="summary-pane"

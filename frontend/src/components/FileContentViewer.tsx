@@ -73,7 +73,7 @@ export default function FileContentViewer(props: Props) {
   return (
     <div class={styles.container}>
       <FileViewerHeader taskId={props.taskId} taskPath={props.taskPath} path={props.path} />
-      <div class={styles.content} classList={{ [styles.pdfContent]: file.state === "ready" && file()?.kind === "pdf" }}>
+      <div class={`${styles.content} ${file.state === "ready" && file()?.kind === "pdf" ? styles.pdfContent : ""}`}>
         <Switch>
           <Match when={file.state === "errored"}>
             <div class={styles.error} role="alert">

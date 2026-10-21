@@ -1,5 +1,6 @@
 // Tests for task turn durations and user-response wait derivation.
 
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expect } from "@tests/expect";
 
@@ -84,7 +85,7 @@ describe("deriveTaskTimings", () => {
     const initialInput = input(1_000, "initial prompt");
     const completed = result(2_000, 1);
     const timings = deriveTaskTimings([initialInput, completed]);
-
+    assert.ok(timings.turns[0] !== undefined);
     expect(timings.turns[0].waitMs).toBeNull();
     expect(timings.userWaitMs.has(initialInput)).toBe(false);
   });
@@ -109,7 +110,7 @@ describe("deriveTaskTimings", () => {
       },
       completed,
     ]);
-
+    assert.ok(timings.turns[0] !== undefined);
     expect(timings.turns[0].reportedModel).toBe("session-model");
   });
 
@@ -126,14 +127,14 @@ describe("deriveTaskTimings", () => {
       completed,
       { kind: "commitSnapshot", ts: 2_100, commitSnapshot: { repositoryCommits: [], changeStat } },
     ]);
-
+    assert.ok(timings.turns[0] !== undefined);
     expect(timings.turns[0].changeStat).toEqual(changeStat);
   });
 
   it("does not present same-timestamp inputs as a measured wait", () => {
     const userInput = input(1_000, "continue");
     const timings = deriveTaskTimings([result(1_000, 1), userInput]);
-
+    assert.ok(timings.turns[0] !== undefined);
     expect(timings.turns[0].waitMs).toBeNull();
     expect(timings.userWaitMs.has(userInput)).toBe(false);
   });
@@ -191,12 +192,15 @@ describe("IncrementalTaskTimingTracker", () => {
     const tracker = new IncrementalTaskTimingTracker();
     const messages = [input(1_000, "prompt"), result(5_000, 4)];
 
-    expect(tracker.derive(messages, false).turns[0].waitMs).toBeNull();
+    const trackerItem = tracker.derive(messages, false).turns[0];
+    assert.ok(trackerItem !== undefined);
+    expect(trackerItem.waitMs).toBeNull();
     const response = input(8_500, "continue");
     messages.push(response);
     const timings = tracker.derive(messages, false);
 
     expect(timings.turns).toHaveLength(1);
+    assert.ok(timings.turns[0] !== undefined);
     expect(timings.turns[0].waitMs).toBe(3_500);
     expect(timings.userWaitMs.get(response)).toBe(3_500);
   });
@@ -209,6 +213,7 @@ describe("IncrementalTaskTimingTracker", () => {
     const timings = tracker.derive([newResult], true);
 
     expect(timings.turns).toHaveLength(1);
+    assert.ok(timings.turns[0] !== undefined);
     expect(timings.turns[0].event).toBe(newResult);
     expect(timings.turns[0].waitMs).toBeNull();
     expect(timings.userWaitMs.size).toBe(0);
@@ -225,7 +230,9 @@ describe("IncrementalTaskTimingTracker", () => {
     messages[32_000] = result(32_001, 1);
     messages[64_999] = input(65_000, "continue");
 
-    expect(tracker.derive(messages, false).turns[0].waitMs).toBe(32_999);
+    const trackerItem = tracker.derive(messages, false).turns[0];
+    assert.ok(trackerItem !== undefined);
+    expect(trackerItem.waitMs).toBe(32_999);
 
     Object.defineProperty(messages[0], "ts", {
       configurable: true,

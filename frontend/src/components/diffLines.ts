@@ -31,29 +31,29 @@ const minMovedBlockAlnumChars = 20;
 export function extractDiffPath(section: string): string {
   // Prefer +++ line: "+++ b/path" or "+++ path" (most reliable).
   const plus = section.match(/^\+\+\+ (.+)/m);
-  if (plus) {
+  if (plus?.[1] !== undefined) {
     const path = normalizeDiffPath(plus[1], "b", section);
     if (path !== "/dev/null") return path;
   }
   // Deleted files: use --- line.
   const minus = section.match(/^--- (.+)/m);
-  if (minus) {
+  if (minus?.[1] !== undefined) {
     const path = normalizeDiffPath(minus[1], "a", section);
     if (path !== "/dev/null") return path;
   }
   // Renames: "rename to <path>" gives the destination path.
   const renameTo = section.match(/^rename to (.+)/m);
-  if (renameTo) return normalizeDiffPath(renameTo[1], "b", section);
+  if (renameTo?.[1] !== undefined) return normalizeDiffPath(renameTo[1], "b", section);
   // Binary lines carry paths even when no text hunk exists.
   const binary = section.match(/^Binary files (.+) and (.+) differ$/m);
-  if (binary) {
+  if (binary?.[1] !== undefined && binary[2] !== undefined) {
     const newPath = normalizeDiffPath(binary[2], "b", section);
     if (newPath !== "/dev/null") return newPath;
     return normalizeDiffPath(binary[1], "a", section);
   }
   // Last resort: diff --git header (binary/empty files). Handles both "a/b/" prefixed and no-prefix formats.
   const git = section.match(/^diff --git (.+)$/m);
-  const gitPaths = git ? splitDiffGitPaths(git[1]) : null;
+  const gitPaths = git?.[1] !== undefined ? splitDiffGitPaths(git[1]) : null;
   if (gitPaths) {
     const oldPath = normalizeDiffPath(gitPaths[0], "a", section);
     const newPath = normalizeDiffPath(gitPaths[1], "b", section);
@@ -83,7 +83,7 @@ function stripGitHeaderTab(path: string): string {
 
 function diffGitSidePath(section: string, side: "a" | "b", usesSidePrefixes: boolean): string | null {
   const git = section.match(/^diff --git (.+)$/m);
-  const paths = git ? splitDiffGitPaths(git[1]) : null;
+  const paths = git?.[1] !== undefined ? splitDiffGitPaths(git[1]) : null;
   if (!paths) return null;
   const path = stripGitHeaderTab(side === "a" ? paths[0] : paths[1]);
   const sidePrefix = `${side}/`;
@@ -117,12 +117,13 @@ export function splitDiff(raw: string): FileDiff[] {
   if (!raw.trim()) return [];
   const lines = annotateDiffLines(raw);
   const sections: DiffLine[][] = [];
-
+  let current: DiffLine[] | null = null;
   for (const line of lines) {
-    if (line.text.startsWith("diff --git ") || sections.length === 0) {
-      sections.push([]);
+    if (line.text.startsWith("diff --git ") || current === null) {
+      current = [];
+      sections.push(current);
     }
-    sections[sections.length - 1].push(line);
+    current.push(line);
   }
 
   return sections
@@ -151,8 +152,7 @@ export function annotateDiffLines(diff: string): DiffLine[] {
   const deletedByLineIndex = new Map<number, ChangeLine>();
   const addedLineIndexesByContent = new Map<string, number[]>();
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (const [i, line] of lines.entries()) {
     if (line.kind === "added") {
       const change = { lineIndex: i, content: line.text.slice(1) };
       addedByLineIndex.set(i, change);
@@ -168,10 +168,14 @@ export function annotateDiffLines(diff: string): DiffLine[] {
   movedBlocks.forEach((block, blockIndex) => {
     const movedVariant = (blockIndex % 2) as 0 | 1;
     for (const lineIndex of block.addedLineIndexes) {
-      lines[lineIndex] = { text: lines[lineIndex].text, kind: "movedAdded", movedVariant };
+      const line = lines[lineIndex];
+      if (!line) throw new Error("Missing moved diff line");
+      lines[lineIndex] = { text: line.text, kind: "movedAdded", movedVariant };
     }
     for (const lineIndex of block.deletedLineIndexes) {
-      lines[lineIndex] = { text: lines[lineIndex].text, kind: "movedDeleted", movedVariant };
+      const line = lines[lineIndex];
+      if (!line) throw new Error("Missing moved diff line");
+      lines[lineIndex] = { text: line.text, kind: "movedDeleted", movedVariant };
     }
   });
 
@@ -201,6 +205,7 @@ function markWhitespaceOnlyChanges(lines: DiffLine[]) {
     const addedLineIndexes: number[] = [];
     while (index < lines.length && isChangeLine(lines[index])) {
       const line = lines[index];
+      if (!line) throw new Error("Missing changed diff line");
       if (line.kind === "deleted") deletedLineIndexes.push(index);
       else if (line.kind === "added") addedLineIndexes.push(index);
       index++;
@@ -210,25 +215,31 @@ function markWhitespaceOnlyChanges(lines: DiffLine[]) {
   }
 }
 
-function isChangeLine(line: DiffLine): boolean {
-  return line.kind === "added" || line.kind === "deleted";
+function isChangeLine(line: DiffLine | undefined): boolean {
+  return line?.kind === "added" || line?.kind === "deleted";
 }
 
 function markWhitespaceOnlyChangeGroup(lines: DiffLine[], deletedLineIndexes: number[], addedLineIndexes: number[]) {
   const usedAddedLineIndexes = new Set<number>();
   for (const deletedLineIndex of deletedLineIndexes) {
-    const deletedContent = lines[deletedLineIndex].text.slice(1);
+    const deleted = lines[deletedLineIndex];
+    if (!deleted) throw new Error("Missing deleted diff line");
+    const deletedContent = deleted.text.slice(1);
     const normalizedDeleted = removeWhitespace(deletedContent);
     const addedLineIndex = addedLineIndexes.find((candidate) => {
       if (usedAddedLineIndexes.has(candidate)) return false;
-      const addedContent = lines[candidate].text.slice(1);
+      const added = lines[candidate];
+      if (!added) throw new Error("Missing added diff line");
+      const addedContent = added.text.slice(1);
       return addedContent !== deletedContent && removeWhitespace(addedContent) === normalizedDeleted;
     });
     if (addedLineIndex === undefined) continue;
 
     usedAddedLineIndexes.add(addedLineIndex);
-    lines[deletedLineIndex].whitespaceOnly = true;
-    lines[addedLineIndex].whitespaceOnly = true;
+    const matched = lines[addedLineIndex];
+    if (!matched) throw new Error("Missing whitespace-only diff line");
+    deleted.whitespaceOnly = true;
+    matched.whitespaceOnly = true;
   }
 }
 
