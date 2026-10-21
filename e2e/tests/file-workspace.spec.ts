@@ -151,6 +151,9 @@ for (const width of [390, 1000, 1440]) {
     await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeVisible();
     expect(documentReads).toBe(1);
     expect(streams).toBe(initialStreams);
+    // Keep header reflow from putting a server-health tooltip under the pointer;
+    // its Escape dismissal takes precedence over closing the document.
+    await page.mouse.move(0, 899);
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
     await expect(page.getByTestId("conversation-pane")).toBeVisible();
