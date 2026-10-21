@@ -69,8 +69,8 @@ for (const width of [320, 390, 1280]) {
       await avatar.focus();
       await link.hover();
       const tooltip = page.getByRole("tooltip");
-      await expect(tooltip).toContainText("750.0% · 7.50 / 8 CPUs · 93.8% of capacity");
-      await expect(tooltip).toContainText("30 GiB / 32 GiB · 93.8%");
+      await expect(tooltip).toContainText("CPU: 750.0% · 7.50 / 8 CPUs (93.8%)");
+      await expect(tooltip).toContainText("RAM: 30 GiB / 32 GiB (93.8%)");
       const tipBox = await tooltip.boundingBox();
       if (!tipBox) throw new Error("Tooltip missing");
       expect(tipBox.x).toBeGreaterThanOrEqual(0);
