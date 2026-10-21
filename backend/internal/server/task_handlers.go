@@ -970,7 +970,24 @@ func taskFileContentType(data []byte) string {
 	if len(data) >= 14 && string(data[:2]) == "BM" {
 		return "image/bmp"
 	}
-	return http.DetectContentType(data)
+	ct := http.DetectContentType(data)
+	// Go identifies only the Ogg container. Its first packet identifies the
+	// codec, so audio and video get their specific media types (RFC 5334).
+	if ct == "application/ogg" && len(data) > 27 {
+		off := 27 + int(data[26]) // Fixed page header plus the segment table.
+		if off < len(data) {
+			pkt := data[off:]
+			if bytes.HasPrefix(pkt, []byte("\x80theora")) {
+				return "video/ogg"
+			}
+			for _, sig := range []string{"\x01vorbis", "\x7fFLAC", "OpusHead", "Speex   "} {
+				if bytes.HasPrefix(pkt, []byte(sig)) {
+					return "audio/ogg"
+				}
+			}
+		}
+	}
+	return ct
 }
 
 // parseTaskFileRange resolves one byte-range specification against current size.

@@ -7,6 +7,42 @@ const fetchMock = vi.spyOn(globalThis, "fetch");
 afterEach(() => fetchMock.mockReset());
 
 describe("readTaskFilePreview", () => {
+  for (const [contentType, kind] of [
+    ["audio/mpeg", "audio"],
+    ["audio/ogg", "audio"],
+    ["audio/wave", "audio"],
+    ["video/mp4", "video"],
+    ["video/ogg", "video"],
+    ["video/webm", "video"],
+  ]) {
+    it(`identifies ${contentType} by MIME and cancels its preview stream`, async () => {
+      let cancelled = false;
+      fetchMock.mockResolvedValue(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: { "Content-Type": contentType } },
+        ),
+      );
+      expect(await readTaskFilePreview("abc", "/recording.bin", new AbortController().signal)).toEqual({
+        kind,
+      });
+      expect(cancelled).toBe(true);
+    });
+  }
+
+  it("keeps text with an audio extension as text", async () => {
+    fetchMock.mockResolvedValue(new Response("notes", { headers: { "Content-Type": "text/plain" } }));
+    expect(await readTaskFilePreview("abc", "/recording.mp3", new AbortController().signal)).toEqual({
+      kind: "text",
+      text: "notes",
+      truncated: false,
+    });
+  });
+
   it("identifies PDFs by MIME and cancels the preview stream without retaining PDF bytes", async () => {
     let cancelled = false;
     fetchMock.mockResolvedValue(

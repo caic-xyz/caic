@@ -1,6 +1,7 @@
-// Renders task-runtime Markdown, images, lazy PDF previews, bounded plain text, and unsupported-file downloads.
+// Renders task-runtime Markdown, images, native audio/video, lazy PDFs, bounded text, and unsupported downloads.
 
 import { Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy, onCleanup } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import FileViewerHeader from "./FileViewerHeader";
 
 import styles from "./FileContentViewer.module.css";
@@ -15,6 +16,38 @@ interface Props {
   taskId: string;
   taskPath: string;
   path: string;
+}
+
+function MediaPreview(props: { taskId: string; path: string; kind: "audio" | "video" }) {
+  let media!: HTMLMediaElement;
+  const [failed, setFailed] = createSignal(false);
+  onCleanup(() => {
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
+  });
+  return (
+    <div class={styles.mediaPreview}>
+      <Dynamic
+        component={props.kind}
+        ref={(el: HTMLMediaElement) => {
+          media = el;
+        }}
+        class={props.kind === "audio" ? styles.audio : styles.video}
+        aria-label={props.path}
+        controls
+        autoplay
+        playsinline
+        src={taskRawURL(props.taskId, props.path)}
+        onError={() => setFailed(true)}
+      />
+      <Show when={failed()}>
+        <div class={styles.error} role="alert">
+          Unable to play this {props.kind} file. Open the raw file to download it.
+        </div>
+      </Show>
+    </div>
+  );
 }
 
 export default function FileContentViewer(props: Props) {
@@ -68,6 +101,12 @@ export default function FileContentViewer(props: Props) {
             <Suspense fallback={<div class={styles.loading}>Loading PDF…</div>}>
               <PdfPreview taskId={props.taskId} path={props.path} />
             </Suspense>
+          </Match>
+          <Match when={file.state === "ready" && file()?.kind === "audio"}>
+            <MediaPreview taskId={props.taskId} path={props.path} kind="audio" />
+          </Match>
+          <Match when={file.state === "ready" && file()?.kind === "video"}>
+            <MediaPreview taskId={props.taskId} path={props.path} kind="video" />
           </Match>
           <Match when={file.state === "ready" && file()?.kind === "unsupported"}>
             <div class={styles.notice}>No preview for this file. Open the raw file to download it.</div>

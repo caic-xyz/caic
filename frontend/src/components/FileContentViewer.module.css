@@ -1,4 +1,4 @@
-/* Styles for task-runtime Markdown, plain-text, image, PDF, and download previews. */
+/* Styles for task-runtime Markdown, plain-text, image, audio/video, PDF, and download previews. */
 
 .container {
   display: flex;
@@ -55,6 +55,25 @@
   display: block;
   max-width: 100%;
   height: auto;
+  margin: auto;
+}
+
+.mediaPreview {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 1rem;
+}
+
+.audio {
+  display: block;
+  width: 100%;
+  max-width: 32rem;
+}
+
+.video {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
   margin: auto;
 }
 

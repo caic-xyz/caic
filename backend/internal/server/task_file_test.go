@@ -201,6 +201,11 @@ func TestTaskFile(t *testing.T) {
 	}{
 		{"AVIF image", "/home/user/screenshot.avif", "\x00\x00\x00\x18ftypavif\x00\x00\x00\x00avifmif1", 200, "inline", "image/avif"},
 		{"BMP image", "/home/user/screenshot.bmp", "BM\x00\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00", 200, "inline", "image/bmp"},
+		{"Ogg Vorbis audio", "/home/user/recording.ogg", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x07\x01vorbis", 200, "attachment", "audio/ogg"},
+		{"Ogg Opus audio", "/home/user/recording.opus", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x08OpusHead", 200, "attachment", "audio/ogg"},
+		{"Ogg Theora video", "/home/user/movie.ogv", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x07\x80theora", 200, "attachment", "video/ogg"},
+		{"unknown Ogg container", "/home/user/data.ogx", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x07unknown", 200, "attachment", "application/ogg"},
+		{"truncated Ogg header", "/home/user/data.ogg", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\xff", 200, "attachment", "application/ogg"},
 		{"image", "/home/user/screenshot.png", "\x89PNG\r\n\x1a\nimage", 200, "inline", "image/png"},
 		{"home-relative text", "~/notes.md", "# Home notes\n", 200, "inline", "text/plain; charset=utf-8"},
 		{"relative text", "notes.md", "# Notes\n", 200, "inline", "text/plain; charset=utf-8"},
