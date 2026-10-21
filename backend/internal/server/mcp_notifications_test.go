@@ -190,6 +190,22 @@ func TestNotificationFeed(t *testing.T) {
 		}
 	})
 
+	t.Run("NumberedTask", func(t *testing.T) {
+		t.Parallel()
+		feed := newNotificationFeed()
+		tasks := make([]v1.Task, 4)
+		for i := range tasks {
+			tasks[i] = v1.Task{ID: ksid.NewID(), Title: "Other task", State: v1.TaskStateRunning}
+		}
+		tasks[3].Title = "Foreground notification investigation"
+		feed.notifications(t.Context(), tasks, v1.UsageResp{})
+		tasks[3].State = v1.TaskStateWaiting
+		got := feed.notifications(t.Context(), tasks, v1.UsageResp{})
+		if len(got) != 1 || got[0].Title != "Task #4 is waiting" || got[0].Body != "Foreground notification investigation" {
+			t.Fatalf("numbered notification = %#v", got)
+		}
+	})
+
 	t.Run("ReadyTransitions", func(t *testing.T) {
 		t.Parallel()
 		for _, state := range []v1.TaskState{v1.TaskStateWaiting, v1.TaskStateAsking, v1.TaskStateHasPlan} {
@@ -200,7 +216,7 @@ func TestNotificationFeed(t *testing.T) {
 			}
 			task.State = state
 			got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
-			if len(got) != 1 || got[0].Title != "Task ready" || got[0].Body != "Review plan needs attention." {
+			if len(got) != 1 || got[0].Title != "Task #1 is waiting" || got[0].Body != "Review plan" {
 				t.Fatalf("ready notification for %s = %#v", state, got)
 			}
 			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 1 {

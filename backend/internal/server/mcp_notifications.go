@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -86,8 +87,8 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 		if old.state == v1.TaskStateRunning && (task.State == v1.TaskStateWaiting || task.State == v1.TaskStateAsking || task.State == v1.TaskStateHasPlan) {
 			f.events[owner] = append(f.events[owner], serviceNotification{
 				ID:         "ready-" + id + "-" + now.Format(time.RFC3339Nano),
-				Title:      "Task ready",
-				Body:       task.Title + " needs attention.",
+				Title:      fmt.Sprintf("Task #%d is waiting", i+1),
+				Body:       taskTitle(task),
 				OccurredAt: now,
 				ExpiresAt:  now.Add(24 * time.Hour),
 			})
