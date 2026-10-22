@@ -59,7 +59,16 @@ func (a *auditStore) record(ctx context.Context, e *audit.Event) {
 		a.log.WarnContext(ctx, "persist audit", "err", err)
 	}
 	a.mu.Unlock()
-	a.log.InfoContext(ctx, "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
+	a.log.Log(ctx, auditLogLevel(e), "audit", "operation", e.Operation, "name", e.Name, "decision", e.Decision, "status", e.Status, "userID", e.UserID)
+}
+
+// auditLogLevel keeps successful allows out of the default logs. The audit trail
+// is the persisted event log; the record mirrors only failures and denials.
+func auditLogLevel(e *audit.Event) slog.Level {
+	if e.Decision != "allow" || (e.Status != "" && e.Status != "ok") {
+		return slog.LevelInfo
+	}
+	return slog.LevelDebug
 }
 
 func (a *auditStore) snapshot() []audit.Event {

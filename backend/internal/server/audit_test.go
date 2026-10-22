@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,25 @@ func TestAuditStore(t *testing.T) {
 		}
 		if events[0].UserID != user.ID {
 			t.Fatalf("userID = %q, want %q", events[0].UserID, user.ID)
+		}
+	})
+
+	t.Run("log level follows outcome", func(t *testing.T) {
+		t.Parallel()
+
+		cases := []struct {
+			event audit.Event
+			want  slog.Level
+		}{
+			{audit.Event{Operation: "resources/read", Name: "gomode://notifications", Decision: "allow"}, slog.LevelDebug},
+			{audit.Event{Operation: "tools/call", Name: "tasks_list", Decision: "allow", Status: "ok"}, slog.LevelDebug},
+			{audit.Event{Operation: "tools/call", Name: "tasks_list", Decision: "allow", Status: "tool_error"}, slog.LevelInfo},
+			{audit.Event{Operation: "tools/call", Name: "task_create", Decision: "missing required MCP scope: caic:tasks.create"}, slog.LevelInfo},
+		}
+		for _, c := range cases {
+			if got := auditLogLevel(&c.event); got != c.want {
+				t.Errorf("auditLogLevel(%+v) = %v, want %v", c.event, got, c.want)
+			}
 		}
 	})
 
