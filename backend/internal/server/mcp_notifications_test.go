@@ -188,6 +188,14 @@ func TestNotificationFeed(t *testing.T) {
 		if got := feed.notifications(t.Context(), []v1.Task{task}, usage); len(got) != 1 || got[0].Title != "Quota available" {
 			t.Fatalf("pool recovery = %#v", got)
 		}
+		usage.Providers[0].FetchStatus = v1.ProviderFetchStatusStale
+		if got := feed.notifications(t.Context(), []v1.Task{task}, usage); len(got) != 0 {
+			t.Fatalf("unknown quota retained recovery alert: %#v", got)
+		}
+		usage.Providers[0].FetchStatus = v1.ProviderFetchStatusFresh
+		if got := feed.notifications(t.Context(), []v1.Task{task}, usage); len(got) != 0 {
+			t.Fatalf("reobserving availability replayed recovery: %#v", got)
+		}
 	})
 
 	t.Run("NumberedTask", func(t *testing.T) {
@@ -206,33 +214,103 @@ func TestNotificationFeed(t *testing.T) {
 		}
 	})
 
-	t.Run("ReadyTransitions", func(t *testing.T) {
+	t.Run("AttentionLifecycle", func(t *testing.T) {
 		t.Parallel()
+		for _, tc := range []struct {
+			state v1.TaskState
+			title string
+		}{
+			{v1.TaskStateWaiting, "Task #1 is waiting"},
+			{v1.TaskStateAsking, "Task #1 has a question"},
+			{v1.TaskStateHasPlan, "Task #1 has a plan ready"},
+		} {
+			t.Run(string(tc.state), func(t *testing.T) {
+				t.Parallel()
+				feed := newNotificationFeed()
+				task := v1.Task{ID: ksid.NewID(), Title: "Review plan", State: tc.state}
+				if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 0 {
+					t.Fatalf("initial attention state notified: %#v", got)
+				}
+				task.State = v1.TaskStateRunning
+				feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+				task.State = tc.state
+				got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+				if len(got) != 1 || got[0].Title != tc.title || got[0].Body != "Review plan" || got[0].ItemID != task.ID.String() || got[0].URL != "/task/@"+task.ID.String() {
+					t.Fatalf("attention notification = %#v", got)
+				}
+				first := got[0]
+				if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 1 || got[0].ID != first.ID {
+					t.Fatalf("repeated snapshot changed occurrence: %#v", got)
+				}
+				task.State = v1.TaskStateRunning
+				if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 0 {
+					t.Fatalf("running task retained alert: %#v", got)
+				}
+				task.State = tc.state
+				if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 1 || got[0].ID == first.ID {
+					t.Fatalf("second occurrence = %#v", got)
+				}
+				if got := feed.notifications(t.Context(), nil, v1.UsageResp{}); len(got) != 0 {
+					t.Fatalf("deleted task retained alert: %#v", got)
+				}
+				if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 0 {
+					t.Fatalf("reappearing task notified: %#v", got)
+				}
+			})
+		}
+	})
+
+	t.Run("AttentionStateChanges", func(t *testing.T) {
+		t.Parallel()
+		feed := newNotificationFeed()
+		task := v1.Task{ID: ksid.NewID(), Title: "Check changes", State: v1.TaskStateRunning}
+		feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+		var previous string
 		for _, state := range []v1.TaskState{v1.TaskStateWaiting, v1.TaskStateAsking, v1.TaskStateHasPlan} {
-			feed := newNotificationFeed()
-			task := v1.Task{ID: ksid.NewID(), Title: "Review plan", State: v1.TaskStateRunning}
-			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 0 {
-				t.Fatalf("initial notifications = %#v", got)
-			}
 			task.State = state
 			got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
-			if len(got) != 1 || got[0].Title != "Task #1 is waiting" || got[0].Body != "Review plan" {
-				t.Fatalf("ready notification for %s = %#v", state, got)
+			if len(got) != 1 || got[0].ID == previous {
+				t.Fatalf("changed attention state = %#v", got)
 			}
-			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 1 {
-				t.Fatalf("duplicate ready notification for %s = %#v", state, got)
-			}
-			task.State = v1.TaskStateRunning
-			feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
-			task.State = state
-			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 2 {
-				t.Fatalf("second ready transition for %s = %#v", state, got)
-			}
-			feed.notifications(t.Context(), nil, v1.UsageResp{})
-			// A task absent from the previous snapshot has no transition to replay.
-			if got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{}); len(got) != 2 {
-				t.Fatalf("reappearing task for %s = %#v", state, got)
-			}
+			previous = got[0].ID
+		}
+	})
+
+	t.Run("ReorderingKeepsDestination", func(t *testing.T) {
+		t.Parallel()
+		feed := newNotificationFeed()
+		tasks := []v1.Task{
+			{ID: ksid.NewID(), State: v1.TaskStateRunning},
+			{ID: ksid.NewID(), Title: "Target task", State: v1.TaskStateRunning},
+		}
+		feed.notifications(t.Context(), tasks, v1.UsageResp{})
+		tasks[1].State = v1.TaskStateWaiting
+		first := feed.notifications(t.Context(), tasks, v1.UsageResp{})[0]
+		tasks[0], tasks[1] = tasks[1], tasks[0]
+		tasks[0].Title = "Renamed task"
+		got := feed.notifications(t.Context(), tasks, v1.UsageResp{})
+		if len(got) != 1 || got[0].Title != "Task #1 is waiting" || got[0].Body != "Renamed task" || got[0].ID != first.ID || got[0].URL != first.URL || got[0].ItemID != first.ItemID {
+			t.Fatalf("reordered notification = %#v; originally %#v", got, first)
+		}
+	})
+
+	t.Run("ExpiredAndBounded", func(t *testing.T) {
+		t.Parallel()
+		feed := newNotificationFeed()
+		tasks := make([]v1.Task, 101)
+		for i := range tasks {
+			tasks[i] = v1.Task{ID: ksid.NewID(), State: v1.TaskStateRunning}
+		}
+		feed.notifications(t.Context(), tasks, v1.UsageResp{})
+		for i := range tasks {
+			tasks[i].State = v1.TaskStateWaiting
+		}
+		if got := feed.notifications(t.Context(), tasks, v1.UsageResp{}); len(got) != 100 {
+			t.Fatalf("feed bound = %d", len(got))
+		}
+		feed.events["local"][50].ExpiresAt = time.Now().Add(-time.Hour)
+		if got := feed.notifications(t.Context(), tasks, v1.UsageResp{}); len(got) != 99 {
+			t.Fatalf("expired alert retained: %d", len(got))
 		}
 	})
 
@@ -266,10 +344,18 @@ func TestNotificationFeed(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("notifications = %#v, want one", got)
 	}
-	if got[0].Title != "Quota available" || got[0].Body != "Build feature can continue." {
+	if got[0].Title != "Quota available" || got[0].Body != "Build feature can continue." || got[0].ItemID != task.ID.String() || got[0].URL != "/task/@"+task.ID.String() {
 		t.Fatalf("notification = %#v", got[0])
 	}
 	if got := feed.notifications(t.Context(), []v1.Task{task}, availableUsage); len(got) != 1 {
 		t.Fatalf("notifications after repeated availability = %#v, want one retained event", got)
+	}
+	if got := feed.notifications(t.Context(), []v1.Task{task}, blockedUsage); len(got) != 0 {
+		t.Fatalf("quota blocked again retained recovery: %#v", got)
+	}
+	feed.notifications(t.Context(), []v1.Task{task}, availableUsage)
+	task.State = v1.TaskStateRunning
+	if got := feed.notifications(t.Context(), []v1.Task{task}, availableUsage); len(got) != 0 {
+		t.Fatalf("resumed task retained recovery: %#v", got)
 	}
 }

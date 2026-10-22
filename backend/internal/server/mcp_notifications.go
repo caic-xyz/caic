@@ -16,10 +16,15 @@ import (
 
 type serviceNotification struct {
 	ID         string    `json:"id"`
+	ItemID     string    `json:"itemId"`
+	URL        string    `json:"url"`
 	Title      string    `json:"title"`
 	Body       string    `json:"body"`
 	OccurredAt time.Time `json:"occurredAt"`
 	ExpiresAt  time.Time `json:"expiresAt"`
+
+	state         v1.TaskState
+	quotaRecovery bool
 }
 
 type observedTaskState struct {
@@ -50,8 +55,10 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	now := time.Now().UTC()
 	blockedTaskIDs := make(map[string]struct{})
 	unknownTaskIDs := make(map[string]struct{})
+	taskIndexes := make(map[string]int, len(tasks))
 	for i := range tasks {
 		task := &tasks[i]
+		taskIndexes[task.ID.String()] = i
 		if task.State != v1.TaskStateWaiting {
 			continue
 		}
@@ -79,29 +86,63 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	}
 	generation := f.generations[owner] + 1
 	f.generations[owner] = generation
+	// The feed is a snapshot of actionable alerts, so task changes withdraw old
+	// occurrences before new ones are added. Display numbers follow current order;
+	// destinations and occurrence identities always use the stable task ID.
+	events := f.events[owner][:0]
+	for j := range f.events[owner] {
+		event := &f.events[owner][j]
+		i, exists := taskIndexes[event.ItemID]
+		if !exists || !event.ExpiresAt.After(now) {
+			continue
+		}
+		task := &tasks[i]
+		if task.State != event.state {
+			continue
+		}
+		if event.quotaRecovery {
+			_, unknown := unknownTaskIDs[event.ItemID]
+			if isBlocked(blockedTaskIDs, event.ItemID) || unknown {
+				continue
+			}
+			event.Body = taskTitle(task) + " can continue."
+		} else {
+			event.Title = taskNotificationTitle(task.State, i+1)
+			event.Body = taskTitle(task)
+		}
+		events = append(events, *event)
+	}
+	f.events[owner] = events
 	for i := range tasks {
 		task := &tasks[i]
 		id := task.ID.String()
 		old := previousStates[id]
 		previousStates[id] = observedTaskState{state: task.State, seen: generation}
-		if old.state == v1.TaskStateRunning && (task.State == v1.TaskStateWaiting || task.State == v1.TaskStateAsking || task.State == v1.TaskStateHasPlan) {
+		if old.seen != 0 && old.state != task.State && taskNotificationTitle(task.State, i+1) != "" {
 			f.events[owner] = append(f.events[owner], serviceNotification{
 				ID:         "ready-" + id + "-" + now.Format(time.RFC3339Nano),
-				Title:      fmt.Sprintf("Task #%d is waiting", i+1),
+				ItemID:     id,
+				URL:        "/task/@" + id,
+				Title:      taskNotificationTitle(task.State, i+1),
 				Body:       taskTitle(task),
 				OccurredAt: now,
 				ExpiresAt:  now.Add(24 * time.Hour),
+				state:      task.State,
 			})
 		}
 		if task.State != v1.TaskStateWaiting || !wasBlocked(previouslyBlocked, id) || isBlocked(blockedTaskIDs, id) {
 			continue
 		}
 		f.events[owner] = append(f.events[owner], serviceNotification{
-			ID:         "quota-recovered-" + id + "-" + now.Format(time.RFC3339Nano),
-			Title:      "Quota available",
-			Body:       task.Title + " can continue.",
-			OccurredAt: now,
-			ExpiresAt:  now.Add(24 * time.Hour),
+			ID:            "quota-recovered-" + id + "-" + now.Format(time.RFC3339Nano),
+			ItemID:        id,
+			URL:           "/task/@" + id,
+			Title:         "Quota available",
+			Body:          taskTitle(task) + " can continue.",
+			OccurredAt:    now,
+			ExpiresAt:     now.Add(24 * time.Hour),
+			state:         task.State,
+			quotaRecovery: true,
 		})
 	}
 	for id, observation := range previousStates {
@@ -112,6 +153,19 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 	f.blockedTaskIDs[owner] = blockedTaskIDs
 	f.events[owner] = recentNotifications(f.events[owner], now)
 	return append(make([]serviceNotification, 0, len(f.events[owner])), f.events[owner]...)
+}
+
+func taskNotificationTitle(state v1.TaskState, number int) string {
+	switch state {
+	case v1.TaskStateWaiting:
+		return fmt.Sprintf("Task #%d is waiting", number)
+	case v1.TaskStateAsking:
+		return fmt.Sprintf("Task #%d has a question", number)
+	case v1.TaskStateHasPlan:
+		return fmt.Sprintf("Task #%d has a plan ready", number)
+	default:
+		return ""
+	}
 }
 
 func notificationOwner(ctx context.Context) string {
