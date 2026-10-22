@@ -4,6 +4,7 @@ package server
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/maruel/ksid"
@@ -262,18 +263,45 @@ func TestNotificationFeed(t *testing.T) {
 
 	t.Run("AttentionStateChanges", func(t *testing.T) {
 		t.Parallel()
-		feed := newNotificationFeed()
 		task := v1.Task{ID: ksid.NewID(), Title: "Check changes", State: v1.TaskStateRunning}
-		feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
-		var previous string
-		for _, state := range []v1.TaskState{v1.TaskStateWaiting, v1.TaskStateAsking, v1.TaskStateHasPlan} {
-			task.State = state
-			got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
-			if len(got) != 1 || got[0].ID == previous {
-				t.Fatalf("changed attention state = %#v", got)
+		synctest.Test(t, func(t *testing.T) {
+			feed := newNotificationFeed()
+			ids := make(map[string]struct{})
+			for range 2 {
+				task.State = v1.TaskStateRunning
+				feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+				for _, state := range []v1.TaskState{v1.TaskStateWaiting, v1.TaskStateAsking, v1.TaskStateHasPlan} {
+					task.State = state
+					got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+					if len(got) != 1 {
+						t.Fatalf("changed attention state = %#v", got)
+					}
+					if _, exists := ids[got[0].ID]; exists {
+						t.Fatalf("reused occurrence ID: %q", got[0].ID)
+					}
+					ids[got[0].ID] = struct{}{}
+				}
 			}
-			previous = got[0].ID
-		}
+		})
+	})
+
+	t.Run("QuotaRecoveryOccurrences", func(t *testing.T) {
+		t.Parallel()
+		task := v1.Task{ID: ksid.NewID(), Title: "Resume work", State: v1.TaskStateWaiting}
+		synctest.Test(t, func(t *testing.T) {
+			feed := newNotificationFeed()
+			var previous string
+			for range 2 {
+				task.RateLimit = v1.TaskRateLimit{Blocked: true, ResetsAt: time.Now().Add(time.Hour)}
+				feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+				task.RateLimit = v1.TaskRateLimit{}
+				got := feed.notifications(t.Context(), []v1.Task{task}, v1.UsageResp{})
+				if len(got) != 1 || got[0].ID == previous {
+					t.Fatalf("quota recovery occurrence = %#v", got)
+				}
+				previous = got[0].ID
+			}
+		})
 	})
 
 	t.Run("ReorderingKeepsDestination", func(t *testing.T) {

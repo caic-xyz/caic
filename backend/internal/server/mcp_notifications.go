@@ -84,6 +84,7 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 		previousStates = make(map[string]observedTaskState, len(tasks))
 		f.states[owner] = previousStates
 	}
+	// The generation also distinguishes occurrence IDs when wall-clock readings repeat.
 	generation := f.generations[owner] + 1
 	f.generations[owner] = generation
 	// The feed is a snapshot of actionable alerts, so task changes withdraw old
@@ -120,7 +121,7 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 		previousStates[id] = observedTaskState{state: task.State, seen: generation}
 		if old.seen != 0 && old.state != task.State && taskNotificationTitle(task.State, i+1) != "" {
 			f.events[owner] = append(f.events[owner], serviceNotification{
-				ID:         "ready-" + id + "-" + now.Format(time.RFC3339Nano),
+				ID:         fmt.Sprintf("ready-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation),
 				ItemID:     id,
 				URL:        "/task/@" + id,
 				Title:      taskNotificationTitle(task.State, i+1),
@@ -134,7 +135,7 @@ func (f *notificationFeed) notifications(ctx context.Context, tasks []v1.Task, u
 			continue
 		}
 		f.events[owner] = append(f.events[owner], serviceNotification{
-			ID:            "quota-recovered-" + id + "-" + now.Format(time.RFC3339Nano),
+			ID:            fmt.Sprintf("quota-recovered-%s-%s-%d", id, now.Format(time.RFC3339Nano), generation),
 			ItemID:        id,
 			URL:           "/task/@" + id,
 			Title:         "Quota available",
