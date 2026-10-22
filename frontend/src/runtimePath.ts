@@ -78,3 +78,20 @@ export function taskRawURL(taskId: string, path: string): string {
 export function taskViewURL(taskId: string, path: string): string {
   return `/task/@${encodeURIComponent(taskId)}/view?${new URLSearchParams({ path })}`;
 }
+
+/** The conversation width the attachment route accepts for prompt images. */
+export const attachmentThumbnailWidth = 480;
+
+/** The document-pane width the attachment route accepts for prompt images. */
+export const attachmentPaneWidth = 1280;
+
+/** The prompt image endpoint for one content digest, optionally downscaled. */
+export function taskAttachmentURL(taskId: string, hash: string, width: number | null): string {
+  const query = width === null ? "" : `?${new URLSearchParams({ w: String(width) })}`;
+  return `/api/caic/v1/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(hash)}${query}`;
+}
+
+/** The document route that shows one prompt image. */
+export function taskAttachmentViewURL(taskId: string, hash: string): string {
+  return `/task/@${encodeURIComponent(taskId)}/view?${new URLSearchParams({ attachment: hash })}`;
+}

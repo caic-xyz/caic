@@ -14,6 +14,7 @@ import (
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 )
 
 // parseMessage decodes a single line from the codex app-server output into one
@@ -697,14 +698,29 @@ func parseItemCompleted(msg *codex.JSONRPCMessage, raw json.RawMessage, typ code
 	}
 }
 
+// userInputFromContent converts a Codex user message item into the canonical user
+// input. Codex echoes the images it was sent as data URL items, so the persisted
+// history keeps them for replay after a server restart.
 func userInputFromContent(content []codex.UserInput) *agent.UserInputMessage {
+	var ui agent.UserInputMessage
 	var texts []string
 	for _, b := range content {
-		if b.Type == codex.TurnInputTypeText && b.Text != "" {
-			texts = append(texts, b.Text)
+		switch b.Type {
+		case codex.TurnInputTypeText:
+			if b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+		case codex.TurnInputTypeImage:
+			if mediaType, data, ok := agent.ParseImageDataURL(b.URL); ok {
+				ui.Images = append(ui.Images, v3.ImageData{MediaType: mediaType, Data: data})
+			}
+		// caic sends text and data URL images only. Local paths, audio,
+		// skills, and mentions carry no bytes this canonical input can show.
+		case codex.TurnInputTypeLocalImage, codex.TurnInputTypeAudio, codex.TurnInputTypeLocalAudio, codex.TurnInputTypeSkill, codex.TurnInputTypeMention:
 		}
 	}
-	return &agent.UserInputMessage{Text: strings.Join(texts, "\n")}
+	ui.Text = strings.Join(texts, "\n")
+	return &ui
 }
 
 // toolNameForChanges returns "Write" if any change has Kind.Type == "add", else "Edit".

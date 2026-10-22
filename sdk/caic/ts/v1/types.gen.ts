@@ -295,10 +295,22 @@ export interface EventSystem {
   contextTokensAfter?: number /* int64 */;
 }
 
+/**
+ * EventImageData describes one prompt image carried by a user-input event.
+ *
+ * Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+ * task attachment route. Data stays until clients fetch images only by Hash.
+ */
+export interface EventImageData {
+  mediaType: string;
+  data: string;
+  hash?: string;
+}
+
 /** EventUserInput is emitted when a user sends a text message to the agent. */
 export interface EventUserInput {
   text: string;
-  images?: ImageData[];
+  images?: EventImageData[];
 }
 
 /** TodoItem is a single todo entry from a TodoWrite tool call. */

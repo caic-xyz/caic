@@ -5,6 +5,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -856,6 +858,7 @@ func (h *taskHandlers) routes() http.Handler {
 	m.HandleFunc("GET /tasks/{id}/diff", h.handleGetDiff)
 	m.HandleFunc("GET /tasks/{id}/diff/index", h.handleGetDiffIndex)
 	m.HandleFunc("GET /tasks/{id}/diff/file", h.handleGetFileDiff)
+	m.HandleFunc("GET /tasks/{id}/attachments/{hash}", h.handleTaskAttachment)
 	m.HandleFunc("GET /tasks/{id}/raw", h.handleTaskRaw)
 	m.HandleFunc("GET /tasks/{id}/repo-status", h.handleTaskRepoStatus)
 	m.HandleFunc("GET /tasks/{id}/vnc/ws", h.handleVNCWebSocket)
@@ -961,6 +964,72 @@ func (h *taskHandlers) handleTaskRaw(w http.ResponseWriter, r *http.Request) {
 		httpLogger(ctx).WarnContext(ctx, "task file shrank during range read", "missing_bytes", remaining)
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// handleTaskAttachment serves one prompt image from the task log by content
+// digest, optionally downscaled. It is a raw browser resource endpoint, like
+// the file stream, and intentionally outside the generated JSON SDK.
+func (h *taskHandlers) handleTaskAttachment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	entry, err := h.getTask(r)
+	if err != nil {
+		writeError(ctx, w, err)
+		return
+	}
+	// A failed lookup must not stay cached: only a served image is immutable.
+	w.Header().Set("Cache-Control", "no-store")
+	raw := strings.ToLower(r.PathValue("hash"))
+	digestBytes, err := hex.DecodeString(raw)
+	if err != nil || len(digestBytes) != sha256.Size {
+		writeError(ctx, w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "image hash must be 64 hexadecimal characters"})
+		return
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], digestBytes)
+
+	width := 0
+	if value := r.URL.Query().Get("w"); value != "" && value != "0" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || (parsed != attachmentConversationWidth && parsed != attachmentPaneWidth) {
+			writeError(ctx, w, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "unsupported image width"})
+			return
+		}
+		width = parsed
+	}
+
+	etag := `"` + raw + "-" + strconv.Itoa(width) + "-" + attachmentVariant + `"`
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.Header().Set("Cache-Control", attachmentCacheControl)
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	logPath := entry.LogPath.Get()
+	if logPath == "" {
+		writeError(ctx, w, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "image not found"})
+		return
+	}
+	mediaType, data, err := taskslog.FindAttachment(ctx, logPath, digest)
+	if err != nil {
+		writeError(ctx, w, attachmentError(err))
+		return
+	}
+	if width > 0 {
+		if scaled, ok := downscaleImage(data, mediaType, width); ok {
+			data = scaled
+		}
+	}
+
+	w.Header().Set("Cache-Control", attachmentCacheControl)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Content-Type", mediaType)
+	w.Header().Set("Content-Disposition", "inline; filename=\"attachment-"+raw[:12]+imageExtension(mediaType)+"\"")
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func taskFileContentType(data []byte) string {

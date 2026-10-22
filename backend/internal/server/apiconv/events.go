@@ -3,6 +3,9 @@
 package apiconv
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -170,9 +173,9 @@ func (tt *ToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 		if m.Text == "" && len(m.Images) == 0 {
 			return nil
 		}
-		var images []v1.ImageData
+		var images []v1.EventImageData
 		for _, img := range m.Images {
-			images = append(images, v1.ImageData{MediaType: img.MediaType, Data: img.Data})
+			images = append(images, v1.EventImageData{MediaType: img.MediaType, Data: img.Data, Hash: imageDigest(img.Data)})
 		}
 		return []v1.EventMessage{{
 			Kind:      v1.EventKindUserInput,
@@ -513,4 +516,16 @@ func MarshalEvent(ev *v1.EventMessage) ([]byte, error) {
 // toolInputProbe extracts run_in_background from a tool's raw JSON input.
 type toolInputProbe struct {
 	RunInBackground bool `json:"run_in_background"`
+}
+
+// imageDigest returns the hex SHA-256 of a base64 image payload, matching the
+// task attachment route. An undecodable payload has no addressable identity, so
+// the digest stays empty and clients keep the inline data.
+func imageDigest(data string) string {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(decoded)
+	return hex.EncodeToString(sum[:])
 }

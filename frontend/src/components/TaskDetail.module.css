@@ -1239,6 +1239,16 @@ a.ciStatus:hover {
   border-radius: var(--radius-md);
 }
 
+.userInputImageLink {
+  display: block;
+  max-width: min(100%, 720px);
+}
+
+.userInputImageLink:focus-visible {
+  outline: 2px solid var(--color-focus-border);
+  outline-offset: 2px;
+}
+
 .safetyWarning {
   padding: 0.5rem 0.75rem;
   margin-top: 0.5rem;

@@ -201,6 +201,7 @@ func TestTaskFile(t *testing.T) {
 	}{
 		{"AVIF image", "/home/user/screenshot.avif", "\x00\x00\x00\x18ftypavif\x00\x00\x00\x00avifmif1", 200, "inline", "image/avif"},
 		{"BMP image", "/home/user/screenshot.bmp", "BM\x00\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00", 200, "inline", "image/bmp"},
+		{"WebP image", "/home/user/comparison.webp", "RIFF\x1a\x00\x00\x00WEBPVP8L", 200, "inline", "image/webp"},
 		{"Ogg Vorbis audio", "/home/user/recording.ogg", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x07\x01vorbis", 200, "attachment", "audio/ogg"},
 		{"Ogg Opus audio", "/home/user/recording.opus", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x08OpusHead", 200, "attachment", "audio/ogg"},
 		{"Ogg Theora video", "/home/user/movie.ogv", "OggS\x00\x02" + strings.Repeat("\x00", 20) + "\x01\x07\x80theora", 200, "attachment", "video/ogg"},

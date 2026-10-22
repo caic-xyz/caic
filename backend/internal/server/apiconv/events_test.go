@@ -3,6 +3,9 @@
 package apiconv
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -46,6 +49,40 @@ func TestToolTimingTrackerConvertMessage(t *testing.T) {
 		}
 	})
 	t.Parallel()
+
+	t.Run("user input image carries its content hash", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		payload := []byte("prompt image bytes")
+		events := tracker.ConvertMessage(&agent.UserInputMessage{
+			Text:   "look",
+			Images: []logv3.ImageData{{MediaType: "image/png", Data: base64.StdEncoding.EncodeToString(payload)}},
+		}, time.Unix(1, 0))
+		if len(events) != 1 || events[0].UserInput == nil || len(events[0].UserInput.Images) != 1 {
+			t.Fatalf("events = %+v, want one user input image", events)
+		}
+		sum := sha256.Sum256(payload)
+		if got, want := events[0].UserInput.Images[0].Hash, hex.EncodeToString(sum[:]); got != want {
+			t.Errorf("Hash = %q, want %q", got, want)
+		}
+		if got := events[0].UserInput.Images[0].Data; got != base64.StdEncoding.EncodeToString(payload) {
+			t.Errorf("Data = %q, want the inline payload", got)
+		}
+	})
+
+	t.Run("undecodable user input image has no hash", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		events := tracker.ConvertMessage(&agent.UserInputMessage{
+			Images: []logv3.ImageData{{MediaType: "image/png", Data: "not base64"}},
+		}, time.Unix(1, 0))
+		if len(events) != 1 || events[0].UserInput == nil || len(events[0].UserInput.Images) != 1 {
+			t.Fatalf("events = %+v, want one user input image", events)
+		}
+		if got := events[0].UserInput.Images[0].Hash; got != "" {
+			t.Errorf("Hash = %q, want empty", got)
+		}
+	})
 
 	t.Run("common provenance", func(t *testing.T) {
 		t.Parallel()

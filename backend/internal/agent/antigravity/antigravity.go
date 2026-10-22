@@ -281,7 +281,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			if c.Type != "text" {
 				return nil, fmt.Errorf("antigravity: unsupported input content %q", c.Type)
 			}
-			if mediaType, data, ok := parseDataURL(c.Text); ok {
+			if mediaType, data, ok := agent.ParseImageDataURL(c.Text); ok {
 				m.Images = append(m.Images, v3.ImageData{MediaType: mediaType, Data: data})
 			} else {
 				m.Text += c.Text
@@ -504,16 +504,4 @@ func parseModels(out []byte) (agent.ModelInventory, error) {
 		return agent.ModelInventory{}, fmt.Errorf("read agy models: %w", err)
 	}
 	return agent.ModelInventory{}, errors.New("agy exited without a models result")
-}
-
-func parseDataURL(s string) (mediaType, data string, ok bool) {
-	if !strings.HasPrefix(s, "data:image/") {
-		return "", "", false
-	}
-	rest := strings.TrimPrefix(s, "data:")
-	mediaType, data, found := strings.Cut(rest, ";base64,")
-	if !found || data == "" {
-		return "", "", false
-	}
-	return mediaType, data, true
 }

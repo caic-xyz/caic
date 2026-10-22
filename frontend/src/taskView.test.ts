@@ -9,9 +9,11 @@ describe("taskViewMode", () => {
     expect(taskViewMode("/settings", "?path=a.md&fullscreen=1")).toBe("closed");
     expect(taskViewMode("/task/@abc/view", "?fullscreen=1")).toBe("closed");
     expect(taskViewMode("/task/@abc/view", "?path=")).toBe("closed");
+    expect(taskViewMode("/task/@abc/view", "?attachment=")).toBe("closed");
   });
   it("defaults to docked and accepts only the explicit fullscreen flag", () => {
     expect(taskViewMode("/task/@abc/view", "?path=notes.md")).toBe("docked");
+    expect(taskViewMode("/task/@abc/view", "?attachment=" + "a".repeat(64))).toBe("docked");
     expect(taskViewMode("/task/@abc/view", "?path=notes.md&fullscreen=true")).toBe("docked");
     expect(taskViewMode("/task/@abc+slug/view", "?path=%2Fnotes.md&fullscreen=1")).toBe("fullscreen");
   });

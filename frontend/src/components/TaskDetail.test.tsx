@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { expect, vi } from "@tests/expect";
 import { Route, Router } from "@solidjs/router";
-import { render, screen, waitFor, within } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
@@ -104,6 +104,74 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
     </Router>
   ));
 }
+
+it("links a sent image to its document view at the conversation width", async () => {
+  const hash = "a".repeat(64);
+  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    handlers.onMessage({
+      kind: "userInput",
+      ts: 1000,
+      userInput: {
+        text: "look",
+        images: [{ mediaType: "image/png", data: "aW1n", hash }],
+      },
+    });
+    handlers.onReady?.();
+    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  renderTaskDetail();
+  const image = await screen.findByRole("img", { name: "attached" });
+  expect(image.getAttribute("src")).toBe(`/api/caic/v1/tasks/abc/attachments/${hash}?w=480`);
+  const link = screen.getByRole("link", { name: "Open attached image" });
+  expect(link.getAttribute("href")).toBe(`/task/@abc/view?attachment=${hash}`);
+});
+
+it("falls back to the inline image when the attachment cannot load", async () => {
+  const hash = "a".repeat(64);
+  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    handlers.onMessage({
+      kind: "userInput",
+      ts: 1000,
+      userInput: { text: "look", images: [{ mediaType: "image/png", data: "aW1n", hash }] },
+    });
+    handlers.onReady?.();
+    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  renderTaskDetail();
+  const image = await screen.findByRole("img", { name: "attached" });
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(image) as object, "src");
+  if (!descriptor?.get || !descriptor.set) throw new Error("Missing HTMLImageElement.src accessors");
+  let assignments = 0;
+  Object.defineProperty(image, "src", {
+    configurable: true,
+    get: () => descriptor.get?.call(image),
+    set: (value: string) => {
+      assignments++;
+      descriptor.set?.call(image, value);
+    },
+  });
+  fireEvent.error(image);
+  expect(image.getAttribute("src")).toBe("data:image/png;base64,aW1n");
+  expect(assignments).toBe(1);
+  fireEvent.error(image);
+  expect(assignments).toBe(1);
+});
+
+it("keeps rendering an image inline when it has no digest", async () => {
+  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    handlers.onMessage({
+      kind: "userInput",
+      ts: 1000,
+      userInput: { text: "look", images: [{ mediaType: "image/png", data: "aW1n" }] },
+    });
+    handlers.onReady?.();
+    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  renderTaskDetail();
+  const image = await screen.findByRole("img", { name: "attached" });
+  expect(image.getAttribute("src")).toBe("data:image/png;base64,aW1n");
+  expect(screen.queryByRole("link", { name: "Open attached image" })).not.toBeInTheDocument();
+});
 
 it("keeps a child-first card mounted and open as parent content and lifecycle metadata arrive", async () => {
   const source = {

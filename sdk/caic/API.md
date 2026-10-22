@@ -1397,6 +1397,19 @@ compact_boundary. Zero means the harness did not report it. |  |
 | `contextTokensAfter` | `int64` | ContextTokensAfter is the context size the harness reported after a
 compact_boundary, measured or estimated. Zero means it did not report it. |  |
 
+### EventImageData
+
+EventImageData describes one prompt image carried by a user-input event.
+
+Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+task attachment route. Data stays until clients fetch images only by Hash.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `mediaType` | `string` |  | yes |
+| `data` | `string` |  | yes |
+| `hash` | `string` |  |  |
+
 ### EventUserInput
 
 EventUserInput is emitted when a user sends a text message to the agent.
@@ -1404,7 +1417,7 @@ EventUserInput is emitted when a user sends a text message to the agent.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `text` | `string` |  | yes |
-| `images` | `ImageData[]` |  |  |
+| `images` | `EventImageData[]` |  |  |
 
 ### TodoItem
 

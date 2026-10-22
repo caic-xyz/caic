@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventImageData, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -231,11 +231,12 @@ export function validateEventSystem(raw: ValidatorInput): EventSystem {
   };
 }
 
-export function validateImageData(raw: ValidatorInput): ImageData {
-  const obj = asObject(raw, "ImageData");
+export function validateEventImageData(raw: ValidatorInput): EventImageData {
+  const obj = asObject(raw, "EventImageData");
   return {
-    mediaType: asString(obj["mediaType"], "ImageData.mediaType"),
-    data: asString(obj["data"], "ImageData.data"),
+    mediaType: asString(obj["mediaType"], "EventImageData.mediaType"),
+    data: asString(obj["data"], "EventImageData.data"),
+    hash: (obj["hash"] === undefined || obj["hash"] === null ? undefined : asString(obj["hash"], "EventImageData.hash")),
   };
 }
 
@@ -243,7 +244,7 @@ export function validateEventUserInput(raw: ValidatorInput): EventUserInput {
   const obj = asObject(raw, "EventUserInput");
   return {
     text: asString(obj["text"], "EventUserInput.text"),
-    images: (obj["images"] === undefined || obj["images"] === null ? undefined : validateArray(obj["images"], "EventUserInput.images", validateImageData) as ImageData[]),
+    images: (obj["images"] === undefined || obj["images"] === null ? undefined : validateArray(obj["images"], "EventUserInput.images", validateEventImageData) as EventImageData[]),
   };
 }
 

@@ -293,8 +293,18 @@ type EventSystem struct {
 
 // EventUserInput is emitted when a user sends a text message to the agent.
 type EventUserInput struct {
-	Text   string      `json:"text"`
-	Images []ImageData `json:"images,omitempty"`
+	Text   string           `json:"text"`
+	Images []EventImageData `json:"images,omitempty"`
+}
+
+// EventImageData describes one prompt image carried by a user-input event.
+//
+// Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+// task attachment route. Data stays until clients fetch images only by Hash.
+type EventImageData struct {
+	MediaType string `json:"mediaType"`
+	Data      string `json:"data"`
+	Hash      string `json:"hash,omitempty"`
 }
 
 // TodoItem is a single todo entry from a TodoWrite tool call.

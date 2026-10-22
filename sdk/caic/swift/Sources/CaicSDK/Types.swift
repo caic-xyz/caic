@@ -1487,10 +1487,20 @@ public struct EventSystem: Codable {
     public let contextTokensAfter: Int?
 }
 
+/// EventImageData describes one prompt image carried by a user-input event.
+///
+/// Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+/// task attachment route. Data stays until clients fetch images only by Hash.
+public struct EventImageData: Codable {
+    public let mediaType: String
+    public let data: String
+    public let hash: String?
+}
+
 /// EventUserInput is emitted when a user sends a text message to the agent.
 public struct EventUserInput: Codable {
     public let text: String
-    public let images: [ImageData]?
+    public let images: [EventImageData]?
 }
 
 /// TodoItem is a single todo entry from a TodoWrite tool call.

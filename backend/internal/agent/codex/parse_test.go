@@ -109,6 +109,69 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("Text = %q, want original prompt", ui.Text)
 		}
 	})
+	t.Run("ItemStartedUserMessageImage", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"the picture","text_elements":[]},{"type":"image","url":"data:image/jpeg;base64,/9j/AA==","detail":null}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := parseTestMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if ui.Text != "the picture" {
+			t.Errorf("Text = %q, want the picture", ui.Text)
+		}
+		if len(ui.Images) != 1 {
+			t.Fatalf("Images = %d, want 1", len(ui.Images))
+		}
+		if img := ui.Images[0]; img.MediaType != "image/jpeg" || img.Data != "/9j/AA==" {
+			t.Errorf("Images[0] = %+v, want image/jpeg /9j/AA==", img)
+		}
+	})
+	t.Run("ItemStartedUserMessageImageOnly", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"image","url":"data:image/png;base64,aW1hZ2U=","detail":null}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := parseTestMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if ui.Text != "" {
+			t.Errorf("Text = %q, want empty", ui.Text)
+		}
+		if len(ui.Images) != 1 || ui.Images[0].MediaType != "image/png" {
+			t.Errorf("Images = %+v, want one image/png", ui.Images)
+		}
+	})
+	t.Run("ItemStartedUserMessageNonImageURL", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"image","url":"picture.jpg","detail":null}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := parseTestMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if len(ui.Images) != 0 {
+			t.Errorf("Images = %+v, want none for a non-data URL", ui.Images)
+		}
+	})
 	t.Run("ItemCompletedUserMessageSuppressed", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt","text_elements":[]}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`

@@ -12,5 +12,9 @@ and existing prompt and history compatibility.
 
 ## Later
 
-- Durable attachment references need an explicit API and persistence design to remove base64 from task history while preserving historical images, fork/restore behavior, and cleanup ownership.
+- Drop the inline base64 payload from the user-input event once attachment URLs
+  are the only render path.
+- Deduplicate the image copies a harness echoes into the task log.
+- Cap prompt images at each harness's documented vision limit before sending
+  them to a model. The limit differs per harness and is not yet verified.
 - A bounded diff preview or paged patch API is needed to limit the peak cost of loading one giant patch.

@@ -139,6 +139,7 @@ declare const classes: {
   readonly "turnSummaryText": string;
   readonly "turnToggle": string;
   readonly "userInputImage": string;
+  readonly "userInputImageLink": string;
   readonly "userInputImages": string;
   readonly "userInputMsg": string;
 };

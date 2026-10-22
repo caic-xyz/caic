@@ -25,6 +25,38 @@ test("API: images are accepted in task inputs when harness supports them", async
   await waitForTaskState(api, id, "purged");
 });
 
+test("UI: a sent image opens in the document pane and survives a reload", async ({ page, api, uniquePrompt }) => {
+  const id = await createTaskAPI(api, uniquePrompt("attachment-pane"));
+  await waitForTaskState(api, id, "waiting");
+  await api.sendInput(id, {
+    prompt: { text: "with image", images: [{ mediaType: "image/png", data: TINY_PNG_B64 }] },
+  });
+  await waitForTaskState(api, id, "waiting");
+
+  const attachmentRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/attachments/")) attachmentRequests.push(request.url());
+  });
+
+  await page.goto(`/task/@${id}`);
+  const link = page.getByRole("link", { name: "Open attached image" });
+  await expect(link).toBeVisible();
+  await expect(link.getByRole("img", { name: "attached" })).toBeVisible();
+  await expect.poll(() => attachmentRequests.some((url) => url.endsWith("?w=480"))).toBe(true);
+
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/task/@${id}/view\\?attachment=[0-9a-f]{64}$`));
+  const image = page.getByRole("img", { name: "attachment" });
+  await expect(image).toBeVisible();
+  expect(await image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+
+  await page.reload();
+  await expect(page.getByRole("img", { name: "attachment" })).toBeVisible();
+
+  await api.purgeTask(id);
+  await waitForTaskState(api, id, "purged");
+});
+
 test("UI: screenshot capture attaches a thumbnail which is sent and cleared on submit", async ({
   page,
   api,

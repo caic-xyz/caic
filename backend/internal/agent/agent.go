@@ -1589,13 +1589,14 @@ func readWarmHistoryPayload(ctx context.Context, fetch func() ([]byte, error)) (
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin
-// and logs it as NDJSON.
+// and logs it as NDJSON. The images travel out of band here, so the recorded
+// user input keeps them for history replay.
 func PlainTextWritePrompt(w io.Writer, p Prompt, log LogSink) error {
 	data := []byte(p.Text + "\n")
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	return log.AppendMessage(&UserInputMessage{Text: p.Text})
+	return log.AppendMessage(&UserInputMessage{Text: p.Text, Images: p.Images})
 }
 
 // isSignalExit reports whether err indicates the process was killed by a

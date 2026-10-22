@@ -70,7 +70,7 @@ import {
 } from "../grouping";
 import { ContextSkillsTracker } from "../contextSkills";
 import { useTaskTimeline } from "../TaskTimelineContext";
-import { taskViewURL } from "../runtimePath";
+import { attachmentThumbnailWidth, taskAttachmentURL, taskAttachmentViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
 import { formatQuotaCountdown, quotaDismissalKey } from "../quota";
 import { IncrementalTaskTimingTracker, formatTimingDuration, type TurnTiming } from "../timing";
@@ -1749,11 +1749,38 @@ function GroupContent(props: {
               <div class={styles.userInputImages}>
                 <For each={ui.images}>
                   {(img) => (
-                    <img
-                      class={styles.userInputImage}
-                      src={`data:${img.mediaType};base64,${img.data}`}
-                      alt="attached"
-                    />
+                    <Show
+                      when={img.hash}
+                      fallback={
+                        <img
+                          class={styles.userInputImage}
+                          src={`data:${img.mediaType};base64,${img.data}`}
+                          alt="attached"
+                        />
+                      }
+                    >
+                      {(hash) => (
+                        <A
+                          class={styles.userInputImageLink}
+                          href={taskAttachmentViewURL(props.taskId, hash())}
+                          aria-label="Open attached image"
+                        >
+                          <img
+                            class={styles.userInputImage}
+                            src={taskAttachmentURL(props.taskId, hash(), attachmentThumbnailWidth)}
+                            alt="attached"
+                            onError={(event) => {
+                              // The event still carries the payload, so a digest the
+                              // log cannot resolve falls back to the inline image,
+                              // once: a failed inline decode must not retry itself.
+                              const image = event.currentTarget;
+                              if (image.src.startsWith("data:")) return;
+                              image.src = `data:${img.mediaType};base64,${img.data}`;
+                            }}
+                          />
+                        </A>
+                      )}
+                    </Show>
                   )}
                 </For>
               </div>

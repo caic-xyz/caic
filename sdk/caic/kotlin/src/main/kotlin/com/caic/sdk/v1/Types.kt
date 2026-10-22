@@ -2110,9 +2110,22 @@ data class EventSystem(
     val contextTokensAfter: Long? = null,
 )
 
+/**
+ * EventImageData describes one prompt image carried by a user-input event.
+ *
+ * Hash is the hex SHA-256 of the decoded bytes and addresses the image in the
+ * task attachment route. Data stays until clients fetch images only by Hash.
+ */
+@Serializable
+data class EventImageData(
+    val mediaType: String,
+    val data: String,
+    val hash: String? = null,
+)
+
 /** EventUserInput is emitted when a user sends a text message to the agent. */
 @Serializable
-data class EventUserInput(val text: String, val images: List<ImageData>? = null)
+data class EventUserInput(val text: String, val images: List<EventImageData>? = null)
 
 /** TodoItem is a single todo entry from a TodoWrite tool call. */
 @Serializable
