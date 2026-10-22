@@ -24,7 +24,7 @@ VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 # module; the plain binary is fine for `fmt`.
 VERIFY_GO = ./custom-gcl run --show-stats=false ./... && go mod tidy -diff
 VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && node scripts/lint_frontend_styles.mjs
-VERIFY_TS = pnpm --silent typecheck
+VERIFY_TS = node scripts/css_module_types.mjs --source-path frontend/src && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json
 VERIFY_ESLINT = pnpm exec eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .
 VERIFY_PY = uv run --locked ruff format --check --quiet . && uv run --locked ruff check --quiet .
 VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files
@@ -104,6 +104,7 @@ fix: custom-gcl frontend-deps
 	@uv run --locked ruff format . >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
 	@pnpm exec stylelint --fix "frontend/src/**/*.css"
+	@node scripts/css_module_types.mjs --source-path frontend/src --write
 	@uv run --locked python scripts/update_agents_file_index.py
 	@uv run --locked python scripts/update_backend_architecture.py
 

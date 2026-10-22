@@ -4,6 +4,9 @@ import { ok } from "node:assert/strict";
 import { expect, test } from "../helpers";
 import type { ErrorResponse } from "../../sdk/caic/ts/v1/types.gen";
 
+// Settings journeys exercise the server's saved preferences through browser reloads.
+test.use({ taskPreferences: null });
+
 test("server model reload shows progress, success, and recoverable failure", async ({ page, api }, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/settings?section=server");

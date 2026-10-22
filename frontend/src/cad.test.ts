@@ -39,7 +39,6 @@ endsolid test_triangle
 
     const geometry = parseStl(buffer);
     expect(geometry).not.toBeNull();
-    assert.ok(geometry.getAttribute("position") !== undefined);
     expect(geometry.getAttribute("position").count).toBe(3);
 
     const group = createStlGroup(geometry);

@@ -18,7 +18,7 @@ function todoStatusIcon(status: string): string {
   }
 }
 
-function todoStatusClass(status: string): string | undefined {
+function todoStatusClass(status: string): string {
   switch (status) {
     case "completed":
       return styles.completed;

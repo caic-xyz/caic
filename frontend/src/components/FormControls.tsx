@@ -11,7 +11,7 @@ import styles from "./FormControls.module.css";
 
 type ControlSelectProps = JSX.SelectHTMLAttributes<HTMLSelectElement>;
 
-function classes(base: string | undefined, extra: string | undefined) {
+function classes(base: string, extra: string | undefined) {
   return extra ? `${base} ${extra}` : base;
 }
 

@@ -18,6 +18,7 @@ frontend_source_changed=false
 while IFS= read -r -d '' file; do
   staged_changes+=("$file")
   case "$file" in
+  *.module.css.d.ts) ;;
   frontend/src/*.css | frontend/src/*.html | frontend/src/*.json | frontend/src/*.svg | frontend/src/*.ts | frontend/src/*.tsx)
     frontend_source_changed=true
     ;;
@@ -45,6 +46,7 @@ python_files=()
 style_files=()
 
 while IFS= read -r -d '' file; do
+  case "$file" in *.module.css.d.ts) continue ;; esac
   if [[ ! -L "$file" ]]; then
     case "$file" in
     AGENTS.md | */AGENTS.md)

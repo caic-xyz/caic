@@ -180,6 +180,29 @@ async function observeDrafts(page: import("@playwright/test").Page) {
 
 const pngFile = { name: "image.png", mimeType: "image/png", buffer: Buffer.from(TINY_PNG_B64, "base64") };
 
+test("UI: task defaults keep attachments available after a saved text-only harness", async ({
+  page,
+  api,
+  uniquePrompt,
+}) => {
+  const saved = await api.createTask({
+    initialPrompt: { text: uniquePrompt("conflicting saved task choices") },
+    harness: "antigravity",
+  });
+  try {
+    await waitForTaskState(api, saved.id, "waiting");
+    await page.goto("/");
+    await expect(page.getByTestId("harness-select")).toHaveValue("claude");
+    const form = page.getByTestId("new-task-form");
+    await expect(form.getByTestId("attach-images")).toBeEnabled();
+    await form.locator('input[type="file"]').setInputFiles(pngFile);
+    await expect(form.getByRole("img", { name: "attached" })).toBeVisible();
+  } finally {
+    await api.purgeTask(saved.id);
+    await waitForTaskState(api, saved.id, "purged");
+  }
+});
+
 test("UI: Blob drafts reject oversized selections and preserve edits through failed and successful submission", async ({
   page,
   api,
@@ -308,7 +331,6 @@ test("UI: unavailable attachment policy keeps text-only task creation working", 
     }),
   );
   await page.goto("/");
-  await page.getByRole("combobox", { name: "Harness", exact: true }).selectOption("claude");
   const form = page.locator("form").filter({ has: page.getByTestId("prompt-input") });
   await expect(form.getByTestId("attach-images")).toBeDisabled();
   await expect(form.getByRole("status")).toHaveText("Image attachments are unavailable until server limits load.");

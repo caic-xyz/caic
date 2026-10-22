@@ -170,16 +170,15 @@ describe("buildTree", () => {
   });
 
   it("preserves all ProcessInfo fields on tree nodes", () => {
-    const procs = [p(5, 0, "myprocess")];
-    assert.ok(procs[0] !== undefined);
-    procs[0].user = "root";
-    procs[0].state = "R";
-    procs[0].cpu = 12.5;
-    procs[0].mem = 3.2;
-    procs[0].cpuTime = 83_000_000_000;
-    procs[0].rssBytes = 2_097_152;
-    procs[0].startedAt = "2026-03-20T10:30:00Z" as ISOTimestamp;
-    const tree = buildTree(procs);
+    const proc = p(5, 0, "myprocess");
+    proc.user = "root";
+    proc.state = "R";
+    proc.cpu = 12.5;
+    proc.mem = 3.2;
+    proc.cpuTime = 83_000_000_000;
+    proc.rssBytes = 2_097_152;
+    proc.startedAt = "2026-03-20T10:30:00Z" as ISOTimestamp;
+    const tree = buildTree([proc]);
     const node = tree[0];
     assert.ok(node !== undefined);
     expect(node.pid).toBe(5);

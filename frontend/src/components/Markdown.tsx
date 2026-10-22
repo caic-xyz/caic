@@ -110,7 +110,6 @@ export default function Markdown(props: { text: string; baseDir?: string }) {
     const block = button.closest(`.${styles.mermaidBlock}`) ?? button.parentElement;
     const text = block?.querySelector("pre > code")?.textContent;
     const copiedClass = styles.copied;
-    if (copiedClass === undefined) throw new Error("Missing copied code style");
     if (text === undefined || text === null) return;
 
     navigator.clipboard

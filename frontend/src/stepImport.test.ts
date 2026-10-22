@@ -54,12 +54,10 @@ describe("STEP import", () => {
 
   it("handles concatenated gzip members before importing the complete model", async () => {
     const middle = Math.floor(cube.length / 2);
-    const members = [gzipSync(cube.subarray(0, middle)), gzipSync(cube.subarray(middle))];
-    assert.ok(members[0] !== undefined);
-    assert.ok(members[1] !== undefined);
-    const joined = new Uint8Array(members[0].length + members[1].length);
-    joined.set(members[0]);
-    joined.set(members[1], members[0].length);
+    const [first, second] = [gzipSync(cube.subarray(0, middle)), gzipSync(cube.subarray(middle))] as const;
+    const joined = new Uint8Array(first.length + second.length);
+    joined.set(first);
+    joined.set(second, first.length);
     expect(await importStep(input(joined, "cube.step.gz"))).toHaveLength(1);
   });
 

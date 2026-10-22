@@ -28,7 +28,7 @@ function clampRatio(value: number): number {
 }
 
 // A bar turns amber at half its ceiling and red at 85% of it.
-function barClass(ratio: number): string | undefined {
+function barClass(ratio: number): string {
   if (ratio >= 0.85) return styles.barDanger;
   if (ratio >= 0.5) return styles.barWarning;
   return styles.barSuccess;

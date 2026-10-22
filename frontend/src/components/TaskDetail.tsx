@@ -175,7 +175,7 @@ interface Props {
 
 type CIStatus = "pending" | "success" | "failure";
 
-const CI_STATUS_CLASS: Record<CIStatus, string | undefined> = {
+const CI_STATUS_CLASS: Record<CIStatus, string> = {
   pending: styles.ciStatus_pending,
   success: styles.ciStatus_success,
   failure: styles.ciStatus_failure,
@@ -1096,7 +1096,6 @@ export default function TaskDetail(props: Props) {
                     navigator.clipboard.writeText(props.sudoPassword);
                   }
                   const copiedClass = styles.copied;
-                  if (copiedClass === undefined) throw new Error("Missing copied password style");
                   btn.classList.add(copiedClass);
                   setTimeout(() => btn.classList.remove(copiedClass), 1500);
                 }}

@@ -1,6 +1,5 @@
 // Tests for the task statistics charts, resource samples, and their text alternatives.
 
-import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { render, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
@@ -331,7 +330,6 @@ describe("StatsContent", () => {
 
   it("does not infer network throughput from one sample", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    assert.ok(stats[0] !== undefined);
     const { findByTestId } = render(() => <StatsContent events={[]} stats={[stats[0]]} turns={[]} usage={usage} />);
     const resources = await findByTestId("resource-charts");
     expect(resources).toHaveTextContent("Waiting for another sample");

@@ -19,3 +19,6 @@ test-results
 visual-screenshots-failures
 # uv-managed Python development environment.
 /.venv/
+
+# CSS export declarations belong to the generator.
+**/*.module.css.d.ts

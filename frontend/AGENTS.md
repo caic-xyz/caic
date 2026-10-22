@@ -117,6 +117,12 @@ top-level theme selector. Do not duplicate component rules for each theme.
 Separate documents such as `WidgetShell.html` require their own token overrides
 and explicit theme propagation.
 
+### CSS Module declarations
+
+Adjacent `*.module.css.d.ts` files declare the actual CSS exports. Do not edit
+them by hand. `make fix` regenerates them; `make verify` and build reject stale or
+missing declarations. `pnpm dev` watches CSS edits and regenerates declarations.
+
 ### Enforcement
 
 Color values are allowed only in `src/global.css` custom-property

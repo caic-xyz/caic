@@ -27,7 +27,7 @@ function UnifiedDiffLine(props: { line: DiffLine }) {
   return <div class={`${styles.line} ${diffLineClass(props.line)}`}>{props.line.text}</div>;
 }
 
-function diffLineClass(line: DiffLine): string | undefined {
+function diffLineClass(line: DiffLine): string {
   switch (line.kind) {
     case "added":
       return line.whitespaceOnly ? styles.lineAddedWhitespace : styles.lineAdded;

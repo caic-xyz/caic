@@ -117,6 +117,7 @@ export default tseslint.config(
   // ignored path (which would only print an ignore warning). Keep the two lists in sync.
   {
     ignores: [
+      "**/*.module.css.d.ts",
       "backend/**",
       "frontend/dist/**",
       "frontend/public/**",

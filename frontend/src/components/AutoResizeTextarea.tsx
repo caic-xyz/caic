@@ -25,7 +25,6 @@ interface Props {
 
 export default function AutoResizeTextarea(props: Props) {
   const emptyClass = styles.empty;
-  if (emptyClass === undefined) throw new Error("Missing empty textarea style");
   let editable!: HTMLDivElement;
   let focusGeneration = 0;
   let pointerFocus = false;

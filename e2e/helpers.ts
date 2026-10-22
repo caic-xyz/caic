@@ -1,4 +1,4 @@
-// Shared e2e test helpers: typed API client and utilities.
+// Shared e2e fixtures: isolated browser task choices, typed API client, and utilities.
 import { ok } from "node:assert/strict";
 import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
@@ -8,7 +8,7 @@ import { readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
 import type { StepLoadTimingReport } from "../frontend/src/stepTimings";
-import type { Task } from "../sdk/caic/ts/v1/types.gen";
+import type { PreferencesResp, Task } from "../sdk/caic/ts/v1/types.gen";
 
 // Observe diagnostic entries without exposing a test-only hook in the viewer.
 export async function collectStepTimings(page: Page): Promise<StepLoadTimingReport[]> {
@@ -59,12 +59,39 @@ function createClient(request: APIRequestContext) {
 export type APIClient = ReturnType<typeof createClient>;
 
 // ---------------------------------------------------------------------------
-// Fixtures: extends Playwright's base test with an `api` client.
+// Task creation saves shared server preferences. Each browser starts with explicit
+// task choices, while real settings and all writes still reach the server. Tests
+// of saved task choices opt out with taskPreferences: null; API-only tests keep
+// using the real preferences endpoint without constructing a browser page.
 // ---------------------------------------------------------------------------
 
 type UniquePrompt = (prefix: string) => string;
+type TaskPreferences = Pick<PreferencesResp, "repositories" | "harness" | "models" | "efforts">;
 
-export const test = base.extend<{ api: APIClient; uniquePrompt: UniquePrompt }>({
+export const test = base.extend<{
+  api: APIClient;
+  uniquePrompt: UniquePrompt;
+  taskPreferences: TaskPreferences | null;
+}>({
+  taskPreferences: [{ repositories: [], harness: "claude", models: {}, efforts: {} }, { option: true }],
+  page: async ({ page, taskPreferences }, use) => {
+    if (taskPreferences) {
+      await page.route("**/api/caic/v1/server/preferences", async (route) => {
+        if (route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        const response = await route.fetch();
+        if (!response.ok()) {
+          await route.fulfill({ response });
+          return;
+        }
+        const preferences: PreferencesResp = await response.json();
+        await route.fulfill({ response, json: { ...preferences, ...taskPreferences } });
+      });
+    }
+    await use(page);
+  },
   api: async ({ request }, use) => {
     await use(createClient(request));
   },

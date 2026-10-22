@@ -218,8 +218,7 @@ describe("streaming archive boundaries", () => {
     const last = gzipSync("last");
     const filename = Buffer.alloc(8000, 97);
     const header = Buffer.from(last.subarray(0, 10));
-    assert.ok(header[3] !== undefined);
-    header[3] |= 8;
+    header.writeUInt8(header.readUInt8(3) | 8, 3);
     const bytes = Uint8Array.from(Buffer.concat([first, header, filename, Buffer.from([0]), last.subarray(10)]));
     for (const size of [1, 17, 1024, 65536]) expect(streamed(bytes, "part.stpz", size)).toBe("first last");
     flipByte(bytes, first.length - 8);

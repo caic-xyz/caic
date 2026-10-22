@@ -7,7 +7,7 @@
 // runtime must not use it; see backend/cmd/caic/smoke_test.go.
 //
 // Playwright transpiles the TypeScript itself, so e2e/tsconfig.json exists
-// solely for `pnpm typecheck`, which checks both the root project
+// solely for `make verify`, which checks both the root project
 // (frontend/src, sdk/) and this directory. Note that Playwright matchers like
 // `toContain` accept `unknown`, so assertion arguments are not type checked.
 //
