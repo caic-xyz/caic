@@ -1,4 +1,4 @@
-// TurnInvocationIcon opens per-turn and aggregate session invocation and change details.
+// TurnInvocationIcon opens per-turn and aggregate session invocation, change, and compaction details.
 
 import { createSignal, Show } from "solid-js";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
@@ -139,7 +139,11 @@ export default function TurnInvocationIcon(props: { turn: TurnTiming; model: str
   );
 }
 
-export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; model: string | null }) {
+export function SessionInvocationIcon(props: {
+  turns: readonly TurnTiming[];
+  model: string | null;
+  compactionSummary: string;
+}) {
   const [open, setOpen] = createSignal(false);
   const totals = () =>
     props.turns.reduce(
@@ -225,6 +229,12 @@ export function SessionInvocationIcon(props: { turns: readonly TurnTiming[]; mod
             </button>
           </div>
           <dl class={styles.metrics}>
+            <Show when={props.compactionSummary}>
+              <div>
+                <dt>Context compaction</dt>
+                <dd>{props.compactionSummary}</dd>
+              </div>
+            </Show>
             <Show when={models().length > 0}>
               <div>
                 <dt>{models().length === 1 ? "Model" : "Models"}</dt>

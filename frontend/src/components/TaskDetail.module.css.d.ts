@@ -82,6 +82,7 @@ declare const classes: {
   readonly "sessionDuration": string;
   readonly "sessionElided": string;
   readonly "sessionElidedExpanded": string;
+  readonly "sessionSkills": string;
   readonly "sessionToggle": string;
   readonly "skillLink": string;
   readonly "skills": string;
@@ -137,7 +138,6 @@ declare const classes: {
   readonly "turnDuration": string;
   readonly "turnSummaryText": string;
   readonly "turnToggle": string;
-  readonly "usageMeta": string;
   readonly "userInputImage": string;
   readonly "userInputImages": string;
   readonly "userInputMsg": string;

@@ -592,9 +592,14 @@ describe("TaskDetail", () => {
     });
   }
 
-  it("retains every closed section's skill links when later sessions collapse", () => {
+  it("reveals each closed section's skill links when its session expands", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       for (const message of [
+        {
+          kind: "init",
+          ts: 0,
+          init: { sessionID: "skills", reportedModel: "m", agentVersion: "1", cwd: "/", harness: "claude" },
+        },
         { kind: "skillLoad", ts: 1, skillLoad: { skill: "review", path: "/a/SKILL.md" } },
         {
           kind: "result",
@@ -621,6 +626,17 @@ describe("TaskDetail", () => {
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
     renderTaskDetail();
+    const user = userEvent.setup();
+    expect(screen.queryByRole("navigation", { name: "Previous context skills" })).not.toBeInTheDocument();
+    const sessions = screen.getAllByRole("button", { name: /^Compacted session/ });
+    assert.ok(sessions[0]);
+    await user.click(sessions[0]);
+    expect(
+      within(screen.getByRole("navigation", { name: "Previous context skills" })).getByRole("link"),
+    ).toHaveTextContent("review");
+    const secondSession = screen.getAllByRole("button", { name: /^Compacted session/ })[1];
+    assert.ok(secondSession);
+    await user.click(secondSession);
     const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
     expect(strips).toHaveLength(2);
     expect(strips.map((strip) => within(strip).getByRole("link").textContent)).toEqual(["review", "quality"]);
@@ -692,7 +708,7 @@ describe("TaskDetail", () => {
     renderTaskDetail();
     expect(screen.getByText("Execute the new plan", { exact: true })).toBeVisible();
     expect(screen.getByText("Executing the new plan", { exact: true })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Compacted session/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Compacted session/ })).toHaveLength(1);
   });
 
   it("preserves completed boundaries and turn expansion across live boundaries and same-session init", async () => {
@@ -727,7 +743,11 @@ describe("TaskDetail", () => {
             },
           },
         },
-        { kind: "system", ts: 5, system: { subtype: "compact_boundary" } },
+        {
+          kind: "system",
+          ts: 5,
+          system: { subtype: "compact_boundary", contextTokensBefore: 128_000, contextTokensAfter: 20_000 },
+        },
         { kind: "skillLoad", ts: 6, skillLoad: { skill: "quality", path: "/b/SKILL.md" } },
         { kind: "text", ts: 7, text: { text: "First compacted response" } },
         {
@@ -777,7 +797,15 @@ describe("TaskDetail", () => {
       return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
     });
     renderTaskDetail();
-    await userEvent.setup().click(screen.getByRole("button", { name: /^1 message/ }));
+    const user = userEvent.setup();
+    expect(screen.queryByText(/Conversation compacted/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Session invocation details" }));
+    expect(screen.getByTestId("session-invocation-dialog")).toHaveTextContent("128kt → 20kt tokens");
+    await user.click(screen.getByRole("button", { name: "Close session details" }));
+    await user.click(screen.getByRole("button", { name: /^Compacted session · 1 turn/ }));
+    expect(screen.queryByText(/Conversation compacted/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Compacted session · 1 turn/ }));
+    await user.click(screen.getByRole("button", { name: /^1 message/ }));
     expect(screen.getByText("First compacted response", { exact: true })).toBeVisible();
     send?.({
       kind: "init",
@@ -787,6 +815,7 @@ describe("TaskDetail", () => {
     expect(screen.getByText("First compacted response", { exact: true })).toBeVisible();
     send?.({ kind: "system", ts: 12, system: { subtype: "compact_boundary" } });
     send?.({ kind: "text", ts: 13, text: { text: "Live response after second compaction" } });
+    await user.click(screen.getByRole("button", { name: /^Compacted session · 1 turn/ }));
     const strips = screen.getAllByRole("navigation", { name: "Previous context skills" });
     expect(strips.map((strip) => within(strip).getByRole("link").textContent)).toEqual(["review", "quality"]);
     const first = screen.getByText("First compacted response", { exact: true });
@@ -2043,69 +2072,6 @@ describe("SSE connection", () => {
 
     expect(document.body.textContent).toContain("⚠️ seven-day-opus quota nearing its limit");
     expect(document.body.textContent).not.toContain("-100%");
-  });
-
-  it("does not render empty usage metadata", () => {
-    const created: FakeES[] = [];
-    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
-    makeSyncReadyMock(created, capturedCb);
-
-    renderTaskDetail();
-    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
-
-    const cb = capturedCb.value;
-    cb({
-      kind: "usage",
-      ts: 1,
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        reportedModel: "",
-      },
-    });
-    cb({
-      kind: "usage",
-      ts: 2,
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        reasoningOutputTokens: 50,
-        reportedModel: "",
-      },
-    });
-    cb({
-      kind: "usage",
-      ts: 3,
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        reportedModel: "claude",
-      },
-    });
-    cb({
-      kind: "usage",
-      ts: 4,
-      usage: {
-        inputTokens: 100,
-        outputTokens: 40,
-        cacheCreationInputTokens: 200,
-        cacheReadInputTokens: 700,
-        reportedModel: "codex",
-      },
-    });
-    vi.advanceTimersByTime(100);
-
-    expect(document.body.textContent).not.toContain("0t in + 0t out");
-    expect(document.body.textContent).toContain("50t thinking");
-    expect(document.body.textContent).not.toContain("claude");
-    expect(document.body.textContent).toContain("codex · 100t new · 200t cache write · 700t cache read · 40t out");
-    expect(document.querySelectorAll('[aria-label="Timing details"]')).toHaveLength(0);
   });
 
   it("replayed textDelta events render once the SSE ready marker arrives", () => {

@@ -90,7 +90,7 @@ describe("SessionInvocationIcon", () => {
       ...turn,
       result: { ...turn.result, cost: { usd: 0.25, source: "estimated" } },
     } satisfies TurnTiming;
-    render(() => <SessionInvocationIcon turns={[turn, estimated]} model={null} />);
+    render(() => <SessionInvocationIcon turns={[turn, estimated]} model={null} compactionSummary="" />);
 
     await user.click(screen.getByRole("button", { name: "Session invocation details" }));
     expect(screen.getByTestId("session-invocation-dialog")).toHaveTextContent("Estimated cost$0.38");
@@ -102,7 +102,7 @@ describe("SessionInvocationIcon", () => {
       ...turn,
       result: { ...turn.result, cost: undefined },
     } satisfies TurnTiming;
-    render(() => <SessionInvocationIcon turns={[turn, unknown]} model={null} />);
+    render(() => <SessionInvocationIcon turns={[turn, unknown]} model={null} compactionSummary="" />);
 
     await user.click(screen.getByRole("button", { name: "Session invocation details" }));
     expect(screen.getByTestId("session-invocation-dialog")).not.toHaveTextContent("Cost");

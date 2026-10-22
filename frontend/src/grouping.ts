@@ -1391,10 +1391,7 @@ export function turnSummary(turn: Turn): string {
 
 export function sessionSummary(session: Session): string {
   const parts: string[] = [];
-  if (session.boundaryEvent?.kind === "init" && session.boundaryEvent.init) {
-    const id = session.boundaryEvent.init.sessionID;
-    parts.push(`Session ${id.slice(0, 8)}`);
-  } else if (session.boundaryEvent?.system?.subtype === "context_cleared") {
+  if (session.boundaryEvent?.system?.subtype === "context_cleared") {
     parts.push("Cleared session");
   } else {
     parts.push("Compacted session");

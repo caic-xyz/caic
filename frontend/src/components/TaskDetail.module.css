@@ -947,6 +947,14 @@ a.ciStatus:hover {
   border-left: 2px solid var(--color-border-light);
 }
 
+.sessionSkills {
+  padding: 0.5rem;
+}
+
+.sessionSkills .skills {
+  margin: 0;
+}
+
 /* Session-level eliding: visually heavier than turn eliding to reflect the hierarchy. */
 .sessionElided {
   display: flex;
@@ -1105,12 +1113,6 @@ a.ciStatus:hover {
 .loadInputBtn:hover:not(:disabled) {
   color: var(--color-text-secondary);
   background: var(--color-bg-hover);
-}
-
-.usageMeta {
-  padding: 0.1rem 0.5rem;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
 }
 
 .askGroup {

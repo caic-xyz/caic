@@ -36,7 +36,6 @@ import type {
   ForgeCheck,
   EventSkillLoad,
   EventStats,
-  EventUsage,
   EventToolInputView,
   EventSubagentSpawn,
   TaskRateLimit,
@@ -608,6 +607,21 @@ export default function TaskDetail(props: Props) {
         .slice(splitIdx())
         .find((event) => event.kind === "init" && !isChildEvent(event)),
   );
+  // Closed context metadata belongs to the session preceding its boundary.
+  const sessionEndBoundaries = createMemo(() => {
+    const sessions = allCompletedSessions();
+    return new Map(pastSessions().map((session, i) => [session, sessions[i + 1]?.boundaryEvent]));
+  });
+  const sessionCompactionSummary = (session: Session) => {
+    const boundary = sessionEndBoundaries().get(session);
+    return boundary?.system?.subtype === "compact_boundary"
+      ? compactTokenSummary(boundary.system.contextTokensBefore, boundary.system.contextTokensAfter)
+      : "";
+  };
+  const sessionSkills = (session: Session) => {
+    const boundary = sessionEndBoundaries().get(session);
+    return boundary ? (contextSkills().closed.get(boundary) ?? []) : [];
+  };
   const currentSessionKey = createMemo(() => {
     const idx = allCompletedSessions().length - 1;
     const ev = currentSessionBoundaryEvent();
@@ -1352,25 +1366,8 @@ export default function TaskDetail(props: Props) {
                 }
                 return undefined;
               };
-              const pastBoundary = () => {
-                const current = item();
-                return current.kind === "sessionElided" || current.kind === "sessionHeader"
-                  ? current.session.boundaryEvent
-                  : undefined;
-              };
               return (
                 <>
-                  <Show when={pastBoundary()} keyed>
-                    {(event) => (
-                      <Show when={contextSkills().closed.has(event)}>
-                        <SessionBoundaryItem
-                          event={event}
-                          taskId={props.taskId}
-                          skills={contextSkills().closed.get(event) ?? []}
-                        />
-                      </Show>
-                    )}
-                  </Show>
                   <Switch>
                     <Match when={item().kind === "native"}>
                       <NativeAgents
@@ -1397,29 +1394,48 @@ export default function TaskDetail(props: Props) {
                               {se.session.durationMs > 0 ? formatTimingDuration(se.session.durationMs) : "0s"}
                             </span>
                           </button>
-                          <SessionInvocationIcon turns={sessionTimings(se.session)} model={props.model ?? null} />
+                          <SessionInvocationIcon
+                            turns={sessionTimings(se.session)}
+                            model={props.model ?? null}
+                            compactionSummary={sessionCompactionSummary(se.session)}
+                          />
                         </div>
                       )}
                     </Match>
                     {/* Expanded past session header: click to collapse. */}
                     <Match when={sessHdr()} keyed>
                       {(sh) => (
-                        <div
-                          class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
-                          data-anchor-key={`session:${sh.sessionKey}`}
-                        >
-                          <button
-                            type="button"
-                            class={styles.sessionToggle}
-                            onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
+                        <>
+                          <div
+                            class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`}
+                            data-anchor-key={`session:${sh.sessionKey}`}
                           >
-                            <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
-                            <span class={styles.sessionDuration}>
-                              {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
-                            </span>
-                          </button>
-                          <SessionInvocationIcon turns={sessionTimings(sh.session)} model={props.model ?? null} />
-                        </div>
+                            <button
+                              type="button"
+                              class={styles.sessionToggle}
+                              onClick={(e) => anchoredToggleSession(e, sh.sessionKey)}
+                            >
+                              <span class={styles.turnSummaryText}>{sessionSummary(sh.session)}</span>
+                              <span class={styles.sessionDuration}>
+                                {sh.session.durationMs > 0 ? formatTimingDuration(sh.session.durationMs) : "0s"}
+                              </span>
+                            </button>
+                            <SessionInvocationIcon
+                              turns={sessionTimings(sh.session)}
+                              model={props.model ?? null}
+                              compactionSummary={sessionCompactionSummary(sh.session)}
+                            />
+                          </div>
+                          <Show when={sessionSkills(sh.session).length > 0}>
+                            <div class={`${styles.indentSession} ${styles.sessionSkills}`}>
+                              <SkillStrip
+                                taskId={props.taskId}
+                                skills={sessionSkills(sh.session)}
+                                label="Previous context skills"
+                              />
+                            </div>
+                          </Show>
+                        </>
                       )}
                     </Match>
                     {/* Session boundary: init, compaction, or clear rendered as a separator. */}
@@ -1427,8 +1443,13 @@ export default function TaskDetail(props: Props) {
                       {(sb) => (
                         <SessionBoundaryItem
                           event={sb.event}
+                          grouped={sb.event === currentSessionBoundaryEvent() && pastSessions().length > 0}
                           taskId={props.taskId}
-                          skills={contextSkills().closed.get(sb.event) ?? []}
+                          skills={
+                            sb.event === currentSessionBoundaryEvent() && pastSessions().length > 0
+                              ? []
+                              : (contextSkills().closed.get(sb.event) ?? [])
+                          }
                         />
                       )}
                     </Match>
@@ -1855,7 +1876,12 @@ function SkillStrip(props: { taskId: string; skills: EventSkillLoad[]; label: st
 
 // Renders the header for a session boundary (init, compaction, or clear).
 // These events are extracted from the message stream and shown as section separators.
-function SessionBoundaryItem(props: { event: EventMessage; taskId: string; skills: EventSkillLoad[] }) {
+function SessionBoundaryItem(props: {
+  event: EventMessage;
+  grouped: boolean;
+  taskId: string;
+  skills: EventSkillLoad[];
+}) {
   const ev = () => props.event;
   const compactSummary = () => compactTokenSummary(ev().system?.contextTokensBefore, ev().system?.contextTokensAfter);
   return (
@@ -1876,7 +1902,7 @@ function SessionBoundaryItem(props: { event: EventMessage; taskId: string; skill
             </div>
           )}
         </Match>
-        <Match when={ev().system?.subtype === "compact_boundary"}>
+        <Match when={ev().system?.subtype === "compact_boundary" && !props.grouped}>
           <div class={styles.contextCleared}>
             Conversation compacted
             <Show when={compactSummary()}>{(summary) => ` · ${summary()}`}</Show>
@@ -1960,19 +1986,6 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   );
 }
 
-function usageMetaParts(u: EventUsage): string[] {
-  const tokenParts: string[] = [];
-  if (u.inputTokens > 0) tokenParts.push(`${formatTokens(u.inputTokens)} new`);
-  if (u.cacheCreationInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheCreationInputTokens)} cache write`);
-  if (u.cacheReadInputTokens > 0) tokenParts.push(`${formatTokens(u.cacheReadInputTokens)} cache read`);
-  if (u.outputTokens > 0) tokenParts.push(`${formatTokens(u.outputTokens)} out`);
-  if ((u.reasoningOutputTokens ?? 0) > 0) {
-    tokenParts.push(`${formatTokens(u.reasoningOutputTokens ?? 0)} thinking`);
-  }
-  if (tokenParts.length === 0) return [];
-  return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
-}
-
 function MessageItem(props: {
   taskId: string;
   ev: EventMessage;
@@ -2047,16 +2060,6 @@ function MessageItem(props: {
             <Markdown text={text.text} />
           </div>
         )}
-      </Match>
-      <Match when={props.ev.usage} keyed>
-        {(usage) => {
-          const parts = usageMetaParts(usage);
-          return (
-            <Show when={parts.length > 0}>
-              <div class={styles.usageMeta}>{parts.join(" · ")}</div>
-            </Show>
-          );
-        }}
       </Match>
       <Match when={props.ev.result} keyed>
         {(result) => (
