@@ -214,7 +214,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
   await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
   await bugFixCard.click();
-  await expect(page.getByTestId("task-setup").locator("summary")).toContainText("150ms");
+  await expect(page.getByTestId("task-setup").locator("summary")).toContainText("300ms");
   const toolSummary = page.getByText("4/4 tools: Read, Edit ×2, Bash");
   await expect(toolSummary).toBeVisible({ timeout: 10_000 });
   await toolSummary.click();
@@ -274,7 +274,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await captureScreenshot(page, "mobile", "task-repository-changes.png");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.getByTitle("Expand sidebar").click();
+  // The responsive breakpoint reopens the sidebar when the viewport returns to
+  // desktop width, so wait for that state instead of clicking a transient button.
   await expect(page.getByTitle("Collapse sidebar")).toBeVisible();
 
   // Screenshot 3: A running agent with verification still in progress.

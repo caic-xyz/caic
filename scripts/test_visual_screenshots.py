@@ -1,7 +1,6 @@
 """Unit tests for deterministic screenshot luminance comparison and render modes."""
 
 import argparse
-import json
 import socket
 import subprocess
 import tempfile
@@ -92,7 +91,7 @@ class GenerateModeTest(unittest.TestCase):
             mock.patch.object(visual_screenshots.subprocess, "run"),
             mock.patch.dict(
                 visual_screenshots.__dict__,
-                {"render_frontend": render, "write_manifest": lambda _directory: None},
+                {"render_frontend": render},
             ),
             mock.patch.dict(
                 visual_screenshots.__dict__,
@@ -177,41 +176,6 @@ class FrontendBundleFreshnessTest(unittest.TestCase):
 
 
 class ScreenshotTreeTest(unittest.TestCase):
-    def test_manifest_provenance_changes_with_generated_sdk_inputs(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
-            subprocess.run(
-                [
-                    "git",
-                    "-c",
-                    "user.name=Capture Test",
-                    "-c",
-                    "user.email=capture@example.test",
-                    "commit",
-                    "--quiet",
-                    "--allow-empty",
-                    "-m",
-                    "Fixture",
-                ],
-                cwd=root,
-                check=True,
-            )
-            output = root / "captures"
-            output.mkdir()
-            for name in ("sdk/caic/ts/v1/api.gen.ts", "sdk/mcp/ts/api.gen.ts", "sdk/voicegateway/ts/api.gen.ts"):
-                with self.subTest(input=name):
-                    source = root / name
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    source.write_text("export const version = 1;\n")
-                    with mock.patch.object(visual_screenshots, "ROOT_DIR", root):
-                        visual_screenshots.write_manifest(output)
-                        before = json.loads((output / "manifest.json").read_text())["source"]["inputsSha256"]
-                        source.write_text("export const version = 2;\n")
-                        visual_screenshots.write_manifest(output)
-                        after = json.loads((output / "manifest.json").read_text())["source"]["inputsSha256"]
-                    self.assertNotEqual(before, after)
-
     def test_image_files_keeps_recursive_relative_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

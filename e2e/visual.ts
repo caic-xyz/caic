@@ -127,6 +127,39 @@ export async function waitForVisualReadiness(page: Page): Promise<void> {
   }
   await page.evaluate(async () => {
     await document.fonts.ready;
+    const deadline = performance.now() + 5000;
+    const waitFor = (condition: () => boolean, target: EventTarget, events: string[], description: string) =>
+      new Promise<void>((resolve, reject) => {
+        if (condition()) {
+          resolve();
+          return;
+        }
+        const settle = () => {
+          window.clearTimeout(timer);
+          for (const event of events) target.removeEventListener(event, settle);
+          if (condition()) resolve();
+          else reject(new Error(`Timed out waiting for ${description}`));
+        };
+        const timer = window.setTimeout(settle, Math.max(0, deadline - performance.now()));
+        for (const event of events) target.addEventListener(event, settle, { once: true });
+      });
+    await waitFor(
+      () => document.readyState === "complete",
+      document,
+      ["readystatechange", "load"],
+      "document.readyState to complete",
+    );
+    for (const image of Array.from(document.images)) {
+      if (image.complete && image.naturalWidth === 0) {
+        throw new Error(`Screenshot image failed to load: ${image.currentSrc || image.src}`);
+      }
+      await waitFor(
+        () => image.complete && image.naturalWidth > 0,
+        image,
+        ["load", "error"],
+        `screenshot image to load: ${image.currentSrc || image.src}`,
+      );
+    }
     // Repaint the settled page so resized SVGs do not reuse partially
     // invalidated raster caches. Restore the exact style without changing layout.
     const root = document.documentElement;

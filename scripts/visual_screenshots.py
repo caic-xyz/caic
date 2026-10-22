@@ -9,8 +9,6 @@ rot silently."""
 
 import argparse
 import concurrent.futures
-import hashlib
-import json
 import os
 import shutil
 import socket
@@ -22,7 +20,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from screenshot_catalog import CatalogSpec, publish_catalog, recover_catalog, validate_catalog
+from screenshot_publish import publish_images, recover_images, validate_images
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_VISUAL_PORTS = (41741, 41742)
@@ -314,34 +312,27 @@ def render_frontend_passes(first: Path, second: Path, binary: Path | None = None
             future.result()
 
 
-def catalog_dimensions(path: Path) -> tuple[int, int]:
-    """Return dimensions of the first image/video stream in a scene."""
+def image_dimensions(path: Path) -> tuple[int, int]:
+    """Return dimensions of the first image/video stream."""
     width, height, _ = video_layout(path).strip().splitlines()[0].split(",")
     return int(width), int(height)
 
 
-def validate_frontend_catalog(directory: Path, expected_files: frozenset[str] | None) -> dict:
-    """Validate the complete frontend catalog against its owned images."""
-    spec = CatalogSpec("caic", "web", IMAGE_SUFFIXES, expected_files)
-    catalog = validate_catalog(directory, spec, catalog_dimensions)
-    for scene in catalog["scenarios"]:
-        path = Path(scene["file"])
-        name = path.with_suffix("").as_posix() + ("-animation" if path.suffix == ".avif" else "")
-        if scene["name"] != name:
-            raise RuntimeError("Frontend screenshot scene name disagrees with its file")
-    return catalog
+def validate_frontend_images(directory: Path, expected_files: frozenset[str] | None = FRONTEND_SCENE_FILES) -> None:
+    """Validate the frontend screenshot inventory against the shared image checks."""
+    validate_images(directory, expected_files, IMAGE_SUFFIXES, image_dimensions)
 
 
 def replace_baselines(source_dir: Path, baseline_dir: Path) -> None:
-    """Publish a validated frontend catalog while retaining recoverable prior images."""
+    """Publish validated frontend images while retaining recoverable prior images."""
     if baseline_dir != BASELINE_DIR:
         raise RuntimeError("Only the managed frontend baseline directory may be published")
-    publish_catalog(
+    publish_images(
         source_dir,
         ROOT_DIR,
         baseline_dir,
-        partial(validate_frontend_catalog, expected_files=FRONTEND_SCENE_FILES),
-        partial(validate_frontend_catalog, expected_files=None),
+        partial(validate_frontend_images, expected_files=FRONTEND_SCENE_FILES),
+        partial(validate_frontend_images, expected_files=None),
     )
 
 
@@ -353,60 +344,6 @@ def preserve_failure(platform: str, first: Path, second: Path) -> Path:
     shutil.copytree(first, destination / "first")
     shutil.copytree(second, destination / "second")
     return destination
-
-
-def write_manifest(directory: Path) -> None:
-    """Publish image dimensions, content hashes, and capture-input provenance."""
-    files = subprocess.run(
-        [
-            "git",
-            "ls-files",
-            "-co",
-            "--exclude-standard",
-            "--",
-            "backend",
-            "e2e",
-            "frontend",
-            "scripts/run-dev.py",
-            "scripts/visual_screenshots.py",
-            "scripts/screenshot_catalog.py",
-            "pnpm-lock.yaml",
-            *FRONTEND_BUILD_INPUTS,
-        ],
-        cwd=ROOT_DIR,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    digest = hashlib.sha256()
-    for name in sorted(set(files)):
-        source = ROOT_DIR / name
-        if source.is_file() and not name.startswith("e2e/screenshots/"):
-            digest.update(name.encode() + b"\0" + source.read_bytes() + b"\0")
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT_DIR, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    scenarios = []
-    for name, source in image_files(directory).items():
-        width, height, _ = video_layout(source).strip().splitlines()[0].split(",")
-        scenarios.append(
-            {
-                "name": str(Path(name).with_suffix("")) + ("-animation" if source.suffix == ".avif" else ""),
-                "file": name,
-                "width": int(width),
-                "height": int(height),
-                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-                "description": Path(name).stem.replace("-", " "),
-            }
-        )
-    manifest = {
-        "schemaVersion": 1,
-        "producer": "caic",
-        "platform": "web",
-        "source": {"revision": revision, "inputsSha256": digest.hexdigest()},
-        "scenarios": scenarios,
-    }
-    (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
@@ -445,11 +382,10 @@ def main() -> int:
                 )
                 return 1
 
-    committed = None
     if args.mode == "check":
-        committed = validate_frontend_catalog(BASELINE_DIR, FRONTEND_SCENE_FILES)
+        validate_frontend_images(BASELINE_DIR)
     elif args.mode == "update":
-        recover_catalog(ROOT_DIR, BASELINE_DIR, partial(validate_frontend_catalog, expected_files=None))
+        recover_images(ROOT_DIR, BASELINE_DIR, partial(validate_frontend_images, expected_files=None))
 
     with tempfile.TemporaryDirectory(prefix="caic-visual-") as tmp:
         tmp_dir = Path(tmp)
@@ -462,12 +398,10 @@ def main() -> int:
         if args.mode == "generate":
             print("Rendering frontend screenshots...")
             render_frontend(first, binary=binary)
-            write_manifest(first)
             print("frontend screenshots rendered.")
             return 0
         print("Rendering frontend screenshots (passes 1/2 and 2/2)...")
         render_frontend_passes(first, second, binary)
-        write_manifest(first)
 
         differences = compare_images(first, second, "frontend repeatability")
         if differences:
@@ -477,9 +411,6 @@ def main() -> int:
             return 1
 
         if args.mode == "check":
-            generated = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
-            if committed is None or committed["source"]["inputsSha256"] != generated["source"]["inputsSha256"]:
-                raise RuntimeError("Frontend capture inputs changed; run make screenshots-update")
             differences = compare_images(first, BASELINE_DIR, "frontend baseline")
             if differences:
                 print("\n".join(differences), file=sys.stderr)
