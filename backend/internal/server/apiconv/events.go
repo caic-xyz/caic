@@ -37,7 +37,7 @@ type ToolTimingTracker struct {
 	harness     harness.Name
 	cost        task.CostTracker
 	pricer      usage.ModelPricer
-	pending     map[string]time.Time
+	pending     map[agent.ToolKey]time.Time
 	planContent func(toolUseID string) string
 	window      task.ResultTextWindow
 	skillReads  agent.SkillReadTracker // Confirms inferred skill loads.
@@ -53,12 +53,21 @@ func NewToolTimingTracker(h harness.Name, model string, pricer usage.ModelPricer
 		cost:        task.CostTracker{Harness: h, Model: model},
 		pricer:      pricer,
 		planContent: planContent,
-		pending:     make(map[string]time.Time),
+		pending:     make(map[agent.ToolKey]time.Time),
 	}
 }
 
 // ConvertMessage converts an agent.Message into zero or more EventMessages.
 func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
+	events := tt.convertMessage(msg, now)
+	for i := range events {
+		events[i].Source = v1.EventMessageSource(*msg.Provenance())
+	}
+	return events
+}
+
+// convertMessage projects event payloads; ConvertMessage attaches their common origin.
+func (tt *ToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
 	turnCost, hasCost := tt.cost.Observe(msg, now, tt.pricer)
 	var ts int64
 	if !now.IsZero() {
@@ -95,7 +104,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			},
 		}}
 	case *agent.TextMessage:
-		if m.Text != "" {
+		if m.Text != "" || m.Source.HasIdentity() {
 			// TODO: propagate m.Phase to EventText once EventText has a Phase field.
 			return []v1.EventMessage{{
 				Kind: v1.EventKindText,
@@ -105,7 +114,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		}
 		return nil
 	case *agent.ToolUseMessage:
-		tt.rememberToolStart(m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
 		detail, inputView := ToolUseDisplay(m.Name, m.Input, &m.InputView)
 		if m.Detail != "" {
 			detail = m.Detail
@@ -138,7 +147,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			},
 		}}
 	case *agent.AskMessage:
-		tt.rememberToolStart(m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
 		return []v1.EventMessage{{
 			Kind: v1.EventKindAsk,
 			Ts:   ts,
@@ -148,7 +157,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			},
 		}}
 	case *agent.TodoMessage:
-		tt.rememberToolStart(m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
 		if todos := TodoItems(m.Todos); len(todos) > 0 {
 			return []v1.EventMessage{{
 				Kind: v1.EventKindTodo,
@@ -173,11 +182,12 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 	case *agent.ToolResultMessage:
 		nativeDuration, _ := agent.NativeDuration(m)
 		duration := nativeDuration.Seconds()
-		if started, ok := tt.pending[m.ToolUseID]; ok {
+		key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+		if started, ok := tt.pending[key]; ok {
 			if duration <= 0 && !now.IsZero() {
 				duration = now.Sub(started).Seconds()
 			}
-			delete(tt.pending, m.ToolUseID)
+			delete(tt.pending, key)
 		}
 		events := []v1.EventMessage{{
 			Kind: v1.EventKindToolResult,
@@ -217,7 +227,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		// fallback before resetting the window for the next turn.
 		result := m.Result
 		nativeDuration, _ := agent.NativeDuration(m)
-		if result == "" {
+		if result == "" && !m.Source.IsChild() {
 			result = tt.window.Value()
 		}
 		tt.window.Update(m)
@@ -267,7 +277,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		}
 		return nil
 	case *agent.ThinkingMessage:
-		if m.Text != "" {
+		if m.Text != "" || m.Source.HasIdentity() {
 			return []v1.EventMessage{{
 				Kind:     v1.EventKindThinking,
 				Ts:       ts,
@@ -366,7 +376,7 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 		}
 		return nil
 	case *agent.WidgetMessage:
-		tt.rememberToolStart(m.ToolUseID, now)
+		tt.rememberToolStart(m.Provenance(), m.ToolUseID, now)
 		return []v1.EventMessage{{
 			Kind: v1.EventKindWidget,
 			Ts:   ts,
@@ -445,20 +455,21 @@ func changeStat(stat *logv3.ChangeStat) *v1.EventChangeStat {
 // resolver returns content only for the visible ExitPlanMode, so superseded
 // plans and all other tool uses render without a snapshot.
 func (tt *ToolTimingTracker) planFor(m *agent.ToolUseMessage) string {
-	if tt.planContent == nil {
+	if m.Source.IsChild() || tt.planContent == nil {
 		return ""
 	}
 	return tt.planContent(m.ToolUseID)
 }
 
-func (tt *ToolTimingTracker) rememberToolStart(toolUseID string, now time.Time) {
-	if now.IsZero() {
+func (tt *ToolTimingTracker) rememberToolStart(source *agent.MessageSource, toolUseID string, now time.Time) {
+	key := agent.ToolKeyForSource(source, toolUseID)
+	if key.ToolUseID == "" || now.IsZero() {
 		return
 	}
-	if _, exists := tt.pending[toolUseID]; !exists && len(tt.pending) == maxPendingToolTimings {
-		tt.pending = make(map[string]time.Time)
+	if _, exists := tt.pending[key]; !exists && len(tt.pending) == maxPendingToolTimings {
+		tt.pending = make(map[agent.ToolKey]time.Time)
 	}
-	tt.pending[toolUseID] = now
+	tt.pending[key] = now
 }
 
 // AskQuestions converts agent ask questions to API DTOs.

@@ -1,11 +1,14 @@
-// Canonical subagent, batch, and background-command activity cards, rendered inline in the task transcript.
+// Stable expandable native activity cards with optional child transcripts and background-command results.
 
-import { For, Show } from "solid-js";
+import { createMemo, For, Show, type JSX } from "solid-js";
 
 import type { BackgroundCommandActivity, NativeActivity } from "../nativeSubagents";
 import { backgroundCommandStatus, nativeActivityStatus } from "../nativeSubagents";
 import { formatTimingDuration } from "../timing";
 import styles from "./NativeSubagents.module.css";
+import type { MessageGroup } from "../grouping";
+
+type TranscriptRenderer = (groups: () => MessageGroup[]) => JSX.Element;
 
 export function NativeActivityStatus(props: { activity: NativeActivity; settled: boolean }) {
   return (
@@ -18,8 +21,22 @@ export function NativeActivityStatus(props: { activity: NativeActivity; settled:
 // NativeAgentCard renders one folded lifecycle: identity, lifecycle status, and
 // the result the harness reported. It is a details/summary so keyboard users can
 // expand it without a pointer.
-export function NativeAgentCard(props: { activity: NativeActivity; settled: boolean }) {
+export function NativeAgentCard(props: {
+  activity: NativeActivity;
+  settled: boolean;
+  renderTranscript?: TranscriptRenderer;
+}) {
   const activity = () => props.activity;
+  const hasTranscript = () => !!(activity().transcript?.length && props.renderTranscript);
+  const showResult = createMemo(() => {
+    if (!hasTranscript()) return true;
+    const result = activity().result?.trim();
+    if (!result) return false;
+    return !activity().transcript?.some((group) => {
+      if (group.content) return group.kind === "text" && group.content.complete && group.content.text.trim() === result;
+      return group.events.findLast((event) => event.kind === "text")?.text?.text.trim() === result;
+    });
+  });
   return (
     <details
       class={styles.card}
@@ -53,20 +70,39 @@ export function NativeAgentCard(props: { activity: NativeActivity; settled: bool
         <h4>Prompt</h4>
         <pre>{activity().prompt}</pre>
       </Show>
-      <h4>Result</h4>
-      <pre>{activity().result || "No result reported by the harness."}</pre>
+      <Show when={hasTranscript()}>{props.renderTranscript?.(() => activity().transcript ?? [])}</Show>
+      <Show when={showResult()}>
+        <h4>Result</h4>
+        <pre>{activity().result || "No result reported by the harness."}</pre>
+      </Show>
     </details>
   );
 }
 
 // NativeAgents renders the cards anchored to one transcript item. It renders
 // nothing when the item has no anchored activity.
-export default function NativeAgents(props: { activities: NativeActivity[]; settled: boolean }) {
+export default function NativeAgents(props: {
+  activities: NativeActivity[];
+  settled: boolean;
+  renderTranscript?: TranscriptRenderer;
+}) {
+  const byID = createMemo(() => new Map(props.activities.map((activity) => [activity.id, activity])));
+  const ids = createMemo(() => props.activities.map((activity) => activity.id));
   return (
     <Show when={props.activities.length > 0}>
       <div class={styles.anchored} data-testid="native-subagents">
-        <For each={props.activities}>
-          {(activity) => <NativeAgentCard activity={activity} settled={props.settled} />}
+        <For each={ids()}>
+          {(id) => (
+            <Show when={byID().get(id)}>
+              {(activity) => (
+                <NativeAgentCard
+                  activity={activity()}
+                  settled={props.settled}
+                  renderTranscript={props.renderTranscript}
+                />
+              )}
+            </Show>
+          )}
         </For>
       </div>
     </Show>

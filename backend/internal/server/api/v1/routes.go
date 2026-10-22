@@ -390,11 +390,12 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[StatusResp](),
 	},
 	{
-		Name:   "getTaskToolInput",
-		Doc:    "Returns the full (untruncated) input for a tool call.",
-		Method: "GET",
-		Path:   "/api/caic/v1/tasks/{id}/tool/{toolUseID}",
-		Resp:   reflect.TypeFor[TaskToolInputResp](),
+		Name:        "getTaskToolInput",
+		Doc:         "Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns.",
+		Method:      "GET",
+		Path:        "/api/caic/v1/tasks/{id}/tool/{toolUseID}",
+		Resp:        reflect.TypeFor[TaskToolInputResp](),
+		QueryParams: []string{"agentID", "delegationToolUseID", "threadID", "turnID"},
 	},
 	{
 		Name:   "globalTaskEvents",

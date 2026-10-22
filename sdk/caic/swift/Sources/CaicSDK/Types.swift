@@ -1337,6 +1337,19 @@ public struct CreateTaskReq: Codable {
     public let caicMCP: Bool?
 }
 
+/// EventMessageSource identifies the provider origin of any normalized event.
+/// AgentID and DelegationToolUseID identify child ownership independently of native
+/// item identity. RootThreadID is an authoritative session owner when reported.
+/// Fields remain absent when the harness does not supply them.
+public struct EventMessageSource: Codable {
+    public let agentID: String?
+    public let delegationToolUseID: String?
+    public let threadID: String?
+    public let turnID: String?
+    public let itemID: String?
+    public let rootThreadID: String?
+}
+
 /// EventInit is emitted once at the start of a session. It includes a Harness
 /// field so the client knows which backend produced the stream.
 public struct EventInit: Codable {
@@ -1674,6 +1687,7 @@ public struct EventSkillLoad: Codable {
 /// EventMessage is a single SSE event in the backend-neutral stream
 /// (/api/caic/v1/tasks/{id}/events). All backends produce these events.
 public struct EventMessage: Codable {
+    public let source: EventMessageSource?
     public let kind: EventKind
     public let ts: Int
     public let `init`: EventInit?

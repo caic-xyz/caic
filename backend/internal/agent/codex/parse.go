@@ -1,4 +1,4 @@
-// Parses Codex CLI wire messages into canonical agent events.
+// Parses Codex CLI wire messages into canonical agent events with provider message provenance.
 
 package codex
 
@@ -89,7 +89,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			ReportedModel:  p.Thread.Model,
 			Version:        p.Thread.CLIVersion,
 			ReportedEffort: string(p.Thread.ReasoningEffort),
-		}}, decodedItem{}, nil
+		}}, decodedItem{threadStarted: &p}, nil
 
 	case codex.MethodTurnStarted:
 		return nil, decodedItem{}, nil
@@ -115,13 +115,13 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 				IsError:     true,
 				Result:      errMsg,
 				DurationMs:  durationMs,
-			}}, decodedItem{turnCompleted: &p}, nil
+			}}, decodedItem{turnCompleted: &p, source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.Turn.ID}}, nil
 		default: // completed, inProgress
 			return []agent.Message{&agent.ResultMessage{
 				MessageType: "result",
 				Subtype:     "result",
 				DurationMs:  durationMs,
-			}}, decodedItem{turnCompleted: &p}, nil
+			}}, decodedItem{turnCompleted: &p, source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.Turn.ID}}, nil
 		}
 
 	case codex.MethodItemStarted, codex.MethodItemCompleted:
@@ -139,14 +139,34 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		} else {
 			msgs, err = parseItemCompleted(&msg, raw, typ)
 		}
-		return msgs, decodedItem{raw: raw, typ: typ, threadID: threadID}, err
+		turnID, sourceErr := agent.JSONString(msg.Params, "turnId")
+		if sourceErr != nil {
+			return nil, decodedItem{}, fmt.Errorf("%s turnId: %w", msg.Method, sourceErr)
+		}
+		itemID, sourceErr := agent.JSONString(raw, "id")
+		if sourceErr != nil {
+			return nil, decodedItem{}, fmt.Errorf("%s item id: %w", msg.Method, sourceErr)
+		}
+		source := agent.MessageSource{ThreadID: threadID, TurnID: turnID, ItemID: itemID}
+		for _, m := range msgs {
+			*m.Provenance() = source
+		}
+		record := decodedItem{raw: raw, typ: typ, source: source}
+		if typ == codex.ItemTypeSubAgentActivity {
+			var activity codex.SubAgentActivityItem
+			if e := json.Unmarshal(raw, &activity); e != nil {
+				return nil, record, e
+			}
+			record.activity = &activity
+		}
+		return msgs, record, err
 
 	case codex.MethodItemDelta:
 		var p codex.AgentMessageDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("item/agentMessage/delta params: %w", err)
 		}
-		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta}}, decodedItem{}, nil
+		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta, Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}}}, decodedItem{}, nil
 
 	case codex.MethodErrorNotification:
 		var p codex.ErrorNotification
@@ -157,6 +177,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			return nil, decodedItem{}, nil
 		}
 		return []agent.Message{&agent.ResultMessage{
+			Source:      agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
 			MessageType: "result",
 			Subtype:     "result",
 			IsError:     true,
@@ -182,21 +203,21 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("item/reasoning/summaryTextDelta params: %w", err)
 		}
-		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta}}, decodedItem{}, nil
+		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta, Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}}}, decodedItem{}, nil
 
 	case codex.MethodCommandOutputDelta:
 		var p codex.CommandExecutionOutputDeltaNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("commandExecution/outputDelta params: %w", err)
 		}
-		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Delta}}, decodedItem{}, nil
+		return []agent.Message{&agent.ToolOutputDeltaMessage{Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}, ToolUseID: p.ItemID, Delta: p.Delta}}, decodedItem{}, nil
 
 	case codex.MethodMcpToolCallProgress:
 		var p codex.McpToolCallProgressNotification
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
 			return nil, decodedItem{}, fmt.Errorf("mcpToolCall/progress params: %w", err)
 		}
-		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Message}}, decodedItem{}, nil
+		return []agent.Message{&agent.ToolOutputDeltaMessage{Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.ItemID}, ToolUseID: p.ItemID, Delta: p.Message}}, decodedItem{}, nil
 
 	case codex.MethodThreadStatusChanged:
 		var p codex.ThreadStatusChangedNotification
@@ -204,9 +225,10 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			return nil, decodedItem{}, fmt.Errorf("thread/status/changed params: %w", err)
 		}
 		return []agent.Message{&agent.SystemMessage{
+			Source:      agent.MessageSource{ThreadID: p.ThreadID},
 			MessageType: "system",
 			Subtype:     string(p.Status.Type),
-		}}, decodedItem{statusChanged: &p}, nil
+		}}, decodedItem{statusChanged: &p, source: agent.MessageSource{ThreadID: p.ThreadID}}, nil
 
 	case codex.MethodModelRerouted:
 		var p codex.ModelReroutedNotification
@@ -218,6 +240,7 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 			detail += " (" + string(p.Reason) + ")"
 		}
 		return []agent.Message{&agent.SystemMessage{
+			Source:        agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID},
 			MessageType:   "system",
 			Subtype:       agent.SystemSubtypeModelRerouted,
 			Detail:        detail,
@@ -225,7 +248,22 @@ func parseMessage(line []byte, probe *agent.JSONRPCEnvelope) ([]agent.Message, d
 		}}, decodedItem{}, nil
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, decodedItem{}, nil
+		raw := &agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}
+		if len(msg.Params) > 0 && msg.Params[0] == '{' {
+			for _, field := range []struct {
+				name  string
+				value *string
+			}{
+				{"threadId", &raw.Source.ThreadID}, {"turnId", &raw.Source.TurnID}, {"itemId", &raw.Source.ItemID},
+			} {
+				value, err := agent.JSONString(msg.Params, field.name)
+				if err != nil {
+					return nil, decodedItem{}, fmt.Errorf("%s %s: %w", msg.Method, field.name, err)
+				}
+				*field.value = value
+			}
+		}
+		return []agent.Message{raw}, decodedItem{}, nil
 	}
 }
 
@@ -258,7 +296,12 @@ func parseThreadGoalUpdated(params json.RawMessage) ([]agent.Message, error) {
 	if p.Goal.Status != codex.ThreadGoalStatusUsageLimited {
 		return nil, nil
 	}
-	return []agent.Message{newCodexRateLimitMessage(agent.RateLimitStatusRejected, "thread_goal", "thread_goal", 1, time.Time{})}, nil
+	m := newCodexRateLimitMessage(agent.RateLimitStatusRejected, "thread_goal", "thread_goal", 1, time.Time{})
+	m.Source.ThreadID = p.ThreadID
+	if p.TurnID != nil {
+		m.Source.TurnID = *p.TurnID
+	}
+	return []agent.Message{m}, nil
 }
 
 func codexRateLimitMessages(s *codex.RateLimitSnapshot, spendControlReached *bool) []agent.Message {

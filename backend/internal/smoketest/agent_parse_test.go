@@ -1,4 +1,4 @@
-// Tests fake-agent parsing preserves skill provenance, context boundaries, usage, and timing fields.
+// Tests fake-agent parsing preserves stream and skill provenance, context boundaries, usage, and timing fields.
 
 package smoketest
 
@@ -10,6 +10,75 @@ import (
 
 func TestParseMessage(t *testing.T) {
 	t.Parallel()
+	t.Run("stream provenance", func(t *testing.T) {
+		t.Parallel()
+		for _, typ := range []string{"text", "text_delta", "thinking", "thinking_delta"} {
+			t.Run(typ, func(t *testing.T) {
+				t.Parallel()
+				for _, text := range []string{"fragment", ""} {
+					t.Run(text, func(t *testing.T) {
+						t.Parallel()
+						line := `{"type":"` + typ + `","text":"` + text + `","source":{"threadID":"child","turnID":"turn","itemID":"item","rootThreadID":"parent"}}`
+						messages, err := parseMessage([]byte(line))
+						if err != nil || len(messages) != 1 {
+							t.Fatalf("stream parse = %v, %v", messages, err)
+						}
+						var source agent.MessageSource
+						var got string
+						switch m := messages[0].(type) {
+						case *agent.TextMessage:
+							source, got = m.Source, m.Text
+						case *agent.TextDeltaMessage:
+							source, got = m.Source, m.Text
+						case *agent.ThinkingMessage:
+							source, got = m.Source, m.Text
+						case *agent.ThinkingDeltaMessage:
+							source, got = m.Source, m.Text
+						default:
+							t.Fatalf("stream type = %T", messages[0])
+						}
+						if got != text || source.ThreadID != "child" || source.TurnID != "turn" || source.ItemID != "item" || source.RootThreadID != "parent" {
+							t.Fatalf("stream = %q, %+v", got, source)
+						}
+					})
+				}
+			})
+		}
+	})
+	t.Run("tool and usage provenance", func(t *testing.T) {
+		t.Parallel()
+		for _, record := range []string{
+			`{"type":"tool_use","id":"shared","name":"Bash","input":{"command":"echo child"}}`,
+			`{"type":"tool_output_delta","tool_use_id":"shared","delta":"child output"}`,
+			`{"type":"usage","usage":{"input_tokens":23},"model":"child-model","context_window":1024}`,
+		} {
+			line := record[:len(record)-1] + `,"source":{"threadID":"child","rootThreadID":"parent","agentID":"native-child"}}`
+			messages, err := parseMessage([]byte(line))
+			if err != nil || len(messages) != 1 {
+				t.Fatalf("parse = %v, %v", messages, err)
+			}
+			source := messages[0].Provenance()
+			if source.ThreadID != "child" || source.RootThreadID != "parent" || source.AgentID != "native-child" {
+				t.Fatalf("%T source = %+v", messages[0], source)
+			}
+			switch m := messages[0].(type) {
+			case *agent.ToolUseMessage:
+				if m.ToolUseID != "shared" || m.Name != "Bash" {
+					t.Fatalf("tool = %+v", m)
+				}
+			case *agent.ToolOutputDeltaMessage:
+				if m.ToolUseID != "shared" || m.Delta != "child output" {
+					t.Fatalf("output = %+v", m)
+				}
+			case *agent.UsageMessage:
+				if m.Usage.InputTokens != 23 || m.ReportedModel != "child-model" || m.ContextWindow != 1024 {
+					t.Fatalf("usage = %+v", m)
+				}
+			default:
+				t.Fatalf("unexpected message %T", m)
+			}
+		}
+	})
 	t.Run("skill provenance", func(t *testing.T) {
 		t.Parallel()
 		messages, err := parseMessage([]byte(`{"type":"skill_load","skill":"review","path":"/skills/review/SKILL.md"}`))

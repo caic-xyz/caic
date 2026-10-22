@@ -1,6 +1,7 @@
-// Incremental task timing derivation: associates completed turns with waits and committed change.
+// Incremental root invocation timing and bounded visual-block spans for concurrent task streams.
 
 import type { EventChangeStat, EventMessage, EventResult } from "@sdk/types.gen";
+import { isChildEvent } from "./grouping";
 
 export interface TurnTiming {
   event: EventMessage;
@@ -99,6 +100,7 @@ export class IncrementalTaskTimingTracker {
   }
 
   private append(event: EventMessage) {
+    if (isChildEvent(event)) return;
     if (event.kind === "init") {
       this.reportedModel = event.init?.reportedModel || undefined;
     }

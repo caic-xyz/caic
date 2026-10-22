@@ -298,3 +298,58 @@ func routeByName(t *testing.T, name string) Route {
 	t.Fatalf("route %q not found", name)
 	return Route{}
 }
+
+func TestEventMessageSource(t *testing.T) {
+	t.Parallel()
+	t.Run("IsZero", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name   string
+			source EventMessageSource
+			zero   bool
+		}{
+			{name: "absent", zero: true},
+			{name: "agent only", source: EventMessageSource{AgentID: "native:child"}},
+			{name: "delegation only", source: EventMessageSource{DelegationToolUseID: "delegate"}},
+			{name: "root only", source: EventMessageSource{RootThreadID: "root"}},
+			{name: "thread only", source: EventMessageSource{ThreadID: "thread"}},
+			{name: "turn only", source: EventMessageSource{TurnID: "turn"}},
+			{name: "item only", source: EventMessageSource{ItemID: "item"}},
+			{name: "missing thread", source: EventMessageSource{TurnID: "turn", ItemID: "item"}},
+			{name: "missing turn", source: EventMessageSource{ThreadID: "thread", ItemID: "item"}},
+			{name: "missing item", source: EventMessageSource{ThreadID: "thread", TurnID: "turn"}},
+			{name: "complete rootless", source: EventMessageSource{ThreadID: "thread", TurnID: "turn", ItemID: "item"}},
+			{name: "complete rooted", source: EventMessageSource{ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if got := tc.source.IsZero(); got != tc.zero {
+					t.Errorf("IsZero() = %t, want %t", got, tc.zero)
+				}
+				for _, message := range []EventMessage{{Source: tc.source, Text: &EventText{Text: "visible"}}, {Source: tc.source, TextDelta: &EventTextDelta{Text: "fragment"}}, {Source: tc.source, Thinking: &EventThinking{Text: "reason"}}, {Source: tc.source, ToolUse: &EventToolUse{Name: "Bash"}}} {
+					encoded, err := json.Marshal(message)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var fields map[string]json.RawMessage
+					if err := json.Unmarshal(encoded, &fields); err != nil {
+						t.Fatal(err)
+					}
+					raw, present := fields["source"]
+					if present == tc.zero {
+						t.Errorf("%T source presence = %t: %s", message, present, encoded)
+					}
+					if present {
+						var decoded EventMessageSource
+						if err := json.Unmarshal(raw, &decoded); err != nil {
+							t.Fatal(err)
+						}
+						if decoded != tc.source {
+							t.Errorf("%T source = %+v, want %+v", message, decoded, tc.source)
+						}
+					}
+				}
+			})
+		}
+	})
+}

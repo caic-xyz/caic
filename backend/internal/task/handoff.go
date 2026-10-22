@@ -185,7 +185,7 @@ func handoffRateLimitLocked(source *Task) RateLimit {
 	entries := source.timelineViewLocked()
 	for _, entry := range entries.Backward() {
 		message, ok := entry.Message.(*agent.RateLimitMessage)
-		if !ok {
+		if !ok || message.IsChildThreadGoal() {
 			continue
 		}
 		limit := rateLimitFromMessage(message)
@@ -203,6 +203,9 @@ func handoffRateLimitLocked(source *Task) RateLimit {
 
 func latestHandoffResult(entries timelineEntries) (handoffResult, bool) {
 	for i, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		result, ok := entry.Message.(*agent.ResultMessage)
 		if !ok {
 			continue
@@ -223,6 +226,9 @@ func recentHandoffTurns(initialPrompt string, entries timelineEntries) []handoff
 	turns := make([]handoffTurn, 0, maxHandoffConversationTurns)
 	skippedInitialPrompt := false
 	for _, entry := range entries.Forward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		var turn handoffTurn
 		switch m := entry.Message.(type) {
 		case *agent.UserInputMessage:

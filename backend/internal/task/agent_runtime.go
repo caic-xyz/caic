@@ -1202,7 +1202,7 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 	go func() {
 		defer close(done)
 		// Track tool_use IDs from ToolUseMessage that may mutate files.
-		pendingMutating := make(map[string]struct{})
+		pendingMutating := make(map[agent.ToolKey]struct{})
 		for parsed := range msgCh {
 			m := parsed.Message
 			emitToolDiff := false
@@ -1211,14 +1211,17 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 			switch msg := m.(type) {
 			case *agent.ToolUseMessage:
 				if _, ok := mutatingTools[msg.Name]; ok {
-					pendingMutating[msg.ToolUseID] = struct{}{}
+					pendingMutating[agent.ToolKeyForSource(msg.Provenance(), msg.ToolUseID)] = struct{}{}
 				}
 			case *agent.ToolResultMessage:
-				if _, ok := pendingMutating[msg.ToolUseID]; ok {
-					delete(pendingMutating, msg.ToolUseID)
+				if _, ok := pendingMutating[agent.ToolKeyForSource(msg.Provenance(), msg.ToolUseID)]; ok {
+					delete(pendingMutating, agent.ToolKeyForSource(msg.Provenance(), msg.ToolUseID))
 					emitToolDiff = r.Runtimes != nil && r.Checkout != nil
 				}
 			case *agent.ResultMessage:
+				if msg.Source.IsChild() {
+					break
+				}
 				if r.Runtimes != nil && r.Checkout != nil {
 					previous := t.latestCommitSnapshot()
 					var baseline []v3.RepositoryCommit

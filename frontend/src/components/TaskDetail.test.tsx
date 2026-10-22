@@ -1,4 +1,4 @@
-// Tests for TaskDetail navigation, runtime file links, prompts, and SSE connection behaviour.
+// Tests parent/child ownership, scoped tool interaction, task navigation, and SSE lifecycle.
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -105,6 +105,104 @@ function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {})
   ));
 }
 
+it("keeps a child-first card mounted and open as parent content and lifecycle metadata arrive", async () => {
+  const source = {
+    agentID: "codex:thread:child",
+    threadID: "child",
+    rootThreadID: "parent",
+    turnID: "turn",
+    itemID: "answer",
+  };
+  let send: ((message: EventMessage) => void) | undefined;
+  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    send = handlers.onMessage;
+    handlers.onMessage({ kind: "textDelta", ts: 1000, source, textDelta: { text: "Child first" } });
+    handlers.onReady?.();
+    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  renderTaskDetail();
+  const card = screen.getByTestId("native-subagent-card");
+  const summary = card.querySelector("summary");
+  if (!summary) throw new Error("Missing native summary");
+  await userEvent.setup().click(summary);
+  const block = within(card).getByTestId("stream-message");
+  send?.({
+    kind: "textDelta",
+    ts: 2000,
+    source: { ...source, agentID: undefined, threadID: "parent" },
+    textDelta: { text: "Parent later" },
+  });
+  send?.({
+    kind: "nativeSubagent",
+    ts: 2100,
+    nativeSubagent: { id: "codex:thread:child", label: "Research", status: "running" },
+  });
+  await waitFor(() => expect(screen.getByText("Parent later")).toBeInTheDocument());
+  expect(screen.getByTestId("native-subagent-card")).toBe(card);
+  expect(card).toHaveAttribute("open");
+  expect(within(card).getByTestId("stream-message")).toBe(block);
+  expect(
+    card.compareDocumentPosition(screen.getByText("Parent later")) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+it("keeps concurrent child Markdown and parent thinking stable through item and lifecycle completion", async () => {
+  const parent = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "reason" };
+  const child = { ...parent, agentID: "codex:thread:child", threadID: "child", itemID: "answer" };
+  let send: ((message: EventMessage) => void) | undefined;
+  taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+    send = handlers.onMessage;
+    const initial: EventMessage[] = [
+      { kind: "thinkingDelta", ts: 1000, source: parent, thinkingDelta: { text: "Consider " } },
+      {
+        kind: "nativeSubagent",
+        ts: 1100,
+        nativeSubagent: { id: "codex:thread:child", label: "Research", status: "running" },
+      },
+      { kind: "textDelta", ts: 1200, source: child, textDelta: { text: "- A **bow" } },
+    ];
+    initial.forEach(handlers.onMessage);
+    handlers.onReady?.();
+    return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+  });
+  renderTaskDetail();
+  const card = screen.getByTestId("native-subagent-card");
+  const summary = card.querySelector("summary");
+  if (!summary) throw new Error("Missing native summary");
+  await userEvent.setup().click(summary);
+  const childBlock = within(card).getByTestId("stream-message");
+  const parentBlock = screen.getAllByTestId("stream-message").find((element) => !card.contains(element));
+  const thinking = parentBlock?.querySelector("details");
+  expect(thinking).not.toHaveAttribute("open");
+  send?.({ kind: "thinkingDelta", ts: 1300, source: parent, thinkingDelta: { text: "triangulation." } });
+  send?.({ kind: "userInput", ts: 1400, userInput: { text: "Continue" } });
+  send?.({ kind: "textDelta", ts: 1500, source: child, textDelta: { text: "tie** example." } });
+  send?.({ kind: "text", ts: 1600, source: child, text: { text: "- A **bowtie** example." } });
+  send?.({ kind: "thinking", ts: 1700, source: parent, thinking: { text: "Consider triangulation." } });
+  send?.({
+    kind: "nativeSubagent",
+    ts: 1800,
+    nativeSubagent: {
+      id: "codex:thread:child",
+      label: "Research",
+      status: "completed",
+      result: "- A **bowtie** example.",
+    },
+  });
+  await waitFor(() => expect(within(card).getByText("Completed")).toBeInTheDocument());
+  expect(screen.getByTestId("native-subagent-card")).toBe(card);
+  expect(card).toHaveAttribute("open");
+  expect(within(card).getByTestId("stream-message")).toBe(childBlock);
+  expect(within(childBlock).getByRole("listitem").querySelector("strong")?.textContent).toBe("bowtie");
+  expect(parentBlock?.querySelector("details")).toBe(thinking);
+  expect(parentBlock?.textContent).toContain("Consider triangulation.");
+  send?.({ kind: "text", ts: 1900, source: child, text: { text: "" } });
+  send?.({ kind: "thinking", ts: 2000, source: parent, thinking: { text: "" } });
+  await waitFor(() => expect(childBlock.textContent).toBe(""));
+  expect(parentBlock?.querySelector("details")).toBeNull();
+  expect(parentBlock?.textContent).toBe("");
+});
+
 it("shows retained disk usage for a stopped task", () => {
   renderTaskDetail({ taskState: "stopped", stoppedDiskUsedBytes: 2_097_152 });
 
@@ -145,6 +243,139 @@ function resultEvent(ts: number): EventMessage {
 }
 
 describe("TaskDetail", () => {
+  it("keeps child tool DOM, output, errors, and scoped input separate from a simultaneous same-ID root tool", async (t) => {
+    const root = { threadID: "root", turnID: "turn" };
+    const child = { threadID: "child", turnID: "turn", agentID: "native:child", delegationToolUseID: "spawn" };
+    const sibling = { threadID: "sibling", turnID: "turn", agentID: "native:sibling" };
+    let send: ((message: EventMessage) => void) | undefined;
+    const inputSpy = vi
+      .spyOn(api, "getTaskToolInput")
+      .mockResolvedValue({ toolUseID: "same", input: { scoped: "child input" } });
+    t.after(() => inputSpy.mockRestore());
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      send = handlers.onMessage;
+      handlers.onMessage({
+        kind: "toolUse",
+        ts: 1000,
+        source: root,
+        toolUse: { toolUseID: "same", name: "Parent tool", input: {} },
+      });
+      handlers.onMessage({
+        kind: "toolUse",
+        ts: 2000,
+        source: child,
+        toolUse: { toolUseID: "same", name: "Child tool", input: {}, inputTruncated: true },
+      });
+      handlers.onMessage({
+        kind: "toolUse",
+        ts: 2100,
+        source: sibling,
+        toolUse: { toolUseID: "same", name: "Sibling tool", input: {} },
+      });
+      handlers.onMessage({ kind: "skillLoad", ts: 2200, source: root, skillLoad: { skill: "root-skill" } });
+      handlers.onMessage({
+        kind: "todo",
+        ts: 2300,
+        source: root,
+        todo: { toolUseID: "todo", todos: [{ content: "Root todo", activeForm: "Root todo", status: "pending" }] },
+      });
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    const user = userEvent.setup();
+    const card = screen
+      .getAllByTestId("native-subagent-card")
+      .find((entry) => entry.getAttribute("data-native-id") === "native:child");
+    if (!card) throw new Error("Missing child card");
+    const nativeSummary = card.querySelector("summary");
+    if (!nativeSummary) throw new Error("Missing native summary");
+    await user.click(nativeSummary);
+    await user.click(within(card).getByText("0/1 tools: Child tool"));
+    const call = within(card).getByTestId("tool-call");
+    const summary = call.querySelector("summary");
+    if (!summary) throw new Error("Missing tool summary");
+    await user.click(summary);
+    await user.click(within(call).getByRole("button", { name: "Load input" }));
+    expect(inputSpy).toHaveBeenCalledWith("abc", "same", "native:child", "spawn", "child", "turn");
+    summary.focus();
+    send?.({
+      kind: "toolOutputDelta",
+      ts: 2900,
+      source: sibling,
+      toolOutputDelta: { toolUseID: "same", delta: "Sibling output" },
+    });
+    send?.({
+      kind: "toolUse",
+      ts: 2950,
+      source: child,
+      toolUse: { toolUseID: "next", name: "Child helper", input: {} },
+    });
+    send?.({
+      kind: "toolOutputDelta",
+      ts: 3000,
+      source: child,
+      toolOutputDelta: { toolUseID: "same", delta: "Child output" },
+    });
+    send?.({ kind: "text", ts: 3500, source: root, text: { text: "Parent continues" } });
+    send?.({
+      kind: "toolResult",
+      ts: 4000,
+      source: child,
+      toolResult: { toolUseID: "same", duration: 2, error: "Child tool failed" },
+    });
+    send?.({
+      kind: "system",
+      ts: 4500,
+      source: child,
+      system: { subtype: "error", detail: "Provider child error detail" },
+    });
+    send?.({ kind: "skillLoad", ts: 4600, source: child, skillLoad: { skill: "child-skill" } });
+    send?.({
+      kind: "todo",
+      ts: 4700,
+      source: child,
+      todo: { toolUseID: "todo", todos: [{ content: "Child todo", activeForm: "Child todo", status: "pending" }] },
+    });
+    send?.({ kind: "system", ts: 4800, source: child, system: { subtype: "compact_boundary" } });
+    await waitFor(() => expect(within(card).getByText("Provider child error detail")).toBeInTheDocument());
+    expect(within(card).getAllByTestId("tool-call")[0]).toBe(call);
+    expect(call).toHaveAttribute("open");
+    expect(summary).toHaveFocus();
+    expect(within(call).getByText("Child output")).toBeInTheDocument();
+    expect(within(call).getByText("Child tool failed")).toBeInTheDocument();
+    expect(screen.getByText("0/1 tools: Parent tool")).toBeInTheDocument();
+    expect(within(card).getByText("1/2 tools: Child tool, Child helper")).toBeInTheDocument();
+    expect(within(card).queryByText("Sibling output")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("navigation", { name: "Loaded skills" })).getByText("root-skill"),
+    ).toBeInTheDocument();
+    const progress = screen.getByText("Todos 0/1").closest("details");
+    expect(progress?.textContent).toContain("Root todo");
+    expect(progress?.textContent).not.toContain("Child todo");
+  });
+
+  it("keeps an identified answer mounted when the successful result repeats it", async () => {
+    const source = { threadID: "parent", rootThreadID: "parent", turnID: "turn", itemID: "answer" };
+    let send: ((message: EventMessage) => void) | undefined;
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      send = handlers.onMessage;
+      handlers.onMessage({ kind: "textDelta", ts: 1000, source, textDelta: { text: "Finished." } });
+      handlers.onReady?.();
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    renderTaskDetail();
+    const block = screen.getByTestId("stream-message");
+    send?.({ kind: "text", ts: 2000, source, text: { text: "Finished." } });
+    const completion = resultEvent(3000);
+    if (!completion.result) throw new Error("Missing result payload");
+    completion.result.result = "Finished.";
+    send?.(completion);
+    await waitFor(() => expect(screen.getByText("Done")).toBeInTheDocument());
+    expect(screen.getByTestId("stream-message")).toBe(block);
+    expect(screen.getAllByText("Finished.")).toHaveLength(1);
+  });
+
   it("omits empty session metadata without leaving extra separators", async () => {
     taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({

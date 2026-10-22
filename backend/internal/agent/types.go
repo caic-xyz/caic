@@ -53,6 +53,11 @@ const SystemSubtypeCompactBoundary = "compact_boundary"
 // so the context was left unchanged.
 const SystemSubtypeCompactError = "compact_error"
 
+// SystemSubtypeExternalActivity retains informational provider activity outside
+// the root conversation without claiming it belongs to a task child. It cannot
+// start a root turn, replace its answer, or clear its result/error state.
+const SystemSubtypeExternalActivity = "external_activity"
+
 // MCPRequestMessage carries one task-local MCP request from the relay.
 type MCPRequestMessage v3.MCPRequestMessage
 
@@ -61,6 +66,8 @@ func (*MCPRequestMessage) Type() string { return messageTypeMCPRequest }
 
 // Message is the interface for all agent streaming messages.
 type Message interface {
+	// Provenance returns the message-owned source. Zero denotes global or unknown origin.
+	Provenance() *MessageSource
 	// Type returns the message type string.
 	Type() string
 }
@@ -113,6 +120,8 @@ func NativeDuration(message Message) (time.Duration, bool) {
 // Its JSON encoding is persisted in task logs. Keep JSON field names and their
 // meanings backward-compatible with logs written by released binaries.
 type InitMessage struct {
+	MessageProvenance
+
 	SessionID      string   `json:"session_id"`
 	Cwd            string   `json:"cwd"`
 	Tools          []string `json:"tools"`
@@ -144,9 +153,56 @@ type TextMessage v3.TextMessage
 // Type implements Message.
 func (m *TextMessage) Type() string { return messageTypeText }
 
+// MessageSource is the v3 persisted provenance shared by semantic stream messages.
+type MessageSource = v3.MessageSource
+
+// MessageProvenance is the shared serialized origin carrier embedded by all messages.
+type MessageProvenance = v3.MessageProvenance
+
+// ToolKey identifies one provider tool invocation across agents and turns.
+// Delegation and native thread identities take precedence over a canonical
+// agent identity so late card correlation cannot change an existing key.
+type ToolKey struct {
+	ThreadID            string
+	DelegationToolUseID string
+	TurnID              string
+	AgentID             string
+	ToolUseID           string
+}
+
+// ToolKeyForSource identifies a tool referenced by an event source without changing its
+// provider-reported ID. ItemID identifies the referencing event, not the tool.
+func ToolKeyForSource(s *MessageSource, id string) ToolKey {
+	k := ToolKey{ThreadID: s.ThreadID, DelegationToolUseID: s.DelegationToolUseID, TurnID: s.TurnID, ToolUseID: id}
+	if k.ThreadID == "" && k.DelegationToolUseID == "" {
+		k.AgentID = s.AgentID
+	}
+	return k
+}
+
+// String encodes the key for source-neutral analytics timing correlation.
+func (k *ToolKey) String() string {
+	if k.ToolUseID == "" {
+		return ""
+	}
+	if k.ThreadID == "" && k.DelegationToolUseID == "" && k.TurnID == "" && k.AgentID == "" {
+		return "0:0:0:0:" + strconv.Itoa(len(k.ToolUseID)) + ":" + k.ToolUseID
+	}
+	var b strings.Builder
+	b.Grow(len(k.ThreadID) + len(k.DelegationToolUseID) + len(k.TurnID) + len(k.AgentID) + len(k.ToolUseID) + 20)
+	for _, s := range []string{k.ThreadID, k.DelegationToolUseID, k.TurnID, k.AgentID, k.ToolUseID} {
+		b.WriteString(strconv.Itoa(len(s)))
+		b.WriteByte(':')
+		b.WriteString(s)
+	}
+	return b.String()
+}
+
 // ToolUseMessage is emitted when the agent invokes a tool (except
 // AskUserQuestion and TodoWrite which have their own types).
 type ToolUseMessage struct {
+	MessageProvenance
+
 	ToolUseID string          `json:"id"`
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input,omitempty"`
@@ -170,6 +226,8 @@ func (m *ToolUseMessage) Type() string { return "tool_use" }
 // field names and their meanings backward-compatible with logs written by
 // released binaries.
 type SkillReadMessage struct {
+	MessageProvenance
+
 	ToolUseID string `json:"id"`
 	Skill     string `json:"skill"`
 	Args      string `json:"args,omitempty"`
@@ -200,6 +258,8 @@ func (m *SkillReadMessage) Type() string { return "skill_read" }
 // field names and their meanings backward-compatible with logs written by
 // released binaries.
 type SkillLoadMessage struct {
+	MessageProvenance
+
 	Skill string `json:"skill"`
 	// Path is the loaded SKILL.md in the task runtime, or empty when the
 	// harness did not report it.
@@ -304,6 +364,8 @@ func writePatchLines(b *strings.Builder, prefix byte, text string) {
 // AskMessage is emitted when the agent asks the user a question via the
 // AskUserQuestion tool.
 type AskMessage struct {
+	MessageProvenance
+
 	ToolUseID string           `json:"id"`
 	Questions []v3.AskQuestion `json:"questions"`
 }
@@ -336,6 +398,8 @@ func ClonePendingUserAction(a v3.PendingUserAction) v3.PendingUserAction {
 // TodoMessage is emitted when the agent updates its todo list via the
 // TodoWrite tool.
 type TodoMessage struct {
+	MessageProvenance
+
 	ToolUseID string     `json:"id"`
 	Todos     []TodoItem `json:"todos"`
 }
@@ -351,6 +415,8 @@ func (m *UserInputMessage) Type() string { return messageTypeUserInput }
 
 // ToolResultMessage is emitted when a tool returns its result.
 type ToolResultMessage struct {
+	MessageProvenance
+
 	ToolUseID  string `json:"tool_use_id"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 	Error      string `json:"error,omitempty"` // Non-empty when the tool reported an error.
@@ -369,6 +435,8 @@ func (m *ToolResultMessage) NativeDuration() (time.Duration, bool) {
 // Its JSON encoding is persisted in task logs. Keep JSON field names and their
 // meanings backward-compatible with logs written by released binaries.
 type UsageMessage struct {
+	MessageProvenance
+
 	Usage         Usage  `json:"usage"`
 	ReportedModel string `json:"model,omitempty"`
 	ContextWindow int    `json:"context_window,omitempty"` // Non-zero when the backend reports the active context window size.
@@ -449,6 +517,8 @@ func (m *TurnCommitSnapshotMessage) Type() string { return messageTypeTurnCommit
 
 // ResultMessage is the terminal message for a query.
 type ResultMessage struct {
+	MessageProvenance
+
 	MessageType   string `json:"type"`
 	Subtype       string `json:"subtype"`
 	IsError       bool   `json:"is_error"`
@@ -482,6 +552,8 @@ func (m *ResultMessage) NativeDuration() (time.Duration, bool) {
 // --include-partial-messages is enabled. Extracted from the nested wire
 // format (stream_event → content_block_delta → text_delta) during parsing.
 type TextDeltaMessage struct {
+	MessageProvenance
+
 	Text string
 }
 
@@ -490,6 +562,8 @@ func (m *TextDeltaMessage) Type() string { return "text_delta" }
 
 // ThinkingMessage is emitted when the agent produces a thinking block.
 type ThinkingMessage struct {
+	MessageProvenance
+
 	Text string `json:"text"`
 }
 
@@ -498,6 +572,8 @@ func (m *ThinkingMessage) Type() string { return "thinking" }
 
 // ThinkingDeltaMessage is a streaming thinking fragment.
 type ThinkingDeltaMessage struct {
+	MessageProvenance
+
 	Text string
 }
 
@@ -508,6 +584,8 @@ func (m *ThinkingDeltaMessage) Type() string { return "thinking_delta" }
 // Codex only: emitted via item/commandExecution/outputDelta (Bash stdout) and
 // item/mcpToolCall/progress (MCP tool progress messages).
 type ToolOutputDeltaMessage struct {
+	MessageProvenance
+
 	ToolUseID string
 	Delta     string
 }
@@ -580,6 +658,8 @@ type NativeSubagent struct {
 // It is harness activity within the parent session, not an independently
 // runnable session.
 type NativeSubagentMessage struct {
+	MessageProvenance
+
 	Subagent NativeSubagent `json:"subagent"`
 }
 
@@ -637,6 +717,8 @@ type BackgroundCommand struct {
 // update. It is informational harness activity: unlike a background subagent,
 // a detached shell command never justifies keeping its task running.
 type BackgroundCommandMessage struct {
+	MessageProvenance
+
 	Command BackgroundCommand `json:"command"`
 }
 
@@ -661,6 +743,8 @@ var WidgetToolNames = map[string]struct{}{
 // via a tool call (e.g. Claude's show_widget). The HTML is the complete,
 // renderable widget code.
 type WidgetMessage struct {
+	MessageProvenance
+
 	ToolUseID string `json:"id"`
 	Title     string `json:"title"`
 	HTML      string `json:"html"`
@@ -698,6 +782,8 @@ type widgetInput struct {
 // agent generates the widget code. Clients accumulate deltas for progressive
 // rendering; the final WidgetMessage replaces them.
 type WidgetDeltaMessage struct {
+	MessageProvenance
+
 	ToolUseID string
 	Delta     string // Partial HTML fragment.
 }
@@ -860,6 +946,8 @@ const (
 
 // RateLimitMessage is emitted when the CLI reports a rate limit status change.
 type RateLimitMessage struct {
+	MessageProvenance
+
 	Status          RateLimitStatus `json:"status"`            // "allowed", "allowed_warning", "rejected".
 	ResetsAt        time.Time       `json:"resets_at"`         // When the quota window resets; zero if unknown.
 	RateLimitType   string          `json:"rate_limit_type"`   // Harness-native window ID (for example, "five_hour"); use QuotaWindow for the canonical ID.
@@ -874,9 +962,18 @@ type RateLimitMessage struct {
 // Type implements Message.
 func (m *RateLimitMessage) Type() string { return "rate_limit" }
 
+// IsChildThreadGoal reports a child's local goal budget, which cannot block
+// the root or update account-wide quota. Other quota reports keep their provider
+// scope regardless of the agent that observed them.
+func (m *RateLimitMessage) IsChildThreadGoal() bool {
+	return m.Source.IsChild() && m.RateLimitType == "thread_goal"
+}
+
 // RawMessage is a pass-through for message types we don't need to inspect
 // (tool_progress, etc.).
 type RawMessage struct {
+	MessageProvenance
+
 	MessageType string
 	Raw         []byte
 }
@@ -887,6 +984,8 @@ func (m *RawMessage) Type() string { return m.MessageType }
 // ParseErrorMessage is emitted when a backend output line cannot be decoded.
 // It carries the error and the raw line for diagnostic display.
 type ParseErrorMessage struct {
+	MessageProvenance
+
 	Err  string
 	Line string
 }
@@ -1097,11 +1196,12 @@ func WriteMetaSession(log LogSink, init *InitMessage) error {
 		return nil
 	}
 	return log.AppendMessage(&MetaSessionMessage{
-		MessageType:    messageTypeSession,
-		SessionID:      init.SessionID,
-		ReportedModel:  init.ReportedModel,
-		ReportedEffort: init.ReportedEffort,
-		AgentVersion:   init.Version,
+		MessageProvenance: init.MessageProvenance,
+		MessageType:       messageTypeSession,
+		SessionID:         init.SessionID,
+		ReportedModel:     init.ReportedModel,
+		ReportedEffort:    init.ReportedEffort,
+		AgentVersion:      init.Version,
 	})
 }
 

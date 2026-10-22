@@ -180,15 +180,24 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 		add := func(confirmed agent.Message, at time.Time) {
 			// Claude records carry per-call model attribution. Codex, Pi, and
 			// OpenCode logs only preserve a reliable session-level model.
-			if lt.Harness == harness.Claude {
+			if lt.Harness == harness.Claude && !confirmed.Provenance().IsChild() {
 				model = usageClaudeModel(model, confirmed)
+			}
+			attributedModel := model
+			if confirmed.Provenance().IsChild() {
+				attributedModel = ""
+				if u, ok := confirmed.(*agent.UsageMessage); ok {
+					attributedModel = u.ReportedModel
+				}
 			}
 			delta, ok := usageDelta(confirmed, lt.Harness)
 			switch m := confirmed.(type) {
 			case *agent.ToolUseMessage:
-				toolTimings.Start(m.ToolUseID, m.Name, at)
+				key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+				toolTimings.Start(key.String(), m.Name, at)
 			case *agent.ToolResultMessage:
-				if name, ms, measured := toolTimings.Finish(m.ToolUseID, at, m.DurationMs); measured {
+				key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+				if name, ms, measured := toolTimings.Finish(key.String(), at, m.DurationMs); measured {
 					delta.ToolTimings = map[string]data.ToolTiming{name: {Count: 1, DurationMs: ms}}
 					ok = true
 				}
@@ -197,7 +206,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 				return
 			}
 			day := at.UTC().Format(usageDayFormat)
-			k := key{day: day, model: model}
+			k := key{day: day, model: attributedModel}
 			row := buckets[k]
 			if row == nil {
 				row = &data.UsageRow{
@@ -206,7 +215,7 @@ func taskUsageRows(lt *LoadedTask, ctx context.Context) iter.Seq2[data.UsageRow,
 					TaskID:  lt.TaskID,
 					Harness: string(lt.Harness),
 					Repos:   slices.Clone(repos),
-					Model:   model,
+					Model:   attributedModel,
 				}
 				buckets[k] = row
 			}
@@ -276,8 +285,13 @@ func usageDelta(m agent.Message, h harness.Name) (data.Delta, bool) {
 		if h == harness.Pi {
 			d.TokenBuckets = usageTokens(m.Usage)
 		}
-		d.ContextWindow = m.ContextWindow
+		if !m.Source.IsChild() {
+			d.ContextWindow = m.ContextWindow
+		}
 	case *agent.ResultMessage:
+		if m.Source.IsChild() {
+			return data.Delta{}, false
+		}
 		if h != harness.Pi {
 			d.TokenBuckets = usageTokens(m.Usage)
 		}

@@ -636,7 +636,7 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		} else if err := decodeLogControl(p.version, line, &m); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", token, err)
 		}
-		return []Message{&InitMessage{SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion}}, nil
+		return []Message{&InitMessage{MessageProvenance: m.MessageProvenance, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, Version: m.AgentVersion}}, nil
 	case logControlLegacyInit:
 		var m v1.LegacyInit
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -698,7 +698,9 @@ func (p *LogRecordParser) parseControl(kind logControlKind, token string, line [
 		if m.Subtype != "" && m.Subtype != messageSubtypeContextCleared {
 			return nil, fmt.Errorf("decode %s: unexpected subtype %q", token, m.Subtype)
 		}
-		return []Message{ContextCleared()}, nil
+		cleared := ContextCleared()
+		*cleared.Provenance() = *m.Provenance()
+		return []Message{cleared}, nil
 	case logControlText:
 		var m TextMessage
 		if err := decodeLogControl(p.version, line, &m); err != nil {
@@ -765,7 +767,7 @@ func (p *LogRecordParser) applyMessageState(msgs []Message) ([]Message, error) {
 	}
 	out := make([]Message, 0, len(msgs))
 	for _, msg := range msgs {
-		if m, ok := msg.(*UsageMessage); ok && m.ContextWindow == 0 && p.contextWindow > 0 {
+		if m, ok := msg.(*UsageMessage); ok && !m.Source.IsChild() && m.ContextWindow == 0 && p.contextWindow > 0 {
 			m.ContextWindow = p.contextWindow
 		}
 		out = append(out, msg)

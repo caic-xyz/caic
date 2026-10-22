@@ -23,25 +23,29 @@ import (
 // task record keyed by the task ID would look like a different agent.
 // Its correlation maps are allocated with the wire, created once per session,
 // instead of by the first record that uses them.
+type delegationKey struct {
+	sessionID string
+	toolUseID string
+}
+
 type nativeSubagents struct {
-	timeline   agent.NativeSubagentTimeline
-	tasks      map[string]agent.NativeSubagent // canonical task ID → card
-	byTool     map[string]string               // tool use ID → canonical task ID
-	tools      map[string]agent.NativeSubagent // tool use ID → delegation metadata
-	background map[string]bool                 // tool use ID → launched in background
+	timeline agent.NativeSubagentTimeline
+	tasks    map[string]agent.NativeSubagent        // canonical task ID → card
+	byTool   map[delegationKey]string               // session/delegation → canonical task ID; empty means ambiguous
+	tools    map[delegationKey]agent.NativeSubagent // session/delegation → invocation metadata
 }
 
 // parse folds one decoded line: a delegation tool use records the metadata that
 // the task records and tool results settle.
-func (n *nativeSubagents) parse(record decodedLine, messages []agent.Message) ([]agent.Message, error) {
-	if err := n.parseToolUses(messages); err != nil {
+func (n *nativeSubagents) parse(record *decodedLine, messages []agent.Message) ([]agent.Message, error) {
+	if err := n.parseToolUses(messages, record.source.ThreadID); err != nil {
 		return nil, err
 	}
 	switch {
 	case record.system != nil:
-		return n.parseTask(record.system)
+		return n.parseTask(record.system, record.source.ThreadID)
 	case record.user != nil:
-		return n.parseToolResult(record.user)
+		return n.parseToolResult(record.user, record.source.ThreadID)
 	default:
 		return nil, nil
 	}
@@ -51,7 +55,7 @@ func (n *nativeSubagents) parse(record decodedLine, messages []agent.Message) ([
 // tool use alone is not lifecycle evidence: the task records carry the native
 // identity and the reported state, so remember what they do not repeat instead
 // of emitting a card here.
-func (n *nativeSubagents) parseToolUses(messages []agent.Message) error {
+func (n *nativeSubagents) parseToolUses(messages []agent.Message, sessionID string) error {
 	for _, message := range messages {
 		use, ok := message.(*agent.ToolUseMessage)
 		if !ok || (use.Name != "Agent" && use.Name != "Task") || use.ToolUseID == "" {
@@ -73,15 +77,20 @@ func (n *nativeSubagents) parseToolUses(messages []agent.Message) error {
 		if s.Label == "" {
 			s.Label = input.SubagentType
 		}
-		n.tools[use.ToolUseID] = s
-		n.background[use.ToolUseID] = input.RunInBackground
+		key := delegationKey{sessionID: sessionID, toolUseID: use.ToolUseID}
+		if prior, found := n.tools[key]; found && prior != s {
+			// Conflicting invocations in one namespace are not safe metadata.
+			n.tools[key] = agent.NativeSubagent{}
+		} else {
+			n.tools[key] = s
+		}
 	}
 	return nil
 }
 
 // parseTask folds one task lifecycle record. Only local_agent tasks are model
 // subagents; local_bash and the other task types must never become native agents.
-func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg) ([]agent.Message, error) {
+func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg, sessionID string) ([]agent.Message, error) {
 	if ev.TaskType == "local_bash" || ev.TaskID == "" {
 		return nil, nil
 	}
@@ -97,9 +106,14 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg) ([]agent.Mes
 	}
 	if ev.ToolUseID != "" {
 		s.ToolUseID = ev.ToolUseID
-		n.byTool[ev.ToolUseID] = canonicalID
+		key := delegationKey{sessionID: sessionID, toolUseID: ev.ToolUseID}
+		if prior, found := n.byTool[key]; found && prior != canonicalID {
+			n.byTool[key] = ""
+		} else {
+			n.byTool[key] = canonicalID
+		}
 	}
-	if tool, ok := n.tools[s.ToolUseID]; ok {
+	if tool, ok := n.tools[delegationKey{sessionID: sessionID, toolUseID: s.ToolUseID}]; ok {
 		if s.Label == "" {
 			s.Label = tool.Label
 		}
@@ -133,7 +147,7 @@ func (n *nativeSubagents) parseTask(ev *claudecode.OutputSystemMsg) ([]agent.Mes
 }
 
 // parseToolResult settles the card whose delegation this result belongs to.
-func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg) ([]agent.Message, error) {
+func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg, sessionID string) ([]agent.Message, error) {
 	// Child stream messages have parent_tool_use_id; they are not the parent's
 	// Agent tool result and must not settle its lifecycle.
 	if ev.ParentToolUseID != "" {
@@ -152,8 +166,9 @@ func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg) ([]agent
 		if b.Type != "tool_result" {
 			continue
 		}
-		canonicalID, known := n.byTool[b.ToolUseID]
-		if !known {
+		key := delegationKey{sessionID: sessionID, toolUseID: b.ToolUseID}
+		canonicalID, known := n.byTool[key]
+		if !known || canonicalID == "" {
 			continue
 		}
 		s := n.tasks[canonicalID]
@@ -168,7 +183,7 @@ func (n *nativeSubagents) parseToolResult(ev *claudecode.OutputUserMsg) ([]agent
 		switch {
 		case b.IsError:
 			s.Status = agent.NativeSubagentStatusFailed
-		case n.background[b.ToolUseID] || result.Status == "async_launched":
+		case n.tools[key].Background || result.Status == "async_launched":
 			continue
 		default:
 			s.Status = agent.NativeSubagentStatusCompleted
@@ -236,7 +251,7 @@ type backgroundCommands struct {
 // a command: foreground shell tasks settle inside their own tool call and must
 // never become cards, and an update or notification for a task the wire has not
 // proven cannot invent one.
-func (b *backgroundCommands) parse(record decodedLine) []agent.Message {
+func (b *backgroundCommands) parse(record *decodedLine) []agent.Message {
 	ev := record.system
 	if ev == nil {
 		return nil

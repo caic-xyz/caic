@@ -16,6 +16,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/antigravity"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 )
@@ -222,5 +223,48 @@ func assertHandoffGolden(t *testing.T, name, got string) {
 	}
 	if got != string(want) {
 		t.Errorf("handoff golden mismatch for %s\n--- got ---\n%s", name, got)
+	}
+}
+
+// TestExternalConversationCannotReplaceRoot exercises the adapter's actual
+// informational messages through root result, error, fallback and handoff folds.
+func TestExternalConversationCannotReplaceRoot(t *testing.T) {
+	t.Parallel()
+	wire := antigravity.New("", nil).NewWire()
+	var messages []agent.Message
+	for _, line := range []string{
+		`{"event":"init","conversation_id":"root"}`,
+		`{"event":"step_update","step_update":{"conversation_id":"root","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Root answer"}}`,
+		`{"event":"result","result":{"conversation_id":"root","status":"ERROR","error":"root failure"}}`,
+		`{"event":"result","result":{"conversation_id":"foreign","status":"SUCCESS","response":"FOREIGN_PRIVATE_ANSWER"}}`,
+	} {
+		out, err := wire.ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, out...)
+	}
+	foreign := messages[len(messages)-1]
+	if _, ok := foreign.(*agent.SystemMessage); !ok || foreign.Provenance().IsChild() {
+		t.Fatalf("foreign message=%#v", foreign)
+	}
+	if ClearsExitError(foreign) {
+		t.Fatal("foreign activity clears root error")
+	}
+	var window ResultTextWindow
+	window.Update(&agent.TextMessage{Text: "Root answer"})
+	window.Update(foreign)
+	if window.Value() != "Root answer" {
+		t.Fatalf("foreign activity replaced root answer: %q", window.Value())
+	}
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "Research geometry"}, harness.Antigravity, "", "")
+	tk.SeedTimeline(messages)
+	result := lastAgentMessage(tk.timelineViewLocked())
+	if result == nil || !result.IsError || !strings.Contains(result.Result, "root failure") {
+		t.Fatalf("foreign activity replaced root result: %+v", result)
+	}
+	handoff := BuildHandoffPrompt(tk, 0)
+	if strings.Contains(handoff, "FOREIGN_PRIVATE_ANSWER") || !strings.Contains(handoff, "Root answer") {
+		t.Fatalf("handoff root attribution = %s", handoff)
 	}
 }

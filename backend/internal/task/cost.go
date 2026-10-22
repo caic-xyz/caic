@@ -48,10 +48,16 @@ type CostTracker struct {
 func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.ModelPricer) (TurnCost, bool) {
 	switch m := msg.(type) {
 	case *agent.InitMessage:
+		if m.Source.IsChild() {
+			break
+		}
 		if m.ReportedModel != "" {
 			c.Model = m.ReportedModel
 		}
 	case *agent.SystemMessage:
+		if m.Source.IsChild() {
+			break
+		}
 		switch m.Subtype {
 		case agent.SystemSubtypeModelRerouted:
 			if m.ReportedModel != "" {
@@ -67,7 +73,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			}
 		}
 	case *agent.UsageMessage:
-		if m.ReportedModel != "" {
+		if m.ReportedModel != "" && !m.Source.IsChild() {
 			c.Model = m.ReportedModel
 		}
 		if c.Harness == harness.OpenCode && m.CumulativeCostUSD != nil && *m.CumulativeCostUSD > 0 {
@@ -83,6 +89,9 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			}
 		}
 	case *agent.ResultMessage:
+		if m.Source.IsChild() {
+			break
+		}
 		switch c.Harness {
 		case harness.OpenCode:
 			if !c.opencodeReported && !c.priceUsage(m.Usage, "", at, pricer) {

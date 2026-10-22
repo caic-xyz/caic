@@ -16,6 +16,13 @@ Its init event omits the model. Keep that absence intact.
 Keep native subagent mapping disabled until recorded lifecycle evidence pins
 its semantics. agy does not expose thinking text in this protocol.
 
+Step activity retains its actual conversation ID and step index. A differing
+conversation ID alone does not prove a child. The DTO's explicit
+`subagent_info.subagents[].conversation_id` can establish a relationship to
+the initialized root, but does not establish native lifecycle statuses or a
+canonical card ID. Tests using that DTO shape are synthetic protocol cases,
+not recorded lifecycle evidence.
+
 ## Integration boundary
 
 The backend is selectable through `backends.Default`.

@@ -1,4 +1,4 @@
-# Fake agent emits deterministic e2e scenarios in canonical v2 log envelopes.
+# Fake agent emits deterministic e2e scenarios, including gated concurrent streams with message identity.
 #
 # Each envelope's message is a flat object whose "type" field maps directly to
 # an agent.Message type (init, text, text_delta, tool_use, ask, widget,
@@ -757,6 +757,151 @@ def emit_native_subagents_turn(turns: int) -> None:
     emit_result(turns, "Native activity finished")
 
 
+def emit_concurrent_streams_turn(turns: int) -> None:
+    """Interleave independent items, advancing only after real user-input gates."""
+
+    def record(payload: dict, thread: str, item: str) -> None:
+        payload["source"] = {
+            "threadID": thread,
+            "turnID": "review-turn",
+            "itemID": item,
+            "rootThreadID": "parent",
+            **({"agentID": f"codex:thread:{thread}"} if thread != "parent" else {}),
+        }
+        emit(payload)
+
+    def message(kind: str, thread: str, item: str, text: str) -> None:
+        record({"type": kind, "text": text}, thread, item)
+
+    def gate(command: str) -> bool:
+        line = sys.stdin.readline()
+        if not line or "\x00" in line:
+            return False
+        if line.rstrip("\n") != command:
+            raise ValueError(f"Expected concurrent-stream command {command!r}, got {line!r}")
+        return True
+
+    for thread, label in (("child-a", "Polygon research"), ("child-b", "Assembly research")):
+        emit(
+            {
+                "type": "native_subagent",
+                "subagent": {"id": f"codex:thread:{thread}", "label": label, "status": "running", "background": True},
+            }
+        )
+    record(
+        {"type": "usage", "usage": {"input_tokens": 100}, "model": "root-model", "context_window": 200000},
+        "parent",
+        "usage",
+    )
+    for thread in ("parent", "child-a", "child-b"):
+        record(
+            {"type": "tool_use", "id": "shared-tool", "name": "Bash", "input": {"command": f"echo {thread}"}},
+            thread,
+            "command",
+        )
+        record(
+            {"type": "tool_output_delta", "tool_use_id": "shared-tool", "delta": f"{thread} output start\n"},
+            thread,
+            "command",
+        )
+    record(
+        {"type": "usage", "usage": {"input_tokens": 999}, "model": "child-model", "context_window": 1024},
+        "child-a",
+        "usage",
+    )
+    message("thinking_delta", "parent", "reasoning", "Considering ")
+    message("text_delta", "child-a", "polygon", "- A bow")
+    message("text_delta", "child-b", "assembly", "Assembly draft")
+    message("text_delta", "child-a", "discarded", "Discarded draft")
+    if not gate("FAKE_CONCURRENT_STREAMS_CONTINUE"):
+        return
+    message("text_delta", "child-a", "polygon", "tie uses `Ear")
+    message("thinking_delta", "parent", "reasoning", "validation while children research.")
+    message("text_delta", "child-b", "assembly", " remains in flight.")
+    message("text_delta", "child-a", "polygon", "cut`.")
+    message("text", "child-a", "polygon", "- A bowtie uses `Earcut`.\n- Validate contours before triangulation.")
+    message("text", "child-a", "discarded", "")
+    message("thinking", "parent", "reasoning", "Considering validation while children research.")
+    message("text", "parent", "summary", "Parent summary remains separate.")
+    # Thousands of fragments exercise bounded per-invocation output snapshots.
+    for _ in range(1000):
+        record({"type": "tool_output_delta", "tool_use_id": "shared-tool", "delta": "."}, "child-a", "command")
+    record(
+        {"type": "tool_output_delta", "tool_use_id": "shared-tool", "delta": "\nchild-a output complete"},
+        "child-a",
+        "command",
+    )
+    if not gate("FAKE_CONCURRENT_STREAMS_RECONNECT"):
+        return
+    for thread in ("child-a", "child-b", "parent"):
+        record(
+            {"type": "tool_output_delta", "tool_use_id": "shared-tool", "delta": f"\n{thread} missed output"},
+            thread,
+            "command",
+        )
+    message("thinking", "parent", "reasoning", "Considering validation while children research.")
+    if not gate("FAKE_CONCURRENT_STREAMS_A_COMPLETE"):
+        return
+    record({"type": "tool_result", "tool_use_id": "shared-tool", "duration_ms": 50}, "child-a", "command")
+    if not gate("FAKE_CONCURRENT_STREAMS_FINISH"):
+        return
+    assembly = "Assembly frames preserve local transforms."
+    message("text", "child-b", "assembly", assembly)
+    record(
+        {"type": "tool_result", "tool_use_id": "shared-tool", "duration_ms": 70, "error": "Assembly command failed"},
+        "child-b",
+        "command",
+    )
+    record({"type": "system", "subtype": "error", "detail": "Assembly child failed independently"}, "child-b", "error")
+    record(
+        {"type": "tool_output_delta", "tool_use_id": "orphan-output", "delta": "Unmatched output remains visible"},
+        "child-b",
+        "orphan-output",
+    )
+    record(
+        {"type": "tool_result", "tool_use_id": "orphan-result", "error": "Unmatched result remains visible"},
+        "child-a",
+        "orphan-result",
+    )
+    for thread, status, result in (
+        ("child-a", "completed", "Polygon review finished; evidence preserved."),
+        ("child-b", "failed", "Assembly child failed independently"),
+    ):
+        emit(
+            {
+                "type": "native_subagent",
+                "subagent": {"id": f"codex:thread:{thread}", "status": status, "result": result},
+            }
+        )
+    if not gate("FAKE_CONCURRENT_STREAMS_ROOT_FINISH"):
+        return
+    record(
+        {"type": "tool_output_delta", "tool_use_id": "shared-tool", "delta": "parent output complete"},
+        "parent",
+        "command",
+    )
+    record({"type": "tool_result", "tool_use_id": "shared-tool", "duration_ms": 90}, "parent", "command")
+    record(
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": "Concurrent review finished",
+            "num_turns": turns,
+            "total_cost_usd": 0.37,
+            "duration_ms": 500,
+            "context_window": 200000,
+            "usage": {
+                "input_tokens": 123,
+                "output_tokens": 45,
+                "cache_creation_input_tokens": 6,
+                "cache_read_input_tokens": 78,
+            },
+        },
+        "parent",
+        "result",
+    )
+
+
 def main() -> None:
     version = "fake"
     if os.environ.get("CAIC_E2E_VISUALS") == "1":
@@ -790,6 +935,9 @@ def main() -> None:
         turns += 1
 
         # Exact keyword triggers (for e2e tests).
+        if line.startswith("FAKE_CONCURRENT_STREAMS"):
+            emit_concurrent_streams_turn(turns)
+            continue
         if line.startswith("FAKE_SKILLS"):
             if "compact" in line:
                 emit({"type": "system", "subtype": "compact_boundary"})

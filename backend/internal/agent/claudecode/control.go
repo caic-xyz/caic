@@ -1,4 +1,4 @@
-// Claude Code stdio control requests for permission prompts.
+// Claude Code stdio control requests preserve ownership when answering root permission prompts.
 
 package claudecode
 
@@ -128,6 +128,9 @@ func (c *controlConn) ReadMessages(r io.Reader, msgCh chan<- agent.TimedMessage)
 }
 
 func (c *controlConn) handleControlMessage(m agent.Message) (bool, error) {
+	if m.Provenance().IsChild() {
+		return false, nil
+	}
 	if pending, ok := m.(*agent.PendingUserActionMessage); ok {
 		switch pending.Action.Kind {
 		case agent.PendingUserActionAskUserQuestion:
@@ -178,11 +181,10 @@ func (c *controlConn) handleControlRequest(raw []byte) (bool, error) {
 	if err := json.Unmarshal(inputRaw, &input); err != nil || len(input.Questions) == 0 {
 		return true, c.sendControlError(msg.RequestID, "invalid AskUserQuestion input")
 	}
-	return false, c.setPendingAsk(pendingControlAsk{
-		requestID: msg.RequestID,
-		toolUseID: can.ToolUseID,
-		questions: askQuestionsFromClaude(input.Questions),
-	})
+	// Valid actionable Asks arrive as normalized PendingUserActionMessage.
+	// A valid Ask retained as raw has unresolved ownership; preserve it for
+	// inspection without registering a response on the root prompt channel.
+	return false, nil
 }
 
 // restorePendingActions restores user-facing actions captured before reconnect.

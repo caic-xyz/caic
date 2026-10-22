@@ -943,6 +943,53 @@ func testRestart(t *testing.T, state taskslog.State, bodyJSON string, wantStatus
 }
 
 func TestTaskHistoryReaders(t *testing.T) {
+	t.Run("scoped_tools_and_root_last_message", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex)
+		root := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+		child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+		tk.SeedTimeline([]agent.Message{
+			&agent.ToolUseMessage{Source: root, ToolUseID: "local", Input: json.RawMessage(`{"owner":"root"}`)},
+			&agent.TextMessage{Source: root, Text: "root answer"},
+			&agent.ToolUseMessage{Source: child, ToolUseID: "local", Input: json.RawMessage(`{"owner":"child"}`)},
+			&agent.TextMessage{Source: child, Text: "child answer"},
+			&agent.UserInputMessage{Source: child, Text: "child prompt"},
+		})
+		entry := s.taskMgr.NewEntry(tk, nil)
+		s.taskMgr.Insert(tk.ID, entry)
+		svc := testTaskHandlers(s).taskSvc
+		if _, err := svc.taskToolInput(t.Context(), entry, "local", v1.TaskToolInputQuery{}); err == nil {
+			t.Fatal("ambiguous unscoped tool lookup succeeded")
+		}
+		for _, tc := range []struct{ thread, want string }{{"root", `{"owner":"root"}`}, {"child", `{"owner":"child"}`}} {
+			q := url.Values{"threadID": {tc.thread}, "turnID": {"turn"}}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+tk.ID.String()+"/tool/local?"+q.Encode(), http.NoBody)
+			req.SetPathValue("id", tk.ID.String())
+			req.SetPathValue("toolUseID", "local")
+			w := httptest.NewRecorder()
+			testTaskHandlers(s).handleTaskToolInput(w, req)
+			var got v1.TaskToolInputResp
+			if w.Code != http.StatusOK {
+				t.Fatalf("scoped input HTTP %d: %s", w.Code, w.Body.String())
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if string(got.Input) != tc.want {
+				t.Errorf("%s input = %s", tc.thread, got.Input)
+			}
+		}
+		if _, err := svc.taskToolInput(t.Context(), entry, "local", v1.TaskToolInputQuery{ThreadID: "missing", TurnID: "turn"}); err == nil {
+			t.Fatal("missing owner fell back to another tool")
+		}
+		registry := &mcpRegistry{serverConfig: s.serverHandlers, taskSvc: svc}
+		result := registry.handleAgentLastMessage(t.Context(), &mcp.ToolRequest[mcpTaskNumberArgs]{Arguments: mcpTaskNumberArgs{TaskNumber: taskID("1")}})
+		out, ok := result.Structured.(mcp.TextOutput)
+		if result.IsError || !ok || out.Result != "Last message from task #1: root answer" {
+			t.Fatalf("last message = %#v", result.Structured)
+		}
+	})
 	t.Parallel()
 
 	t.Run("valid_read_from_log_without_hydrating_task", func(t *testing.T) {
@@ -976,7 +1023,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 			t.Fatal("loaded task entry not found")
 		}
 
-		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
+		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1", v1.TaskToolInputQuery{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1012,7 +1059,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		entry := s.taskMgr.NewEntry(tk, nil)
 		s.taskMgr.Insert(tk.ID, entry)
 
-		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
+		resp, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1", v1.TaskToolInputQuery{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1036,7 +1083,7 @@ func TestTaskHistoryReaders(t *testing.T) {
 		entry := s.taskMgr.NewEntry(tk, loaded)
 		s.taskMgr.Insert(tk.ID, entry)
 
-		_, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1")
+		_, err := testTaskHandlers(s).taskSvc.taskToolInput(t.Context(), entry, "tool-1", v1.TaskToolInputQuery{})
 		apiErr, ok := errors.AsType[*api.Error](err)
 		if !ok || apiErr.Code != api.CodeInternalError || !strings.Contains(apiErr.Error(), "history unavailable") {
 			t.Fatalf("taskToolInput error = %v, want explicit history-unavailable error", err)

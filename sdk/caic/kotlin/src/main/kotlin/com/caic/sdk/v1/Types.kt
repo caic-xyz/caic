@@ -1946,6 +1946,22 @@ data class CreateTaskReq(
 )
 
 /**
+ * EventMessageSource identifies the provider origin of any normalized event.
+ * AgentID and DelegationToolUseID identify child ownership independently of native
+ * item identity. RootThreadID is an authoritative session owner when reported.
+ * Fields remain absent when the harness does not supply them.
+ */
+@Serializable
+data class EventMessageSource(
+    @SerialName("agentID") val agentID: String? = null,
+    @SerialName("delegationToolUseID") val delegationToolUseID: String? = null,
+    @SerialName("threadID") val threadID: String? = null,
+    @SerialName("turnID") val turnID: String? = null,
+    @SerialName("itemID") val itemID: String? = null,
+    @SerialName("rootThreadID") val rootThreadID: String? = null,
+)
+
+/**
  * EventInit is emitted once at the start of a session. It includes a Harness
  * field so the client knows which backend produced the stream.
  */
@@ -2322,6 +2338,7 @@ data class EventSkillLoad(
  */
 @Serializable
 data class EventMessage(
+    val source: EventMessageSource? = null,
     val kind: EventKind,
     val ts: Long,
     val init: EventInit? = null,

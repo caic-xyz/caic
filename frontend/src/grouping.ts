@@ -1,8 +1,26 @@
-// Pure grouping and turn-splitting logic for agent event streams.
+// Source-scoped text and tool grouping with bounded stream snapshots and compact display aggregates.
 
-import type { EventMessage, EventToolUse, EventToolResult, EventAsk, EventResult } from "@sdk/types.gen";
+import type {
+  EventMessage,
+  EventMessageSource,
+  EventToolUse,
+  EventToolResult,
+  EventAsk,
+  EventResult,
+} from "@sdk/types.gen";
 
 export interface MessageGroup {
+  range?: { start: number; end: number } | null;
+  tool?: ScopedTool;
+  // Provider identity keeps concurrent messages separate and fixes their first position.
+  messageKey?: string;
+  // Identified items fold raw fragments into one immutable content snapshot.
+  // events retains only first/latest provenance; range retains the full span.
+  content?: {
+    text: string;
+    complete: boolean;
+    range: { start: number; end: number } | null;
+  };
   kind: "text" | "action" | "ask" | "userInput" | "widget" | "other";
   events: EventMessage[];
   // For "action" groups: paired tool_use and tool_result events (empty for thinking-only).
@@ -18,15 +36,167 @@ export interface MessageGroup {
   widgetDone?: boolean;
   // For result groups whose payload canonically replaces duplicate text.
   resultReplacesText?: boolean;
+  // Keep the identified message mounted while the result card shows metadata.
+  resultDuplicatesText?: boolean;
   // Thinking event segments whose durations are summed when several Codex
   // thinking blocks collapse into one visual group.
   timingSegments?: EventMessage[][];
+}
+
+export interface ScopedTool {
+  startedAt: number;
+  finishedAt: number;
+  ended: boolean;
+  key: string;
+  source: EventMessageSource;
+  use?: EventToolUse;
+  result?: EventToolResult;
+  output: string;
+  range: { start: number; end: number } | null;
+}
+
+export function isChildEvent(event: EventMessage): boolean {
+  const s = event.source;
+  return !!(s?.agentID || s?.delegationToolUseID || (s?.rootThreadID && s.threadID && s.threadID !== s.rootThreadID));
+}
+
+export function toolIdentity(source: EventMessageSource | undefined, id: string): string {
+  const thread = source?.threadID ?? "";
+  const delegation = source?.delegationToolUseID ?? "";
+  return JSON.stringify([
+    thread,
+    delegation,
+    source?.turnID ?? "",
+    thread || delegation ? "" : (source?.agentID ?? ""),
+    id,
+  ]);
+}
+
+// Legacy coalescing may combine source-free calls; scoped groups own exactly one invocation.
+function isLegacyToolGroup(group: MessageGroup): boolean {
+  return !group.tool && !group.messageKey && group.kind === "action" && group.toolCalls.length > 0;
+}
+
+function matchesToolCall(call: ToolCall, source: EventMessageSource | undefined, id: string): boolean {
+  return toolIdentity(call.source, call.use.toolUseID) === toolIdentity(source, id);
+}
+
+export function messageSource(event: EventMessage): EventMessageSource | undefined {
+  return event.source;
+}
+
+export function messageIdentity(event: EventMessage): string | null {
+  if (
+    event.kind !== "text" &&
+    event.kind !== "textDelta" &&
+    event.kind !== "thinking" &&
+    event.kind !== "thinkingDelta"
+  )
+    return null;
+  const source = messageSource(event);
+  if (!source?.threadID || !source.turnID || !source.itemID) return null;
+  const channel = event.kind === "thinking" || event.kind === "thinkingDelta" ? "thinking" : "text";
+  return JSON.stringify([source.threadID, source.turnID, source.itemID, channel]);
+}
+
+export function childAgentID(event: EventMessage): string | null {
+  return event.source?.agentID || null;
+}
+
+function toolEventID(event: EventMessage): string | null {
+  if (event.kind === "toolUse") return event.toolUse?.toolUseID ?? null;
+  if (event.kind === "toolResult") return event.toolResult?.toolUseID ?? null;
+  if (event.kind === "toolOutputDelta") return event.toolOutputDelta?.toolUseID ?? null;
+  return null;
+}
+
+function appendScopedTool(group: MessageGroup, event: EventMessage, key: string, ended: boolean): void {
+  const previous = group.tool;
+  const range = previous?.range;
+  group.tool = {
+    key,
+    startedAt: previous?.startedAt || (event.toolUse ? event.ts : 0),
+    finishedAt: event.toolResult ? event.ts : (previous?.finishedAt ?? 0),
+    ended: ended || previous?.ended === true,
+    source: { ...previous?.source, ...event.source },
+    use: event.toolUse ?? previous?.use,
+    result: event.toolResult ?? previous?.result,
+    output: (previous?.output ?? "") + (event.toolOutputDelta?.delta ?? ""),
+    range:
+      event.ts > 0
+        ? { start: Math.min(range?.start ?? event.ts, event.ts), end: Math.max(range?.end ?? event.ts, event.ts) }
+        : (range ?? null),
+  };
+  const first = group.events[0];
+  group.events = first ? [first, event] : [event];
+  const tool = group.tool;
+  group.toolCalls = tool.use
+    ? [
+        {
+          use: tool.use,
+          result: tool.result,
+          done: !!tool.result || (tool.ended && !tool.use.background),
+          source: tool.source,
+          key,
+          output: tool.output,
+          durationMs: tool.result ? toolResultDurationMs(tool.result, tool.startedAt, tool.finishedAt) : null,
+        },
+      ]
+    : [];
+}
+
+// Display aggregates retain compact summaries while each invocation owns its bounded stream state.
+export function aggregateToolGroups(groups: MessageGroup[]): MessageGroup[] {
+  const result: MessageGroup[] = [];
+  const aggregates = new Map<string, MessageGroup>();
+  for (const group of groups) {
+    if (!group.tool?.use) {
+      result.push(group);
+      continue;
+    }
+    const scope = toolIdentity(group.tool.source, "");
+    let aggregate = aggregates.get(scope);
+    if (!aggregate) {
+      aggregate = { kind: "action", messageKey: `tools:${scope}`, events: [], toolCalls: [] };
+      aggregates.set(scope, aggregate);
+      result.push(aggregate);
+    }
+    aggregate.toolCalls.push(...group.toolCalls);
+    if (group.tool.range)
+      aggregate.range = {
+        start: Math.min(aggregate.range?.start ?? group.tool.range.start, group.tool.range.start),
+        end: Math.max(aggregate.range?.end ?? group.tool.range.end, group.tool.range.end),
+      };
+    if (aggregate.events.length === 0) aggregate.events = group.events;
+  }
+  return result;
+}
+
+function appendIdentifiedMessage(group: MessageGroup, event: EventMessage): void {
+  const text = event.text?.text ?? event.textDelta?.text ?? event.thinking?.text ?? event.thinkingDelta?.text ?? "";
+  const complete = event.kind === "text" || event.kind === "thinking";
+  const previous = group.content;
+  const range = previous?.range ?? null;
+  group.content = {
+    text: complete ? text : previous?.complete ? previous.text : (previous?.text ?? "") + text,
+    complete: complete || previous?.complete === true,
+    range:
+      event.ts > 0
+        ? { start: Math.min(range?.start ?? event.ts, event.ts), end: Math.max(range?.end ?? event.ts, event.ts) }
+        : range,
+  };
+  const first = group.events[0];
+  group.events = first ? [first, event] : [event];
 }
 
 // A tool_use event paired with its optional tool_result.
 // done is true when the tool has completed — either via an explicit result
 // event or implicitly because a later event arrived (the agent moved on).
 export interface ToolCall {
+  source?: EventMessageSource;
+  key?: string;
+  output?: string;
+  durationMs?: number | null;
   use: EventToolUse;
   result?: EventToolResult;
   done: boolean;
@@ -60,6 +230,7 @@ export interface Session {
 
 // Returns true if ev starts a new session.
 export function isSessionBoundary(ev: EventMessage): boolean {
+  if (isChildEvent(ev)) return false;
   return (
     ev.kind === "init" ||
     (ev.kind === "system" && (ev.system?.subtype === "compact_boundary" || ev.system?.subtype === "context_cleared"))
@@ -100,15 +271,69 @@ function groupMessagesAfter(
   priorWarningPercentages: ReadonlyMap<string, number>,
 ): MessageGroup[] {
   const groups: MessageGroup[] = [];
+  const byIdentity = new Map<string, MessageGroup>();
+  const byTool = new Map<string, MessageGroup>();
 
   function lastGroup(): MessageGroup | undefined {
-    return groups[groups.length - 1];
+    const group = groups[groups.length - 1];
+    return group?.messageKey ? undefined : group;
   }
 
   let usageSinceLastTool = false;
   const previousWarningPercentages = new Map(priorWarningPercentages);
 
   for (const ev of msgs) {
+    const toolID = toolEventID(ev);
+    if (ev.kind === "toolResult" && toolID) {
+      const widget = groups.find(
+        (group) =>
+          group.kind === "widget" &&
+          group.widgetToolUseID === toolID &&
+          toolIdentity(group.events[0]?.source, toolID) === toolIdentity(ev.source, toolID),
+      );
+      if (widget) {
+        widget.widgetDone = true;
+        widget.events.push(ev);
+        continue;
+      }
+    }
+    if (ev.kind === "result" && ev.source) {
+      const scope = toolIdentity(ev.source, "");
+      for (const group of byTool.values()) {
+        if (group.tool && toolIdentity(group.tool.source, "") === scope) {
+          group.tool = { ...group.tool, ended: true };
+          group.toolCalls = group.toolCalls.map((call) => (call.use.background ? call : { ...call, done: true }));
+        }
+      }
+    }
+    if (toolID !== null && (ev.source || byTool.has(toolIdentity(ev.source, toolID)))) {
+      const key = toolIdentity(ev.source, toolID);
+      let group = byTool.get(key);
+      if (!group) {
+        group = { kind: "action", messageKey: `tool:${key}`, events: [], toolCalls: [] };
+        byTool.set(key, group);
+        groups.push(group);
+      }
+      appendScopedTool(group, ev, key, false);
+      continue;
+    }
+    const messageKey = messageIdentity(ev);
+    if (messageKey !== null) {
+      const existing = byIdentity.get(messageKey);
+      if (existing) appendIdentifiedMessage(existing, ev);
+      else {
+        const group: MessageGroup = {
+          kind: ev.kind === "thinking" || ev.kind === "thinkingDelta" ? "action" : "text",
+          messageKey,
+          events: [],
+          toolCalls: [],
+        };
+        appendIdentifiedMessage(group, ev);
+        groups.push(group);
+        byIdentity.set(messageKey, group);
+      }
+      continue;
+    }
     switch (ev.kind) {
       case "text": {
         // A final text event replaces any preceding textDelta group.
@@ -152,7 +377,7 @@ function groupMessagesAfter(
           // arrives or when later events prove the agent moved on (implicit done).
           const call: ToolCall = { use: ev.toolUse, done: false };
           const last = lastGroup();
-          if (last && last.kind === "action" && last.toolCalls.length > 0 && !usageSinceLastTool) {
+          if (last && isLegacyToolGroup(last) && !usageSinceLastTool) {
             // Consecutive toolUse in the same AssistantMessage — merge.
             last.events.push(ev);
             last.toolCalls.push(call);
@@ -162,7 +387,7 @@ function groupMessagesAfter(
             let coalesced = false;
             for (let i = groups.length - 1; i >= 0; i--) {
               const group = groups[i];
-              if (group?.kind === "action" && group.toolCalls.length > 0) {
+              if (group && isLegacyToolGroup(group)) {
                 group.events.push(ev);
                 group.toolCalls.push(call);
                 coalesced = true;
@@ -188,7 +413,11 @@ function groupMessagesAfter(
           for (let i = groups.length - 1; i >= 0; i--) {
             const g = groups[i];
             if (!g) throw new Error("Missing message group");
-            if (g.kind === "widget" && g.widgetToolUseID === tr.toolUseID) {
+            if (
+              g.kind === "widget" &&
+              g.widgetToolUseID === tr.toolUseID &&
+              toolIdentity(g.events[0]?.source, tr.toolUseID) === toolIdentity(ev.source, tr.toolUseID)
+            ) {
               g.widgetDone = true;
               g.events.push(ev);
               matched = true;
@@ -196,13 +425,13 @@ function groupMessagesAfter(
             }
           }
           if (!matched) {
-            // Search all tool groups for the matching toolUseID — results may
-            // arrive after intervening text/other groups, not just the last group.
+            // Search compatible legacy calls across intervening groups. Scoped
+            // invocations are matched exclusively through the scoped lookup above.
             for (let i = groups.length - 1; i >= 0; i--) {
               const g = groups[i];
               if (!g) throw new Error("Missing message group");
-              if (g.kind !== "action") continue;
-              const tc = g.toolCalls.find((c) => c.use.toolUseID === tr.toolUseID && !c.result);
+              if (!isLegacyToolGroup(g)) continue;
+              const tc = g.toolCalls.find((call) => matchesToolCall(call, ev.source, tr.toolUseID) && !call.result);
               if (tc) {
                 tc.result = tr;
                 tc.done = true;
@@ -213,7 +442,11 @@ function groupMessagesAfter(
             }
           }
           if (!matched) {
-            groups.push({ kind: "action", events: [ev], toolCalls: [] });
+            const key = toolIdentity(ev.source, tr.toolUseID);
+            const orphan: MessageGroup = { kind: "action", messageKey: `tool:${key}`, events: [], toolCalls: [] };
+            appendScopedTool(orphan, ev, key, false);
+            byTool.set(key, orphan);
+            groups.push(orphan);
           }
         }
         break;
@@ -257,6 +490,7 @@ function groupMessagesAfter(
         }
         break;
       case "todo":
+        if (isChildEvent(ev)) groups.push({ kind: "other", events: [ev], toolCalls: [] });
         // Rendered by ProgressPanel from messages() directly; skip here to avoid
         // splitting consecutive tool groups.
         break;
@@ -268,6 +502,7 @@ function groupMessagesAfter(
         // Metadata-only; stats are handled by StatsIcon component.
         break;
       case "skillLoad":
+        if (isChildEvent(ev)) groups.push({ kind: "other", events: [ev], toolCalls: [] });
         // Rendered by TaskDetail's loaded-skill links.
         break;
       case "thinking": {
@@ -304,16 +539,29 @@ function groupMessagesAfter(
         // Append to the most recent action group that owns this tool call so
         // the accumulated output can be displayed inside its ToolCallCard.
         const id = ev.toolOutputDelta?.toolUseID;
+        let matched = false;
         if (id) {
           for (let i = groups.length - 1; i >= 0; i--) {
             const g = groups[i];
             if (!g) throw new Error("Missing message group");
-            if (g.kind !== "action") continue;
-            if (g.toolCalls.some((c) => c.use.toolUseID === id)) {
-              g.events.push(ev);
+            if (!isLegacyToolGroup(g)) continue;
+            if (g.toolCalls.some((call) => matchesToolCall(call, ev.source, id))) {
+              g.toolCalls = g.toolCalls.map((call) =>
+                matchesToolCall(call, ev.source, id)
+                  ? { ...call, output: (call.output ?? "") + (ev.toolOutputDelta?.delta ?? "") }
+                  : call,
+              );
+              matched = true;
               break;
             }
           }
+        }
+        if (!matched && id) {
+          const key = toolIdentity(ev.source, id);
+          const orphan: MessageGroup = { kind: "action", messageKey: `tool:${key}`, events: [], toolCalls: [] };
+          appendScopedTool(orphan, ev, key, false);
+          byTool.set(key, orphan);
+          groups.push(orphan);
         }
         break;
       }
@@ -334,7 +582,11 @@ function groupMessagesAfter(
           let widgetGroup: MessageGroup | undefined;
           for (let i = groups.length - 1; i >= 0; i--) {
             const group = groups[i];
-            if (group?.kind === "widget" && group.widgetToolUseID === id) {
+            if (
+              group?.kind === "widget" &&
+              group.widgetToolUseID === id &&
+              toolIdentity(group.events[0]?.source, id) === toolIdentity(ev.source, id)
+            ) {
               widgetGroup = group;
               break;
             }
@@ -362,7 +614,11 @@ function groupMessagesAfter(
           let widgetGroup: MessageGroup | undefined;
           for (let i = groups.length - 1; i >= 0; i--) {
             const group = groups[i];
-            if (group?.kind === "widget" && group.widgetToolUseID === id) {
+            if (
+              group?.kind === "widget" &&
+              group.widgetToolUseID === id &&
+              toolIdentity(group.events[0]?.source, id) === toolIdentity(ev.source, id)
+            ) {
               widgetGroup = group;
               break;
             }
@@ -431,12 +687,17 @@ function groupMessagesAfter(
   // tool-call action groups are absorbed into them.
   const merged: MessageGroup[] = [];
   for (const g of groups) {
+    if (g.messageKey) {
+      merged.push(g);
+      continue;
+    }
     if (g.kind === "action" && g.toolCalls.length > 0) {
       // Find the nearest non-text, non-thinking-only anchor action group.
       let anchor: MessageGroup | undefined;
       for (let i = merged.length - 1; i >= 0; i--) {
         const m = merged[i];
         if (!m) throw new Error("Missing message group");
+        if (m.messageKey) break;
         if (m.kind === "text" || (m.kind === "action" && m.toolCalls.length === 0)) continue;
         anchor = m;
         break;
@@ -445,7 +706,7 @@ function groupMessagesAfter(
       const thinkingEvents: EventMessage[] = [];
       while (merged.length > 0) {
         const last = merged[merged.length - 1];
-        if (!last || last.kind !== "action" || last.toolCalls.length > 0) break;
+        if (!last || last.messageKey || last.kind !== "action" || last.toolCalls.length > 0) break;
         thinkingEvents.unshift(...(merged.pop()?.events ?? []));
       }
       if (anchor && anchor.kind === "action") {
@@ -466,7 +727,7 @@ function groupMessagesAfter(
     } else if (g.kind === "action" && g.toolCalls.length === 0) {
       // Thinking-only group immediately following a tool-call group: absorb into it.
       const last = merged[merged.length - 1];
-      if (last && last.kind === "action" && last.toolCalls.length > 0) {
+      if (last && !last.messageKey && last.kind === "action" && last.toolCalls.length > 0) {
         last.events.push(...g.events);
         continue;
       }
@@ -475,7 +736,7 @@ function groupMessagesAfter(
       // a tool-call group: move thinking events into the tool group so they render
       // inside the collapsed tool block, not as a standalone ThinkingCard.
       const last = merged[merged.length - 1];
-      if (last && last.kind === "action" && last.toolCalls.length > 0) {
+      if (last && !last.messageKey && last.kind === "action" && last.toolCalls.length > 0) {
         const thinkingEvs = g.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
         if (thinkingEvs.length > 0) {
           last.events.push(...thinkingEvs);
@@ -497,6 +758,7 @@ function groupMessagesAfter(
   // groups are dropped.
   const isThinkingEv = (e: EventMessage) => e.kind === "thinking" || e.kind === "thinkingDelta";
   const renderedText = (g: MessageGroup) => {
+    if (g.content) return g.content.text;
     const final = g.events.findLast((e) => e.kind === "text");
     if (final) return final.text?.text ?? "";
     return g.events
@@ -521,6 +783,11 @@ function groupMessagesAfter(
   };
 
   for (const g of merged) {
+    if (g.messageKey) {
+      resetRun();
+      finalGroups.push(g);
+      continue;
+    }
     if (g.kind !== "text" && g.kind !== "action") {
       resetRun();
       finalGroups.push(g);
@@ -590,19 +857,23 @@ function groupMessagesAfter(
       previous?.kind === "text" &&
       renderedText(previous).trim() === result.result.trim()
     ) {
-      group.resultReplacesText = true;
-      finalGroups.splice(i - 1, 1);
-      i--;
+      if (previous.messageKey) group.resultDuplicatesText = true;
+      else {
+        group.resultReplacesText = true;
+        finalGroups.splice(i - 1, 1);
+        i--;
+      }
     }
   }
 
   // Mark tool calls as implicitly done when later events prove completion.
   // Within a group, every non-last non-background call is done (the agent
-  // moved on to the next call). Entire non-last groups are fully done.
-  const lastActionGroupIdx = finalGroups.findLastIndex((g) => g.kind === "action" && g.toolCalls.length > 0);
+  // moved on to the next call). Later root-owned groups finish legacy root calls;
+  // unresolved child activity does not provide completion evidence for them.
+  const lastRootGroupIdx = finalGroups.findLastIndex((group) => group.events.some((event) => !isChildEvent(event)));
   for (const [i, g] of finalGroups.entries()) {
-    if (g.kind !== "action" || g.toolCalls.length === 0) continue;
-    if (i < lastActionGroupIdx || i < finalGroups.length - 1) {
+    if (g.tool || g.kind !== "action" || g.toolCalls.length === 0) continue;
+    if (i < lastRootGroupIdx) {
       for (const tc of g.toolCalls) tc.done = true;
     } else {
       // Last action group: mark all but the final non-background call as done.
@@ -624,23 +895,54 @@ export class IncrementalMessageGrouper {
   private previousLength = 0;
   private previousWarningPercentages = new Map<string, number>();
   private result: MessageGroup[] | null = null;
+  private byIdentity = new Map<string, number>();
+  private byTool = new Map<string, number>();
+  private ended = false;
+  private pendingLegacyGroup = -1;
+
+  finish(): MessageGroup[] {
+    if (this.ended) return this.result ?? [];
+    this.ended = true;
+    this.result = (this.result ?? []).map((group) =>
+      group.tool
+        ? {
+            ...group,
+            tool: { ...group.tool, ended: true },
+            toolCalls: group.toolCalls.map((call) => (call.use.background ? call : { ...call, done: true })),
+          }
+        : group,
+    );
+    return this.result;
+  }
+  private firstEvent: EventMessage | null = null;
+  private lastEvent: EventMessage | null = null;
 
   reset(): void {
     this.previousLength = 0;
     this.previousWarningPercentages.clear();
     this.result = null;
+    this.byIdentity.clear();
+    this.byTool.clear();
+    this.pendingLegacyGroup = -1;
+    this.ended = false;
+    this.firstEvent = null;
+    this.lastEvent = null;
   }
 
   resetAfter(msgs: ReadonlyArray<EventMessage>): void {
-    this.previousLength = 0;
+    this.reset();
     this.previousWarningPercentages = rateLimitWarningPercentagesAfter(msgs);
-    this.result = null;
   }
 
   group(msgs: EventMessage[]): MessageGroup[] {
     const previous = this.result;
-    if (previous && this.previousLength <= msgs.length) {
+    if (
+      previous &&
+      this.previousLength <= msgs.length &&
+      (this.previousLength === 0 || (msgs[0] === this.firstEvent && msgs[this.previousLength - 1] === this.lastEvent))
+    ) {
       const newEvents = msgs.slice(this.previousLength);
+      if (newEvents.length === 0) return previous;
       const canExtend =
         newEvents.length > 0 &&
         newEvents.every(
@@ -648,7 +950,9 @@ export class IncrementalMessageGrouper {
             ev.kind === "thinkingDelta" ||
             ev.kind === "textDelta" ||
             ev.kind === "toolOutputDelta" ||
-            ev.kind === "widgetDelta",
+            ev.kind === "widgetDelta" ||
+            (ev.source !== undefined && toolEventID(ev) !== null) ||
+            messageIdentity(ev) !== null,
         );
       if (canExtend && previous.length > 0) {
         const result = [...previous];
@@ -656,34 +960,77 @@ export class IncrementalMessageGrouper {
           const group = result[index];
           if (!group) throw new Error("Missing mutable message group");
           if (group !== previous[index]) return group;
-          const copy = { ...group, events: [...group.events] };
+          const copy = { ...group, events: group.content || group.tool ? group.events : [...group.events] };
           result[index] = copy;
           return copy;
         };
         const appendGroup = (group: MessageGroup): void => {
-          const previousGroupIndex = result.length - 1;
-          const previousGroup = result[previousGroupIndex];
-          if (previousGroup?.kind === "action" && previousGroup.toolCalls.some((call) => !call.done)) {
-            const mutable = mutableGroup(previousGroupIndex);
+          if (this.pendingLegacyGroup >= 0 && group.events.some((event) => !isChildEvent(event))) {
+            const mutable = mutableGroup(this.pendingLegacyGroup);
             mutable.toolCalls = mutable.toolCalls.map((call) => (call.done ? call : { ...call, done: true }));
+            this.pendingLegacyGroup = -1;
           }
           result.push(group);
         };
 
         for (const ev of newEvents) {
+          const toolID = toolEventID(ev);
+          if (ev.kind === "toolResult" && toolID) {
+            const index = result.findIndex(
+              (group) =>
+                group.kind === "widget" &&
+                group.widgetToolUseID === toolID &&
+                toolIdentity(group.events[0]?.source, toolID) === toolIdentity(ev.source, toolID),
+            );
+            if (index >= 0) {
+              const widget = mutableGroup(index);
+              widget.widgetDone = true;
+              widget.events.push(ev);
+              continue;
+            }
+          }
+          if (toolID !== null && (ev.source || this.byTool.has(toolIdentity(ev.source, toolID)))) {
+            const key = toolIdentity(ev.source, toolID);
+            const index = this.byTool.get(key);
+            if (index !== undefined) appendScopedTool(mutableGroup(index), ev, key, this.ended);
+            else {
+              const group: MessageGroup = { kind: "action", messageKey: `tool:${key}`, events: [], toolCalls: [] };
+              appendScopedTool(group, ev, key, this.ended);
+              this.byTool.set(key, result.length);
+              appendGroup(group);
+            }
+            continue;
+          }
+          const messageKey = messageIdentity(ev);
+          if (messageKey !== null) {
+            const index = this.byIdentity.get(messageKey);
+            if (index !== undefined) appendIdentifiedMessage(mutableGroup(index), ev);
+            else {
+              this.byIdentity.set(messageKey, result.length);
+              const group: MessageGroup = {
+                kind: ev.kind === "thinking" || ev.kind === "thinkingDelta" ? "action" : "text",
+                messageKey,
+                events: [],
+                toolCalls: [],
+              };
+              appendIdentifiedMessage(group, ev);
+              appendGroup(group);
+            }
+            continue;
+          }
           const lastGroupIndex = result.length - 1;
           const lastGroup = result[lastGroupIndex];
           if (!lastGroup) throw new Error("Missing streaming message group");
           if (ev.kind === "thinkingDelta") {
-            if (lastGroup.kind === "action") {
+            if (!lastGroup.messageKey && lastGroup.kind === "action") {
               mutableGroup(lastGroupIndex).events.push(ev);
             } else {
               appendGroup({ kind: "action", events: [ev], toolCalls: [] });
             }
           } else if (ev.kind === "textDelta") {
-            if (lastGroup.kind === "text") {
+            if (!lastGroup.messageKey && lastGroup.kind === "text") {
               mutableGroup(lastGroupIndex).events.push(ev);
-            } else if (lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
+            } else if (!lastGroup.messageKey && lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
               const group = mutableGroup(lastGroupIndex);
               group.kind = "text";
               group.events.push(ev);
@@ -697,9 +1044,14 @@ export class IncrementalMessageGrouper {
               for (let i = result.length - 1; i >= 0; i--) {
                 const group = result[i];
                 if (!group) throw new Error("Missing message group");
-                if (group.kind !== "action") continue;
-                if (group.toolCalls.some((call) => call.use.toolUseID === id)) {
-                  mutableGroup(i).events.push(ev);
+                if (!isLegacyToolGroup(group)) continue;
+                if (group.toolCalls.some((call) => matchesToolCall(call, ev.source, id))) {
+                  const mutable = mutableGroup(i);
+                  mutable.toolCalls = mutable.toolCalls.map((call) =>
+                    matchesToolCall(call, ev.source, id)
+                      ? { ...call, output: (call.output ?? "") + (ev.toolOutputDelta?.delta ?? "") }
+                      : call,
+                  );
                   found = true;
                   break;
                 }
@@ -713,7 +1065,11 @@ export class IncrementalMessageGrouper {
               for (let i = result.length - 1; i >= 0; i--) {
                 const group = result[i];
                 if (!group) throw new Error("Missing message group");
-                if (group.kind === "widget" && group.widgetToolUseID === id) {
+                if (
+                  group.kind === "widget" &&
+                  group.widgetToolUseID === id &&
+                  toolIdentity(group.events[0]?.source, id) === toolIdentity(ev.source, id)
+                ) {
                   const mutable = mutableGroup(i);
                   mutable.events.push(ev);
                   mutable.widgetHTML = (mutable.widgetHTML ?? "") + (ev.widgetDelta?.delta ?? "");
@@ -736,6 +1092,8 @@ export class IncrementalMessageGrouper {
         }
         this.result = result;
         this.previousLength = msgs.length;
+        this.firstEvent = msgs[0] ?? null;
+        this.lastEvent = msgs.at(-1) ?? null;
         return result;
       }
     }
@@ -743,9 +1101,23 @@ export class IncrementalMessageGrouper {
   }
 
   private regroup(msgs: EventMessage[]): MessageGroup[] {
+    const ended = this.ended;
+    this.ended = false;
     this.result = groupMessagesAfter(msgs, this.previousWarningPercentages);
     this.previousLength = msgs.length;
-    return this.result;
+    this.firstEvent = msgs[0] ?? null;
+    this.lastEvent = msgs.at(-1) ?? null;
+    this.byIdentity.clear();
+    this.byTool.clear();
+    this.pendingLegacyGroup = -1;
+    this.result.forEach((group, index) => {
+      if (group.tool) this.byTool.set(group.tool.key, index);
+      else if (group.messageKey) this.byIdentity.set(group.messageKey, index);
+      if (!group.tool && group.kind === "action" && group.toolCalls.some((call) => !call.done)) {
+        this.pendingLegacyGroup = index;
+      }
+    });
+    return ended ? this.finish() : this.result;
   }
 }
 
@@ -781,6 +1153,12 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
 
   for (const g of groups) {
     current.push(g);
+    const range = g.content?.range ?? g.tool?.range ?? g.range;
+    if (range) {
+      firstTs = hasTs ? Math.min(firstTs, range.start) : range.start;
+      lastTs = Math.max(lastTs, range.end);
+      hasTs = true;
+    }
     if (g.kind === "action") {
       toolCount += g.toolCalls.length;
     } else if (g.kind === "text") {
@@ -799,7 +1177,7 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
           lastTs = Math.max(lastTs, ev.ts);
         }
       }
-      if (ev.kind === "result" && ev.result !== undefined) {
+      if (ev.kind === "result" && ev.result !== undefined && !isChildEvent(ev)) {
         resultPayload = ev.result;
         const durationMs = Math.round((ev.result.duration ?? 0) * 1000);
         if (durationMs > 0) {
@@ -807,7 +1185,7 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
         }
       }
     }
-    if (g.kind === "other" && g.events.some((ev) => ev.kind === "result")) {
+    if (g.kind === "other" && g.events.some((ev) => ev.kind === "result" && !isChildEvent(ev))) {
       flush();
     }
   }
@@ -830,7 +1208,7 @@ export function groupSessions(msgs: EventMessage[]): Session[] {
   let currentSessionID: string | undefined;
 
   function flushSession() {
-    const groups = groupMessages(segment);
+    const groups = aggregateToolGroups(groupMessages(segment));
     const turns = groupTurns(groups);
     let toolCount = 0;
     let textCount = 0;
@@ -855,7 +1233,7 @@ export function groupSessions(msgs: EventMessage[]): Session[] {
   }
 
   for (const ev of msgs) {
-    if (ev.kind === "init") {
+    if (ev.kind === "init" && !isChildEvent(ev)) {
       const newID = ev.init?.sessionID;
       if (newID !== currentSessionID) {
         // Restart init supplies the identity of the context just opened by a
@@ -921,7 +1299,7 @@ export function buildTurnItems(
           kind: "group",
           group,
           isLive: false,
-          key: `${turnKey}-g${j}`,
+          key: group.messageKey ? `message:${group.messageKey}` : `${turnKey}-g${j}`,
           indent: "turn",
         });
       }
@@ -992,6 +1370,7 @@ export function toolResultDurationMs(result: EventToolResult, startTs: number, r
 }
 
 export function toolCallDurationMs(call: ToolCall, durations: ReadonlyMap<string, number>): number | null {
+  if (call.durationMs !== undefined) return call.durationMs;
   if (call.result) {
     const explicit = toolResultDurationMs(call.result, 0, 0);
     if (explicit !== null) return explicit;

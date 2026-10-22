@@ -24,7 +24,7 @@ func DecodeV1MetaSessionMessage(line []byte) (MetaSessionMessage, error) {
 	if err != nil {
 		return MetaSessionMessage{}, err
 	}
-	return MetaSessionMessage(record), err
+	return MetaSessionMessage{MessageType: record.MessageType, SessionID: record.SessionID, ReportedModel: record.ReportedModel, ReportedEffort: record.ReportedEffort, AgentVersion: record.AgentVersion}, err
 }
 
 type v1RecordDiscriminator struct {

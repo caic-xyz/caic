@@ -294,14 +294,14 @@ func InferredSkillReadsFromCommand(cmd, cwd, sourceID string) []Message {
 // SkillReadTracker releases inferred reads and loads only after the opening
 // tool succeeds. A turn boundary discards those whose result never arrived.
 type SkillReadTracker struct {
-	pending map[string][]Message
+	pending map[ToolKey][]Message
 }
 
 // Confirm reports whether the input is already countable and returns the
 // inferred reads and loads confirmed by a successful tool result, in arrival
 // order. Ordinary messages allocate nothing.
 func (t *SkillReadTracker) Confirm(m Message) (bool, []Message) {
-	var source string
+	var source ToolKey
 	switch m := m.(type) {
 	case *SkillReadMessage:
 		if !m.Inferred {
@@ -310,27 +310,35 @@ func (t *SkillReadTracker) Confirm(m Message) (bool, []Message) {
 		if m.SourceToolUseID == "" {
 			return false, nil
 		}
-		source = m.SourceToolUseID
+		source = ToolKeyForSource(m.Provenance(), m.SourceToolUseID)
 	case *SkillLoadMessage:
 		if m.SourceToolUseID == "" {
 			return true, nil
 		}
-		source = m.SourceToolUseID
+		source = ToolKeyForSource(m.Provenance(), m.SourceToolUseID)
 	case *ToolResultMessage:
-		confirmed := t.pending[m.ToolUseID]
-		delete(t.pending, m.ToolUseID)
+		key := ToolKeyForSource(m.Provenance(), m.ToolUseID)
+		confirmed := t.pending[key]
+		delete(t.pending, key)
 		if m.Error != "" {
 			return true, nil
 		}
 		return true, confirmed
 	case *ResultMessage:
-		clear(t.pending)
+		scope := ToolKeyForSource(m.Provenance(), "")
+		for pending := range t.pending {
+			key := pending
+			key.ToolUseID = ""
+			if key == scope {
+				delete(t.pending, pending)
+			}
+		}
 		return true, nil
 	default:
 		return true, nil
 	}
 	if t.pending == nil {
-		t.pending = make(map[string][]Message)
+		t.pending = make(map[ToolKey][]Message)
 	}
 	t.pending[source] = append(t.pending[source], m)
 	return false, nil

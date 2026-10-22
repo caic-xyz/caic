@@ -30,7 +30,115 @@ func (conversionPricer) ModelPrice(_ agent.QuotaProvider, model string, _ time.T
 }
 
 func TestToolTimingTrackerConvertMessage(t *testing.T) {
+	t.Run("tool timing separates owners and late correlation", func(t *testing.T) {
+		t.Parallel()
+		tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+		root := agent.MessageSource{ThreadID: "root", TurnID: "turn"}
+		child := agent.MessageSource{ThreadID: "session", DelegationToolUseID: "delegate"}
+		t0 := time.Unix(10, 0)
+		tracker.ConvertMessage(&agent.ToolUseMessage{Source: root, ToolUseID: "same", Name: "Bash"}, t0)
+		tracker.ConvertMessage(&agent.ToolUseMessage{Source: child, ToolUseID: "same", Name: "Read"}, t0.Add(time.Second))
+		child.AgentID = "resolved-child"
+		childEvents := tracker.ConvertMessage(&agent.ToolResultMessage{Source: child, ToolUseID: "same"}, t0.Add(3*time.Second))
+		rootEvents := tracker.ConvertMessage(&agent.ToolResultMessage{Source: root, ToolUseID: "same"}, t0.Add(5*time.Second))
+		if childEvents[0].ToolResult.Duration != 2 || rootEvents[0].ToolResult.Duration != 5 {
+			t.Fatalf("child/root durations = %+v / %+v", childEvents[0].ToolResult, rootEvents[0].ToolResult)
+		}
+	})
 	t.Parallel()
+
+	t.Run("common provenance", func(t *testing.T) {
+		t.Parallel()
+		source := agent.MessageSource{AgentID: "child", DelegationToolUseID: "delegation", ThreadID: "thread", TurnID: "turn", ItemID: "item"}
+		for _, message := range []agent.Message{
+			&agent.TextMessage{Text: "visible"}, &agent.TextDeltaMessage{Text: "fragment"},
+			&agent.ThinkingMessage{Text: "reason"}, &agent.ThinkingDeltaMessage{Text: "reason fragment"},
+			&agent.ToolUseMessage{ToolUseID: "tool", Name: "Bash"},
+			&agent.ToolResultMessage{ToolUseID: "tool"},
+			&agent.ToolOutputDeltaMessage{ToolUseID: "tool", Delta: "output"},
+			&agent.ResultMessage{}, &agent.UsageMessage{}, &agent.SystemMessage{},
+			&agent.UserInputMessage{Text: "input"}, &agent.LogMessage{Line: "log"},
+			&agent.DiffStatMessage{}, &agent.TurnCommitSnapshotMessage{},
+		} {
+			*message.Provenance() = source
+			tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+			events := tracker.ConvertMessage(message, time.Unix(1, 0))
+			if len(events) == 0 {
+				t.Fatalf("%T produced no event", message)
+			}
+			for _, event := range events {
+				encoded, err := json.Marshal(event)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var envelope struct {
+					Source agent.MessageSource `json:"source"`
+				}
+				if err := json.Unmarshal(encoded, &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if envelope.Source != source {
+					t.Errorf("%T common provenance = %s", message, encoded)
+				}
+			}
+		}
+	})
+
+	t.Run("result fallback excludes child output", func(t *testing.T) {
+		t.Parallel()
+		parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
+		child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
+		for _, messages := range [][]agent.Message{
+			{&agent.TextMessage{Text: "Parent answer", Source: parent}, &agent.ToolUseMessage{Source: child, ToolUseID: "child-tool"}, &agent.ToolResultMessage{Source: child, ToolUseID: "child-tool"}, &agent.ThinkingDeltaMessage{Text: "child reasoning", Source: child}, &agent.TextMessage{Text: "Child answer", Source: child}},
+			{&agent.TextDeltaMessage{Text: "Parent ", Source: parent}, &agent.TextDeltaMessage{Text: "Child answer", Source: child}, &agent.TextDeltaMessage{Text: "answer", Source: parent}},
+		} {
+			tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+			for _, msg := range messages {
+				tracker.ConvertMessage(msg, time.Time{})
+			}
+			result := tracker.ConvertMessage(&agent.ResultMessage{}, time.Time{})
+			if len(result) != 1 || result[0].Result == nil || result[0].Result.Result != "Parent answer" {
+				t.Errorf("parent result fallback = %+v", result)
+			}
+		}
+	})
+
+	t.Run("empty scoped completions remain observable", func(t *testing.T) {
+		t.Parallel()
+		source := agent.MessageSource{ThreadID: "parent", TurnID: "turn", ItemID: "item"}
+		for _, msg := range []agent.Message{
+			&agent.TextMessage{Source: source},
+			&agent.ThinkingMessage{Source: source},
+		} {
+			tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+			if events := tracker.ConvertMessage(msg, time.Unix(1, 0)); len(events) != 1 {
+				t.Errorf("%T completion = %+v", msg, events)
+			}
+		}
+		for _, partial := range []agent.MessageSource{
+			{},
+			{RootThreadID: "root"},
+			{ThreadID: "parent"},
+			{TurnID: "turn"},
+			{ItemID: "item"},
+			{ThreadID: "parent", TurnID: "turn"},
+			{ThreadID: "parent", ItemID: "item"},
+			{TurnID: "turn", ItemID: "item"},
+		} {
+			for _, msg := range []agent.Message{&agent.TextMessage{Source: partial}, &agent.ThinkingMessage{Source: partial}} {
+				tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+				if events := tracker.ConvertMessage(msg, time.Unix(1, 0)); len(events) != 0 {
+					t.Errorf("unscoped %T completion = %+v", msg, events)
+				}
+			}
+			for _, msg := range []agent.Message{&agent.TextMessage{Text: "Visible", Source: partial}, &agent.ThinkingMessage{Text: "Visible", Source: partial}} {
+				tracker := NewToolTimingTracker(harness.Codex, "", nil, nil)
+				if events := tracker.ConvertMessage(msg, time.Unix(1, 0)); len(events) != 1 {
+					t.Errorf("nonempty %T with partial source = %+v", msg, events)
+				}
+			}
+		}
+	})
 
 	t.Run("cost projection preserves raw reports", func(t *testing.T) {
 		t.Parallel()

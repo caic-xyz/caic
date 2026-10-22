@@ -1,8 +1,9 @@
-// Tests native Pi subagent-extension lifecycle from the recorded joke evidence.
+// Tests native Pi subagent-extension lifecycle and the absence of child streams in the recorded parent transport.
 
 package pi
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -162,6 +163,61 @@ func TestNativeSubagentWorkflowEvidence(t *testing.T) {
 			}
 			if !strings.Contains(card.Result, "Output file:") {
 				t.Fatalf("result = %q, want the workflow's reported output artifact", card.Result)
+			}
+		})
+	}
+}
+
+// TestDelegationTransportOwnership pins what the retained parent transport
+// actually exposes: delegation tools/results and native lifecycle, never the
+// child's internal tool stream or ownership inferred from result prose.
+func TestDelegationTransportOwnership(t *testing.T) {
+	t.Parallel()
+	evidence := agenttest.LoadNativeSubagentEvidence(t, "testdata/evidence/native-subagent-joke-v3.jsonl", agent.LogVersionV3, func() agent.WireFormat { return New("", nil).NewWire() })
+	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			t.Parallel()
+			wire := New("", nil).NewWire()
+			parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
+			if version != 0 {
+				parser, err = agent.NewLogRecordParser(version, wire.ParseMessage)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var calls, results, outputs, cards int
+			for _, line := range evidence.Payloads {
+				var messages []agent.Message
+				if version == 0 {
+					messages, err = wire.ParseMessage(line)
+				} else {
+					record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + string(line) + `}`))
+					err = e
+					for _, timed := range record.Messages {
+						messages = append(messages, timed.Message)
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, m := range messages {
+					if m.Provenance().IsChild() {
+						t.Fatalf("invented child stream on %T: %+v", m, m.Provenance())
+					}
+					switch m.(type) {
+					case *agent.ToolUseMessage:
+						calls++
+					case *agent.ToolResultMessage:
+						results++
+					case *agent.ToolOutputDeltaMessage:
+						outputs++
+					case *agent.NativeSubagentMessage:
+						cards++
+					}
+				}
+			}
+			if calls == 0 || results == 0 || outputs == 0 || cards == 0 {
+				t.Fatalf("lost exposed paths: calls=%d results=%d output=%d cards=%d", calls, results, outputs, cards)
 			}
 		})
 	}

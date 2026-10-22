@@ -1,4 +1,4 @@
-// TaskDetail renders agent output with context-section skills, runtime file links, actions, and Git-state diff navigation.
+// TaskDetail renders source-owned parent/child transcripts, scoped tools, root context, file links, and task actions.
 
 import {
   createSignal,
@@ -50,6 +50,10 @@ import { notifications } from "@maruel/gomode/web/notifications";
 
 import {
   IncrementalMessageGrouper,
+  aggregateToolGroups,
+  isChildEvent,
+  toolIdentity,
+  messageIdentity,
   groupSessions,
   isSessionBoundary,
   buildPastSessionItems,
@@ -229,6 +233,15 @@ export default function TaskDetail(props: Props) {
   const taskPath = () => location.pathname.split("/").slice(0, 3).join("/");
   const timeline = useTaskTimeline();
   const messages = timeline.messages;
+  const nativeTracker = new NativeActivityTracker();
+  const nativeActivities = createMemo(() => nativeTracker.derive(messages()));
+  const displayedAtRoot = (event: EventMessage): boolean => {
+    nativeActivities();
+    return (
+      (event.kind === "rateLimit" && event.rateLimit?.rateLimitType !== "thread_goal") ||
+      nativeTracker.ownerFor(event) === null
+    );
+  };
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
@@ -446,25 +459,30 @@ export default function TaskDetail(props: Props) {
   const [completedMsgs, setCompletedMsgs] = createSignal<EventMessage[]>([]);
   let derivedTaskId = "";
   let derivedEpoch = -1;
+  let derivedRouting = -1;
   createEffect(() => {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
+    nativeActivities();
+    const routing = nativeTracker.routingRevision;
     const msgs = messages();
     const taskChanged = taskId !== derivedTaskId;
-    const reset = taskChanged || epoch !== derivedEpoch;
+    const reset = taskChanged || epoch !== derivedEpoch || routing !== derivedRouting;
     const previousIdx = untrack(splitIdx);
     let idx = reset ? 0 : previousIdx;
     if (reset) {
       derivedTaskId = taskId;
       derivedEpoch = epoch;
+      derivedRouting = routing;
       if (taskChanged) userScrolledUp = false;
     }
     for (let i = idx; i < msgs.length; i++) {
-      if (msgs[i]?.kind === "result") idx = i + 1;
+      const event = msgs[i];
+      if (event?.kind === "result" && !isChildEvent(event)) idx = i + 1;
     }
     if (reset || idx !== previousIdx) {
       setSplitIdx(idx);
-      setCompletedMsgs(msgs.slice(0, idx));
+      setCompletedMsgs(msgs.slice(0, idx).filter(displayedAtRoot));
     }
   });
 
@@ -501,19 +519,20 @@ export default function TaskDetail(props: Props) {
   // Setup can fail before that happens, so retain the recorded prompt as task context.
   const hasInitialPromptEvent = createMemo(() => {
     const history = messages();
-    const firstInput = history.findIndex((event) => event.kind === "userInput");
+    const firstInput = history.findIndex((event) => event.kind === "userInput" && !isChildEvent(event));
     if (firstInput < 0 || history[firstInput]?.userInput?.text !== props.initialPrompt) return false;
     return !history
       .slice(0, firstInput)
       .some(
         (event) =>
-          event.kind === "text" ||
-          event.kind === "textDelta" ||
-          event.kind === "thinking" ||
-          event.kind === "thinkingDelta" ||
-          event.kind === "toolUse" ||
-          event.kind === "toolResult" ||
-          event.kind === "result",
+          !isChildEvent(event) &&
+          (event.kind === "text" ||
+            event.kind === "textDelta" ||
+            event.kind === "thinking" ||
+            event.kind === "thinkingDelta" ||
+            event.kind === "toolUse" ||
+            event.kind === "toolResult" ||
+            event.kind === "result"),
       );
   });
   // Fold setup metadata incrementally; large retained histories must not be
@@ -538,7 +557,7 @@ export default function TaskDetail(props: Props) {
     }
     for (let i = setupProcessed; i < history.length; i++) {
       const event = history[i];
-      if (!event) continue;
+      if (!event || isChildEvent(event)) continue;
       if (event.kind === "log" && event.log) setupLogs.push(event);
       if (firstInit === null && event.kind === "init") firstInit = event;
       if ((event.kind === "init" || event.kind === "userInput") && event.ts > 0) {
@@ -587,7 +606,7 @@ export default function TaskDetail(props: Props) {
       currentSessionBoundaryFromCompleted() ??
       messages()
         .slice(splitIdx())
-        .find((event) => event.kind === "init"),
+        .find((event) => event.kind === "init" && !isChildEvent(event)),
   );
   const currentSessionKey = createMemo(() => {
     const idx = allCompletedSessions().length - 1;
@@ -601,20 +620,32 @@ export default function TaskDetail(props: Props) {
   let groupedTaskId = "";
   let groupedEpoch = -1;
   let groupedSplitIdx = -1;
+  let groupedThrough = 0;
+  let groupedMessages: EventMessage[] = [];
+  let groupedRouting = -1;
   const currentGroups = createMemo(() => {
     const taskId = props.taskId;
     const epoch = timeline.epoch();
     const start = splitIdx();
-    if (taskId !== groupedTaskId || epoch !== groupedEpoch || start !== groupedSplitIdx) {
+    nativeActivities();
+    const routing = nativeTracker.routingRevision;
+    if (taskId !== groupedTaskId || epoch !== groupedEpoch || start !== groupedSplitIdx || routing !== groupedRouting) {
       groupedTaskId = taskId;
       groupedEpoch = epoch;
       groupedSplitIdx = start;
+      groupedRouting = routing;
       messageGrouper.resetAfter(completedMsgs());
+      groupedThrough = start;
+      groupedMessages = [];
     }
-    const msgs = messages()
-      .slice(start)
-      .filter((ev) => ev.kind !== "init");
-    return messageGrouper.group(msgs);
+    const history = messages();
+    for (let i = groupedThrough; i < history.length; i++) {
+      const event = history[i];
+      if (!event) throw new Error("Missing timeline event");
+      if (event.kind !== "init" && displayedAtRoot(event)) groupedMessages.push(event);
+    }
+    groupedThrough = history.length;
+    return aggregateToolGroups(messageGrouper.group(groupedMessages));
   });
 
   // Past session items: stable during streaming (only change on turn completion or expansion toggle).
@@ -648,7 +679,7 @@ export default function TaskDetail(props: Props) {
       kind: "group" as const,
       group: g,
       isLive: false,
-      key: `${initialKeyPrefix}:${j}`,
+      key: g.messageKey ? `message:${g.messageKey}` : `${initialKeyPrefix}:${j}`,
     }));
   });
   // Session boundary item for the current session.
@@ -672,12 +703,12 @@ export default function TaskDetail(props: Props) {
       if (g.kind === "other" && g.events.length === 1 && event?.kind === "system" && isSessionBoundary(event)) {
         return { kind: "sessionBoundary", event, key: `g:${j}` };
       }
-      return { kind: "group", group: g, isLive: true, key: `g:${j}` };
+      return { kind: "group", group: g, isLive: true, key: g.messageKey ? `message:${g.messageKey}` : `g:${j}` };
     });
   });
   // Flat item model: past sessions (elided) + current session boundary + current session
   // completed turns (elided) + last completed turn (always expanded) + live turn groups.
-  const items = createMemo((): MsgItem[] => [
+  const transcriptItems = createMemo((): MsgItem[] => [
     ...pastSessionItems(),
     ...sessionBoundaryItems(),
     ...completedTurnItems(),
@@ -695,7 +726,8 @@ export default function TaskDetail(props: Props) {
     const groups = allGroups();
     for (let i = groups.length - 1; i >= 0; i--) {
       const group = groups[i];
-      if (group?.kind === "ask") return group;
+      const event = group?.events[0];
+      if (group?.kind === "ask" && event && !isChildEvent(event)) return group;
     }
     return null;
   });
@@ -840,23 +872,54 @@ export default function TaskDetail(props: Props) {
 
   // One tracker per mount folds canonical native activity across turns,
   // compaction, and replaced history without regrouping the transcript.
-  const nativeTracker = new NativeActivityTracker();
-  const nativeActivities = createMemo(() => nativeTracker.derive(messages()));
   const nativeSettled = () => !isActive();
+  const renderNativeTranscript = (groups: () => MessageGroup[]) => (
+    <Index each={groups()}>
+      {(group) => (
+        <div data-testid="stream-message" data-message-key={group().messageKey}>
+          <Show when={hasGroupTiming(group())}>
+            <div class={styles.timedItemContent}>
+              <span class={styles.messageTiming}>
+                <TimingIcon
+                  events={group().events}
+                  range={group().content?.range ?? group().tool?.range ?? group().range}
+                />
+              </span>
+              <GroupContent
+                group={group}
+                taskId={props.taskId}
+                isWaiting={() => false}
+                lastAskGroup={() => null}
+                onAskAnswer={sendAskAnswer}
+                pendingAction={pendingAction}
+                model={props.model ?? null}
+                turnTiming={() => undefined}
+                nativeByToolUseID={nativeByToolUseID}
+                nativeSettled={nativeSettled}
+                backgroundByToolUseID={backgroundByToolUseID}
+                backgroundSettled={backgroundSettled}
+              />
+            </div>
+          </Show>
+        </div>
+      )}
+    </Index>
+  );
   // Correlate canonical native activity with the tool card that spawned it.
   const nativeByToolUseID = createMemo(() => {
     const byTool = new Map<string, NativeActivity[]>();
     for (const activity of nativeActivities()) {
       if (!activity.toolUseID) continue;
-      const list = byTool.get(activity.toolUseID);
+      const key = toolIdentity(activity.source, activity.toolUseID);
+      const list = byTool.get(key);
       if (list) list.push(activity);
-      else byTool.set(activity.toolUseID, [activity]);
+      else byTool.set(key, [activity]);
     }
     return byTool;
   });
   // Anchor each card to the transcript item it settled at, or spawned at while
   // running, so agents render in the flow instead of a task-wide panel.
-  const nativeByAnchor = createMemo(() => assignNativeAnchors(items(), nativeActivities()));
+  const nativeByAnchor = createMemo(() => assignNativeAnchors(transcriptItems(), nativeActivities()));
   // An activity whose turn produced no anchorable transcript item still needs a
   // home, so it renders after the transcript instead of disappearing.
   const nativeUnanchored = createMemo(() => {
@@ -864,6 +927,45 @@ export default function TaskDetail(props: Props) {
     for (const list of nativeByAnchor().values()) for (const a of list) anchored.add(a.id);
     return nativeActivities().filter((activity) => !anchored.has(activity.id));
   });
+  type TranscriptItem = MsgItem | { kind: "native"; activity: NativeActivity; key: string };
+  // Native cards are keyed siblings, including when no parent content exists
+  // yet. Adding root content or folding lifecycle updates retains their DOM.
+  const items = createMemo((): TranscriptItem[] => {
+    const root = transcriptItems();
+    const firstRoot = root.find((item) => item.kind === "group");
+    const firstRootTs = firstRoot?.kind === "group" ? (firstRoot.group.events[0]?.ts ?? 0) : 0;
+    const early = new Set(
+      nativeActivities()
+        .filter((activity) => activity.transcript && firstRootTs > activity.anchorTs)
+        .map((activity) => activity.id),
+    );
+    const nativeItem = (activity: NativeActivity): TranscriptItem => ({
+      kind: "native",
+      activity,
+      key: `native:${activity.id}`,
+    });
+    const result: TranscriptItem[] = [];
+    for (const item of root) {
+      if (item === firstRoot)
+        result.push(
+          ...nativeActivities()
+            .filter((activity) => early.has(activity.id))
+            .map(nativeItem),
+        );
+      result.push(item);
+      for (const activity of nativeByAnchor().get(item.key) ?? []) {
+        if (!early.has(activity.id)) result.push(nativeItem(activity));
+      }
+    }
+    for (const activity of nativeUnanchored()) {
+      if (!early.has(activity.id)) result.push(nativeItem(activity));
+    }
+    return result;
+  });
+  const itemsByKey = createMemo<Record<string, TranscriptItem>>(() =>
+    Object.fromEntries(items().map((item) => [item.key, item])),
+  );
+  const itemKeys = createMemo(() => items().map((item) => item.key));
   // One tracker per mount folds canonical background commands across turns,
   // compaction, and replaced history. A detached shell never drives task state,
   // so this is presentation-only folding.
@@ -874,13 +976,14 @@ export default function TaskDetail(props: Props) {
     const byTool = new Map<string, BackgroundCommandActivity[]>();
     for (const command of backgroundCommands()) {
       if (!command.toolUseID) continue;
-      const list = byTool.get(command.toolUseID);
+      const key = toolIdentity(command.source, command.toolUseID);
+      const list = byTool.get(key);
       if (list) list.push(command);
-      else byTool.set(command.toolUseID, [command]);
+      else byTool.set(key, [command]);
     }
     return byTool;
   });
-  const backgroundByAnchor = createMemo(() => assignNativeAnchors(items(), backgroundCommands()));
+  const backgroundByAnchor = createMemo(() => assignNativeAnchors(transcriptItems(), backgroundCommands()));
   const backgroundUnanchored = createMemo(() => {
     const anchored = new Set<string>();
     for (const list of backgroundByAnchor().values()) for (const c of list) anchored.add(c.id);
@@ -1219,8 +1322,13 @@ export default function TaskDetail(props: Props) {
               </pre>
             </details>
           </Show>
-          <Index each={items()}>
-            {(item) => {
+          <For each={itemKeys()}>
+            {(key) => {
+              const item = (): TranscriptItem => {
+                const current = itemsByKey()[key];
+                if (!current) throw new Error("Missing transcript item");
+                return current;
+              };
               // Type-narrowing accessors for the MsgItem discriminated union.
               const sessElided = () =>
                 item().kind === "sessionElided" ? (item() as Extract<MsgItem, { kind: "sessionElided" }>) : null;
@@ -1234,7 +1342,6 @@ export default function TaskDetail(props: Props) {
               const grpItem = () => (item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>) : null);
               // Canonical native activity anchored to this item: a settled card
               // renders where it settled, a running one where it spawned.
-              const anchored = () => nativeByAnchor().get(item().key) ?? [];
               const anchorIndent = () => {
                 const current = item();
                 if (current.kind === "group") {
@@ -1265,6 +1372,17 @@ export default function TaskDetail(props: Props) {
                     )}
                   </Show>
                   <Switch>
+                    <Match when={item().kind === "native"}>
+                      <NativeAgents
+                        activities={
+                          item().kind === "native"
+                            ? [(item() as Extract<TranscriptItem, { kind: "native" }>).activity]
+                            : []
+                        }
+                        settled={nativeSettled()}
+                        renderTranscript={renderNativeTranscript}
+                      />
+                    </Match>
                     {/* Collapsed past session: single clickable row. */}
                     <Match when={sessElided()} keyed>
                       {(se) => (
@@ -1363,7 +1481,11 @@ export default function TaskDetail(props: Props) {
                     {/* Message group: non-keyed to preserve iframe state in WidgetCard. */}
                     <Match when={grpItem()}>
                       {(gi) => (
-                        <div class={gi().indent === "turn" ? styles.indentTurn : undefined}>
+                        <div
+                          class={gi().indent === "turn" ? styles.indentTurn : undefined}
+                          data-testid={gi().group.messageKey ? "stream-message" : undefined}
+                          data-message-key={gi().group.messageKey}
+                        >
                           <div class={styles.timedItemContent}>
                             <Show
                               when={
@@ -1375,6 +1497,7 @@ export default function TaskDetail(props: Props) {
                               <span class={styles.messageTiming}>
                                 <TimingIcon
                                   events={gi().group.events}
+                                  range={gi().group.content?.range ?? gi().group.tool?.range ?? gi().group.range}
                                   segments={gi().group.timingSegments}
                                   userWaitMs={taskTimings().userWaitMs}
                                   previousEventTs={taskTimings().previousEventTs}
@@ -1401,9 +1524,8 @@ export default function TaskDetail(props: Props) {
                       )}
                     </Match>
                   </Switch>
-                  <Show when={anchored().length > 0 || backgroundByAnchor().get(item().key)?.length}>
+                  <Show when={backgroundByAnchor().get(item().key)?.length}>
                     <div class={anchorIndent()}>
-                      <NativeAgents activities={anchored()} settled={nativeSettled()} />
                       <BackgroundCommands
                         commands={backgroundByAnchor().get(item().key) ?? []}
                         settled={backgroundSettled()}
@@ -1413,10 +1535,7 @@ export default function TaskDetail(props: Props) {
                 </>
               );
             }}
-          </Index>
-          <Show when={nativeUnanchored().length > 0}>
-            <NativeAgents activities={nativeUnanchored()} settled={nativeSettled()} />
-          </Show>
+          </For>
           <Show when={backgroundUnanchored().length > 0}>
             <BackgroundCommands commands={backgroundUnanchored()} settled={backgroundSettled()} />
           </Show>
@@ -1622,7 +1741,22 @@ function GroupContent(props: {
         )}
       </Match>
       <Match when={group().kind === "action"}>
-        <Show when={group().toolCalls.length > 0} fallback={<ThinkingCard events={group().events} />}>
+        <Show
+          when={group().toolCalls.length > 0}
+          fallback={
+            <Show when={group().tool} fallback={<ThinkingCard events={group().events} text={group().content?.text} />}>
+              {(tool) => (
+                <details data-testid="orphan-tool">
+                  <summary>
+                    Tool {tool().result ? "result" : "output"}:{" "}
+                    {tool().result?.toolUseID ?? group().events[0]?.toolOutputDelta?.toolUseID}
+                  </summary>
+                  <pre>{tool().result?.error || tool().output || "Result received; no output reported."}</pre>
+                </details>
+              )}
+            </Show>
+          }
+        >
           <ToolMessageGroup
             toolCalls={group().toolCalls}
             taskId={props.taskId}
@@ -1637,14 +1771,22 @@ function GroupContent(props: {
         </Show>
       </Match>
       <Match when={group().kind === "text"}>
-        <TextMessageGroup events={group().events} />
+        <TextMessageGroup events={group().events} text={group().content?.text} />
       </Match>
       <Match when={group().kind === "widget"}>
         <WidgetCard group={group()} />
       </Match>
       <Match when={group().kind === "other"}>
         <For each={group().events}>
-          {(ev) => <MessageItem ev={ev} model={props.model} turnTiming={props.turnTiming(ev)} />}
+          {(ev) => (
+            <MessageItem
+              ev={ev}
+              taskId={props.taskId}
+              model={props.model}
+              turnTiming={props.turnTiming(ev)}
+              hideResultText={group().resultDuplicatesText}
+            />
+          )}
         </For>
       </Match>
     </Switch>
@@ -1652,6 +1794,8 @@ function GroupContent(props: {
 }
 
 function hasGroupTiming(group: MessageGroup): boolean {
+  if (group.tool && !group.tool.use) return true;
+  if (group.content) return group.content.text.trim() !== "";
   if (group.kind === "action") {
     return (
       group.toolCalls.length > 0 ||
@@ -1829,7 +1973,13 @@ function usageMetaParts(u: EventUsage): string[] {
   return u.reportedModel ? [u.reportedModel, ...tokenParts] : tokenParts;
 }
 
-function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming?: TurnTiming }) {
+function MessageItem(props: {
+  taskId: string;
+  ev: EventMessage;
+  model: string | null;
+  turnTiming?: TurnTiming;
+  hideResultText?: boolean;
+}) {
   return (
     <Switch>
       <Match when={props.ev.rateLimit}>
@@ -1837,6 +1987,36 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
       </Match>
       <Match when={props.ev.system?.subtype === "api_error"}>
         <div class={styles.parseError}>API error</div>
+      </Match>
+      <Match when={props.ev.system?.subtype === "error"}>
+        <div class={styles.parseError}>{props.ev.system?.detail || "Agent error"}</div>
+      </Match>
+      <Match when={props.ev.toolResult || props.ev.toolOutputDelta}>
+        <details data-testid="orphan-tool">
+          <summary>
+            Tool {props.ev.toolResult ? "result" : "output"}:{" "}
+            {props.ev.toolResult?.toolUseID ?? props.ev.toolOutputDelta?.toolUseID}
+          </summary>
+          <pre>
+            {props.ev.toolResult?.error || props.ev.toolOutputDelta?.delta || "Result received; no output reported."}
+          </pre>
+        </details>
+      </Match>
+      <Match when={props.ev.todo}>
+        <For each={props.ev.todo?.todos}>
+          {(todo) => (
+            <div>
+              {todo.status}: {todo.content}
+            </div>
+          )}
+        </For>
+      </Match>
+      <Match when={props.ev.skillLoad}>
+        <SkillStrip
+          taskId={props.taskId}
+          skills={props.ev.skillLoad ? [props.ev.skillLoad] : []}
+          label="Child loaded skill"
+        />
       </Match>
       <Match when={props.ev.system?.subtype === "compact_start"}>
         <div class={styles.systemMsg} data-testid="compact-start">
@@ -1879,7 +2059,14 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
         }}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => <ResultCard result={result} model={props.model} turnTiming={props.turnTiming} />}
+        {(result) => (
+          <ResultCard
+            result={result}
+            model={props.model}
+            turnTiming={props.turnTiming}
+            hideText={props.hideResultText}
+          />
+        )}
       </Match>
       <Match when={props.ev.error} keyed>
         {(err) => <div class={styles.parseError}>Parse error: {err.err}</div>}
@@ -1891,7 +2078,7 @@ function MessageItem(props: { ev: EventMessage; model: string | null; turnTiming
   );
 }
 
-function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: TurnTiming }) {
+function ResultCard(props: { result: EventResult; model: string | null; turnTiming?: TurnTiming; hideText?: boolean }) {
   const result = () => props.result;
   const meta = createMemo(() => {
     const current = result();
@@ -1919,7 +2106,7 @@ function ResultCard(props: { result: EventResult; model: string | null; turnTimi
       <Show when={!props.turnTiming}>
         <strong>{result().isError ? "Error" : "Done"}</strong>
       </Show>
-      <Show when={result().result}>
+      <Show when={!props.hideText && result().result}>
         <div class={styles.resultText}>
           <Markdown text={result().result} />
         </div>
@@ -1943,7 +2130,11 @@ function ToolMessageGroup(props: {
   backgroundSettled: () => boolean;
 }) {
   const calls = () => props.toolCalls;
-  const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
+  const callKey = (call: ToolCall) => `${props.taskId}:tool:${toolIdentity(call.source, call.use.toolUseID)}`;
+  const groupKey = () => {
+    const first = calls()[0];
+    return `${props.taskId}:group:${first?.source ? toolIdentity(first.source, "") : first?.use.toolUseID}`;
+  };
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
   const thinkingEvents = () => (props.events ?? []).filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
   const durations = createMemo(() => toolCallDurations(props.events ?? []));
@@ -1953,23 +2144,25 @@ function ToolMessageGroup(props: {
   return (
     <Show when={calls().length > 0}>
       <Show
-        when={calls().length > 1}
+        when={calls().length > 1 || calls()[0]?.source !== undefined}
         fallback={
           <Show when={calls()[0]}>
             {(call) => (
               <ToolCallCard
                 call={call()}
                 taskId={props.taskId}
-                durationMs={toolCallDurationMs(call(), durations())}
+                durationMs={call().durationMs ?? toolCallDurationMs(call(), durations())}
                 thinkingEvents={thinkingEvents()}
                 outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
-                open={detailsOpenState.get(call().use.toolUseID) ?? false}
-                onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
+                open={detailsOpenState.get(callKey(call())) ?? false}
+                onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
                 onClearAndExecutePlan={props.onClearAndExecutePlan}
                 pendingAction={props.pendingAction}
-                nativeActivity={props.nativeByToolUseID().get(call().use.toolUseID)}
+                nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                 nativeSettled={props.nativeSettled}
-                backgroundCommands={props.backgroundByToolUseID().get(call().use.toolUseID)}
+                backgroundCommands={props
+                  .backgroundByToolUseID()
+                  .get(toolIdentity(call().source, call().use.toolUseID))}
                 backgroundSettled={props.backgroundSettled}
               />
             )}
@@ -1994,15 +2187,17 @@ function ToolMessageGroup(props: {
                   <ToolCallCard
                     call={call()}
                     taskId={props.taskId}
-                    durationMs={toolCallDurationMs(call(), durations())}
+                    durationMs={call().durationMs ?? toolCallDurationMs(call(), durations())}
                     outputDeltaEvents={outputDeltaEvents(call().use.toolUseID)}
-                    open={detailsOpenState.get(call().use.toolUseID) ?? false}
-                    onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
+                    open={detailsOpenState.get(callKey(call())) ?? false}
+                    onToggle={(v) => detailsOpenState.set(callKey(call()), v)}
                     suppressPlanContent={true}
                     pendingAction={props.pendingAction}
-                    nativeActivity={props.nativeByToolUseID().get(call().use.toolUseID)}
+                    nativeActivity={props.nativeByToolUseID().get(toolIdentity(call().source, call().use.toolUseID))}
                     nativeSettled={props.nativeSettled}
-                    backgroundCommands={props.backgroundByToolUseID().get(call().use.toolUseID)}
+                    backgroundCommands={props
+                      .backgroundByToolUseID()
+                      .get(toolIdentity(call().source, call().use.toolUseID))}
                     backgroundSettled={props.backgroundSettled}
                   />
                 )}
@@ -2036,8 +2231,9 @@ function ToolMessageGroup(props: {
 }
 
 // Renders a thinking group, collapsed by default like a ToolCallCard.
-function ThinkingCard(props: { events: EventMessage[] }) {
+function ThinkingCard(props: { events: EventMessage[]; text?: string }) {
   const text = createMemo(() => {
+    if (props.text !== undefined) return props.text;
     // Process events sequentially so each thinking block (final or still-streaming
     // deltas) is collected independently. Multiple thinking blocks can land in the
     // same group when consecutive tool-call turns are merged by groupMessages.
@@ -2058,7 +2254,7 @@ function ThinkingCard(props: { events: EventMessage[] }) {
     const t = text();
     return t ? (t.split("\n", 1)[0] ?? "").trim() : "";
   });
-  const key = () => "thinking:" + (props.events[0]?.ts ?? 0);
+  const key = () => "thinking:" + (props.events[0] ? (messageIdentity(props.events[0]) ?? props.events[0].ts) : 0);
   const isOpen = () => detailsOpenState.get(key()) ?? false;
   return (
     <Show when={text()}>
@@ -2100,11 +2296,12 @@ function ShadowHTML(props: { html: string }) {
 }
 
 // Renders a text group, combining textDelta fragments into a single view.
-function TextMessageGroup(props: { events: EventMessage[] }) {
+function TextMessageGroup(props: { events: EventMessage[]; text?: string }) {
   const thinkingEvents = createMemo(() =>
     props.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta"),
   );
   const text = createMemo(() => {
+    if (props.text !== undefined) return props.text;
     const finalEv = props.events.findLast((e) => e.kind === "text");
     if (finalEv?.text) return finalEv.text.text;
     return props.events
@@ -2245,6 +2442,19 @@ function ToolCallCard(props: {
 }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [inputError, setInputError] = createSignal("");
+  let inputRequest = 0;
+  const inputOwner = createMemo(() =>
+    JSON.stringify([props.taskId, toolIdentity(props.call.source, props.call.use.toolUseID)]),
+  );
+  createEffect(() => {
+    inputOwner();
+    inputRequest++;
+    setLoadedInput(null);
+    setLoading(false);
+    setInputError("");
+  });
+  onCleanup(() => inputRequest++);
 
   const durationMs = () => props.durationMs;
   const error = () => props.call.result?.error ?? "";
@@ -2254,18 +2464,36 @@ function ToolCallCard(props: {
   const showLoadBtn = () => props.call.use.inputTruncated && !loadedInput();
 
   async function loadInput() {
+    const request = ++inputRequest;
     setLoading(true);
+    setInputError("");
     try {
-      const resp = await api.getTaskToolInput(props.taskId, props.call.use.toolUseID);
-      setLoadedInput(resp.input as Record<string, unknown>);
+      const source = props.call.source;
+      const resp = await api.getTaskToolInput(
+        props.taskId,
+        props.call.use.toolUseID,
+        source?.agentID ?? "",
+        source?.delegationToolUseID ?? "",
+        source?.threadID ?? "",
+        source?.turnID ?? "",
+      );
+      if (request === inputRequest) setLoadedInput(resp.input as Record<string, unknown>);
+    } catch (err) {
+      if (request === inputRequest) setInputError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (request === inputRequest) setLoading(false);
     }
   }
 
   return (
     <>
-      <details class={styles.toolBlock} open={props.open} onToggle={(e) => props.onToggle(e.currentTarget.open)}>
+      <details
+        class={styles.toolBlock}
+        data-testid="tool-call"
+        data-tool-key={toolIdentity(props.call.source, props.call.use.toolUseID)}
+        open={props.open}
+        onToggle={(e) => props.onToggle(e.currentTarget.open)}
+      >
         <summary>
           <span class={styles.toolSummaryContent}>
             <span class={styles.toolSummaryMain}>
@@ -2328,9 +2556,14 @@ function ToolCallCard(props: {
         <Show when={error()}>
           <pre class={styles.toolErrorPre}>{error()}</pre>
         </Show>
-        <Show when={(props.outputDeltaEvents?.length ?? 0) > 0}>
+        <Show when={inputError()}>
+          <pre class={styles.toolErrorPre} role="alert">
+            {inputError()}
+          </pre>
+        </Show>
+        <Show when={props.call.output || (props.outputDeltaEvents?.length ?? 0) > 0}>
           <pre class={styles.toolOutputDelta}>
-            {props.outputDeltaEvents?.map((e) => e.toolOutputDelta?.delta ?? "").join("")}
+            {props.call.output ?? props.outputDeltaEvents?.map((e) => e.toolOutputDelta?.delta ?? "").join("")}
           </pre>
         </Show>
       </details>

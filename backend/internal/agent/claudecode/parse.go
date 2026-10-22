@@ -1,4 +1,4 @@
-// Claude Code stream-json parser. Converts Claude's wire format into backend-neutral agent.Message types.
+// Claude Code stream-json parser preserves delegation ownership while converting content, tools, usage, and controls.
 
 package claudecode
 
@@ -8,6 +8,9 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/buger/jsonparser"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -50,6 +53,13 @@ const (
 	maxBufferedWidgetJSONBytes = 1 << 20
 )
 
+// widgetBlockKey scopes a stream block index to its actual session and delegation.
+type widgetBlockKey struct {
+	threadID     string
+	delegationID string
+	index        int
+}
+
 // WidgetTracker tracks which content block indices are widget tools during
 // streaming, enabling input_json_delta events to be emitted as WidgetDeltaMessage.
 // It bounds both tracked blocks and aggregate partial JSON so malformed streams
@@ -57,15 +67,15 @@ const (
 type WidgetTracker struct {
 	// activeWidgets maps content block index → toolUseID for blocks whose
 	// tool name is in agent.WidgetToolNames.
-	activeWidgets map[int]string
+	activeWidgets map[widgetBlockKey]string
 	// accum maps content block index → accumulated partial JSON string.
-	accum map[int]string
+	accum map[widgetBlockKey]string
 	// lastHTMLLen maps content block index → length of HTML already emitted,
 	// so only new bytes are sent as deltas.
-	lastHTMLLen map[int]int
+	lastHTMLLen map[widgetBlockKey]int
 	// exceeded maps content block index → true when accumulated HTML or JSON
 	// exceeds its limit. No further deltas are emitted.
-	exceeded map[int]struct{}
+	exceeded map[widgetBlockKey]struct{}
 	// bufferedJSONBytes is the aggregate size of accum values.
 	bufferedJSONBytes int
 }
@@ -73,19 +83,19 @@ type WidgetTracker struct {
 // newWidgetTracker returns a WidgetTracker whose maps are ready.
 func newWidgetTracker() *WidgetTracker {
 	return &WidgetTracker{
-		activeWidgets: make(map[int]string),
-		accum:         make(map[int]string),
-		lastHTMLLen:   make(map[int]int),
-		exceeded:      make(map[int]struct{}),
+		activeWidgets: make(map[widgetBlockKey]string),
+		accum:         make(map[widgetBlockKey]string),
+		lastHTMLLen:   make(map[widgetBlockKey]int),
+		exceeded:      make(map[widgetBlockKey]struct{}),
 	}
 }
 
-func (wt *WidgetTracker) forgetAccum(index int) {
+func (wt *WidgetTracker) forgetAccum(index widgetBlockKey) {
 	wt.bufferedJSONBytes -= len(wt.accum[index])
 	delete(wt.accum, index)
 }
 
-func (wt *WidgetTracker) forget(index int) {
+func (wt *WidgetTracker) forget(index widgetBlockKey) {
 	wt.forgetAccum(index)
 	delete(wt.activeWidgets, index)
 	delete(wt.lastHTMLLen, index)
@@ -96,43 +106,44 @@ func (wt *WidgetTracker) forget(index int) {
 // the event belongs to a tracked widget block. Returns (nil, false) if the
 // event is not widget-related and should be handled by the normal path.
 func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) ([]agent.Message, bool) {
+	index := widgetBlockKey{threadID: w.SessionID, delegationID: w.ParentToolUseID, index: w.Event.Index}
 	switch w.Event.Type {
 	case "content_block_start":
 		cb := w.Event.ContentBlock
 		if cb.Type == "tool_use" && func() bool { _, ok := agent.WidgetToolNames[cb.Name]; return ok }() {
-			wt.forget(w.Event.Index)
+			wt.forget(index)
 			if len(wt.activeWidgets) < maxTrackedWidgetBlocks {
-				wt.activeWidgets[w.Event.Index] = cb.ID
+				wt.activeWidgets[index] = cb.ID
 			}
 		}
 		return nil, false
 	case "content_block_delta":
 		if w.Event.Delta.Type == "input_json_delta" {
-			toolUseID, ok := wt.activeWidgets[w.Event.Index]
+			toolUseID, ok := wt.activeWidgets[index]
 			if !ok {
 				return nil, false
 			}
-			if _, ok := wt.exceeded[w.Event.Index]; ok {
+			if _, ok := wt.exceeded[index]; ok {
 				return nil, true // absorbed but no emission
 			}
 			partial := w.Event.Delta.PartialJSON
 			if len(partial) > maxBufferedWidgetJSONBytes-wt.bufferedJSONBytes {
-				wt.exceeded[w.Event.Index] = struct{}{}
-				wt.forgetAccum(w.Event.Index)
+				wt.exceeded[index] = struct{}{}
+				wt.forgetAccum(index)
 				return nil, true
 			}
-			wt.accum[w.Event.Index] += partial
+			wt.accum[index] += partial
 			wt.bufferedJSONBytes += len(partial)
-			html := extractPartialWidgetCode(wt.accum[w.Event.Index])
+			html := extractPartialWidgetCode(wt.accum[index])
 			if len(html) > agent.MaxWidgetHTMLBytes {
-				wt.exceeded[w.Event.Index] = struct{}{}
-				wt.forgetAccum(w.Event.Index)
+				wt.exceeded[index] = struct{}{}
+				wt.forgetAccum(index)
 				return nil, true
 			}
-			prevLen := wt.lastHTMLLen[w.Event.Index]
+			prevLen := wt.lastHTMLLen[index]
 			if len(html) > prevLen {
 				delta := html[prevLen:]
-				wt.lastHTMLLen[w.Event.Index] = len(html)
+				wt.lastHTMLLen[index] = len(html)
 				return []agent.Message{&agent.WidgetDeltaMessage{
 					ToolUseID: toolUseID,
 					Delta:     delta,
@@ -142,8 +153,8 @@ func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) (
 		}
 		return nil, false
 	case "content_block_stop":
-		if _, ok := wt.activeWidgets[w.Event.Index]; ok {
-			wt.forget(w.Event.Index)
+		if _, ok := wt.activeWidgets[index]; ok {
+			wt.forget(index)
 			return nil, true
 		}
 		return nil, false
@@ -162,7 +173,51 @@ type decodedLine struct {
 	reasoningEstimate int                         // Nonnegative thinking-token estimate from a system record.
 	system            *claudecode.OutputSystemMsg // Set for a task lifecycle record.
 	user              *claudecode.OutputUserMsg   // Set for a decoded user record.
-	parentToolUseID   string                      // Set for a subagent's assistant record: the delegating tool use.
+	source            agent.MessageSource         // Actual session and delegating tool metadata of this record.
+	askControl        bool                        // Native Ask controls match actual Ask ownership before session fallback.
+	controlAgentID    string                      // Agent named by a can_use_tool request, when reported.
+	harnessRecord     bool                        // Native session records can inherit the known session context.
+}
+
+// parseRecordHeader reads dispatch and ownership together so streamed fragments
+// do not repeatedly scan the same envelope for optional metadata. First fields,
+// nulls, escaping and UTF-8 replacement match agent.JSONString semantics.
+func parseRecordHeader(line []byte) (typ string, source agent.MessageSource, err error) {
+	var seen uint8
+	err = jsonparser.ObjectEach(line, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
+		var target *string
+		var bit uint8
+		switch string(key) {
+		case "type":
+			target, bit = &typ, 1
+		case "session_id":
+			target, bit = &source.ThreadID, 2
+		case "parent_tool_use_id":
+			target, bit = &source.DelegationToolUseID, 4
+		default:
+			return nil
+		}
+		if seen&bit != 0 {
+			return nil
+		}
+		seen |= bit
+		if kind == jsonparser.Null {
+			return nil
+		}
+		if kind != jsonparser.String {
+			return fmt.Errorf("JSON field is %v, want string", kind)
+		}
+		text, err := jsonparser.ParseString(value)
+		if err != nil {
+			return err
+		}
+		if !utf8.ValidString(text) {
+			text = string([]rune(text))
+		}
+		*target = text
+		return nil
+	})
+	return typ, source, err
 }
 
 // parseMessageWithTracker decodes a single Claude Code NDJSON line with
@@ -170,8 +225,8 @@ type decodedLine struct {
 // input_json_delta events for widget tools produce WidgetDeltaMessage. It returns
 // the decoded records of the line so the native-subagent adapter reads the
 // fields the canonical conversion drops without decoding the line again.
-func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, decodedLine, error) {
-	typ, err := agent.JSONString(line, "type")
+func parseMessageWithTracker(line []byte, wt *WidgetTracker) (msgs []agent.Message, record decodedLine, err error) {
+	typ, source, err := parseRecordHeader(line)
 	if err != nil {
 		return nil, decodedLine{}, fmt.Errorf("unmarshal envelope: %w", err)
 	}
@@ -182,7 +237,18 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 			return nil, decodedLine{}, fmt.Errorf("unmarshal envelope: %w", err)
 		}
 	}
-	var record decodedLine
+	record.source = source
+	switch typ {
+	case string(claudecode.OutputSystem), string(claudecode.OutputAssistant), string(claudecode.OutputUser), string(claudecode.OutputResult), string(claudecode.OutputStreamEvent), string(claudecode.OutputControlRequest):
+		record.harnessRecord = true
+	}
+	defer func() {
+		for _, message := range msgs {
+			if message.Provenance().IsZero() {
+				*message.Provenance() = record.source
+			}
+		}
+	}()
 	switch claudecode.OutputType(typ) {
 	case claudecode.OutputSystem:
 		subtype, err := agent.JSONString(line, "subtype")
@@ -192,7 +258,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 		msgs, err := parseSystem(line, subtype, &record)
 		return msgs, record, err
 	case claudecode.OutputAssistant:
-		msgs, err := parseAssistant(line, &record)
+		msgs, err := parseAssistant(line)
 		return msgs, record, err
 	case claudecode.OutputUser:
 		msgs, err := parseUser(line, &record)
@@ -242,7 +308,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, d
 			QuotaWindow:     canonicalQuotaWindow(info.RateLimitType),
 		}}, record, nil
 	case claudecode.OutputControlRequest:
-		msgs, err := parseControlRequest(line)
+		msgs, err := parseControlRequest(line, &record)
 		return msgs, record, err
 	case agent.PendingUserActionMessageType:
 		var m agent.PendingUserActionMessage
@@ -320,7 +386,7 @@ func canonicalQuotaWindow(rateLimitType claudecode.RateLimitType) string {
 	}
 }
 
-func parseControlRequest(line []byte) ([]agent.Message, error) {
+func parseControlRequest(line []byte, record *decodedLine) ([]agent.Message, error) {
 	var w claudecode.OutputControlRequestMsg
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
@@ -329,6 +395,8 @@ func parseControlRequest(line []byte) ([]agent.Message, error) {
 	if !ok || can.Subtype != claudecode.ControlCanUseTool || can.ToolName != "AskUserQuestion" {
 		return []agent.Message{&agent.RawMessage{MessageType: string(w.Type), Raw: append([]byte(nil), line...)}}, nil
 	}
+	record.askControl = true
+	record.controlAgentID = can.AgentID
 	inputRaw, err := rawObject(can.Input)
 	if err != nil {
 		return nil, fmt.Errorf("marshal AskUserQuestion input: %w", err)
@@ -433,12 +501,11 @@ func parseSystem(line []byte, subtype string, record *decodedLine) ([]agent.Mess
 	}
 }
 
-func parseAssistant(line []byte, record *decodedLine) ([]agent.Message, error) {
+func parseAssistant(line []byte) ([]agent.Message, error) {
 	var w claudecode.OutputAssistantMsg
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
-	record.parentToolUseID = w.ParentToolUseID
 	var msgs []agent.Message
 	for i := range w.Message.Content {
 		b := &w.Message.Content[i]
@@ -688,8 +755,15 @@ func parseUser(line []byte, record *decodedLine) ([]agent.Message, error) {
 		return nil, nil
 	}
 
-	// Standard tool result: parent_tool_use_id set at the top level.
-	if w.ParentToolUseID != "" {
+	// A child user record carries the delegating Agent ID, not its own tool
+	// result ID. The role:user body owns prompts and inline tool_result IDs.
+	// Role-less result bodies directly reference their tool at the top level.
+	role, err := agent.JSONString(w.Message, "role")
+	if err != nil {
+		return nil, err
+	}
+	if w.ParentToolUseID != "" && role != "user" {
+		record.source.DelegationToolUseID = ""
 		return []agent.Message{extractToolResult(w.ParentToolUseID, w.Message)}, nil
 	}
 

@@ -174,8 +174,8 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/caic/v1/processes/${encodeURIComponent(id)}`),
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
     signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/caic/v1/processes/${encodeURIComponent(id)}/${encodeURIComponent(pid)}/signal`, req),
-    /** Returns the full (untruncated) input for a tool call. */
-    getTaskToolInput: (id: string, toolUseID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/tool/${encodeURIComponent(toolUseID)}`),
+    /** Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. */
+    getTaskToolInput: (id: string, toolUseID: string, agentID: string, delegationToolUseID: string, threadID: string, turnID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/tool/${encodeURIComponent(toolUseID)}?agentID=${encodeURIComponent(agentID)}&delegationToolUseID=${encodeURIComponent(delegationToolUseID)}&threadID=${encodeURIComponent(threadID)}&turnID=${encodeURIComponent(turnID)}`),
     /** Streams task list updates for all tasks via SSE. */
     globalTaskEvents: (handlers: GlobalTaskEventsHandlers): EventSource => {
       const es = new EventSource("/api/caic/v1/tasks/events");

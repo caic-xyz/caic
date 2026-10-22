@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/apiconv"
@@ -23,6 +25,32 @@ import (
 
 func TestTaskEventBackwardProjector(t *testing.T) {
 	t.Parallel()
+	t.Run("preserves question provenance", func(t *testing.T) {
+		t.Parallel()
+		source := agent.MessageSource{ThreadID: "root", RootThreadID: "root", TurnID: "turn", ItemID: "ask"}
+		question := &agent.AskMessage{Source: source, ToolUseID: "ask", Questions: []logv3.AskQuestion{{Question: "Which approach?"}}}
+		projection := newTaskEventBackwardProjector(agentReplayHistory{question})
+		if projection.message == nil || projection.message.Ask == nil || projection.message.Ask.ToolUseID != "ask" || projection.message.Source != v1.EventMessageSource(source) {
+			t.Fatalf("question origin lost: %+v", projection.message)
+		}
+	})
+	t.Run("keeps provider messages distinct", func(t *testing.T) {
+		t.Parallel()
+		parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
+		other := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "earlier"}
+		child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "child-turn", ItemID: "answer"}
+		for _, tail := range [][]agent.Message{
+			{&agent.TextDeltaMessage{Text: "new ", Source: parent}, &agent.TextDeltaMessage{Text: "child ", Source: child}, &agent.TextDeltaMessage{Text: "answer", Source: parent}},
+			{&agent.TextMessage{Text: "new answer", Source: parent}, &agent.TextMessage{Text: "child answer", Source: child}},
+		} {
+			history := append(agentReplayHistory{&agent.TextDeltaMessage{Text: "earlier", Source: other}}, tail...)
+			p := newTaskEventBackwardProjector(history)
+			if p.message == nil || p.message.Text == nil || p.message.Text.Text != "new answer" || p.message.Source != v1.EventMessageSource(parent) {
+				t.Fatalf("backward boundary mixed provider messages: %+v", p.message)
+			}
+		}
+	})
+
 	p := newTaskEventBackwardProjector(agentReplayHistory{
 		&agent.TextMessage{Text: "older response"},
 		&agent.UserInputMessage{Text: "new turn"},
@@ -454,6 +482,80 @@ func TestGenericConvertWidgetDelta(t *testing.T) {
 }
 
 func TestTaskEventStreamResume(t *testing.T) {
+	t.Run("CodexChildErrorBeforeRootMetadata", func(t *testing.T) {
+		t.Parallel()
+		for _, replay := range []bool{false, true} {
+			t.Run(strconv.FormatBool(replay), func(t *testing.T) {
+				t.Parallel()
+				wire := codex.New("", nil).NewWire()
+				parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := httptest.NewRecorder()
+				stream := taskEventStream{w: w, writer: sse.New(w), tracker: apiconv.NewToolTimingTracker(harness.Codex, "", nil, nil), resume: taskEventResume{timelineID: "timeline", source: taskEventSourceMemory}}
+				sequence := uint64(0)
+				for _, line := range []string{
+					`{"method":"thread/started","params":{"thread":{"id":"child","parentThreadId":"root"}}}`,
+					`{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"child-turn","tokenUsage":{"last":{"inputTokens":10,"totalTokens":10},"total":{"inputTokens":10,"totalTokens":10}}}}`,
+					`{"method":"error","params":{"threadId":"child","turnId":"child-turn","error":{"message":"child failed before root metadata"}}}`,
+					`{"method":"thread/started","params":{"thread":{"id":"root","threadSource":"user"}}}`,
+					`{"method":"thread/started","params":{"thread":{"id":"child"}}}`,
+					`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"root-turn","status":"completed"}}}`,
+				} {
+					var messages []agent.Message
+					if replay {
+						r, err := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + line + `}`))
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, timed := range r.Messages {
+							messages = append(messages, timed.Message)
+						}
+					} else {
+						messages, err = wire.ParseMessage([]byte(line))
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					for _, m := range messages {
+						sequence++
+						if err := stream.writeMessage(m, sequence, time.Unix(1, 0), false); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				var failures, results int
+				for line := range strings.SplitSeq(w.Body.String(), "\n") {
+					if !strings.HasPrefix(line, "data:") {
+						continue
+					}
+					var event v1.EventMessage
+					if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &event); err != nil {
+						t.Fatal(err)
+					}
+					if event.System != nil && event.System.Subtype == "error" {
+						failures++
+						if event.System.Detail != "child failed before root metadata" || event.Source.AgentID != "codex:thread:child" {
+							t.Fatalf("SSE lost child failure: %+v", event)
+						}
+					}
+					if event.Result != nil {
+						results++
+						if event.Source.ThreadID != "root" || event.Source.AgentID != "" || event.Result.Usage.InputTokens != 10 {
+							t.Fatalf("child ended root turn or consumed usage: %+v", event)
+						}
+					}
+					if event.NativeSubagent != nil {
+						t.Fatal("thread metadata invented a lifecycle card")
+					}
+				}
+				if failures != 1 || results != 1 {
+					t.Fatalf("SSE failures/results = %d/%d: %s", failures, results, w.Body.String())
+				}
+			})
+		}
+	})
 	t.Parallel()
 	t.Run("SeedsConverterFromAcknowledgedMessages", func(t *testing.T) {
 		t.Parallel()
@@ -497,6 +599,48 @@ func TestTaskEventStreamResume(t *testing.T) {
 			t.Fatalf("error = %v, want invalid task event ID", err)
 		}
 	})
+}
+
+func TestReplayMemoryHistoryConcurrentMessages(t *testing.T) {
+	t.Parallel()
+	parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "parent-item"}
+	child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "child-turn", ItemID: "child-item"}
+	tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "work"}, harness.Codex)
+	tk.SeedTimelineParts([]agent.TimedMessage{
+		{Message: &agent.UserInputMessage{Text: "work"}},
+		{Message: &agent.TextDeltaMessage{Text: "Parent ", Source: parent}},
+		{Message: &agent.TextDeltaMessage{Text: "Child ", Source: child}},
+	}, []agent.TimedMessage{
+		{Message: &agent.TextDeltaMessage{Text: "answer", Source: parent}},
+		{Message: &agent.TextMessage{Text: "Child answer", Source: child}},
+	})
+	history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
+	defer unsubscribe()
+	defer history.Release()
+	preview := newTaskEventBackwardProjector(timelineReplayHistory{snapshot: history})
+	if preview.message == nil || preview.message.Text == nil || preview.message.Text.Text != "Parent answer" || preview.message.Source.ItemID != "parent-item" {
+		t.Errorf("compacted preview lost root message: %+v", preview.message)
+	}
+	s := newTestRouter(t, nil)
+	entry := s.taskMgr.NewEntry(tk, nil)
+	w := httptest.NewRecorder()
+	stream := taskEventStream{
+		ctx: t.Context(), w: w, writer: sse.New(w), tracker: newHistoryTracker(tk),
+		resume: taskEventResume{
+			timelineID: tk.TimelineID(), source: taskEventSourceMemory,
+			after: taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 1, event: 0},
+		},
+	}
+	through := uint64(history.Len()) //nolint:gosec // Small fixed regression history.
+	if err := testTaskHandlers(s).replayMemoryHistory(&stream, entry, history, time.Now(), through); err != nil {
+		t.Fatal(err)
+	}
+	body := w.Body.String()
+	for _, fragment := range []string{`"text":"Parent "`, `"text":"answer"`, `"itemID":"parent-item"`, `"text":"Child answer"`} {
+		if !strings.Contains(body, fragment) {
+			t.Errorf("reconnect lost %s: %s", fragment, body)
+		}
+	}
 }
 
 func TestReplayMemoryHistoryRebuildsFilterAfterCursorReset(t *testing.T) {
@@ -547,6 +691,23 @@ func TestReplayMemoryHistoryRebuildsFilterAfterCursorReset(t *testing.T) {
 
 func TestFilterHistoryForReplay(t *testing.T) {
 	t.Parallel()
+	t.Run("preserves unrelated message fragments", func(t *testing.T) {
+		t.Parallel()
+		child := agent.MessageSource{ThreadID: "child", TurnID: "turn", ItemID: "answer"}
+		parent := agent.MessageSource{ThreadID: "parent", TurnID: "turn", ItemID: "answer"}
+		for _, msgs := range [][]agent.Message{
+			{&agent.TextDeltaMessage{Text: "child", Source: child}, &agent.TextMessage{Text: "parent", Source: parent}},
+			{&agent.ThinkingDeltaMessage{Text: "child", Source: child}, &agent.ThinkingMessage{Text: "parent", Source: parent}},
+			{&agent.TextDeltaMessage{Text: "child", Source: child}, &agent.TextDeltaMessage{Text: "parent", Source: parent}, &agent.TextMessage{Text: "parent done", Source: parent}},
+			{&agent.ThinkingDeltaMessage{Text: "child", Source: child}, &agent.ThinkingDeltaMessage{Text: "parent", Source: parent}, &agent.ThinkingMessage{Text: "parent done", Source: parent}},
+		} {
+			got := filterHistoryForReplay(msgs)
+			if len(got) != 2 || got[0] != msgs[0] {
+				t.Errorf("replay dropped another message's fragments: %#v", got)
+			}
+		}
+	})
+
 	t.Run("RemovesTextDeltasBeforeText", func(t *testing.T) {
 		t.Parallel()
 		msgs := []agent.Message{

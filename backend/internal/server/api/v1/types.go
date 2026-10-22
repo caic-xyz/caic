@@ -581,6 +581,15 @@ type TaskListRestorationStatus struct {
 	Error   string `json:"error"`
 }
 
+// TaskToolInputQuery scopes a provider-local tool ID to its owner and turn.
+// An empty query requires the ID to be unambiguous throughout task history.
+type TaskToolInputQuery struct {
+	AgentID             string `json:"agentID,omitempty"`
+	DelegationToolUseID string `json:"delegationToolUseID,omitempty"`
+	ThreadID            string `json:"threadID,omitempty"`
+	TurnID              string `json:"turnID,omitempty"`
+}
+
 // TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 // It returns the full (untruncated) input for a tool call.
 type TaskToolInputResp struct {

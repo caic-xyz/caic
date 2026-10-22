@@ -66,6 +66,7 @@ type TaskEventBackward struct {
 // EventMessage is a single SSE event in the backend-neutral stream
 // (/api/caic/v1/tasks/{id}/events). All backends produce these events.
 type EventMessage struct {
+	Source            EventMessageSource      `json:"source,omitzero"`
 	Kind              EventKind               `json:"kind"`
 	Ts                int64                   `json:"ts"`
 	Init              *EventInit              `json:"init,omitempty"`
@@ -107,6 +108,25 @@ type EventInit struct {
 	Tools          []string `json:"tools,omitzero"`
 	Cwd            string   `json:"cwd"`
 	Harness        string   `json:"harness"`
+}
+
+// EventMessageSource identifies the provider origin of any normalized event.
+// AgentID and DelegationToolUseID identify child ownership independently of native
+// item identity. RootThreadID is an authoritative session owner when reported.
+// Fields remain absent when the harness does not supply them.
+type EventMessageSource struct {
+	AgentID             string `json:"agentID,omitempty"`
+	DelegationToolUseID string `json:"delegationToolUseID,omitempty"`
+	ThreadID            string `json:"threadID,omitempty"`
+	TurnID              string `json:"turnID,omitempty"`
+	ItemID              string `json:"itemID,omitempty"`
+	RootThreadID        string `json:"rootThreadID,omitempty"`
+}
+
+// IsZero reports whether all source fields are empty. source,omitzero retains
+// partial provenance and omits only the completely absent source.
+func (s *EventMessageSource) IsZero() bool {
+	return *s == (EventMessageSource{})
 }
 
 // EventText is an assistant text block.

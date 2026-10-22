@@ -62,6 +62,68 @@ const activities: [NativeActivity, NativeActivity, NativeActivity, NativeActivit
 ];
 
 describe("NativeAgents", () => {
+  it("preserves a distinct lifecycle result alongside partial child output", () => {
+    render(() => (
+      <NativeAgentCard
+        activity={{
+          ...activities[0],
+          result: "Finished research.",
+          transcript: [
+            {
+              kind: "text",
+              toolCalls: [],
+              events: [{ kind: "textDelta", ts: 1, textDelta: { text: "Partial research" } }],
+            },
+          ],
+        }}
+        settled={true}
+        renderTranscript={() => <p>Partial research</p>}
+      />
+    ));
+    expect(screen.getByText("Partial research")).toBeInTheDocument();
+    expect(screen.getByText("Finished research.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Result" })).toBeInTheDocument();
+  });
+
+  it("omits only a lifecycle echo already represented by completed child text", () => {
+    render(() => (
+      <NativeAgentCard
+        activity={{
+          ...activities[0],
+          result: " Finished research. ",
+          transcript: [
+            { kind: "text", toolCalls: [], events: [{ kind: "text", ts: 1, text: { text: "Finished research." } }] },
+          ],
+        }}
+        settled={true}
+        renderTranscript={() => <p>Finished research.</p>}
+      />
+    ));
+    expect(screen.getAllByText("Finished research.")).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Result" })).not.toBeInTheDocument();
+  });
+
+  it("does not show a missing-result placeholder when child output exists", () => {
+    render(() => (
+      <NativeAgentCard
+        activity={{
+          ...activities[0],
+          result: "",
+          transcript: [
+            {
+              kind: "text",
+              toolCalls: [],
+              events: [{ kind: "textDelta", ts: 1, textDelta: { text: "Partial research" } }],
+            },
+          ],
+        }}
+        settled={true}
+        renderTranscript={() => <p>Partial research</p>}
+      />
+    ));
+    expect(screen.queryByText("No result reported by the harness.")).not.toBeInTheDocument();
+    expect(screen.getByText("Partial research")).toBeInTheDocument();
+  });
   it("exposes expandable cards with their identity and result", async () => {
     render(() => <NativeAgents activities={activities} settled={false} />);
     const card = screen.getByText("Subagent: Joker").closest("details");

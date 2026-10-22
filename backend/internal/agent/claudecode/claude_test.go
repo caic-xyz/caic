@@ -158,8 +158,8 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		injection    = `{"type":"user","isSynthetic":true,"parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /home/user/.claude/skills/code-quality\n\n# Code Quality\n"}]}}`
 		failedUse    = `{"type":"assistant","parent_tool_use_id":null,"message":{"model":"m","content":[{"type":"tool_use","id":"sk_2","name":"Skill","input":{"skill":"missing"}}],"usage":{}}}`
 		failedResult = `{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_2","content":"Unknown skill: missing","is_error":true}]}}`
-		// A subagent's records carry the delegating tool use ID; its tool
-		// result is keyed by that ID too.
+		// A subagent's records carry delegation metadata; its tool result
+		// still pairs with the inner Skill invocation.
 		childUse       = `{"type":"assistant","parent_tool_use_id":"agent_1","message":{"model":"m","content":[{"type":"tool_use","id":"sk_3","name":"Skill","input":{"skill":"review"}}],"usage":{}}}`
 		childResult    = `{"type":"user","parent_tool_use_id":"agent_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"sk_3","content":"Launching skill: review"}]}}`
 		childInjection = `{"type":"user","isSynthetic":true,"parent_tool_use_id":"agent_1","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /home/user/.claude/skills/review\n\n# Review\n"}]}}`
@@ -203,8 +203,8 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 			nil,
 			{&agent.SkillReadMessage{ToolUseID: "sk_2", Skill: "missing"}},
 			nil,
-			{&agent.SkillReadMessage{ToolUseID: "sk_3", Skill: "review"}},
-			{&agent.ToolResultMessage{ToolUseID: "agent_1"}},
+			{&agent.SkillReadMessage{Source: agent.MessageSource{DelegationToolUseID: "agent_1"}, ToolUseID: "sk_3", Skill: "review"}},
+			nil,
 			nil,
 			nil, // The ResultMessage is compared by type below.
 		}
@@ -329,7 +329,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		t.Parallel()
 		var b wireFormat
 		b.widgetTracker = newWidgetTracker()
-		b.pendingSkillUses = make(map[string]string)
+		b.pendingSkillUses = make(map[agent.ToolKey]string)
 		assistant := []byte(`{"type":"assistant","message":{"model":"claude-opus","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5}}}`)
 		msgs, err := b.ParseMessage(assistant)
 		if err != nil {
@@ -372,7 +372,7 @@ func TestWireFormatSkillAndModel(t *testing.T) {
 		// suppressed too.
 		var b wireFormat
 		b.widgetTracker = newWidgetTracker()
-		b.pendingSkillUses = make(map[string]string)
+		b.pendingSkillUses = make(map[agent.ToolKey]string)
 		toolUse := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_9","name":"Skill","input":{}}],"usage":{}}}`)
 		msgs, err := b.ParseMessage(toolUse)
 		if err != nil {

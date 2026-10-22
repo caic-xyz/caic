@@ -41,6 +41,20 @@ function input(ts: number, text: string): EventMessage {
 }
 
 describe("deriveTaskTimings", () => {
+  it("keeps child results and user inputs out of root waits and preceding timestamps", () => {
+    const source = { agentID: "native:child" };
+    const rootResult = result(1000, 1);
+    const rootInput = input(5000, "continue");
+    const timings = deriveTaskTimings([
+      rootResult,
+      { ...result(2000, 1), source },
+      { ...input(3000, "child continuation"), source },
+      rootInput,
+    ]);
+    expect(timings.turns).toHaveLength(1);
+    expect(timings.turns[0]?.waitMs).toBe(4000);
+    expect(timings.previousEventTs.get(rootInput)).toBe(1000);
+  });
   it("associates each completed turn with its first following user response", () => {
     const firstResult = result(10_000, 2);
     const firstInput = input(25_500, "continue");

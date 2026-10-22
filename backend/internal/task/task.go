@@ -578,6 +578,9 @@ func (t *Task) LastAgentResult() string {
 	view := t.timelineViewLocked()
 	// Walk messages in reverse to find the last ResultMessage.
 	for i, entry := range view.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		if rm, ok := entry.Message.(*agent.ResultMessage); ok {
 			if rm.Result != "" {
 				return rm.Result
@@ -973,6 +976,22 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 	cleanTurnComplete := false
 	for _, entry := range view.Forward() {
 		msg := entry.Message
+		if msg.Provenance().IsChild() {
+			switch m := msg.(type) {
+			case *agent.NativeSubagentMessage:
+				t.nativeSubagents.Apply(&m.Subagent)
+			case *agent.BackgroundCommandMessage:
+				t.backgroundCommands.Apply(&m.Command)
+			case *agent.RateLimitMessage:
+				if !m.IsChildThreadGoal() {
+					t.recordRateLimitLocked(m)
+				}
+			}
+			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
+			t.observeRollupLocked(msg, entry.ProducerTime, entry.ProducerTime, true)
+			continue
+		}
+
 		if exit, ok := msg.(*agent.ExitMessage); ok {
 			if exit.ExitCode != 0 && !cleanTurnComplete {
 				t.lastExitError = exit.ExitError()
@@ -1134,33 +1153,47 @@ func compactFinalizedDeltas(entries timelineEntries) {
 func compactFinalizedDeltaAt(entries timelineEntries, i int) {
 	switch final := entries.At(i).Message.(type) {
 	case *agent.TextMessage:
+		compacted := compactedTextDelta
+		if final.Source != (agent.MessageSource{}) {
+			compacted = &agent.TextDeltaMessage{Source: final.Source}
+		}
 		for j := i - 1; j >= 0; j-- {
-			if _, ok := entries.At(j).Message.(*agent.TextDeltaMessage); !ok {
+			delta, ok := entries.At(j).Message.(*agent.TextDeltaMessage)
+			if !ok {
 				break
 			}
-			entries.SetMessage(j, compactedTextDelta)
+			if delta.Source == final.Source {
+				entries.SetMessage(j, compacted)
+			}
 		}
 	case *agent.ThinkingMessage:
+		compacted := compactedThinkingDelta
+		if final.Source != (agent.MessageSource{}) {
+			compacted = &agent.ThinkingDeltaMessage{Source: final.Source}
+		}
 		for j := i - 1; j >= 0; j-- {
-			if _, ok := entries.At(j).Message.(*agent.ThinkingDeltaMessage); !ok {
+			delta, ok := entries.At(j).Message.(*agent.ThinkingDeltaMessage)
+			if !ok {
 				break
 			}
-			entries.SetMessage(j, compactedThinkingDelta)
+			if delta.Source == final.Source {
+				entries.SetMessage(j, compacted)
+			}
 		}
 	case *agent.WidgetMessage:
 		for j := i - 1; j >= 0; j-- {
-			if _, ok := entries.At(j).Message.(*agent.WidgetDeltaMessage); !ok {
+			if delta, ok := entries.At(j).Message.(*agent.WidgetDeltaMessage); !ok || agent.ToolKeyForSource(delta.Provenance(), delta.ToolUseID) != agent.ToolKeyForSource(final.Provenance(), final.ToolUseID) {
 				break
 			}
-			entries.SetMessage(j, compactedWidgetDelta)
+			entries.SetMessage(j, &agent.WidgetDeltaMessage{ToolUseID: final.ToolUseID, Source: final.Source})
 		}
 	case *agent.ToolResultMessage:
 		for j := i - 1; j >= 0; j-- {
 			delta, ok := entries.At(j).Message.(*agent.ToolOutputDeltaMessage)
-			if !ok || delta.ToolUseID != final.ToolUseID {
+			if !ok || agent.ToolKeyForSource(delta.Provenance(), delta.ToolUseID) != agent.ToolKeyForSource(final.Provenance(), final.ToolUseID) {
 				break
 			}
-			entries.SetMessage(j, &agent.ToolOutputDeltaMessage{ToolUseID: delta.ToolUseID})
+			entries.SetMessage(j, &agent.ToolOutputDeltaMessage{ToolUseID: delta.ToolUseID, Source: delta.Source})
 		}
 	}
 }
@@ -1332,7 +1365,7 @@ func (t *Task) SubscribeRateLimits(ctx context.Context) (history []*agent.RateLi
 	t.mu.Lock()
 	view := t.timelineViewLocked()
 	for _, entry := range view.Forward() {
-		if rateLimit, ok := entry.Message.(*agent.RateLimitMessage); ok {
+		if rateLimit, ok := entry.Message.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
 			history = append(history, rateLimit)
 		}
 	}
@@ -1855,6 +1888,7 @@ func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (s
 // remain recorded even when their live statistics have been superseded.
 func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTitleGen bool, read *repo.GitSnapshot, log agent.LogSink) (stateChanged, generateTitle bool, persistErr error) {
 	m := parsed.Message
+	child := m.Provenance().IsChild()
 	t.mu.Lock()
 	if _, compact := m.(*agent.DiffStatMessage); compact && read != nil && !t.acceptGitReadLocked(read.Read) {
 		t.mu.Unlock()
@@ -1903,7 +1937,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 			t.timelineCompactPending = append(t.timelineCompactPending, t.timelineLenLocked()-1)
 		}
 	}
-	if rateLimit, ok := m.(*agent.RateLimitMessage); ok {
+	if rateLimit, ok := m.(*agent.RateLimitMessage); ok && !rateLimit.IsChildThreadGoal() {
 		t.recordRateLimitLocked(rateLimit)
 		for _, sub := range t.rateLimitSubs {
 			sub.ch <- rateLimit
@@ -1911,7 +1945,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 	}
 
 	// Capture metadata from the init message.
-	if init, ok := m.(*agent.InitMessage); ok {
+	if init, ok := m.(*agent.InitMessage); ok && !child {
 		if init.SessionID != "" {
 			t.sessionID = init.SessionID
 		}
@@ -1926,14 +1960,14 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 		}
 	}
 	// Track model rerouting (codex): update reportedModel to the active model.
-	if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == agent.SystemSubtypeModelRerouted && sm.ReportedModel != "" {
+	if sm, ok := m.(*agent.SystemMessage); ok && !child && sm.Subtype == agent.SystemSubtypeModelRerouted && sm.ReportedModel != "" {
 		t.reportedModel = sm.ReportedModel
 	}
 	// Track plan mode and plan file from tool_use events.
-	if tu, ok := m.(*agent.ToolUseMessage); ok {
+	if tu, ok := m.(*agent.ToolUseMessage); ok && !child {
 		t.trackToolUse(tu)
 	}
-	if u, ok := m.(*agent.UsageMessage); ok {
+	if u, ok := m.(*agent.UsageMessage); ok && !child {
 		t.lastAPIUsage = u.Usage
 		if u.ReportedModel != "" {
 			t.reportedModel = u.ReportedModel
@@ -1954,19 +1988,22 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 	//   - First turn: the agent may produce output before Checkout.Start
 	//     sets StateRunning (race between backend subprocess and
 	//     SetState on the main goroutine).
-	switch m.(type) {
-	case *agent.AskMessage:
-		if t.state == taskslog.StateStarting || t.state == taskslog.StateRunning || t.state == taskslog.StateWaiting || t.state == taskslog.StateHasPlan {
-			t.setState(taskslog.StateAsking)
-		}
-	case *agent.TextMessage, *agent.ToolUseMessage, *agent.TodoMessage:
-		if t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking || t.state == taskslog.StateHasPlan {
-			if t.state == taskslog.StateAsking && lastTurnHasUnansweredAsk(t.timelineViewLocked()) {
-				break
+	if !child {
+		switch m.(type) {
+		case *agent.AskMessage:
+			if t.state == taskslog.StateStarting || t.state == taskslog.StateRunning || t.state == taskslog.StateWaiting || t.state == taskslog.StateHasPlan {
+				t.setState(taskslog.StateAsking)
 			}
-			t.setState(taskslog.StateRunning)
+		case *agent.TextMessage, *agent.ToolUseMessage, *agent.TodoMessage:
+			if t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking || t.state == taskslog.StateHasPlan {
+				if t.state == taskslog.StateAsking && lastTurnHasUnansweredAsk(t.timelineViewLocked()) {
+					break
+				}
+				t.setState(taskslog.StateRunning)
+			}
 		}
 	}
+
 	// Fold harness-native child activity into the canonical card set and let it
 	// settle the parent state. A harness can end the parent turn when it
 	// delegates in the background, so a trailing ResultMessage is not enough
@@ -2009,7 +2046,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 	} else if ClearsExitError(m) {
 		t.lastExitError = ""
 	}
-	if sm, ok := m.(*agent.SystemMessage); ok && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
+	if sm, ok := m.(*agent.SystemMessage); ok && !child && (sm.Subtype == "compact_boundary" || sm.Subtype == "context_cleared") {
 		t.priorNumTurns = t.liveNumTurns
 		t.priorDuration = t.liveDuration
 		// Compaction replaces the conversation with a summary, so the
@@ -2020,7 +2057,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 		}
 	}
 	// Transition to waiting/asking when a result arrives.
-	if rm, ok := m.(*agent.ResultMessage); ok {
+	if rm, ok := m.(*agent.ResultMessage); ok && !child {
 		current := read == nil || t.acceptGitReadLocked(read.Read)
 		if current && (len(rm.DiffStat) > 0 || read != nil && (len(read.RepoStates) > 0 || len(read.FailedRepos) > 0)) {
 			if read == nil {
@@ -2283,6 +2320,9 @@ func (t *Task) observeRollupLocked(m agent.Message, at, producerAt time.Time, re
 
 func (t *Task) observeRollupMessageLocked(m agent.Message, at, producerAt time.Time, replayed bool) {
 	if q, ok := m.(*agent.RateLimitMessage); ok {
+		if q.IsChildThreadGoal() {
+			return
+		}
 		c := quotaChange(q, at)
 		t.Rollup.ObserveQuota(&c)
 		return
@@ -2314,6 +2354,9 @@ func (t *Task) rollupMetaLocked() usagedb.TaskMeta {
 func (t *Task) rollupModelLocked(m agent.Message) string {
 	if u, ok := m.(*agent.UsageMessage); ok && u.ReportedModel != "" {
 		return u.ReportedModel
+	}
+	if m.Provenance().IsChild() {
+		return ""
 	}
 	return t.activeModel()
 }
@@ -2348,7 +2391,6 @@ func (t *Task) releaseTimelineReader() {
 var (
 	compactedTextDelta     = &agent.TextDeltaMessage{}
 	compactedThinkingDelta = &agent.ThinkingDeltaMessage{}
-	compactedWidgetDelta   = &agent.WidgetDeltaMessage{}
 )
 
 type timelineEntries struct {
@@ -2469,6 +2511,9 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 // nil if it is not a ResultMessage (agent still producing output) or msgs is empty.
 func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		switch m := entry.Message.(type) {
 		case *agent.DiffStatMessage:
 			continue // Relay metadata; skip.
@@ -2488,6 +2533,11 @@ func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 			continue // tool_progress, etc.; skip.
 		case *agent.UsageMessage:
 			continue // Token usage metadata; skip.
+		case *agent.SystemMessage:
+			if m.Subtype == agent.SystemSubtypeExternalActivity {
+				continue // Informational activity cannot replace the root result.
+			}
+			return nil
 		case *agent.ResultMessage:
 			return m
 		default:
@@ -2497,7 +2547,7 @@ func lastAgentMessage(entries timelineEntries) *agent.ResultMessage {
 	return nil
 }
 
-// ResultTextWindow accumulates the visible assistant text of the current
+// ResultTextWindow accumulates the root assistant text of the current
 // turn so a streaming consumer can produce the fallback result text at the
 // point a ResultMessage arrives. Any other message type (a boundary, see
 // fallbackBoundary) resets the window; finalized TextMessages accumulate
@@ -2510,6 +2560,9 @@ type ResultTextWindow struct {
 
 // Update folds one message into the window.
 func (w *ResultTextWindow) Update(msg agent.Message) {
+	if msg.Provenance().IsChild() {
+		return
+	}
 	if fallbackBoundary(msg) {
 		w.reset()
 		return
@@ -2580,7 +2633,12 @@ func fallbackBoundary(msg agent.Message) bool {
 // fold (SeedTimeline), and the server SSE replay filter must all agree on this
 // rule, so it lives in one place.
 func ClearsExitError(msg agent.Message) bool {
+	if msg.Provenance().IsChild() {
+		return false
+	}
 	switch m := msg.(type) {
+	case *agent.SystemMessage:
+		return m.Subtype != agent.SystemSubtypeExternalActivity
 	case *agent.ExitMessage, *agent.DiffStatMessage, *agent.TurnCommitSnapshotMessage, *agent.NativeSubagentMessage, *agent.RawMessage,
 		*agent.BackgroundCommandMessage,
 		*agent.PendingUserActionMessage, *agent.ParseErrorMessage,
@@ -2600,19 +2658,22 @@ func ClearsExitError(msg agent.Message) bool {
 // skipped as a boundary first.
 func lastTurnHasUnansweredAsk(entries timelineEntries) bool {
 	skipTrailingResult := lastAgentMessage(entries) != nil
-	answered := map[string]struct{}{}
+	answered := map[agent.ToolKey]struct{}{}
 	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		switch m := entry.Message.(type) {
 		case *agent.AskMessage:
 			if m.ToolUseID == "" {
 				return true
 			}
-			if _, ok := answered[m.ToolUseID]; !ok {
+			if _, ok := answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; !ok {
 				return true
 			}
 		case *agent.ToolResultMessage:
 			if m.ToolUseID != "" && m.Error == "" {
-				answered[m.ToolUseID] = struct{}{}
+				answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = struct{}{}
 			}
 		case *agent.ResultMessage:
 			if skipTrailingResult {
@@ -2631,27 +2692,30 @@ func lastTurnHasUnansweredAsk(entries timelineEntries) bool {
 // control messages directly.
 func pendingUserActionsFromMessages(entries timelineEntries) []v3.PendingUserAction {
 	skipTrailingResult := lastAgentMessage(entries) != nil
-	answered := map[string]struct{}{}
-	restored := map[string]struct{}{}
-	pending := map[string]v3.PendingUserAction{}
+	answered := map[agent.ToolKey]struct{}{}
+	restored := map[agent.ToolKey]struct{}{}
+	pending := map[agent.ToolKey]v3.PendingUserAction{}
 	var actions []v3.PendingUserAction
 	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		switch m := entry.Message.(type) {
 		case *agent.AskMessage:
 			if m.ToolUseID == "" {
 				continue
 			}
-			if _, ok := answered[m.ToolUseID]; ok {
+			if _, ok := answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; ok {
 				continue
 			}
-			if _, ok := restored[m.ToolUseID]; ok {
+			if _, ok := restored[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; ok {
 				continue
 			}
-			action, ok := pending[m.ToolUseID]
+			action, ok := pending[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]
 			if ok {
 				actions = append(actions, agent.ClonePendingUserAction(action))
-				restored[m.ToolUseID] = struct{}{}
-				delete(pending, m.ToolUseID)
+				restored[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = struct{}{}
+				delete(pending, agent.ToolKeyForSource(m.Provenance(), m.ToolUseID))
 			}
 		case *agent.PendingUserActionMessage:
 			switch m.Action.Kind {
@@ -2660,11 +2724,11 @@ func pendingUserActionsFromMessages(entries timelineEntries) []v3.PendingUserAct
 				continue
 			}
 			if m.Action.ToolUseID != "" {
-				pending[m.Action.ToolUseID] = m.Action
+				pending[agent.ToolKeyForSource(m.Provenance(), m.Action.ToolUseID)] = m.Action
 			}
 		case *agent.ToolResultMessage:
 			if m.ToolUseID != "" && m.Error == "" {
-				answered[m.ToolUseID] = struct{}{}
+				answered[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = struct{}{}
 			}
 		case *agent.ResultMessage:
 			if skipTrailingResult {
@@ -2685,6 +2749,9 @@ func pendingUserActionsFromMessages(entries timelineEntries) []v3.PendingUserAct
 func lastTurnHasExitPlan(entries timelineEntries) bool {
 	skippedResult := false
 	for _, entry := range entries.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
 		switch m := entry.Message.(type) {
 		case *agent.ToolUseMessage:
 			if m.Name == "ExitPlanMode" {

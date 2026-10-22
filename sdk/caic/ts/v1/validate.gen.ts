@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
+import type { AskOption, AskQuestion, BranchAction, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventBackgroundCommand, EventChangeStat, EventCommitSnapshot, EventCost, EventCostSource, EventDiffStat, EventError, EventFileChange, EventInit, EventKind, EventLog, EventMessage, EventMessageSource, EventNativeSubagent, EventNativeSubagentScope, EventNativeSubagentStatus, EventRateLimit, EventRateLimitStatus, EventRepositoryCommit, EventResult, EventSkillLoad, EventStats, EventSubagentEnd, EventSubagentSpawn, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolInputKind, EventToolInputView, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, GitOperation, GitRepositoryState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderAuthKind, ProviderFetchStatus, ProviderQuota, QuotaBalance, QuotaProvider, QuotaRateLimit, Repo, RuntimeInstance, ServerHealth, Task, TaskEventBackward, TaskHistoryStreamError, TaskListEvent, TaskListRestorationStatus, TaskRateLimit, TaskRepo, TaskStartupFailure, TaskState, TodoItem, ToolOutputContentType, UnassessedQuotaWindow, UsageResp, Warning, WarningCategory, WarningDetail } from "./types.gen";
 
 // ---- helpers ----
 
@@ -56,6 +56,18 @@ function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueV
     result[k] = valValidator((v as ObjectValue)[k]);
   }
   return result;
+}
+
+export function validateEventMessageSource(raw: ValidatorInput): EventMessageSource {
+  const obj = asObject(raw, "EventMessageSource");
+  return {
+    agentID: (obj["agentID"] === undefined || obj["agentID"] === null ? undefined : asString(obj["agentID"], "EventMessageSource.agentID")),
+    delegationToolUseID: (obj["delegationToolUseID"] === undefined || obj["delegationToolUseID"] === null ? undefined : asString(obj["delegationToolUseID"], "EventMessageSource.delegationToolUseID")),
+    threadID: (obj["threadID"] === undefined || obj["threadID"] === null ? undefined : asString(obj["threadID"], "EventMessageSource.threadID")),
+    turnID: (obj["turnID"] === undefined || obj["turnID"] === null ? undefined : asString(obj["turnID"], "EventMessageSource.turnID")),
+    itemID: (obj["itemID"] === undefined || obj["itemID"] === null ? undefined : asString(obj["itemID"], "EventMessageSource.itemID")),
+    rootThreadID: (obj["rootThreadID"] === undefined || obj["rootThreadID"] === null ? undefined : asString(obj["rootThreadID"], "EventMessageSource.rootThreadID")),
+  };
 }
 
 export function validateEventInit(raw: ValidatorInput): EventInit {
@@ -431,6 +443,7 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
   const obj = asObject(raw, "EventMessage");
   const result: EventMessage = {
     kind: (asString(obj["kind"], "EventMessage.kind") as EventKind),
+    source: (obj["source"] === undefined || obj["source"] === null ? undefined : validateEventMessageSource(obj["source"])),
     ts: asNumber(obj["ts"], "EventMessage.ts"),
   };
   switch (result.kind) {

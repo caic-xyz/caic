@@ -1,4 +1,4 @@
-// Package claudecode implements agent.Backend for Claude Code.
+// Package claudecode implements Claude Code sessions with delegation-scoped content, tools, controls, and accounting.
 package claudecode
 
 import (
@@ -140,10 +140,14 @@ type wireFormat struct {
 	// pendingSkillUses maps a Skill tool use ID to the skill its success
 	// loads into the main context, until the paired tool result arrives. The
 	// value is empty for a call naming no skill and for a subagent's call.
-	pendingSkillUses map[string]string
+	pendingSkillUses map[agent.ToolKey]string
+	// askSources retains actual Ask ownership until its matching control arrives.
+	askSources  map[agent.ToolKey]agent.MessageSource
+	sessionID   string
+	childModels map[agent.ToolKey]string
 	// loadedSkill is the skill whose Skill call succeeded. Its load waits one
 	// record for the synthetic injection that names the skill directory.
-	loadedSkill string
+	loadedSkill *agent.SkillLoadMessage
 }
 
 // newWireFormat builds a live wireFormat with fresh per-session state for use by
@@ -151,14 +155,15 @@ type wireFormat struct {
 func newWireFormat() *wireFormat {
 	return &wireFormat{
 		nativeSubagents: nativeSubagents{
-			tasks:      make(map[string]agent.NativeSubagent),
-			byTool:     make(map[string]string),
-			tools:      make(map[string]agent.NativeSubagent),
-			background: make(map[string]bool),
+			tasks:  make(map[string]agent.NativeSubagent),
+			byTool: make(map[delegationKey]string),
+			tools:  make(map[delegationKey]agent.NativeSubagent),
 		},
 		backgroundCommands: backgroundCommands{known: make(map[string]bool)},
 		widgetTracker:      newWidgetTracker(),
-		pendingSkillUses:   make(map[string]string),
+		pendingSkillUses:   make(map[agent.ToolKey]string),
+		askSources:         make(map[agent.ToolKey]agent.MessageSource),
+		childModels:        make(map[agent.ToolKey]string),
 	}
 }
 
@@ -177,25 +182,92 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	var loaded *agent.SkillLoadMessage
-	if w.loadedSkill != "" {
-		loaded = &agent.SkillLoadMessage{Skill: w.loadedSkill, Path: skillPath(record.user)}
-		w.loadedSkill = ""
+	loaded := w.loadedSkill
+	w.loadedSkill = nil
+	for _, message := range msgs {
+		if init, ok := message.(*agent.InitMessage); ok && init.SessionID != "" && !record.source.IsChild() {
+			w.sessionID = init.SessionID
+		}
 	}
-	subagent := record.parentToolUseID != ""
+	if record.source.ThreadID == "" && record.harnessRecord && !record.askControl {
+		record.source.ThreadID = w.sessionID
+	}
+	if record.controlAgentID != "" {
+		if card, ok := w.nativeSubagents.tasks["claude:task:"+record.controlAgentID]; ok {
+			record.source.AgentID = card.ID
+			record.source.DelegationToolUseID = card.ToolUseID
+		}
+	}
+	subagent := record.source.DelegationToolUseID != ""
 	w.pendingReasoningEstimate += record.reasoningEstimate
-	native, err := w.nativeSubagents.parse(record, msgs)
+	native, err := w.nativeSubagents.parse(&record, msgs)
 	if err != nil {
 		return nil, err
 	}
 	msgs = append(msgs, native...)
-	msgs = append(msgs, w.backgroundCommands.parse(record)...)
+	msgs = append(msgs, w.backgroundCommands.parse(&record)...)
+	for i, message := range msgs {
+		if message.Provenance().IsZero() || record.harnessRecord {
+			*message.Provenance() = record.source
+		}
+		source := message.Provenance()
+		if source.AgentID == "" && source.DelegationToolUseID != "" {
+			key := delegationKey{sessionID: source.ThreadID, toolUseID: source.DelegationToolUseID}
+			if id := w.nativeSubagents.byTool[key]; id != "" {
+				source.AgentID = id
+			}
+		}
+		switch m := message.(type) {
+		case *agent.AskMessage:
+			w.askSources[agent.ToolKeyForSource(source, m.ToolUseID)] = *source
+		case *agent.PendingUserActionMessage:
+			requested := *source
+			var matched agent.MessageSource
+			var key agent.ToolKey
+			var found, ambiguous bool
+			for candidate, askSource := range w.askSources {
+				if candidate.ToolUseID != m.Action.ToolUseID ||
+					requested.ThreadID != "" && askSource.ThreadID != "" && requested.ThreadID != askSource.ThreadID ||
+					requested.DelegationToolUseID != "" && requested.DelegationToolUseID != askSource.DelegationToolUseID ||
+					requested.AgentID != "" && askSource.AgentID != "" && requested.AgentID != askSource.AgentID ||
+					requested.IsChild() && !askSource.IsChild() {
+					continue
+				}
+				if found {
+					ambiguous = true
+					break
+				}
+				key, found = candidate, true
+				matched = askSource
+			}
+			if found && !ambiguous {
+				*source = matched
+				if source.AgentID == "" {
+					source.AgentID = requested.AgentID
+				}
+				delete(w.askSources, key)
+			}
+			if ambiguous {
+				// An unresolved control cannot be actionable: even an empty
+				// source can match a source-free root Ask. Keep the actual
+				// record informationally instead of assigning root ownership.
+				msgs[i] = &agent.RawMessage{Source: requested, MessageType: "control_request", Raw: append([]byte(nil), line...)}
+			} else if source.ThreadID == "" && record.askControl {
+				source.ThreadID = w.sessionID
+			}
+		case *agent.ToolResultMessage:
+			delete(w.askSources, agent.ToolKeyForSource(source, m.ToolUseID))
+		}
+	}
+	if loaded != nil && agent.ToolKeyForSource(loaded.Provenance(), "") == agent.ToolKeyForSource(&record.source, "") {
+		loaded.Path = skillPath(record.user)
+	}
 	out := msgs[:0]
 	for _, msg := range msgs {
 		keep := true
 		switch m := msg.(type) {
 		case *agent.InitMessage:
-			if m.ReportedModel != "" {
+			if m.ReportedModel != "" && !m.Source.IsChild() {
 				w.reportedModel = m.ReportedModel
 			}
 		case *agent.SkillReadMessage:
@@ -206,7 +278,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 				if subagent {
 					load = ""
 				}
-				w.pendingSkillUses[m.ToolUseID] = load
+				w.pendingSkillUses[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)] = load
 			}
 			if m.Skill == "" {
 				// Parse-level placeholder for an unexpected Skill input shape;
@@ -218,24 +290,32 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			// the main context.
 			keep = !subagent
 		case *agent.ToolResultMessage:
-			if load, ok := w.pendingSkillUses[m.ToolUseID]; ok {
-				delete(w.pendingSkillUses, m.ToolUseID)
+			if load, ok := w.pendingSkillUses[agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)]; ok {
+				delete(w.pendingSkillUses, agent.ToolKeyForSource(m.Provenance(), m.ToolUseID))
 				// The Skill tool's result is internal machinery; the read
 				// itself is already recorded.
 				keep = false
 				if load != "" && m.Error == "" {
-					if w.loadedSkill != "" {
+					if w.loadedSkill != nil {
 						// Another success before the next record; no
 						// injection can name both directories.
-						out = append(out, &agent.SkillLoadMessage{Skill: w.loadedSkill})
+						out = append(out, w.loadedSkill)
 					}
-					w.loadedSkill = load
+					w.loadedSkill = &agent.SkillLoadMessage{Source: *m.Provenance(), Skill: load}
 				}
 			}
 		case *agent.UsageMessage:
-			if m.ReportedModel != "" {
+			switch {
+			case m.Source.IsChild():
+				key := agent.ToolKeyForSource(m.Provenance(), "")
+				if m.ReportedModel != "" {
+					w.childModels[key] = m.ReportedModel
+				} else if model := w.childModels[key]; model != "" {
+					m.ReportedModel, m.ModelDerived = model, true
+				}
+			case m.ReportedModel != "":
 				w.reportedModel = m.ReportedModel
-			} else if w.reportedModel != "" {
+			case w.reportedModel != "":
 				// message_delta usage events carry no model; attribute them
 				// to the session's active model. The stamp is derived, so the
 				// task pricing fold must not price this record per call: the
@@ -245,6 +325,9 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			}
 			w.pendingReasoningOutputTokens += m.Usage.ReasoningOutputTokens
 		case *agent.ResultMessage:
+			if m.Source.IsChild() {
+				break
+			}
 			// Claude Code reports the active model's context window only in the
 			// turn result, so this is the earliest point caic can learn it.
 			m.ContextWindow = resultContextWindow(line, w.reportedModel)
@@ -261,6 +344,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			w.pendingReasoningEstimate = 0
 			// A turn boundary drops skill reads whose result never arrived.
 			clear(w.pendingSkillUses)
+			clear(w.askSources)
 		}
 		if keep {
 			out = append(out, msg)

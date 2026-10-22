@@ -74,7 +74,7 @@ Type notation: `JSONValue` means any valid JSON value.
 | GET | `/api/caic/v1/tasks/{id}/diff/index` | Returns repository and changed-file metadata without loading patch bodies. |  | `TaskDiffIndexResp` |
 | GET | `/api/caic/v1/tasks/{id}/diff/file` | Returns one committed or uncommitted file patch. |  | `FileDiffResp` |
 | GET | `/api/caic/v1/tasks/{id}/repo-status` | Returns compact Git state for every repository mapped to a task. |  | `TaskRepoStatusResp` |
-| GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
+| GET | `/api/caic/v1/tasks/{id}/tool/{toolUseID}` | Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. |  | `TaskToolInputResp` |
 | GET | `/api/caic/v1/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
 
 ## Processes
@@ -1211,6 +1211,22 @@ CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 | `gitHubToken` | `boolean` |  |  |
 | `caicMCP` | `boolean` | Enables task-scoped CAIC MCP delegation. |  |
 
+### EventMessageSource
+
+EventMessageSource identifies the provider origin of any normalized event.
+AgentID and DelegationToolUseID identify child ownership independently of native
+item identity. RootThreadID is an authoritative session owner when reported.
+Fields remain absent when the harness does not supply them.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `agentID` | `string` |  |  |
+| `delegationToolUseID` | `string` |  |  |
+| `threadID` | `string` |  |  |
+| `turnID` | `string` |  |  |
+| `itemID` | `string` |  |  |
+| `rootThreadID` | `string` |  |  |
+
 ### EventInit
 
 EventInit is emitted once at the start of a session. It includes a Harness
@@ -1628,6 +1644,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `source` | `EventMessageSource` |  |  |
 | `kind` | `EventKind` |  | yes |
 | `ts` | `int64` |  | yes |
 | `init` | `EventInit` |  |  |

@@ -565,6 +565,25 @@ func TestDirectionalNativeRecords(t *testing.T) {
 func TestWriteMetaSession(t *testing.T) {
 	t.Parallel()
 
+	t.Run("V3PreservesProvenance", func(t *testing.T) {
+		t.Parallel()
+		buf := &testLogSink{Version: LogVersionV3}
+		source := MessageSource{AgentID: "native:child", DelegationToolUseID: "delegate"}
+		if err := WriteMetaSession(buf, &InitMessage{Source: source, SessionID: "session"}); err != nil {
+			t.Fatal(err)
+		}
+		parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := parser.ParseRecord(bytes.TrimSpace(buf.Bytes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(record.Messages) != 1 || *record.Messages[0].Message.Provenance() != source {
+			t.Errorf("session provenance lost: %s", buf.Bytes())
+		}
+	})
 	t.Run("V2PreservesDurableSettings", func(t *testing.T) {
 		t.Parallel()
 		buf := &testLogSink{Version: LogVersionV2}
@@ -607,6 +626,196 @@ func TestWriteMetaSession(t *testing.T) {
 
 func TestMarshalLogMessage(t *testing.T) {
 	t.Parallel()
+	t.Run("CommonSourceVersions", func(t *testing.T) {
+		t.Parallel()
+		messages := []Message{
+			&TextMessage{}, &UserInputMessage{}, ContextCleared(), &LogMessage{},
+			&StrippedEnvMessage{}, &DiffStatMessage{}, &ExitMessage{}, &MetaMessage{},
+			&MetaSessionMessage{}, &RelayGenerationMessage{}, &ModelInfoMessage{},
+			&MetaResultMessage{}, &MetaPRMessage{}, &TurnCommitSnapshotMessage{}, &PendingUserActionMessage{},
+		}
+		source := MessageSource{ThreadID: "child", TurnID: "turn", ItemID: "item", RootThreadID: "root", AgentID: "native:child", DelegationToolUseID: "delegate"}
+		for _, message := range messages {
+			t.Run(fmt.Sprintf("%T", message), func(t *testing.T) {
+				t.Parallel()
+				for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+					*message.Provenance() = MessageSource{}
+					absent, err := MarshalLogMessage(version, message)
+					if err != nil {
+						t.Fatal(err)
+					}
+					*message.Provenance() = source
+					encoded, err := MarshalLogMessage(version, message)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if version == LogVersionV2 {
+						if !bytes.Equal(absent, encoded) {
+							t.Errorf("v2 frozen shape changed: %s != %s", absent, encoded)
+						}
+						var fields map[string]json.RawMessage
+						if err := json.Unmarshal(encoded, &fields); err != nil {
+							t.Fatal(err)
+						}
+						fields["source"], _ = json.Marshal(source)
+						invalid, err := json.Marshal(fields)
+						if err != nil {
+							t.Fatal(err)
+						}
+						parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := parser.ParseRecord(invalid); err == nil {
+							t.Errorf("v2 accepted source: %s", invalid)
+						}
+						continue
+					}
+					out, ok := reflect.TypeAssert[Message](reflect.New(reflect.TypeOf(message).Elem()))
+					if !ok {
+						t.Fatal("control does not implement Message")
+					}
+					if err := decodeLogControl(version, encoded, out); err != nil {
+						t.Fatal(err)
+					}
+					if *out.Provenance() != source {
+						t.Errorf("v3 source lost: %+v", out.Provenance())
+					}
+					if err := decodeLogControl(version, absent, out); err != nil {
+						t.Fatal(err)
+					}
+					if !out.Provenance().IsZero() {
+						t.Errorf("old v3 source = %+v", out.Provenance())
+					}
+				}
+			})
+		}
+	})
+	t.Run("ParsedControlProvenance", func(t *testing.T) {
+		t.Parallel()
+		for _, message := range []Message{&MetaSessionMessage{SessionID: "session"}, ContextCleared()} {
+			message.Provenance().AgentID = "native:child"
+			encoded, err := MarshalLogMessage(LogVersionV3, message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(record.Messages) != 1 || *record.Messages[0].Message.Provenance() != *message.Provenance() {
+				t.Errorf("parsed %T source lost: %+v", message, record)
+			}
+		}
+	})
+	t.Run("TextSourceVersions", func(t *testing.T) {
+		t.Parallel()
+		const oldShape = `{"phase":"commentary","t":"text","text":"visible"}`
+		for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+			message := &TextMessage{Text: "visible", Phase: "commentary"}
+			encoded, err := MarshalLogMessage(version, message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(encoded) != oldShape {
+				t.Errorf("v%d absent source changed old shape: %s", version, encoded)
+			}
+			parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(record.Messages) != 1 {
+				t.Fatalf("v%d old text record = %+v", version, record)
+			}
+			restored, ok := record.Messages[0].Message.(*TextMessage)
+			if !ok || restored.Text != "visible" || restored.Phase != "commentary" || !restored.Source.IsZero() {
+				t.Errorf("v%d old text message = %#v", version, record.Messages[0].Message)
+			}
+		}
+		for _, source := range []MessageSource{
+			{ThreadID: "thread", TurnID: "turn", ItemID: "item", RootThreadID: "root"},
+			{ThreadID: "thread", RootThreadID: "root"},
+			{RootThreadID: "root"},
+		} {
+			message := &TextMessage{Text: "visible", Phase: "commentary", Source: source}
+			old, err := MarshalLogMessage(LogVersionV2, message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(old) != oldShape {
+				t.Errorf("v2 sourced text changed frozen shape: %s", old)
+			}
+			encoded, err := MarshalLogMessage(LogVersionV3, message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(encoded, []byte(`"source":`)) {
+				t.Errorf("v3 text lost source: %s", encoded)
+			}
+			parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(record.Messages) != 1 {
+				t.Fatalf("v3 text record = %+v", record)
+			}
+			restored, ok := record.Messages[0].Message.(*TextMessage)
+			if !ok || restored.Source != source || restored.Text != "visible" || restored.Phase != "commentary" {
+				t.Errorf("v3 sourced text = %#v, want source %+v", record.Messages[0].Message, source)
+			}
+		}
+	})
+
+	t.Run("TextSourceVersionValidation", func(t *testing.T) {
+		t.Parallel()
+		const sourced = `{"t":"text","text":"visible","source":{"threadID":"thread","rootThreadID":"root"}}`
+		for _, version := range []LogVersion{LogVersionV2, LogVersionV3} {
+			parser, err := NewLogRecordParser(version, func([]byte) ([]Message, error) { return nil, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := parser.ParseRecord([]byte(sourced))
+			if version == LogVersionV2 {
+				if err == nil || !strings.Contains(err.Error(), `unknown top-level field "source"`) {
+					t.Errorf("v2 source accepted or wrong error: %v", err)
+				}
+			} else {
+				if err != nil || len(record.Messages) != 1 {
+					t.Fatalf("v3 source rejected: %+v, %v", record, err)
+				}
+				message, ok := record.Messages[0].Message.(*TextMessage)
+				if !ok || message.Source != (MessageSource{ThreadID: "thread", RootThreadID: "root"}) {
+					t.Errorf("v3 partial source = %#v", record.Messages[0].Message)
+				}
+			}
+		}
+		parser, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []string{
+			`{"t":"text","text":"visible","source":{"unknown":"value"}}`,
+			`{"t":"text","text":"visible","source":{"threadID":123}}`,
+			`{"t":"text","text":"visible","unknown":"value"}`,
+		} {
+			if _, err := parser.ParseRecord([]byte(line)); err == nil {
+				t.Errorf("invalid v3 source/control accepted: %s", line)
+			}
+		}
+	})
+
 	t.Run("ReadOnlyV1RejectsPhysicalWrites", func(t *testing.T) {
 		t.Parallel()
 		log := &testLogSink{Version: LogVersionV1}
@@ -1042,6 +1251,25 @@ func TestRelayGenerationCommand(t *testing.T) {
 }
 
 func TestLogRecordParser(t *testing.T) {
+	t.Run("ChildContextDoesNotInheritRootSnapshot", func(t *testing.T) {
+		t.Parallel()
+		p, err := NewLogRecordParser(LogVersionV3, func([]byte) ([]Message, error) {
+			return []Message{&UsageMessage{Source: MessageSource{AgentID: "child"}}}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.ParseRecord([]byte(`{"t":"model_info","context_window":1000000}`)); err != nil {
+			t.Fatal(err)
+		}
+		r, err := p.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":{}}`))
+		if err != nil || len(r.Messages) != 1 {
+			t.Fatalf("child usage: %+v %v", r, err)
+		}
+		if m, ok := r.Messages[0].Message.(*UsageMessage); !ok || m.ContextWindow != 0 {
+			t.Fatalf("unknown child context inherited root snapshot: %+v", r.Messages[0].Message)
+		}
+	})
 	t.Parallel()
 
 	t.Run("Constructor", func(t *testing.T) {

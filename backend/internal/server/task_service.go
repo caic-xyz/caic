@@ -899,18 +899,38 @@ func (s *taskService) forkDelegatedTask(ctx context.Context, delegatingTaskID ks
 	return &dto, nil
 }
 
-func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, toolUseID string) (*v1.TaskToolInputResp, error) {
+func (s *taskService) taskToolInput(ctx context.Context, entry *taskmgr.Entry, toolUseID string, scope v1.TaskToolInputQuery) (*v1.TaskToolInputResp, error) {
 	if toolUseID == "" {
 		return nil, &api.Error{Status: http.StatusBadRequest, Code: api.CodeBadRequest, Message: "toolUseID required"}
 	}
+	source := agent.MessageSource{AgentID: scope.AgentID, DelegationToolUseID: scope.DelegationToolUseID, ThreadID: scope.ThreadID, TurnID: scope.TurnID}
+	scoped := !source.IsZero()
+	wanted := agent.ToolKeyForSource(&source, toolUseID)
+	var found *agent.ToolUseMessage
+	var foundKey agent.ToolKey
 	for message, err := range s.taskMgr.BackwardMessages(ctx, entry) {
 		if err != nil {
 			return nil, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "task history unavailable: " + err.Error()}
 		}
 		toolUse, ok := message.(*agent.ToolUseMessage)
-		if ok && toolUse.ToolUseID == toolUseID {
-			return &v1.TaskToolInputResp{ToolUseID: toolUse.ToolUseID, Input: toolUse.Input}, nil
+		if !ok || toolUse.ToolUseID != toolUseID {
+			continue
 		}
+		key := agent.ToolKeyForSource(toolUse.Provenance(), toolUseID)
+		if scoped {
+			if key == wanted {
+				return &v1.TaskToolInputResp{ToolUseID: toolUse.ToolUseID, Input: toolUse.Input}, nil
+			}
+			continue
+		}
+		if found == nil {
+			found, foundKey = toolUse, key
+		} else if key != foundKey {
+			return nil, &api.Error{Status: http.StatusConflict, Code: api.CodeConflict, Message: "tool use ID is ambiguous; specify its source"}
+		}
+	}
+	if found != nil {
+		return &v1.TaskToolInputResp{ToolUseID: found.ToolUseID, Input: found.Input}, nil
 	}
 	return nil, &api.Error{Status: http.StatusNotFound, Code: api.CodeNotFound, Message: "tool use" + " not found"}
 }

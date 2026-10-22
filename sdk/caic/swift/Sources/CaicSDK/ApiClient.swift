@@ -282,9 +282,9 @@ public final class ApiClient {
     public func signalProcess(id: String, pid: String, req: SignalProcessReq) async throws -> StatusResp {
         try await request("POST", path: "/api/caic/v1/processes/\(id)/\(pid)/signal", body: try encoder.encode(req))
     }
-    /// Returns the full (untruncated) input for a tool call.
-    public func getTaskToolInput(id: String, toolUseID: String) async throws -> TaskToolInputResp {
-        try await request("GET", path: "/api/caic/v1/tasks/\(id)/tool/\(toolUseID)")
+    /// Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns.
+    public func getTaskToolInput(id: String, toolUseID: String, agentID: String, delegationToolUseID: String, threadID: String, turnID: String) async throws -> TaskToolInputResp {
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/tool/\(toolUseID)?agentID=\(agentID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? agentID)&delegationToolUseID=\(delegationToolUseID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? delegationToolUseID)&threadID=\(threadID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? threadID)&turnID=\(turnID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? turnID)")
     }
     /// Returns current usage quota statistics.
     public func getUsage() async throws -> UsageResp {

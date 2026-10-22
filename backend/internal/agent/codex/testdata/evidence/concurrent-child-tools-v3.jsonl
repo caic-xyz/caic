@@ -1,0 +1,7 @@
+{"t":"agent","ts":1.000,"msg":{"method":"thread/started","params":{"thread":{"id":"root","model":"root-model"}}}}
+{"t":"agent","ts":1.001,"msg":{"method":"item/started","params":{"threadId":"root","turnId":"root-turn","item":{"id":"spawn","type":"subAgentActivity","agentThreadId":"child","agentPath":"/root/worker","kind":"started"}}}}
+{"t":"agent","ts":1.002,"msg":{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"child-turn","tokenUsage":{"total":{"totalTokens":12,"inputTokens":10,"outputTokens":2},"last":{"totalTokens":12,"inputTokens":10,"outputTokens":2}}}}}
+{"t":"agent","ts":1.003,"msg":{"method":"item/started","params":{"threadId":"child","turnId":"child-turn","item":{"id":"command","type":"commandExecution","command":"printf child","cwd":"/workspace","status":"inProgress","exitCode":null}}}}
+{"t":"agent","ts":1.004,"msg":{"method":"item/commandExecution/outputDelta","params":{"threadId":"child","turnId":"child-turn","itemId":"command","delta":"child output"}}}
+{"t":"agent","ts":1.005,"msg":{"method":"item/completed","params":{"threadId":"child","turnId":"child-turn","item":{"id":"command","type":"commandExecution","command":"printf child","cwd":"/workspace","status":"failed","exitCode":2}}}}
+{"t":"agent","ts":1.006,"msg":{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"child-turn","status":"completed"}}}}

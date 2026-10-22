@@ -7,6 +7,16 @@ import { ContextSkillsTracker } from "./contextSkills";
 const load = (skill: string, path?: string): EventMessage => ({ kind: "skillLoad", ts: 1, skillLoad: { skill, path } });
 
 describe("ContextSkillsTracker", () => {
+  it("ignores child loads and child compaction in the root context", () => {
+    const source = { delegationToolUseID: "spawn" };
+    const result = new ContextSkillsTracker().derive("task", 0, [
+      load("root"),
+      { ...load("child"), source },
+      { kind: "system", ts: 2, source, system: { subtype: "compact_boundary" } },
+    ]);
+    expect(result.current.map((skill) => skill.skill)).toEqual(["root"]);
+    expect(result.closed.size).toBe(0);
+  });
   it("enriches one known path and preserves ambiguity when another path appears", () => {
     const tracker = new ContextSkillsTracker();
     const history = [load("review"), load("review", "/a/SKILL.md")];

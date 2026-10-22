@@ -20,10 +20,12 @@ import (
 // adapter is the only reader of the child-thread lifecycle they report.
 type decodedItem struct {
 	raw           json.RawMessage
+	activity      *codex.SubAgentActivityItem
 	typ           codex.ItemType
 	statusChanged *codex.ThreadStatusChangedNotification
 	turnCompleted *codex.TurnCompletedNotification
-	threadID      string // Thread of an item notification.
+	source        agent.MessageSource // Origin of the observation, distinct from its subject.
+	threadStarted *codex.ThreadStartedNotification
 }
 
 // The card map is allocated with the wire, created once per session, instead of
@@ -52,7 +54,7 @@ const codexRootAgentPath = "/root"
 
 // parse folds one routed item: a spawn proves an agent, coordination tools and
 // child thread lifecycle only update threads the wire has already seen.
-func (n *nativeSubagents) parse(item decodedItem) ([]agent.Message, error) {
+func (n *nativeSubagents) parse(item *decodedItem) ([]agent.Message, error) {
 	switch {
 	case item.statusChanged != nil:
 		return n.parseThreadStatus(item.statusChanged), nil
@@ -61,7 +63,7 @@ func (n *nativeSubagents) parse(item decodedItem) ([]agent.Message, error) {
 	}
 	switch item.typ {
 	case codex.ItemTypeSubAgentActivity:
-		return n.parseActivity(item.raw)
+		return n.parseActivity(item.activity), nil
 	case codex.ItemTypeCollabAgentToolCall:
 		return n.parseCollabToolCall(item.raw)
 	default:
@@ -73,13 +75,9 @@ func (n *nativeSubagents) parse(item decodedItem) ([]agent.Message, error) {
 // reports a spawned agent's lifecycle. Its identity is the agent thread ID, the
 // same identity the collaboration receiver path uses, so both item types settle
 // one card per agent.
-func (n *nativeSubagents) parseActivity(raw json.RawMessage) ([]agent.Message, error) {
-	var item codex.SubAgentActivityItem
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return nil, err
-	}
+func (n *nativeSubagents) parseActivity(item *codex.SubAgentActivityItem) []agent.Message {
 	if item.AgentThreadID == "" || item.AgentPath == codexRootAgentPath {
-		return nil, nil
+		return nil
 	}
 	s, known := n.known(item.AgentThreadID)
 	if !known {
@@ -87,7 +85,7 @@ func (n *nativeSubagents) parseActivity(raw json.RawMessage) ([]agent.Message, e
 		// spawn. An interaction, interruption, or completion is evidence about an
 		// existing card and cannot invent one.
 		if item.Kind != codex.SubAgentActivityKindStarted {
-			return nil, nil
+			return nil
 		}
 		s = agent.NativeSubagent{ID: codexThreadIdentity(item.AgentThreadID)}
 	}
@@ -106,7 +104,7 @@ func (n *nativeSubagents) parseActivity(raw json.RawMessage) ([]agent.Message, e
 	}
 	s.Status = subAgentActivityStatus(item.Kind)
 	n.remember(item.AgentThreadID, &s)
-	return n.timeline.Observe(&s), nil
+	return n.timeline.Observe(&s)
 }
 
 // parseThreadStatus tracks a spawned child thread's own lifecycle. Codex

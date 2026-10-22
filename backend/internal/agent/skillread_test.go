@@ -145,6 +145,22 @@ func TestSkillsFromCommand(t *testing.T) {
 }
 
 func TestSkillReadTracker(t *testing.T) {
+	t.Run("child completion and parent turn boundary", func(t *testing.T) {
+		t.Parallel()
+		var tracker agent.SkillReadTracker
+		parent := agent.MessageSource{ThreadID: "root", TurnID: "turn"}
+		child := agent.MessageSource{ThreadID: "child", DelegationToolUseID: "delegate"}
+		read := &agent.SkillReadMessage{Source: child, Skill: "review", Inferred: true, SourceToolUseID: "same"}
+		tracker.Confirm(read)
+		tracker.Confirm(&agent.ResultMessage{Source: parent})
+		if _, got := tracker.Confirm(&agent.ToolResultMessage{Source: parent, ToolUseID: "same"}); len(got) != 0 {
+			t.Fatal("parent tool confirmed a child skill read")
+		}
+		child.AgentID = "resolved-child"
+		if _, got := tracker.Confirm(&agent.ToolResultMessage{Source: child, ToolUseID: "same"}); len(got) != 1 || got[0] != read {
+			t.Fatalf("child read lost across parent turn/correlation: %v", got)
+		}
+	})
 	t.Parallel()
 	var tracker agent.SkillReadTracker
 	read := &agent.SkillReadMessage{Skill: "review", Inferred: true, SourceToolUseID: "call-1"}

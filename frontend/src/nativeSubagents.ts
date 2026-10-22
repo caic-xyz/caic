@@ -1,12 +1,13 @@
-// Incrementally folds canonical native activity and background commands across turns,
-// compaction, and replaced history, and hosts the transcript anchor rules shared by every
-// anchored card kind. A terminal observation's result supersedes an earlier interim one.
+// Folds global native lifecycles and source-owned child transcripts with reported delegation correlation.
 
-import type { EventBackgroundCommand, EventMessage, EventNativeSubagent } from "@sdk/types.gen";
+import type { EventBackgroundCommand, EventMessage, EventMessageSource, EventNativeSubagent } from "@sdk/types.gen";
 
 import type { MessageGroup, MsgItem, Session, Turn } from "./grouping";
+import { aggregateToolGroups, childAgentID, IncrementalMessageGrouper } from "./grouping";
 
 export interface NativeActivity extends EventNativeSubagent {
+  source?: EventMessageSource;
+  transcript?: MessageGroup[];
   startedAt: number | null;
   endedAt: number | null;
   // anchorTs positions the card in the transcript: the observation that created
@@ -29,30 +30,108 @@ export function nativeActivityStatus(activity: NativeActivity, settled: boolean)
 }
 
 export class NativeActivityTracker {
-  private previous: EventMessage[] = [];
+  private processed = 0;
+  private firstEvent: EventMessage | null = null;
+  private lastEvent: EventMessage | null = null;
   private byID = new Map<string, NativeActivity>();
   private snapshot: NativeActivity[] = [];
+  private transcripts = new Map<string, { events: EventMessage[]; grouper: IncrementalMessageGrouper }>();
+  private byDelegation = new Map<string, Map<string, Set<string>>>();
+  private pendingNamespaces = new Map<string, Set<string>>();
+  routingRevision = 0;
+
+  ownerFor(event: EventMessage): string | null {
+    const canonical = childAgentID(event);
+    if (canonical) return canonical;
+    const source = event.source;
+    if (!source?.delegationToolUseID) return null;
+    const namespace = source.rootThreadID || source.threadID || "";
+    const candidates = new Set<string>();
+    for (const [scope, ids] of this.byDelegation.get(source.delegationToolUseID) ?? []) {
+      if (namespace && scope && namespace !== scope) continue;
+      if (!scope && (this.pendingNamespaces.get(source.delegationToolUseID)?.size ?? 0) > 1) continue;
+      for (const id of ids) candidates.add(id);
+    }
+    return candidates.size === 1 ? (candidates.values().next().value ?? null) : null;
+  }
 
   derive(messages: EventMessage[]): NativeActivity[] {
     const reset =
-      messages.length < this.previous.length ||
-      (this.previous.length > 0 &&
-        (messages[0] !== this.previous[0] ||
-          messages[this.previous.length - 1] !== this.previous[this.previous.length - 1]));
+      messages.length < this.processed ||
+      (this.processed > 0 && (messages[0] !== this.firstEvent || messages[this.processed - 1] !== this.lastEvent));
     let changed = reset;
     if (reset) {
       this.byID.clear();
-      this.previous = [];
+      this.transcripts.clear();
+      this.byDelegation.clear();
+      this.pendingNamespaces.clear();
+      this.routingRevision++;
+      this.processed = 0;
     }
-    for (let i = this.previous.length; i < messages.length; i++) {
+    // Discover reported relationships before routing actor events. New or
+    // ambiguous correlation is a structural change; ordinary deltas never replay history.
+    let routingChanged = false;
+    for (let i = this.processed; i < messages.length; i++) {
+      const event = messages[i];
+      if (!event) throw new Error("Missing timeline event");
+      const namespace = event.source?.rootThreadID || event.source?.threadID || "";
+      const delegation = event.source?.delegationToolUseID;
+      if (delegation && !event.source?.agentID) {
+        const pendingScopes = this.pendingNamespaces.get(delegation) ?? new Set<string>();
+        if (!pendingScopes.has(namespace)) routingChanged = true;
+        pendingScopes.add(namespace);
+        this.pendingNamespaces.set(delegation, pendingScopes);
+      }
+      const native = event.nativeSubagent;
+      if (event.kind !== "nativeSubagent" || !native?.toolUseID || !native.id) continue;
+      const scopes = this.byDelegation.get(native.toolUseID) ?? new Map<string, Set<string>>();
+      const ids = scopes.get(namespace) ?? new Set<string>();
+      if (!ids.has(native.id)) routingChanged = true;
+      ids.add(native.id);
+      scopes.set(namespace, ids);
+      this.byDelegation.set(native.toolUseID, scopes);
+    }
+    if (routingChanged) {
+      this.routingRevision++;
+      if (this.processed > 0) {
+        this.byID.clear();
+        this.transcripts.clear();
+        this.processed = 0;
+      }
+      changed = true;
+    }
+    const changedTranscripts = new Set<string>();
+    const appendTranscript = (id: string, event: EventMessage): void => {
+      let transcript = this.transcripts.get(id);
+      if (!transcript) {
+        transcript = { events: [], grouper: new IncrementalMessageGrouper() };
+        this.transcripts.set(id, transcript);
+        const existing = this.byID.get(id);
+        if (existing) this.byID.set(id, { ...existing, anchorTs: existing.startedAt ?? event.ts });
+        else this.byID.set(id, { id, status: "unknown", startedAt: null, endedAt: null, anchorTs: event.ts });
+      }
+      transcript.events.push(event);
+      changedTranscripts.add(id);
+      changed = true;
+    };
+    for (let i = this.processed; i < messages.length; i++) {
       const ev = messages[i];
       if (!ev) throw new Error("Missing timeline event");
+      // Lifecycle subjects must fold globally even when their actor is another child.
+      const lifecycle = ev.kind === "nativeSubagent" || ev.kind === "backgroundCommand";
+      const childID = lifecycle ? null : this.ownerFor(ev);
+      if (childID !== null) {
+        if (ev.kind !== "rateLimit" || ev.rateLimit?.rateLimitType === "thread_goal") appendTranscript(childID, ev);
+        continue;
+      }
       const s = ev.nativeSubagent;
       if (ev.kind !== "nativeSubagent" || !s?.id) continue;
       const old = this.byID.get(s.id);
       const status = old && (nativeTerminal(old.status) || s.status === "unknown") ? old.status : s.status;
       const next: NativeActivity = {
         ...s,
+        source: old?.source ?? ev.source,
+        transcript: old?.transcript,
         toolUseID: old?.toolUseID || s.toolUseID,
         scope: old?.scope || s.scope,
         groupID: old?.groupID || s.groupID,
@@ -69,7 +148,14 @@ export class NativeActivityTracker {
         background: old?.background || s.background,
         // Reposition only on creation or a folded status change, so running
         // heartbeats do not drag an active card toward the newest content.
-        anchorTs: !old || status !== old.status ? (ev.ts > 0 ? ev.ts : (old?.anchorTs ?? 0)) : old.anchorTs,
+        anchorTs:
+          old && this.transcripts.has(s.id)
+            ? old.anchorTs
+            : !old || status !== old.status
+              ? ev.ts > 0
+                ? ev.ts
+                : (old?.anchorTs ?? 0)
+              : old.anchorTs,
         startedAt: old?.startedAt ?? (s.status === "running" && ev.ts > 0 ? ev.ts : null),
         endedAt: old?.endedAt ?? (nativeTerminal(s.status) && ev.ts > 0 ? ev.ts : null),
       };
@@ -79,15 +165,30 @@ export class NativeActivityTracker {
       )
         continue;
       this.byID.set(s.id, next);
+      if (this.transcripts.has(s.id)) changedTranscripts.add(s.id);
       changed = true;
     }
-    this.previous = messages.slice();
+    for (const id of changedTranscripts) {
+      const transcript = this.transcripts.get(id);
+      const activity = this.byID.get(id);
+      if (transcript && activity) {
+        const groups = transcript.grouper.group(transcript.events);
+        this.byID.set(id, {
+          ...activity,
+          transcript: aggregateToolGroups(nativeTerminal(activity.status) ? transcript.grouper.finish() : groups),
+        });
+      }
+    }
+    this.processed = messages.length;
+    this.firstEvent = messages[0] ?? null;
+    this.lastEvent = messages.at(-1) ?? null;
     if (changed) this.snapshot = [...this.byID.values()];
     return this.snapshot;
   }
 }
 
 function groupEndTs(group: MessageGroup): number {
+  if (group.messageKey) return group.events[0]?.ts ?? 0;
   let max = 0;
   for (const ev of group.events) if (ev.ts > max) max = ev.ts;
   return max;
@@ -163,6 +264,7 @@ export function assignNativeAnchors<T extends { anchorTs: number }>(
 }
 
 export interface BackgroundCommandActivity extends EventBackgroundCommand {
+  source?: EventMessageSource;
   startedAt: number | null;
   endedAt: number | null;
   // anchorTs positions the card in the transcript: the observation that created
@@ -184,22 +286,22 @@ export function backgroundCommandStatus(activity: BackgroundCommandActivity, set
 }
 
 export class BackgroundCommandTracker {
-  private previous: EventMessage[] = [];
+  private processed = 0;
+  private firstEvent: EventMessage | null = null;
+  private lastEvent: EventMessage | null = null;
   private byID = new Map<string, BackgroundCommandActivity>();
   private snapshot: BackgroundCommandActivity[] = [];
 
   derive(messages: EventMessage[]): BackgroundCommandActivity[] {
     const reset =
-      messages.length < this.previous.length ||
-      (this.previous.length > 0 &&
-        (messages[0] !== this.previous[0] ||
-          messages[this.previous.length - 1] !== this.previous[this.previous.length - 1]));
+      messages.length < this.processed ||
+      (this.processed > 0 && (messages[0] !== this.firstEvent || messages[this.processed - 1] !== this.lastEvent));
     let changed = reset;
     if (reset) {
       this.byID.clear();
-      this.previous = [];
+      this.processed = 0;
     }
-    for (let i = this.previous.length; i < messages.length; i++) {
+    for (let i = this.processed; i < messages.length; i++) {
       const ev = messages[i];
       if (!ev) throw new Error("Missing timeline event");
       const s = ev.backgroundCommand;
@@ -208,6 +310,7 @@ export class BackgroundCommandTracker {
       const status = old && (backgroundTerminal(old.status) || s.status === "running") ? old.status : s.status;
       const next: BackgroundCommandActivity = {
         ...s,
+        source: old?.source ?? ev.source,
         toolUseID: old?.toolUseID || s.toolUseID,
         label: old?.label || s.label,
         // A terminal observation upgrades an interim result, but terminal
@@ -235,7 +338,9 @@ export class BackgroundCommandTracker {
       this.byID.set(s.id, next);
       changed = true;
     }
-    this.previous = messages.slice();
+    this.processed = messages.length;
+    this.firstEvent = messages[0] ?? null;
+    this.lastEvent = messages.at(-1) ?? null;
     if (changed) this.snapshot = [...this.byID.values()];
     return this.snapshot;
   }

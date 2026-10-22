@@ -15,6 +15,21 @@ function toolResult(id: string, ts: number, duration: number): EventMessage {
 }
 
 describe("task stats", () => {
+  it("includes same-ID tools from multiple agents without mixing their start times", () => {
+    const root = { threadID: "root", turnID: "turn" };
+    const child = { threadID: "child", turnID: "turn", agentID: "native:child" };
+    expect(
+      deriveToolTimingSummaries([
+        { ...toolUse("same", "Root", 1000), source: root },
+        { ...toolUse("same", "Child", 2000), source: child },
+        { ...toolResult("same", 3000, 0), source: root },
+        { ...toolResult("same", 4000, 0), source: child },
+      ]),
+    ).toEqual([
+      { name: "Child", calls: 1, durationMs: 2000 },
+      { name: "Root", calls: 1, durationMs: 2000 },
+    ]);
+  });
   it("aggregates completed tool time by tool name", () => {
     const events = [
       toolUse("read-1", "Read", 1_000),

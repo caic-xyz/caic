@@ -8,6 +8,9 @@ import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
 import {
   IncrementalMessageGrouper,
+  toolIdentity,
+  childAgentID,
+  messageIdentity,
   groupMessages,
   groupTurns,
   groupSessions,
@@ -69,6 +72,129 @@ function resultEvent(): EventMessage {
 }
 
 describe("groupMessages", () => {
+  it("keeps tool keys stable through canonical enrichment but separates turns and native threads", () => {
+    const source = { threadID: "child", delegationToolUseID: "spawn", turnID: "turn", itemID: "start" };
+    expect(toolIdentity(source, "local")).toBe(
+      toolIdentity({ ...source, agentID: "native:child", itemID: "finish" }, "local"),
+    );
+    expect(toolIdentity(source, "local")).not.toBe(toolIdentity({ ...source, turnID: "other" }, "local"));
+    expect(toolIdentity(source, "local")).not.toBe(toolIdentity({ ...source, threadID: "other" }, "local"));
+    expect(toolIdentity({ agentID: "a" }, "local")).not.toBe(toolIdentity({ agentID: "b" }, "local"));
+  });
+
+  it("extends tool output with bounded prior-event reads and immutable output snapshots", () => {
+    const source = { agentID: "native:child", threadID: "child", turnID: "turn" };
+    const messages: EventMessage[] = [
+      { kind: "toolUse", ts: 1, source, toolUse: { toolUseID: "call", name: "Bash", input: {} } },
+      ...Array.from({ length: 10000 }, (_, i): EventMessage => ({
+        kind: "toolOutputDelta",
+        ts: i + 2,
+        source,
+        toolOutputDelta: { toolUseID: "call", delta: "x" },
+      })),
+    ];
+    const grouper = new IncrementalMessageGrouper();
+    const first = grouper.group(messages)[0];
+    assert.ok(first);
+    let reads = 0;
+    first.events = new Proxy(first.events, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    messages.push({ kind: "toolOutputDelta", ts: 10002, source, toolOutputDelta: { toolUseID: "call", delta: "end" } });
+    const next = grouper.group(messages)[0];
+    assert.ok(next);
+    expect(reads).toBeLessThanOrEqual(4);
+    assert.ok(first.toolCalls[0]);
+    assert.ok(next.toolCalls[0]);
+    expect(first.toolCalls[0].output).toBe("x".repeat(10000));
+    expect(next.toolCalls[0].output).toBe("x".repeat(10000) + "end");
+    expect(next).toEqual(groupMessages(messages)[0]);
+  });
+  it("keeps simultaneous same-ID tools pending until their own result and retains orphan output", () => {
+    const root = { threadID: "root", turnID: "turn" };
+    const child = { threadID: "child", turnID: "turn", agentID: "native:child" };
+    const events: EventMessage[] = [
+      { ...toolUseEvent("same", "Read"), source: root },
+      { ...toolUseEvent("same", "Bash"), source: child },
+      { kind: "text", ts: 3, source: root, text: { text: "Both running" } },
+      { kind: "toolOutputDelta", ts: 4, source: child, toolOutputDelta: { toolUseID: "same", delta: "child output" } },
+      { ...toolResultEvent("same"), source: child },
+      {
+        kind: "toolOutputDelta",
+        ts: 6,
+        source: root,
+        toolOutputDelta: { toolUseID: "missing", delta: "orphan output" },
+      },
+    ];
+    const groups = groupMessages(events);
+    expect(groups.flatMap((g) => g.toolCalls).find((call) => call.use.name === "Read")?.done).toBe(false);
+    expect(JSON.stringify(groups)).toContain("orphan output");
+  });
+  it("retains sourced tools without classifying them as content fragments", () => {
+    const event = toolUseEvent("tool", "Read");
+    event.source = { agentID: "native:child", threadID: "child", rootThreadID: "root", turnID: "turn", itemID: "item" };
+    expect(childAgentID(event)).toBe("native:child");
+    expect(messageIdentity(event)).toBe(null);
+    expect(groupMessages([event]).length).toBe(1);
+  });
+
+  it("keeps concurrent message identities in their first positions through scoped completions", () => {
+    const parent = { threadID: "parent", turnID: "turn", itemID: "reason", rootThreadID: "parent" };
+    const child = { ...parent, threadID: "child", itemID: "answer" };
+    const events: EventMessage[] = [
+      { kind: "thinkingDelta", ts: 1, source: parent, thinkingDelta: { text: "Consider " } },
+      { kind: "textDelta", ts: 2, source: child, textDelta: { text: "A bow" } },
+      { kind: "thinkingDelta", ts: 3, source: parent, thinkingDelta: { text: "triangles" } },
+      { kind: "userInput", ts: 4, userInput: { text: "Continue" } },
+      { kind: "textDelta", ts: 5, source: child, textDelta: { text: "tie" } },
+      { kind: "text", ts: 6, source: child, text: { text: "A bowtie." } },
+      { kind: "thinking", ts: 7, source: parent, thinking: { text: "Consider triangles." } },
+    ];
+    const incremental = new IncrementalMessageGrouper();
+    for (let i = 1; i <= events.length; i++) {
+      expect(incremental.group(events.slice(0, i))).toEqual(groupMessages(events.slice(0, i)));
+    }
+    const groups = groupMessages(events);
+    expect(groups).toHaveLength(3);
+    expect(groups.map((group) => group.events[0]?.ts)).toEqual([1, 2, 4]);
+    expect(groups.slice(0, 2).map((group) => group.content)).toEqual([
+      { text: "Consider triangles.", complete: true, range: { start: 1, end: 7 } },
+      { text: "A bowtie.", complete: true, range: { start: 2, end: 6 } },
+    ]);
+  });
+
+  it("retains a complete item timing span when intermediate timestamps arrive out of order", () => {
+    const source = { threadID: "parent", turnID: "turn", itemID: "answer" };
+    const events: EventMessage[] = [
+      { kind: "textDelta", ts: 10, source, textDelta: { text: "A " } },
+      { kind: "textDelta", ts: 30, source, textDelta: { text: "bow" } },
+      { kind: "textDelta", ts: 5, source, textDelta: { text: "tie" } },
+      { kind: "text", ts: 20, source, text: { text: "A bowtie." } },
+    ];
+    const grouper = new IncrementalMessageGrouper();
+    const previous = grouper.group(events.slice(0, 2));
+    const groups = grouper.group(events);
+    expect(groups).toEqual(groupMessages(events));
+    assert.ok(groups[0]);
+    assert.ok(previous[0]);
+    expect(groups[0].content).toEqual({ text: "A bowtie.", complete: true, range: { start: 5, end: 30 } });
+    expect(groupTurns(groups)[0]?.durationMs).toBe(25);
+    expect(previous[0].content).toEqual({ text: "A bow", complete: false, range: { start: 10, end: 30 } });
+  });
+
+  it("isolates distinct reasoning items and same item IDs in separate threads or turns", () => {
+    const source = { threadID: "parent", turnID: "turn", itemID: "item" };
+    const groups = groupMessages([
+      { kind: "thinkingDelta", ts: 1, source, thinkingDelta: { text: "first" } },
+      { kind: "thinkingDelta", ts: 2, source: { ...source, itemID: "other" }, thinkingDelta: { text: "second" } },
+      { kind: "thinkingDelta", ts: 3, source: { ...source, threadID: "child" }, thinkingDelta: { text: "third" } },
+      { kind: "thinkingDelta", ts: 4, source: { ...source, turnID: "later" }, thinkingDelta: { text: "fourth" } },
+    ]);
+    expect(groups).toHaveLength(4);
+  });
   it("keeps a successful result payload instead of duplicate preceding text", () => {
     const completion = resultEvent();
     if (!completion.result) throw new Error("result fixture is missing payload");
@@ -107,6 +233,98 @@ describe("groupMessages", () => {
     expect(groups[0].toolCalls[0].done).toBe(true);
     assert.ok(groups[0].toolCalls[1] !== undefined);
     expect(groups[0].toolCalls[1].done).toBe(false);
+  });
+
+  it("unresolved child tools do not implicitly complete source-free root tools", () => {
+    const root = toolUseEvent("spawn", "Agent");
+    const child: EventMessage = {
+      ...toolUseEvent("child-call", "Bash"),
+      source: { delegationToolUseID: "spawn" },
+    };
+    const events = [root, child];
+    const incremental = new IncrementalMessageGrouper();
+    incremental.group([root]);
+    for (const groups of [groupMessages(events), incremental.group(events)]) {
+      assert.ok(groups[0]?.toolCalls[0]);
+      expect(groups[0].toolCalls[0].done).toBe(false);
+      expect(groups[0].toolCalls[0].result).toBeUndefined();
+    }
+    const continued = [...events, textDeltaEvent("Root continues")];
+    for (const groups of [groupMessages(continued), incremental.group(continued)]) {
+      assert.ok(groups[0]?.toolCalls[0]);
+      expect(groups[0].toolCalls[0].done).toBe(true);
+    }
+  });
+
+  it("legacy output and results never attach to scoped invocations with the same local ID", () => {
+    for (const source of [{ delegationToolUseID: "spawn" }, { threadID: "child", agentID: "native:child" }]) {
+      const root = toolUseEvent("same", "Bash");
+      const child: EventMessage = { ...toolUseEvent("same", "Bash"), source };
+      const output: EventMessage = {
+        kind: "toolOutputDelta",
+        ts: 3,
+        toolOutputDelta: { toolUseID: "same", delta: "root output" },
+      };
+      const result: EventMessage = {
+        kind: "toolResult",
+        ts: 4,
+        toolResult: { toolUseID: "same", duration: 0.1, error: "Root failure" },
+      };
+      const childOutput: EventMessage = {
+        ...output,
+        source,
+        toolOutputDelta: { toolUseID: "same", delta: "child output" },
+      };
+      const events: EventMessage[] = [];
+      const incremental = new IncrementalMessageGrouper();
+      for (const event of [root, child, output, result, childOutput]) {
+        events.push(event);
+        for (const groups of [groupMessages(events), incremental.group(events)]) {
+          const rootCall = groups.flatMap((group) => group.toolCalls).find((call) => !call.source);
+          const childCall = groups.flatMap((group) => group.toolCalls).find((call) => call.source);
+          expect(rootCall).toBeDefined();
+          if (childCall) {
+            expect(childCall.result).toBeUndefined();
+            expect(childCall.done).toBe(false);
+            expect(childCall.output ?? "").not.toContain("root output");
+          }
+          if (events.includes(output)) expect(rootCall?.output).toBe("root output");
+          if (events.includes(result)) expect(rootCall?.result?.error).toBe("Root failure");
+        }
+      }
+    }
+  });
+
+  it("legacy coalescing never adds invocations to scoped groups", () => {
+    for (const source of [{ delegationToolUseID: "spawn" }, { threadID: "root", turnID: "turn" }]) {
+      const events: EventMessage[] = [];
+      const incremental = new IncrementalMessageGrouper();
+      const scoped: EventMessage = { ...toolUseEvent("child-call", "Bash"), source };
+      const output: EventMessage = {
+        kind: "toolOutputDelta",
+        ts: 4,
+        source,
+        toolOutputDelta: { toolUseID: "child-call", delta: "child output" },
+      };
+      for (const event of [toolUseEvent("spawn", "Agent"), scoped, toolUseEvent("root-next", "Read"), output]) {
+        events.push(event);
+        for (const groups of [groupMessages(events), incremental.group(events)]) {
+          const calls = groups.flatMap((group) => group.toolCalls);
+          expect(calls.map((call) => call.use.toolUseID).sort()).toEqual(
+            events.length >= 3
+              ? ["child-call", "root-next", "spawn"]
+              : events.length === 1
+                ? ["spawn"]
+                : ["child-call", "spawn"],
+          );
+          for (const group of groups.filter((candidate) => candidate.tool)) {
+            expect(group.toolCalls).toHaveLength(1);
+            assert.ok(group.toolCalls[0]);
+            expect(group.toolCalls[0].use.toolUseID).toBe("child-call");
+          }
+        }
+      }
+    }
   });
 
   it("tool is marked done when its toolResult arrives", () => {

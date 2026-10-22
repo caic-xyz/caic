@@ -2,7 +2,13 @@
 
 package codex
 
-import "testing"
+import (
+	"bytes"
+	"os"
+	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+)
 
 // BenchmarkParseNativeSubagentLines measures the per-line cost the stateful
 // adapter adds to every app-server notification: an unrelated item, a
@@ -65,5 +71,56 @@ func BenchmarkParseStreamingDelta(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// BenchmarkParseToolLifecycle measures the source-bearing command events that
+// child threads interleave with parent content on the same app-server wire.
+func BenchmarkParseToolLifecycle(b *testing.B) {
+	for _, tc := range []struct{ name, line string }{
+		{"start", `{"method":"item/started","params":{"threadId":"child","turnId":"turn","item":{"id":"command","type":"commandExecution","command":"printf child","cwd":"/workspace","status":"inProgress"}}}`},
+		{"output", `{"method":"item/commandExecution/outputDelta","params":{"threadId":"child","turnId":"turn","itemId":"command","delta":"child output"}}`},
+		{"completed", `{"method":"item/completed","params":{"threadId":"child","turnId":"turn","item":{"id":"command","type":"commandExecution","command":"printf child","cwd":"/workspace","status":"completed","exitCode":0}}}`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			line := []byte(tc.line)
+			wire := New("", nil).NewWire()
+			if _, err := wire.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"root"}}}`)); err != nil {
+				b.Fatal(err)
+			}
+			b.SetBytes(int64(len(line)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := wire.ParseMessage(line); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkReplayConcurrentChildTools measures recorded raw history through the
+// same stateful wire and canonical record parser used to warm a reattachment.
+func BenchmarkReplayConcurrentChildTools(b *testing.B) {
+	data, err := os.ReadFile("testdata/evidence/concurrent-child-tools-v3.jsonl")
+	if err != nil {
+		b.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		wire := New("", nil).NewWire()
+		parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, line := range lines {
+			if _, err := parser.ParseRecord(line); err != nil {
+				b.Fatal(err)
+			}
+		}
 	}
 }

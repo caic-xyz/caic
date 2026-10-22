@@ -1,8 +1,8 @@
-// Task analytics derivation for tool timing and resource-counter rates.
+// Inclusive task analytics with source-scoped tool timing and resource-counter rates.
 
 import type { EventMessage, EventStats } from "@sdk/types.gen";
 
-import { toolResultDurationMs } from "./grouping";
+import { toolIdentity, toolResultDurationMs } from "./grouping";
 
 export interface ToolTimingSummary {
   name: string;
@@ -69,14 +69,15 @@ export class IncrementalToolTimingTracker {
 
   private append(event: EventMessage) {
     if (event.kind === "toolUse" && event.toolUse) {
-      this.starts.set(event.toolUse.toolUseID, { name: event.toolUse.name, ts: event.ts });
+      this.starts.set(toolIdentity(event.source, event.toolUse.toolUseID), { name: event.toolUse.name, ts: event.ts });
       return;
     }
     if (event.kind !== "toolResult" || !event.toolResult) return;
 
-    const start = this.starts.get(event.toolResult.toolUseID);
+    const key = toolIdentity(event.source, event.toolResult.toolUseID);
+    const start = this.starts.get(key);
     if (!start) return;
-    this.starts.delete(event.toolResult.toolUseID);
+    this.starts.delete(key);
     const durationMs = toolResultDurationMs(event.toolResult, start.ts, event.ts);
     if (durationMs === null) return;
 

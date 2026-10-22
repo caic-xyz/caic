@@ -289,7 +289,9 @@ type wireFormat struct {
 	reportedEffort    string      // Resolved by thread/start.
 	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
 	lastThreadTotals  map[string]codex.TokenUsageBreakdown
-	threadTurnStarted map[string]bool // usage before a thread's first turn is its saved baseline
+	threadModels      map[string]string   // Only models explicitly reported for each native thread.
+	childThreads      map[string]struct{} // Explicit child ownership, independent of lifecycle/card evidence.
+	threadTurnStarted map[string]bool     // usage before a thread's first turn is its saved baseline
 }
 
 // handshake performs the JSON-RPC initialize → initialized → model/list →
@@ -540,8 +542,14 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		w.totalUsage.CacheReadInputTokens += incremental.CacheReadInputTokens
 		w.totalUsage.OutputTokens += incremental.OutputTokens
 		w.totalUsage.ReasoningOutputTokens += incremental.ReasoningOutputTokens
-		usageMsg := &agent.UsageMessage{Usage: incremental, ReportedModel: w.reportedModel, ModelDerived: true}
+		model := w.threadModels[p.ThreadID]
+		if p.ThreadID == w.threadID || p.ThreadID == "" {
+			model = w.reportedModel
+		}
+		usageMsg := &agent.UsageMessage{Usage: incremental, ReportedModel: model, ModelDerived: true,
+			Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID}}
 		w.mu.Unlock()
+		w.scopeSource(usageMsg.Provenance())
 		if p.TokenUsage.ModelContextWindow != nil {
 			usageMsg.ContextWindow = int(*p.TokenUsage.ModelContextWindow)
 		}
@@ -552,52 +560,108 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A child thread's turn completion is not the parent turn. Drop its result so
-	// it cannot end the parent turn or trigger a title/summary refresh; the
-	// native-subagent adapter still settles the child's card from the same record.
-	// The root thread is only known after thread/started, so an unscoped wire keeps
-	// the result rather than dropping every turn.
-	if tc := record.turnCompleted; tc != nil && tc.ThreadID != "" {
-		if root := w.rootThreadID(); root != "" && tc.ThreadID != root {
-			msgs = nil
+	if started := record.threadStarted; started != nil {
+		t := &started.Thread
+		w.mu.Lock()
+		if t.ID != "" && (t.ParentThreadID != "" || t.ThreadSource == codex.ThreadSourceSubagent) {
+			if w.childThreads == nil {
+				w.childThreads = make(map[string]struct{})
+			}
+			w.childThreads[t.ID] = struct{}{}
+		}
+		if w.threadModels == nil {
+			w.threadModels = make(map[string]string)
+		}
+		if t.Model != "" {
+			w.threadModels[t.ID] = t.Model
+		}
+		_, knownChild := w.nativeSubagents.known(t.ID)
+		_, reportedChild := w.childThreads[t.ID]
+		// Each retained process session announces its own root. Explicit
+		// delegation metadata and already-known children cannot replace it.
+		if t.ParentThreadID == "" && (t.ThreadSource == "" || t.ThreadSource == codex.ThreadSourceUser) && !knownChild && !reportedChild {
+			w.threadID = t.ID
+		}
+		w.mu.Unlock()
+		for _, m := range msgs {
+			m.Provenance().ThreadID = t.ID
+			if t.ParentThreadID != "" || t.ThreadSource == codex.ThreadSourceSubagent {
+				m.Provenance().AgentID = codexThreadIdentity(t.ID)
+			}
 		}
 	}
-	// A child thread's skill reads still count for analytics, but its loads
-	// are not in the root thread's context. Like the result above, an unscoped
-	// wire keeps them.
-	if record.threadID != "" {
-		if root := w.rootThreadID(); root != "" && record.threadID != root {
-			msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
-				_, ok := m.(*agent.SkillLoadMessage)
-				return ok
-			})
+	if activity := record.activity; activity != nil && activity.Kind == codex.SubAgentActivityKindStarted && activity.AgentThreadID != "" && activity.Model != "" {
+		w.mu.Lock()
+		if w.threadModels == nil {
+			w.threadModels = make(map[string]string)
 		}
+		w.threadModels[activity.AgentThreadID] = activity.Model
+		w.mu.Unlock()
 	}
-	native, err := w.nativeSubagents.parse(record)
+	w.scopeSource(&record.source)
+	// A child completion cannot finish the parent turn. Its native lifecycle
+	// observation still settles the child's card below.
+	if record.turnCompleted != nil && record.source.IsChild() {
+		msgs = nil
+	}
+	// Child reads count in analytics; their loads never enter root context.
+	if record.source.IsChild() {
+		msgs = slices.DeleteFunc(msgs, func(m agent.Message) bool {
+			_, ok := m.(*agent.SkillLoadMessage)
+			return ok
+		})
+	}
+	native, err := w.nativeSubagents.parse(&record)
 	if err != nil {
 		return nil, err
 	}
 	msgs = append(msgs, native...)
+	// A lifecycle observation's subject may be another child; its origin is
+	// still the thread that emitted the enclosing item or notification.
+	for _, m := range native {
+		*m.Provenance() = record.source
+	}
+	for _, m := range msgs {
+		if m.Provenance().IsZero() && !record.source.IsZero() {
+			*m.Provenance() = record.source
+		}
+		w.scopeSource(m.Provenance())
+	}
 	out := msgs[:0]
 	for _, msg := range msgs {
-		if _, ok := msg.(*agent.UserInputMessage); ok && w.suppressUserInput {
+		if _, ok := msg.(*agent.UserInputMessage); ok && w.suppressUserInput && !msg.Provenance().IsChild() {
 			continue
 		}
 		// Capture thread ID from InitMessage (produced by thread/started).
-		if init, ok := msg.(*agent.InitMessage); ok && init.SessionID != "" {
+		if init, ok := msg.(*agent.InitMessage); ok && init.SessionID != "" && !init.Source.IsChild() && (record.threadStarted == nil || init.SessionID == w.rootThreadID()) {
 			w.mu.Lock()
 			w.threadID = init.SessionID
+			if init.ReportedModel != "" {
+				w.reportedModel = init.ReportedModel
+			}
 			w.mu.Unlock()
 		}
 		// Track model reroutes so later usage stays attributed to the model
 		// that actually served it.
 		if sm, ok := msg.(*agent.SystemMessage); ok && sm.Subtype == agent.SystemSubtypeModelRerouted && sm.ReportedModel != "" {
 			w.mu.Lock()
-			w.reportedModel = sm.ReportedModel
+			if w.threadModels == nil {
+				w.threadModels = make(map[string]string)
+			}
+			if sm.Source.ThreadID != "" {
+				w.threadModels[sm.Source.ThreadID] = sm.ReportedModel
+			}
+			if !sm.Source.IsChild() {
+				w.reportedModel = sm.ReportedModel
+			}
 			w.mu.Unlock()
 		}
 		// Inject accumulated usage into ResultMessage and reset for next turn.
 		if rm, ok := msg.(*agent.ResultMessage); ok {
+			if rm.Source.IsChild() {
+				out = append(out, &agent.SystemMessage{Source: rm.Source, MessageType: "system", Subtype: "error", Detail: rm.Result})
+				continue
+			}
 			w.mu.Lock()
 			rm.Usage = w.totalUsage
 			w.totalUsage = agent.Usage{}
@@ -606,6 +670,21 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		out = append(out, msg)
 	}
 	return out, nil
+}
+
+// scopeSource adds session ownership without inferring it from arrival order.
+func (w *wireFormat) scopeSource(s *agent.MessageSource) {
+	if s.ThreadID == "" {
+		return
+	}
+	w.mu.Lock()
+	s.RootThreadID = w.threadID
+	_, reportedChild := w.childThreads[s.ThreadID]
+	w.mu.Unlock()
+	_, known := w.nativeSubagents.known(s.ThreadID)
+	if s.IsChild() || known || reportedChild {
+		s.AgentID = codexThreadIdentity(s.ThreadID)
+	}
 }
 
 // rootThreadID returns the session's root thread ID, or "" before the wire has

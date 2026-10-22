@@ -134,6 +134,21 @@ export const ToolOutputJSON = "json";
 export const ToolOutputMarkdown = "markdown";
 
 /**
+ * EventMessageSource identifies the provider origin of any normalized event.
+ * AgentID and DelegationToolUseID identify child ownership independently of native
+ * item identity. RootThreadID is an authoritative session owner when reported.
+ * Fields remain absent when the harness does not supply them.
+ */
+export interface EventMessageSource {
+  agentID?: string;
+  delegationToolUseID?: string;
+  threadID?: string;
+  turnID?: string;
+  itemID?: string;
+  rootThreadID?: string;
+}
+
+/**
  * EventInit is emitted once at the start of a session. It includes a Harness
  * field so the client knows which backend produced the stream.
  */
@@ -498,6 +513,7 @@ export interface EventSkillLoad {
  * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
  */
 export interface EventMessage {
+  source?: EventMessageSource;
   kind: EventKind;
   ts: number /* int64 */;
   init?: EventInit;

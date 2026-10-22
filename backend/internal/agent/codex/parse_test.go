@@ -5,6 +5,7 @@ package codex
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -223,7 +224,7 @@ func TestParseMessage(t *testing.T) {
 				t.Errorf("ToolUseID = %q, want empty so the tool result survives", read.ToolUseID)
 			}
 			// The load waits for the command's success.
-			wantLoad := &agent.SkillLoadMessage{Skill: name, Path: "/home/user/.agents/skills/" + name + "/SKILL.md", SourceToolUseID: "item_2"}
+			wantLoad := &agent.SkillLoadMessage{Source: agent.MessageSource{ThreadID: "t1", TurnID: "turn_1", ItemID: "item_2"}, Skill: name, Path: "/home/user/.agents/skills/" + name + "/SKILL.md", SourceToolUseID: "item_2"}
 			if load, ok := msgs[2+2*i].(*agent.SkillLoadMessage); !ok || *load != *wantLoad {
 				t.Errorf("msgs[%d] = %#v, want %#v", 2+2*i, msgs[2+2*i], wantLoad)
 			}
@@ -1026,7 +1027,222 @@ func TestAgentArgs(t *testing.T) {
 }
 
 func TestWireFormat(t *testing.T) {
+	t.Run("ParseMessage/explicit child evidence without lifecycle cards", func(t *testing.T) {
+		t.Parallel()
+		for _, metadata := range []string{`"parentThreadId":"parent"`, `"threadSource":"subagent"`} {
+			t.Run(metadata, func(t *testing.T) {
+				t.Parallel()
+				w := New("", nil).NewWire()
+				if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"child",` + metadata + `}}}`)); err != nil {
+					t.Fatal(err)
+				}
+				msgs, err := w.ParseMessage([]byte(`{"method":"error","params":{"threadId":"child","turnId":"turn","error":{"message":"child failed before root metadata"}}}`))
+				if err != nil || len(msgs) != 1 {
+					t.Fatalf("child error: %v %v", msgs, err)
+				}
+				if m, ok := msgs[0].(*agent.SystemMessage); !ok || m.Detail != "child failed before root metadata" || !m.Source.IsChild() || m.Source.AgentID != "codex:thread:child" {
+					t.Errorf("explicit child error escaped to root: %+v", msgs[0])
+				}
+				if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"parent","threadSource":"user"}}}`)); err != nil {
+					t.Fatal(err)
+				}
+				msgs, err = w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"child"}}}`))
+				if err != nil || len(msgs) != 1 {
+					t.Fatalf("repeated child init: %v %v", msgs, err)
+				}
+				if s := msgs[0].Provenance(); !s.IsChild() || s.RootThreadID != "parent" {
+					t.Fatalf("metadata-free child replaced root: %+v", s)
+				}
+				msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"parent","turn":{"id":"turn","status":"completed"}}}`))
+				if err != nil || len(msgs) != 1 {
+					t.Fatalf("parent result suppressed: %v %v", msgs, err)
+				}
+				// Thread ownership does not prove a native lifecycle/card.
+				if wire, ok := w.(*wireFormat); !ok || len(wire.nativeSubagents.spawns) != 0 {
+					t.Fatal("thread metadata invented a native lifecycle card")
+				}
+			})
+		}
+	})
+	t.Run("ParseMessage/root replacement across retained sessions", func(t *testing.T) {
+		t.Parallel()
+		w := New("", nil).NewWire()
+		for _, id := range []string{"original-root", "restarted-root"} {
+			if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"` + id + `","threadSource":"user"}}}`)); err != nil {
+				t.Fatal(err)
+			}
+			msgs, err := w.ParseMessage([]byte(`{"method":"item/started","params":{"threadId":"` + id + `","turnId":"turn","item":{"type":"commandExecution","id":"local","command":"printf root","status":"inProgress"}}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("root tool: %v %v", msgs, err)
+			}
+			if source := msgs[0].Provenance(); source.IsChild() || source.RootThreadID != id {
+				t.Fatalf("new authoritative root treated as child: %+v", source)
+			}
+			msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"` + id + `","turn":{"id":"turn","status":"completed"}}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("new root completion suppressed: %v %v", msgs, err)
+			}
+		}
+	})
+
+	t.Run("ParseMessage/child model and lifecycle isolation", func(t *testing.T) {
+		t.Parallel()
+		w := New("", nil).NewWire()
+		lines := []string{
+			`{"method":"thread/started","params":{"thread":{"id":"root","model":"root-model"}}}`,
+			`{"method":"thread/started","params":{"thread":{"id":"child","parentThreadId":"root","threadSource":"subagent","model":"child-model"}}}`,
+			`{"method":"model/rerouted","params":{"threadId":"child","turnId":"turn","fromModel":"child-model","toModel":"child-rerouted"}}`,
+			`{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"turn","tokenUsage":{"last":{"inputTokens":5,"totalTokens":5},"total":{"inputTokens":5,"totalTokens":5}}}}`,
+			`{"method":"error","params":{"threadId":"child","turnId":"turn","error":{"message":"child failure"}}}`,
+			`{"method":"thread/tokenUsage/updated","params":{"threadId":"root","turnId":"turn","tokenUsage":{"last":{"inputTokens":7,"totalTokens":7},"total":{"inputTokens":7,"totalTokens":7}}}}`,
+		}
+		for i, line := range lines {
+			msgs, err := w.ParseMessage([]byte(line))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("line %d: %v %v", i, msgs, err)
+			}
+			if i > 0 && i < 5 && !msgs[0].Provenance().IsChild() {
+				t.Fatalf("child origin lost: %T %+v", msgs[0], msgs[0].Provenance())
+			}
+			if i == 3 {
+				m, ok := msgs[0].(*agent.UsageMessage)
+				if !ok || m.ReportedModel != "child-rerouted" {
+					t.Fatal("child model not preserved")
+				}
+			}
+			if i == 4 {
+				if m, ok := msgs[0].(*agent.SystemMessage); !ok || m.Detail != "child failure" {
+					t.Fatalf("child error lost: %+v", msgs[0])
+				}
+			}
+			if i == 5 {
+				if m, ok := msgs[0].(*agent.UsageMessage); !ok || m.Source.IsChild() || m.Source.RootThreadID != "root" || m.ReportedModel != "root-model" {
+					t.Fatalf("child changed root identity/model: %+v", m)
+				}
+			}
+		}
+		msgs, err := w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"turn","status":"completed"}}}`))
+		if err != nil || len(msgs) != 1 {
+			t.Fatalf("parent result: %v %v", msgs, err)
+		}
+		if m, ok := msgs[0].(*agent.ResultMessage); !ok || m.Usage.InputTokens != 12 {
+			t.Fatalf("child failure consumed parent usage: %v", msgs)
+		}
+	})
+	t.Run("ParseMessage/known child before root metadata", func(t *testing.T) {
+		t.Parallel()
+		w := New("", nil).NewWire()
+		if _, err := w.ParseMessage([]byte(`{"method":"item/started","params":{"threadId":"parent","turnId":"turn","item":{"type":"subAgentActivity","id":"spawn","agentThreadId":"child","agentPath":"/root/child","kind":"started","model":"reported-child-model"}}}`)); err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := w.ParseMessage([]byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"turn","tokenUsage":{"total":{"inputTokens":1,"totalTokens":1},"last":{"inputTokens":1,"totalTokens":1}}}}`))
+		if err != nil || len(msgs) != 1 {
+			t.Fatalf("usage: %v %v", msgs, err)
+		}
+		if m, ok := msgs[0].(*agent.UsageMessage); !ok || !m.Source.IsChild() || m.ReportedModel != "reported-child-model" || m.Source.RootThreadID != "" {
+			t.Fatalf("reported ownership/model lost: %+v", m)
+		}
+		msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"turn","status":"completed"}}}`))
+		if err != nil || len(msgs) != 0 {
+			t.Fatalf("known child completed unknown root: %v %v", msgs, err)
+		}
+		for _, root := range []string{"first-root", "restarted-root"} {
+			if _, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"` + root + `","threadSource":"user"}}}`)); err != nil {
+				t.Fatal(err)
+			}
+			// A child announced before session metadata stays a child when its
+			// own init omits optional delegation fields during warm replay.
+			msgs, err := w.ParseMessage([]byte(`{"method":"thread/started","params":{"thread":{"id":"child"}}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("child init: %v %v", msgs, err)
+			}
+			if s := msgs[0].Provenance(); !s.IsChild() || s.RootThreadID != root {
+				t.Fatalf("known child replaced root during replay: %+v", s)
+			}
+			msgs, err = w.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"` + root + `","turn":{"id":"turn","status":"completed"}}}`))
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("root result lost after child init: %v %v", msgs, err)
+			}
+		}
+	})
 	t.Parallel()
+	// Concurrent provenance reproduces child answer fragments interleaved with
+	// root reasoning, including completion and retained raw-log replay.
+	t.Run("ParseMessage/concurrent provenance", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{
+			`{"method":"thread/started","params":{"thread":{"id":"parent"}}}`,
+			`{"method":"item/agentMessage/delta","params":{"threadId":"child","turnId":"child-turn","itemId":"answer","delta":"A bow"}}`,
+			`{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"parent","turnId":"parent-turn","itemId":"reason","summaryIndex":0,"delta":"Evaluating"}}`,
+			`{"method":"item/agentMessage/delta","params":{"threadId":"child","turnId":"child-turn","itemId":"answer","delta":"tie"}}`,
+			`{"method":"item/completed","params":{"threadId":"child","turnId":"child-turn","item":{"id":"answer","type":"agentMessage","text":"A bowtie"}}}`,
+			`{"method":"item/completed","params":{"threadId":"parent","turnId":"parent-turn","item":{"id":"reason","type":"reasoning","summary":["Evaluating"]}}}`,
+		}
+		for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
+			t.Run(fmt.Sprint(version), func(t *testing.T) {
+				t.Parallel()
+				w := &wireFormat{}
+				parser, err := agent.NewLogRecordParser(agent.LogVersionV3, w.ParseMessage)
+				if version != 0 {
+					parser, err = agent.NewLogRecordParser(version, w.ParseMessage)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i, line := range lines {
+					var msgs []agent.Message
+					if version == 0 {
+						msgs, err = w.ParseMessage([]byte(line))
+					} else {
+						record, e := parser.ParseRecord([]byte(`{"t":"agent","ts":1.000,"msg":` + line + `}`))
+						err = e
+						for _, m := range record.Messages {
+							msgs = append(msgs, m.Message)
+						}
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if i == 0 {
+						continue
+					}
+					if len(msgs) != 1 {
+						t.Fatalf("line %d messages = %v", i, msgs)
+					}
+					data, e := json.Marshal(msgs[0])
+					if e != nil {
+						t.Fatal(e)
+					}
+					var m struct {
+						Source struct {
+							ThreadID     string `json:"threadID"`
+							TurnID       string `json:"turnID"`
+							ItemID       string `json:"itemID"`
+							RootThreadID string `json:"rootThreadID"`
+						} `json:"source"`
+					}
+					if e = json.Unmarshal(data, &m); e != nil {
+						t.Fatal(e)
+					}
+					thread, turn, item := "child", "child-turn", "answer"
+					if i == 2 || i == 5 {
+						thread, turn, item = "parent", "parent-turn", "reason"
+					}
+					wantAgentID := ""
+					if thread == "child" {
+						wantAgentID = "codex:thread:child"
+					}
+					if got := msgs[0].Provenance().AgentID; got != wantAgentID {
+						t.Errorf("line %d agentID = %q, want %q", i, got, wantAgentID)
+					}
+					if m.Source.ThreadID != thread || m.Source.TurnID != turn || m.Source.ItemID != item || m.Source.RootThreadID != "parent" {
+						t.Errorf("line %d provenance = %s", i, data)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("ChildThreadSkillReadLoadsNothing", func(t *testing.T) {
 		t.Parallel()
 		// Observed shape (4DLLPGQ6C000): spawned child threads run the same
@@ -1161,6 +1377,7 @@ func TestWireFormat(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}
 		w.reportedModel = "gpt-5.6"
+		w.threadID = "t1"
 		const input = `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"cachedInputTokens":500,"cacheWriteInputTokens":100,"outputTokens":200,"reasoningOutputTokens":0},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":50,"cacheWriteInputTokens":12,"outputTokens":20,"reasoningOutputTokens":5}}}}`
 		msgs, err := w.ParseMessage([]byte(input))
 		if err != nil {
@@ -1455,5 +1672,39 @@ func TestReplayBufferOwnership(t *testing.T) {
 	msg, ok := msgs[0].(*agent.TextDeltaMessage)
 	if !ok || msg.Text != "hello" {
 		t.Fatalf("message = %#v", msgs)
+	}
+}
+
+func TestCodexChildEventOwnership(t *testing.T) {
+	t.Parallel()
+	wire := New("", nil).NewWire()
+	lines := []string{
+		`{"method":"thread/started","params":{"thread":{"id":"root","model":"root-model"}}}`,
+		`{"method":"item/started","params":{"threadId":"child","turnId":"turn","item":{"type":"commandExecution","id":"command","command":"cat /home/user/.agents/skills/review/SKILL.md","cwd":"/src","status":"inProgress"}}}`,
+		`{"method":"item/commandExecution/outputDelta","params":{"threadId":"child","turnId":"turn","itemId":"command","delta":"output"}}`,
+		`{"method":"item/completed","params":{"threadId":"child","turnId":"turn","item":{"type":"commandExecution","id":"command","command":"cat /home/user/.agents/skills/review/SKILL.md","cwd":"/src","status":"completed","exitCode":0}}}`,
+		`{"method":"thread/tokenUsage/updated","params":{"threadId":"child","turnId":"turn","tokenUsage":{"total":{"totalTokens":12,"inputTokens":10,"outputTokens":2},"last":{"totalTokens":12,"inputTokens":10,"outputTokens":2}}}}`,
+		`{"method":"error","params":{"threadId":"child","turnId":"turn","error":{"message":"child failed"}}}`,
+	}
+	for i, line := range lines {
+		msgs, err := wire.ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatalf("line %d: %v", i, err)
+		}
+		if i == 0 {
+			continue
+		}
+		if len(msgs) == 0 {
+			t.Fatalf("line %d lost visible or analytics event", i)
+		}
+		for _, m := range msgs {
+			s := m.Provenance()
+			if s.AgentID != "codex:thread:child" || s.ThreadID != "child" || s.TurnID != "turn" || s.RootThreadID != "root" {
+				t.Errorf("line %d %T source = %+v", i, m, s)
+			}
+			if _, ok := m.(*agent.ResultMessage); ok {
+				t.Errorf("line %d child event emitted a parent result", i)
+			}
+		}
 	}
 }

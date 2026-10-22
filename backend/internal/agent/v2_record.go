@@ -180,7 +180,7 @@ func parseV2Record(p *LogRecordParser, line []byte) (ParsedRecord, error) {
 		return ParsedRecord{}, fmt.Errorf("corrupt v2 log record: unknown top-level t %q", token)
 	}
 	record := ParsedRecord{RelayRecord: token.relayOwned(), Control: true}
-	if err := validateV2ControlFields(kind, token, fields); err != nil {
+	if err := validateV2ControlFields(p.version, kind, token, fields); err != nil {
 		return record, err
 	}
 	msgs, err := parseV2Control(p, kind, token, line)
@@ -204,14 +204,14 @@ func containsV2ControlField(fields []string, want string) bool {
 	return slices.Contains(fields, want)
 }
 
-func validateV2ControlFields(kind logControlKind, token logRecordType, fields []string) error {
+func validateV2ControlFields(version LogVersion, kind logControlKind, token logRecordType, fields []string) error {
 	for _, field := range fields {
 		if field == "type" {
 			return errors.New("corrupt v2 log record: unknown top-level field \"type\": top-level type discriminator is not valid in v2")
 		}
 		// The strict decoder in parseV2Control validates caic_meta fields after
 		// this pass has enforced the v2 discriminator and duplicate-key rules.
-		if kind == logControlMeta || v2ControlFieldAllowed(kind, field) {
+		if kind == logControlMeta || v2ControlFieldAllowed(version, kind, field) {
 			continue
 		}
 		return fmt.Errorf("corrupt v2 %s record: unknown top-level field %q", token, field)
@@ -219,8 +219,8 @@ func validateV2ControlFields(kind logControlKind, token logRecordType, fields []
 	return nil
 }
 
-func v2ControlFieldAllowed(kind logControlKind, field string) bool {
-	if field == "t" {
+func v2ControlFieldAllowed(version LogVersion, kind logControlKind, field string) bool {
+	if field == "t" || version == LogVersionV3 && field == "source" {
 		return true
 	}
 	switch kind {

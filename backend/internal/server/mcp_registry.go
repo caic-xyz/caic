@@ -1274,6 +1274,10 @@ func (m *mcpRegistry) handleAgentLastMessage(ctx context.Context, call *mcp.Tool
 			historyErr = err
 			break
 		}
+		if candidate.Provenance().IsChild() {
+			continue
+		}
+
 		switch candidate := candidate.(type) {
 		case *agent.ResultMessage:
 			if candidate.Result != "" {

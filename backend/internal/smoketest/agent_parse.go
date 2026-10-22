@@ -1,4 +1,4 @@
-// Parser for flat fake-agent messages carried inside v2 task-log envelopes.
+// Parser for flat fake-agent messages preserving content, tool, and usage ownership in task-log envelopes.
 // Each message is a JSON object whose "type" field maps directly to an
 // agent.Message type.
 
@@ -54,23 +54,37 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
-		return []agent.Message{&agent.TextDeltaMessage{Text: m.Text}}, nil
+		return []agent.Message{&agent.TextDeltaMessage{Source: m.Source, Text: m.Text}}, nil
 	case "thinking":
+		var m agent.ThinkingMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
+	case "thinking_delta":
 		var m textDelta
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
-		return []agent.Message{&agent.ThinkingMessage{Text: m.Text}}, nil
+		return []agent.Message{&agent.ThinkingDeltaMessage{Source: m.Source, Text: m.Text}}, nil
 	case "tool_use":
-		var m toolUse
+		var m agent.ToolUseMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
-		return []agent.Message{&agent.ToolUseMessage{
-			ToolUseID: m.ID,
-			Name:      m.Name,
-			Input:     m.Input,
-		}}, nil
+		return []agent.Message{&m}, nil
+	case "tool_output_delta":
+		var m toolOutputDelta
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&agent.ToolOutputDeltaMessage{MessageProvenance: m.MessageProvenance, ToolUseID: m.ToolUseID, Delta: m.Delta}}, nil
+	case "usage":
+		var m agent.UsageMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	case "tool_result":
 		var m agent.ToolResultMessage
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -140,13 +154,15 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 // Wire types: thin wrappers matching the flat NDJSON the Python script emits.
 
 type textDelta struct {
-	Text string `json:"text"`
+	Source agent.MessageSource `json:"source,omitzero"`
+	Text   string              `json:"text"`
 }
 
-type toolUse struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+type toolOutputDelta struct {
+	agent.MessageProvenance
+
+	ToolUseID string `json:"tool_use_id"`
+	Delta     string `json:"delta"`
 }
 
 type askMsg struct {

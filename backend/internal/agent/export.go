@@ -89,13 +89,14 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 	b.WriteString("\n---\n\n")
 
 	// Conversation
-	seenTools := make(map[string]bool) // Track tool IDs to skip duplicates.
+	seenTools := make(map[ToolKey]struct{}) // Track tool IDs to skip duplicates.
 	for _, msg := range msgs {
 		if tu, ok := msg.(*ToolUseMessage); ok && !isInputEmpty(tu.Input) {
-			if seenTools[tu.ToolUseID] {
+			key := ToolKeyForSource(tu.Provenance(), tu.ToolUseID)
+			if _, seen := seenTools[key]; seen {
 				continue
 			}
-			seenTools[tu.ToolUseID] = true
+			seenTools[key] = struct{}{}
 		}
 		renderMsg(&b, msg)
 	}
@@ -105,6 +106,9 @@ func RenderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 
 func discussionReportedSettings(msgs []Message) (model, effort string) {
 	for _, msg := range msgs {
+		if msg.Provenance().IsChild() {
+			continue
+		}
 		switch m := msg.(type) {
 		case *InitMessage:
 			if m.ReportedModel != "" {

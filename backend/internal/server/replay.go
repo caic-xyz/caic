@@ -1,4 +1,4 @@
-// History replay filtering and backward-loading boundaries for task SSE streams.
+// History replay filtering and backward-loading boundaries for task SSE streams, preserving provider message identity.
 
 package server
 
@@ -23,29 +23,44 @@ type taskEventBackwardProjector struct {
 func newTaskEventBackwardProjector(history replayHistory) *taskEventBackwardProjector {
 	p := &taskEventBackwardProjector{}
 	var deltaParts []string
+	var source agent.MessageSource
 	for i := history.Len() - 1; i >= 0; i-- {
 		msg := history.At(i)
+		if msg.Provenance().IsChild() {
+			continue
+		}
 		switch m := msg.(type) {
 		case *agent.TextDeltaMessage:
+			if m.Source.IsChild() {
+				continue
+			}
+			if len(deltaParts) > 0 && source != m.Source {
+				p.setDeltaParts(deltaParts, &source)
+				return p
+			}
 			if m.Text != "" {
+				source = m.Source
 				deltaParts = append(deltaParts, m.Text)
 				if p.sequence == 0 {
 					p.sequence = uint64(i + 1)
 				}
 			}
 		case *agent.TextMessage:
+			if m.Source.IsChild() {
+				continue
+			}
 			if len(deltaParts) > 0 {
-				p.setDeltaParts(deltaParts)
+				p.setDeltaParts(deltaParts, &source)
 				return p
 			}
 			if m.Text != "" {
 				p.sequence = uint64(i + 1)
-				p.setText(m.Text, time.Time{})
+				p.setText(m.Text, &m.Source, time.Time{})
 				return p
 			}
 		case *agent.AskMessage:
 			if len(deltaParts) > 0 {
-				p.setDeltaParts(deltaParts)
+				p.setDeltaParts(deltaParts, &source)
 				return p
 			}
 			if len(m.Questions) > 0 {
@@ -55,47 +70,44 @@ func newTaskEventBackwardProjector(history replayHistory) *taskEventBackwardProj
 			}
 		case *agent.ResultMessage:
 			if len(deltaParts) > 0 {
-				p.setDeltaParts(deltaParts)
+				p.setDeltaParts(deltaParts, &source)
 				return p
 			}
 			if m.Result != "" {
 				p.sequence = uint64(i + 1)
-				p.setText(m.Result, time.Time{})
+				p.setText(m.Result, &agent.MessageSource{}, time.Time{})
 				return p
 			}
 		case *agent.UserInputMessage, *agent.InitMessage:
 			if len(deltaParts) > 0 {
-				p.setDeltaParts(deltaParts)
+				p.setDeltaParts(deltaParts, &source)
 			}
 			return p
 		}
 	}
 	if len(deltaParts) > 0 {
-		p.setDeltaParts(deltaParts)
+		p.setDeltaParts(deltaParts, &source)
 	}
 	return p
 }
 
-func (p *taskEventBackwardProjector) setText(text string, at time.Time) {
-	p.message = &v1.EventMessage{Kind: v1.EventKindText, Ts: backwardTimestamp(at), Text: &v1.EventText{Text: text}}
+func (p *taskEventBackwardProjector) setText(text string, source *agent.MessageSource, at time.Time) {
+	p.message = &v1.EventMessage{Kind: v1.EventKindText, Ts: backwardTimestamp(at), Text: &v1.EventText{Text: text}, Source: v1.EventMessageSource(*source)}
 }
 
-func (p *taskEventBackwardProjector) setDeltaParts(parts []string) {
+func (p *taskEventBackwardProjector) setDeltaParts(parts []string, source *agent.MessageSource) {
 	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
 		parts[i], parts[j] = parts[j], parts[i]
 	}
-	p.setDeltaText(strings.Join(parts, ""), time.Time{})
-}
-
-func (p *taskEventBackwardProjector) setDeltaText(text string, at time.Time) {
-	p.message = &v1.EventMessage{Kind: v1.EventKindText, Ts: backwardTimestamp(at), Text: &v1.EventText{Text: text}}
+	p.setText(strings.Join(parts, ""), source, time.Time{})
 }
 
 func (p *taskEventBackwardProjector) setAsk(msg *agent.AskMessage, at time.Time) {
 	p.message = &v1.EventMessage{
-		Kind: v1.EventKindAsk,
-		Ts:   backwardTimestamp(at),
-		Ask:  &v1.EventAsk{ToolUseID: msg.ToolUseID, Questions: apiconv.AskQuestions(msg.Questions)},
+		Source: v1.EventMessageSource(msg.Source),
+		Kind:   v1.EventKindAsk,
+		Ts:     backwardTimestamp(at),
+		Ask:    &v1.EventAsk{ToolUseID: msg.ToolUseID, Questions: apiconv.AskQuestions(msg.Questions)},
 	}
 }
 
@@ -172,7 +184,7 @@ func (f *historyReplayFilter[H]) Skip(i int) bool {
 	} else if task.ClearsExitError(msg) {
 		f.cleanTurnComplete = false
 	}
-	if result, ok := msg.(*agent.ResultMessage); ok {
+	if result, ok := msg.(*agent.ResultMessage); ok && !result.Source.IsChild() {
 		f.cleanTurnComplete = !result.IsError
 	}
 	return false
@@ -183,13 +195,13 @@ func deltaRunEnd[H replayHistory](history H, start int) (int, bool) {
 	case *agent.TextDeltaMessage:
 		end := start + 1
 		for end < history.Len() {
-			if _, ok := history.At(end).(*agent.TextDeltaMessage); !ok {
+			if next, ok := history.At(end).(*agent.TextDeltaMessage); !ok || first.Source != next.Source {
 				break
 			}
 			end++
 		}
 		if end < history.Len() {
-			if _, ok := history.At(end).(*agent.TextMessage); ok {
+			if final, ok := history.At(end).(*agent.TextMessage); ok && first.Source == final.Source {
 				return end, true
 			}
 		}
@@ -197,13 +209,13 @@ func deltaRunEnd[H replayHistory](history H, start int) (int, bool) {
 	case *agent.ThinkingDeltaMessage:
 		end := start + 1
 		for end < history.Len() {
-			if _, ok := history.At(end).(*agent.ThinkingDeltaMessage); !ok {
+			if next, ok := history.At(end).(*agent.ThinkingDeltaMessage); !ok || first.Source != next.Source {
 				break
 			}
 			end++
 		}
 		if end < history.Len() {
-			if _, ok := history.At(end).(*agent.ThinkingMessage); ok {
+			if final, ok := history.At(end).(*agent.ThinkingMessage); ok && first.Source == final.Source {
 				return end, true
 			}
 		}
@@ -211,13 +223,13 @@ func deltaRunEnd[H replayHistory](history H, start int) (int, bool) {
 	case *agent.WidgetDeltaMessage:
 		end := start + 1
 		for end < history.Len() {
-			if _, ok := history.At(end).(*agent.WidgetDeltaMessage); !ok {
+			if delta, ok := history.At(end).(*agent.WidgetDeltaMessage); !ok || agent.ToolKeyForSource(delta.Provenance(), delta.ToolUseID) != agent.ToolKeyForSource(first.Provenance(), first.ToolUseID) {
 				break
 			}
 			end++
 		}
 		if end < history.Len() {
-			if _, ok := history.At(end).(*agent.WidgetMessage); ok {
+			if final, ok := history.At(end).(*agent.WidgetMessage); ok && agent.ToolKeyForSource(final.Provenance(), final.ToolUseID) == agent.ToolKeyForSource(first.Provenance(), first.ToolUseID) {
 				return end, true
 			}
 		}
@@ -226,13 +238,13 @@ func deltaRunEnd[H replayHistory](history H, start int) (int, bool) {
 		end := start + 1
 		for end < history.Len() {
 			delta, ok := history.At(end).(*agent.ToolOutputDeltaMessage)
-			if !ok || delta.ToolUseID != first.ToolUseID {
+			if !ok || agent.ToolKeyForSource(delta.Provenance(), delta.ToolUseID) != agent.ToolKeyForSource(first.Provenance(), first.ToolUseID) {
 				break
 			}
 			end++
 		}
 		if end < history.Len() {
-			if result, ok := history.At(end).(*agent.ToolResultMessage); ok && result.ToolUseID == first.ToolUseID {
+			if result, ok := history.At(end).(*agent.ToolResultMessage); ok && agent.ToolKeyForSource(result.Provenance(), result.ToolUseID) == agent.ToolKeyForSource(first.Provenance(), first.ToolUseID) {
 				return end, true
 			}
 		}

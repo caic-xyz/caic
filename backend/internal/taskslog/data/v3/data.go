@@ -124,13 +124,63 @@ type ImageData struct {
 
 // TextMessage is the persisted TextMessage representation.
 type TextMessage struct {
+	MessageProvenance
+
 	MessageType string `json:"t"`
 	Text        string `json:"text"`
 	Phase       string `json:"phase,omitempty"` // Codex only: "commentary" | "final_answer" | "".
 }
 
+// MessageProvenance carries optional origin metadata without promoting the
+// source's IsZero method onto the enclosing message.
+type MessageProvenance struct {
+	Source MessageSource `json:"source,omitzero"`
+}
+
+// Provenance returns this message's owned source value. It is always available;
+// an all-zero value denotes task-global or unknown origin.
+func (p *MessageProvenance) Provenance() *MessageSource {
+	return &p.Source
+}
+
+// MessageSource identifies the provider origin of any normalized message.
+// RootThreadID names the authoritative session owner when the wire reports it.
+type MessageSource struct {
+	// AgentID identifies the canonical native-agent card when the origin is a
+	// known child. It is independent of native thread and stream item identity.
+	AgentID string `json:"agentID,omitempty"`
+	// DelegationToolUseID is the provider-reported delegating tool, retained when
+	// the canonical native agent is not known yet.
+	DelegationToolUseID string `json:"delegationToolUseID,omitempty"`
+	ThreadID            string `json:"threadID,omitempty"`
+	TurnID              string `json:"turnID,omitempty"`
+	ItemID              string `json:"itemID,omitempty"`
+	RootThreadID        string `json:"rootThreadID,omitempty"`
+}
+
+// IsChild reports explicit native-agent or delegation ownership, or an
+// authoritative root/thread mismatch. Unknown ownership does not imply a child.
+func (s *MessageSource) IsChild() bool {
+	return s.AgentID != "" || s.DelegationToolUseID != "" || s.RootThreadID != "" && s.ThreadID != "" && s.ThreadID != s.RootThreadID
+}
+
+// IsZero reports whether all source fields are empty. Partial provenance remains
+// present in JSON even when it cannot identify a complete stream item.
+func (s *MessageSource) IsZero() bool {
+	return *s == (MessageSource{})
+}
+
+// HasIdentity reports whether ThreadID, TurnID, and ItemID are all present.
+// Ownership fields are optional. Empty completions need this complete identity so
+// consumers can clear only the matching item's fragments.
+func (s *MessageSource) HasIdentity() bool {
+	return s.ThreadID != "" && s.TurnID != "" && s.ItemID != ""
+}
+
 // UserInputMessage is the persisted UserInputMessage representation.
 type UserInputMessage struct {
+	MessageProvenance
+
 	MessageType string      `json:"t"`
 	Text        string      `json:"text,omitempty"`
 	Images      []ImageData `json:"images,omitempty"`
@@ -138,6 +188,8 @@ type UserInputMessage struct {
 
 // SystemMessage is the persisted SystemMessage representation.
 type SystemMessage struct {
+	MessageProvenance
+
 	MessageType   string `json:"t"`
 	Subtype       string `json:"subtype"`
 	SessionID     string `json:"session_id"`
@@ -155,18 +207,24 @@ type SystemMessage struct {
 
 // LogMessage is the persisted LogMessage representation.
 type LogMessage struct {
+	MessageProvenance
+
 	MessageType string `json:"t"`
 	Line        string `json:"line"`
 }
 
 // StrippedEnvMessage is the persisted StrippedEnvMessage representation.
 type StrippedEnvMessage struct {
+	MessageProvenance
+
 	MessageType string            `json:"t"`
 	Variables   map[string]string `json:"variables"`
 }
 
 // DiffStatMessage is the persisted DiffStatMessage representation.
 type DiffStatMessage struct {
+	MessageProvenance
+
 	MessageType string   `json:"t"`
 	DiffStat    DiffStat `json:"diff_stat"`
 	// Repos carries one compact git state per task repository, filled by the
@@ -177,6 +235,8 @@ type DiffStatMessage struct {
 
 // ExitMessage is the persisted ExitMessage representation.
 type ExitMessage struct {
+	MessageProvenance
+
 	MessageType     string   `json:"t"`
 	ExitCode        int      `json:"exit_code"`
 	Command         []string `json:"cmd,omitempty"`
@@ -188,6 +248,8 @@ type ExitMessage struct {
 
 // MetaMessage is the persisted MetaMessage representation.
 type MetaMessage struct {
+	MessageProvenance
+
 	MessageType       string           `json:"t"`
 	Version           int              `json:"version"`
 	Prompt            string           `json:"prompt"`
@@ -217,6 +279,8 @@ type MetaMessage struct {
 
 // MetaSessionMessage is the persisted MetaSessionMessage representation.
 type MetaSessionMessage struct {
+	MessageProvenance
+
 	MessageType    string `json:"t"`
 	SessionID      string `json:"session_id"`
 	ReportedModel  string `json:"model,omitempty"`
@@ -226,18 +290,24 @@ type MetaSessionMessage struct {
 
 // RelayGenerationMessage is the persisted RelayGenerationMessage representation.
 type RelayGenerationMessage struct {
+	MessageProvenance
+
 	MessageType string `json:"t"`
 	Generation  string `json:"generation"`
 }
 
 // ModelInfoMessage is the persisted ModelInfoMessage representation.
 type ModelInfoMessage struct {
+	MessageProvenance
+
 	MessageType   string `json:"t"`
 	ContextWindow int64  `json:"context_window"`
 }
 
 // MetaResultMessage is the persisted MetaResultMessage representation.
 type MetaResultMessage struct {
+	MessageProvenance
+
 	MessageType              string   `json:"t"`
 	State                    string   `json:"state"`
 	Title                    string   `json:"title,omitempty"`
@@ -260,6 +330,8 @@ type MetaResultMessage struct {
 
 // MetaPRMessage is the persisted MetaPRMessage representation.
 type MetaPRMessage struct {
+	MessageProvenance
+
 	MessageType string `json:"t"`
 	ForgeOwner  string `json:"forge_owner"`
 	ForgeRepo   string `json:"forge_repo"`
@@ -268,6 +340,8 @@ type MetaPRMessage struct {
 
 // TurnCommitSnapshotMessage is the persisted TurnCommitSnapshotMessage representation.
 type TurnCommitSnapshotMessage struct {
+	MessageProvenance
+
 	MessageType string `json:"t"`
 	// Baseline marks the snapshot taken before a newly started agent session.
 	Baseline bool `json:"baseline,omitempty"`
@@ -281,12 +355,16 @@ type TurnCommitSnapshotMessage struct {
 
 // PendingUserActionMessage is the persisted PendingUserActionMessage representation.
 type PendingUserActionMessage struct {
+	MessageProvenance
+
 	MessageType string            `json:"t"`
 	Action      PendingUserAction `json:"action"`
 }
 
 // MCPRequestMessage is the persisted MCPRequestMessage representation.
 type MCPRequestMessage struct {
+	MessageProvenance
+
 	MessageType string          `json:"t"`
 	ID          string          `json:"id"`
 	Method      string          `json:"method"`

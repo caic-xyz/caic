@@ -65,8 +65,13 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 		if h == harness.Pi {
 			e.Delta.TokenBuckets = rollupTokens(m.Usage)
 		}
-		e.Delta.ContextWindow = m.ContextWindow
+		if !m.Source.IsChild() {
+			e.Delta.ContextWindow = m.ContextWindow
+		}
 	case *agent.ResultMessage:
+		if m.Source.IsChild() {
+			return e, false
+		}
 		if h != harness.Pi {
 			e.Delta.TokenBuckets = rollupTokens(m.Usage)
 		}
@@ -92,14 +97,16 @@ func rollupEvent(m agent.Message, at, producerAt time.Time, replayed bool, model
 		e.Delta.SkillReads = map[string]int{m.Skill: 1}
 	case *agent.ToolUseMessage:
 		e.Delta.ToolCalls = map[string]int{m.Name: 1}
-		e.ToolStartID = m.ToolUseID
+		key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+		e.ToolStartID = key.String()
 		e.ToolName = m.Name
 		e.ToolProducerTime = producerAt
 	case *agent.ToolResultMessage:
 		if m.ToolUseID == "" {
 			return e, false
 		}
-		e.ToolResultID = m.ToolUseID
+		key := agent.ToolKeyForSource(m.Provenance(), m.ToolUseID)
+		e.ToolResultID = key.String()
 		e.ToolNativeDurationMs = m.DurationMs
 		e.ToolProducerTime = producerAt
 	case *agent.NativeSubagentMessage:

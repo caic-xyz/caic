@@ -173,8 +173,8 @@ class ApiClient(
     suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/processes/$id")
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
     suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/caic/v1/processes/$id/$pid/signal", json.encodeToString(req))
-    /** Returns the full (untruncated) input for a tool call. */
-    suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID")
+    /** Returns full tool input; source query parameters disambiguate provider-local IDs across owners and turns. */
+    suspend fun getTaskToolInput(id: String, toolUseID: String, agentID: String, delegationToolUseID: String, threadID: String, turnID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID?agentID=$agentID&delegationToolUseID=$delegationToolUseID&threadID=$threadID&turnID=$turnID")
     /** Returns current usage quota statistics. */
     suspend fun getUsage(): UsageResp = request("GET", "/api/caic/v1/usage")
     /** Returns daily cross-task usage rollups for the usage dashboard. */

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -71,6 +72,107 @@ func recvType(ch <-chan TimelineMessage) string {
 }
 
 func TestTask(t *testing.T) {
+	t.Run("ChildObservedProviderQuotaRemainsShared", func(t *testing.T) {
+		t.Parallel()
+		for _, live := range []bool{false, true} {
+			t.Run(strconv.FormatBool(live), func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "model", "")
+				sink := &rollupSpy{}
+				tk.Rollup = sink
+				quota := &agent.RateLimitMessage{Source: agent.MessageSource{AgentID: "child"}, Status: agent.RateLimitStatusRejected, RateLimitType: "five_hour", ResetsAt: time.Now().Add(time.Hour), QuotaLabel: "shared account", QuotaProvider: agent.QuotaProviderCodex}
+				if live {
+					tk.addMessage(t.Context(), quota, true)
+				} else {
+					tk.SeedTimeline([]agent.Message{quota})
+				}
+				history, _, unsub := tk.SubscribeRateLimits(t.Context())
+				unsub()
+				if len(history) != 1 || tk.rateLimit.Status != agent.RateLimitStatusRejected || len(sink.Quotas) != 1 {
+					t.Fatalf("child-origin account quota discarded: history=%v quota=%+v sink=%v", history, tk.rateLimit, sink.Quotas)
+				}
+				if prompt := BuildHandoffPrompt(tk, 0); !strings.Contains(prompt, "shared account") {
+					t.Fatalf("provider block lost from handoff: %s", prompt)
+				}
+			})
+		}
+	})
+	t.Run("ChildOwnershipLiveAndSeed", func(t *testing.T) {
+		t.Parallel()
+		parent := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+		child := agent.MessageSource{ThreadID: "child", TurnID: "child-turn", RootThreadID: "root", AgentID: "child"}
+		for _, live := range []bool{false, true} {
+			t.Run(strconv.FormatBool(live), func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "root prompt"}, harness.Codex, "root-model", "")
+				sink := &rollupSpy{}
+				tk.Rollup = sink
+				messages := []agent.Message{
+					&agent.InitMessage{Source: parent, SessionID: "root", ReportedModel: "root-model"},
+					&agent.UsageMessage{Source: parent, Usage: agent.Usage{InputTokens: 12}, ContextWindow: 100, ReportedModel: "root-model", ModelDerived: true},
+					&agent.TextMessage{Source: parent, Text: "root answer"},
+					&agent.ResultMessage{Source: parent, Usage: agent.Usage{InputTokens: 30}},
+					&agent.UserInputMessage{Source: child, Text: "child prompt"},
+					&agent.InitMessage{Source: child, SessionID: "child", ReportedModel: "child-model"},
+					&agent.TextMessage{Source: child, Text: "child answer"},
+					&agent.ToolUseMessage{Source: child, Name: "EnterPlanMode", ToolUseID: "local"},
+					&agent.UsageMessage{Source: child, Usage: agent.Usage{InputTokens: 999}, ContextWindow: 999, ReportedModel: "child-model", ModelDerived: true},
+					&agent.SystemMessage{Source: child, Subtype: agent.SystemSubtypeCompactBoundary, ContextTokensAfter: 999},
+					&agent.SystemMessage{Source: child, Subtype: agent.SystemSubtypeModelRerouted, ReportedModel: "child-model"},
+					&agent.AskMessage{Source: child, ToolUseID: "ask"},
+					&agent.RateLimitMessage{Source: child, Status: agent.RateLimitStatusRejected, QuotaLabel: "child-only-quota", RateLimitType: "thread_goal"},
+					&agent.ResultMessage{Source: child, IsError: true, Result: "child error", Usage: agent.Usage{InputTokens: 999}},
+				}
+				if live {
+					tk.SetState(taskslog.StateRunning)
+					for _, message := range messages {
+						tk.addMessage(t.Context(), message, true)
+					}
+				} else {
+					tk.SeedTimeline(messages)
+				}
+				if tk.GetState() != taskslog.StateWaiting || tk.sessionID != "root" || tk.reportedModel != "root-model" || tk.costTracker.Model != "root-model" || tk.inPlanMode {
+					t.Fatalf("child changed root state: state=%s session=%s model=%s costmodel=%s plan=%t", tk.GetState(), tk.sessionID, tk.reportedModel, tk.costTracker.Model, tk.inPlanMode)
+				}
+				if tk.lastAPIUsage.InputTokens != 12 || tk.reportedContextWindow != 100 || tk.liveUsage.InputTokens != 30 {
+					t.Fatalf("root context/totals changed: latest=%+v window=%d totals=%+v", tk.lastAPIUsage, tk.reportedContextWindow, tk.liveUsage)
+				}
+				if got := tk.LastAgentResult(); got != "root answer" {
+					t.Errorf("last result = %q", got)
+				}
+				history, _, unsub := tk.SubscribeRateLimits(t.Context())
+				unsub()
+				if len(sink.Quotas) != 0 {
+					t.Fatalf("child goal affected provider quota: %+v", sink.Quotas)
+				}
+				if len(history) != 0 {
+					t.Fatalf("child thread quota entered root subscription: %+v", history)
+				}
+				prompt := BuildHandoffPrompt(tk, 0)
+				if strings.Contains(prompt, "child answer") || strings.Contains(prompt, "child prompt") || strings.Contains(prompt, "child error") || strings.Contains(prompt, "child-only-quota") {
+					t.Errorf("child leaked into handoff: %s", prompt)
+				}
+			})
+		}
+	})
+	t.Run("ToolCompactionOwnerScope", func(t *testing.T) {
+		t.Parallel()
+		parent := agent.MessageSource{ThreadID: "root", TurnID: "turn", RootThreadID: "root"}
+		child := agent.MessageSource{ThreadID: "child", TurnID: "turn", RootThreadID: "root"}
+		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "", "")
+		tk.SeedTimeline([]agent.Message{
+			&agent.ToolOutputDeltaMessage{Source: parent, ToolUseID: "same", Delta: "parent output"},
+			&agent.ToolResultMessage{Source: child, ToolUseID: "same"},
+			&agent.ToolOutputDeltaMessage{Source: child, ToolUseID: "same", Delta: "child output"},
+			&agent.ToolResultMessage{Source: child, ToolUseID: "same"},
+		})
+		if got, ok := tk.timeline[0].Message.(*agent.ToolOutputDeltaMessage); !ok || got.Delta != "parent output" {
+			t.Fatal("child completion erased parent output")
+		}
+		if got, ok := tk.timeline[2].Message.(*agent.ToolOutputDeltaMessage); !ok || got.Delta != "" || got.Source != child {
+			t.Fatalf("compacted delta lost source: %+v", got)
+		}
+	})
 	t.Parallel()
 	t.Run("RootTaskHasNoParent", func(t *testing.T) {
 		t.Parallel()
@@ -264,6 +366,67 @@ func TestTask(t *testing.T) {
 			t.Errorf("restored repo states = %#v, want %#v", snapshot.RepoStates, repos)
 		}
 	})
+	t.Run("ConcurrentMessageCompaction", func(t *testing.T) {
+		t.Parallel()
+		for _, live := range []bool{false, true} {
+			for _, thinking := range []bool{false, true} {
+				t.Run(fmt.Sprintf("live=%t/thinking=%t", live, thinking), func(t *testing.T) {
+					t.Parallel()
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "parent-item"}
+					child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "child-turn", ItemID: "child-item"}
+					messages := []agent.Message{
+						&agent.TextDeltaMessage{Text: "Parent ", Source: parent},
+						&agent.TextDeltaMessage{Text: "Child ", Source: child},
+						&agent.TextDeltaMessage{Text: "answer", Source: parent},
+						&agent.TextDeltaMessage{Text: "answer", Source: child},
+						&agent.TextMessage{Text: "Child answer", Source: child},
+					}
+					if thinking {
+						for i := range 4 {
+							m, ok := messages[i].(*agent.TextDeltaMessage)
+							if !ok {
+								t.Fatalf("fixture fragment %d is %T", i, messages[i])
+							}
+							messages[i] = &agent.ThinkingDeltaMessage{Text: m.Text, Source: m.Source}
+						}
+						messages[4] = &agent.ThinkingMessage{Text: "Child answer", Source: child}
+					}
+					if live {
+						for _, m := range messages {
+							tk.addMessage(t.Context(), m, false)
+						}
+					} else {
+						prefix := []agent.TimedMessage{{Message: messages[0]}, {Message: messages[1]}}
+						suffix := []agent.TimedMessage{{Message: messages[2]}, {Message: messages[3]}, {Message: messages[4]}}
+						tk.SeedTimelineParts(prefix, suffix)
+					}
+					history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
+					defer unsubscribe()
+					defer history.Release()
+					for _, i := range []int{0, 2} {
+						if got := history.At(i).Message; got != messages[i] {
+							t.Errorf("parent fragment %d compacted by child: %#v", i, got)
+						}
+					}
+					for _, i := range []int{1, 3} {
+						var text string
+						var source agent.MessageSource
+						switch m := history.At(i).Message.(type) {
+						case *agent.TextDeltaMessage:
+							text, source = m.Text, m.Source
+						case *agent.ThinkingDeltaMessage:
+							text, source = m.Text, m.Source
+						}
+						if text != "" || source != child {
+							t.Errorf("child placeholder %d lost identity or retained payload: %#v", i, history.At(i).Message)
+						}
+					}
+				})
+			}
+		}
+	})
+
 	t.Run("LiveFinalCompactsDeltas", func(t *testing.T) {
 		t.Parallel()
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
@@ -3037,6 +3200,35 @@ func TestTask(t *testing.T) {
 
 	t.Run("PendingUserActions", func(t *testing.T) {
 		t.Parallel()
+		t.Run("AmbiguousClaudeControlDoesNotRestoreRootAsk", func(t *testing.T) {
+			t.Parallel()
+			for _, initialized := range []bool{false, true} {
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				wire := claudecode.New().NewWire()
+				input := `{"questions":[{"question":"Proceed?","header":"Choice","options":[{"label":"Yes","description":"Go"},{"label":"No","description":"Stop"}]}]}`
+				var lines []string
+				if initialized {
+					lines = append(lines, `{"type":"system","subtype":"init","session_id":"root"}`)
+				}
+				lines = append(lines,
+					`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ask","name":"AskUserQuestion","input":`+input+`}]}}`,
+					`{"type":"assistant","session_id":"child-thread","parent_tool_use_id":"spawn","message":{"content":[{"type":"tool_use","id":"ask","name":"AskUserQuestion","input":`+input+`}]}}`,
+					`{"type":"control_request","request_id":"permission","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"ask","input":`+input+`}}`,
+				)
+				var history []agent.Message
+				for _, line := range lines {
+					messages, err := wire.ParseMessage([]byte(line))
+					if err != nil {
+						t.Fatal(err)
+					}
+					history = append(history, messages...)
+				}
+				tk.SeedTimeline(history)
+				if got := tk.PendingUserActions(); len(got) != 0 {
+					t.Errorf("initialized=%t: ambiguous control restored root action: %#v", initialized, got)
+				}
+			}
+		})
 		t.Run("RestoresCurrentAsk", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

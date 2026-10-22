@@ -676,15 +676,17 @@ func (h *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 }
 
 // handleTaskToolInput returns the full (untruncated) input for a tool call.
-// It scans the task's message history for the ToolUseMessage with the given
-// toolUseID and returns its Input field.
+// Source query parameters distinguish provider-local IDs across owners and
+// turns. An unscoped request must identify exactly one invocation.
 func (h *taskHandlers) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(r.Context(), w, err)
 		return
 	}
-	resp, err := h.taskSvc.taskToolInput(r.Context(), entry, r.PathValue("toolUseID"))
+	q := r.URL.Query()
+	scope := v1.TaskToolInputQuery{AgentID: q.Get("agentID"), DelegationToolUseID: q.Get("delegationToolUseID"), ThreadID: q.Get("threadID"), TurnID: q.Get("turnID")}
+	resp, err := h.taskSvc.taskToolInput(r.Context(), entry, r.PathValue("toolUseID"), scope)
 	writeJSONResponse(r.Context(), w, resp, err)
 }
 

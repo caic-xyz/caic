@@ -1,6 +1,7 @@
-// Incrementally folds loaded skills by context section, preserving path provenance across compaction and clear.
+// Incrementally folds root-owned skill loads by context section across compaction and clear.
 
 import type { EventMessage, EventSkillLoad } from "@sdk/types.gen";
+import { isChildEvent } from "./grouping";
 
 export interface ContextSkills {
   current: EventSkillLoad[];
@@ -28,6 +29,7 @@ export class ContextSkillsTracker {
     for (let i = this.processed; i < messages.length; i++) {
       const ev = messages[i];
       if (!ev) throw new Error("Missing timeline event");
+      if (isChildEvent(ev)) continue;
       if (
         ev.kind === "system" &&
         (ev.system?.subtype === "compact_boundary" || ev.system?.subtype === "context_cleared")

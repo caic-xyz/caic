@@ -1378,6 +1378,7 @@ func semanticLoadedMessages(loaded *LoadedTask, control bool, messages []agent.T
 // inventoryResultMetadata is the V1-native result subset needed to backfill an
 // omitted caic_result trailer. It is only emitted by the inventory parser.
 type inventoryResultMetadata struct {
+	agent.MessageProvenance
 	tailResult
 }
 
@@ -1751,7 +1752,7 @@ var errTaskLogStreamStopped = errors.New("task log stream consumer stopped")
 func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.TimedMessage) {
 	for _, parsed := range msgs {
 		init, ok := parsed.Message.(*agent.InitMessage)
-		if !ok {
+		if !ok || init.Source.IsChild() {
 			continue
 		}
 		if init.SessionID != "" {
@@ -1773,7 +1774,7 @@ func applyParsedSessionMetadata(lt *LoadedTask, msgs []agent.TimedMessage) {
 func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) {
 	for _, msg := range msgs {
 		init, ok := msg.(*agent.InitMessage)
-		if !ok {
+		if !ok || init.Source.IsChild() {
 			continue
 		}
 		if init.SessionID != "" {

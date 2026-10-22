@@ -96,7 +96,7 @@ func TestWidgetTrackerBounds(t *testing.T) {
 		if wt.bufferedJSONBytes != 0 || len(wt.accum) != 0 {
 			t.Fatalf("over-limit JSON retained %d bytes in %#v", wt.bufferedJSONBytes, wt.accum)
 		}
-		if _, ok := wt.exceeded[0]; !ok {
+		if _, ok := wt.exceeded[widgetBlockKey{}]; !ok {
 			t.Fatal("over-limit widget was not marked exceeded")
 		}
 		stream(t, wt, map[string]any{"type": "content_block_stop", "index": 0})
@@ -983,7 +983,7 @@ func TestParseMessage(t *testing.T) {
 		if len(msgs) != 0 {
 			t.Errorf("got %d messages, want 0 (start is absorbed)", len(msgs))
 		}
-		if _, ok := wt.activeWidgets[0]; !ok {
+		if _, ok := wt.activeWidgets[widgetBlockKey{}]; !ok {
 			t.Error("widget not tracked after content_block_start")
 		}
 	})
@@ -1042,7 +1042,7 @@ func TestParseMessage(t *testing.T) {
 		if len(msgs) != 0 {
 			t.Errorf("got %d messages on stop, want 0", len(msgs))
 		}
-		if _, ok := wt.activeWidgets[0]; ok {
+		if _, ok := wt.activeWidgets[widgetBlockKey{}]; ok {
 			t.Error("widget should be cleaned up after stop")
 		}
 	})

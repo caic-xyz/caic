@@ -3,6 +3,10 @@
 package codex
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -60,6 +64,105 @@ func TestNativeSubagentJokeEvidence(t *testing.T) {
 			}
 			if !card.Background {
 				t.Fatalf("card = %#v, want a detached agent", card)
+			}
+		})
+	}
+}
+
+// TestConcurrentChildToolsEvidence pins a seven-record excerpt of task
+// 4H9K7LT6U000. The command and IDs are sanitized; the notification ordering,
+// enclosing actor, child tool failure and suppressed child completion remain.
+func TestConcurrentChildToolsEvidence(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("testdata/evidence/concurrent-child-tools-v3.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []agent.LogVersion{0, agent.LogVersionV2, agent.LogVersionV3} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			t.Parallel()
+			wire := New("", nil).NewWire()
+			parser, err := agent.NewLogRecordParser(agent.LogVersionV3, wire.ParseMessage)
+			if version != 0 {
+				parser, err = agent.NewLogRecordParser(version, wire.ParseMessage)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var messages []agent.Message
+			for line := range bytes.SplitSeq(bytes.TrimSpace(data), []byte{'\n'}) {
+				if version == 0 {
+					var raw struct {
+						Message json.RawMessage `json:"msg"`
+					}
+					if err := json.Unmarshal(line, &raw); err != nil {
+						t.Fatal(err)
+					}
+					msgs, err := wire.ParseMessage(raw.Message)
+					if err != nil {
+						t.Fatal(err)
+					}
+					messages = append(messages, msgs...)
+				} else {
+					record, err := parser.ParseRecord(line)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, timed := range record.Messages {
+						messages = append(messages, timed.Message)
+					}
+				}
+			}
+			var starts, results, output, usage, observations int
+			for _, m := range messages {
+				switch m := m.(type) {
+				case *agent.InitMessage:
+					continue
+				case *agent.RawMessage:
+					continue
+				case *agent.NativeSubagentMessage:
+					observations++
+					if m.Subagent.ID != "codex:thread:child" || m.Source.IsChild() || m.Source.ThreadID != "root" {
+						t.Fatalf("actor confused with subject: %+v", m)
+					}
+					continue
+				case *agent.ToolUseMessage:
+					starts++
+				case *agent.ToolResultMessage:
+					results++
+				case *agent.ToolOutputDeltaMessage:
+					output++
+				case *agent.UsageMessage:
+					usage++
+					if m.ReportedModel != "" {
+						t.Fatalf("unknown child model guessed from parent: %q", m.ReportedModel)
+					}
+				case *agent.ResultMessage:
+					t.Fatal("child completion escaped as parent result")
+				}
+				s := m.Provenance()
+				if s.AgentID != "codex:thread:child" || s.ThreadID != "child" || s.TurnID != "child-turn" || s.RootThreadID != "root" {
+					t.Fatalf("lost child source on %T: %+v", m, s)
+				}
+			}
+			if starts != 1 || results != 1 || output != 1 || usage != 1 || observations != 1 {
+				t.Fatalf("events starts=%d results=%d output=%d usage=%d cards=%d", starts, results, output, usage, observations)
+			}
+			// Reusing this warmed wire proves child completion did not consume
+			// accumulated usage while the parent is still in flight.
+			msgs, err := wire.ParseMessage([]byte(`{"method":"turn/completed","params":{"threadId":"root","turn":{"id":"root-turn","status":"completed"}}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("root result = %v", msgs)
+			}
+			r, ok := msgs[0].(*agent.ResultMessage)
+			if !ok {
+				t.Fatalf("root result type = %T", msgs[0])
+			}
+			if r.Source.IsChild() || r.Usage.InputTokens != 10 || r.Usage.OutputTokens != 2 {
+				t.Fatalf("root usage is not inclusive: %+v", r)
 			}
 		})
 	}

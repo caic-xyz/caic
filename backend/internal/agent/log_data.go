@@ -684,7 +684,7 @@ func marshalV2Control(m Message) ([]byte, error) {
 	var record any
 	switch m := m.(type) {
 	case *TextMessage:
-		r := v2.TextMessage(*m)
+		r := v2.TextMessage{Text: m.Text, Phase: m.Phase}
 		r.MessageType = string(token)
 		record = r
 	case *UserInputMessage:
@@ -692,15 +692,15 @@ func marshalV2Control(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *SystemMessage:
-		r := v2.SystemMessage(*m)
+		r := v2.SystemMessage{MessageType: m.MessageType, Subtype: m.Subtype, SessionID: m.SessionID, UUID: m.UUID, Detail: m.Detail, ReportedModel: m.ReportedModel, ContextTokensBefore: m.ContextTokensBefore, ContextTokensAfter: m.ContextTokensAfter}
 		r.MessageType = string(token)
 		record = r
 	case *LogMessage:
-		r := v2.LogMessage(*m)
+		r := v2.LogMessage{MessageType: m.MessageType, Line: m.Line}
 		r.MessageType = string(token)
 		record = r
 	case *StrippedEnvMessage:
-		r := v2.StrippedEnvMessage(*m)
+		r := v2.StrippedEnvMessage{MessageType: m.MessageType, Variables: m.Variables}
 		r.MessageType = string(token)
 		record = r
 	case *DiffStatMessage:
@@ -708,7 +708,7 @@ func marshalV2Control(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *ExitMessage:
-		r := v2.ExitMessage(*m)
+		r := v2.ExitMessage{MessageType: m.MessageType, ExitCode: m.ExitCode, Command: m.Command, Signal: m.Signal, Error: m.Error, StderrTruncated: m.StderrTruncated, Ts: m.Ts}
 		r.MessageType = string(token)
 		record = r
 	case *MetaMessage:
@@ -716,15 +716,15 @@ func marshalV2Control(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *MetaSessionMessage:
-		r := v2.MetaSessionMessage(*m)
+		r := v2.MetaSessionMessage{MessageType: m.MessageType, SessionID: m.SessionID, ReportedModel: m.ReportedModel, ReportedEffort: m.ReportedEffort, AgentVersion: m.AgentVersion}
 		r.MessageType = string(token)
 		record = r
 	case *RelayGenerationMessage:
-		r := v2.RelayGenerationMessage(*m)
+		r := v2.RelayGenerationMessage{MessageType: m.MessageType, Generation: m.Generation}
 		r.MessageType = string(token)
 		record = r
 	case *ModelInfoMessage:
-		r := v2.ModelInfoMessage(*m)
+		r := v2.ModelInfoMessage{MessageType: m.MessageType, ContextWindow: m.ContextWindow}
 		r.MessageType = string(token)
 		record = r
 	case *MetaResultMessage:
@@ -732,7 +732,7 @@ func marshalV2Control(m Message) ([]byte, error) {
 		r.MessageType = string(token)
 		record = r
 	case *MetaPRMessage:
-		r := v2.MetaPRMessage(*m)
+		r := v2.MetaPRMessage{MessageType: m.MessageType, ForgeOwner: m.ForgeOwner, ForgeRepo: m.ForgeRepo, ForgePR: m.ForgePR}
 		r.MessageType = string(token)
 		record = r
 	case *TurnCommitSnapshotMessage:
@@ -860,13 +860,13 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = LogMessage(record)
+			*out = LogMessage{MessageType: record.MessageType, Line: record.Line}
 		case *StrippedEnvMessage:
 			record, err := decodeLogData[v1.StrippedEnvMessage](line, false)
 			if err != nil {
 				return err
 			}
-			*out = StrippedEnvMessage(record)
+			*out = StrippedEnvMessage{MessageType: record.MessageType, Variables: record.Variables}
 		case *DiffStatMessage:
 			record, err := decodeLogData[v1.DiffStatMessage](line, false)
 			if err != nil {
@@ -878,13 +878,13 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = ExitMessage(record)
+			*out = ExitMessage{MessageType: record.MessageType, ExitCode: record.ExitCode, Command: record.Command, Signal: record.Signal, Error: record.Error, StderrTruncated: record.StderrTruncated, Ts: record.Ts}
 		case *ModelInfoMessage:
 			record, err := decodeLogData[v1.ModelInfoMessage](line, false)
 			if err != nil {
 				return err
 			}
-			*out = ModelInfoMessage(record)
+			*out = ModelInfoMessage{MessageType: record.MessageType, ContextWindow: record.ContextWindow}
 		case *MetaResultMessage:
 			record, err := decodeLogData[v1.MetaResultMessage](line, false)
 			if err != nil {
@@ -896,7 +896,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = MetaPRMessage(record)
+			*out = MetaPRMessage{MessageType: record.MessageType, ForgeOwner: record.ForgeOwner, ForgeRepo: record.ForgeRepo, ForgePR: record.ForgePR}
 		case *TurnCommitSnapshotMessage:
 			record, err := decodeLogData[v1.TurnCommitSnapshotMessage](line, false)
 			if err != nil {
@@ -919,7 +919,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = TextMessage(record)
+			*out = TextMessage{MessageType: record.MessageType, Text: record.Text, Phase: record.Phase}
 		case *UserInputMessage:
 			record, err := decodeLogData[v2.UserInputMessage](line, false)
 			if err != nil {
@@ -931,19 +931,19 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = SystemMessage(record)
+			*out = SystemMessage{MessageType: record.MessageType, Subtype: record.Subtype, SessionID: record.SessionID, UUID: record.UUID, Detail: record.Detail, ReportedModel: record.ReportedModel, ContextTokensBefore: record.ContextTokensBefore, ContextTokensAfter: record.ContextTokensAfter}
 		case *LogMessage:
 			record, err := decodeLogData[v2.LogMessage](line, false)
 			if err != nil {
 				return err
 			}
-			*out = LogMessage(record)
+			*out = LogMessage{MessageType: record.MessageType, Line: record.Line}
 		case *StrippedEnvMessage:
 			record, err := decodeLogData[v2.StrippedEnvMessage](line, false)
 			if err != nil {
 				return err
 			}
-			*out = StrippedEnvMessage(record)
+			*out = StrippedEnvMessage{MessageType: record.MessageType, Variables: record.Variables}
 		case *DiffStatMessage:
 			record, err := decodeLogData[v2.DiffStatMessage](line, false)
 			if err != nil {
@@ -955,7 +955,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = ExitMessage(record)
+			*out = ExitMessage{MessageType: record.MessageType, ExitCode: record.ExitCode, Command: record.Command, Signal: record.Signal, Error: record.Error, StderrTruncated: record.StderrTruncated, Ts: record.Ts}
 		case *MetaMessage:
 			record, err := decodeLogData[v2.MetaMessage](line, true)
 			if err != nil {
@@ -967,19 +967,19 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = MetaSessionMessage(record)
+			*out = MetaSessionMessage{MessageType: record.MessageType, SessionID: record.SessionID, ReportedModel: record.ReportedModel, ReportedEffort: record.ReportedEffort, AgentVersion: record.AgentVersion}
 		case *RelayGenerationMessage:
 			record, err := decodeLogData[v2.RelayGenerationMessage](line, false)
 			if err != nil {
 				return err
 			}
-			*out = RelayGenerationMessage(record)
+			*out = RelayGenerationMessage{MessageType: record.MessageType, Generation: record.Generation}
 		case *ModelInfoMessage:
 			record, err := decodeLogData[v2.ModelInfoMessage](line, false)
 			if err != nil {
 				return err
 			}
-			*out = ModelInfoMessage(record)
+			*out = ModelInfoMessage{MessageType: record.MessageType, ContextWindow: record.ContextWindow}
 		case *MetaResultMessage:
 			record, err := decodeLogData[v2.MetaResultMessage](line, false)
 			if err != nil {
@@ -991,7 +991,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 			if err != nil {
 				return err
 			}
-			*out = MetaPRMessage(record)
+			*out = MetaPRMessage{MessageType: record.MessageType, ForgeOwner: record.ForgeOwner, ForgeRepo: record.ForgeRepo, ForgePR: record.ForgePR}
 		case *TurnCommitSnapshotMessage:
 			record, err := decodeLogData[v2.TurnCommitSnapshotMessage](line, false)
 			if err != nil {
@@ -1016,7 +1016,7 @@ func decodeLogControl(version LogVersion, line []byte, out Message) error {
 	case LogVersionV3:
 		switch out := out.(type) {
 		case *TextMessage:
-			record, err := decodeLogData[v3.TextMessage](line, false)
+			record, err := decodeLogData[v3.TextMessage](line, true)
 			if err != nil {
 				return err
 			}

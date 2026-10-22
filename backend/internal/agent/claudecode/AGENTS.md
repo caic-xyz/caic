@@ -135,8 +135,18 @@ injection and no path otherwise. A failed call (`is_error`) loads nothing.
 
 A subagent's assistant and user records carry `parent_tool_use_id`, the
 delegating tool use. Its `Skill` calls and file reads keep their analytics
-read but load nothing into the main context. Its tool results are keyed by the
-delegating ID, so they never match the child's `Skill` call.
+read but load nothing into the main context. A `role: user` record's inline
+`tool_result.tool_use_id` pairs with the child's own invocation; the enclosing
+`parent_tool_use_id` identifies delegation ownership, not the completed tool.
+Child prompts remain scoped user messages. Role-less direct result bodies keep
+their top-level tool reference without claiming delegation ownership.
+
+Assistant, user, and stream-event DTOs expose session and delegation metadata;
+control requests expose an optional `agent_id` and their tool use ID. The
+recorded AskUserQuestion control follows its assistant tool invocation. These
+fields do not expose a complete turn/item tuple: do not manufacture one from
+UUIDs or content-block positions. Ownership and control correlation live in
+`parse.go` and `claude.go`.
 
 The model can also open a skill as an ordinary file. `parse.go` infers a read
 and a pending load from `Read` (`file_path`) and `Bash` (`command`). Those

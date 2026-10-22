@@ -29,6 +29,171 @@ function event(
 }
 
 describe("NativeActivityTracker", () => {
+  it("keeps repeated delegation IDs in separate root namespaces and leaves ambiguous history unattributed", () => {
+    const a: EventMessage = {
+      kind: "text",
+      ts: 1,
+      source: { threadID: "root-a", delegationToolUseID: "spawn" },
+      text: { text: "From A" },
+    };
+    const b: EventMessage = {
+      kind: "text",
+      ts: 2,
+      source: { threadID: "root-b", delegationToolUseID: "spawn" },
+      text: { text: "From B" },
+    };
+    const tracker = new NativeActivityTracker();
+    tracker.derive([a, b]);
+    const mapped = [
+      a,
+      b,
+      { ...event("native:a", "running", 3, { toolUseID: "spawn" }), source: { threadID: "root-a" } },
+      { ...event("native:b", "running", 4, { toolUseID: "spawn" }), source: { threadID: "root-b" } },
+    ];
+    const activities = tracker.derive(mapped);
+    expect(tracker.ownerFor(a)).toBe("native:a");
+    expect(tracker.ownerFor(b)).toBe("native:b");
+    expect(activities.map((entry) => entry.transcript?.[0]?.events[0]?.text?.text)).toEqual(["From A", "From B"]);
+    expect(new NativeActivityTracker().derive(mapped)).toEqual(activities);
+    const unknown = new NativeActivityTracker();
+    const ambiguous = unknown.derive([a, b, event("native:unknown", "running", 3, { toolUseID: "spawn" })]);
+    expect(unknown.ownerFor(a)).toBeNull();
+    expect(unknown.ownerFor(b)).toBeNull();
+    assert.ok(ambiguous[0]);
+    expect(ambiguous[0].transcript).toBeUndefined();
+  });
+  it("correlates early delegation output and folds a grandchild lifecycle before actor routing", () => {
+    const source = { delegationToolUseID: "spawn", turnID: "turn" };
+    const early: EventMessage = {
+      kind: "toolOutputDelta",
+      ts: 1,
+      source,
+      toolOutputDelta: { toolUseID: "call", delta: "early output" },
+    };
+    const tracker = new NativeActivityTracker();
+    expect(tracker.derive([early])).toEqual([]);
+    expect(tracker.ownerFor(early)).toBeNull();
+    const messages: EventMessage[] = [
+      early,
+      event("native:child", "running", 2, { toolUseID: "spawn" }),
+      {
+        kind: "toolUse",
+        ts: 3,
+        source: { ...source, agentID: "native:child" },
+        toolUse: { toolUseID: "call", name: "Read", input: {} },
+      },
+      {
+        ...event("native:grandchild", "running", 4, { toolUseID: "call" }),
+        source: { ...source, agentID: "native:child" },
+      },
+      event("native:child", "completed", 5, {}),
+    ];
+    const activities = tracker.derive(messages);
+    expect(activities.map((a) => a.id)).toEqual(["native:child", "native:grandchild"]);
+    expect(tracker.ownerFor(early)).toBe("native:child");
+    expect(activities[0]?.transcript?.[0]?.toolCalls[0]).toMatchObject({ output: "early output", done: true });
+    expect(new NativeActivityTracker().derive(messages)).toEqual(activities);
+  });
+
+  it("extends a long child message without rereading its prior fragments", () => {
+    const source = {
+      agentID: "codex:thread:child",
+      threadID: "child",
+      rootThreadID: "parent",
+      turnID: "turn",
+      itemID: "answer",
+    };
+    const messages: EventMessage[] = Array.from({ length: 10000 }, (_, i) => ({
+      kind: "textDelta",
+      ts: i + 1,
+      source,
+      textDelta: { text: "word " },
+    }));
+    const tracker = new NativeActivityTracker();
+    const previous = tracker.derive(messages)[0]?.transcript?.[0];
+    if (!previous) throw new Error("Missing child message");
+    let priorReads = 0;
+    previous.events = new Proxy(previous.events, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) priorReads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    messages.push({ kind: "textDelta", ts: 10001, source, textDelta: { text: "continued" } });
+    const current = tracker.derive(messages)[0]?.transcript?.[0];
+    expect(priorReads).toBeLessThanOrEqual(4);
+    expect(previous.content?.text).toBe("word ".repeat(10000));
+    expect(current?.content?.text).toBe("word ".repeat(10000) + "continued");
+    expect(current?.content?.range).toEqual({ start: 1, end: 10001 });
+    expect(current?.events.length).toBeLessThanOrEqual(2);
+  });
+
+  it("folds child content before lifecycle, keeps its anchor and clears on replaced history", () => {
+    const source = {
+      agentID: "codex:thread:child",
+      threadID: "child",
+      turnID: "turn",
+      itemID: "answer",
+      rootThreadID: "parent",
+    };
+    const messages: EventMessage[] = [
+      { kind: "textDelta", ts: 1000, source, textDelta: { text: "A bow" } },
+      event("codex:thread:child", "running", 1500, { label: "Research" }),
+      { kind: "textDelta", ts: 2000, source, textDelta: { text: "tie" } },
+      { kind: "text", ts: 3000, source, text: { text: "A bowtie." } },
+      event("codex:thread:child", "completed", 4000, { result: "A bowtie." }),
+    ];
+    const tracker = new NativeActivityTracker();
+    expect(tracker.derive(messages.slice(0, 1))[0]).toMatchObject({ status: "unknown", anchorTs: 1000 });
+    const child = tracker.derive(messages)[0];
+    assert.ok(child);
+    expect(child).toMatchObject({ status: "completed", label: "Research", anchorTs: 1000 });
+    expect(child.transcript).toHaveLength(1);
+    expect(child.transcript?.[0]?.content).toEqual({
+      text: "A bowtie.",
+      complete: true,
+      range: { start: 1000, end: 3000 },
+    });
+    expect(new NativeActivityTracker().derive(messages)).toEqual([child]);
+    expect(tracker.derive([{ kind: "text", ts: 10, text: { text: "Other history" } }])).toEqual([]);
+  });
+
+  it("does not guess child ownership when the authoritative root is absent", () => {
+    expect(
+      new NativeActivityTracker().derive([
+        {
+          kind: "textDelta",
+          ts: 1,
+          source: { threadID: "unknown", turnID: "turn", itemID: "item" },
+          textDelta: { text: "Visible" },
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("keeps multiple child messages and exact completions separate", () => {
+    const source = {
+      agentID: "codex:thread:child",
+      threadID: "child",
+      turnID: "turn",
+      itemID: "first",
+      rootThreadID: "parent",
+    };
+    const second = { ...source, itemID: "second" };
+    const messages: EventMessage[] = [
+      { kind: "textDelta", ts: 1, source, textDelta: { text: "First partial" } },
+      { kind: "textDelta", ts: 2, source: second, textDelta: { text: "Second partial" } },
+      { kind: "text", ts: 3, source, text: { text: "First complete" } },
+      { kind: "textDelta", ts: 4, source: second, textDelta: { text: " continued" } },
+      { kind: "text", ts: 5, source: second, text: { text: "Second complete" } },
+    ];
+    const tracker = new NativeActivityTracker();
+    const initial = tracker.derive(messages.slice(0, 2))[0]?.transcript;
+    const final = tracker.derive(messages)[0]?.transcript;
+    expect(final?.map((message) => message.content?.text)).toEqual(["First complete", "Second complete"]);
+    expect(initial?.map((message) => message.content?.text)).toEqual(["First partial", "Second partial"]);
+    expect(new NativeActivityTracker().derive(messages)[0]?.transcript).toEqual(final);
+  });
   it("folds concurrent agents and a batch across compaction without reopening terminal work", () => {
     const tracker = new NativeActivityTracker();
     const messages = [
