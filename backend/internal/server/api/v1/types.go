@@ -534,8 +534,8 @@ func (e TaskListEvent) MarshalJSON() ([]byte, error) { //nolint:gocritic // json
 
 // ServerHealth is compact last-observed machine health. Time is omitted before the first
 // successful sample. CPUPerc uses 100% per fully busy logical CPU; CPUCount is
-// the whole-machine capacity. High flags trigger immediately at >=80% of machine
-// capacity and clear below 75%. Sampling errors and collection gaps retain both
+// the whole-machine capacity. High flags are true when the latest successful sample
+// is at or above 80% of machine capacity. Sampling errors and collection gaps retain both
 // flags and readings until a successful sample updates them. Error reports sampling
 // failures separately; Time identifies the last successful measurement.
 type ServerHealth struct {

@@ -1,4 +1,4 @@
-/* Fixed half-height alarm slots and a viewport-bounded reading tooltip. */
+/* Fixed half-height CPU/memory levels and a viewport-bounded reading tooltip. */
 
 .wrapper {
   position: relative;
@@ -15,12 +15,10 @@
   justify-content: center;
   width: 28px;
   height: 32px;
-  color: var(--color-danger);
   border-radius: var(--radius-sm);
 }
 
 .link:hover {
-  color: var(--color-danger);
   background: var(--color-bg-hover);
 }
 
@@ -35,9 +33,20 @@
   fill: currentcolor;
 }
 
-.hidden,
-.inactive {
-  visibility: hidden;
+.normal {
+  color: var(--color-success);
+}
+
+.warning {
+  color: var(--color-warning);
+}
+
+.high {
+  color: var(--color-danger);
+}
+
+.unavailable {
+  color: var(--color-gray);
 }
 
 .tooltip {

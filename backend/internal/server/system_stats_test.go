@@ -156,16 +156,8 @@ func TestSystemStats(t *testing.T) {
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
-			if !h.CPUHigh || !h.MemHigh {
-				t.Fatalf("hysteresis = %+v", h)
-			}
-			sample.CPUs[1].UsagePerc = 49
-			sample.MemPerc = 74
-			sample.Time = time.Now()
-			s.record(&sample, nil)
-			h, _ = s.health()
 			if h.CPUHigh || h.MemHigh {
-				t.Fatalf("recovery = %+v", h)
+				t.Fatalf("recovery below threshold = %+v", h)
 			}
 			s.record(&v1.SystemSample{}, errors.New("memory unavailable"))
 			h, _ = s.health()
@@ -199,8 +191,8 @@ func TestSystemStats(t *testing.T) {
 			sample.Time = time.Now()
 			s.record(&sample, nil)
 			h, _ = s.health()
-			if h.Error != "" || !h.CPUHigh || !h.MemHigh {
-				t.Fatalf("fresh high sample after gap = %+v", h)
+			if h.Error != "" || h.CPUHigh || h.MemHigh {
+				t.Fatalf("fresh sample after gap = %+v", h)
 			}
 		})
 	})
@@ -251,7 +243,7 @@ func TestSystemStats(t *testing.T) {
 			percent float64
 			high    bool
 		}{
-			{79.9, false}, {80, true}, {75, true}, {74.9, false}, {79.9, false}, {80.1, true},
+			{79.9, false}, {80, true}, {79.9, false}, {80.1, true},
 		} {
 			sample := v1.SystemSample{Time: time.Now(), CPUs: []v1.CPUUsage{{ID: "cpu0", UsagePerc: tc.percent}}, MemPerc: tc.percent}
 			s.record(&sample, nil)

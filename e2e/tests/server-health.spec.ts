@@ -1,11 +1,11 @@
-// Browser coverage for retained server warnings, live SSE readings, stream liveness, and header containment.
+// Browser coverage for always-visible CPU/memory levels, live SSE readings, stream liveness, and header containment.
 
 import { createServer, type ServerResponse } from "node:http";
 import type { ServerHealth, TaskListEvent, ISOTimestamp } from "../../sdk/caic/ts/v1/types.gen";
 import { expect, test } from "../helpers";
 
 for (const width of [320, 390, 1280]) {
-  test(`live server alarms at ${width}px`, async ({ page }, testInfo) => {
+  test(`live server usage levels at ${width}px`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     const requests: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -46,7 +46,7 @@ for (const width of [320, 390, 1280]) {
         route.fulfill({ status: 307, headers: { location: `http://127.0.0.1:${address.port}/events` } }),
       );
       await page.goto("/");
-      const link = page.getByRole("link", { name: "High CPU and memory usage — open System" });
+      const link = page.getByRole("link", { name: /CPU .*memory .* — open System/ });
       await expect(link).toBeVisible();
       const cpu = page.getByTestId("cpu-alarm");
       const memory = page.getByTestId("memory-alarm");
@@ -63,7 +63,6 @@ for (const width of [320, 390, 1280]) {
       expect(linkBox.width).toBeGreaterThanOrEqual(28);
       expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(before.x);
       expect(before.x - (cpuBox.x + cpuBox.width)).toBeLessThanOrEqual(8);
-      await expect(link).toHaveCSS("color", "rgb(220, 53, 69)");
       await expect(cpu).toHaveCSS("fill", "rgb(220, 53, 69)");
       await expect(memory).toHaveCSS("fill", "rgb(220, 53, 69)");
       await avatar.focus();
@@ -87,26 +86,35 @@ for (const width of [320, 390, 1280]) {
       await expect(tooltip).toBeHidden();
       await expect(link).toBeFocused();
 
-      update({ cpuHigh: false });
-      await expect(page.getByRole("link", { name: "High memory usage — open System" })).toBeVisible();
-      await expect(cpu).toBeHidden();
-      await expect(memory).toBeVisible();
+      update({ cpuPerc: 400 });
+      await expect(link).toHaveAccessibleName("CPU normal, memory high — open System");
+      await expect(cpu).toHaveCSS("fill", "rgb(40, 167, 69)");
+      await expect(memory).toHaveCSS("fill", "rgb(220, 53, 69)");
       expect(await memory.boundingBox()).toEqual(memBox);
       expect(await avatar.boundingBox()).toEqual(before);
       await page.screenshot({ path: testInfo.outputPath("memory-high.png") });
-      update({ cpuHigh: true, memHigh: false });
-      await expect(page.getByRole("link", { name: "High CPU usage — open System" })).toBeVisible();
-      await expect(cpu).toBeVisible();
-      await expect(memory).toBeHidden();
+      update({ cpuPerc: 680, memUsed: 16 * 2 ** 30 });
+      await expect(link).toHaveAccessibleName("CPU warning, memory normal — open System");
+      await expect(cpu).toHaveCSS("fill", "rgb(184, 92, 0)");
+      await expect(memory).toHaveCSS("fill", "rgb(40, 167, 69)");
       expect(await cpu.boundingBox()).toEqual(cpuBox);
+      await page.screenshot({ path: testInfo.outputPath("cpu-warning.png") });
+      update({ cpuPerc: 0, memUsed: 0 });
+      await expect(link).toHaveAccessibleName("CPU normal, memory normal — open System");
+      await expect(cpu).toBeVisible();
+      await expect(memory).toBeVisible();
+      await expect(cpu).toHaveCSS("fill", "rgb(40, 167, 69)");
+      await expect(memory).toHaveCSS("fill", "rgb(40, 167, 69)");
+      await page.screenshot({ path: testInfo.outputPath("both-normal.png") });
       update({ error: "sample failed" });
-      const retained = page.getByRole("link", { name: "High CPU usage — open System" });
-      await expect(retained).toBeVisible();
+      await expect(link).toHaveAccessibleName("CPU unavailable, memory unavailable — open System");
+      await expect(cpu).toHaveCSS("fill", "rgb(108, 117, 125)");
+      await expect(memory).toHaveCSS("fill", "rgb(108, 117, 125)");
       await avatar.focus();
-      await retained.focus();
+      await link.focus();
       await expect(tooltip).toContainText("Sampling error: sample failed");
       expect(await avatar.boundingBox()).toEqual(before);
-      update({ error: "", cpuHigh: true, memHigh: true });
+      update({ error: "", cpuPerc: 750, memUsed: 30 * 2 ** 30 });
       await expect(link).toBeVisible();
       await page.clock.fastForward(30_000);
       await expect(link).toBeVisible();
@@ -123,6 +131,9 @@ for (const width of [320, 390, 1280]) {
       await expect(link).toBeVisible();
       await link.focus();
       await expect(tooltip).toContainText("Updates unavailable");
+      await expect(cpu).toHaveCSS("fill", "rgb(108, 117, 125)");
+      await expect(memory).toHaveCSS("fill", "rgb(108, 117, 125)");
+      await page.screenshot({ path: testInfo.outputPath("disconnected.png") });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await link.focus();
       await link.press("Enter");

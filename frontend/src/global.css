@@ -41,6 +41,7 @@
   --color-error: #c00;
 
   /* Paired warning background, border, and text. */
+  --color-warning: #b85c00;
   --color-warning-bg: #fff3cd;
   --color-warning-border: #ffc107;
   --color-warning-text: #856404;

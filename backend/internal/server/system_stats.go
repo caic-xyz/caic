@@ -20,12 +20,10 @@ import (
 )
 
 type systemStats struct {
-	mu          sync.Mutex
-	samples     []v1.SystemSample
-	err         string
-	changed     chan struct{}
-	cpuPressure systemPressure
-	memPressure systemPressure
+	mu      sync.Mutex
+	samples []v1.SystemSample
+	err     string
+	changed chan struct{}
 }
 
 func newSystemStats(ctx context.Context) *systemStats {
@@ -53,7 +51,8 @@ func (s *systemStats) health() (h v1.ServerHealth, changed <-chan struct{}) {
 		h.CPUPerc += c.UsagePerc
 	}
 	h.MemUsed, h.MemTotal = v.MemUsed, v.MemTotal
-	h.CPUHigh, h.MemHigh = s.cpuPressure.high, s.memPressure.high
+	h.CPUHigh = h.CPUCount > 0 && h.CPUPerc/float64(h.CPUCount) >= 80
+	h.MemHigh = v.MemPerc >= 80
 	return h, s.changed
 }
 
@@ -64,12 +63,6 @@ func (s *systemStats) record(sample *v1.SystemSample, err error) {
 		s.err = err.Error()
 	} else {
 		s.err = ""
-		var total float64
-		for _, c := range sample.CPUs {
-			total += c.UsagePerc
-		}
-		s.cpuPressure.update(total / float64(len(sample.CPUs)))
-		s.memPressure.update(sample.MemPerc)
 		if len(s.samples) == cap(s.samples) {
 			copy(s.samples, s.samples[1:])
 			s.samples = s.samples[:len(s.samples)-1]
@@ -107,19 +100,6 @@ func (s *systemStats) run(ctx context.Context) {
 			previous = next
 			s.record(&sample, err)
 		}
-	}
-}
-
-// systemPressure raises warnings immediately at 80% and clears below 75%.
-type systemPressure struct {
-	high bool
-}
-
-func (p *systemPressure) update(percent float64) {
-	if percent < 75 {
-		p.high = false
-	} else if percent >= 80 {
-		p.high = true
 	}
 }
 
