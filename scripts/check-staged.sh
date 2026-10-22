@@ -136,7 +136,7 @@ if ((${#style_files[@]} > 0)); then
 fi
 
 if "$frontend_source_changed"; then
-  run_check frontend-styles node scripts/lint_frontend_styles.mjs
+  run_check frontend-styles pnpm exec node scripts/lint_frontend_styles.mjs
 fi
 
 run_check binaries uv run --locked python scripts/lint_binaries.py

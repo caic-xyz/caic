@@ -17,11 +17,8 @@
   "scripts": {
     "dev": "concurrently --kill-others \"node scripts/css_module_types.mjs --source-path frontend/src --watch\" \"vite\"",
     "build": "node scripts/css_module_types.mjs --source-path frontend/src && vite build",
-    "benchmark": "tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'",
     "postbuild": "uv run --locked python scripts/precompress_dist.py --dist backend/frontend/dist --delete-originals --encodings br",
-    "preview": "vite preview",
-    "test": "node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'",
-    "test:coverage": "node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --experimental-test-coverage --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx'"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@maruel/gomode": "github:maruel/gomode#f174c574f177519fd63849c091e90a603739eee2",

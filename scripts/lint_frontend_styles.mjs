@@ -39,7 +39,7 @@ const RAW_HEX_COLOR = /(?<!&)#[0-9a-fA-F]{3,8}\b/gu;
 const RAW_FUNCTION_COLOR = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(([^)]*)\)/gu;
 // HTML and JSON do not have a CSS AST, so their color policy needs narrow text matching.
 const RAW_NAMED_COLOR = new RegExp(`(?<![-\\w.])(${[...OPAQUE_NAMED_COLORS].sort().join("|")})(?![-\\w])`, "giu");
-const HELP = `Usage: node scripts/lint_frontend_styles.mjs [--source-path PATH] [--token-file PATH]
+const HELP = `Usage: pnpm exec node scripts/lint_frontend_styles.mjs [--source-path PATH] [--token-file PATH]
 
 Lint tracked and unignored frontend files.
 

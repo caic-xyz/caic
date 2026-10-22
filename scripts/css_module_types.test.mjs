@@ -1,4 +1,4 @@
-// Tests CSS export typing, stale-output checks, deleted modules, and live declaration refresh.
+// Tests CSS export typing, freshness checks, and live updates through watch failure and recovery.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
@@ -108,7 +108,7 @@ test("check mode rejects missing, changed, and orphaned types without writing", 
   await assert.rejects(readFile(declaration), { code: "ENOENT" });
 });
 
-test("watch mode follows created, edited, and deleted modules", async (t) => {
+test("watch mode follows module changes and reports failure and recovery", async (t) => {
   const source = await fixture(t);
   const child = spawn(process.execPath, [script, "--source-path", source, "--watch"], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -141,9 +141,19 @@ test("watch mode follows created, edited, and deleted modules", async (t) => {
   await waitFor(async () => (await content())?.includes('"first"'));
   await writeFile(cssPath, ".second {}\n");
   await waitFor(async () => (await content())?.includes('"second"'));
+  assert.equal(errors, "");
+  const valid = await content();
+  await writeFile(cssPath, ".broken {\n");
+  await waitFor(() => errors.includes("CSS types stale:"));
+  assert.match(errors, /Unclosed block/);
+  assert.equal(await content(), valid);
+  assert.equal(output.includes("CSS types recovered"), false);
+  await writeFile(cssPath, ".recovered {}\n");
+  await waitFor(async () => (await content())?.includes('"recovered"'));
+  await waitFor(() => output.includes("CSS types recovered"));
+  assert.equal(child.exitCode, null);
   await unlink(cssPath);
   await waitFor(async () => (await content()) === null);
-  assert.equal(errors, "");
 });
 
 test("declarations match Vite exports for compositions, globals, and ICSS values", async (t) => {

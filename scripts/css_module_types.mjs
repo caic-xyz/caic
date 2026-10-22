@@ -1,11 +1,11 @@
-// Generates exact CSS Module export declarations and checks missing, stale, or orphaned output.
+// Generates exact CSS Module declarations, checks freshness, and reports watch failures and recovery.
 import { watch } from "node:fs";
 import { glob, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import typedCssModules from "typed-css-modules";
 
 const { default: DtsCreator } = typedCssModules;
-const help = `Usage: node scripts/css_module_types.mjs --source-path PATH [--write | --watch]
+const help = `Usage: pnpm exec node scripts/css_module_types.mjs --source-path PATH [--write | --watch]
 
 Check exact CSS Module declarations without changing files.
   --write        Generate declarations and remove orphaned output.
@@ -81,12 +81,22 @@ async function main() {
   }
   let pending = Promise.resolve();
   let debounce = null;
+  let failed = false;
   // Subscribe before generating so edits during the initial pass are not lost.
   const watcher = watch(source, { recursive: true }, (_event, filename) => {
     if (!filename?.endsWith(".css")) return;
     clearTimeout(debounce);
     debounce = setTimeout(() => {
-      pending = pending.then(() => update(source, true)).catch((error) => process.stderr.write(`${error.message}\n`));
+      pending = pending.then(async () => {
+        try {
+          await update(source, true);
+          if (failed) process.stdout.write("CSS types recovered\n");
+          failed = false;
+        } catch (error) {
+          failed = true;
+          process.stderr.write(`CSS types stale: ${error.message}\n`);
+        }
+      });
     }, 50);
   });
   try {

@@ -135,7 +135,7 @@ design-system radius.
 Run after styling changes:
 
 ```bash
-node scripts/lint_frontend_styles.mjs
+pnpm exec node scripts/lint_frontend_styles.mjs
 make build
 ```
 

@@ -5,6 +5,9 @@
 
 HTTP?=:2242
 
+FRONTEND_TEST = pnpm exec node --test scripts/css_module_types.test.mjs && NODE_OPTIONS=--no-experimental-webstorage pnpm exec tsx --test --test-concurrency=4 --conditions=browser --test-force-exit --test-reporter=./scripts/quiet-test-reporter.mjs --import ./frontend/tests/setup-dom.ts
+FRONTEND_TEST_FILES = "frontend/src/**/*.test.ts" "frontend/src/**/*.test.tsx"
+
 # Static checks for verify, grouped into independent lanes run concurrently by
 # scripts/run-concurrently.sh. Each is read-only; fix applies their autofixes.
 #
@@ -23,8 +26,8 @@ VERIFY_WORKFLOWS = go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 # linting must run through the custom binary built from the published plugin
 # module; the plain binary is fine for `fmt`.
 VERIFY_GO = ./custom-gcl run --show-stats=false ./... && go mod tidy -diff
-VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && node scripts/lint_frontend_styles.mjs
-VERIFY_TS = node scripts/css_module_types.mjs --source-path frontend/src && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json
+VERIFY_JS = pnpm exec prettier --check --log-level warn --cache --cache-location node_modules/.cache/prettier/.prettier-cache --cache-strategy content . && pnpm exec stylelint "frontend/src/**/*.css" && pnpm exec node scripts/lint_frontend_styles.mjs
+VERIFY_TS = pnpm exec node scripts/css_module_types.mjs --source-path frontend/src && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo -p tsconfig.json && pnpm exec tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsc/e2e.tsbuildinfo -p e2e/tsconfig.json
 VERIFY_ESLINT = pnpm exec eslint --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content .
 VERIFY_PY = uv run --locked ruff format --check --quiet . && uv run --locked ruff check --quiet .
 VERIFY_SH = files=$$(git ls-files "*.sh" "scripts/hooks/*"); [ -z "$$files" ] || go tool shfmt -d $$files
@@ -104,7 +107,7 @@ fix: custom-gcl frontend-deps
 	@uv run --locked ruff format . >/dev/null
 	@files=$$(git ls-files '*.sh' 'scripts/hooks/*'); [ -z "$$files" ] || go tool shfmt -w $$files
 	@pnpm exec stylelint --fix "frontend/src/**/*.css"
-	@node scripts/css_module_types.mjs --source-path frontend/src --write
+	@pnpm exec node scripts/css_module_types.mjs --source-path frontend/src --write
 	@uv run --locked python scripts/update_agents_file_index.py
 	@uv run --locked python scripts/update_backend_architecture.py
 
@@ -113,14 +116,14 @@ check-agent-logs:
 
 benchmark: frontend-deps
 	@go test ./... -run '^$$' -bench . -benchmem
-	@pnpm --silent benchmark
+	@pnpm exec tsx scripts/bench.ts 'frontend/src/**/*.bench.ts'
 
 fake-dev: frontend-build
 	@uv run --locked python scripts/run-dev.py --http $(HTTP) --fake
 
 # Independent Go, frontend, and Python suites run after dependency installation.
 test: frontend-deps
-	@./scripts/run-concurrently.sh go,frontend,python 'go test -cover ./...' 'pnpm --silent test:coverage' 'uv run --locked python scripts/run_python_tests.py'
+	@./scripts/run-concurrently.sh go,frontend,python 'go test -cover ./...' '$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)' 'uv run --locked python scripts/run_python_tests.py'
 
 # End-to-end tests run against the fake backend (see e2e/playwright.config.ts):
 # slow, needs a frontend build and the Playwright chromium build, and shares
@@ -150,7 +153,7 @@ coverage: frontend-deps
 	@echo "  HTML report: coverage.html"
 	@echo ""
 	@echo "=== Frontend coverage ==="
-	@pnpm --silent test:coverage
+	@$(FRONTEND_TEST) --experimental-test-coverage $(FRONTEND_TEST_FILES)
 
 git-hooks:
 	@./scripts/install-git-hooks.sh
