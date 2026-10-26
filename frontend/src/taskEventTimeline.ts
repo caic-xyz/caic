@@ -182,8 +182,8 @@ export function createTaskEventTimeline(options: TaskEventTimelineOptions): Task
       },
       onBackward: (event) => {
         if (!active || historyFailed || live || !replaceOnNextFlush) return;
-        setBackwardMessages([event.message]);
-        connectTail(event.eventId);
+        setBackwardMessages(event.messages);
+        if (event.eventId) connectTail(event.eventId);
       },
       onReady: () => {
         if (!active || historyFailed) return;

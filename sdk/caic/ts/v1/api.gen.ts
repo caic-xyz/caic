@@ -106,7 +106,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     getTaskInfo: (id: string): Promise<TaskInfo> => request<TaskInfo>("GET", `/api/caic/v1/tasks/${encodeURIComponent(id)}/info`),
     /** Creates and starts a new coding agent task. */
     createTask: (req: CreateTaskReq): Promise<Task> => request<Task>("POST", "/api/caic/v1/tasks", req),
-    /** Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
+    /** Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
     taskEvents: (id: string, handlers: TaskEventsHandlers): EventSource => {
       const es = new EventSource(`/api/caic/v1/tasks/${encodeURIComponent(id)}/events`);
       es.addEventListener("message", (e) => {

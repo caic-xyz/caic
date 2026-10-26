@@ -249,7 +249,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "taskEvents",
-		Doc:    "Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged.",
+		Doc:    "Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged.",
 		Method: "GET",
 		Path:   "/api/caic/v1/tasks/{id}/events",
 		Resp:   reflect.TypeFor[EventMessage](),

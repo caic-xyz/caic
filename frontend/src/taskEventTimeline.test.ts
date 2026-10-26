@@ -103,13 +103,16 @@ describe("createTaskEventTimeline", () => {
     const backwardMessage = textEvent("latest", 3);
     const tailEvent = textEvent("!", 5);
 
-    handlers.onBackward?.({ message: backwardMessage, eventId: "v1/timeline/memory/4/0" });
-    expect(timeline.messages()).toEqual([backwardMessage]);
+    handlers.onBackward?.({
+      messages: [textEvent("earlier preview", 2), backwardMessage],
+      eventId: "v1/timeline/memory/4/0",
+    });
+    expect(timeline.messages()).toEqual([textEvent("earlier preview", 2), backwardMessage]);
     expect(connections).toHaveLength(2);
     assert.ok(connections[1] !== undefined);
     const tail = connections[1].handlers;
     tail.onMessage(tailEvent);
-    expect(timeline.messages()).toEqual([backwardMessage, tailEvent]);
+    expect(timeline.messages()).toEqual([textEvent("earlier preview", 2), backwardMessage, tailEvent]);
     handlers.onMessage(textEvent("older", 1));
     handlers.onMessage(textEvent("latest response", 4));
     handlers.onReady?.();
@@ -129,6 +132,25 @@ describe("createTaskEventTimeline", () => {
     timeline.dispose();
   });
 
+  it("renders disk previews without opening a tail connection", () => {
+    const connections = captureConnections();
+    const timeline = createRoot((dispose) => ({
+      dispose,
+      ...createTaskEventTimeline({ taskId: () => "task", taskState: () => "purged", onError: vi.fn() }),
+    }));
+    const handlers = connections[0]?.handlers;
+    assert.ok(handlers !== undefined);
+    const preview = [textEvent("recent", 2), textEvent("latest", 3)];
+    handlers.onBackward?.({ messages: preview, eventId: "" });
+    expect(timeline.messages()).toEqual(preview);
+    expect(connections).toHaveLength(1);
+    handlers.onMessage(textEvent("canonical", 1));
+    expect(timeline.messages()).toEqual(preview);
+    handlers.onReady?.();
+    expect(timeline.messages()).toEqual([textEvent("canonical", 1)]);
+    timeline.dispose();
+  });
+
   it("replaces backfill when the backward event ID is rejected", () => {
     const connections = captureConnections();
     const timeline = createRoot((dispose) => ({
@@ -144,7 +166,7 @@ describe("createTaskEventTimeline", () => {
     const stale = textEvent("stale", 1);
     const replacement = textEvent("replacement", 2);
 
-    handlers.onBackward?.({ message: stale, eventId: "v1/stale/memory/1/0" });
+    handlers.onBackward?.({ messages: [stale], eventId: "v1/stale/memory/1/0" });
     assert.ok(connections[1] !== undefined);
     const tail = connections[1].handlers;
     tail.onReset?.();

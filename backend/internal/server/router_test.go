@@ -814,7 +814,7 @@ func TestHandleTaskEvents(t *testing.T) {
 		tk.SeedTimeline([]agent.Message{
 			&agent.UserInputMessage{Text: "fix the bug"},
 			&agent.TextMessage{Text: "latest response"},
-			&agent.ToolUseMessage{ToolUseID: "tool-after-boundary", Name: "BashAfterBoundary"},
+			&agent.ToolUseMessage{ToolUseID: "tool-after-boundary", Name: "BashInPreview"},
 		})
 		tk.SetState(taskslog.StateRunning)
 		s := newTestRouter(t, nil)
@@ -837,14 +837,14 @@ func TestHandleTaskEvents(t *testing.T) {
 		if backwardEnd < backwardAt || strings.Contains(body[backwardAt:backwardEnd], "id:") {
 			t.Fatalf("backward boundary unexpectedly carried an SSE ID:\n%s", body[backwardAt:canonicalAt])
 		}
-		backwardID := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 2}.String()
+		backwardID := taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 3, event: taskEventMessageEnd}.String()
 		if !strings.Contains(body[backwardAt:backwardEnd], "latest response") ||
 			!strings.Contains(body[backwardAt:backwardEnd], `"eventId":"`+backwardID+`"`) ||
 			!strings.Contains(body, "event: ready") {
 			t.Fatalf("backward boundary or canonical ready marker missing:\n%s", body)
 		}
-		if strings.Contains(body, "BashAfterBoundary") {
-			t.Fatalf("history replay crossed the backward event ID:\n%s", body)
+		if !strings.Contains(body[backwardAt:backwardEnd], "BashInPreview") || !strings.Contains(body[backwardEnd:], "BashInPreview") {
+			t.Fatalf("preview or canonical history omitted tool activity:\n%s", body)
 		}
 
 		resumeCtx, resumeCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
@@ -858,19 +858,19 @@ func TestHandleTaskEvents(t *testing.T) {
 		if strings.Contains(resumedBody, "event: backward") {
 			t.Fatalf("resumed task stream unexpectedly replayed a backward boundary:\n%s", resumedBody)
 		}
-		if !strings.Contains(resumedBody, "BashAfterBoundary") {
-			t.Fatalf("resumed task stream omitted events after the backward event ID:\n%s", resumedBody)
+		if strings.Contains(resumedBody, "BashInPreview") || strings.Contains(resumedBody, "event: reset") {
+			t.Fatalf("resumed task stream duplicated preview history or reset:\n%s", resumedBody)
 		}
 
 		headerCtx, headerCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		t.Cleanup(headerCancel)
 		headerReq := httptest.NewRequestWithContext(headerCtx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
 		headerReq.SetPathValue("id", taskID.String())
-		headerReq.URL.RawQuery = "last-event-id=" + url.QueryEscape(backwardID)
-		headerReq.Header.Set("Last-Event-ID", taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 3}.String())
+		headerReq.URL.RawQuery = "last-event-id=" + url.QueryEscape(taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 2}.String())
+		headerReq.Header.Set("Last-Event-ID", taskEventID{timeline: tk.TimelineID(), source: taskEventSourceMemory, message: 3, event: taskEventMessageEnd}.String())
 		headerWriter := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(headerWriter, headerReq)
-		if body := headerWriter.Body.String(); strings.Contains(body, "BashAfterBoundary") {
+		if body := headerWriter.Body.String(); strings.Contains(body, "BashInPreview") {
 			t.Fatalf("Last-Event-ID did not take precedence over the bootstrap query value:\n%s", body)
 		}
 	})
@@ -2191,7 +2191,7 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		// replay instead of waiting for the request context deadline.
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		t.Cleanup(cancel)
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events", http.NoBody)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/caic/v1/tasks/"+taskID.String()+"/events?backward=1", http.NoBody)
 		req.SetPathValue("id", taskID.String())
 		w := httptest.NewRecorder()
 		testTaskHandlers(s).handleTaskEvents(w, req)
@@ -2206,6 +2206,12 @@ func TestHandleTaskEventHistory(t *testing.T) {
 		// when the events endpoint is accessed. The handler replays the
 		// full message history, then emits "ready" and closes the stream.
 		body := w.Body.String()
+		previewAt := strings.Index(body, "event: backward")
+		canonicalAt := strings.Index(body, "id: v1/")
+		if previewAt < 0 || canonicalAt < previewAt || !strings.Contains(body[previewAt:canonicalAt], `"eventId":""`) || !strings.Contains(body[previewAt:canonicalAt], "I found the bug") {
+			t.Fatalf("disk preview missing before canonical history:\n%s", body)
+		}
+
 		entry, ok := s.taskMgr.GetEntry(taskID)
 		if !ok {
 			t.Fatal("purged task disappeared")

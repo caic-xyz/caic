@@ -55,12 +55,12 @@ type TaskHistoryStreamError struct {
 	Message string `json:"message"`
 }
 
-// TaskEventBackward carries the latest visible agent response and its canonical
-// event ID. Pass EventID as the events endpoint's last-event-id query parameter
-// to stream newer events while earlier history is replayed.
+// TaskEventBackward carries a chronological recent preview before canonical
+// history. EventID resumes strictly after the preview's memory snapshot. It is
+// empty for disk previews, whose canonical history uses the same connection.
 type TaskEventBackward struct {
-	Message EventMessage `json:"message"`
-	EventID string       `json:"eventId"`
+	Messages []EventMessage `json:"messages"`
+	EventID  string         `json:"eventId"`
 }
 
 // EventMessage is a single SSE event in the backend-neutral stream

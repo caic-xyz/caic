@@ -558,12 +558,12 @@ export interface EventMessage {
 }
 
 /**
- * TaskEventBackward carries the latest visible agent response and its canonical
- * event ID. Pass EventID as the events endpoint's last-event-id query parameter
- * to stream newer events while earlier history is replayed.
+ * TaskEventBackward carries a chronological recent preview before canonical
+ * history. EventID resumes strictly after the preview's memory snapshot. It is
+ * empty for disk previews, whose canonical history uses the same connection.
  */
 export interface TaskEventBackward {
-  message: EventMessage;
+  messages: EventMessage[];
   eventId: string;
 }
 

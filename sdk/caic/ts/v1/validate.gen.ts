@@ -537,7 +537,7 @@ export function validateEventMessage(raw: ValidatorInput): EventMessage {
 export function validateTaskEventBackward(raw: ValidatorInput): TaskEventBackward {
   const obj = asObject(raw, "TaskEventBackward");
   return {
-    message: validateEventMessage(obj["message"]),
+    messages: validateArray(obj["messages"], "TaskEventBackward.messages", validateEventMessage) as EventMessage[],
     eventId: asString(obj["eventId"], "TaskEventBackward.eventId"),
   };
 }

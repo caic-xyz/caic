@@ -207,15 +207,27 @@ func (h *taskHandlers) streamTaskEvents(stream *taskEventStream, entry *taskmgr.
 	} else {
 		through := uint64(history.Len()) //nolint:gosec // A timeline cannot approach uint64 capacity.
 		if stream.backward && !stream.resume.active() {
-			backward := newTaskEventBackwardProjector(timelineReplayHistory{snapshot: history})
-			if backward.message != nil {
-				through = backward.sequence
-				id := stream.resume.eventID(backward.sequence, 0)
-				if err := stream.writeBackward(backward.message, id); err != nil {
+			preview := newTaskPreview()
+			for i := history.Len() - 1; i >= 0; i-- {
+				if err := stream.ctx.Err(); err != nil {
+					history.Release()
+					return err
+				}
+				m := history.At(i)
+				if !preview.add(agent.TimedMessage{Message: m.Message, ProducerTime: m.ObservedAt}) {
+					break
+				}
+			}
+			events := preview.events(newHistoryTracker(entry.Task()))
+			if len(events) > 0 {
+				id := stream.resume.eventID(through, taskEventMessageEnd)
+				if err := stream.writeBackward(events, id.String()); err != nil {
+					history.Release()
 					return err
 				}
 				if err := stream.flush(); err != nil {
-					return fmt.Errorf("flush backward task SSE boundary: %w", err)
+					history.Release()
+					return fmt.Errorf("flush recent task SSE preview: %w", err)
 				}
 				backwardOnly = true
 			}
@@ -340,6 +352,20 @@ func (h *taskHandlers) replayMemoryHistory(stream *taskEventStream, entry *taskm
 }
 
 func (h *taskHandlers) replayHistoryFromDisk(stream *taskEventStream, entry *taskmgr.Entry, lt *taskslog.LoadedTask) error {
+	if stream.backward && !stream.resume.active() {
+		events, err := recentDiskPreview(stream.ctx, lt, newHistoryTracker(entry.Task()))
+		if err != nil {
+			return err
+		}
+		if len(events) > 0 {
+			if err := stream.writeBackward(events, ""); err != nil {
+				return err
+			}
+			if err := stream.flush(); err != nil {
+				return fmt.Errorf("flush recent disk preview: %w", err)
+			}
+		}
+	}
 	return h.replayWithCursorReset(stream, entry, func() error {
 		return h.streamHistoryFromDisk(stream, entry, lt)
 	})
@@ -1237,11 +1263,11 @@ func (s *taskEventStream) writeEvent(ev *v1.EventMessage, id taskEventID) error 
 	return nil
 }
 
-func (s *taskEventStream) writeBackward(message *v1.EventMessage, id taskEventID) error {
+func (s *taskEventStream) writeBackward(messages []v1.EventMessage, id string) error {
 	if !s.backward {
 		return nil
 	}
-	data, err := json.Marshal(v1.TaskEventBackward{Message: *message, EventID: id.String()})
+	data, err := json.Marshal(v1.TaskEventBackward{Messages: messages, EventID: id})
 	if err != nil {
 		return fmt.Errorf("marshal backward task SSE boundary: %w", err)
 	}
@@ -1272,6 +1298,11 @@ const (
 	taskEventSourceDisk   taskEventSource = "disk"
 	taskEventSourceMemory taskEventSource = "memory"
 )
+
+// taskEventMessageEnd acknowledges a whole snapshot message, including messages
+// that emit no events or several events. Individual canonical frames retain
+// their ordinary event indexes.
+const taskEventMessageEnd = ^uint64(0)
 
 type taskEventID struct {
 	timeline string
@@ -1359,7 +1390,7 @@ func (r *taskEventResume) observe(sequence uint64, events []v1.EventMessage) err
 	if sequence != r.after.message {
 		return nil
 	}
-	if r.after.event >= uint64(len(events)) {
+	if r.after.event != taskEventMessageEnd && r.after.event >= uint64(len(events)) {
 		return errInvalidTaskEventID
 	}
 	r.cursorSeen = true

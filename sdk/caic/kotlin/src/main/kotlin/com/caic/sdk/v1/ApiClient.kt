@@ -183,7 +183,7 @@ class ApiClient(
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
 
     // SSE endpoints
-    /** Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
+    /** Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
     fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/caic/v1/tasks/$id/events")
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/caic/v1/tasks/events")
@@ -228,7 +228,7 @@ class ApiClient(
     }
 
     // Reconnecting SSE wrappers with exponential backoff.
-    /** Streams backend-neutral task events via SSE. backward=1 emits the latest response and its event ID before replaying earlier history. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
+    /** Streams backend-neutral task events via SSE. backward=1 emits a recent preview of 50 meaningful events, coalescing fragments and retaining the latest response and tool starts, before canonical history. Memory previews include a resume event ID; disk previews use an empty ID. Native EventSource cannot set Last-Event-ID initially, so last-event-id supplies it in the initial query; browser reconnects use the Last-Event-ID header, which takes precedence because the original query remains unchanged. */
     fun taskEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskEvents(id) }
     /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEventsReconnecting(): Flow<TaskListEvent> = reconnectingFlow { globalTaskEvents() }

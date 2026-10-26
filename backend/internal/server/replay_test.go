@@ -23,49 +23,6 @@ import (
 	"github.com/maruel/gomode/sse"
 )
 
-func TestTaskEventBackwardProjector(t *testing.T) {
-	t.Parallel()
-	t.Run("preserves question provenance", func(t *testing.T) {
-		t.Parallel()
-		source := agent.MessageSource{ThreadID: "root", RootThreadID: "root", TurnID: "turn", ItemID: "ask"}
-		question := &agent.AskMessage{Source: source, ToolUseID: "ask", Questions: []logv3.AskQuestion{{Question: "Which approach?"}}}
-		projection := newTaskEventBackwardProjector(agentReplayHistory{question})
-		if projection.message == nil || projection.message.Ask == nil || projection.message.Ask.ToolUseID != "ask" || projection.message.Source != v1.EventMessageSource(source) {
-			t.Fatalf("question origin lost: %+v", projection.message)
-		}
-	})
-	t.Run("keeps provider messages distinct", func(t *testing.T) {
-		t.Parallel()
-		parent := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "answer"}
-		other := agent.MessageSource{ThreadID: "parent", RootThreadID: "parent", TurnID: "turn", ItemID: "earlier"}
-		child := agent.MessageSource{ThreadID: "child", RootThreadID: "parent", TurnID: "child-turn", ItemID: "answer"}
-		for _, tail := range [][]agent.Message{
-			{&agent.TextDeltaMessage{Text: "new ", Source: parent}, &agent.TextDeltaMessage{Text: "child ", Source: child}, &agent.TextDeltaMessage{Text: "answer", Source: parent}},
-			{&agent.TextMessage{Text: "new answer", Source: parent}, &agent.TextMessage{Text: "child answer", Source: child}},
-		} {
-			history := append(agentReplayHistory{&agent.TextDeltaMessage{Text: "earlier", Source: other}}, tail...)
-			p := newTaskEventBackwardProjector(history)
-			if p.message == nil || p.message.Text == nil || p.message.Text.Text != "new answer" || p.message.Source != v1.EventMessageSource(parent) {
-				t.Fatalf("backward boundary mixed provider messages: %+v", p.message)
-			}
-		}
-	})
-
-	p := newTaskEventBackwardProjector(agentReplayHistory{
-		&agent.TextMessage{Text: "older response"},
-		&agent.UserInputMessage{Text: "new turn"},
-		&agent.TextDeltaMessage{Text: "new "},
-		&agent.ToolUseMessage{ToolUseID: "tool", Name: "Read"},
-		&agent.TextDeltaMessage{Text: "answer"},
-	})
-	if p.message == nil || p.message.Text == nil || p.message.Text.Text != "new answer" {
-		t.Fatalf("backward boundary = %+v, want accumulated current-turn deltas", p.message)
-	}
-	if p.sequence != 5 {
-		t.Fatalf("backward sequence = %d, want 5", p.sequence)
-	}
-}
-
 func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()
 	gt := apiconv.NewToolTimingTracker(harness.Claude, "", nil, nil)
@@ -581,6 +538,26 @@ func TestTaskEventStreamResume(t *testing.T) {
 			t.Fatalf("resumed result lost acknowledged converter state: %s", body)
 		}
 	})
+	t.Run("SnapshotMessageBoundary", func(t *testing.T) {
+		t.Parallel()
+		for _, events := range [][]v1.EventMessage{nil, {{Kind: v1.EventKindToolResult}, {Kind: v1.EventKindSkillLoad}}} {
+			resume := taskEventResume{after: taskEventID{message: 10, event: taskEventMessageEnd}}
+			if err := resume.observe(10, events); err != nil {
+				t.Fatal(err)
+			}
+			if err := resume.complete(); err != nil {
+				t.Fatal(err)
+			}
+			for i := range events {
+				if !resume.acknowledged(taskEventID{message: 10, event: uint64(i)}) {
+					t.Fatal("snapshot event replayed")
+				}
+			}
+			if resume.acknowledged(taskEventID{message: 11}) {
+				t.Fatal("new message acknowledged")
+			}
+		}
+	})
 	t.Run("RejectsInvalidEventIndex", func(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
@@ -617,10 +594,6 @@ func TestReplayMemoryHistoryConcurrentMessages(t *testing.T) {
 	history, _, unsubscribe := tk.SubscribeSnapshot(t.Context())
 	defer unsubscribe()
 	defer history.Release()
-	preview := newTaskEventBackwardProjector(timelineReplayHistory{snapshot: history})
-	if preview.message == nil || preview.message.Text == nil || preview.message.Text.Text != "Parent answer" || preview.message.Source.ItemID != "parent-item" {
-		t.Errorf("compacted preview lost root message: %+v", preview.message)
-	}
 	s := newTestRouter(t, nil)
 	entry := s.taskMgr.NewEntry(tk, nil)
 	w := httptest.NewRecorder()

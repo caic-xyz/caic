@@ -1729,11 +1729,11 @@ public struct EventMessage: Codable {
     public let skillLoad: EventSkillLoad?
 }
 
-/// TaskEventBackward carries the latest visible agent response and its canonical
-/// event ID. Pass EventID as the events endpoint's last-event-id query parameter
-/// to stream newer events while earlier history is replayed.
+/// TaskEventBackward carries a chronological recent preview before canonical
+/// history. EventID resumes strictly after the preview's memory snapshot. It is
+/// empty for disk previews, whose canonical history uses the same connection.
 public struct TaskEventBackward: Codable {
-    public let message: EventMessage
+    public let messages: [EventMessage]
     public let eventId: String
 }
 

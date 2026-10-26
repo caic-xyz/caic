@@ -62,12 +62,12 @@ describe("taskEventStream", () => {
     if (!backwardListener) throw new Error("backward listener not registered");
     backwardListener(
       new MessageEvent("backward", {
-        data: '{"message":{"kind":"text","ts":1,"text":{"text":"latest"}},"eventId":"v1/timeline/memory/4/0"}',
+        data: '{"messages":[{"kind":"text","ts":1,"text":{"text":"latest"}}],"eventId":"v1/timeline/memory/4/0"}',
       }),
     );
 
     expect(onBackward).toHaveBeenCalledWith({
-      message: { kind: "text", ts: 1, text: { text: "latest" } },
+      messages: [{ kind: "text", ts: 1, text: { text: "latest" } }],
       eventId: "v1/timeline/memory/4/0",
     });
   });
