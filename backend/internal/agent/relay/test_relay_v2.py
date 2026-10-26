@@ -993,6 +993,51 @@ def test_exit_and_stripped_environment_controls() -> None:
         _cleanup(relay_dir)
 
 
+def test_start_failure_before_handshake() -> None:
+    """A queued connection must recover startup failure output after daemon exit."""
+    with tempfile.TemporaryDirectory(prefix="caic-relay-start-test-") as relay_dir:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import runpy, sys, threading\n"
+                "relay = runpy.run_path(sys.argv.pop(1))\n"
+                "connected = threading.Event()\n"
+                "connections = []\n"
+                "def accept_without_handshake(self, srv):\n"
+                "    connections.extend(srv.accept()[0] for _ in range(2))\n"
+                "    connected.set()\n"
+                "def command_after_connect(cmd):\n"
+                "    assert connected.wait(5), 'client did not connect'\n"
+                "    return cmd\n"
+                "relay['_Daemon'].accept_thread = accept_without_handshake\n"
+                "relay['serve'].__globals__['_oom_adjusted_command'] = command_after_connect\n"
+                "raise SystemExit(relay['main']())",
+                str(RELAY_PY),
+                "serve-attach",
+                "--dir",
+                relay_dir,
+                "--",
+                "caic-test-missing-executable",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_make_env(relay_dir),
+        )
+        try:
+            out = _read_stdout_to_eof(proc, timeout=10)
+            _, err = proc.communicate(timeout=10)
+            records = _decode_records(out)
+            assert [record["t"] for record in records] == ["relay_generation", "exit"], (out, err)
+            assert records[1]["exit_code"] != 0
+            assert "caic-test-missing-executable" in records[1]["error"]
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+
 def test_antigravity_mcp_lifecycle() -> None:
     """Auxiliary plugins preserve HOME/worktrees and are removed on exit/retry."""
     with tempfile.TemporaryDirectory(prefix="caic-agy-mcp-test-") as root:
@@ -1161,6 +1206,7 @@ def main() -> int:
         test_caic_mcp_request_isolation,
         test_caic_mcp_stdio_server,
         test_caic_mcp_stdio_errors,
+        test_start_failure_before_handshake,
         test_antigravity_mcp_lifecycle,
         test_parse_numstat,
     )

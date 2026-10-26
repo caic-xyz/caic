@@ -919,7 +919,7 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, harness, cai
         try:
             if _wait_for_socket(30, child_pid=pid):
                 try:
-                    attach_client(offset=0)
+                    attach_client(offset=0, require_replay=True)
                 except OSError:
                     _copy_output_to_stdout()
             else:
@@ -1123,14 +1123,26 @@ def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace, harness, cai
         pass
 
 
-def attach_client(offset):
+def attach_client(offset, require_replay):
     """Connect to relay via Unix socket and bridge to stdio."""
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     conn.connect(SOCK_PATH)
 
     # Send handshake.
     hs = json.dumps({"offset": offset}) + "\n"
-    conn.sendall(hs.encode())
+    try:
+        conn.sendall(hs.encode())
+        # A successful connect can still be queued when a failed subprocess
+        # takes down the daemon. Detect that before starting the stdout thread
+        # so serve-attach can replay the persisted startup error instead of
+        # silently closing stdout. Leave the first byte for normal streaming.
+        # serve writes relay_generation before accepting clients, so the
+        # initial replay from offset 0 has data even if the agent awaits stdin.
+        if require_replay and not conn.recv(1, socket.MSG_PEEK):
+            raise ConnectionResetError("relay closed before replay")
+    except OSError:
+        conn.close()
+        raise
 
     # Thread: relay socket → stdout.
     def relay_to_stdout():
@@ -1361,7 +1373,7 @@ def main() -> int:
             caic_mcp=args.caic_mcp,
         )
     elif args.mode == "attach":
-        attach_client(args.offset)
+        attach_client(args.offset, require_replay=False)
     elif args.mode == "read-plan":
         return read_plan(args.path)
     elif args.mode == "caic-mcp":
