@@ -67,8 +67,8 @@ func TestMCPResources(t *testing.T) {
 			if len(resource.Title) > maxMCPTaskTitle || !utf8.ValidString(resource.Title) {
 				t.Fatalf("resource title length = %d, valid UTF-8 = %t", len(resource.Title), utf8.ValidString(resource.Title))
 			}
-			if resource.Meta[mcpTruncatedMetaKey] != true {
-				t.Fatalf("resource metadata = %#v, want truncation marker", resource.Meta)
+			if !strings.HasSuffix(resource.Title, "…") {
+				t.Fatalf("resource title = %q, want bounded task title with ellipsis", resource.Title)
 			}
 		}
 		if !yielded {

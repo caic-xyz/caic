@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -1586,11 +1587,15 @@ func (t *Task) SendCompact(ctx context.Context, instructions string) error {
 	return h.Session.SendCompact(instructions)
 }
 
-// SetTitle sets the title under the mutex. Empty strings are ignored to
+// SetTitle sets the title under the mutex, limiting it to 80 Unicode characters
+// including a trailing ellipsis when truncated. Empty strings are ignored to
 // preserve the prompt-fallback invariant.
 func (t *Task) SetTitle(title string) {
 	if title == "" {
 		return
+	}
+	if utf8.RuneCountInString(title) > maxTitleChars {
+		title = string([]rune(title)[:maxTitleChars-1]) + "…"
 	}
 	t.mu.Lock()
 	t.title = title
@@ -1606,8 +1611,9 @@ func (t *Task) SetAgentVersion(v string) {
 }
 
 // GenerateTitle asks the LLM for a short title from the prompt and any result
-// messages, logging through the task-scoped log. No-op when the provider is
-// unconfigured.
+// messages, making up to two shortening requests when the title exceeds the
+// character limit and logging through the task-scoped log. No-op when the
+// provider is unconfigured.
 func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 	if t.Provider == nil {
 		return
@@ -1646,9 +1652,11 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 	}
 
 	start := time.Now()
+	msgs := genai.Messages{genai.NewTextMessage(input)}
+	opts := &genai.GenOptionText{SystemPrompt: fmt.Sprintf(titleSystemPrompt, maxTitleChars)}
 	res, err := t.Provider.GenSync(ctx,
-		genai.Messages{genai.NewTextMessage(input)},
-		&genai.GenOptionText{SystemPrompt: titleSystemPrompt},
+		msgs,
+		opts,
 	)
 	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
@@ -1657,12 +1665,23 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 	}
 	// Strip surrounding quotes if the model adds them despite instructions.
 	title := strings.Trim(strings.TrimSpace(res.String()), "\"'`")
+	for attempt := 0; attempt < 2 && utf8.RuneCountInString(title) > maxTitleChars; attempt++ {
+		msgs = append(msgs, res.Message, genai.NewTextMessage(fmt.Sprintf(
+			"The title is too long. Shorten it to at most %d characters, including spaces and punctuation. Reply with ONLY the shorter title, no quotes.", maxTitleChars)))
+		res, err = t.Provider.GenSync(ctx, msgs, opts)
+		dur = time.Since(start).Round(time.Millisecond)
+		if err != nil {
+			log.WarnContext(ctx, "title shortening failed", "err", err, "dur", dur)
+			return
+		}
+		title = strings.Trim(strings.TrimSpace(res.String()), "\"'`")
+	}
 	if title == "" {
 		log.WarnContext(ctx, "title empty", "dur", dur)
 		return
 	}
-	log.InfoContext(ctx, "title generated", "title", title, "dur", dur)
 	t.SetTitle(title)
+	log.InfoContext(ctx, "title generated", "title", t.Title(), "dur", dur)
 }
 
 // RecordSessionCrash marks an agent session as crashed and emits a
@@ -2783,4 +2802,6 @@ type rateLimitSub struct {
 	ch chan *agent.RateLimitMessage
 }
 
-const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
+const maxTitleChars = 80
+
+const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title of at most %d characters, including spaces and punctuation. Reply with ONLY the title, no quotes."

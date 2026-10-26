@@ -15,11 +15,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"github.com/maruel/genai"
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
@@ -55,6 +59,22 @@ func (*failingConn) Close() error { return nil }
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
+type titleSequenceProvider struct {
+	genai.Provider
+
+	replies  []string
+	requests []genai.Messages
+}
+
+func (p *titleSequenceProvider) GenSync(_ context.Context, msgs genai.Messages, _ ...genai.GenOption) (genai.Result, error) {
+	i := len(p.requests)
+	p.requests = append(p.requests, slices.Clone(msgs))
+	if i >= len(p.replies) {
+		return genai.Result{}, errors.New("unexpected title request")
+	}
+	return genai.Result{Replies: []genai.Reply{{Text: p.replies[i]}}}, nil
+}
+
 // recvType reads one message type from a live subscriber channel. The task
 // fanout performs a synchronous non-blocking send into a buffered channel
 // during addMessage, so a message is available immediately on return; a
@@ -72,6 +92,62 @@ func recvType(ch <-chan TimelineMessage) string {
 }
 
 func TestTask(t *testing.T) {
+	t.Run("GenerateTitle", func(t *testing.T) {
+		t.Parallel()
+		t.Run("ProviderError", func(t *testing.T) {
+			t.Parallel()
+			for _, replies := range [][]string{nil, {strings.Repeat("x", 81)}, {strings.Repeat("x", 81), strings.Repeat("y", 81)}} {
+				t.Run(strconv.Itoa(len(replies)), func(t *testing.T) {
+					t.Parallel()
+					tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+					tk.SetTitle("Previous title")
+					p := &titleSequenceProvider{replies: replies}
+					tk.Provider = p
+					tk.GenerateTitle(t.Context(), testLogger())
+					if got := tk.Title(); got != "Previous title" {
+						t.Fatalf("Title = %q after provider error", got)
+					}
+					if len(p.requests) != len(replies)+1 {
+						t.Fatalf("requests = %d, want %d", len(p.requests), len(replies)+1)
+					}
+				})
+			}
+		})
+		for _, tc := range []struct {
+			name    string
+			replies []string
+			want    string
+		}{
+			{"short", []string{"  \"Fix task titles\"  "}, "Fix task titles"},
+			{"at_limit", []string{strings.Repeat("\u754c", 80)}, strings.Repeat("\u754c", 80)},
+			{"shortened", []string{strings.Repeat("x", 81), "Shorter title"}, "Shorter title"},
+			{"second_retry_shortens", []string{strings.Repeat("x", 81), strings.Repeat("y", 81), "Short enough"}, "Short enough"},
+			{"retries_still_long", []string{strings.Repeat("x", 81), strings.Repeat("y", 81), strings.Repeat("\u754c", 81)}, strings.Repeat("\u754c", 79) + "…"},
+			{"empty", []string{"  "}, "test"},
+			{"retry_empty", []string{strings.Repeat("x", 81), "  "}, "test"},
+			{"second_retry_empty", []string{strings.Repeat("x", 81), strings.Repeat("y", 81), "  "}, "test"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+				p := &titleSequenceProvider{replies: tc.replies}
+				tk.Provider = p
+				tk.GenerateTitle(t.Context(), testLogger())
+				if got := tk.Title(); got != tc.want || !utf8.ValidString(got) {
+					t.Fatalf("Title = %q, want %q", got, tc.want)
+				}
+				if len(p.requests) != len(tc.replies) {
+					t.Fatalf("requests = %d, want %d", len(p.requests), len(tc.replies))
+				}
+				for i := 1; i < len(p.requests); i++ {
+					msgs := p.requests[i]
+					if len(msgs) != 2*i+1 || msgs[2*i-1].Role() != "assistant" || msgs[2*i-1].String() != tc.replies[i-1] || !strings.Contains(msgs[2*i].String(), "80") {
+						t.Fatalf("shortening request did not continue the title conversation: %v", msgs)
+					}
+				}
+			})
+		}
+	})
 	t.Run("ChildObservedProviderQuotaRemainsShared", func(t *testing.T) {
 		t.Parallel()
 		for _, live := range []bool{false, true} {
@@ -3154,6 +3230,21 @@ func TestTask(t *testing.T) {
 
 	t.Run("SetTitle", func(t *testing.T) {
 		t.Parallel()
+		t.Run("HardLimit", func(t *testing.T) {
+			t.Parallel()
+			prompt := strings.Repeat("\u754c", 100)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: prompt}, "", "", "")
+			if got := tk.Title(); got != strings.Repeat("\u754c", 79)+"…" {
+				t.Fatalf("prompt fallback title = %q", got)
+			}
+			if tk.InitialPrompt.Text != prompt {
+				t.Fatal("title truncation changed the prompt")
+			}
+			tk.SetTitle(strings.Repeat("a", 81))
+			if got := tk.Title(); got != strings.Repeat("a", 79)+"…" {
+				t.Fatalf("Title = %q", got)
+			}
+		})
 		t.Run("SetsTitle", func(t *testing.T) {
 			t.Parallel()
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")

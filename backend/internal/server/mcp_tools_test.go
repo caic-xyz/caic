@@ -818,8 +818,8 @@ func TestMCPTools(t *testing.T) {
 			if !strings.HasPrefix(output.Result, prefix) || len(strings.TrimPrefix(output.Result, prefix)) > maxMCPTaskTitle {
 				t.Fatalf("created task result length = %d", len(output.Result))
 			}
-			if result.Meta[mcpTruncatedMetaKey] != true || !utf8.ValidString(output.Result) {
-				t.Fatalf("created task metadata = %#v, valid UTF-8 = %t", result.Meta, utf8.ValidString(output.Result))
+			if !strings.HasSuffix(output.Result, "…") || !utf8.ValidString(output.Result) {
+				t.Fatalf("created task result = %q, valid UTF-8 = %t", output.Result, utf8.ValidString(output.Result))
 			}
 		})
 
