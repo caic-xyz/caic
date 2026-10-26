@@ -29,6 +29,7 @@ import (
 
 	v3 "github.com/caic-xyz/caic/backend/internal/taskslog/data/v3"
 
+	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -50,6 +51,17 @@ import (
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
+type titleProvider struct {
+	genai.Provider
+
+	calls atomic.Int32
+}
+
+func (p *titleProvider) GenSync(context.Context, genai.Messages, ...genai.GenOption) (genai.Result, error) {
+	p.calls.Add(1)
+	return genai.Result{Replies: []genai.Reply{{Text: "Generated title"}}}, nil
+}
 
 type endedStatsInfo struct {
 	runtimetest.FakeInfo
@@ -5046,6 +5058,42 @@ func TestManager(t *testing.T) {
 				t.Fatalf("relay reconnect calls = %d, want 0", attachCalls)
 			}
 		})
+		t.Run("preserves_saved_title", func(t *testing.T) {
+			t.Parallel()
+			for _, saved := range []string{"", "Saved title"} {
+				t.Run(saved, func(t *testing.T) {
+					t.Parallel()
+					id := ksid.NewID()
+					fake := &runtimetest.FakeInfo{Meta: map[string]string{
+						"md-agent-title\x00caic.id":      id.String(),
+						"md-agent-title\x00caic.harness": string(harness.Claude),
+					}}
+					provider := &titleProvider{}
+					m := newTestManager(t, Config{
+						ServerCtx: t.Context(), Provider: provider,
+						Runtimes: newTestRuntime(t, &runtimetest.FakeBackend{}, fake),
+						Backends: map[harness.Name]agent.Backend{harness.Claude: &agenttest.FakeBackend{}},
+					})
+					adopted, err := m.ImportInstances(t.Context(), []runtime.Instance{{ID: runtime.NewID("test-runtime", "md-agent-title"), State: "exited"}}, []*taskslog.LoadedTask{{
+						LogVersion: agent.LogVersionV3, TaskID: id.String(), Harness: harness.Claude, Prompt: "test", Title: saved,
+						Timeline: []agent.TimedMessage{{Message: &agent.ResultMessage{MessageType: "result", Result: "Completed work"}}},
+					}})
+					if err != nil || len(adopted) != 1 {
+						t.Fatalf("ImportInstances = %v, %v", adopted, err)
+					}
+					adopted[0].Lifecycle.wg.Wait()
+					want := saved
+					calls := int32(0)
+					if saved == "" {
+						want = "Generated title"
+						calls = 1
+					}
+					if got := adopted[0].Task().Title(); got != want || provider.calls.Load() != calls {
+						t.Fatalf("title = %q, calls = %d; want %q, %d", got, provider.calls.Load(), want, calls)
+					}
+				})
+			}
+		})
 		t.Run("valid_adopts_qualified_no_repo_instance", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
@@ -6681,28 +6729,6 @@ func TestAllocateBranchesAdoptionDisablesSharing(t *testing.T) {
 	}
 }
 
-func TestCountResultMessages(t *testing.T) {
-	t.Parallel()
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		msgs := []agent.Message{
-			&agent.TextMessage{Text: "hello"},
-			&agent.ResultMessage{MessageType: "result"},
-			&agent.TextMessage{Text: "world"},
-			&agent.ResultMessage{MessageType: "result"},
-		}
-		if n := countResultMessages(slices.Values(msgs)); n != 2 {
-			t.Errorf("countResultMessages = %d, want 2", n)
-		}
-	})
-	t.Run("valid_empty", func(t *testing.T) {
-		t.Parallel()
-		if n := countResultMessages(slices.Values([]agent.Message(nil))); n != 0 {
-			t.Errorf("countResultMessages(nil) = %d, want 0", n)
-		}
-	})
-}
-
 func TestLastResultText(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
@@ -6721,73 +6747,6 @@ func TestLastResultText(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
 		if got := lastResultText(tk); got != "" {
 			t.Errorf("lastResultText = %q, want empty", got)
-		}
-	})
-}
-
-func TestNeedsTitleRegen(t *testing.T) {
-	t.Parallel()
-	resolver := agent.Backends{}
-	t.Run("valid_no_log", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		if !needsTitleRegen(tk, nil, resolver) {
-			t.Error("needsTitleRegen should return true when lt is nil")
-		}
-	})
-	t.Run("valid_no_title_in_log", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		lt := &taskslog.LoadedTask{TaskID: "test", Prompt: "test"}
-		if !needsTitleRegen(tk, lt, resolver) {
-			t.Error("needsTitleRegen should return true when lt.Title is empty")
-		}
-	})
-	t.Run("valid_more_results_in_memory", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.SeedTimeline([]agent.Message{
-			&agent.ResultMessage{MessageType: "result"},
-			&agent.ResultMessage{MessageType: "result"},
-		})
-		lt := &taskslog.LoadedTask{
-			TaskID: "test",
-			Title:  "existing title",
-			Timeline: []agent.TimedMessage{
-				{Message: &agent.ResultMessage{MessageType: "result"}},
-			},
-		}
-		if !needsTitleRegen(tk, lt, resolver) {
-			t.Error("needsTitleRegen should return true when restoredResults > logResults")
-		}
-	})
-	t.Run("valid_same_count", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		tk.SeedTimeline([]agent.Message{
-			&agent.ResultMessage{MessageType: "result"},
-		})
-		lt := &taskslog.LoadedTask{
-			TaskID: "test",
-			Title:  "existing title",
-			Timeline: []agent.TimedMessage{
-				{Message: &agent.ResultMessage{MessageType: "result"}},
-			},
-		}
-		if needsTitleRegen(tk, lt, resolver) {
-			t.Error("needsTitleRegen should return false when counts match")
-		}
-	})
-	t.Run("valid_large_log_skips", func(t *testing.T) {
-		t.Parallel()
-		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "")
-		lt := &taskslog.LoadedTask{
-			TaskID:  "test",
-			Title:   "existing title",
-			LogSize: 200 << 20, // 200 MiB, above maxLogSize
-		}
-		if needsTitleRegen(tk, lt, resolver) {
-			t.Error("needsTitleRegen should return false for large logs")
 		}
 	})
 }

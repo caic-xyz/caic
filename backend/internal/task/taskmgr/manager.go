@@ -704,46 +704,6 @@ func containerPathMatchesRepo(containerPath string, checkout *repo.Checkout) boo
 	}, containerPath)
 }
 
-// needsTitleRegen reports whether an imported task needs an LLM title regeneration.
-func needsTitleRegen(t *task.Task, lt *taskslog.LoadedTask, resolver taskslog.WireResolver) bool {
-	if lt == nil || lt.Title == "" {
-		return true
-	}
-	// Skip the full log parse for large files — it would block startup
-	// for minutes. The title from the log header is good enough.
-	const maxLogSize = 100 << 20 // 100 MiB
-	if lt.LogSize > maxLogSize {
-		return false
-	}
-	logResults := 0
-	if err := lt.LoadMessagesWithResolver(resolver); err == nil {
-		logResults = countTimelineResults(lt.Timeline)
-	}
-	restoredResults := countResultMessages(t.ForwardMessages())
-	return restoredResults > logResults
-}
-
-func countTimelineResults(entries []agent.TimedMessage) int {
-	n := 0
-	for _, entry := range entries {
-		if _, ok := entry.Message.(*agent.ResultMessage); ok {
-			n++
-		}
-	}
-	return n
-}
-
-// countResultMessages counts the number of ResultMessages in msgs.
-func countResultMessages(msgs iter.Seq[agent.Message]) int {
-	n := 0
-	for m := range msgs {
-		if _, ok := m.(*agent.ResultMessage); ok {
-			n++
-		}
-	}
-	return n
-}
-
 // FindTasksMonitoringBranch returns all entries that match the given forge owner/repo
 // and have a monitor branch set.
 func (m *Manager) FindTasksMonitoringBranch(owner, repoName string) []*Entry {
@@ -2235,8 +2195,8 @@ func (m *Manager) importInstance(ctx context.Context, checkout *repo.Checkout, c
 		"repo", relPath, "instance", c.ID, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
-	// Only regenerate title if a new turn was completed.
-	if needsTitleRegen(t, lt, m) {
+	// Preserve saved titles on restart, including when new turns were restored.
+	if lt.Title == "" {
 		entry.Lifecycle.generateTitle()
 	}
 

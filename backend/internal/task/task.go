@@ -65,7 +65,7 @@ func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
 
 // SessionHandle bundles the resources associated with an active agent session:
 // the SSH session, the message dispatch channel, and the log writer.
-// DispatchDone is closed when the dispatch goroutine exits after MsgCh is closed.
+// DispatchDone is closed after MsgCh is drained and title refresh workers finish.
 type SessionHandle struct {
 	Session      *agent.Session
 	MsgCh        chan agent.TimedMessage
@@ -180,6 +180,8 @@ type Task struct {
 	planExitID             string                          // ToolUseID of the ExitPlanMode carrying planContent; "" after context_cleared.
 	planDismissed          bool                            // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
 	inPlanMode             bool                            // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
+	completedRootTurns     int                             // Completed root turns; reconstructed from history for title refresh cadence.
+	titleGeneration        uint64                          // Orders concurrent title requests so stale responses cannot replace newer titles.
 	title                  string                          // LLM-generated short title; set via SetTitle.
 	timelinePrefix         []agent.TimedMessage            // Imported durable history; ownership transfers at adoption.
 	timeline               []agent.TimedMessage            // Live tail and ordinary one-slice histories.
@@ -1082,6 +1084,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 				t.diffCreated = true
 			}
 		case *agent.ResultMessage:
+			t.completedRootTurns++
 			t.planDismissed = false
 			cleanTurnComplete = !m.IsError
 			if m.ContextWindow > 0 {
@@ -1269,7 +1272,7 @@ func (t *Task) GracefulStopSession(ctx context.Context, timeout time.Duration) (
 // stream and resets live stats. Message history is preserved so that SSE
 // subscribers (including reconnecting clients) can see the full timeline.
 func (t *Task) ClearMessages(ctx context.Context) {
-	t.addMessage(ctx, agent.ContextCleared(), false)
+	t.addMessage(ctx, agent.ContextCleared())
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1559,7 +1562,7 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		// ClearMessages (the "Clear and execute plan" path) is the only
 		// place that erases plan state.
 	}
-	t.addMessage(ctx, syntheticUserInput(p), false)
+	t.addMessage(ctx, syntheticUserInput(p))
 	return nil
 }
 
@@ -1594,11 +1597,9 @@ func (t *Task) SetTitle(title string) {
 	if title == "" {
 		return
 	}
-	if utf8.RuneCountInString(title) > maxTitleChars {
-		title = string([]rune(title)[:maxTitleChars-1]) + "…"
-	}
 	t.mu.Lock()
-	t.title = title
+	t.titleGeneration++
+	t.setTitleLocked(title)
 	t.mu.Unlock()
 }
 
@@ -1610,46 +1611,19 @@ func (t *Task) SetAgentVersion(v string) {
 	t.mu.Unlock()
 }
 
-// GenerateTitle asks the LLM for a short title from the prompt and any result
-// messages, making up to two shortening requests when the title exceeds the
+// GenerateTitle asks the LLM for a short title from the last ten root turns,
+// making up to two shortening requests when the title exceeds the
 // character limit and logging through the task-scoped log. No-op when the
 // provider is unconfigured.
 func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 	if t.Provider == nil {
 		return
 	}
-	var b strings.Builder
-	var window ResultTextWindow
-	for m := range t.ForwardMessages() {
-		if v, ok := m.(*agent.ResultMessage); ok {
-			text := v.Result
-			if text == "" {
-				text = window.Value()
-			}
-			if text != "" {
-				if b.Len() > 0 {
-					b.WriteByte('\n')
-				}
-				b.WriteString("Result: ")
-				b.WriteString(text)
-			}
-			// A result is a turn boundary: reset the window for the next turn.
-			window.Update(m)
-			continue
-		}
-		window.Update(m)
-	}
-	// Prepend the original prompt.
-	// TODO: Use the images too.
-	input := "Prompt: " + t.InitialPrompt.Text
-	if b.Len() > 0 {
-		input += "\n" + b.String()
-	}
-	// Truncate to keep it working on most providers.
-	const maxChars = 50000
-	if len(input) > maxChars {
-		input = input[:maxChars]
-	}
+	t.mu.Lock()
+	t.titleGeneration++
+	generation := t.titleGeneration
+	t.mu.Unlock()
+	input := t.titleInput()
 
 	start := time.Now()
 	msgs := genai.Messages{genai.NewTextMessage(input)}
@@ -1680,8 +1654,15 @@ func (t *Task) GenerateTitle(ctx context.Context, log *slog.Logger) {
 		log.WarnContext(ctx, "title empty", "dur", dur)
 		return
 	}
-	t.SetTitle(title)
-	log.InfoContext(ctx, "title generated", "title", t.Title(), "dur", dur)
+	t.mu.Lock()
+	if generation != t.titleGeneration {
+		t.mu.Unlock()
+		return
+	}
+	t.setTitleLocked(title)
+	title = t.title
+	t.mu.Unlock()
+	log.InfoContext(ctx, "title generated", "title", title, "dur", dur)
 }
 
 // RecordSessionCrash marks an agent session as crashed and emits a
@@ -1700,7 +1681,7 @@ func (t *Task) RecordSessionCrash(ctx context.Context, err error) bool {
 		Subtype:     "error",
 		IsError:     true,
 		Result:      msg,
-	}, true)
+	})
 	return true
 }
 
@@ -1720,7 +1701,7 @@ func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
 		Subtype:     "error",
 		IsError:     true,
 		Result:      msg,
-	}, true)
+	})
 	return true
 }
 
@@ -1887,31 +1868,31 @@ func (t *Task) settledTurnStateLocked() taskslog.State {
 
 func (t *Task) recordStartupFailure(ctx context.Context, err error) {
 	t.SetState(taskslog.StateFailed)
-	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()}, false)
+	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()})
 }
 
 // addMessage records a synthetic server message with an explicit zero producer time.
-func (t *Task) addMessage(_ context.Context, m agent.Message, skipTitleGen bool) {
-	t.addParsedMessage(agent.TimedMessage{Message: m}, skipTitleGen)
+func (t *Task) addMessage(_ context.Context, m agent.Message) {
+	t.addParsedMessage(agent.TimedMessage{Message: m})
 }
 
 // addParsedMessage records one physical relay record while task state and
 // subscribers consume its Message.
-func (t *Task) addParsedMessage(parsed agent.TimedMessage, skipTitleGen bool) (stateChanged, generateTitle bool) {
-	changed, title, _ := t.addParsedMessageWithGitSnapshot(parsed, skipTitleGen, nil, nil)
-	return changed, title
+func (t *Task) addParsedMessage(parsed agent.TimedMessage) (stateChanged bool) {
+	changed, _ := t.addParsedMessageWithGitSnapshot(parsed, nil, nil)
+	return changed
 }
 
 // addParsedMessageWithGitSnapshot applies host statistics only when their snapshot
 // is newer. Stale compact controls are dropped; result payloads and lifecycle
 // remain recorded even when their live statistics have been superseded.
-func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTitleGen bool, read *repo.GitSnapshot, log agent.LogSink) (stateChanged, generateTitle bool, persistErr error) {
+func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, read *repo.GitSnapshot, log agent.LogSink) (stateChanged bool, persistErr error) {
 	m := parsed.Message
 	child := m.Provenance().IsChild()
 	t.mu.Lock()
 	if _, compact := m.(*agent.DiffStatMessage); compact && read != nil && !t.acceptGitReadLocked(read.Read) {
 		t.mu.Unlock()
-		return false, false, nil
+		return false, nil
 	}
 	if ds, ok := m.(*agent.DiffStatMessage); ok && read != nil {
 		ds.DiffStat, ds.Repos = read.Summary(t.liveDiffStat, t.liveRepoStates)
@@ -1939,7 +1920,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 		if meta.ReportedEffort != "" && t.reportedEffort == "" {
 			t.reportedEffort = meta.ReportedEffort
 		}
-		return stateChanged, generateTitle, persistErr
+		return stateChanged, persistErr
 	}
 	producerAt := parsed.ProducerTime
 	at := producerAt
@@ -2077,6 +2058,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 	}
 	// Transition to waiting/asking when a result arrives.
 	if rm, ok := m.(*agent.ResultMessage); ok && !child {
+		t.completedRootTurns++
 		current := read == nil || t.acceptGitReadLocked(read.Read)
 		if current && (len(rm.DiffStat) > 0 || read != nil && (len(read.RepoStates) > 0 || len(read.FailedRepos) > 0)) {
 			if read == nil {
@@ -2113,9 +2095,6 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 		if t.state == taskslog.StateRunning || t.state == taskslog.StateStarting || t.state == taskslog.StateWaiting || t.state == taskslog.StateAsking {
 			t.setState(t.settledTurnStateLocked())
 		}
-		if !skipTitleGen {
-			generateTitle = true
-		}
 	}
 	t.costTracker.Observe(m, at, t.Pricer)
 	// Forward the folded message to the usage rollup with the cost snapshot
@@ -2127,7 +2106,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 	// persisted replay, so the live stream must match to avoid a transient
 	// "Parse error" that disappears when the task log is reloaded.
 	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 && t.lastExitError == "" {
-		return stateChanged, generateTitle, persistErr
+		return stateChanged, persistErr
 	}
 	t.broadcastTimelineMessageLocked(m, at)
 	if _, result := m.(*agent.ResultMessage); result && read != nil {
@@ -2137,7 +2116,7 @@ func (t *Task) addParsedMessageWithGitSnapshot(parsed agent.TimedMessage, skipTi
 		t.broadcastTimelineMessageLocked(summary, at)
 	}
 
-	return stateChanged, generateTitle, persistErr
+	return stateChanged, persistErr
 }
 
 // appendGitSummary writes backend controls to the dispatch-owned log.
@@ -2405,6 +2384,100 @@ func (t *Task) releaseTimelineReader() {
 		}
 		t.timelineCompactPending = t.timelineCompactPending[:0]
 	}
+}
+
+// titleRefreshDue keeps early titles responsive while reducing requests on long
+// tasks. The count is folded from history, so restarts do not reset the cadence.
+func (t *Task) titleRefreshDue() bool {
+	t.mu.Lock()
+	n := t.completedRootTurns
+	t.mu.Unlock()
+	switch n {
+	case 1, 2, 5, 10, 20:
+		return true
+	default:
+		return n > 0 && n%50 == 0
+	}
+}
+
+type titleTurn struct{ prompt, answer string }
+
+// titleInput reads only the most recent ten root turns and bounds each prompt
+// and answer before building the request. Tool payloads and child activity are
+// excluded; an empty result uses the turn's latest assistant text.
+func (t *Task) titleInput() string {
+	t.mu.Lock()
+	view := t.acquireTimelineReaderLocked()
+	title := t.title
+	t.mu.Unlock()
+	defer t.releaseTimelineReader()
+
+	const maxTextBytes = 2000
+	start, completed := 0, 0
+	for i, entry := range view.Backward() {
+		if entry.Message.Provenance().IsChild() {
+			continue
+		}
+		if _, ok := entry.Message.(*agent.ResultMessage); ok {
+			completed++
+			if completed > 10 {
+				start = i + 1
+				break
+			}
+		}
+	}
+	turns := make([]titleTurn, 0, 10)
+	var current titleTurn
+	finalText := false
+	for i := start; i < view.Len(); i++ {
+		m := view.At(i).Message
+		if m.Provenance().IsChild() {
+			continue
+		}
+		switch m := m.(type) {
+		case *agent.UserInputMessage:
+			current.prompt = truncateUTF8(m.Text, maxTextBytes)
+		case *agent.TextMessage:
+			current.answer = truncateUTF8(m.Text, maxTextBytes)
+			finalText = true
+		case *agent.TextDeltaMessage:
+			if !finalText {
+				current.answer += truncateUTF8(m.Text, maxTextBytes-len(current.answer))
+			}
+		case *agent.ResultMessage:
+			if m.Result != "" {
+				current.answer = truncateUTF8(m.Result, maxTextBytes)
+			}
+			turns = append(turns, current)
+			current = titleTurn{}
+			finalText = false
+		}
+	}
+	if current.prompt != "" || current.answer != "" {
+		turns = append(turns, current)
+	}
+	if len(turns) == 0 {
+		turns = append(turns, titleTurn{})
+	}
+	if start == 0 && turns[0].prompt == "" {
+		turns[0].prompt = truncateUTF8(t.InitialPrompt.Text, maxTextBytes)
+	}
+	if len(turns) > 10 {
+		turns = turns[len(turns)-10:]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Current title: %s\nRecent activity:\n", title)
+	for _, turn := range turns {
+		fmt.Fprintf(&b, "Prompt: %s\nResult: %s\n", turn.prompt, turn.answer)
+	}
+	return b.String()
+}
+
+func (t *Task) setTitleLocked(title string) {
+	if utf8.RuneCountInString(title) > maxTitleChars {
+		title = string([]rune(title)[:maxTitleChars-1]) + "…"
+	}
+	t.title = title
 }
 
 var (
@@ -2804,4 +2877,4 @@ type rateLimitSub struct {
 
 const maxTitleChars = 80
 
-const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title of at most %d characters, including spaces and punctuation. Reply with ONLY the title, no quotes."
+const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title of at most %d characters, including spaces and punctuation. Keep the current title if it still accurately describes the recent activity. Reply with ONLY the title, no quotes."

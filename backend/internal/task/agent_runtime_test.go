@@ -1066,7 +1066,11 @@ func TestRunner(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0", ContainerPath: "/repo"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetSessionMetadata("session-1", "", "", "")
-			tk.SeedTimeline([]agent.Message{&agent.UserInputMessage{Text: "accepted"}})
+			tk.SeedTimeline([]agent.Message{
+				&agent.UserInputMessage{Text: "accepted"},
+				&agent.ResultMessage{},
+				&agent.ResultMessage{},
+			})
 			tk.SetState(taskslog.StateStopped)
 			tk.SetTitle("existing title")
 			provider := &titleProviderSpy{calls: make(chan struct{}, 1)}
@@ -1089,7 +1093,7 @@ func TestRunner(t *testing.T) {
 			})
 			// Replace the one-shot revival probe with stale state. The next
 			// live Bash result must publish an authoritative probe again.
-			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{Repos: []v3.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}}}}, false)
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{Repos: []v3.RepoState{{RepoIndex: 0, Branch: "caic-0", Behind: 2}}}})
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{ToolUseID: "rebase", Name: "Bash", Input: json.RawMessage(`{}`)}}
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ToolResultMessage{ToolUseID: "rebase"}}
 			h.MsgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result", Result: "rebased"}}
@@ -1929,7 +1933,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			_, sub, unsub := tk.Subscribe(t.Context())
 			defer unsub()
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false, nil)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
 			log := &agenttest.LogSink{Version: agent.LogVersionV2}
 			opts := agent.Options{Logger: logtest.Logger(t), MsgCh: msgCh, Log: log}
 			var v2Message agent.Message
@@ -1975,7 +1979,7 @@ func testRunnerSessions(t *testing.T) {
 			<-sub
 			close(msgCh)
 			<-done
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"}, false)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "synthetic"})
 		})
 		t.Run("GitSnapshotsRejectDeferredPublication", func(t *testing.T) {
 			t.Parallel()
@@ -2013,14 +2017,14 @@ func testRunnerSessions(t *testing.T) {
 					t.Fatal("older full or compact snapshot replaced the newer summary")
 				}
 			}
-			changed, _, _ := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
+			changed, _ := tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
 				DiffStat: compact.DiffStat, Repos: compact.RepoStates,
-			}}, false, &compact, nil)
+			}}, &compact, nil)
 			if changed || len(tk.timeline) != 0 {
 				t.Fatal("stale compact control was recorded or applied")
 			}
 			rm := &agent.ResultMessage{MessageType: "result", NumTurns: 1, DiffStat: result.DiffStat}
-			_, _, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: rm}, false, &result, nil)
+			_, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: rm}, &result, nil)
 			snap := tk.Snapshot()
 			if len(snap.DiffStat) != 1 || snap.DiffStat[0].Path != "fresh.go" || len(snap.RepoStates) != 1 || snap.RepoStates[0].Behind != 2 {
 				t.Fatalf("deferred publication changed the newest summary: %+v, %+v", snap.DiffStat, snap.RepoStates)
@@ -2029,7 +2033,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Fatal("stale result lost its recorded payload or lifecycle")
 			}
 			// A later relay refresh supersedes already completed host probes.
-			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: v3.DiffStat{{Path: "restored.go", LinesAdded: 1}}}}, false)
+			tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: v3.DiffStat{{Path: "restored.go", LinesAdded: 1}}}})
 			if tk.SetLiveRepositorySummary(&latest) || tk.LiveDiffStat()[0].Path != "restored.go" {
 				t.Fatal("completed snapshot overwrote a later relay refresh")
 			}
@@ -2049,12 +2053,12 @@ func testRunnerSessions(t *testing.T) {
 					backend.onDiff = func() {
 						// A summary change before this RPC finishes must not invalidate the
 						// completed result read. A changed instance still invalidates it.
-						tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: prior}}, false)
+						tk.addParsedMessage(agent.TimedMessage{Message: &agent.DiffStatMessage{DiffStat: prior}})
 						if replaced {
 							tk.SetRuntimeConnectionInfo("test-runtime:replacement", runtime.ConnectionTarget{}, "", "", 0)
 						}
 					}
-					msgCh, done := r.startMessageDispatch(t.Context(), tk, false, nil)
+					msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
 					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1}
 					msgCh <- agent.TimedMessage{Message: result}
 					close(msgCh)
@@ -2111,7 +2115,7 @@ func testRunnerSessions(t *testing.T) {
 					}
 					refresh()
 					result := &agent.ResultMessage{MessageType: "result", NumTurns: 1, DiffStat: snapshot.DiffStat}
-					_, _, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: result}, false, &snapshot, nil)
+					_, _ = tk.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: result}, &snapshot, nil)
 					if got := tk.LiveDiffStat(); !reflect.DeepEqual(got, want) {
 						t.Errorf("live stats = %+v, want newer snapshot %+v", got, want)
 					}
@@ -2148,11 +2152,11 @@ func testRunnerSessions(t *testing.T) {
 				RepositoryPath: "/home/user/src/repo",
 				BranchName:     "caic-0",
 				CommitHash:     "1111111111111111111111111111111111111111",
-			}}, true, nil), false)
+			}}, true, nil))
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false, persisted)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, persisted)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- agent.TimedMessage{Message: rm}
@@ -2237,7 +2241,7 @@ func testRunnerSessions(t *testing.T) {
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh, _ := r.startMessageDispatch(t.Context(), tk, false, nil)
+					msgCh, _ := r.startMessageDispatch(t.Context(), tk, nil)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -2291,7 +2295,7 @@ func testRunnerSessions(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false, nil)
+			msgCh, _ := r.startMessageDispatch(t.Context(), tk, nil)
 
 			toolID := "tool_read_1"
 			msgCh <- agent.TimedMessage{Message: &agent.ToolUseMessage{
@@ -2335,7 +2339,7 @@ func testRunnerSessions(t *testing.T) {
 				t.Parallel()
 				r := newRuntime(t, &statusFailingRuntime{FakeBackend: testContainer()})
 				tk := newTask(t)
-				tk.addMessage(t.Context(), &agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe}, false)
+				tk.addMessage(t.Context(), &agent.DiffStatMessage{MessageType: "caic_diff_stat", Repos: probe})
 				before := len(tk.timeline)
 
 				r.emitDiffStatBranch(t.Context(), tk, "test-runtime:ctr-1", repos, nil)
@@ -2381,7 +2385,28 @@ func testRunnerSessions(t *testing.T) {
 			})
 		})
 
-		t.Run("SkipTitleGenerationKeepsTurnMeasurements", func(t *testing.T) {
+		t.Run("DispatchWaitsForTitleRefresh", func(t *testing.T) {
+			t.Parallel()
+			r := newTestAgentRuntime(t, nil, "", nil)
+			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
+			p := &titleBlockingProvider{started: make(chan struct{}), release: make(chan struct{})}
+			tk.Provider = p
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{}}
+			close(msgCh)
+			<-p.started
+			select {
+			case <-done:
+				t.Error("dispatch completed before its title worker")
+			default:
+			}
+			close(p.release)
+			<-done
+			if got := tk.Title(); got != "Stale title" {
+				t.Fatalf("Title = %q, want worker result", got)
+			}
+		})
+		t.Run("TurnMeasurementsRefreshTitleAtMilestones", func(t *testing.T) {
 			t.Parallel()
 			stub := &fetchRecorder{FakeBackend: testContainer()}
 			r := newTestAgentRuntime(t, newTestCheckout(t, "", "/repo", stub), "", nil)
@@ -2390,10 +2415,14 @@ func testRunnerSessions(t *testing.T) {
 			tk.Repos = []taskslog.RepoMount{{Branch: "caic-0"}}
 			tk.SetRuntimeConnectionInfo(runtime.NewID("test-runtime", "ctr-1"), runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(taskslog.StateRunning)
+			tk.SetTitle("Stable title")
+			tk.SeedTimeline([]agent.Message{&agent.ResultMessage{}, &agent.ResultMessage{}})
+			provider := &titleProviderSpy{calls: make(chan struct{}, 4)}
+			tk.Provider = provider
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, true, nil)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
 
 			// Send a mutating tool use + result and a ResultMessage.
 			toolID := "tool_edit_1"
@@ -2403,11 +2432,30 @@ func testRunnerSessions(t *testing.T) {
 			recvMsg(t, ch)
 			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result"}}
 			recvMsg(t, ch)
+			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{MessageType: "result"}}
+			recvMsg(t, ch)
 			close(msgCh)
 			<-done
 
 			if !stub.fetched.Load() {
-				t.Error("Fetch was skipped with title generation disabled")
+				t.Error("turn measurements skipped Fetch")
+			}
+			select {
+			case <-provider.calls:
+				t.Error("turn 3 or 4 requested a replacement title")
+			case <-time.After(100 * time.Millisecond):
+			}
+			if got := tk.Title(); got != "Stable title" {
+				t.Errorf("Title = %q, want Stable title", got)
+			}
+			msgCh, done = r.startMessageDispatch(t.Context(), tk, nil)
+			msgCh <- agent.TimedMessage{Message: &agent.ResultMessage{}}
+			close(msgCh)
+			<-done
+			select {
+			case <-provider.calls:
+			case <-time.After(time.Second):
+				t.Fatal("turn 5 did not request a title refresh")
 			}
 		})
 
@@ -2418,7 +2466,7 @@ func testRunnerSessions(t *testing.T) {
 			tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, "", "", "")
 			tk.SetState(taskslog.StateRunning)
 
-			msgCh, done := r.startMessageDispatch(t.Context(), tk, false, nil)
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, nil)
 
 			// Buffer several messages, then close without draining.
 			msgs := []*agent.TextMessage{
@@ -2533,7 +2581,7 @@ func testRunnerSessions(t *testing.T) {
 		tk.addMessage(t.Context(), &agent.ToolUseMessage{
 			ToolUseID: "tu1", Name: "Write",
 			Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-		}, false)
+		})
 		if snap := tk.Snapshot(); snap.PlanContent != "the plan" {
 			t.Fatalf("PlanContent = %q before restart, want %q", snap.PlanContent, "the plan")
 		}

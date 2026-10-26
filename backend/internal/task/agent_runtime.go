@@ -112,7 +112,7 @@ func (r *AgentRuntime) Reconnect(ctx context.Context, t *Task) (*SessionHandle, 
 		return nil, err
 	}
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false, log)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
 
 	// Attach to the live relay. If the relay is dead, the session is lost.
 	var primaryBranch string
@@ -269,7 +269,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	var dispatchDone <-chan struct{}
 	{
 		region := trace.StartRegion(ctx, "dispatch-init")
-		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, false, log)
+		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, log)
 		region.End()
 	}
 
@@ -307,7 +307,7 @@ func (r *AgentRuntime) Start(ctx context.Context, t *Task, resolvedGitHubToken s
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 
-	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt), false)
+	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt))
 	// Use SetStateIf so that a fast agent subprocess that already
 	// produced a result (and was processed by the dispatch goroutine
 	// via addMessage) isn't overwritten back to Running.
@@ -617,8 +617,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 
 	// 2. Start a new relay with --resume to continue the previous session.
 	// Resuming restores harness context inside a fresh relay. Its output is
-	// live activity, so keep tool and turn measurements enabled while
-	// preserving the existing title in the resumed session.
+	// live activity, so keep tool and turn measurements enabled.
 	t.SetState(taskslog.StateStarting)
 	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
 
@@ -628,7 +627,7 @@ func (r *AgentRuntime) ReviveTask(ctx context.Context, t *Task) (*SessionHandle,
 		return nil, r.finishReviveFailure(ctx, t, fmt.Errorf("open log: %w", err), nil)
 	}
 
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true, log)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
 
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -981,7 +980,7 @@ func (r *AgentRuntime) finishStartupFailure(ctx context.Context, t *Task, log ag
 	failure := &agent.LogMessage{MessageType: "caic_log", Line: "Task startup failed: " + startupErr.Error()}
 	writeErr := log.AppendMessage(failure)
 	t.SetState(taskslog.StateFailed)
-	t.addMessage(ctx, failure, false)
+	t.addMessage(ctx, failure)
 	purgeErr := r.purgeFailedStartupInstance(ctx, t)
 
 	res := taskslog.Result{State: taskslog.StateFailed, Err: startupErr}
@@ -1050,7 +1049,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	tlog := r.Log.With("br", primaryBranch, "instance", instanceID)
 
 	r.recordCommitBaseline(ctx, t, log, instanceID)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false, log)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
 	tlog.Info("starting session", "hns", t.Harness)
 	target := t.RuntimeConnectionTarget()
 	opts := &agent.Options{
@@ -1079,7 +1078,7 @@ func (r *AgentRuntime) startSessionWithLog(ctx context.Context, t *Task, prompt 
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.addMessage(ctx, syntheticUserInput(prompt), false)
+		t.addMessage(ctx, syntheticUserInput(prompt))
 		t.SetState(taskslog.StateRunning)
 	}
 	return h, nil
@@ -1129,7 +1128,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 	// Start new session.
 	t.SetState(taskslog.StateStarting)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false, log)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, log)
 
 	var branch string
 	if p := t.Primary(); p != nil {
@@ -1179,7 +1178,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, Log: log}
 	t.AttachSession(h)
 	if mode == replaceSessionRestart {
-		t.addMessage(ctx, syntheticUserInput(prompt), false)
+		t.addMessage(ctx, syntheticUserInput(prompt))
 		t.SetState(taskslog.StateRunning)
 		tlog.Info("session restarted")
 	} else {
@@ -1191,7 +1190,7 @@ func (r *AgentRuntime) replaceSession(ctx context.Context, t *Task, prompt agent
 
 // startMessageDispatch starts a goroutine that reads from msgCh, dispatches to
 // t.addMessage, and reports task state transitions.
-func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTitleGen bool, log agent.LogSink) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
+func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, log agent.LogSink) (msgCh chan agent.TimedMessage, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	target := t.GitTarget()
 	allRepos := target.Repos
@@ -1201,6 +1200,8 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 	dispatchDone = done
 	go func() {
 		defer close(done)
+		var titleWork sync.WaitGroup
+		defer titleWork.Wait()
 		// Track tool_use IDs from ToolUseMessage that may mutate files.
 		pendingMutating := make(map[agent.ToolKey]struct{})
 		for parsed := range msgCh {
@@ -1236,19 +1237,19 @@ func (r *AgentRuntime) startMessageDispatch(ctx context.Context, t *Task, skipTi
 					}
 				}
 			}
-			stateChanged, generateTitle, persistErr := t.addParsedMessageWithGitSnapshot(parsed, skipTitleGen, resultRead, log)
+			stateChanged, persistErr := t.addParsedMessageWithGitSnapshot(parsed, resultRead, log)
 			if persistErr != nil {
 				r.Log.WarnContext(ctx, "persisting Git summary failed", "err", persistErr)
 			}
 			if commitSnapshot != nil {
 				r.persistCommitSnapshot(ctx, log, commitSnapshot, instanceID)
-				t.addMessage(ctx, commitSnapshot, false)
+				t.addMessage(ctx, commitSnapshot)
 			}
 			if stateChanged {
 				r.NotifyTaskChange()
 			}
-			if generateTitle {
-				go t.GenerateTitle(ctx, r.Log)
+			if _, result := parsed.Message.(*agent.ResultMessage); result && !parsed.Message.Provenance().IsChild() && t.titleRefreshDue() {
+				titleWork.Go(func() { t.GenerateTitle(ctx, r.Log) })
 			}
 			if emitToolDiff {
 				r.emitDiffStatBranch(ctx, t, instanceID, allRepos, log)
@@ -1300,7 +1301,7 @@ func (r *AgentRuntime) recordCommitBaseline(ctx context.Context, t *Task, log ag
 		r.Log.WarnContext(ctx, "persisting commit baseline failed", "id", id, "err", err)
 		return
 	}
-	t.addMessage(ctx, snapshot, false)
+	t.addMessage(ctx, snapshot)
 }
 
 // persistCommitSnapshot writes a completed-turn commit snapshot without
@@ -1326,9 +1327,9 @@ func (r *AgentRuntime) emitDiffStatBranch(ctx context.Context, t *Task, id runti
 	if len(snapshot.DiffStat) == 0 && len(snapshot.RepoStates) == 0 && len(snapshot.FailedRepos) == 0 {
 		return
 	}
-	changed, _, persistErr := t.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
+	changed, persistErr := t.addParsedMessageWithGitSnapshot(agent.TimedMessage{Message: &agent.DiffStatMessage{
 		MessageType: "caic_diff_stat", DiffStat: snapshot.DiffStat, Repos: snapshot.RepoStates,
-	}}, false, &snapshot, log)
+	}}, &snapshot, log)
 	if persistErr != nil {
 		r.Log.WarnContext(ctx, "persisting Git summary failed", "err", persistErr)
 	}
@@ -1459,6 +1460,6 @@ func (w *provisioningWriter) emitLineLocked(line string) error {
 			return err
 		}
 	}
-	w.t.addMessage(w.ctx, m, false)
+	w.t.addMessage(w.ctx, m)
 	return nil
 }

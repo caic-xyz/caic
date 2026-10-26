@@ -54,8 +54,8 @@ func TestTaskRollupForwarding(t *testing.T) {
 		sink := &rollupSpy{}
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "model", "")
 		tk.Rollup = sink
-		tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "read-1", Name: "Read"}, false)
-		tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: "read-1"}, false)
+		tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "read-1", Name: "Read"})
+		tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: "read-1"})
 		if len(sink.Observes) != 2 {
 			t.Fatalf("observes = %d, want start and result", len(sink.Observes))
 		}
@@ -72,12 +72,12 @@ func TestTaskRollupForwarding(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "model", "")
 		tk.Rollup = sink
 		for _, id := range []string{"failed", "ok"} {
-			tk.addMessage(t.Context(), &agent.SkillReadMessage{Skill: "review", Inferred: true, SourceToolUseID: id}, false)
+			tk.addMessage(t.Context(), &agent.SkillReadMessage{Skill: "review", Inferred: true, SourceToolUseID: id})
 			errText := ""
 			if id == "failed" {
 				errText = "file missing"
 			}
-			tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: id, Error: errText}, false)
+			tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: id, Error: errText})
 		}
 		reads := 0
 		for _, observed := range sink.Observes {
@@ -96,17 +96,17 @@ func TestTaskRollupForwarding(t *testing.T) {
 
 		// Init captures the reported model; a model-less usage message must
 		// attribute to it. Uninteresting messages (the init) forward nothing.
-		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "claude-opus"}, false)
+		tk.addMessage(t.Context(), &agent.InitMessage{ReportedModel: "claude-opus"})
 		tk.addMessage(t.Context(), &agent.UsageMessage{
 			ReportedModel: "claude-opus",
 			Usage:         agent.Usage{InputTokens: 10, OutputTokens: 5},
-		}, false)
-		tk.addMessage(t.Context(), &agent.UsageMessage{Usage: agent.Usage{OutputTokens: 3}}, false)
+		})
+		tk.addMessage(t.Context(), &agent.UsageMessage{Usage: agent.Usage{OutputTokens: 3}})
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType:  "result",
 			TotalCostUSD: 0.5,
 			NumTurns:     1,
-		}, false)
+		})
 
 		if len(sink.Observes) != 3 {
 			t.Fatalf("observes = %d, want 3", len(sink.Observes))
@@ -194,7 +194,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 		tk.Rollup = sink
 		tk.addMessage(t.Context(), &agent.RateLimitMessage{
 			Status: agent.RateLimitStatusAllowed, QuotaProvider: agent.QuotaProviderAnthropic,
-		}, false)
+		})
 		if len(sink.Quotas) != 1 {
 			t.Fatalf("quota changes = %d, want 1", len(sink.Quotas))
 		}
@@ -211,7 +211,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 		if _, ok := tk.Rollup.(DiscardRollup); !ok {
 			t.Fatalf("default Rollup = %T, want DiscardRollup", tk.Rollup)
 		}
-		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
 		tk2 := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk2.SeedTimelineParts(nil, []agent.TimedMessage{{Message: &agent.ResultMessage{MessageType: "result"}}})
 	})
@@ -222,7 +222,7 @@ func TestTaskRollupForwarding(t *testing.T) {
 		tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Claude, "m", "")
 		tk.Rollup = sink
 		tk.DiscardRollup()
-		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
+		tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
 		if len(sink.Discards) != 1 || sink.Discards[0].TaskID != tk.ID {
 			t.Errorf("discards = %+v, want task %s", sink.Discards, tk.ID)
 		}
