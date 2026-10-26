@@ -24,11 +24,22 @@ function depthFixture(): Buffer {
   return Buffer.from(zipSync(files));
 }
 
+async function renderedFrame(canvas: Locator): Promise<Buffer> {
+  // Inspect the WebGL buffer in the same animation frame as rendering, before
+  // the browser discards it. Element screenshots also include floating controls
+  // and tooltips, and scroll the page while capturing the canvas.
+  const png = await canvas.evaluate(async (element: HTMLCanvasElement) => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return element.toDataURL("image/png").slice("data:image/png;base64,".length);
+  });
+  return Buffer.from(png, "base64");
+}
+
 async function stableFrame(canvas: Locator): Promise<Buffer> {
-  let frame = await canvas.screenshot();
+  let frame = await renderedFrame(canvas);
   await expect
     .poll(async () => {
-      const next = await canvas.screenshot();
+      const next = await renderedFrame(canvas);
       const same = next.equals(frame);
       frame = next;
       return same;
@@ -37,7 +48,7 @@ async function stableFrame(canvas: Locator): Promise<Buffer> {
   return frame;
 }
 
-// Compare rendered opacity against the same opaque planes and background.
+// Compare rendered alpha against the same opaque planes.
 // The camera looks down at Z=0, so the nearer plane is lower in the image.
 async function planeOpacities(page: Page, solid: Buffer, translucent: Buffer) {
   return page.evaluate(
@@ -62,7 +73,6 @@ async function planeOpacities(page: Page, solid: Buffer, translucent: Buffer) {
         if (value === undefined) throw new Error(`Image channel ${index} is missing`);
         return value;
       }
-      const background = channel(data, 1);
       const planes: { y: number; opacity: number }[] = [];
       function red(index: number) {
         return channel(data, index * 4) > 80 && channel(data, index * 4 + 1) < 80 && channel(data, index * 4 + 2) < 80;
@@ -77,7 +87,7 @@ async function planeOpacities(page: Page, solid: Buffer, translucent: Buffer) {
           const pixel = queue[offset];
           if (pixel === undefined) throw new Error("Plane traversal queue is incomplete");
           y += Math.floor(pixel / width);
-          opacity += (background - channel(after.data, pixel * 4 + 1)) / (background - channel(data, pixel * 4 + 1));
+          opacity += channel(after.data, pixel * 4 + 3) / channel(data, pixel * 4 + 3);
           for (const neighbor of [pixel - width, pixel + width, pixel - 1, pixel + 1]) {
             if (neighbor < 0 || neighbor >= width * height || seen[neighbor] || !red(neighbor)) continue;
             seen[neighbor] = 1;
@@ -150,7 +160,7 @@ for (const width of [390, 1280]) {
     await canvas.hover();
     const beforeZoom = await stableFrame(canvas);
     await page.mouse.wheel(0, -150);
-    await expect.poll(async () => (await canvas.screenshot()).equals(beforeZoom)).toBe(false);
+    await expect.poll(async () => (await renderedFrame(canvas)).equals(beforeZoom)).toBe(false);
     const zoomedTransparent = await stableFrame(canvas);
     await mode.click();
     const zoomedSolid = await stableFrame(canvas);

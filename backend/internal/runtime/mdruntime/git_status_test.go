@@ -963,7 +963,14 @@ func gitShim(t *testing.T, inject string) string {
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" + inject + "\nexec " + shellQuote(gitPath) + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o700); err != nil { //nolint:gosec // the wrapper must be executable.
+	// Write in a child process so parallel forks of this test process cannot
+	// inherit the writable descriptor and make executing the shim hit ETXTBSY.
+	path := filepath.Join(dir, "git")
+	cmd := newIsolatedGitCommand(t, "bash", "-c", `umask 077; printf '%s' "$2" > "$1"`, "write-git-shim", path, script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("write git shim: %v: %s", err, out)
+	}
+	if err := os.Chmod(path, 0o700); err != nil { //nolint:gosec // the wrapper must be executable.
 		t.Fatal(err)
 	}
 	return dir + string(os.PathListSeparator) + os.Getenv("PATH")

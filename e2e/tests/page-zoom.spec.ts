@@ -1,10 +1,11 @@
 // Browser coverage for native page zoom, dense quota groups, task cards, and account-menu access.
 
 import { ok } from "node:assert/strict";
+import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { UsageResp } from "../../sdk/caic/ts/v1/types.gen";
+import type { TaskListEvent, UsageResp } from "../../sdk/caic/ts/v1/types.gen";
 import { createTaskAPI, expect, test, waitForTaskState } from "../helpers";
 
 test("page zoom keeps quotas, task cards, and the account menu within the viewport", async ({
@@ -38,12 +39,25 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
     viewport: { width: 960, height: 1200 },
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
+  // Other workers create and update tasks on the shared backend. Keep this
+  // layout fixture fixed while native zoom and scrolling are being asserted.
+  const snapshot: TaskListEvent = { kind: "snapshot", snapshot: [task], complete: true };
+  const events = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream", "Access-Control-Allow-Origin": "*" });
+    response.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+  });
   try {
+    await new Promise<void>((resolve) => events.listen(0, "127.0.0.1", resolve));
+    const address = events.address();
+    if (!address || typeof address === "string") throw new Error("Task event fixture did not start");
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const page = context.pages()[0];
     ok(page);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("**/api/caic/v1/tasks/events", (route) =>
+      route.fulfill({ status: 307, headers: { location: `http://127.0.0.1:${address.port}/events` } }),
+    );
     const usage: UsageResp = {
       local: { windows: [] },
       providers: [
@@ -123,5 +137,7 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
     expect(errors).toEqual([]);
   } finally {
     await context.close();
+    events.closeAllConnections();
+    await new Promise<void>((resolve, reject) => events.close((error) => (error ? reject(error) : resolve())));
   }
 });
