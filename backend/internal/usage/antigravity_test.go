@@ -86,12 +86,12 @@ func TestAntigravityFetcher(t *testing.T) {
 		}
 	})
 	t.Run("argon weekly quota", func(t *testing.T) {
-		t.Setenv("CAIC_TEST_AGY_RESPONSE", strings.Replace(agyQuotaResponse, `"id":"gemini-weekly"`, `"id":"gemini-argon-wty-weekly"`, 1))
+		t.Setenv("CAIC_TEST_AGY_RESPONSE", strings.Replace(agyQuotaResponse, `"id":"gemini-weekly"`, `"id":"gemini-argon-wtu-weekly"`, 1))
 		q := NewAntigravityFetcher().Get(t.Context())
 		if q == nil || len(q.RateLimits) != 4 {
 			t.Fatalf("quota = %#v", q)
 		}
-		if got := q.RateLimits[1]; got.Window != "gemini-argon-wty-weekly" || got.Label != "argon-7d" {
+		if got := q.RateLimits[1]; got.Window != "gemini-argon-wtu-weekly" || got.Label != "argon-7d" {
 			t.Errorf("argon bucket = %#v", got)
 		}
 	})
