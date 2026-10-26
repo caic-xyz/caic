@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/taskslog"
 	"github.com/maruel/ksid"
@@ -78,6 +79,33 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 func TestTaskService(t *testing.T) {
 	t.Parallel()
+	t.Run("focusTask/userIsolation", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t, nil)
+		svc := testTaskHandlers(s).taskSvc
+		ctx := auth.NewContext(t.Context(), &auth.User{ID: "owner"})
+		ch, cancel := svc.subscribeTaskFocus(ctx)
+		t.Cleanup(cancel)
+		other, cancelOther := svc.subscribeTaskFocus(t.Context())
+		t.Cleanup(cancelOther)
+		id := ksid.NewID()
+		svc.focusTask(ctx, ksid.NewID())
+		svc.focusTask(ctx, id)
+		if got := <-ch; got != id.String() {
+			t.Fatalf("focus = %q, want latest %q", got, id)
+		}
+		svc.focusTask(newMCPPrincipalContext(ctx, &mcpPrincipal{TaskID: id}), id)
+		select {
+		case got := <-ch:
+			t.Fatalf("background task changed focus to %q", got)
+		default:
+		}
+		select {
+		case got := <-other:
+			t.Fatalf("other user's focus changed to %q", got)
+		default:
+		}
+	})
 	t.Run("taskListSnapshot/activeTasksFirst", func(t *testing.T) {
 		t.Parallel()
 

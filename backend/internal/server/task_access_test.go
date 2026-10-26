@@ -160,7 +160,7 @@ func TestTaskAccessTransportMatrix(t *testing.T) {
 		if _, err := registry.subscriptionSources(mcpCtx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{foreignURI}}); err == nil {
 			t.Fatal("subscribe to foreign task resource succeeded")
 		}
-		update := sources.taskUpdate(mcpCtx, registry)
+		update := sources.taskUpdate(mcpCtx, registry.mcpResources)
 		if len(update.ResourceURIs) != 1 || update.ResourceURIs[0] != mineURI {
 			t.Fatalf("subscription update = %+v, want only %s", update, mineURI)
 		}

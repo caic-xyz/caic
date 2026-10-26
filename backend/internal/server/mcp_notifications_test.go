@@ -1,4 +1,4 @@
-// Tests for backend-generated Go Mode notification events.
+// Tests and benchmarks backend-generated Go Mode notification events.
 
 package server
 
@@ -385,5 +385,18 @@ func TestNotificationFeed(t *testing.T) {
 	task.State = v1.TaskStateRunning
 	if got := feed.notifications(t.Context(), []v1.Task{task}, availableUsage); len(got) != 0 {
 		t.Fatalf("resumed task retained recovery: %#v", got)
+	}
+}
+
+func BenchmarkNotificationFeed(b *testing.B) {
+	tasks := make([]v1.Task, 100)
+	for i := range tasks {
+		tasks[i] = v1.Task{ID: ksid.NewID(), Title: "Build feature", State: v1.TaskStateRunning}
+	}
+	feed := newNotificationFeed()
+	feed.notifications(b.Context(), tasks, v1.UsageResp{})
+	b.ResetTimer()
+	for b.Loop() {
+		feed.notifications(b.Context(), tasks, v1.UsageResp{})
 	}
 }

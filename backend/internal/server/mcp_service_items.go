@@ -10,6 +10,9 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
+// serviceItem is a task entry in the host-neutral baseline for native clients.
+// References identify positions in the original task snapshot, independently
+// of the priority order in which items are delivered.
 type serviceItem struct {
 	ID             string `json:"id"`
 	Reference      string `json:"reference,omitempty"`
@@ -18,14 +21,19 @@ type serviceItem struct {
 	NeedsAttention bool   `json:"needsAttention"`
 }
 
+// serviceItemsOutput carries a bounded baseline and guidance for fetching
+// tasks omitted by either the item-count or encoded-byte limit.
 type serviceItemsOutput struct {
 	Items         []serviceItem `json:"items"`
 	MoreItemsHint string        `json:"moreItemsHint"`
 	OmittedCount  int           `json:"omittedCount,omitempty"`
 }
 
+// serviceItems projects tasks with bounded titles and snapshot-based references.
+// The newest ID comes first, followed by other attention-needed tasks, preserving
+// snapshot order within each remaining priority group. A lone task has no reference.
 func serviceItems(tasks []v1.Task) []serviceItem {
-	// The host owns ordering, stable references, and attention priority; see
+	// The service owns ordering, stable references, and attention priority; see
 	// github.com/maruel/gomode/docs/ANDROID_SHELL.md#service-item-voice-context-ownership.
 	// Number tasks only when more than one is visible: a lone task needs no
 	// disambiguating reference in voice context.
@@ -69,6 +77,9 @@ func serviceItems(tasks []v1.Task) []serviceItem {
 	return items
 }
 
+// boundedServiceItems caps the prioritized baseline by item count and encoded
+// JSON bytes, including the paging hint and omitted count in the byte budget.
+// It fails if even the empty response cannot fit maxBytes.
 func boundedServiceItems(tasks []v1.Task, maxBytes int) (serviceItemsOutput, error) {
 	items := serviceItems(tasks)
 	if len(items) > mcpServiceItemMaxCount {
@@ -90,6 +101,8 @@ func boundedServiceItems(tasks []v1.Task, maxBytes int) (serviceItemsOutput, err
 	return outputForItems(fitted), nil
 }
 
+// taskNeedsAttention reports an explicit task error or a state requiring user
+// input, plan approval, or failure recovery.
 func taskNeedsAttention(task *v1.Task) bool {
 	if task.Error != "" {
 		return true

@@ -1,25 +1,247 @@
-// Tests caller-local MCP timestamps, UTC fallback, and isolation from shared snapshots.
+// Tests shared MCP projections, caller-local timestamp isolation, pagination, and bounded output.
 
 package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/harness"
+	"github.com/caic-xyz/caic/backend/internal/repo"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/ksid"
 )
+
+func TestMCPProjection(t *testing.T) {
+	t.Parallel()
+	t.Run("repository pagination survives earlier insertion", func(t *testing.T) {
+		t.Parallel()
+
+		repositories := []string{"b", "c"}
+		first, next, err := paginateMCPRepositories(repositories, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != 1 || first[0] != "b" || next == "" {
+			t.Fatalf("first page = %#v, cursor = %q", first, next)
+		}
+		repositories = []string{"a", "b", "c"}
+		second, next, err := paginateMCPRepositories(repositories, next, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 || second[0] != "c" || next != "" {
+			t.Fatalf("second page = %#v, cursor = %q", second, next)
+		}
+	})
+	t.Run("repository default page size", func(t *testing.T) {
+		t.Parallel()
+
+		paths := make([]string, mcpRepoPageSizeDefault+1)
+		for i := range paths {
+			paths[i] = fmt.Sprintf("repo-%03d", i)
+		}
+		page, next, err := paginateMCPRepositories(paths, "", mcpRepoPageSizeDefault)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) != mcpRepoPageSizeDefault || next == "" {
+			t.Fatalf("page length = %d, cursor = %q, want %d repositories and a cursor", len(page), next, mcpRepoPageSizeDefault)
+		}
+	})
+	t.Run("JSON size limit shortens page without losing cursor position", func(t *testing.T) {
+		t.Parallel()
+
+		paths := []string{"a", "b", "c", "d"}
+		repositories := make([]mcpRepoSummary, len(paths))
+		for i, path := range paths {
+			repositories[i] = mcpRepoSummary{Path: path, RemoteURL: strings.Repeat(path, 40)}
+		}
+		cursorForCount := func(count int) (string, error) { return mcpKeyCursor(paths[count-1]), nil }
+		outputForPage := func(page []mcpRepoSummary, cursor string) any {
+			return mcpRepoListOutput{Repositories: page, NextCursor: cursor}
+		}
+		twoItems, err := json.Marshal(outputForPage(repositories[:2], mcpKeyCursor(paths[1])))
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, next, err := fitMCPJSONPage(repositories, false, len(twoItems), cursorForCount, outputForPage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) != 2 || next != mcpKeyCursor("b") {
+			t.Fatalf("bounded page length = %d, cursor = %q, want two items anchored at b", len(page), next)
+		}
+		remaining, next, err := paginateMCPRepositories(paths, next, mcpRepoPageSizeDefault)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(remaining, []string{"c", "d"}) || next != "" {
+			t.Fatalf("remaining page = %#v, cursor = %q, want c and d", remaining, next)
+		}
+	})
+	t.Run("repository cursor bounds long paths", func(t *testing.T) {
+		t.Parallel()
+
+		paths := []string{strings.Repeat("a", mcpTaskCursorMaxBytes*2), "z"}
+		first, cursor, err := paginateMCPRepositories(paths, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != 1 || len(cursor) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+			t.Fatalf("first page = %#v, cursor length = %d", first, len(cursor))
+		}
+		second, next, err := paginateMCPRepositories(paths, cursor, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 || second[0] != "z" || next != "" {
+			t.Fatalf("second page = %#v, cursor = %q", second, next)
+		}
+	})
+	t.Run("repository cursor rejects removed anchor", func(t *testing.T) {
+		t.Parallel()
+
+		_, cursor, err := paginateMCPRepositories([]string{"a", "b"}, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := paginateMCPRepositories([]string{"b"}, cursor, 1); err == nil {
+			t.Fatal("paginateMCPRepositories() accepted a removed cursor anchor")
+		}
+	})
+	t.Run("repository fields", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		longValue := strings.Repeat("€", maxMCPRepoField)
+		checkout := &repo.Checkout{
+			BaseBranch:       longValue,
+			BaseBranchRemote: longValue,
+			Dir:              t.TempDir(),
+			Repository:       &repo.Repository{Remote: "https://example.com/" + longValue},
+		}
+		registerRouterCheckout(t, s.checkouts, "bounded-repo", checkout)
+		registry := &mcpTools{serverConfig: s.serverHandlers}
+		result := registry.handleReposList(t.Context(), &mcp.ToolRequest[mcpRepoListArgs]{Arguments: mcpRepoListArgs{}})
+		output, ok := result.Structured.(mcpRepoListOutput)
+		if result.IsError || !ok || len(output.Repositories) != 1 {
+			t.Fatalf("handleReposList() result = %#v", result)
+		}
+		repository := output.Repositories[0]
+		if len(repository.BaseBranch.Name) > maxMCPRepoField || len(repository.BaseBranch.Remote) > maxMCPRepoField || len(repository.RemoteURL) > maxMCPRepoField {
+			t.Fatalf("repository fields exceed limit: %#v", repository)
+		}
+		if !output.FieldsTruncated || result.Meta[mcpTruncatedMetaKey] != true {
+			t.Fatalf("truncation output = %#v, metadata = %#v", output, result.Meta)
+		}
+
+		checkout.RelPath = strings.Repeat("x", maxMCPRepoField+1)
+		if _, _, err := repositorySummary(registry.serverConfig, checkout); !errors.Is(err, errMCPRepositoryPathTooLong) {
+			t.Fatalf("repositorySummary() path error = %v", err)
+		}
+	})
+	t.Run("resource pagination survives earlier insertion", func(t *testing.T) {
+		t.Parallel()
+
+		keys := make([]mcpResourceKey, mcpResourcePageSize+1)
+		for i := range keys {
+			keys[i] = mcpResourceKey{URI: fmt.Sprintf("test://resource/%03d/%s", i, strings.Repeat("x", mcpTaskCursorMaxBytes*2))}
+		}
+		first, cursor, err := paginateMCPResourceKeys(keys, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(first) != mcpResourcePageSize || len(cursor) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+			t.Fatalf("first page length = %d, cursor = %q", len(first), cursor)
+		}
+		keys = append([]mcpResourceKey{{URI: "test://resource/-1"}}, keys...)
+		second, next, err := paginateMCPResourceKeys(keys, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second) != 1 || !strings.HasPrefix(second[0].URI, "test://resource/100/") || next != "" {
+			t.Fatalf("second page = %#v, cursor = %q", second, next)
+		}
+	})
+	t.Run("text boundary", func(t *testing.T) {
+		t.Parallel()
+
+		exact := strings.Repeat("a", mcpTextOutputMaxBytes)
+		result := boundedTextToolResult(exact)
+		output, ok := result.Structured.(mcp.TextOutput)
+		if !ok {
+			t.Fatalf("exact boundary result type = %T, want mcp.TextOutput", result.Structured)
+		}
+		if output.Result != exact || result.Meta != nil {
+			t.Fatalf("exact boundary was changed: length = %d, meta = %#v", len(output.Result), result.Meta)
+		}
+
+		overflow := strings.Repeat("a", mcpTextOutputMaxBytes-1) + "€"
+		result = boundedTextToolResult(overflow)
+		output, ok = result.Structured.(mcp.TextOutput)
+		if !ok {
+			t.Fatalf("overflow result type = %T, want mcp.TextOutput", result.Structured)
+		}
+		if len(output.Result) > mcpTextOutputMaxBytes || !strings.Contains(output.Result, "[Output truncated.") {
+			t.Fatalf("overflow result length = %d, value suffix = %q", len(output.Result), output.Result[len(output.Result)-100:])
+		}
+		if got := result.Meta[mcpTruncatedMetaKey]; got != true {
+			t.Fatalf("truncated metadata = %#v, want true", got)
+		}
+		if !utf8.ValidString(output.Result) {
+			t.Fatal("overflow result is not valid UTF-8")
+		}
+	})
+	t.Run("resource overflow", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := boundedResourceJSON("caic://large", strings.Repeat("a", mcpResourceJSONMaxBytes-2)); err != nil {
+			t.Fatalf("boundedResourceJSON() rejected exact boundary: %v", err)
+		}
+		_, err := boundedResourceJSON("caic://large", strings.Repeat("a", mcpResourceJSONMaxBytes))
+		if err == nil || !strings.Contains(err.Error(), "256 KiB") {
+			t.Fatalf("boundedResourceJSON() error = %v", err)
+		}
+	})
+	t.Run("task summary strings", func(t *testing.T) {
+		t.Parallel()
+
+		tk := v1.Task{Title: strings.Repeat("€", maxMCPTaskTitle), RequestedModel: strings.Repeat("m", maxTaskSummaryModel+1)}
+		summary := taskMCPSummary(1, &tk)
+		if len(summary.Title) > maxMCPTaskTitle || len(summary.Model) > maxTaskSummaryModel {
+			t.Fatalf("summary string lengths = title %d, model %d", len(summary.Title), len(summary.Model))
+		}
+		if !utf8.ValidString(summary.Title) || !strings.HasSuffix(summary.Title, "…") || !strings.HasSuffix(summary.Model, "…") {
+			t.Fatalf("summary strings were not visibly UTF-8 truncated: %#v", summary)
+		}
+
+		resolved := taskMCPSummary(1, &v1.Task{
+			RequestedModel:  "requested-model",
+			RequestedEffort: "high",
+			ReportedModel:   "reported-model",
+			ReportedEffort:  "medium",
+		})
+		if resolved.Model != "reported-model" || resolved.Effort != "medium" {
+			t.Fatalf("resolved settings = %q/%q, want reported-model/medium", resolved.Model, resolved.Effort)
+		}
+	})
+}
 
 func TestMCPResourceTimezone(t *testing.T) {
 	t.Parallel()
@@ -182,7 +404,7 @@ func TestMCPNotificationsInLocation(t *testing.T) {
 func TestMCPSystemStatsTimezone(t *testing.T) {
 	t.Parallel()
 	stamp := time.Date(2099, 7, 19, 13, 30, 0, 0, time.UTC)
-	c := &mcpRegistry{
+	c := &mcpTools{
 		serverConfig: &serverHandlers{systemStats: &systemStats{samples: []v1.SystemSample{{Time: stamp, MemUsed: 512}}}},
 		metrics:      metrics.NewStore(metrics.Resource{ServiceName: "caic"}),
 	}

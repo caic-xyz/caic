@@ -284,14 +284,23 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		hostState:   d.HostState,
 	}
 	registry := &mcpRegistry{
-		serverConfig:  s.serverHandlers,
-		taskSvc:       svc,
-		ci:            s.ciHandlers,
-		usage:         s.usageHandlers,
-		notifications: newNotificationFeed(),
-		audit:         audit,
-		metrics:       d.Metrics,
-		skills:        mcpSkills,
+		mcpTools: &mcpTools{
+			serverConfig: s.serverHandlers,
+			taskSvc:      svc,
+			ci:           s.ciHandlers,
+			usage:        s.usageHandlers,
+			audit:        audit,
+			metrics:      d.Metrics,
+		},
+		mcpResources: &mcpResources{
+			serverConfig:  s.serverHandlers,
+			taskSvc:       svc,
+			usage:         s.usageHandlers,
+			notifications: newNotificationFeed(),
+			audit:         audit,
+			skills:        mcpSkills,
+		},
+		prefs: s.serverHandlers.prefs,
 	}
 	if err := registry.validateToolSchemas(); err != nil {
 		return nil, err

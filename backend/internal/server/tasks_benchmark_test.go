@@ -105,7 +105,7 @@ func BenchmarkMCPTaskListPage(b *testing.B) {
 		task := mustNewTask(b, id, agent.Prompt{Text: "benchmark task"}, harness.Claude)
 		insertTestTask(s, id, task)
 	}
-	registry := &mcpRegistry{taskSvc: testTaskHandlers(s).taskSvc}
+	registry := &mcpTools{taskSvc: testTaskHandlers(s).taskSvc}
 	b.ReportAllocs()
 	b.ReportMetric(mcpTaskPageSizeDefault, "tasks/op")
 	b.ResetTimer()
@@ -129,7 +129,7 @@ func BenchmarkMCPRepoListPage(b *testing.B) {
 		registerRouterCheckout(b, s.checkouts, path, &repo.Checkout{BaseBranch: "main", Dir: b.TempDir()})
 		s.repoStatus.SetResultIfChanged(path, "sha", forgecache.Result{Status: forge.CIStatusSuccess, Checks: checks})
 	}
-	registry := &mcpRegistry{serverConfig: s.serverHandlers}
+	registry := &mcpTools{serverConfig: s.serverHandlers}
 	b.ReportAllocs()
 	b.ReportMetric(mcpRepoPageSizeDefault, "repos/op")
 	b.ResetTimer()
