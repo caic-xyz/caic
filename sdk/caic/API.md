@@ -34,6 +34,8 @@ Type notation: `JSONValue` means any valid JSON value.
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | GET | `/auth/me` | Returns the authenticated user's profile. |  | `UserResp` |
+| POST | `/auth/sessions/{sessionID}/revoke` | Revokes an owned host login session. |  | `StatusResp` |
+| GET | `/auth/sessions` | Lists active host login sessions. |  | `SessionsResp` |
 | POST | `/auth/logout` | Invalidates the current session. |  | `StatusResp` |
 
 ## Oauth
@@ -539,6 +541,7 @@ UserResp is returned by GET /auth/me.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `sessionID` | `string` | SessionID is a public identifier, never an authentication credential. | yes |
 | `id` | `string` |  | yes |
 | `provider` | `string` |  | yes |
 | `username` | `string` |  | yes |
@@ -551,6 +554,28 @@ StatusResp is a common response for mutation endpoints.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `status` | `string` |  | yes |
+
+### SessionResp
+
+SessionResp describes an active host login without exposing its credential.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `current` | `boolean` |  | yes |
+| `createdAt` | `ISOTimestamp` |  | yes |
+| `expiresAt` | `ISOTimestamp` |  | yes |
+| `source` | `string` |  | yes |
+| `ip` | `string` |  | yes |
+| `userAgent` | `string` |  | yes |
+
+### SessionsResp
+
+SessionsResp lists the signed-in user's sessions.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sessions` | `SessionResp[]` |  | yes |
 
 ### RepoPrefsResp
 

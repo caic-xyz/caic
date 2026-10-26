@@ -199,6 +199,8 @@ type VoiceGatewayMetadata struct {
 
 // UserResp is returned by GET /auth/me.
 type UserResp struct {
+	// SessionID is a public identifier, never an authentication credential.
+	SessionID string `json:"sessionID"`
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
 	Username  string `json:"username"`
@@ -1595,4 +1597,20 @@ type SystemSample struct {
 type SystemStatsResp struct {
 	Samples []SystemSample `json:"samples"`
 	Error   string         `json:"error,omitempty"`
+}
+
+// SessionResp describes an active host login without exposing its credential.
+type SessionResp struct {
+	ID        string    `json:"id"`
+	Current   bool      `json:"current"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Source    string    `json:"source"`
+	IP        string    `json:"ip"`
+	UserAgent string    `json:"userAgent"`
+}
+
+// SessionsResp lists the signed-in user's sessions.
+type SessionsResp struct {
+	Sessions []SessionResp `json:"sessions"`
 }

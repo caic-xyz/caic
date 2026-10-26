@@ -1,4 +1,4 @@
-// Implements fake container and agent backends for e2e testing without real SSH or containers.
+// Implements fake runtime and optional OAuth provider fixtures for end-to-end browser tests.
 
 //go:build e2e
 
@@ -6,10 +6,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -200,6 +204,53 @@ func serveFake(ctx context.Context, log *slog.Logger, addr string, cfg *server.C
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 	defer ln.Close()
+
+	// Authentication is opt-in for a separate e2e server; ordinary fake tests
+	// intentionally keep their no-auth behavior. This fixture exists only in e2e builds.
+	if os.Getenv("CAIC_E2E_AUTH") == "1" {
+		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/oauth/authorize":
+				target, err := url.Parse(r.URL.Query().Get("redirect_uri"))
+				if err != nil {
+					http.Error(w, "invalid redirect", http.StatusBadRequest)
+					return
+				}
+				q := target.Query()
+				q.Set("state", r.URL.Query().Get("state"))
+				q.Set("code", "fixture-code")
+				if r.URL.Query().Get("fixture_account") == "reviewer" {
+					q.Set("code", "fixture-reviewer")
+				}
+				target.RawQuery = q.Encode()
+				http.Redirect(w, r, target.String(), http.StatusFound)
+			case "/oauth/token":
+				w.Header().Set("Content-Type", "application/json")
+				access := "fixture-access"
+				if r.FormValue("code") == "fixture-reviewer" {
+					access = "fixture-reviewer-access"
+				}
+				_ = json.NewEncoder(w).Encode(map[string]string{"access_token": access, "token_type": "Bearer"})
+			case "/api/v4/user":
+				w.Header().Set("Content-Type", "application/json")
+				id := 42
+				username := "device-approver"
+				if r.Header.Get("Authorization") == "Bearer fixture-reviewer-access" {
+					id = 43
+					username = "device-reviewer"
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "username": username, "avatar_url": ""})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer provider.Close()
+		cfg.Auth.ExternalURL = "http://" + ln.Addr().String()
+		cfg.GitLab.URL = provider.URL
+		cfg.GitLab.OAuthClientID = "fixture-client"
+		cfg.GitLab.OAuthClientSecret = "fixture-secret"
+		cfg.GitLab.OAuthAllowedUsers = []string{"device-approver", "device-reviewer"}
+	}
 
 	srv, err := app.New(ctx, log, rootDir, cfg)
 	if err != nil {

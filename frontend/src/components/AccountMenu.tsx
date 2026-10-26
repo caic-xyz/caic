@@ -1,4 +1,4 @@
-// Navbar account menu: avatar button with a dropdown for settings, monitoring, shortcuts, and sign-out.
+// Navbar account menu: avatar button with a dropdown for settings, sessions, monitoring, shortcuts, and sign-out.
 
 import { createSignal, Show } from "solid-js";
 import { A } from "@solidjs/router";
@@ -49,6 +49,9 @@ export default function AccountMenu(props: { onKeyboardShortcuts: () => void }) 
             Keyboard shortcuts
           </button>
           <Show when={hasAuth() && auth.user()}>
+            <A class={styles.dropdownItem} href="/sessions" role="menuitem" onClick={() => setMenuOpen(false)}>
+              Sessions
+            </A>
             <button
               class={styles.dropdownItem}
               role="menuitem"

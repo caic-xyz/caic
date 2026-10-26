@@ -938,6 +938,8 @@ export interface UpdateResp {
 
 /** UserResp is returned by GET /auth/me. */
 export interface UserResp {
+  /** SessionID is a public identifier, never an authentication credential. */
+  sessionID: string;
   id: string;
   provider: string;
   username: string;
@@ -947,6 +949,22 @@ export interface UserResp {
 /** StatusResp is a common response for mutation endpoints. */
 export interface StatusResp {
   status: string;
+}
+
+/** SessionResp describes an active host login without exposing its credential. */
+export interface SessionResp {
+  id: string;
+  current: boolean;
+  createdAt: ISOTimestamp;
+  expiresAt: ISOTimestamp;
+  source: string;
+  ip: string;
+  userAgent: string;
+}
+
+/** SessionsResp lists the signed-in user's sessions. */
+export interface SessionsResp {
+  sessions: SessionResp[];
 }
 
 /** RepoPrefsResp holds per-repository preferences. */

@@ -1,13 +1,17 @@
-// HTTP handlers for OAuth 2.0 login endpoints and session management.
+// HTTP handlers for OAuth login, session-bound device pairing, and normal session management.
 
 package server
 
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/maruel/gomode/devicelogin"
 	"github.com/maruel/gomode/oauth"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/oauth/oauthserver"
@@ -23,7 +28,6 @@ import (
 const (
 	sessionCookieName = "caic_session"
 	sessionTTL        = 30 * 24 * time.Hour
-	sessionMaxAge     = 30 * 24 * 60 * 60 // 30 days in seconds
 )
 
 type authHandlers struct {
@@ -193,12 +197,10 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Check allowlist.
-		if allowed := h.allowedUsersFor(provider); allowed != nil {
-			if !slices.Contains(allowed, strings.ToLower(username)) {
-				h.log.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
-				writeError(r.Context(), w, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: "user " + username + " is not in the " + provider + " allowlist" + " access denied"})
-				return
-			}
+		if err := h.checkLogin(auth.Provider(provider), username); err != nil {
+			h.log.WarnContext(r.Context(), "login denied", "provider", provider, "username", username)
+			writeError(r.Context(), w, &api.Error{Status: http.StatusForbidden, Code: api.CodeForbidden, Message: err.Error()})
+			return
 		}
 
 		// Upsert user in store.
@@ -218,23 +220,14 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Issue JWT.
-		jwt, err := auth.IssueToken(&u, h.sessionSecret, sessionTTL)
+		jwt, session, err := h.issueSession(r, &u, "provider")
 		if err != nil {
 			h.log.WarnContext(r.Context(), "issue token", "err", err)
 			writeError(r.Context(), w, &api.Error{Status: http.StatusInternalServerError, Code: api.CodeInternalError, Message: "issue token"})
 			return
 		}
 
-		// Set session cookie.
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
-			Name:     sessionCookieName,
-			Value:    jwt,
-			MaxAge:   sessionMaxAge,
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			Secure:   h.useSecureCookies(r),
-			Path:     "/",
-		})
+		h.writeSessionCookie(w, r, jwt, session.ExpiresAt)
 
 		if redirectMode == "app" {
 			http.Redirect(w, r, "caic://auth?token="+url.QueryEscape(jwt), http.StatusFound)
@@ -257,6 +250,7 @@ func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSONResponse(r.Context(), w, &v1.UserResp{
 		ID:        u.ID,
+		SessionID: auth.SessionIDFromContext(r.Context()),
 		Provider:  string(u.Provider),
 		Username:  u.Username,
 		AvatarURL: u.AvatarURL,
@@ -299,6 +293,16 @@ func (h *authHandlers) refreshTokenRefresher() auth.TokenRefresher {
 
 // handleLogout handles POST /auth/logout.
 func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if !h.sessionMutationAllowed(w, r) {
+		return
+	}
+	u, ok := auth.UserFromContext(r.Context())
+	if ok {
+		if err := h.store.RevokeSession(u.ID, auth.SessionIDFromContext(r.Context())); err != nil {
+			writeError(r.Context(), w, &api.Error{Status: 500, Code: api.CodeInternalError, Message: "revoke session"})
+			return
+		}
+	}
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 		Name:     sessionCookieName,
 		Value:    "",
@@ -407,9 +411,102 @@ func (h *authHandlers) routes() http.Handler {
 	m.HandleFunc("GET /auth/google/callback", h.handleCallback("google"))
 	m.HandleFunc("GET /auth/me", h.handleGetMe)
 	m.HandleFunc("POST /auth/logout", h.handleLogout)
+	m.HandleFunc("GET /auth/sessions", h.handleSessions)
+	m.HandleFunc("POST /auth/sessions/{sessionID}/revoke", h.handleRevokeSession)
 	return m
 }
 
 // loginProviders is the fixed dispatch order for login providers: the default
 // provider is the first one configured.
 var loginProviders = []string{"github", "gitlab", "google"}
+
+func (h *authHandlers) checkLogin(provider auth.Provider, username string) error {
+	if h.oauthFor(string(provider)) == nil {
+		return errors.New("login provider unavailable")
+	}
+	if allowed := h.allowedUsersFor(string(provider)); allowed != nil && !slices.Contains(allowed, strings.ToLower(username)) {
+		return fmt.Errorf("user %s is not in the %s allowlist: access denied", username, provider)
+	}
+	return nil
+}
+
+func (h *authHandlers) issueSession(r *http.Request, u *auth.User, source string) (string, auth.Session, error) {
+	if err := h.checkLogin(u.Provider, u.Username); err != nil {
+		return "", auth.Session{}, err
+	}
+	return h.store.IssueToken(u, h.sessionSecret, sessionTTL, h.sessionInfo(r, source))
+}
+
+func (h *authHandlers) writeSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure follows the same trusted host policy as normal OAuth login.
+		Name: sessionCookieName, Value: token, MaxAge: max(1, int(time.Until(expires).Seconds())), Expires: expires, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: h.useSecureCookies(r), Path: "/",
+	})
+}
+
+func (h *authHandlers) sessionInfo(r *http.Request, source string) auth.SessionInfo {
+	ip, _ := netip.ParseAddr(httpLogContextFromRequest(r).clientIP)
+	coarse := "unknown"
+	if ip.IsValid() {
+		bits := 48
+		if ip.Is4() {
+			bits = 24
+		}
+		coarse = netip.PrefixFrom(ip, bits).Masked().String()
+	}
+	return auth.SessionInfo{Source: source, IP: coarse, UserAgent: devicelogin.UserAgent(r.UserAgent())}
+}
+
+// Cookie-authenticated mutations require a non-simple request header and the
+// same origin. The host never grants CORS access to these routes, so a remote
+// page cannot provide this header through a successful browser preflight.
+func (h *authHandlers) sessionMutationAllowed(w http.ResponseWriter, r *http.Request) bool {
+	if expected := r.Header.Get("X-Caic-Session"); expected != "" && expected != auth.SessionIDFromContext(r.Context()) {
+		writeError(r.Context(), w, &api.Error{Status: http.StatusUnauthorized, Code: api.CodeUnauthorized, Message: "session changed"})
+		return false
+	}
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		origin := r.Header.Get("Origin")
+		if r.Header.Get("X-Caic-Csrf") != "1" || (origin != "" && (h.hostState == nil || origin != h.hostState.ExternalURL(r))) {
+			writeError(r.Context(), w, &api.Error{Status: 403, Code: api.CodeForbidden, Message: "same-origin session action required"})
+			return false
+		}
+	}
+	return true
+}
+
+func (h *authHandlers) handleSessions(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeError(r.Context(), w, &api.Error{Status: 401, Code: api.CodeUnauthorized, Message: "sign in required"})
+		return
+	}
+	sessions := []v1.SessionResp{}
+	ownedSessions := h.store.Sessions(u.ID)
+	for i := range ownedSessions {
+		p := &ownedSessions[i]
+		sessions = append(sessions, v1.SessionResp{ID: p.ID, Current: p.ID == auth.SessionIDFromContext(r.Context()), CreatedAt: p.CreatedAt, ExpiresAt: p.ExpiresAt, Source: p.Source, IP: p.IP, UserAgent: p.UserAgent})
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSONResponse(r.Context(), w, &v1.SessionsResp{Sessions: sessions}, nil)
+}
+
+func (h *authHandlers) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeError(r.Context(), w, &api.Error{Status: 401, Code: api.CodeUnauthorized, Message: "sign in required"})
+		return
+	}
+	if !h.sessionMutationAllowed(w, r) {
+		return
+	}
+	if err := h.store.RevokeSession(u.ID, r.PathValue("sessionID")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(r.Context(), w, &api.Error{Status: 404, Code: api.CodeNotFound, Message: "session not found"})
+		} else {
+			writeError(r.Context(), w, &api.Error{Status: 500, Code: api.CodeInternalError, Message: "revoke session"})
+		}
+		return
+	}
+	writeJSONResponse(r.Context(), w, &v1.StatusResp{Status: "ok"}, nil)
+}

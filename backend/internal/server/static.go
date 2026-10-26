@@ -157,6 +157,7 @@ func (s *spaHandler) bootstrapSnippet(r *http.Request) []byte {
 	if u, ok := auth.UserFromContext(r.Context()); ok {
 		data.User = &v1.UserResp{
 			ID:        u.ID,
+			SessionID: auth.SessionIDFromContext(r.Context()),
 			Provider:  string(u.Provider),
 			Username:  u.Username,
 			AvatarURL: u.AvatarURL,

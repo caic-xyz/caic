@@ -33,11 +33,16 @@ function renderAuth() {
 beforeEach(() => {
   window.__CAIC_BOOTSTRAP__ = {
     authProviders: ["github"],
-    user: { id: "a", provider: "github", username: "account-a" },
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
   };
   window.gomodeAuth = { postMessage: vi.fn() };
   vi.spyOn(api, "logout").mockResolvedValue({ status: "ok" });
-  vi.spyOn(api, "getMe").mockResolvedValue({ id: "a", provider: "github", username: "account-a" });
+  vi.spyOn(api, "getMe").mockResolvedValue({
+    id: "a",
+    sessionID: "session-a",
+    provider: "github",
+    username: "account-a",
+  });
 });
 
 afterEach(() => {
@@ -86,6 +91,7 @@ it("keeps native monitoring paused until logout settles", async () => {
   const pendingLogout = Promise.withResolvers<{ status: string }>();
   vi.mocked(api.logout).mockReturnValue(pendingLogout.promise);
   const result = currentAuth().logout();
+  expect(api.logout).toHaveBeenCalledWith("session-a");
   expect(currentAuth().ready()).toBe(false);
   expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
   expect(postMessage).toHaveBeenCalledTimes(2);
@@ -101,7 +107,12 @@ it("restores a confirmed signed-in user after a failed logout", async () => {
   const postMessage = renderAuth();
   await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
   vi.mocked(api.logout).mockRejectedValue(new Error("logout failed"));
-  vi.mocked(api.getMe).mockResolvedValue({ id: "b", provider: "github", username: "account-b" });
+  vi.mocked(api.getMe).mockResolvedValue({
+    id: "b",
+    sessionID: "session-b",
+    provider: "github",
+    username: "account-b",
+  });
 
   await currentAuth().logout();
   expect(currentAuth().ready()).toBe(true);

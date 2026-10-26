@@ -1,4 +1,4 @@
-// Audit event recording for OAuth authorization and MCP tool operations.
+// Audit event recording for OAuth authorization, device login, and MCP tool operations.
 
 package server
 
@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/server/data/audit"
+	"github.com/maruel/gomode/devicelogin"
 )
 
 type auditStore struct {
@@ -131,5 +133,43 @@ func (a *auditStore) persistLocked(e *audit.Event) error {
 		}
 		return err
 	}
+	// Pairing completion requires its audit to reach durable storage before credentials.
+	if e.Operation == "device_login" {
+		return errors.Join(f.Sync(), f.Close())
+	}
 	return f.Close()
+}
+
+func (a *auditStore) recordDeviceLogin(_ context.Context, e *devicelogin.AuditEvent) error {
+	if a.path == "" {
+		return errors.New("device login requires a persistent audit path")
+	}
+	userID, _, ok := strings.Cut(e.Subject, "\x00")
+	if !ok {
+		return errors.New("invalid approving session")
+	}
+	decision := "deny"
+	if e.Approved {
+		decision = "allow"
+	}
+	status := "ok"
+	switch e.Kind {
+	case devicelogin.AuditSessionFailed, devicelogin.AuditResponseFailed, devicelogin.AuditRevocationFailed, devicelogin.AuditSessionCreationUncertain:
+		status = "failed"
+	default:
+	}
+	event := audit.Event{Time: time.Now().UTC(), UserID: userID, Operation: "device_login", Name: string(e.Kind), Decision: decision, Status: status, Args: auditValueSummary(struct {
+		RequestID   string    `json:"requestID"`
+		SessionID   string    `json:"sessionID,omitempty"`
+		IP          string    `json:"ip"`
+		UserAgent   string    `json:"userAgent"`
+		RequestedAt time.Time `json:"requestedAt"`
+	}{e.RequestID, e.SessionID, e.IP, e.UserAgent, e.CreatedAt})}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.persistLocked(&event); err != nil {
+		return err
+	}
+	a.events = append(a.events, event)
+	return nil
 }

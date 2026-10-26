@@ -423,7 +423,7 @@ describe("structured warnings", () => {
 it("destroys account A task and repo state before rendering confirmed account B", async () => {
   window.__CAIC_BOOTSTRAP__ = {
     authProviders: ["github"],
-    user: { id: "a", provider: "github", username: "account-a" },
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
   };
   const accountBRepos = deferred<Repo[]>();
   vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockReturnValueOnce(accountBRepos.promise);
@@ -494,7 +494,7 @@ it("destroys account A task and repo state before rendering confirmed account B"
   expect(voiceSession.state.connected).toBe(false);
   expect(getVoiceTaskNumber("a-task")).toBeUndefined();
 
-  checkedIdentity.resolve({ id: "b", provider: "github", username: "account-b" });
+  checkedIdentity.resolve({ id: "b", sessionID: "session-b", provider: "github", username: "account-b" });
   await waitFor(() => expect(screen.getByTitle("account-b")).toBeInTheDocument());
   expect(screen.getByRole("link", { name: "CPU unavailable, memory unavailable — open System" })).toBeInTheDocument();
   expect(screen.queryByText("Account A task")).not.toBeInTheDocument();
@@ -522,7 +522,7 @@ it("destroys account A task and repo state before rendering confirmed account B"
 it("removes account data when the event stream discovers /auth/me returned 404", async () => {
   window.__CAIC_BOOTSTRAP__ = {
     authProviders: ["github"],
-    user: { id: "a", provider: "github", username: "account-a" },
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
   };
   renderApp();
   await waitFor(() => expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument());
@@ -551,11 +551,16 @@ it("removes account data when the event stream discovers /auth/me returned 404",
 it("ignores an old account's delayed /auth/me probe after switching accounts", async () => {
   window.__CAIC_BOOTSTRAP__ = {
     authProviders: ["github"],
-    user: { id: "a", provider: "github", username: "account-a" },
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
   };
   vi.mocked(api.listRepos).mockResolvedValueOnce([repoA]).mockResolvedValueOnce([repoB]);
   vi.spyOn(api, "logout").mockRejectedValue(new Error("logout response lost"));
-  vi.spyOn(api, "getMe").mockResolvedValue({ id: "b", provider: "github", username: "account-b" });
+  vi.spyOn(api, "getMe").mockResolvedValue({
+    id: "b",
+    sessionID: "session-b",
+    provider: "github",
+    username: "account-b",
+  });
   const oldProbe = Promise.withResolvers<Response>();
 
   renderApp();

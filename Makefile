@@ -136,6 +136,9 @@ test-e2e: frontend-deps generate-sdks playwright-browser
 	if [ $$status -ne 0 ]; then \
 	  echo ""; echo "=== Fake server log (test-results/e2e-server.log), last 100 lines: ==="; \
 	  tail -n 100 test-results/e2e-server.log 2>/dev/null; \
+	  auth_port=$${CAIC_E2E_AUTH_PORT:-$$(( $${CAIC_E2E_PORT:-8090} + 1 ))}; \
+	  echo "=== Auth server log (test-results/e2e-auth-server-$$auth_port.log), last 100 lines: ==="; \
+	  tail -n 100 "test-results/e2e-auth-server-$$auth_port.log" 2>/dev/null; \
 	fi; \
 	exit $$status
 

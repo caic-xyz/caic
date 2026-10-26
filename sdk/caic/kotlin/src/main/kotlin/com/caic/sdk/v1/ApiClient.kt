@@ -95,6 +95,10 @@ class ApiClient(
     suspend fun triggerUpdate(): UpdateResp = request("POST", "/api/caic/v1/server/update")
     /** Returns the authenticated user's profile. */
     suspend fun getMe(): UserResp = request("GET", "/auth/me")
+    /** Revokes an owned host login session. */
+    suspend fun revokeSession(sessionID: String): StatusResp = request("POST", "/auth/sessions/$sessionID/revoke")
+    /** Lists active host login sessions. */
+    suspend fun listSessions(): SessionsResp = request("GET", "/auth/sessions")
     /** Invalidates the current session. */
     suspend fun logout(): StatusResp = request("POST", "/auth/logout")
     /** Returns server and per-repository preferences. */

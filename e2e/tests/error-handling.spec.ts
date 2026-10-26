@@ -14,7 +14,12 @@ test("runtime restoration warning shows the exact count and can be dismissed", a
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/auth/me", (route) =>
     route.fulfill({
-      json: { id: "restore-test", provider: "github", username: "restore-test" } satisfies UserResp,
+      json: {
+        id: "restore-test",
+        sessionID: "fixture-session",
+        provider: "github",
+        username: "restore-test",
+      } satisfies UserResp,
     }),
   );
   await page.route("**/api/caic/v1/tasks/events", (route) =>
@@ -57,7 +62,12 @@ test("categorized CI alerts stay quiet on replay and expose details on mobile", 
   // Keep the session probe valid so finite SSE fixtures exercise reconnects.
   await page.route("**/auth/me", (route) =>
     route.fulfill({
-      json: { id: "warning-test", provider: "github", username: "warning-test" } satisfies UserResp,
+      json: {
+        id: "warning-test",
+        sessionID: "fixture-session",
+        provider: "github",
+        username: "warning-test",
+      } satisfies UserResp,
     }),
   );
   await page.route("**/api/caic/v1/tasks/events", async (route) => {

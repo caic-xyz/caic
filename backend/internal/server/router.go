@@ -33,6 +33,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usagedb"
 	"github.com/caic-xyz/caic/metrics"
 	"github.com/maruel/gomode"
+	"github.com/maruel/gomode/devicelogin"
 	"github.com/maruel/gomode/mcp"
 	"github.com/maruel/gomode/oauth/oauthclient"
 	"github.com/maruel/gomode/oauth/oauthserver"
@@ -53,6 +54,7 @@ type Router struct {
 
 	// Route handler concerns.
 	authHandlers     *authHandlers
+	deviceLogin      *devicelogin.Server
 	ciHandlers       *ciHandlers
 	runtimeProcesses *runtimeProcessHandlers
 	goModeHandler    http.Handler
@@ -247,6 +249,7 @@ func New(ctx context.Context, log *slog.Logger, d Dependencies) (*Router, error)
 		ipgeoChecker:     d.IPGeoChecker,
 		trustedProxies:   slices.Clone(d.TrustedProxies),
 	}
+	s.deviceLogin = devicelogin.New(&deviceLoginHost{auth: s.authHandlers, audit: audit})
 	svc.log = s.log.With("handler", "tasks")
 
 	// OAuth server — only when auth and an immutable issuer are configured.
@@ -435,6 +438,10 @@ func (r *Router) buildHandler() (http.Handler, error) {
 	// handleGetMe and handleLogout check the session internally and return 404
 	// when unauthenticated.
 	mountPrefix(mux, "", "/auth", r.authHandlers.routes())
+	mux.HandleFunc("POST /auth/device/start", r.deviceLogin.Start)
+	mux.HandleFunc("POST /auth/device/poll", r.deviceLogin.Poll)
+	mux.HandleFunc("POST /auth/device/lookup", r.deviceLogin.Lookup)
+	mux.HandleFunc("POST /auth/device/approve", r.deviceLogin.Approve)
 
 	// OAuth routes only when auth is configured.
 	if r.oauthServer != nil {

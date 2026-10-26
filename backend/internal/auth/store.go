@@ -1,12 +1,16 @@
-// User store: reads and writes ~/.config/caic/users.json with atomic rename.
+// User and session store persists identities and individually revocable login sessions with atomic rename.
 
 package auth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -25,9 +29,10 @@ type usersFile struct {
 // Store manages the users.json file with in-memory caching.
 // All methods are safe for concurrent use.
 type Store struct {
-	mu   sync.Mutex
-	path string
-	file usersFile
+	mu       sync.Mutex
+	path     string
+	file     usersFile
+	sessions []Session
 }
 
 // Open reads or creates users.json at path.
@@ -36,7 +41,11 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{path: path, file: *f}, nil
+	sessions, err := loadSessions(path + ".sessions")
+	if err != nil {
+		return nil, err
+	}
+	return &Store{path: path, file: *f, sessions: sessions}, nil
 }
 
 // UpsertUser creates or updates a user matched by (Provider, ProviderID).
@@ -130,6 +139,100 @@ func (s *Store) FindByID(id string) (User, bool) {
 		}
 	}
 	return User{}, false
+}
+
+// IssueToken creates and persists a session before returning its signed credential and session metadata.
+func (s *Store) IssueToken(u *User, secret []byte, ttl time.Duration, info SessionInfo) (string, Session, error) {
+	now := time.Now().UTC()
+	id := "ses_" + ksid.NewID().String()
+	payload := jwtPayload{
+		SessionID: id,
+		UserID:    u.ID,
+		Provider:  string(u.Provider),
+		Username:  u.Username,
+		IssuedAt:  now.Unix(),
+		Expiry:    now.Add(ttl).Unix(),
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", Session{}, fmt.Errorf("marshal jwt payload: %w", err)
+	}
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sigInput := jwtHeader + "." + encodedPayload
+	sig := hmacSHA256(secret, sigInput)
+	token := sigInput + "." + sig
+	session := Session{ID: id, UserID: u.ID, CreatedAt: now, ExpiresAt: time.Unix(payload.Expiry, 0).UTC(), Source: info.Source, IP: info.IP, UserAgent: info.UserAgent, TokenHash: sha256.Sum256([]byte(token))}
+	if err := s.addSession(&session); err != nil {
+		return "", Session{}, err
+	}
+	return token, session, nil
+}
+
+// Sessions lists the user's unexpired sessions, newest first.
+func (s *Store) Sessions(userID string) []Session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []Session{}
+	now := time.Now()
+	for i := range s.sessions {
+		p := &s.sessions[i]
+		if p.UserID == userID && now.Before(p.ExpiresAt) {
+			out = append(out, *p)
+		}
+	}
+	slices.SortFunc(out, func(a, b Session) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	return out
+}
+
+// RevokeSession removes one owned session, persisting before returning success.
+func (s *Store) RevokeSession(userID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := slices.Clone(s.sessions)
+	for i := range next {
+		if next[i].ID == id && next[i].UserID == userID {
+			next = slices.Delete(next, i, i+1)
+			if err := saveSessions(s.path+".sessions", next); err != nil {
+				return err
+			}
+			s.sessions = next
+			return nil
+		}
+	}
+	return os.ErrNotExist
+}
+
+func (s *Store) addSession(p *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !slices.ContainsFunc(s.file.Users, func(u User) bool { return u.ID == p.UserID }) {
+		return errors.New("session user not found")
+	}
+	next := make([]Session, 0, len(s.sessions)+1)
+	for i := range s.sessions {
+		if time.Now().Before(s.sessions[i].ExpiresAt) {
+			next = append(next, s.sessions[i])
+		}
+	}
+	next = append(next, *p)
+	if err := saveSessions(s.path+".sessions", next); err != nil {
+		return err
+	}
+	s.sessions = next
+	return nil
+}
+
+func (s *Store) validateSession(c *claims, token string) (Session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	hash := sha256.Sum256([]byte(token))
+	for i := range s.sessions {
+		p := &s.sessions[i]
+		if p.ID == c.SessionID && p.UserID == c.UserID && time.Now().Before(p.ExpiresAt) && p.ExpiresAt.Unix() == c.Expiry.Unix() && hmac.Equal(p.TokenHash[:], hash[:]) {
+			return *p, true
+		}
+	}
+	return Session{}, false
 }
 
 func loadUsersFile(path string) (*usersFile, error) {

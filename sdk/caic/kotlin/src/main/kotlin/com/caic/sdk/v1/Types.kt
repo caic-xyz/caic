@@ -1290,6 +1290,8 @@ data class UpdateResp(
 /** UserResp is returned by GET /auth/me. */
 @Serializable
 data class UserResp(
+    /** SessionID is a public identifier, never an authentication credential. */
+    @SerialName("sessionID") val sessionID: String,
     val id: String,
     val provider: String,
     val username: String,
@@ -1299,6 +1301,22 @@ data class UserResp(
 /** StatusResp is a common response for mutation endpoints. */
 @Serializable
 data class StatusResp(val status: String)
+
+/** SessionResp describes an active host login without exposing its credential. */
+@Serializable
+data class SessionResp(
+    val id: String,
+    val current: Boolean,
+    val createdAt: Instant,
+    val expiresAt: Instant,
+    val source: String,
+    val ip: String,
+    val userAgent: String,
+)
+
+/** SessionsResp lists the signed-in user's sessions. */
+@Serializable
+data class SessionsResp(val sessions: List<SessionResp>)
 
 /** RepoPrefsResp holds per-repository preferences. */
 @Serializable

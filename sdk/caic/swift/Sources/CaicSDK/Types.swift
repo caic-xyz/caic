@@ -740,6 +740,8 @@ public struct UpdateResp: Codable {
 
 /// UserResp is returned by GET /auth/me.
 public struct UserResp: Codable {
+    /// SessionID is a public identifier, never an authentication credential.
+    public let sessionID: String
     public let id: String
     public let provider: String
     public let username: String
@@ -749,6 +751,22 @@ public struct UserResp: Codable {
 /// StatusResp is a common response for mutation endpoints.
 public struct StatusResp: Codable {
     public let status: String
+}
+
+/// SessionResp describes an active host login without exposing its credential.
+public struct SessionResp: Codable {
+    public let id: String
+    public let current: Bool
+    public let createdAt: ISOTimestamp
+    public let expiresAt: ISOTimestamp
+    public let source: String
+    public let ip: String
+    public let userAgent: String
+}
+
+/// SessionsResp lists the signed-in user's sessions.
+public struct SessionsResp: Codable {
+    public let sessions: [SessionResp]
 }
 
 /// RepoPrefsResp holds per-repository preferences.

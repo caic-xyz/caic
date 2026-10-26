@@ -2892,7 +2892,7 @@ func TestVoiceRoutesByMode(t *testing.T) {
 	}
 	sessionCookie := func(t *testing.T, s *testRouter, user *auth.User) *http.Cookie {
 		t.Helper()
-		jwt, err := auth.IssueToken(user, s.sessionSecret, time.Hour)
+		jwt, _, err := s.authStore.IssueToken(user, s.sessionSecret, time.Hour, auth.SessionInfo{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3017,7 +3017,7 @@ func TestExternalVoiceToken(t *testing.T) {
 
 	t.Run("issues scoped token", func(t *testing.T) {
 		t.Parallel()
-		jwt, err := auth.IssueToken(&user, s.sessionSecret, time.Hour)
+		jwt, _, err := s.authStore.IssueToken(&user, s.sessionSecret, time.Hour, auth.SessionInfo{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3200,8 +3200,8 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP accepts caic bearer token", func(t *testing.T) {
 		t.Parallel()
-		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
-		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{}`)))
 		req.Host = "caic.example.com"
@@ -3225,8 +3225,8 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP bearer scopes filter native and released tool lists", func(t *testing.T) {
 		t.Parallel()
-		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
-		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 
 		for _, native := range []bool{false, true} {
 			name := "released"
@@ -3264,8 +3264,8 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP bearer scopes filter native and released resource lists", func(t *testing.T) {
 		t.Parallel()
-		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
-		tokenResp := authorizeMCPClientWithScopes(t, h, &user, &registered, "https://claude.ai/api/mcp/auth_callback", []string{mcpScopeTasksCreate})
+		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClientWithScopes(t, s.authStore, h, &user, &registered, "https://claude.ai/api/mcp/auth_callback", []string{mcpScopeTasksCreate})
 
 		for _, native := range []bool{false, true} {
 			name := "released"
@@ -3321,7 +3321,7 @@ func TestBuildHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
-		sessionJWT, err := auth.IssueToken(&user, secret, sessionTTL)
+		sessionJWT, _, err := store.IssueToken(&user, secret, sessionTTL, auth.SessionInfo{})
 		if err != nil {
 			t.Fatalf("issue session token: %v", err)
 		}
@@ -3340,8 +3340,8 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("MCP rejects invalid origin before handler", func(t *testing.T) {
 		t.Parallel()
-		_, h, user, registered := newMCPOAuthLifecycleRouter(t)
-		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+		tokenResp := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader("not-json"))
 		req.Host = "caic.example.com"
@@ -3371,7 +3371,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Run("MCP scope denial includes auth metadata and audit", func(t *testing.T) {
 		t.Parallel()
 		s, h, user, registered := newMCPOAuthLifecycleRouter(t)
-		tokenResp := authorizeMCPClient(t, h, &user, &registered)
+		tokenResp := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/call", `"name":"task_create","arguments":{"prompt":"OPENAI_API_KEY=sk-secret","repos":["repo"]}`)))
 		req.Host = "caic.example.com"

@@ -34,6 +34,17 @@ const serverPort = process.env.CAIC_E2E_PORT ?? "8090";
 if (!/^\d+$/.test(serverPort)) {
   throw new Error(`CAIC_E2E_PORT must be a decimal port, got ${serverPort}`);
 }
+const authServerPort = process.env.CAIC_E2E_AUTH_PORT ?? String(Number(serverPort) + 1);
+if (
+  !/^\d+$/.test(authServerPort) ||
+  Number(authServerPort) < 1 ||
+  Number(authServerPort) > 65535 ||
+  Number(authServerPort) === Number(serverPort)
+) {
+  throw new Error("CAIC_E2E_AUTH_PORT must be a separate valid port");
+}
+const authServerURL = `http://${serverHost}:${authServerPort}`;
+process.env.CAIC_E2E_AUTH_URL = authServerURL;
 const prebuiltBinary = process.env.CAIC_E2E_BINARY;
 if (prebuiltBinary && !/^\/[a-zA-Z0-9_./-]+$/.test(prebuiltBinary)) {
   throw new Error("CAIC_E2E_BINARY must be an absolute path without shell metacharacters");
@@ -55,15 +66,27 @@ export default defineConfig({
   outputDir: process.env.CAIC_E2E_OUTPUT_DIR,
   // The dot reporter keeps progress to one line; failures still print in full at the end.
   reporter: "dot",
-  webServer: {
-    // Both streams go to the log file instead of the terminal: the fake server is
-    // chatty and the dot reporter keeps the run to one line. The test-e2e make
-    // target prints the log tail when the suite fails.
-    command: `mkdir -p ../test-results && uv run --locked python ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake${binaryOption} > ../test-results/${serverLog} 2>&1`,
-    url: `${serverURL}/api/caic/v1/server/config`,
-    reuseExistingServer: false,
-    timeout: 30_000,
-  },
+  webServer: [
+    {
+      // Both streams go to the log file instead of the terminal: the fake server is
+      // chatty and the dot reporter keeps the run to one line. The test-e2e make
+      // target prints the log tail when the suite fails.
+      command: `mkdir -p ../test-results && uv run --locked python ../scripts/run-dev.py --http ${serverHost}:${serverPort} --fake${binaryOption} > ../test-results/${serverLog} 2>&1`,
+      url: `${serverURL}/api/caic/v1/server/config`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    ...(includeVisuals
+      ? []
+      : [
+          {
+            command: `CAIC_E2E_AUTH=1 uv run --locked python ../scripts/run-dev.py --http ${serverHost}:${authServerPort} --fake${binaryOption} > ../test-results/e2e-auth-server-${authServerPort}.log 2>&1`,
+            url: `${authServerURL}/server-info/config`,
+            reuseExistingServer: false,
+            timeout: 30_000,
+          },
+        ]),
+  ],
   use: {
     baseURL: serverURL,
     colorScheme: "light",

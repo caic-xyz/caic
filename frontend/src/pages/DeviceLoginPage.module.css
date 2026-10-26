@@ -1,0 +1,28 @@
+/* Host tokens and responsive page spacing for shared device pairing views. */
+.page {
+  --device-login-color: var(--color-text-primary);
+  --device-login-background: var(--color-bg-surface);
+  --device-login-button-color: var(--color-text-primary);
+  --device-login-input-color: var(--color-text-primary);
+  --device-login-input-background: var(--color-bg-input);
+  --device-login-button-background: var(--color-bg-input);
+  --device-login-border: var(--color-border);
+  --device-login-focus: var(--color-primary);
+  --device-login-radius: var(--radius-md);
+
+  max-width: 44rem;
+  padding: 1rem;
+  margin: 2rem auto;
+  container-type: inline-size;
+  font-family: system-ui;
+}
+
+.accountButton {
+  min-height: 3rem;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}

@@ -1,4 +1,4 @@
-// Singleton API client for the caic web UI.
+// Browser API clients attach CSRF protection and bind logout to its originating session.
 
 import { createApiClient, type TaskEventsHandlers } from "@sdk/api.gen";
 import { validateEventMessage, validateTaskEventBackward, validateTaskHistoryStreamError } from "@sdk/validate.gen";
@@ -33,8 +33,20 @@ function taskEventStreamWithQuery(id: string, query: URLSearchParams, handlers: 
   return source;
 }
 
+const csrfFetch: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set("X-Caic-CSRF", "1");
+  return fetch(input, { ...init, headers });
+};
+
 export const api = {
-  ...createApiClient(),
+  ...createApiClient(csrfFetch),
+  logout: (sessionID: string) =>
+    createApiClient((input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("X-Caic-Session", sessionID);
+      return csrfFetch(input, { ...init, headers });
+    }).logout(),
   taskEventBackfill: (id: string, handlers: TaskEventsHandlers) =>
     taskEventStreamWithQuery(id, new URLSearchParams({ backward: "1" }), handlers),
   // EventSource cannot set Last-Event-ID initially. Bootstrap through the URL;

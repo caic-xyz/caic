@@ -1,4 +1,4 @@
-// HTTP middleware for JWT session validation and user context injection.
+// HTTP middleware authenticates tracked cookie and bearer sessions and injects their validated identity and session.
 
 package auth
 
@@ -11,6 +11,7 @@ import (
 )
 
 type contextKey struct{}
+type sessionContextKey struct{}
 
 // TokenRefresher is called after loading a user whose access token has expired
 // but still holds a refresh token. On success it returns an updated *User; on
@@ -33,15 +34,19 @@ func Middleware(store *Store, secret []byte, refresh TokenRefresher) func(http.H
 			token := tokenFromRequest(r)
 			if token != "" {
 				if claims, err := validateToken(token, secret); err == nil {
-					if user, ok := store.FindByID(claims.UserID); ok {
-						// Refresh expired tokens before they are used.
-						tok := oauth.Token{RefreshToken: user.RefreshToken, Expiry: user.TokenExpiry}
-						if refresh != nil && tok.Expired() && tok.RefreshToken != "" {
-							if updated := refresh(r.Context(), &user); updated != nil {
-								user = *updated
+					if session, valid := store.validateSession(claims, token); valid {
+						if user, ok := store.FindByID(claims.UserID); ok {
+							// Refresh expired tokens before they are used.
+							tok := oauth.Token{RefreshToken: user.RefreshToken, Expiry: user.TokenExpiry}
+							if refresh != nil && tok.Expired() && tok.RefreshToken != "" {
+								if updated := refresh(r.Context(), &user); updated != nil {
+									user = *updated
+								}
 							}
+							ctx := context.WithValue(r.Context(), contextKey{}, &user)
+							ctx = context.WithValue(ctx, sessionContextKey{}, session)
+							r = r.WithContext(ctx)
 						}
-						r = r.WithContext(context.WithValue(r.Context(), contextKey{}, &user))
 					}
 				}
 			}
@@ -85,4 +90,10 @@ func tokenFromRequest(r *http.Request) string {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
 	return ""
+}
+
+// SessionIDFromContext identifies the tracked host session authenticated by Middleware.
+func SessionIDFromContext(ctx context.Context) string {
+	session, _ := ctx.Value(sessionContextKey{}).(Session)
+	return session.ID
 }

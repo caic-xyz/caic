@@ -1,6 +1,6 @@
-// LoginPage shows OAuth provider buttons when auth is enabled and user is not logged in.
+// LoginPage offers provider login and device pairing, preserving approval return paths.
 
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 
 import { useAuth } from "../AuthContext";
 import GitHubIcon from "../components/github.svg?solid";
@@ -21,7 +21,7 @@ function providerLabel(provider: string): string {
   return `Sign in with ${provider}`;
 }
 
-export default function LoginPage() {
+export default function LoginPage(props: { next?: string }) {
   const { providers } = useAuth();
 
   return (
@@ -32,12 +32,21 @@ export default function LoginPage() {
         <div class="login-buttons">
           <For each={providers()}>
             {(provider) => (
-              <a href={`/auth/${provider}/start`} rel="external" class="login-button">
+              <a
+                href={`/auth/${provider}/start${props.next ? `?next=${encodeURIComponent(props.next)}` : ""}`}
+                rel="external"
+                class="login-button"
+              >
                 {providerIcon(provider)}
                 {providerLabel(provider)}
               </a>
             )}
           </For>
+          <Show when={!props.next}>
+            <a href="/device-login" rel="external" class="login-button">
+              Sign in with another device
+            </a>
+          </Show>
         </div>
       </div>
     </div>

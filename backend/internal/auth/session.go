@@ -1,4 +1,4 @@
-// JWT session management: issue and validate HS256 tokens using stdlib only.
+// JWT claims and validation bind host credentials to persistent, individually revocable sessions.
 
 // Package auth manages caic user sessions and OAuth login identity.
 package auth
@@ -22,37 +22,18 @@ var jwtHeader = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ
 
 // jwtPayload is the JSON structure for the JWT payload.
 type jwtPayload struct {
-	UserID   string `json:"uid"`
-	Provider string `json:"prv"`
-	Username string `json:"usr"`
-	IssuedAt int64  `json:"iat"`
-	Expiry   int64  `json:"exp"`
-}
-
-// IssueToken creates a signed JWT for the user. ttl is typically 30 days.
-func IssueToken(u *User, secret []byte, ttl time.Duration) (string, error) {
-	now := time.Now()
-	payload := jwtPayload{
-		UserID:   u.ID,
-		Provider: string(u.Provider),
-		Username: u.Username,
-		IssuedAt: now.Unix(),
-		Expiry:   now.Add(ttl).Unix(),
-	}
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal jwt payload: %w", err)
-	}
-	encodedPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
-	sigInput := jwtHeader + "." + encodedPayload
-	sig := hmacSHA256(secret, sigInput)
-	return sigInput + "." + sig, nil
+	SessionID string `json:"sid"`
+	UserID    string `json:"uid"`
+	Provider  string `json:"prv"`
+	Username  string `json:"usr"`
+	IssuedAt  int64  `json:"iat"`
+	Expiry    int64  `json:"exp"`
 }
 
 // validateToken parses and verifies a JWT. Returns Claims or an error.
 func validateToken(token string, secret []byte) (*claims, error) {
 	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
+	if len(parts) != 3 || parts[0] != jwtHeader {
 		return nil, errors.New("invalid jwt format")
 	}
 	sigInput := parts[0] + "." + parts[1]
@@ -68,15 +49,16 @@ func validateToken(token string, secret []byte) (*claims, error) {
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 		return nil, fmt.Errorf("parse jwt payload: %w", err)
 	}
-	if time.Now().Unix() > payload.Expiry {
+	if payload.SessionID == "" || payload.UserID == "" || payload.IssuedAt <= 0 || payload.Expiry <= payload.IssuedAt || time.Now().Unix() >= payload.Expiry {
 		return nil, errors.New("jwt expired")
 	}
 	return &claims{
-		UserID:   payload.UserID,
-		Provider: Provider(payload.Provider),
-		Username: payload.Username,
-		IssuedAt: time.Unix(payload.IssuedAt, 0),
-		Expiry:   time.Unix(payload.Expiry, 0),
+		SessionID: payload.SessionID,
+		UserID:    payload.UserID,
+		Provider:  Provider(payload.Provider),
+		Username:  payload.Username,
+		IssuedAt:  time.Unix(payload.IssuedAt, 0),
+		Expiry:    time.Unix(payload.Expiry, 0),
 	}, nil
 }
 
@@ -102,9 +84,10 @@ type User struct {
 
 // claims are the fields embedded in the JWT payload.
 type claims struct {
-	UserID   string
-	Provider Provider
-	Username string
-	IssuedAt time.Time
-	Expiry   time.Time
+	SessionID string
+	UserID    string
+	Provider  Provider
+	Username  string
+	IssuedAt  time.Time
+	Expiry    time.Time
 }

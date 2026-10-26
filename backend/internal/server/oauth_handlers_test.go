@@ -88,14 +88,14 @@ func TestOAuthServer(t *testing.T) {
 		t.Run("refresh token and grant list survive server restart", func(t *testing.T) {
 			t.Parallel()
 			s, _, user, registered := newMCPOAuthLifecycleRouter(t)
-			tokenResp := authorizeMCPClient(t, mustBuildMCPOAuthLifecycleHandler(t, s), &user, &registered)
+			tokenResp := authorizeMCPClient(t, s.authStore, mustBuildMCPOAuthLifecycleHandler(t, s), &user, &registered)
 			s.oauthServer.Close()
 
 			restarted := newTestRouterWithAuthHost(t, s.authStore, s.oauthRefreshTokenPath, auth.NewHostState("https://caic.example.com", nil))
 			restarted.sessionSecret = []byte("0123456789abcdef0123456789abcdef")
 			h := mustBuildMCPOAuthLifecycleHandler(t, restarted)
 
-			grants := listOAuthGrants(t, h, &user)
+			grants := listOAuthGrants(t, s.authStore, h, &user)
 			if len(grants.Grants) != 1 || grants.Grants[0].ClientName != "Claude" || grants.Grants[0].ClientID != registered.ClientID {
 				t.Fatalf("grants after restart = %+v", grants.Grants)
 			}
@@ -108,9 +108,9 @@ func TestOAuthServer(t *testing.T) {
 		t.Run("approval refresh and revocation are audited", func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "mcp_audit.jsonl")
-			_, h, user, registered := newMCPOAuthLifecycleRouter(t, path)
+			s, h, user, registered := newMCPOAuthLifecycleRouter(t, path)
 
-			tokenResp := authorizeMCPClient(t, h, &user, &registered)
+			tokenResp := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 			rotated := refreshMCPToken(t, h, registered.ClientID, tokenResp.RefreshToken, http.StatusOK)
 			form := url.Values{
 				"client_id":       {registered.ClientID},
@@ -153,9 +153,9 @@ func TestOAuthServer(t *testing.T) {
 		t.Run("grant list shows authenticated user client details", func(t *testing.T) {
 			t.Parallel()
 			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
-			authorizeMCPClient(t, h, &user, &registered)
+			authorizeMCPClient(t, s.authStore, h, &user, &registered)
 
-			grants := listOAuthGrants(t, h, &user)
+			grants := listOAuthGrants(t, s.authStore, h, &user)
 			if len(grants.Grants) != 1 {
 				t.Fatalf("grants = %+v, want one", grants.Grants)
 			}
@@ -177,7 +177,7 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
-			bobGrants := listOAuthGrants(t, h, &bob)
+			bobGrants := listOAuthGrants(t, s.authStore, h, &bob)
 			if len(bobGrants.Grants) != 0 {
 				t.Fatalf("bob grants = %+v, want none", bobGrants.Grants)
 			}
@@ -186,11 +186,11 @@ func TestOAuthServer(t *testing.T) {
 		t.Run("user grant revocation blocks only that grant refresh", func(t *testing.T) {
 			t.Parallel()
 			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
-			first := authorizeMCPClient(t, h, &user, &registered)
+			first := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 			secondClient := registerTestClient(t, h, "Codex", []string{"https://codex.example.com/auth/callback"})
-			second := authorizeMCPClientWithRedirect(t, h, &user, &secondClient, "https://codex.example.com/auth/callback")
+			second := authorizeMCPClientWithRedirect(t, s.authStore, h, &user, &secondClient, "https://codex.example.com/auth/callback")
 
-			grants := listOAuthGrants(t, h, &user)
+			grants := listOAuthGrants(t, s.authStore, h, &user)
 			if len(grants.Grants) != 2 {
 				t.Fatalf("grants = %+v, want two", grants.Grants)
 			}
@@ -207,10 +207,10 @@ func TestOAuthServer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("upsert bob: %v", err)
 			}
-			revokeOAuthGrant(t, h, &bob, firstGrantID, http.StatusNotFound, api.CodeOAuthGrantNotFound)
+			revokeOAuthGrant(t, s.authStore, h, &bob, firstGrantID, http.StatusNotFound, api.CodeOAuthGrantNotFound)
 			first = refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusOK)
 
-			revokeOAuthGrant(t, h, &user, firstGrantID, http.StatusOK, "")
+			revokeOAuthGrant(t, s.authStore, h, &user, firstGrantID, http.StatusOK, "")
 			refreshMCPToken(t, h, registered.ClientID, first.RefreshToken, http.StatusBadRequest)
 			refreshMCPToken(t, h, secondClient.ClientID, second.RefreshToken, http.StatusOK)
 		})
@@ -240,7 +240,7 @@ func TestOAuthServer(t *testing.T) {
 				"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
 				"scope":                 {mcpAuthDefaultScope + " " + mcpScopeServerAdmin},
 			}
-			jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+			jwt, _, err := s2.authStore.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL, auth.SessionInfo{})
 			if err != nil {
 				t.Fatalf("issue token: %v", err)
 			}
@@ -376,7 +376,7 @@ func TestOAuthServer(t *testing.T) {
 				"resource":              {"https://caic.example.com/api/caic/v1/mcp"},
 				"scope":                 {"caic:mcp.read"},
 			}
-			jwt, err := auth.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+			jwt, _, err := s2.authStore.IssueToken(&user2, []byte("0123456789abcdef0123456789abcdef"), sessionTTL, auth.SessionInfo{})
 			if err != nil {
 				t.Fatalf("issue token: %v", err)
 			}
@@ -525,15 +525,15 @@ func mustBuildMCPOAuthLifecycleHandler(t *testing.T, s *testRouter) http.Handler
 	return h
 }
 
-func authorizeMCPClient(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse) oauth.TokenResponse {
-	return authorizeMCPClientWithScopes(t, h, user, registered, "https://claude.ai/api/mcp/auth_callback", []string{mcpScopeRead, mcpScopeTasksRead})
+func authorizeMCPClient(t *testing.T, store *auth.Store, h http.Handler, user *auth.User, registered *oauth.RegisterResponse) oauth.TokenResponse {
+	return authorizeMCPClientWithScopes(t, store, h, user, registered, "https://claude.ai/api/mcp/auth_callback", []string{mcpScopeRead, mcpScopeTasksRead})
 }
 
-func authorizeMCPClientWithRedirect(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string) oauth.TokenResponse {
-	return authorizeMCPClientWithScopes(t, h, user, registered, redirectURI, []string{mcpScopeRead, mcpScopeTasksRead})
+func authorizeMCPClientWithRedirect(t *testing.T, store *auth.Store, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string) oauth.TokenResponse {
+	return authorizeMCPClientWithScopes(t, store, h, user, registered, redirectURI, []string{mcpScopeRead, mcpScopeTasksRead})
 }
 
-func authorizeMCPClientWithScopes(t *testing.T, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string, scopes []string) oauth.TokenResponse {
+func authorizeMCPClientWithScopes(t *testing.T, store *auth.Store, h http.Handler, user *auth.User, registered *oauth.RegisterResponse, redirectURI string, scopes []string) oauth.TokenResponse {
 	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	digest := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
@@ -547,7 +547,7 @@ func authorizeMCPClientWithScopes(t *testing.T, h http.Handler, user *auth.User,
 		"resource":              {resource},
 		"scope":                 {mcpAuthDefaultScope + " " + mcpScopeServerAdmin},
 	}
-	jwt, err := auth.IssueToken(user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+	jwt, _, err := store.IssueToken(user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL, auth.SessionInfo{})
 	if err != nil {
 		t.Fatalf("issue session token: %v", err)
 	}
@@ -614,10 +614,10 @@ func authorizeMCPClientWithScopes(t *testing.T, h http.Handler, user *auth.User,
 	return tokenResp
 }
 
-func listOAuthGrants(t *testing.T, h http.Handler, user *auth.User) v1.OAuthGrantsResp {
+func listOAuthGrants(t *testing.T, store *auth.Store, h http.Handler, user *auth.User) v1.OAuthGrantsResp {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/oauth/grants", http.NoBody)
 	req.Host = "caic.example.com"
-	addTestSessionCookie(t, req, user)
+	addTestSessionCookie(t, store, req, user)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -630,10 +630,10 @@ func listOAuthGrants(t *testing.T, h http.Handler, user *auth.User) v1.OAuthGran
 	return grants
 }
 
-func revokeOAuthGrant(t *testing.T, h http.Handler, user *auth.User, grantID string, wantStatus int, wantCode api.ErrorCode) {
+func revokeOAuthGrant(t *testing.T, store *auth.Store, h http.Handler, user *auth.User, grantID string, wantStatus int, wantCode api.ErrorCode) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/oauth/grants/"+grantID+"/revoke", http.NoBody)
 	req.Host = "caic.example.com"
-	addTestSessionCookie(t, req, user)
+	addTestSessionCookie(t, store, req, user)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != wantStatus {
@@ -650,8 +650,8 @@ func revokeOAuthGrant(t *testing.T, h http.Handler, user *auth.User, grantID str
 	}
 }
 
-func addTestSessionCookie(t *testing.T, req *http.Request, user *auth.User) {
-	jwt, err := auth.IssueToken(user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL)
+func addTestSessionCookie(t *testing.T, store *auth.Store, req *http.Request, user *auth.User) {
+	jwt, _, err := store.IssueToken(user, []byte("0123456789abcdef0123456789abcdef"), sessionTTL, auth.SessionInfo{})
 	if err != nil {
 		t.Fatalf("issue session token: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestMCPToolFocusAuthenticated(t *testing.T) {
 		t.Run(transport, func(t *testing.T) {
 			t.Parallel()
 			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
-			token := authorizeMCPClient(t, h, &user, &registered)
+			token := authorizeMCPClient(t, s.authStore, h, &user, &registered)
 			id := ksid.NewID()
 			target := mustNewTask(t, id, agent.Prompt{Text: "focus target"}, harness.Claude)
 			target.OwnerID = user.ID
@@ -703,7 +703,7 @@ func TestMCPToolFocusAuthenticated(t *testing.T) {
 			req.Header.Set("Mcp-Method", "tools/call")
 			req.Header.Set("Mcp-Name", "task_get_detail")
 			if transport == "browser session" {
-				addTestSessionCookie(t, req, &user)
+				addTestSessionCookie(t, s.authStore, req, &user)
 			} else {
 				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 			}
@@ -736,8 +736,8 @@ func TestMCPSystemStatsAuthorization(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, h, user, registered := newMCPOAuthLifecycleRouter(t)
-			token := authorizeMCPClientWithScopes(t, h, &user, &registered, "https://claude.ai/api/mcp/auth_callback", tc.scopes)
+			s, h, user, registered := newMCPOAuthLifecycleRouter(t)
+			token := authorizeMCPClientWithScopes(t, s.authStore, h, &user, &registered, "https://claude.ai/api/mcp/auth_callback", tc.scopes)
 			// Rotation must preserve the chosen scopes rather than adding newly
 			// advertised permissions to existing basic-read grants.
 			for _, access := range []string{token.AccessToken, refreshMCPToken(t, h, registered.ClientID, token.RefreshToken, http.StatusOK).AccessToken} {

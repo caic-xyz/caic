@@ -1,9 +1,10 @@
-// Route tree shared by the app entry point and tests: nested layout routes under the shell.
+// Application routes shared by entry point and tests, including public device pairing pages.
 
 import { Route } from "@solidjs/router";
 import type { JSX } from "solid-js";
 
 import App from "./App";
+import { DeviceLoginPage, DeviceApprovalPage } from "./pages/DeviceLoginPage";
 import MainLayout from "./components/MainLayout";
 import EmptyPage from "./pages/EmptyPage";
 import TaskWorkspace from "./components/TaskWorkspace";
@@ -13,6 +14,7 @@ import ProcessesPage from "./pages/ProcessesPage";
 import StatsPage from "./pages/StatsPage";
 import TaskInfoPage from "./pages/TaskInfoPage";
 import VncPage from "./pages/VncPage";
+import SessionsPage from "./pages/SessionsPage";
 import SettingsPage from "./pages/SettingsPage";
 import MonitoringPage from "./pages/MonitoringPage";
 
@@ -23,21 +25,26 @@ import MonitoringPage from "./pages/MonitoringPage";
  */
 export function appRoutes(): JSX.Element {
   return (
-    <Route path="/" component={App}>
-      <Route path="/" component={MainLayout}>
-        <Route path="/" component={EmptyPage} />
-        <Route path="/task/:taskId" component={TaskWorkspace}>
-          <Route path="/" component={() => null} />
-          <Route path="/view" component={FileViewerPage} />
-          <Route path="/diff" component={DiffPage} />
-          <Route path="/processes" component={ProcessesPage} />
-          <Route path="/stats" component={StatsPage} />
-          <Route path="/info" component={TaskInfoPage} />
-          <Route path="/vnc" component={VncPage} />
+    <>
+      <Route path="/device-login" component={DeviceLoginPage} />
+      <Route path="/device" component={DeviceApprovalPage} />
+      <Route path="/" component={App}>
+        <Route path="/" component={MainLayout}>
+          <Route path="/" component={EmptyPage} />
+          <Route path="/task/:taskId" component={TaskWorkspace}>
+            <Route path="/" component={() => null} />
+            <Route path="/view" component={FileViewerPage} />
+            <Route path="/diff" component={DiffPage} />
+            <Route path="/processes" component={ProcessesPage} />
+            <Route path="/stats" component={StatsPage} />
+            <Route path="/info" component={TaskInfoPage} />
+            <Route path="/vnc" component={VncPage} />
+          </Route>
         </Route>
+        <Route path="/sessions" component={SessionsPage} />
+        <Route path="/settings" component={SettingsPage} />
+        <Route path="/monitoring" component={MonitoringPage} />
       </Route>
-      <Route path="/settings" component={SettingsPage} />
-      <Route path="/monitoring" component={MonitoringPage} />
-    </Route>
+    </>
   );
 }

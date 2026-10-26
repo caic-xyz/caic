@@ -87,6 +87,8 @@ var Routes = []Route{
 		Path:   "/auth/me",
 		Resp:   reflect.TypeFor[UserResp](),
 	},
+	{Name: "revokeSession", Doc: "Revokes an owned host login session.", Method: "POST", Path: "/auth/sessions/{sessionID}/revoke", Resp: reflect.TypeFor[StatusResp]()},
+	{Name: "listSessions", Doc: "Lists active host login sessions.", Method: "GET", Path: "/auth/sessions", Resp: reflect.TypeFor[SessionsResp]()},
 	{
 		Name:   "logout",
 		Doc:    "Invalidates the current session.",

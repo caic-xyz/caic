@@ -208,7 +208,7 @@ func startAuthServer(ctx context.Context, stateDir string) (baseURL, sessionCook
 		return "", "", nil, err
 	}
 	secret := []byte("0123456789abcdef0123456789abcdef")
-	session, err := auth.IssueToken(&user, secret, smokeSessionTTL)
+	session, _, err := store.IssueToken(&user, secret, smokeSessionTTL, auth.SessionInfo{Source: "api"})
 	if err != nil {
 		return "", "", nil, err
 	}

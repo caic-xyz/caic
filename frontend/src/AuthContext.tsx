@@ -1,4 +1,4 @@
-// Auth context: tracks the current user and signals native voice when cookie identity changes.
+// Auth context owns cookie identity and invalidates native voice before account reload or logout.
 
 import { createContext, createSignal, useContext, onMount, type ParentComponent } from "solid-js";
 
@@ -17,6 +17,8 @@ interface AuthState {
   logout: () => Promise<void>;
   /** Settle as signed out after /auth/me confirms the session is missing. */
   confirmLoggedOut: () => void;
+  /** Invalidate native identity before reloading the current cookie session. */
+  reloadIdentity: (destination?: "/") => void;
 }
 
 declare global {
@@ -94,11 +96,20 @@ export const AuthProvider: ParentComponent = (props) => {
 
   const logout = async () => {
     const previousUser = user();
+    const sessionID = previousUser?.sessionID;
+    if (!sessionID) {
+      reloadIdentity();
+      return;
+    }
     setReady(false);
     notifyNativeAuthChanging();
     try {
-      await api.logout();
-    } catch {
+      await api.logout(sessionID);
+    } catch (error) {
+      if (error instanceof APIError && error.status === 401) {
+        reloadIdentity();
+        return;
+      }
       try {
         const confirmedUser = await api.getMe();
         setUser(confirmedUser);
@@ -128,8 +139,15 @@ export const AuthProvider: ParentComponent = (props) => {
     notifyNativeAuthChanged(false);
   };
 
+  const reloadIdentity = (destination?: "/") => {
+    if (ready()) notifyNativeAuthChanging();
+    setReady(false);
+    if (destination) window.location.assign(destination);
+    else window.location.reload();
+  };
+
   return (
-    <AuthContext.Provider value={{ ready, providers, user, logout, confirmLoggedOut }}>
+    <AuthContext.Provider value={{ ready, providers, user, logout, confirmLoggedOut, reloadIdentity }}>
       {props.children}
     </AuthContext.Provider>
   );

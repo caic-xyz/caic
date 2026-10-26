@@ -126,6 +126,14 @@ public final class ApiClient {
     public func getMe() async throws -> UserResp {
         try await request("GET", path: "/auth/me")
     }
+    /// Revokes an owned host login session.
+    public func revokeSession(sessionID: String) async throws -> StatusResp {
+        try await request("POST", path: "/auth/sessions/\(sessionID)/revoke")
+    }
+    /// Lists active host login sessions.
+    public func listSessions() async throws -> SessionsResp {
+        try await request("GET", path: "/auth/sessions")
+    }
     /// Invalidates the current session.
     public func logout() async throws -> StatusResp {
         try await request("POST", path: "/auth/logout")
