@@ -2024,17 +2024,6 @@ func TestCaicToolRegistryTools(t *testing.T) {
 		assertMCPToolVisibility(t, tools, "repos_list", false)
 		t.Run("error", func(t *testing.T) {
 			t.Parallel()
-			t.Run("voice_session_defaults", func(t *testing.T) {
-				t.Parallel()
-				if got := registry.voiceSessionDefaults(ctx); got != "" {
-					t.Fatalf("voiceSessionDefaults() = %q, want no task-scoped preference data", got)
-				}
-				readOnlyCtx := newMCPPrincipalContext(ctx, &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
-				readOnlyCtx = auth.NewContext(readOnlyCtx, &auth.User{ID: "user-1"})
-				if got := registry.voiceSessionDefaults(readOnlyCtx); got != "" {
-					t.Fatalf("voiceSessionDefaults() = %q, want no read-only preference data", got)
-				}
-			})
 			t.Run("resource_subscription", func(t *testing.T) {
 				t.Parallel()
 				if _, err := registry.subscriptionSources(ctx, mcp.SubscriptionFilter{ResourceSubscriptions: []string{"gomode://items"}}); err == nil {

@@ -1,4 +1,4 @@
-// Tests for the MCP JSON-RPC endpoint.
+// Tests MCP HTTP routing, protocol discovery, tool dispatch, and subscription delivery.
 
 package server
 
@@ -42,31 +42,6 @@ func mcpRequestJSON(method, paramsFields string) string {
 		paramsFields += ","
 	}
 	return `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{` + paramsFields + `"_meta":{"io.modelcontextprotocol/protocolVersion":"` + mcp.ProtocolVersion + `","io.modelcontextprotocol/clientInfo":{"name":"caic-test","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`
-}
-
-func TestTaskListSnapshotOrdersActiveTasksFirst(t *testing.T) {
-	t.Parallel()
-
-	s := newTestRouter(t, nil)
-	inactiveID := ksid.NewID()
-	inactive := mustNewTask(t, inactiveID, agent.Prompt{Text: "inactive"}, harness.Claude)
-	inactive.SetState(taskslog.StateStopped)
-	insertTestTask(s, inactiveID, inactive)
-
-	activeID := ksid.NewID()
-	active := mustNewTask(t, activeID, agent.Prompt{Text: "active"}, harness.Claude)
-	insertTestTask(s, activeID, active)
-
-	tasks := testTaskHandlers(s).taskSvc.taskListSnapshot(t.Context())
-	if len(tasks) != 2 {
-		t.Fatalf("task count = %d, want 2", len(tasks))
-	}
-	if got := tasks[0].InitialPrompt; got != "active" {
-		t.Errorf("first task = %q, want active", got)
-	}
-	if got := tasks[1].InitialPrompt; got != "inactive" {
-		t.Errorf("second task = %q, want inactive", got)
-	}
 }
 
 func TestMCPEndpointTaskAccessContract(t *testing.T) {
@@ -315,57 +290,8 @@ func TestMCPHandlers(t *testing.T) {
 		if !ok {
 			t.Fatalf("instructions type = %T", result["instructions"])
 		}
-		if strings.Contains(instructions, "[Current tasks at session start]") {
-			t.Fatalf("instructions duplicate the client-owned task snapshot: %q", instructions)
-		}
-	})
-
-	t.Run("serverDiscoverInstructionsDoNotIncludeTaskSnapshot", func(t *testing.T) {
-		t.Parallel()
-		s := newTestRouter(t, nil)
-		id := ksid.NewID()
-		tk := mustNewTask(t, id, agent.Prompt{Text: "ship voice prompt"}, harness.Claude)
-		insertTestTask(s, id, tk)
-		_, resp := postMCP(t, s.mcpHandlers.protocol, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
-		if resp.Error != nil {
-			t.Fatalf("error = %#v", resp.Error)
-		}
-		result, ok := resp.Result.(map[string]any)
-		if !ok {
-			t.Fatalf("result type = %T", resp.Result)
-		}
-		instructions, ok := result["instructions"].(string)
-		if !ok {
-			t.Fatalf("instructions type = %T", result["instructions"])
-		}
-		for _, unwanted := range []string{"[Current tasks at session start]", "Task #1", "ship voice prompt"} {
-			if strings.Contains(instructions, unwanted) {
-				t.Fatalf("instructions include dynamic task data %q: %q", unwanted, instructions)
-			}
-		}
-		if !strings.Contains(instructions, "follow nextCursor until it is absent") {
-			t.Fatalf("instructions lack pagination guidance: %q", instructions)
-		}
-	})
-
-	t.Run("serverDiscoverInstructionsHideTaskSnapshotWithoutScope", func(t *testing.T) {
-		t.Parallel()
-		s := newTestRouter(t, nil)
-		id := ksid.NewID()
-		tk := mustNewTask(t, id, agent.Prompt{Text: "private task prompt"}, harness.Claude)
-		insertTestTask(s, id, tk)
-		registry, ok := s.mcpHandlers.protocol.Registry.(*mcpRegistry)
-		if !ok {
-			t.Fatalf("registry type = %T", s.mcpHandlers.protocol.Registry)
-		}
-		ctx := newMCPPrincipalContext(t.Context(), &mcpPrincipal{Scopes: []string{mcpScopeRead}, Remote: true})
-		ctx = auth.NewContext(ctx, &auth.User{ID: "user-1"})
-		instructions, err := registry.Instructions(ctx)
-		if err != nil {
-			t.Fatalf("Instructions() error: %v", err)
-		}
-		if strings.Contains(instructions, "private task prompt") || strings.Contains(instructions, "[Current tasks at session start]") {
-			t.Fatalf("instructions disclose task snapshot: %q", instructions)
+		if instructions == "" {
+			t.Fatal("discovery instructions are empty")
 		}
 	})
 

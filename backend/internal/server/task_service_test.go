@@ -1,4 +1,4 @@
-// Tests accepted input lifetime at the submission boundary and task metadata diagnostics.
+// Tests task ordering, accepted input lifetime, and task metadata diagnostics.
 
 package server
 
@@ -78,6 +78,30 @@ func TestTaskInfoCompareWarnings(t *testing.T) {
 
 func TestTaskService(t *testing.T) {
 	t.Parallel()
+	t.Run("taskListSnapshot/activeTasksFirst", func(t *testing.T) {
+		t.Parallel()
+
+		s := newTestRouter(t, nil)
+		inactiveID := ksid.NewID()
+		inactive := mustNewTask(t, inactiveID, agent.Prompt{Text: "inactive"}, harness.Claude)
+		inactive.SetState(taskslog.StateStopped)
+		insertTestTask(s, inactiveID, inactive)
+
+		activeID := ksid.NewID()
+		active := mustNewTask(t, activeID, agent.Prompt{Text: "active"}, harness.Claude)
+		insertTestTask(s, activeID, active)
+
+		tasks := testTaskHandlers(s).taskSvc.taskListSnapshot(t.Context())
+		if len(tasks) != 2 {
+			t.Fatalf("task count = %d, want 2", len(tasks))
+		}
+		if got := tasks[0].InitialPrompt; got != "active" {
+			t.Errorf("first task = %q, want active", got)
+		}
+		if got := tasks[1].InitialPrompt; got != "inactive" {
+			t.Errorf("second task = %q, want inactive", got)
+		}
+	})
 	t.Run("sendInput", func(t *testing.T) {
 		t.Parallel()
 		for _, when := range []string{"before_send", "during_send"} {
