@@ -14,7 +14,7 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
 }, testInfo) => {
   const prompt = uniquePrompt("Investigate frontend width") + " with a long task description".repeat(20);
   const id = await createTaskAPI(api, prompt);
-  await waitForTaskState(api, id, "waiting");
+  const task = await waitForTaskState(api, id, "waiting");
 
   // tabs.setZoom changes Chromium's native page zoom, including CSS viewport
   // width and media queries. CSS zoom and deviceScaleFactor do not do that.
@@ -80,7 +80,7 @@ test("page zoom keeps quotas, task cards, and the account menu within the viewpo
       }),
     );
     await page.goto("/");
-    await expect(page.getByText(prompt, { exact: true })).toBeVisible();
+    await expect(page.locator(`[data-task-id="${id}"]`).getByText(task.title, { exact: true })).toBeVisible();
     await expect(page.getByTestId("usage-badge")).toHaveCount(8);
 
     for (const zoom of [1.25, 1.5, 2, 4, 1]) {

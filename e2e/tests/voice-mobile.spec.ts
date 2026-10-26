@@ -119,7 +119,7 @@ test("six long task titles fit above voice controls on a Pixel 6", async ({ page
       ),
     ),
   );
-  await Promise.all(ids.map((id) => waitForTaskState(api, id, "waiting", 30_000)));
+  const tasks = await Promise.all(ids.map((id) => waitForTaskState(api, id, "waiting", 30_000)));
 
   await page.goto("/");
   const voiceView = page.getByTestId("mobile-voice-tasks");
@@ -133,6 +133,7 @@ test("six long task titles fit above voice controls on a Pixel 6", async ({ page
     lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
     fullTitle: el.textContent,
   }));
-  expect(titleMetrics.fullTitle?.length).toBeGreaterThan(80);
+  expect(titleMetrics.fullTitle).toBe(tasks[0]?.title);
+  expect(titleMetrics.fullTitle).toHaveLength(80);
   expect(titleMetrics.height).toBeLessThanOrEqual(titleMetrics.lineHeight * 2 + 1);
 });
