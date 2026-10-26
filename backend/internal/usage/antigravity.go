@@ -113,6 +113,8 @@ func (f *AntigravityFetcher) fetch(ctx context.Context) (*ProviderQuota, error) 
 				label = "7d"
 			case "gemini-5h":
 				label = "5h"
+			case "gemini-argon-wty-weekly":
+				label = "argon-7d"
 			case "3p-weekly":
 				label = "3p-7d"
 			}

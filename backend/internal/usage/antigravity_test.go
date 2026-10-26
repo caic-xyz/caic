@@ -85,6 +85,16 @@ func TestAntigravityFetcher(t *testing.T) {
 			t.Fatal("failed refresh did not back off")
 		}
 	})
+	t.Run("argon weekly quota", func(t *testing.T) {
+		t.Setenv("CAIC_TEST_AGY_RESPONSE", strings.Replace(agyQuotaResponse, `"id":"gemini-weekly"`, `"id":"gemini-argon-wty-weekly"`, 1))
+		q := NewAntigravityFetcher().Get(t.Context())
+		if q == nil || len(q.RateLimits) != 4 {
+			t.Fatalf("quota = %#v", q)
+		}
+		if got := q.RateLimits[1]; got.Window != "gemini-argon-wty-weekly" || got.Label != "argon-7d" {
+			t.Errorf("argon bucket = %#v", got)
+		}
+	})
 	t.Run("disabled quota", func(t *testing.T) {
 		t.Setenv("CAIC_TEST_AGY_RESPONSE", strings.Replace(agyQuotaResponse, `"remaining_fraction":0.94`, `"remaining_fraction":0,"disabled":true`, 1))
 		q := NewAntigravityFetcher().Get(t.Context())
