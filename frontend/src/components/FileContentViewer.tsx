@@ -2,6 +2,7 @@
 
 import { Match, Show, Suspense, Switch, createMemo, createResource, createSignal, lazy, onCleanup } from "solid-js";
 import { Dynamic } from "solid-js/web";
+import ImagePreview from "./ImagePreview";
 import FileViewerHeader from "./FileViewerHeader";
 
 import styles from "./FileContentViewer.module.css";
@@ -89,9 +90,9 @@ export default function FileContentViewer(props: Props) {
                 </div>
               }
             >
-              <img
-                class={styles.image}
+              <ImagePreview
                 src={taskRawURL(props.taskId, props.path)}
+                fullSrc={taskRawURL(props.taskId, props.path)}
                 alt={props.path}
                 onError={() => setImageError(true)}
               />

@@ -51,13 +51,6 @@
   cursor: pointer;
 }
 
-.image {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: auto;
-}
-
 .mediaPreview {
   box-sizing: border-box;
   height: 100%;

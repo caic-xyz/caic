@@ -6,7 +6,6 @@ declare const classes: {
   readonly "error": string;
   readonly "frontMatter": string;
   readonly "frontMatterSource": string;
-  readonly "image": string;
   readonly "loading": string;
   readonly "mediaPreview": string;
   readonly "notice": string;

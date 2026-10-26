@@ -2,6 +2,7 @@
 
 import { Show, createSignal } from "solid-js";
 
+import ImagePreview from "./ImagePreview";
 import TaskViewHeader from "./TaskViewHeader";
 import styles from "./AttachmentViewer.module.css";
 import { attachmentPaneWidth, taskAttachmentURL } from "../runtimePath";
@@ -34,7 +35,7 @@ export default function AttachmentViewer(props: { taskId: string; taskPath: stri
             </div>
           }
         >
-          <img class={styles.image} src={pane()} alt="attachment" onError={() => setFailed(true)} />
+          <ImagePreview src={pane()} fullSrc={full()} alt="attachment" onError={() => setFailed(true)} />
         </Show>
       </div>
     </div>

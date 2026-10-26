@@ -3,7 +3,6 @@ declare const classes: {
   readonly "container": string;
   readonly "content": string;
   readonly "error": string;
-  readonly "image": string;
   readonly "rawLink": string;
   readonly "title": string;
 };

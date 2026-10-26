@@ -1,4 +1,4 @@
-/* Layout and full-size image styles for the prompt-image document pane. */
+/* Layout and header styles for the prompt-image document pane. */
 
 .container {
   display: flex;
@@ -30,13 +30,6 @@
   min-height: 2.75rem;
   font-size: 0.8rem;
   color: var(--color-link);
-}
-
-.image {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: auto;
 }
 
 .error {
