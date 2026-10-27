@@ -1178,6 +1178,38 @@ describe("TaskDetail", () => {
     expect(within(getByTestId("native-subagents")).getByText("Subagent: Orphan")).toBeInTheDocument();
   });
 
+  it("updates a pending tool duration without new events and freezes it on completion", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    let complete = () => {};
+    taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
+      handlers.onMessage({
+        kind: "toolUse",
+        ts: 8_000,
+        toolUse: { toolUseID: "live-shell", name: "Bash", input: { command: "sleep 10" } },
+      });
+      handlers.onReady?.();
+      complete = () =>
+        handlers.onMessage({
+          kind: "toolResult",
+          ts: 13_000,
+          toolResult: { toolUseID: "live-shell", duration: 5 },
+        });
+      return { addEventListener: vi.fn(), close: vi.fn(), onerror: null } as unknown as EventSource;
+    });
+    try {
+      renderTaskDetail();
+      expect(screen.getByTestId("tool-duration")).toHaveTextContent("0:02");
+      vi.advanceTimersByTime(2_000);
+      expect(screen.getByTestId("tool-duration")).toHaveTextContent("0:04");
+      complete();
+      vi.advanceTimersByTime(10_000);
+      expect(screen.getByTestId("tool-duration")).toHaveTextContent("0:05");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows elapsed time on a single-event message block", () => {
     taskEventStreamMock.mockImplementationOnce((_id, handlers) => {
       handlers.onMessage({

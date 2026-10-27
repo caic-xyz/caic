@@ -139,6 +139,7 @@ function appendScopedTool(group: MessageGroup, event: EventMessage, key: string,
           source: tool.source,
           key,
           output: tool.output,
+          startedAt: tool.startedAt,
           durationMs: tool.result ? toolResultDurationMs(tool.result, tool.startedAt, tool.finishedAt) : null,
         },
       ]
@@ -193,6 +194,7 @@ function appendIdentifiedMessage(group: MessageGroup, event: EventMessage): void
 // done is true when the tool has completed — either via an explicit result
 // event or implicitly because a later event arrived (the agent moved on).
 export interface ToolCall {
+  startedAt?: number;
   source?: EventMessageSource;
   key?: string;
   output?: string;
@@ -375,7 +377,7 @@ function groupMessagesAfter(
         if (ev.toolUse) {
           // All tool calls start as pending; they become done when a toolResult
           // arrives or when later events prove the agent moved on (implicit done).
-          const call: ToolCall = { use: ev.toolUse, done: false };
+          const call: ToolCall = { use: ev.toolUse, done: false, startedAt: ev.ts };
           const last = lastGroup();
           if (last && isLegacyToolGroup(last) && !usageSinceLastTool) {
             // Consecutive toolUse in the same AssistantMessage — merge.

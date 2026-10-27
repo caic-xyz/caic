@@ -3,7 +3,8 @@
 import { afterEach, describe, it } from "node:test";
 import { render, screen, cleanup } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { expect } from "@tests/expect";
+import { createSignal } from "solid-js";
+import { expect, vi } from "@tests/expect";
 import { BackgroundCommandCard, BackgroundCommandStatusChip, BackgroundCommands } from "./NativeSubagents";
 import NativeAgents, { NativeAgentCard } from "./NativeSubagents";
 import type { BackgroundCommandActivity, NativeActivity } from "../nativeSubagents";
@@ -204,6 +205,27 @@ const commands: [BackgroundCommandActivity, BackgroundCommandActivity, Backgroun
 ];
 
 describe("BackgroundCommands", () => {
+  it("ticks a running command, uses its final duration, and hides stale elapsed time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5_000);
+    const [command, setCommand] = createSignal(commands[1]);
+    const [settled, setSettled] = createSignal(false);
+    try {
+      const view = render(() => <BackgroundCommandCard command={command()} settled={settled()} />);
+      expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:03");
+      vi.advanceTimersByTime(2_000);
+      expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:05");
+      setSettled(true);
+      expect(screen.queryByTestId("background-command-duration")).not.toBeInTheDocument();
+      setCommand({ ...commands[1], status: "completed", endedAt: 8_000 });
+      vi.advanceTimersByTime(10_000);
+      expect(screen.getByTestId("background-command-duration")).toHaveTextContent("0:06");
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("exposes expandable cards with identity, output, and result", async () => {
     render(() => <BackgroundCommands commands={commands} settled={false} />);
     const card = screen.getByText("Background command: Install and run new lint in pitchpal").closest("details");

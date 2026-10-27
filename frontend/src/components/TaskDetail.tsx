@@ -69,6 +69,7 @@ import {
   type Turn,
 } from "../grouping";
 import { ContextSkillsTracker } from "../contextSkills";
+import { createLiveDuration } from "../liveDuration";
 import { useTaskTimeline } from "../TaskTimelineContext";
 import { attachmentThumbnailWidth, taskAttachmentURL, taskAttachmentViewURL, taskViewURL } from "../runtimePath";
 import { formatBytes, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
@@ -2486,7 +2487,24 @@ function ToolCallCard(props: {
   });
   onCleanup(() => inputRequest++);
 
-  const durationMs = () => props.durationMs;
+  const timedCommand = () => props.backgroundCommands?.[0];
+  const durationMs = createLiveDuration(
+    () => {
+      const start = timedCommand()?.startedAt ?? props.call.startedAt;
+      return start !== undefined && start > 0 ? start : null;
+    },
+    () => {
+      const command = timedCommand();
+      if (!command) return props.durationMs;
+      return command.startedAt !== null && command.endedAt !== null
+        ? Math.max(0, command.endedAt - command.startedAt)
+        : null;
+    },
+    () => {
+      const command = timedCommand();
+      return !(props.backgroundSettled?.() ?? false) && (command ? command.status === "running" : !props.call.done);
+    },
+  );
   const error = () => props.call.result?.error ?? "";
   const effectiveInput = (): Record<string, unknown> =>
     (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
@@ -2563,12 +2581,10 @@ function ToolCallCard(props: {
                 <span class={styles.toolError}> error</span>
               </Show>
             </span>
-            <Show when={durationMs()} keyed>
-              {(duration) => (
-                <span class={styles.toolDuration} data-testid="tool-duration">
-                  {formatTimingDuration(duration)}
-                </span>
-              )}
+            <Show when={durationMs() !== null}>
+              <span class={styles.toolDuration} data-testid="tool-duration">
+                {formatTimingDuration(durationMs() ?? 0)}
+              </span>
             </Show>
           </span>
         </summary>

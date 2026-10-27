@@ -5,6 +5,7 @@ import { createMemo, For, Show, type JSX } from "solid-js";
 import type { BackgroundCommandActivity, NativeActivity } from "../nativeSubagents";
 import { backgroundCommandStatus, nativeActivityStatus } from "../nativeSubagents";
 import { formatTimingDuration } from "../timing";
+import { createLiveDuration } from "../liveDuration";
 import styles from "./NativeSubagents.module.css";
 import type { MessageGroup } from "../grouping";
 
@@ -27,6 +28,14 @@ export function NativeAgentCard(props: {
   renderTranscript?: TranscriptRenderer;
 }) {
   const activity = () => props.activity;
+  const duration = createLiveDuration(
+    () => activity().startedAt,
+    () => {
+      const { startedAt, endedAt } = activity();
+      return startedAt !== null && endedAt !== null ? Math.max(0, endedAt - startedAt) : null;
+    },
+    () => !props.settled && activity().status === "running",
+  );
   const hasTranscript = () => !!(activity().transcript?.length && props.renderTranscript);
   const showResult = createMemo(() => {
     if (!hasTranscript()) return true;
@@ -52,9 +61,9 @@ export function NativeAgentCard(props: {
         <Show when={activity().background}>
           <span class={styles.background}>background</span>
         </Show>
-        <Show when={activity().startedAt !== null && activity().endedAt !== null}>
+        <Show when={duration() !== null}>
           <span class={styles.duration} data-testid="native-subagent-duration">
-            {formatTimingDuration(Math.max(0, (activity().endedAt ?? 0) - (activity().startedAt ?? 0)))}
+            {formatTimingDuration(duration() ?? 0)}
           </span>
         </Show>
       </summary>
@@ -137,6 +146,14 @@ export function BackgroundCommandStatusChip(props: { command: BackgroundCommandA
 // details/summary so keyboard users can expand it without a pointer.
 export function BackgroundCommandCard(props: { command: BackgroundCommandActivity; settled: boolean }) {
   const command = () => props.command;
+  const duration = createLiveDuration(
+    () => command().startedAt,
+    () => {
+      const { startedAt, endedAt } = command();
+      return startedAt !== null && endedAt !== null ? Math.max(0, endedAt - startedAt) : null;
+    },
+    () => !props.settled && command().status === "running",
+  );
   return (
     <details class={styles.card} data-testid="background-command-card" data-command-id={command().id}>
       <summary>
@@ -149,9 +166,9 @@ export function BackgroundCommandCard(props: { command: BackgroundCommandActivit
             exit {command().exitCode}
           </span>
         </Show>
-        <Show when={command().startedAt !== null && command().endedAt !== null}>
+        <Show when={duration() !== null}>
           <span class={styles.duration} data-testid="background-command-duration">
-            {formatTimingDuration(Math.max(0, (command().endedAt ?? 0) - (command().startedAt ?? 0)))}
+            {formatTimingDuration(duration() ?? 0)}
           </span>
         </Show>
       </summary>

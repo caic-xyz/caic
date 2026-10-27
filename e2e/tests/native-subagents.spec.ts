@@ -56,10 +56,15 @@ for (const width of [390, 1280]) {
     // One command settled (exit 0); the other is still running, and the replay
     // keeps reporting it as running instead of inventing an outcome.
     const watchCard = page.locator('[data-command-id="claude:shell:watch1"]');
+    const duration = watchCard.getByTestId("background-command-duration");
+    await expect(duration).toBeVisible();
+    const initialDuration = await duration.textContent();
+    await expect(duration).not.toHaveText(initialDuration ?? "");
     await page.reload();
     await expect(cards).toHaveCount(2);
     await expect(page.getByText("exit 0").first()).toBeVisible();
     await expect(watchCard.locator("summary")).toContainText("Running");
     await expect(watchCard.getByTestId("background-command-exit")).toHaveCount(0);
+    await expect(duration).toBeVisible();
   });
 }
