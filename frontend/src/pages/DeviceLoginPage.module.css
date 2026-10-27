@@ -1,13 +1,14 @@
 /* Host tokens and responsive page spacing for shared device pairing views. */
 .page {
   --device-login-color: var(--color-text-primary);
-  --device-login-background: var(--color-bg-surface);
-  --device-login-button-color: var(--color-text-primary);
+  --device-login-background: transparent;
+  --device-login-button-color: var(--color-on-primary-container);
   --device-login-input-color: var(--color-text-primary);
   --device-login-input-background: var(--color-bg-input);
-  --device-login-button-background: var(--color-bg-input);
+  --device-login-button-background: var(--color-primary-container);
   --device-login-border: var(--color-border);
   --device-login-focus: var(--color-primary);
+  --device-login-link-color: var(--color-link);
   --device-login-radius: var(--radius-md);
 
   max-width: 44rem;
