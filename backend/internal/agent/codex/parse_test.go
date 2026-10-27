@@ -1070,6 +1070,8 @@ func TestAgentArgs(t *testing.T) {
 		want := []string{
 			"codex", "--no-daemon", "app-server",
 			"-c", `approval_policy="never"`,
+			"-c", `model_auto_compact_token_limit=244800`,
+			"-c", `model_auto_compact_token_limit_scope="total"`,
 			"-c", `sandbox_mode="danger-full-access"`,
 		}
 		if !slices.Equal(args, want) {

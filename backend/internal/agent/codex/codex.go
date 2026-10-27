@@ -225,9 +225,25 @@ var (
 )
 
 func codexAppServerArgs() []string {
+	// Compact at 244,800 total active tokens: 90% of the 272K input-token
+	// threshold for Sol/Terra long-context API pricing (2x input/cache and 1.5x
+	// output rates for the full request). This leaves 27,200 tokens of headroom:
+	// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+	// The 90% margin follows Codex's default compaction/window ratio:
+	// https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/protocol/src/openai_models.rs#L529
+	// This is a compaction trigger, not a hard billing cap: context can grow
+	// between checks, and included subscription quotas have separate accounting.
+	// Count the full context, including the carried compaction prefix. Leave
+	// model_context_window unset to preserve model-default headroom; API pricing
+	// depends on actual input size, not the configured window capacity.
+	// https://learn.chatgpt.com/docs/config-file/config-reference
+	// https://learn.chatgpt.com/docs/pricing
 	return []string{
 		"codex", "--no-daemon", "app-server",
 		"-c", `approval_policy="never"`,
+		"-c", `model_auto_compact_token_limit=244800`,
+		"-c", `model_auto_compact_token_limit_scope="total"`,
 		"-c", `sandbox_mode="danger-full-access"`,
 	}
 }
