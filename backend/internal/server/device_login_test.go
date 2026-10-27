@@ -18,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
@@ -26,8 +27,18 @@ import (
 	"github.com/maruel/gomode/oauth/oauthclient"
 )
 
+//nolint:paralleltest // Virtual polling must isolate KSID's process-wide clock.
 func TestDeviceLogin(t *testing.T) {
-	t.Parallel()
+	// KSID's process-wide generator must not interleave real and frozen clocks.
+	// Keep host fixtures and background workers outside each bubble, then align
+	// virtual time with the existing approver session before advancing the poll.
+	afterPollInterval := func(t *testing.T, f func(*testing.T)) {
+		now := time.Now()
+		synctest.Test(t, func(t *testing.T) {
+			time.Sleep(time.Until(now) + 5*time.Second)
+			f(t)
+		})
+	}
 	setup := func(t *testing.T) (*testRouter, http.Handler, auth.User, string, string) {
 		dir := t.TempDir()
 		store, err := auth.Open(filepath.Join(dir, "users.json"))
@@ -97,7 +108,6 @@ func TestDeviceLogin(t *testing.T) {
 	t.Run("completion persistence", func(t *testing.T) {
 		for _, failure := range []string{"none", "before creation", "after creation", "created audit", "response audit", "write", "concurrent", "cancel"} {
 			t.Run(failure, func(t *testing.T) {
-				t.Parallel()
 				s, _, user, path, credential := setup(t)
 				ctx, cancel := context.WithCancel(t.Context())
 				t.Cleanup(cancel)
@@ -113,65 +123,65 @@ func TestDeviceLogin(t *testing.T) {
 				if w := post(t, mux, "/auth/device/approve", `{"user_code":"`+code.UserCode+`","approve":true}`, credential, detail.CSRFToken); w.Code != 200 {
 					t.Fatal(w.Body.String())
 				}
-				time.Sleep(5 * time.Second)
-				poll := func() {
-					r := httptest.NewRequestWithContext(ctx, http.MethodPost, "https://caic.example.com/auth/device/poll", strings.NewReader(`{"device_code":"`+code.DeviceCode+`"}`))
-					r.Header.Set("Content-Type", "application/json")
-					r.Header.Set("Accept-Encoding", "gzip")
-					r.RemoteAddr = "192.0.2.4:1234"
-					w := http.ResponseWriter(httptest.NewRecorder())
-					if failure == "write" {
-						w = &deviceFailedWriter{w}
+				afterPollInterval(t, func(t *testing.T) {
+					poll := func() {
+						r := httptest.NewRequestWithContext(ctx, http.MethodPost, "https://caic.example.com/auth/device/poll", strings.NewReader(`{"device_code":"`+code.DeviceCode+`"}`))
+						r.Header.Set("Content-Type", "application/json")
+						r.Header.Set("Accept-Encoding", "gzip")
+						r.RemoteAddr = "192.0.2.4:1234"
+						w := http.ResponseWriter(httptest.NewRecorder())
+						if failure == "write" {
+							w = &deviceFailedWriter{w}
+						}
+						mux.ServeHTTP(w, r)
 					}
-					mux.ServeHTTP(w, r)
-				}
-				if failure == "concurrent" {
-					var wg sync.WaitGroup
-					for range 12 {
-						wg.Go(poll)
+					if failure == "concurrent" {
+						var wg sync.WaitGroup
+						for range 12 {
+							wg.Go(poll)
+						}
+						wg.Wait()
+					} else {
+						poll()
 					}
-					wg.Wait()
-				} else {
+					restarted, err := auth.Open(filepath.Join(filepath.Dir(path), "users.json"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					active := slices.DeleteFunc(restarted.Sessions(user.ID), func(p auth.Session) bool { return p.Source != "device" })
+					if failure == "none" || failure == "concurrent" {
+						if len(active) != 1 || host.created.Load() != 1 {
+							t.Fatalf("active %d created %d", len(active), host.created.Load())
+						}
+					} else if len(active) != 0 {
+						t.Fatalf("failed completion left %d active sessions", len(active))
+					}
+					if failure == "before creation" {
+						if host.created.Load() != 0 {
+							t.Fatal("creation attempted after prerequisite failed")
+						}
+					} else if host.created.Load() != 1 {
+						t.Fatalf("created %d sessions", host.created.Load())
+					}
+					before := host.created.Load()
 					poll()
-				}
-				restarted, err := auth.Open(filepath.Join(filepath.Dir(path), "users.json"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				active := slices.DeleteFunc(restarted.Sessions(user.ID), func(p auth.Session) bool { return p.Source != "device" })
-				if failure == "none" || failure == "concurrent" {
-					if len(active) != 1 || host.created.Load() != 1 {
-						t.Fatalf("active %d created %d", len(active), host.created.Load())
+					if host.created.Load() != before {
+						t.Fatal("retry duplicated persistent session")
 					}
-				} else if len(active) != 0 {
-					t.Fatalf("failed completion left %d active sessions", len(active))
-				}
-				if failure == "before creation" {
-					if host.created.Load() != 0 {
-						t.Fatal("creation attempted after prerequisite failed")
+					events := readAuditEvents(t, path)
+					for _, event := range events {
+						if !strings.Contains(event.Args, code.RequestID) {
+							t.Fatal("missing correlation")
+						}
+						if strings.Contains(event.Args, code.DeviceCode) || strings.Contains(event.Args, code.UserCode) {
+							t.Fatal("secret in audit")
+						}
 					}
-				} else if host.created.Load() != 1 {
-					t.Fatalf("created %d sessions", host.created.Load())
-				}
-				before := host.created.Load()
-				poll()
-				if host.created.Load() != before {
-					t.Fatal("retry duplicated persistent session")
-				}
-				events := readAuditEvents(t, path)
-				for _, event := range events {
-					if !strings.Contains(event.Args, code.RequestID) {
-						t.Fatal("missing correlation")
-					}
-					if strings.Contains(event.Args, code.DeviceCode) || strings.Contains(event.Args, code.UserCode) {
-						t.Fatal("secret in audit")
-					}
-				}
+				})
 			})
 		}
 	})
 	t.Run("normal cookie and single use", func(t *testing.T) {
-		t.Parallel()
 		s, h, user, path, credential := setup(t)
 		c := start(t, h)
 		d := lookup(t, h, credential, c.UserCode)
@@ -183,102 +193,102 @@ func TestDeviceLogin(t *testing.T) {
 			t.Fatalf("approve: %d %s", w.Code, w.Body.String())
 		}
 		poll := `{"device_code":"` + c.DeviceCode + `"}`
-		time.Sleep(5 * time.Second)
-		w := post(t, h, "/auth/device/poll", poll, "", "")
-		if w.Code != 200 {
-			t.Fatalf("poll: %d %s", w.Code, w.Body.String())
-		}
-		cookies := w.Result().Cookies()
-		if len(cookies) != 1 {
-			t.Fatalf("cookies: %v", cookies)
-		}
-		cookie := cookies[0]
-		if cookie.Name != "caic_session" || cookie.MaxAge < 2591995 || cookie.MaxAge > 2592000 || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
-			t.Fatalf("cookie: %v", cookie)
-		}
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/auth/me", nil)
-		req.AddCookie(cookie)
-		me := httptest.NewRecorder()
-		h.ServeHTTP(me, req)
-		if me.Code != 200 || !strings.Contains(me.Body.String(), user.ID) {
-			t.Fatalf("normal identity %d %s", me.Code, me.Body.String())
-		}
-		records := slices.DeleteFunc(s.authStore.Sessions(user.ID), func(s auth.Session) bool { return s.Source != "device" })
-		if len(records) != 1 || time.Until(records[0].ExpiresAt) > sessionTTL || time.Until(records[0].ExpiresAt) < sessionTTL-time.Minute {
-			t.Fatalf("normal session lifetime: %+v", records)
-		}
-		if !cookie.Expires.Equal(records[0].ExpiresAt) {
-			t.Fatalf("cookie expires at %v, persisted session at %v", cookie.Expires, records[0].ExpiresAt)
-		}
-		for _, bearer := range []bool{false, true} {
-			for _, tc := range []struct {
-				method, path, body string
-				status             int
-			}{
-				{http.MethodPost, "/api/caic/v1/tasks", "{}", http.StatusBadRequest},
-				{http.MethodGet, "/api/caic/v1/voice/token", "", http.StatusOK},
-				{http.MethodGet, "/oauth/authorize", "", http.StatusBadRequest},
-			} {
-				req := httptest.NewRequestWithContext(t.Context(), tc.method, "https://caic.example.com"+tc.path, strings.NewReader(tc.body))
-				req.Header.Set("Content-Type", "application/json")
-				if bearer {
-					req.Header.Set("Authorization", "Bearer "+cookie.Value)
-				} else {
-					req.AddCookie(cookie)
-				}
-				response := httptest.NewRecorder()
-				h.ServeHTTP(response, req)
-				if response.Code != tc.status {
-					t.Errorf("bearer=%v %s: %d %s", bearer, tc.path, response.Code, response.Body.String())
+		afterPollInterval(t, func(t *testing.T) {
+			w := post(t, h, "/auth/device/poll", poll, "", "")
+			if w.Code != 200 {
+				t.Fatalf("poll: %d %s", w.Code, w.Body.String())
+			}
+			cookies := w.Result().Cookies()
+			if len(cookies) != 1 {
+				t.Fatalf("cookies: %v", cookies)
+			}
+			cookie := cookies[0]
+			if cookie.Name != "caic_session" || cookie.MaxAge < 2591995 || cookie.MaxAge > 2592000 || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
+				t.Fatalf("cookie: %v", cookie)
+			}
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/auth/me", nil)
+			req.AddCookie(cookie)
+			me := httptest.NewRecorder()
+			h.ServeHTTP(me, req)
+			if me.Code != 200 || !strings.Contains(me.Body.String(), user.ID) {
+				t.Fatalf("normal identity %d %s", me.Code, me.Body.String())
+			}
+			records := slices.DeleteFunc(s.authStore.Sessions(user.ID), func(s auth.Session) bool { return s.Source != "device" })
+			if len(records) != 1 || time.Until(records[0].ExpiresAt) > sessionTTL || time.Until(records[0].ExpiresAt) < sessionTTL-time.Minute {
+				t.Fatalf("normal session lifetime: %+v", records)
+			}
+			if !cookie.Expires.Equal(records[0].ExpiresAt) {
+				t.Fatalf("cookie expires at %v, persisted session at %v", cookie.Expires, records[0].ExpiresAt)
+			}
+			for _, bearer := range []bool{false, true} {
+				for _, tc := range []struct {
+					method, path, body string
+					status             int
+				}{
+					{http.MethodPost, "/api/caic/v1/tasks", "{}", http.StatusBadRequest},
+					{http.MethodGet, "/api/caic/v1/voice/token", "", http.StatusOK},
+					{http.MethodGet, "/oauth/authorize", "", http.StatusBadRequest},
+				} {
+					req := httptest.NewRequestWithContext(t.Context(), tc.method, "https://caic.example.com"+tc.path, strings.NewReader(tc.body))
+					req.Header.Set("Content-Type", "application/json")
+					if bearer {
+						req.Header.Set("Authorization", "Bearer "+cookie.Value)
+					} else {
+						req.AddCookie(cookie)
+					}
+					response := httptest.NewRecorder()
+					h.ServeHTTP(response, req)
+					if response.Code != tc.status {
+						t.Errorf("bearer=%v %s: %d %s", bearer, tc.path, response.Code, response.Body.String())
+					}
 				}
 			}
-		}
-		// The normal cookie may authorize an OAuth client; MCP grant scopes remain separate.
-		registered := post(t, h, "/oauth/register", `{"client_name":"Device parity test","redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code"]}`, "", "")
-		if registered.Code != http.StatusCreated {
-			t.Fatalf("register OAuth client: %d %s", registered.Code, registered.Body.String())
-		}
-		var client struct {
-			ClientID string `json:"client_id"`
-		}
-		if err := json.Unmarshal(registered.Body.Bytes(), &client); err != nil {
-			t.Fatal(err)
-		}
-		query := url.Values{"response_type": {"code"}, "client_id": {client.ClientID}, "redirect_uri": {"https://client.example/callback"}, "code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"}, "resource": {"https://caic.example.com/api/caic/v1/mcp"}, "scope": {mcpAuthDefaultScope}}
-		consentRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/oauth/authorize?"+query.Encode(), http.NoBody)
-		consentRequest.AddCookie(cookie)
-		consentPage := httptest.NewRecorder()
-		h.ServeHTTP(consentPage, consentRequest)
-		_, suffix, found := strings.Cut(consentPage.Body.String(), `name="consent_token" value="`)
-		consent, _, closed := strings.Cut(suffix, `"`)
-		if consentPage.Code != 200 || !found || !closed || consent == "" {
-			t.Fatalf("device OAuth consent: %d %s", consentPage.Code, consentPage.Body.String())
-		}
-		consentForm := url.Values{"consent_token": {consent}, "scope_form": {"1"}, "scope": strings.Fields(mcpAuthDefaultScope)}
-		decisionRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://caic.example.com/oauth/authorize", strings.NewReader(consentForm.Encode()))
-		decisionRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		decisionRequest.AddCookie(cookie)
-		oauthDecision := httptest.NewRecorder()
-		h.ServeHTTP(oauthDecision, decisionRequest)
-		location, err := url.Parse(oauthDecision.Header().Get("Location"))
-		if err != nil || oauthDecision.Code != http.StatusSeeOther || location.Query().Get("code") == "" {
-			t.Fatalf("device OAuth approval: %d %s", oauthDecision.Code, oauthDecision.Body.String())
-		}
-		delegated := start(t, h)
-		proof := lookup(t, h, cookie.Value, delegated.UserCode)
-		if response := post(t, h, "/auth/device/approve", `{"user_code":"`+delegated.UserCode+`","approve":true}`, cookie.Value, proof.CSRFToken); response.Code != 200 {
-			t.Fatalf("delegate approval: %d %s", response.Code, response.Body.String())
-		}
-		if w := post(t, h, "/auth/device/poll", poll, "", ""); w.Code == 200 {
-			t.Fatal("approval reused")
-		}
-		events := readAuditEvents(t, path)
-		if len(events) != 5 || events[0].UserID != user.ID || events[0].Decision != "allow" {
-			t.Fatalf("audit: %+v", events)
-		}
+			// The normal cookie may authorize an OAuth client; MCP grant scopes remain separate.
+			registered := post(t, h, "/oauth/register", `{"client_name":"Device parity test","redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code"]}`, "", "")
+			if registered.Code != http.StatusCreated {
+				t.Fatalf("register OAuth client: %d %s", registered.Code, registered.Body.String())
+			}
+			var client struct {
+				ClientID string `json:"client_id"`
+			}
+			if err := json.Unmarshal(registered.Body.Bytes(), &client); err != nil {
+				t.Fatal(err)
+			}
+			query := url.Values{"response_type": {"code"}, "client_id": {client.ClientID}, "redirect_uri": {"https://client.example/callback"}, "code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"}, "resource": {"https://caic.example.com/api/caic/v1/mcp"}, "scope": {mcpAuthDefaultScope}}
+			consentRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://caic.example.com/oauth/authorize?"+query.Encode(), http.NoBody)
+			consentRequest.AddCookie(cookie)
+			consentPage := httptest.NewRecorder()
+			h.ServeHTTP(consentPage, consentRequest)
+			_, suffix, found := strings.Cut(consentPage.Body.String(), `name="consent_token" value="`)
+			consent, _, closed := strings.Cut(suffix, `"`)
+			if consentPage.Code != 200 || !found || !closed || consent == "" {
+				t.Fatalf("device OAuth consent: %d %s", consentPage.Code, consentPage.Body.String())
+			}
+			consentForm := url.Values{"consent_token": {consent}, "scope_form": {"1"}, "scope": strings.Fields(mcpAuthDefaultScope)}
+			decisionRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://caic.example.com/oauth/authorize", strings.NewReader(consentForm.Encode()))
+			decisionRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			decisionRequest.AddCookie(cookie)
+			oauthDecision := httptest.NewRecorder()
+			h.ServeHTTP(oauthDecision, decisionRequest)
+			location, err := url.Parse(oauthDecision.Header().Get("Location"))
+			if err != nil || oauthDecision.Code != http.StatusSeeOther || location.Query().Get("code") == "" {
+				t.Fatalf("device OAuth approval: %d %s", oauthDecision.Code, oauthDecision.Body.String())
+			}
+			delegated := start(t, h)
+			proof := lookup(t, h, cookie.Value, delegated.UserCode)
+			if response := post(t, h, "/auth/device/approve", `{"user_code":"`+delegated.UserCode+`","approve":true}`, cookie.Value, proof.CSRFToken); response.Code != 200 {
+				t.Fatalf("delegate approval: %d %s", response.Code, response.Body.String())
+			}
+			if w := post(t, h, "/auth/device/poll", poll, "", ""); w.Code == 200 {
+				t.Fatal("approval reused")
+			}
+			events := readAuditEvents(t, path)
+			if len(events) != 5 || events[0].UserID != user.ID || events[0].Decision != "allow" {
+				t.Fatalf("audit: %+v", events)
+			}
+		})
 	})
 	t.Run("same-account session cannot reuse decision proof", func(t *testing.T) {
-		t.Parallel()
 		s, h, user, _, credential := setup(t)
 		c := start(t, h)
 		d := lookup(t, h, credential, c.UserCode)
@@ -296,7 +306,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("denial audited", func(t *testing.T) {
-		t.Parallel()
 		_, h, _, path, credential := setup(t)
 		c := start(t, h)
 		d := lookup(t, h, credential, c.UserCode)
@@ -304,18 +313,18 @@ func TestDeviceLogin(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("deny %d", w.Code)
 		}
-		time.Sleep(5 * time.Second)
-		w = post(t, h, "/auth/device/poll", `{"device_code":"`+c.DeviceCode+`"}`, "", "")
-		if !strings.Contains(w.Body.String(), "access_denied") || len(w.Result().Cookies()) != 0 {
-			t.Fatalf("denied poll %d %s", w.Code, w.Body.String())
-		}
-		events := readAuditEvents(t, path)
-		if len(events) != 1 || events[0].Decision != "deny" {
-			t.Fatalf("audit %+v", events)
-		}
+		afterPollInterval(t, func(t *testing.T) {
+			w = post(t, h, "/auth/device/poll", `{"device_code":"`+c.DeviceCode+`"}`, "", "")
+			if !strings.Contains(w.Body.String(), "access_denied") || len(w.Result().Cookies()) != 0 {
+				t.Fatalf("denied poll %d %s", w.Code, w.Body.String())
+			}
+			events := readAuditEvents(t, path)
+			if len(events) != 1 || events[0].Decision != "deny" {
+				t.Fatalf("audit %+v", events)
+			}
+		})
 	})
 	t.Run("policy rechecked before issuance", func(t *testing.T) {
-		t.Parallel()
 		s, h, _, _, credential := setup(t)
 		c := start(t, h)
 		d := lookup(t, h, credential, c.UserCode)
@@ -324,14 +333,14 @@ func TestDeviceLogin(t *testing.T) {
 			t.Fatal(w.Body.String())
 		}
 		s.authHandlers.githubAllowedUsers = []string{"other"}
-		time.Sleep(5 * time.Second)
-		w = post(t, h, "/auth/device/poll", `{"device_code":"`+c.DeviceCode+`"}`, "", "")
-		if w.Code != 403 || len(w.Result().Cookies()) != 0 {
-			t.Fatalf("policy %d %s", w.Code, w.Body.String())
-		}
+		afterPollInterval(t, func(t *testing.T) {
+			w = post(t, h, "/auth/device/poll", `{"device_code":"`+c.DeviceCode+`"}`, "", "")
+			if w.Code != 403 || len(w.Result().Cookies()) != 0 {
+				t.Fatalf("policy %d %s", w.Code, w.Body.String())
+			}
+		})
 	})
 	t.Run("eligibility and authentication", func(t *testing.T) {
-		t.Parallel()
 		s, h, user, _, credential := setup(t)
 		c := start(t, h)
 		body := `{"user_code":"` + c.UserCode + `"}`
@@ -349,7 +358,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("session creation rechecks eligibility", func(t *testing.T) {
-		t.Parallel()
 		s, _, user, _, _ := setup(t)
 		host := &deviceLoginHost{auth: s.authHandlers}
 		subject := user.ID + "\x00session"
@@ -366,7 +374,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("audit failure fails closed", func(t *testing.T) {
-		t.Parallel()
 		_, h, _, path, credential := setup(t)
 		if err := os.Mkdir(path, 0o700); err != nil {
 			t.Fatal(err)
@@ -377,14 +384,14 @@ func TestDeviceLogin(t *testing.T) {
 		if w.Code != 500 {
 			t.Fatalf("audit failure %d %s", w.Code, w.Body.String())
 		}
-		time.Sleep(5 * time.Second)
-		w = post(t, h, "/auth/device/poll", `{"device_code":"`+c.DeviceCode+`"}`, "", "")
-		if !strings.Contains(w.Body.String(), "authorization_pending") {
-			t.Fatalf("audit issued session: %s", w.Body.String())
-		}
+		afterPollInterval(t, func(t *testing.T) {
+			w = post(t, h, "/auth/device/poll", `{"device_code":"`+c.DeviceCode+`"}`, "", "")
+			if !strings.Contains(w.Body.String(), "authorization_pending") {
+				t.Fatalf("audit issued session: %s", w.Body.String())
+			}
+		})
 	})
 	t.Run("off without provider", func(t *testing.T) {
-		t.Parallel()
 		s, h, _, _, _ := setup(t)
 		s.authHandlers.githubOAuth = nil
 		if w := post(t, h, "/auth/device/start", "{}", "", ""); w.Code != 404 {
@@ -392,7 +399,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("host protection retained", func(t *testing.T) {
-		t.Parallel()
 		_, h, _, _, _ := setup(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://evil.example/auth/device/start", strings.NewReader("{}"))
 		req.Header.Set("Content-Type", "application/json")
@@ -403,7 +409,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("off without authentication", func(t *testing.T) {
-		t.Parallel()
 		s := newTestRouter(t, nil)
 		h, err := s.buildHandler()
 		if err != nil {
@@ -414,7 +419,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("IP origin protection retained", func(t *testing.T) {
-		t.Parallel()
 		s, h, _, _, _ := setup(t)
 		checker, err := ipgeo.NewChecker(t.Context(), testLogger(), "127.0.0.0/8", "", "")
 		if err != nil {
@@ -426,7 +430,6 @@ func TestDeviceLogin(t *testing.T) {
 		}
 	})
 	t.Run("persistent audit path required", func(t *testing.T) {
-		t.Parallel()
 		a := &auditStore{log: testLogger()}
 		if err := a.recordDeviceLogin(t.Context(), &devicelogin.AuditEvent{Subject: "user", Approved: true}); err == nil {
 			t.Fatal("memory-only audit accepted")
