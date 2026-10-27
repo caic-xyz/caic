@@ -4,6 +4,7 @@ package task
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,214 @@ func TestCostTracker(t *testing.T) {
 		"gpt-6-sol":  {InputPerMTok: 2, CachedInputPerMTok: 0.2, OutputPerMTok: 10},
 		"gpt-6-luna": {InputPerMTok: 0.1},
 	}
+
+	t.Run("OpenAIRequestsAcrossHarnesses", func(t *testing.T) {
+		t.Parallel()
+		for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
+			for _, model := range []string{"openai/gpt-6.1-sol", "openai-codex/gpt-6.1-sol", "openai/gpt-6.1-terra", "openai-codex/gpt-6.1-terra"} {
+				t.Run(string(h)+"/"+model, func(t *testing.T) {
+					t.Parallel()
+					pricer := usage.NewPricer(nil)
+					c := CostTracker{Harness: h, Model: model}
+					long := agent.Usage{InputTokens: 100_000, CacheReadInputTokens: 200_000, OutputTokens: 1_000}
+					short := agent.Usage{InputTokens: 100_000, OutputTokens: 1_000}
+					c.Observe(&agent.UsageMessage{PerCall: true, ReportedModel: model, Usage: long}, at, pricer)
+					for range 3 {
+						c.Observe(&agent.UsageMessage{PerCall: true, ReportedModel: model, Usage: short}, at, pricer)
+					}
+					result := agent.Usage{InputTokens: 400_000, CacheReadInputTokens: 200_000, OutputTokens: 4_000}
+					if h == harness.Pi {
+						result = short // Pi repeats only the last request in its result.
+					}
+					cost, ok := c.Observe(&agent.ResultMessage{Usage: result}, at, pricer)
+					want := 1.085
+					if strings.HasSuffix(model, "terra") {
+						want = 0.5425
+					}
+					if !ok || cost.Source != CostEstimated || math.Abs(cost.USD-want) > 1e-9 {
+						t.Fatalf("cost = %+v/%v, want %v", cost, ok, want)
+					}
+				})
+			}
+		}
+	})
+
+	t.Run("PiAggregateSummaryRetainsBaseRates", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Pi, Model: "openai-codex/gpt-6.1-sol"}
+		pricer := usage.NewPricer(nil)
+		c.Observe(&agent.UsageMessage{Usage: agent.Usage{InputTokens: 300_000}}, at, pricer)
+		c.Observe(&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, at, pricer)
+		cost, ok := c.Observe(&agent.ResultMessage{}, at, pricer)
+		if !ok || math.Abs(cost.USD-0.6) > 1e-9 {
+			t.Fatalf("aggregate summary cost = %+v/%v, want 0.6", cost, ok)
+		}
+	})
+
+	t.Run("PiHistoricalRequestStillUsesContextTier", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.Pi, Model: "openai-codex/gpt-6.1-sol"}
+		pricer := usage.NewPricer(nil)
+		c.Observe(&agent.UsageMessage{ReportedModel: "openai-codex/gpt-6.1-sol", Usage: agent.Usage{InputTokens: 100_000, CacheReadInputTokens: 200_000, OutputTokens: 1_000}}, at, pricer)
+		cost, ok := c.Observe(&agent.ResultMessage{}, at, pricer)
+		if !ok || math.Abs(cost.USD-0.455) > 1e-9 {
+			t.Fatalf("historical request cost = %+v/%v, want 0.455", cost, ok)
+		}
+	})
+
+	t.Run("OpenCodeReportedOpenAICostSupersedesRequests", func(t *testing.T) {
+		t.Parallel()
+		c := CostTracker{Harness: harness.OpenCode, Model: "openai-codex/gpt-6.1-sol"}
+		pricer := usage.NewPricer(nil)
+		call := &agent.UsageMessage{PerCall: true, ReportedModel: c.Model, Usage: agent.Usage{InputTokens: 300_000}}
+		c.Observe(call, at, pricer)
+		reported := 0.5
+		c.Observe(&agent.UsageMessage{CumulativeCostUSD: &reported}, at, pricer)
+		c.Observe(call, at, pricer) // Once reported, additional calls await a new snapshot.
+		cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 600_000}}, at, pricer)
+		if !ok || cost.Source != CostReported || cost.USD != 0.5 || c.TotalUSD != 0.5 {
+			t.Fatalf("reported cost = %+v/%v, total = %v", cost, ok, c.TotalUSD)
+		}
+	})
+	t.Run("OpenCodeAggregateOpenAIUsageKeepsBaseRates", func(t *testing.T) {
+		t.Parallel()
+		for _, model := range []string{"openai/gpt-6.1-sol", "openai-codex/gpt-6.1-sol"} {
+			c := CostTracker{Harness: harness.OpenCode, Model: model}
+			cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 400_000, CacheReadInputTokens: 100_000, OutputTokens: 1_000}}, at, usage.NewPricer(nil))
+			if !ok || math.Abs(cost.USD-0.82) > 1e-9 || cost.Source != CostEstimated {
+				t.Fatalf("%s aggregate cost = %+v/%v, want 0.82 estimated", model, cost, ok)
+			}
+		}
+	})
+
+	t.Run("CodexRequestContextPricing", func(t *testing.T) {
+		t.Parallel()
+		pricer := usage.NewPricer(nil)
+		for _, tc := range []struct {
+			name  string
+			calls []*agent.UsageMessage
+			total agent.Usage
+			want  float64
+		}{
+			{
+				name: "three short requests exceed threshold in aggregate",
+				calls: []*agent.UsageMessage{
+					{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000, OutputTokens: 1_000}},
+					{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000, OutputTokens: 1_000}},
+					{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000, OutputTokens: 1_000}},
+				},
+				total: agent.Usage{InputTokens: 300_000, OutputTokens: 3_000}, want: 0.63,
+			},
+			{
+				name: "long request includes cache reads and writes",
+				calls: []*agent.UsageMessage{
+					{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000, CacheReadInputTokens: 200_000, CacheCreationInputTokens: 1_000, OutputTokens: 1_000}},
+				},
+				total: agent.Usage{InputTokens: 100_000, CacheReadInputTokens: 200_000, CacheCreationInputTokens: 1_000, OutputTokens: 1_000}, want: 0.46,
+			},
+			{
+				name: "legacy turn totals retain base rate",
+				calls: []*agent.UsageMessage{
+					{ModelDerived: true, Usage: agent.Usage{InputTokens: 300_000, OutputTokens: 1_000}},
+				},
+				total: agent.Usage{InputTokens: 300_000, OutputTokens: 1_000}, want: 0.61,
+			},
+			{
+				name: "missing requests price only residual at base rate",
+				calls: []*agent.UsageMessage{
+					{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 300_000, OutputTokens: 1_000}},
+				},
+				total: agent.Usage{InputTokens: 400_000, OutputTokens: 2_000}, want: 1.425,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				c := CostTracker{Harness: harness.Codex, Model: "gpt-6.1-sol"}
+				for _, call := range tc.calls {
+					c.Observe(call, at, pricer)
+				}
+				cost, ok := c.Observe(&agent.ResultMessage{Usage: tc.total}, at, pricer)
+				if !ok || math.Abs(cost.USD-tc.want) > 1e-9 || cost.Source != CostEstimated {
+					t.Fatalf("cost = %+v/%v, want %v estimated", cost, ok, tc.want)
+				}
+				// The next turn must not subtract the preceding turn's requests.
+				cost, ok = c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+				if !ok || math.Abs(cost.USD-0.2) > 1e-9 || math.Abs(c.TotalUSD-tc.want-0.2) > 1e-9 {
+					t.Fatalf("next cost = %+v/%v, total = %v", cost, ok, c.TotalUSD)
+				}
+			})
+		}
+	})
+
+	t.Run("CodexSessionBoundaryResetsRequestCoverage", func(t *testing.T) {
+		t.Parallel()
+		for _, boundary := range []agent.Message{agent.ContextCleared(), &agent.ExitMessage{}, &agent.InitMessage{SessionID: "next"}} {
+			c := CostTracker{Harness: harness.Codex, Model: "gpt-6.1-sol"}
+			pricer := usage.NewPricer(nil)
+			c.Observe(&agent.UsageMessage{PerCall: true, Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+			c.Observe(boundary, at, pricer)
+			c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+			if math.Abs(c.TotalUSD-0.4) > 1e-9 {
+				t.Fatalf("total after %T = %v, want 0.4", boundary, c.TotalUSD)
+			}
+		}
+	})
+
+	t.Run("CodexSessionStartResetsCoverageAfterFilteredExit", func(t *testing.T) {
+		t.Parallel()
+		for _, filteredExit := range []bool{false, true} {
+			c := CostTracker{Harness: harness.Codex, Model: "gpt-6.1-sol"}
+			pricer := usage.NewPricer(nil)
+			c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+			c.Observe(&agent.UsageMessage{PerCall: true, ReportedModel: "gpt-6.1-terra",
+				Source: agent.MessageSource{ThreadID: "child", RootThreadID: "root"}, Usage: agent.Usage{InputTokens: 300_000}}, at, pricer)
+			if !filteredExit {
+				c.Observe(&agent.ExitMessage{ExitCode: 1}, at, pricer)
+			}
+			c.Observe(&agent.InitMessage{SessionID: "next"}, at, pricer)
+			cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+			if !ok || math.Abs(c.TotalUSD-1) > 1e-9 || math.Abs(cost.USD-0.8) > 1e-9 {
+				t.Fatalf("filtered exit %v: cost=%+v/%v, total=%v", filteredExit, cost, ok, c.TotalUSD)
+			}
+		}
+	})
+
+	t.Run("CodexPricedChildDoesNotEstablishUnpricedParentCost", func(t *testing.T) {
+		t.Parallel()
+		for _, parentInput := range []int{0, 100_000} {
+			c := CostTracker{Harness: harness.Codex, Model: "unknown"}
+			pricer := usage.NewPricer(nil)
+			c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "gpt-6.1-terra",
+				Source: agent.MessageSource{ThreadID: "child", RootThreadID: "root"},
+				Usage:  agent.Usage{InputTokens: 300_000}}, at, pricer)
+			cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 300_000 + parentInput}}, at, pricer)
+			if ok != (parentInput == 0) || (parentInput > 0 && cost.Source != "") || math.Abs(c.TotalUSD-0.6) > 1e-9 {
+				t.Fatalf("parent input %d: cost=%+v/%v, total=%v", parentInput, cost, ok, c.TotalUSD)
+			}
+		}
+	})
+
+	t.Run("CodexChildModelsReroutingAndMidTurnCompaction", func(t *testing.T) {
+		t.Parallel()
+		pricer := usage.NewPricer(nil)
+		c := CostTracker{Harness: harness.Codex, Model: "gpt-6.1-sol"}
+		c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+		child := agent.MessageSource{ThreadID: "child", RootThreadID: "root"}
+		c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "gpt-6.1-terra", Source: child, Usage: agent.Usage{InputTokens: 300_000}}, at, pricer)
+		if c.Model != "gpt-6.1-sol" {
+			t.Fatalf("child changed parent model to %s", c.Model)
+		}
+		if _, ok := c.Observe(&agent.ResultMessage{Source: child, Usage: agent.Usage{InputTokens: 300_000}}, at, pricer); ok {
+			t.Fatal("child result ended root turn")
+		}
+		c.Observe(&agent.SystemMessage{Subtype: agent.SystemSubtypeCompactBoundary}, at, pricer)
+		c.Observe(&agent.SystemMessage{Subtype: agent.SystemSubtypeModelRerouted, ReportedModel: "gpt-6.1-terra"}, at, pricer)
+		c.Observe(&agent.UsageMessage{PerCall: true, ModelDerived: true, Usage: agent.Usage{InputTokens: 100_000}}, at, pricer)
+		cost, ok := c.Observe(&agent.ResultMessage{Usage: agent.Usage{InputTokens: 500_000}}, at, pricer)
+		if !ok || math.Abs(cost.USD-0.9) > 1e-9 || math.Abs(c.TotalUSD-0.9) > 1e-9 {
+			t.Fatalf("cost = %+v/%v, total = %v, want 0.9", cost, ok, c.TotalUSD)
+		}
+	})
 
 	t.Run("PiUnpricedInvocationsAccumulateAcrossBoundaries", func(t *testing.T) {
 		t.Parallel()

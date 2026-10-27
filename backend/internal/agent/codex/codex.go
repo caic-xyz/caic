@@ -564,6 +564,15 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 		usageMsg := &agent.UsageMessage{Usage: incremental, ReportedModel: model, ModelDerived: true,
 			Source: agent.MessageSource{ThreadID: p.ThreadID, TurnID: p.TurnID}}
+		// Cumulative deltas may cover several requests after a missed event.
+		// Only Last's exact token buckets establish one request's context size;
+		// repeated totals yield zero deltas and must not reprice Last.
+		last := p.TokenUsage.Last
+		usageMsg.PerCall = breakdown.InputTokens == last.InputTokens &&
+			breakdown.CachedInputTokens == last.CachedInputTokens &&
+			breakdown.CacheWriteInputTokens == last.CacheWriteInputTokens &&
+			breakdown.OutputTokens == last.OutputTokens &&
+			(breakdown.InputTokens > 0 || breakdown.OutputTokens > 0)
 		w.mu.Unlock()
 		w.scopeSource(usageMsg.Provenance())
 		if p.TokenUsage.ModelContextWindow != nil {

@@ -446,10 +446,13 @@ type UsageMessage struct {
 	// ReportedCostUSD is the harness-reported cost of this usage's API call.
 	// A pointer distinguishes a reported zero from an absent cost.
 	ReportedCostUSD *float64 `json:"reported_cost_usd,omitempty"`
+	// PerCall identifies a single, deduplicated API request, even when its model
+	// is derived from thread state. Absent/false in logs without request detail.
+	PerCall bool `json:"per_call,omitempty"`
 	// ModelDerived reports that ReportedModel was derived by caic from session
-	// state because the harness record carried no model. Such records must not
-	// be priced per call: the harness prices this usage in its turn result, or
-	// another harness-reported record already covers the same API call. The
+	// state because the harness record carried no model. Unless PerCall is true,
+	// these records must not be priced per call: the turn result or another
+	// harness-reported record already covers the same API call. The
 	// model stamp remains valid for per-model usage analytics.
 	ModelDerived bool `json:"model_derived,omitempty"`
 }

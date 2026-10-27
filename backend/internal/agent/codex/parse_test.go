@@ -1438,6 +1438,40 @@ func TestWireFormat(t *testing.T) {
 			t.Errorf("threadID = %q, want captured-id", w.threadID)
 		}
 	})
+	t.Run("RequestUsageRequiresOneDeduplicatedCall", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{}
+		for i, tc := range []struct {
+			total, last string
+			perCall     bool
+		}{
+			{`{"totalTokens":110,"inputTokens":100,"outputTokens":10}`, `{"inputTokens":100,"outputTokens":10}`, true},
+			{`{"totalTokens":110,"inputTokens":100,"outputTokens":10}`, `{"inputTokens":100,"outputTokens":10}`, false},
+			// Two missing notifications: the delta exceeds Last's request.
+			{`{"totalTokens":440,"inputTokens":400,"outputTokens":40}`, `{"inputTokens":100,"outputTokens":10}`, false},
+			{`{"totalTokens":550,"inputTokens":500,"outputTokens":50}`, `{"inputTokens":100,"outputTokens":10}`, true},
+			// Cumulative totals reset at a context boundary.
+			{`{"totalTokens":220,"inputTokens":200,"outputTokens":20}`, `{"inputTokens":200,"outputTokens":20}`, true},
+			// Equal input/output totals alone cannot establish cache buckets.
+			{`{"totalTokens":330,"inputTokens":300,"cachedInputTokens":50,"outputTokens":30}`, `{"inputTokens":100,"cachedInputTokens":20,"outputTokens":10}`, false},
+		} {
+			line := fmt.Sprintf(`{"method":"thread/tokenUsage/updated","params":{"threadId":"root","tokenUsage":{"total":%s,"last":%s}}}`, tc.total, tc.last)
+			msgs, err := w.ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("event %d: messages = %d", i, len(msgs))
+			}
+			msg, ok := msgs[0].(*agent.UsageMessage)
+			if !ok {
+				t.Fatalf("event %d: unexpected %T", i, msgs[0])
+			}
+			if msg.PerCall != tc.perCall {
+				t.Errorf("event %d: PerCall = %v, want %v", i, msg.PerCall, tc.perCall)
+			}
+		}
+	})
 	t.Run("TokenUsageUpdatedEmitsUsageMessage", func(t *testing.T) {
 		t.Parallel()
 		w := &wireFormat{}

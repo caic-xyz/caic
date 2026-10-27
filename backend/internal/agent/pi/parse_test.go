@@ -777,6 +777,9 @@ func TestCaicModelInfo(t *testing.T) {
 		if um.ReportedModel != "openrouter/anthropic/claude-opus-4-6" {
 			t.Errorf("ReportedModel = %q, want openrouter/anthropic/claude-opus-4-6", um.ReportedModel)
 		}
+		if !um.PerCall {
+			t.Error("turn_end must preserve single-request pricing scope")
+		}
 	})
 
 	t.Run("turn_end without caic_model_info defaults to 0", func(t *testing.T) {
@@ -1193,6 +1196,9 @@ func TestParseCompactionEvents(t *testing.T) {
 		}
 		if u.Usage.InputTokens != 100000 || u.Usage.OutputTokens != 5000 || u.Usage.CacheReadInputTokens != 1000 {
 			t.Errorf("usage = %+v, want compaction token counts", u.Usage)
+		}
+		if u.PerCall {
+			t.Error("compaction summary usage can aggregate multiple requests")
 		}
 		if sm, ok := msgs[1].(*agent.SystemMessage); !ok || sm.Subtype != agent.SystemSubtypeCompactBoundary {
 			t.Fatalf("second message = %#v, want compact boundary", msgs[1])

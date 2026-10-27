@@ -4229,6 +4229,43 @@ func TestPricedCost(t *testing.T) {
 	// glm-5.3-flash: $0.15/M input, $0.03/M cache read, $0.50/M output.
 	prices := fakePricer{"zai/glm-5.3-flash": {InputPerMTok: 0.15, CachedInputPerMTok: 0.03, OutputPerMTok: 0.50}}
 
+	t.Run("CodexRequestCostLiveReplayRollup", func(t *testing.T) {
+		t.Parallel()
+		for _, exited := range []bool{false, true} {
+			messages := []agent.Message{
+				&agent.UsageMessage{PerCall: true, ModelDerived: true, ReportedModel: "gpt-6.1-sol", Usage: agent.Usage{InputTokens: 300_000, OutputTokens: 1_000}},
+			}
+			resultUsage, wantCost := agent.Usage{InputTokens: 300_000, OutputTokens: 1_000}, 1.215
+			if exited {
+				messages = append(messages, &agent.ExitMessage{ExitCode: 1})
+				// A new session's aggregate excludes requests before the exit.
+				resultUsage, wantCost = agent.Usage{InputTokens: 100_000}, 1.415
+			}
+			messages = append(messages, &agent.ResultMessage{MessageType: "result", Usage: resultUsage})
+			for _, replay := range []bool{false, true} {
+				tk := mustNewTask(t, ksid.NewID(), agent.Prompt{Text: "test"}, harness.Codex, "gpt-6.1-sol", "")
+				tk.Pricer = quotausage.NewPricer(nil)
+				sink := &rollupSpy{}
+				tk.Rollup = sink
+				if replay {
+					tk.SeedTimeline(messages)
+				} else {
+					for _, msg := range messages {
+						tk.addMessage(t.Context(), msg)
+					}
+				}
+				cost, _, _, tokens, _ := tk.LiveStats()
+				if math.Abs(cost-wantCost) > 1e-9 || tokens.InputTokens != resultUsage.InputTokens || tokens.OutputTokens != resultUsage.OutputTokens {
+					t.Fatalf("exited %v/replay %v: cost=%v, tokens=%+v", exited, replay, cost, tokens)
+				}
+				last := sink.Observes[len(sink.Observes)-1].Event
+				if !last.TurnBoundary || math.Abs(last.CostUSD-wantCost) > 1e-9 || last.Delta.Input != int64(resultUsage.InputTokens) {
+					t.Fatalf("exited %v/replay %v: rollup=%+v", exited, replay, last)
+				}
+			}
+		}
+	})
+
 	t.Run("CodexResultKeepsRawCostSeparate", func(t *testing.T) {
 		t.Parallel()
 		const model = "gpt-6-sol"

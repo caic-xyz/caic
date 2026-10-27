@@ -1,4 +1,4 @@
-// Per-model token pricing from quota providers, with time-dependent price tiers.
+// Per-model token pricing with dated schedules, request-context tiers, and source provenance.
 
 package usage
 
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -23,11 +24,12 @@ const pricingDateLayout = "2006-01-02"
 // do not surcharge cache writes leave CacheWritePerMTok zero, which bills
 // cache-creation tokens at the input price.
 type ModelPrice struct {
-	InputPerMTok        float64 `json:"input_per_mtok"`                    // Non-cached input (cache miss).
-	CachedInputPerMTok  float64 `json:"cached_input_per_mtok"`             // Cache read (cache hit).
-	CacheWritePerMTok   float64 `json:"cache_write_per_mtok,omitempty"`    // Cache creation; 0 = same as input.
-	CacheWrite1hPerMTok float64 `json:"cache_write_1h_per_mtok,omitempty"` // One-hour cache creation; 0 = same as CacheWritePerMTok.
-	OutputPerMTok       float64 `json:"output_per_mtok"`
+	InputPerMTok        float64          `json:"input_per_mtok"`                    // Non-cached input (cache miss).
+	CachedInputPerMTok  float64          `json:"cached_input_per_mtok"`             // Cache read (cache hit).
+	CacheWritePerMTok   float64          `json:"cache_write_per_mtok,omitempty"`    // Cache creation; 0 = same as input.
+	CacheWrite1hPerMTok float64          `json:"cache_write_1h_per_mtok,omitempty"` // One-hour cache creation; 0 = same as CacheWritePerMTok.
+	OutputPerMTok       float64          `json:"output_per_mtok"`
+	LongContext         LongContextPrice `json:"long_context,omitzero"`
 }
 
 // staticModelPrice prices model under a harness model-provider prefix, or ""
@@ -48,6 +50,24 @@ func staticModelPrice(provider, model string, at time.Time) (ModelPrice, bool) {
 	default:
 		return ModelPrice{}, false
 	}
+}
+
+// RequestCost prices one API request, including all cached input when selecting
+// its context tier. Cost and CostBuckets retain base rates for aggregates whose
+// individual request sizes are unknown. Reasoning tokens are included in output.
+// The Sol/Terra tier applies to the full request above 272K total input tokens:
+// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+func (p ModelPrice) RequestCost(u agent.Usage) float64 {
+	input := int64(u.InputTokens) + int64(u.CacheCreationInputTokens) + int64(u.CacheReadInputTokens)
+	if p.LongContext.InputTokensAbove > 0 && input > p.LongContext.InputTokensAbove {
+		p.InputPerMTok *= p.LongContext.InputMultiplier
+		p.CachedInputPerMTok *= p.LongContext.InputMultiplier
+		p.CacheWritePerMTok *= p.LongContext.InputMultiplier
+		p.CacheWrite1hPerMTok *= p.LongContext.InputMultiplier
+		p.OutputPerMTok *= p.LongContext.OutputMultiplier
+	}
+	return p.Cost(u)
 }
 
 // Cost returns the USD cost of one usage report at p.
@@ -77,8 +97,8 @@ func (p ModelPrice) CostBuckets(input, cacheWrite5m, cacheWrite1h, cacheRead, ou
 		float64(output)*p.OutputPerMTok) / 1_000_000
 }
 
-// Validate reports whether every price field is non-negative, which every
-// provider's published prices are.
+// Validate checks non-negative rates and a complete, positive long-context tier
+// when one is configured.
 func (p ModelPrice) Validate() error {
 	fields := []struct {
 		name  string
@@ -95,7 +115,18 @@ func (p ModelPrice) Validate() error {
 			return fmt.Errorf("%s is negative: %v", f.name, f.value)
 		}
 	}
+	if p.LongContext != (LongContextPrice{}) && (p.LongContext.InputTokensAbove <= 0 || p.LongContext.InputMultiplier <= 0 || p.LongContext.OutputMultiplier <= 0) {
+		return errors.New("long_context requires a positive input threshold and multipliers")
+	}
 	return nil
+}
+
+// LongContextPrice applies multipliers to an entire request above InputTokensAbove.
+// InputMultiplier applies to uncached input, cache reads, and cache writes.
+type LongContextPrice struct {
+	InputTokensAbove int64   `json:"input_tokens_above"`
+	InputMultiplier  float64 `json:"input_multiplier"`
+	OutputMultiplier float64 `json:"output_multiplier"`
 }
 
 // modelPriceTable maps the model IDs of one provider to their price
@@ -288,9 +319,9 @@ type ModelPricer interface {
 }
 
 // Pricer resolves per-model token pricing from the quota providers:
-// fetcher-supplied live pricing (OpenRouter), static published schedules
-// (Z.ai, DeepSeek), and API-equivalent schedules for subscription-backed
-// providers (Anthropic, OpenAI via Claude Code and Codex).
+// fetcher-supplied live pricing (OpenRouter) and static published schedules.
+// The same model rates apply across harnesses; subscription sessions use
+// API-equivalent estimates rather than subscription quota accounting.
 type Pricer struct {
 	fetchers map[agent.QuotaProvider]ModelPricer
 }
@@ -355,8 +386,9 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 		// estimates use the one-hour write rate where one is published.
 		return pricing.providers["anthropic"].lookup(model, at)
 	case agent.QuotaProviderCodex:
-		// API-equivalent prices: Codex subscriptions are not billed per token.
-		// Long-context pricing is not encoded; short-context prices are used.
+		// OpenAI model rates apply regardless of harness or credential mode.
+		// For subscription sessions these are API-equivalent estimates.
+		// RequestCost applies long-context rates when a request size is known.
 		return pricing.providers["openai"].lookup(model, at)
 	default:
 		// Direct OpenAI API models ("openai/...") are not a quota provider
@@ -370,8 +402,9 @@ func (p *Pricer) ModelPrice(provider agent.QuotaProvider, modelID string, at tim
 
 // pricingJSON embeds the provider price schedules, keeping the numbers,
 // provider names, sources, and retrieval dates in pricing.json so a
-// mechanical updater can rewrite them without editing Go code. See that file
-// for the schema.
+// mechanical updater can rewrite them without editing Go code. Model source
+// and retrieved fields override provider defaults; aliases inherit their target.
+// Retrieval dates record when rates were checked, not when metadata was edited.
 //
 //go:embed pricing.json
 var pricingJSON []byte
@@ -432,6 +465,9 @@ func (p *pricingProvider) Validate() error {
 	if p.Source == "" || p.Retrieved == "" {
 		return errors.New("source and retrieved are required")
 	}
+	if err := validatePricingSource(p.Source, p.Retrieved); err != nil {
+		return err
+	}
 	for _, holiday := range p.Holidays {
 		if _, err := time.Parse(pricingDateLayout, holiday); err != nil {
 			return fmt.Errorf("holiday %q: %w", holiday, err)
@@ -451,7 +487,8 @@ func (p *pricingProvider) Validate() error {
 		return errors.New("no models")
 	}
 	seen := make(map[string]struct{}, len(p.Models))
-	for _, m := range p.Models {
+	for i := range p.Models {
+		m := &p.Models[i]
 		if err := m.Validate(); err != nil {
 			return err
 		}
@@ -460,7 +497,35 @@ func (p *pricingProvider) Validate() error {
 		}
 		seen[m.ID] = struct{}{}
 	}
+	for i := range p.Models {
+		m := &p.Models[i]
+		if _, _, err := p.modelSource(m); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// modelSource resolves model overrides, provider defaults, and alias targets.
+// Metadata stays in the embedded document, outside the hot pricing lookup path.
+func (p *pricingProvider) modelSource(m *pricingModel) (source, retrieved string, err error) {
+	if m.Alias != "" {
+		for i := range p.Models {
+			target := &p.Models[i]
+			if target.ID == m.Alias && target.Alias == "" {
+				return p.modelSource(target)
+			}
+		}
+		return "", "", fmt.Errorf("model %q aliases unpriced model %q", m.ID, m.Alias)
+	}
+	source, retrieved = p.Source, p.Retrieved
+	if m.Source != "" {
+		source = m.Source
+	}
+	if m.Retrieved != "" {
+		retrieved = m.Retrieved
+	}
+	return source, retrieved, nil
 }
 
 // build resolves the entry, which Validate must have accepted, into its model
@@ -497,11 +562,7 @@ func (p *pricingProvider) build() (providerPricing, error) {
 		if m.Alias == "" {
 			continue
 		}
-		tiers, ok := models[m.Alias]
-		if !ok {
-			return providerPricing{}, fmt.Errorf("model %q aliases unpriced model %q", m.ID, m.Alias)
-		}
-		models[m.ID] = tiers
+		models[m.ID] = models[m.Alias]
 	}
 	return providerPricing{models: models, windows: windows}, nil
 }
@@ -509,18 +570,26 @@ func (p *pricingProvider) build() (providerPricing, error) {
 // pricingModel mirrors one model entry: either tiers, or an alias of another
 // priced model in the same provider.
 type pricingModel struct {
-	ID    string        `json:"id"`
-	Alias string        `json:"alias"`
-	Tiers []pricingTier `json:"tiers"`
+	ID        string        `json:"id"`
+	Source    string        `json:"source,omitempty"`
+	Retrieved string        `json:"retrieved,omitempty"`
+	Alias     string        `json:"alias"`
+	Tiers     []pricingTier `json:"tiers"`
 }
 
 // Validate reports whether the entry prices tiers or aliases another priced
 // model, without doing both or neither.
-func (m pricingModel) Validate() error {
+func (m *pricingModel) Validate() error {
 	if m.ID == "" {
 		return errors.New("model ID is empty")
 	}
+	if err := validatePricingSource(m.Source, m.Retrieved); err != nil {
+		return fmt.Errorf("model %q: %w", m.ID, err)
+	}
 	if m.Alias != "" {
+		if m.Source != "" || m.Retrieved != "" {
+			return fmt.Errorf("model %q must inherit source and retrieved from its alias target", m.ID)
+		}
 		if len(m.Tiers) > 0 {
 			return fmt.Errorf("model %q has both alias and tiers", m.ID)
 		}
@@ -532,6 +601,23 @@ func (m pricingModel) Validate() error {
 	for _, tier := range m.Tiers {
 		if err := tier.Validate(); err != nil {
 			return fmt.Errorf("model %q: %w", m.ID, err)
+		}
+	}
+	return nil
+}
+
+// validatePricingSource checks optional provenance overrides. Providers require
+// both fields; models may inherit either field from the provider's defaults.
+func validatePricingSource(source, retrieved string) error {
+	if source != "" {
+		u, err := url.Parse(source)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return fmt.Errorf("source %q is not an absolute HTTP(S) URL", source)
+		}
+	}
+	if retrieved != "" {
+		if _, err := time.Parse(pricingDateLayout, retrieved); err != nil {
+			return fmt.Errorf("retrieved %q: %w", retrieved, err)
 		}
 	}
 	return nil

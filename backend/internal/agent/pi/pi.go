@@ -815,6 +815,7 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	w.mu.Unlock()
 	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {
 		return []agent.Message{&agent.UsageMessage{
+			PerCall:         true,
 			Usage:           toAgentUsage(&ev.Message.Usage),
 			ReportedCostUSD: &ev.Message.Usage.Cost.Total,
 			ReportedModel:   resolvedModel(ev.Message.Provider, ev.Message.ResponseModel, ev.Message.Model),

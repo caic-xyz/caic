@@ -7,6 +7,39 @@ import (
 	"testing"
 )
 
+func TestUsageMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("JSONRequestDetail", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			json    string
+			perCall bool
+		}{
+			{`{"model":"gpt-6.1-sol","model_derived":true,"usage":{"input_tokens":300000}}`, false},
+			{`{"model":"gpt-6.1-sol","model_derived":true,"per_call":true,"usage":{"input_tokens":300000}}`, true},
+		} {
+			var msg UsageMessage
+			if err := json.Unmarshal([]byte(tc.json), &msg); err != nil {
+				t.Fatal(err)
+			}
+			if msg.PerCall != tc.perCall || !msg.ModelDerived || msg.Usage.InputTokens != 300000 {
+				t.Fatalf("decoded request detail = %+v", msg)
+			}
+			encoded, err := json.Marshal(&msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := fields["per_call"]; present != tc.perCall {
+				t.Fatalf("per_call presence = %v, JSON = %s", present, encoded)
+			}
+		}
+	})
+}
+
 func TestQuotaProvider(t *testing.T) {
 	t.Parallel()
 	t.Run("Valid", func(t *testing.T) {

@@ -1001,6 +1001,7 @@ func (t *Task) SeedTimelineParts(prefix, suffix []agent.TimedMessage) {
 			} else {
 				t.lastExitError = ""
 			}
+			t.costTracker.Observe(msg, entry.ProducerTime, t.Pricer)
 			continue
 		}
 		if ClearsExitError(msg) {

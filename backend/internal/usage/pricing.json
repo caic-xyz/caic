@@ -7,6 +7,8 @@
       "models": [
         {
           "id": "claude-fable-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -20,6 +22,8 @@
         },
         {
           "id": "claude-fable-5-1",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -33,6 +37,8 @@
         },
         {
           "id": "claude-haiku-4-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -46,6 +52,8 @@
         },
         {
           "id": "claude-mythos-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -59,6 +67,8 @@
         },
         {
           "id": "claude-mythos-5-1",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -72,6 +82,8 @@
         },
         {
           "id": "claude-opus-4-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -85,6 +97,8 @@
         },
         {
           "id": "claude-opus-4-6",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -98,6 +112,8 @@
         },
         {
           "id": "claude-opus-4-7",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -111,6 +127,8 @@
         },
         {
           "id": "claude-opus-4-8",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -124,6 +142,8 @@
         },
         {
           "id": "claude-opus-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -137,6 +157,8 @@
         },
         {
           "id": "claude-opus-5-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -151,6 +173,8 @@
         },
         {
           "id": "claude-sonnet-4-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -164,6 +188,8 @@
         },
         {
           "id": "claude-sonnet-4-6",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -177,6 +203,8 @@
         },
         {
           "id": "claude-sonnet-5",
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -246,6 +274,8 @@
       "models": [
         {
           "id": "deepseek-flash",
+          "source": "https://api-docs.deepseek.com/quick_start/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "windows": "peak",
@@ -274,6 +304,8 @@
         },
         {
           "id": "deepseek-v4-pro",
+          "source": "https://api-docs.deepseek.com/quick_start/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "windows": "peak",
@@ -297,10 +329,12 @@
     {
       "provider": "openai",
       "source": "https://developers.openai.com/api/docs/pricing",
-      "retrieved": "2026-10-04",
+      "retrieved": "2026-10-27",
       "models": [
         {
           "id": "gpt-5.3-codex",
+          "source": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
@@ -313,104 +347,180 @@
         },
         {
           "id": "gpt-5.6-cyber",
+          "source": "https://developers.openai.com/api/docs/models/gpt-5.6-cyber",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 12.5,
                 "cached_input_per_mtok": 1.25,
                 "cache_write_per_mtok": 15.625,
-                "output_per_mtok": 75.0
+                "output_per_mtok": 75.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-5.6-luna",
+          "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 0.2,
                 "cached_input_per_mtok": 0.02,
                 "cache_write_per_mtok": 0.25,
-                "output_per_mtok": 1.2
+                "output_per_mtok": 1.2,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-5.6-sol",
+          "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 4.0,
                 "cached_input_per_mtok": 0.4,
                 "cache_write_per_mtok": 5.0,
-                "output_per_mtok": 20.0
+                "output_per_mtok": 20.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-5.6-terra",
+          "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.2,
                 "cache_write_per_mtok": 2.5,
-                "output_per_mtok": 12.0
+                "output_per_mtok": 12.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-6.1-sol",
+          "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.1,
                 "cache_write_per_mtok": 2.5,
-                "output_per_mtok": 10.0
+                "output_per_mtok": 10.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "gpt-6.1-terra",
+          "source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
+          "retrieved": "2026-10-27",
+          "tiers": [
+            {
+              "price": {
+                "input_per_mtok": 1.0,
+                "cached_input_per_mtok": 0.05,
+                "cache_write_per_mtok": 1.25,
+                "output_per_mtok": 5.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-6-astra",
+          "source": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 10.0,
                 "cached_input_per_mtok": 1.0,
                 "cache_write_per_mtok": 12.5,
-                "output_per_mtok": 50.0
+                "output_per_mtok": 50.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-6-luna",
+          "source": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 0.1,
                 "cached_input_per_mtok": 0.01,
                 "cache_write_per_mtok": 0.125,
-                "output_per_mtok": 0.5
+                "output_per_mtok": 0.5,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
         },
         {
           "id": "gpt-6-sol",
+          "source": "https://developers.openai.com/api/docs/models/gpt-6-sol",
+          "retrieved": "2026-10-27",
           "tiers": [
             {
               "price": {
                 "input_per_mtok": 2.0,
                 "cached_input_per_mtok": 0.2,
                 "cache_write_per_mtok": 2.5,
-                "output_per_mtok": 10.0
+                "output_per_mtok": 10.0,
+                "long_context": {
+                  "input_tokens_above": 272000,
+                  "input_multiplier": 2.0,
+                  "output_multiplier": 1.5
+                }
               }
             }
           ]
@@ -432,6 +542,8 @@
       "models": [
         {
           "id": "glm-5.3-flash",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -444,6 +556,8 @@
         },
         {
           "id": "glm-5.3-flashx",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -456,6 +570,8 @@
         },
         {
           "id": "glm-5.3",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -468,6 +584,8 @@
         },
         {
           "id": "glm-5.2",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -480,6 +598,8 @@
         },
         {
           "id": "glm-5.1",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -492,6 +612,8 @@
         },
         {
           "id": "glm-5",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -504,6 +626,8 @@
         },
         {
           "id": "glm-4.7",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -516,6 +640,8 @@
         },
         {
           "id": "glm-4.7-flashx",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -528,10 +654,18 @@
         },
         {
           "id": "glm-4.7-flash",
-          "tiers": [{ "price": {} }]
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
+          "tiers": [
+            {
+              "price": {}
+            }
+          ]
         },
         {
           "id": "glm-4.6",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -544,6 +678,8 @@
         },
         {
           "id": "glm-4.5",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -556,6 +692,8 @@
         },
         {
           "id": "glm-4.5-x",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -568,6 +706,8 @@
         },
         {
           "id": "glm-4.5-air",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -580,6 +720,8 @@
         },
         {
           "id": "glm-4.5-airx",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -592,10 +734,18 @@
         },
         {
           "id": "glm-4.5-flash",
-          "tiers": [{ "price": {} }]
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
+          "tiers": [
+            {
+              "price": {}
+            }
+          ]
         },
         {
           "id": "glm-4-32b-0414-128k",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -608,6 +758,8 @@
         },
         {
           "id": "glm-4.6v",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -620,6 +772,8 @@
         },
         {
           "id": "glm-4.6v-flashx",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -632,10 +786,18 @@
         },
         {
           "id": "glm-4.6v-flash",
-          "tiers": [{ "price": {} }]
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
+          "tiers": [
+            {
+              "price": {}
+            }
+          ]
         },
         {
           "id": "glm-4.5v",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {
@@ -648,6 +810,8 @@
         },
         {
           "id": "glm-ocr",
+          "source": "https://docs.z.ai/guides/overview/pricing",
+          "retrieved": "2026-09-21",
           "tiers": [
             {
               "price": {

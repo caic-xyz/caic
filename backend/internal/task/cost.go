@@ -1,8 +1,9 @@
-// CostTracker folds harness cost reports and token prices into task and turn costs.
+// CostTracker folds harness reports and per-request or aggregate token estimates into task costs.
 
 package task
 
 import (
+	"strings"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -41,16 +42,24 @@ type CostTracker struct {
 	opencodeReported  bool
 	lastTurnUSD       float64
 	pendingTurnSource CostSource
+	pricedUsage       agent.Usage // Request tokens already priced since the last root result/session exit.
 }
 
 // Observe folds one agent message and returns a cost only at a result boundary.
 // A false result means the turn's cost is unknown, including unpriced models.
 func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.ModelPricer) (TurnCost, bool) {
 	switch m := msg.(type) {
+	case *agent.ExitMessage:
+		if !m.Source.IsChild() {
+			c.pricedUsage = agent.Usage{}
+		}
 	case *agent.InitMessage:
 		if m.Source.IsChild() {
 			break
 		}
+		// A new wire starts fresh result totals. SSE may filter the preceding
+		// process exit, so session start must reset request coverage as well.
+		c.pricedUsage = agent.Usage{}
 		if m.ReportedModel != "" {
 			c.Model = m.ReportedModel
 		}
@@ -70,6 +79,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 			}
 			if m.Subtype == "context_cleared" {
 				c.opencodeReported = false
+				c.pricedUsage = agent.Usage{}
 			}
 		}
 	case *agent.UsageMessage:
@@ -79,26 +89,57 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 		if c.Harness == harness.OpenCode && m.CumulativeCostUSD != nil && *m.CumulativeCostUSD > 0 {
 			c.opencodeReported = true
 			c.TotalUSD = c.priorUSD + *m.CumulativeCostUSD
-			c.markSource(CostReported)
+			c.pendingTurnSource = CostReported
 		}
-		if !m.ModelDerived && (m.ReportedModel != "" || c.Harness == harness.Pi) {
-			if !c.priceUsage(m.Usage, "", at, pricer) && c.Harness == harness.Pi && m.ReportedCostUSD != nil {
-				c.priorUSD += *m.ReportedCostUSD
-				c.TotalUSD += *m.ReportedCostUSD
-				c.markSource(CostReported)
+		if c.Harness == harness.OpenCode && c.opencodeReported {
+			break // ACP's reported session cost supersedes token estimates.
+		}
+		// PerCall records establish request context independently of the harness.
+		// Older non-derived records carrying a model are also individual calls.
+		priced := false
+		if m.PerCall || (!m.ModelDerived && m.ReportedModel != "") {
+			priced = c.priceRequest(m, at, pricer)
+			if priced {
+				c.pricedUsage.InputTokens += m.Usage.InputTokens
+				c.pricedUsage.CacheCreationInputTokens += m.Usage.CacheCreationInputTokens
+				c.pricedUsage.CacheReadInputTokens += m.Usage.CacheReadInputTokens
+				c.pricedUsage.OutputTokens += m.Usage.OutputTokens
 			}
+		} else if c.Harness == harness.Pi && !m.ModelDerived {
+			// Pi summary usage may aggregate multiple requests. Older records
+			// without model or request detail also retain base-rate estimation.
+			priced = c.priceUsage(m.Usage, at, pricer)
+		}
+		if !priced && c.Harness == harness.Pi && (m.PerCall || !m.ModelDerived) && m.ReportedCostUSD != nil {
+			c.priorUSD += *m.ReportedCostUSD
+			c.TotalUSD += *m.ReportedCostUSD
+			c.markSource(CostReported)
 		}
 	case *agent.ResultMessage:
 		if m.Source.IsChild() {
 			break
 		}
 		switch c.Harness {
-		case harness.OpenCode:
-			if !c.opencodeReported && !c.priceUsage(m.Usage, "", at, pricer) {
-				c.applyResultReport(m.TotalCostUSD, false)
+		case harness.OpenCode, harness.Codex:
+			if c.Harness == harness.OpenCode && c.opencodeReported {
+				break
 			}
-		case harness.Codex:
-			if !c.priceUsage(m.Usage, agent.QuotaProviderCodex, at, pricer) {
+			// Results sum every request, including child threads. Subtract calls
+			// already priced, then estimate only the remaining aggregate at base
+			// rates: legacy logs and missing events do not establish request sizes.
+			remaining := agent.Usage{
+				InputTokens:              max(0, m.Usage.InputTokens-c.pricedUsage.InputTokens),
+				CacheCreationInputTokens: max(0, m.Usage.CacheCreationInputTokens-c.pricedUsage.CacheCreationInputTokens),
+				CacheReadInputTokens:     max(0, m.Usage.CacheReadInputTokens-c.pricedUsage.CacheReadInputTokens),
+				OutputTokens:             max(0, m.Usage.OutputTokens-c.pricedUsage.OutputTokens),
+				CacheTTLSeconds:          m.Usage.CacheTTLSeconds,
+			}
+			if !c.priceUsage(remaining, at, pricer) {
+				if remaining.InputTokens > 0 || remaining.CacheCreationInputTokens > 0 || remaining.CacheReadInputTokens > 0 || remaining.OutputTokens > 0 {
+					// Priced children do not establish the cost of unpriced
+					// parent usage. Do not present a partial turn as known.
+					c.pendingTurnSource = ""
+				}
 				c.applyResultReport(m.TotalCostUSD, false)
 			}
 		case harness.Claude:
@@ -119,6 +160,7 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 				c.applyResultReport(m.TotalCostUSD, false)
 			}
 		}
+		c.pricedUsage = agent.Usage{}
 		cost := TurnCost{USD: c.TotalUSD - c.lastTurnUSD, Source: c.pendingTurnSource}
 		c.lastTurnUSD = c.TotalUSD
 		c.pendingTurnSource = ""
@@ -127,21 +169,48 @@ func (c *CostTracker) Observe(msg agent.Message, at time.Time, pricer usage.Mode
 	return TurnCost{}, false
 }
 
-func (c *CostTracker) priceUsage(u agent.Usage, provider agent.QuotaProvider, at time.Time, pricer usage.ModelPricer) bool {
-	if c.Model == "" || pricer == nil {
+func (c *CostTracker) priceUsage(u agent.Usage, at time.Time, pricer usage.ModelPricer) bool {
+	price, ok := c.modelPrice(c.Model, at, pricer)
+	if !ok {
 		return false
+	}
+	c.addEstimatedCost(price.Cost(u))
+	return true
+}
+
+func (c *CostTracker) priceRequest(m *agent.UsageMessage, at time.Time, pricer usage.ModelPricer) bool {
+	model := m.ReportedModel
+	if model == "" && !m.Source.IsChild() {
+		model = c.Model
+	}
+	price, ok := c.modelPrice(model, at, pricer)
+	if !ok {
+		return false
+	}
+	c.addEstimatedCost(price.RequestCost(m.Usage))
+	return true
+}
+
+func (c *CostTracker) modelPrice(model string, at time.Time, pricer usage.ModelPricer) (usage.ModelPrice, bool) {
+	if model == "" || pricer == nil {
+		return usage.ModelPrice{}, false
 	}
 	if at.IsZero() {
 		at = time.Now()
 	}
-	price, ok := pricer.ModelPrice(provider, c.Model, at)
-	if !ok {
-		return false
+	// Pi and OpenCode identify the billing provider in the model ID. Native
+	// Codex can report a bare model ID, which needs an OpenAI provider hint.
+	var provider agent.QuotaProvider
+	if c.Harness == harness.Codex && !strings.Contains(model, "/") {
+		provider = agent.QuotaProviderCodex
 	}
-	c.sessionPricedUSD += price.Cost(u)
+	return pricer.ModelPrice(provider, model, at)
+}
+
+func (c *CostTracker) addEstimatedCost(usd float64) {
+	c.sessionPricedUSD += usd
 	c.TotalUSD = c.priorUSD + c.sessionPricedUSD
 	c.markSource(CostEstimated)
-	return true
 }
 
 func (c *CostTracker) applyResultReport(usd float64, zeroKnown bool) {

@@ -3,6 +3,8 @@
 package usage
 
 import (
+	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -76,8 +78,88 @@ func TestModelPricingPrice(t *testing.T) {
 	})
 }
 
-func TestPricerModelPrice(t *testing.T) {
+func TestPricer(t *testing.T) {
 	t.Parallel()
+	t.Run("LunaAndAstraRequestCost", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			model                       string
+			atThreshold, aboveThreshold float64
+		}{
+			{"gpt-6-luna", 0.02687, 0.05349002},
+			{"gpt-6-astra", 2.687, 5.349002},
+		} {
+			t.Run(tc.model, func(t *testing.T) {
+				t.Parallel()
+				p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, tc.model, time.Now())
+				if !ok {
+					t.Fatalf("missing price for %s", tc.model)
+				}
+				// Include reads and writes when selecting the request tier.
+				u := agent.Usage{InputTokens: 250_000, CacheCreationInputTokens: 10_000, CacheReadInputTokens: 12_000, OutputTokens: 1_000}
+				if got := p.RequestCost(u); math.Abs(got-tc.atThreshold) > 1e-9 {
+					t.Errorf("threshold cost = %v, want %v", got, tc.atThreshold)
+				}
+				u.CacheReadInputTokens++
+				if got := p.RequestCost(u); math.Abs(got-tc.aboveThreshold) > 1e-9 {
+					t.Errorf("long-context cost = %v, want %v", got, tc.aboveThreshold)
+				}
+			})
+		}
+	})
+	t.Run("PublishedOpenAIContextTiers", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			model string
+			want  float64
+		}{
+			{"gpt-5.3-codex", 0.539},
+			{"gpt-5.6-cyber", 7.6125},
+			{"gpt-5.6-luna", 0.1218},
+			{"gpt-5.6-sol", 2.43},
+			{"gpt-5.6-terra", 1.218},
+			{"gpt-6-sol", 1.215},
+			{"gpt-daybreak-blue-latest", 2.43},
+			{"gpt-daybreak-red-latest", 7.6125},
+		} {
+			p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, tc.model, time.Now())
+			if !ok {
+				t.Fatalf("missing price for %s", tc.model)
+			}
+			got := p.RequestCost(agent.Usage{InputTokens: 300_000, OutputTokens: 1_000})
+			if math.Abs(got-tc.want) > 1e-9 {
+				t.Errorf("%s request cost = %v, want %v", tc.model, got, tc.want)
+			}
+		}
+	})
+	t.Run("RequestCost", func(t *testing.T) {
+		t.Parallel()
+		p, ok := NewPricer(nil).ModelPrice(agent.QuotaProviderCodex, "gpt-6.1-sol", time.Now())
+		if !ok {
+			t.Fatal("Sol price missing")
+		}
+		for _, tc := range []struct {
+			name  string
+			usage agent.Usage
+			want  float64
+		}{
+			{"at threshold", agent.Usage{InputTokens: 272_000, OutputTokens: 1_000}, 0.554},
+			{"above threshold", agent.Usage{InputTokens: 272_001, OutputTokens: 1_000}, 1.103004},
+			{"cached input sets tier", agent.Usage{InputTokens: 1_000, CacheCreationInputTokens: 1_000, CacheReadInputTokens: 270_001, OutputTokens: 1_000}, 0.0780002},
+			{"reasoning already in output", agent.Usage{InputTokens: 300_000, OutputTokens: 1_000, ReasoningOutputTokens: 900}, 1.215},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if got := p.RequestCost(tc.usage); math.Abs(got-tc.want) > 1e-9 {
+					t.Errorf("RequestCost = %v, want %v", got, tc.want)
+				}
+			})
+		}
+		// Aggregated history cannot establish the context length of a request.
+		if got := p.CostBuckets(300_000, 0, 0, 0, 1_000); got != 0.61 {
+			t.Errorf("aggregate cost = %v, want 0.61", got)
+		}
+	})
 	t.Run("Sol61ProviderForms", func(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
@@ -87,9 +169,30 @@ func TestPricerModelPrice(t *testing.T) {
 				provider = agent.QuotaProviderCodex
 			}
 			got, ok := p.ModelPrice(provider, model, time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC))
-			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, OutputPerMTok: 10}
+			want := ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.1, CacheWritePerMTok: 2.5, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
 			if !ok || got != want {
 				t.Errorf("%s price = %+v/%v, want %+v", model, got, ok, want)
+			}
+		}
+	})
+	t.Run("Terra61ProviderForms", func(t *testing.T) {
+		t.Parallel()
+		p := NewPricer(nil)
+		for _, model := range []string{"gpt-6.1-terra", "openai-codex/gpt-6.1-terra", "openai/gpt-6.1-terra", "openrouter/openai/gpt-6.1-terra"} {
+			provider := agent.QuotaProvider("")
+			if model == "gpt-6.1-terra" {
+				provider = agent.QuotaProviderCodex
+			}
+			price, ok := p.ModelPrice(provider, model, time.Now())
+			if !ok {
+				t.Fatalf("%s price missing", model)
+			}
+			u := agent.Usage{InputTokens: 300_000, CacheReadInputTokens: 100_000, CacheCreationInputTokens: 10_000, OutputTokens: 1_000}
+			if got := price.RequestCost(u); math.Abs(got-0.6425) > 1e-9 {
+				t.Errorf("%s long request = %v, want 0.6425", model, got)
+			}
+			if got := price.Cost(u); math.Abs(got-0.3225) > 1e-9 {
+				t.Errorf("%s base rate = %v, want 0.3225", model, got)
 			}
 		}
 	})
@@ -211,7 +314,7 @@ func TestPricerModelPrice(t *testing.T) {
 	t.Run("CodexOpenAIApiEquivalent", func(t *testing.T) {
 		t.Parallel()
 		p := NewPricer(nil)
-		want := ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0}
+		want := ModelPrice{InputPerMTok: 2.0, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}
 		for _, model := range []string{
 			"openai-codex/gpt-5.6-terra",
 			"codex/gpt-5.6-terra",
@@ -237,7 +340,7 @@ func TestPricerModelPrice(t *testing.T) {
 		if !ok {
 			t.Fatal("daybreak blue not priced")
 		}
-		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0}); got != want {
+		if want := (ModelPrice{InputPerMTok: 4.0, CachedInputPerMTok: 0.40, CacheWritePerMTok: 5.0, OutputPerMTok: 20.0, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}); got != want {
 			t.Errorf("daybreak blue price = %+v, want %+v", got, want)
 		}
 	})
@@ -251,9 +354,9 @@ func TestPricerModelPrice(t *testing.T) {
 			want     ModelPrice
 		}{
 			{agent.QuotaProviderAnthropic, "claude-opus-5-5", ModelPrice{InputPerMTok: 4, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CacheWrite1hPerMTok: 8, OutputPerMTok: 20}},
-			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, OutputPerMTok: 50}},
-			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.5}},
-			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, OutputPerMTok: 10}},
+			{agent.QuotaProviderCodex, "gpt-6-astra", ModelPrice{InputPerMTok: 10, CachedInputPerMTok: 1, CacheWritePerMTok: 12.5, OutputPerMTok: 50, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{agent.QuotaProviderCodex, "gpt-6-luna", ModelPrice{InputPerMTok: 0.1, CachedInputPerMTok: 0.01, CacheWritePerMTok: 0.125, OutputPerMTok: 0.5, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{agent.QuotaProviderCodex, "gpt-6-sol", ModelPrice{InputPerMTok: 2, CachedInputPerMTok: 0.2, CacheWritePerMTok: 2.5, OutputPerMTok: 10, LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 		} {
 			got, ok := p.ModelPrice(tc.provider, tc.model, at)
 			if !ok || got != tc.want {
@@ -388,9 +491,33 @@ func TestParsePricingJSON(t *testing.T) {
 
 	// provider builds a one-provider document from extra provider fields.
 	provider := func(fields string) string {
-		return `{"providers":[{"provider":"p","source":"https://example.test","retrieved":"2026-09",` + fields + `}]}`
+		return `{"providers":[{"provider":"p","source":"https://example.test","retrieved":"2026-09-01",` + fields + `}]}`
 	}
 	const model = `{"id":"m","tiers":[{"price":{"input_per_mtok":1}}]}`
+
+	t.Run("ModelSources", func(t *testing.T) {
+		t.Parallel()
+		data := provider(`"models":[` + model + `,{"id":"override","source":"https://example.test/model","retrieved":"2026-10-27","tiers":[{"price":{}}]},{"id":"alias","alias":"override"},{"id":"date-only","retrieved":"2026-10-01","tiers":[{"price":{}}]}]`)
+		var file pricingFile
+		if err := json.Unmarshal([]byte(data), &file); err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		p := &file.Providers[0]
+		for i, want := range []struct{ source, retrieved string }{
+			{"https://example.test", "2026-09-01"},
+			{"https://example.test/model", "2026-10-27"},
+			{"https://example.test/model", "2026-10-27"},
+			{"https://example.test", "2026-10-01"},
+		} {
+			source, retrieved, err := p.modelSource(&p.Models[i])
+			if err != nil || source != want.source || retrieved != want.retrieved {
+				t.Errorf("%s source = %s/%s (%v), want %+v", p.Models[i].ID, source, retrieved, err, want)
+			}
+		}
+	})
 
 	t.Run("Valid", func(t *testing.T) {
 		t.Parallel()
@@ -425,9 +552,15 @@ func TestParsePricingJSON(t *testing.T) {
 			{"InvalidJSON", `{`},
 			{"NoProviders", `{}`},
 			{"UnknownField", provider(`"models":[` + model + `],"typo":1`)},
-			{"DuplicateProvider", `{"providers":[{"provider":"p","source":"s","retrieved":"r","models":[` + model + `]},{"provider":"p","source":"s","retrieved":"r","models":[` + model + `]}]}`},
+			{"DuplicateProvider", `{"providers":[{"provider":"p","source":"https://example.test","retrieved":"2026-09-01","models":[` + model + `]},{"provider":"p","source":"https://example.test","retrieved":"2026-09-01","models":[` + model + `]}]}`},
 			{"EmptyProviderName", `{"providers":[{"source":"s","retrieved":"r","models":[` + model + `]}]}`},
 			{"MissingSource", `{"providers":[{"provider":"p","retrieved":"2026-09","models":[` + model + `]}]}`},
+			{"BadProviderSource", `{"providers":[{"provider":"p","source":"not-a-url","retrieved":"2026-09-01","models":[` + model + `]}]}`},
+			{"BadProviderRetrieved", `{"providers":[{"provider":"p","source":"https://example.test","retrieved":"2026-09","models":[` + model + `]}]}`},
+			{"BadModelSource", provider(`"models":[{"id":"m","source":"javascript:alert(1)","tiers":[{"price":{}}]}]`)},
+			{"BadModelRetrieved", provider(`"models":[{"id":"m","retrieved":"2026-02-30","tiers":[{"price":{}}]}]`)},
+			{"AliasSourceOverride", provider(`"models":[` + model + `,{"id":"a","alias":"m","source":"https://example.test/alias"}]`)},
+			{"AliasRetrievedOverride", provider(`"models":[` + model + `,{"id":"a","alias":"m","retrieved":"2026-10-27"}]`)},
 			{"BadHoliday", provider(`"holidays":["2026-1-1"],"models":[` + model + `]`)},
 			{"BadWeekday", provider(`"windows":{"peak":[{"days":["monday"],"start":"01:00","end":"02:00"}]},"models":[` + model + `]`)},
 			{"BadStart", provider(`"windows":{"peak":[{"start":"01:60","end":"02:00"}]},"models":[` + model + `]`)},
@@ -466,6 +599,7 @@ func TestModelPriceValidate(t *testing.T) {
 			{"Priced", ModelPrice{InputPerMTok: 1, CachedInputPerMTok: 0.1, CacheWritePerMTok: 1.25, CacheWrite1hPerMTok: 2.5, OutputPerMTok: 5}},
 			// A free model prices every field at zero.
 			{"Free", ModelPrice{}},
+			{"LongContext", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2, OutputMultiplier: 1.5}}},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -487,6 +621,9 @@ func TestModelPriceValidate(t *testing.T) {
 			{"CacheWrite", ModelPrice{CacheWritePerMTok: -0.01}},
 			{"CacheWrite1h", ModelPrice{CacheWrite1hPerMTok: -0.01}},
 			{"Output", ModelPrice{OutputPerMTok: -1}},
+			{"LongContextThreshold", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: -1, InputMultiplier: 2, OutputMultiplier: 1.5}}},
+			{"LongContextInput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, OutputMultiplier: 1.5}}},
+			{"LongContextOutput", ModelPrice{LongContext: LongContextPrice{InputTokensAbove: 272000, InputMultiplier: 2}}},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {

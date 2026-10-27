@@ -206,6 +206,8 @@ func parseMessageTyped(typ pi.EventType, line []byte) ([]agent.Message, decodedR
 		// replaces the last API usage with the compacted context size.
 		var msgs []agent.Message
 		if ev.Result != nil && ev.Result.Usage != nil {
+			// Summary usage may combine history and turn-prefix requests, so
+			// it cannot establish one request's long-context pricing tier.
 			msgs = append(msgs, &agent.UsageMessage{Usage: toAgentUsage(ev.Result.Usage), ReportedCostUSD: &ev.Result.Usage.Cost.Total})
 		}
 		msgs = append(msgs, m)
