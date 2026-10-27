@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { createSignal, Show } from "solid-js";
 import { expect, vi } from "@tests/expect";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
@@ -150,7 +151,8 @@ import { executeFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools"
 import { voiceSession } from "@maruel/gomode/web/VoiceSession";
 import { api } from "./api";
 import { taskDiffCache } from "./diffCache";
-import { AuthProvider } from "./AuthContext";
+import { AuthProvider, useAuth } from "./AuthContext";
+import VoiceTaskFocus from "./VoiceTaskFocus";
 import { HostModeProvider } from "@maruel/gomode/web/HostMode";
 import { AppStateProvider, useAppState, type AppStore } from "./AppState";
 import { getVoiceTaskNumber, focusedVoiceTask } from "./voiceTaskState";
@@ -267,6 +269,7 @@ beforeEach(() => {
   fakeUsageESListeners.length = 0;
   fakeESOpenListeners.length = 0;
   initialTaskSnapshot = [];
+  window.__CAIC_BOOTSTRAP__ = { authProviders: [] };
   window.history.replaceState(null, "", "/");
   delete window.goModeHost;
   vi.mocked(api.globalTaskEvents).mockImplementation(((handlers: { onMessage: (event: unknown) => void }) => {
@@ -357,8 +360,181 @@ beforeEach(() => {
 
 afterEach(() => {
   delete window.__CAIC_BOOTSTRAP__;
+  delete window.goModeFrontendDocument;
+  delete window.gomodeAuth;
+  delete window.gomodeFrontendReadiness;
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+function preparationBridge() {
+  const auth: Record<string, unknown>[] = [];
+  const readiness: Array<{ ready: boolean; token: string; tools: Array<{ name: string }> }> = [];
+  window.goModeHost = { isVoiceConnected: () => false };
+  window.goModeFrontendDocument = Promise.resolve("app-document");
+  const bridge: NonNullable<Window["gomodeAuth"]> = {
+    postMessage(message) {
+      const request = JSON.parse(message) as Record<string, unknown>;
+      auth.push(request);
+      if (request.authChanged === true && request.nativeAccess === true) {
+        // Synchronous acknowledgement deliberately stresses subtree replacement.
+        bridge.onmessage?.({ data: JSON.stringify({ ...request, frontendToken: `identity-${auth.length}` }) });
+      }
+    },
+  };
+  window.gomodeAuth = bridge;
+  window.gomodeFrontendReadiness = { postMessage: (message) => readiness.push(JSON.parse(message)) };
+  return { auth, readiness };
+}
+
+it("waits after tool registration for an authoritative initial snapshot, including an empty one", async () => {
+  initialTaskSnapshot = null;
+  const { readiness } = preparationBridge();
+  const view = renderApp();
+  await waitForTaskEventsSubscription();
+  await waitFor(() => expect(readiness.length).toBeGreaterThan(0));
+  expect(readiness.some((message) => message.ready)).toBe(false);
+  dispatchSSE({ kind: "snapshot", snapshot: [makeTask()], complete: false });
+  dispatchSSE({ kind: "upsert", upsert: makeTask() });
+  expect(readiness.some((message) => message.ready)).toBe(false);
+  dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+  await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  expect(readiness.at(-1)?.tools).toEqual([expect.objectContaining({ name: "focus_task" })]);
+  const preparedCount = readiness.length;
+  dispatchSSE({ kind: "upsert", upsert: makeTask() });
+  fireEvent(window, new Event("offline"));
+  fireEvent(window, new Event("online"));
+  await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+  dispatchSSE({ kind: "snapshot", snapshot: [], complete: false });
+  expect(readiness).toHaveLength(preparedCount);
+  view.unmount();
+  expect(readiness.at(-1)).toEqual(expect.objectContaining({ ready: false, tools: [] }));
+});
+
+it("waits for tool registration when initial task data completes first", async () => {
+  initialTaskSnapshot = null;
+  const { readiness } = preparationBridge();
+  const [toolsMounted, setToolsMounted] = createSignal(false);
+  function PreparedStore() {
+    const auth = useAuth();
+    return (
+      <Show when={auth.ready()}>
+        <AppStateProvider>
+          <Show when={toolsMounted()}>
+            <VoiceTaskFocus mobile={() => false} />
+          </Show>
+        </AppStateProvider>
+      </Show>
+    );
+  }
+  const view = render(() => (
+    <AuthProvider>
+      <MemoryRouter
+        root={(props) => (
+          <HostModeProvider>
+            <PreparedStore />
+            {props.children}
+          </HostModeProvider>
+        )}
+      >
+        <Route path="/" component={() => null} />
+      </MemoryRouter>
+    </AuthProvider>
+  ));
+  await waitForTaskEventsSubscription();
+  await waitFor(() => expect(readiness.length).toBeGreaterThan(0));
+  dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+  expect(readiness.some((message) => message.ready)).toBe(false);
+  setToolsMounted(true);
+  await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  expect(readiness.at(-1)?.tools).toEqual([expect.objectContaining({ name: "focus_task" })]);
+  view.unmount();
+});
+
+it("keeps auth-disabled preparation usable after a task stream error and reconnect", async () => {
+  const { readiness } = preparationBridge();
+  const previousFetch = globalThis.fetch;
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((input, init) =>
+      input === "/auth/me" ? Promise.resolve(new Response(null, { status: 404 })) : previousFetch(input, init),
+    );
+  const view = renderApp();
+  await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  const preparedCount = readiness.length;
+  const stream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value;
+  if (!stream) throw new Error("No task stream");
+  vi.useFakeTimers();
+  stream.onerror?.(new Event("error"));
+  await Promise.resolve();
+  await Promise.resolve();
+  vi.advanceTimersByTime(1000);
+  expect(taskEventSubscriptions).toBe(2);
+  expect(fetch.mock.calls.some(([input]) => input === "/auth/me")).toBe(false);
+  expect(readiness).toHaveLength(preparedCount);
+  expect(readiness.at(-1)?.ready).toBe(true);
+  view.unmount();
+});
+
+it("revokes authenticated preparation when a task stream error confirms a missing session", async () => {
+  window.__CAIC_BOOTSTRAP__ = {
+    authProviders: ["github"],
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
+  };
+  const { auth, readiness } = preparationBridge();
+  const previousFetch = globalThis.fetch;
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
+    input === "/auth/me" ? Promise.resolve(new Response(null, { status: 404 })) : previousFetch(input, init),
+  );
+  const view = renderApp();
+  await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  const stream = vi.mocked(api.globalTaskEvents).mock.results.at(-1)?.value;
+  if (!stream) throw new Error("No task stream");
+  stream.onerror?.(new Event("error"));
+  await waitFor(() =>
+    expect(auth.some((message) => message.authChanged === true && message.nativeAccess === false)).toBe(true),
+  );
+  expect(readiness.at(-1)).toEqual(expect.objectContaining({ ready: false, tools: [] }));
+  expect(taskEventSubscriptions).toBe(1);
+  view.unmount();
+});
+
+it("does not give a replacement account the old account's prepared task data", async () => {
+  window.__CAIC_BOOTSTRAP__ = {
+    authProviders: ["github"],
+    user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
+  };
+  const { readiness } = preparationBridge();
+  vi.spyOn(api, "logout").mockRejectedValue(new Error("lost logout response"));
+  vi.spyOn(api, "getMe").mockResolvedValue({
+    id: "b",
+    sessionID: "session-b",
+    provider: "github",
+    username: "account-b",
+  });
+  const view = renderApp();
+  await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  initialTaskSnapshot = null;
+  fireEvent.click(screen.getByTitle("account-a"));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+  await waitFor(() => expect(screen.getByTitle("account-b")).toBeInTheDocument());
+  await waitFor(() => expect(taskEventSubscriptions).toBe(2));
+  expect(readiness.at(-1)).toEqual(expect.objectContaining({ ready: false, tools: [] }));
+  dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+  await waitFor(() => expect(readiness.at(-1)?.ready).toBe(true));
+  view.unmount();
+});
+
+it("keeps browser voice controls unavailable until the initial complete task snapshot", async () => {
+  initialTaskSnapshot = null;
+  vi.mocked(api.getConfig).mockResolvedValue({ voiceGateway: { mode: "embedded" } } as Config);
+  const view = renderApp();
+  await waitForTaskEventsSubscription();
+  await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+  expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
+  dispatchSSE({ kind: "snapshot", snapshot: [], complete: true });
+  await screen.findByTestId("voice-overlay");
+  view.unmount();
 });
 
 describe("structured warnings", () => {
@@ -2161,6 +2337,7 @@ describe("App repo chips: No repository", () => {
     renderApp();
 
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
+    await screen.findByTestId("chip-label-repos/a");
     expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
 
     dispatchOpen();

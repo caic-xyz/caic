@@ -10,6 +10,15 @@ import typescriptPreset from "@babel/preset-typescript";
 import { JSDOM } from "jsdom";
 import { afterEach } from "node:test";
 
+declare global {
+  interface Window {
+    gomodeAuth?: {
+      onmessage?: ((event: { data: string }) => void) | null;
+      postMessage(message: string): void;
+    };
+  }
+}
+
 // Load the assertion facade FIRST, before the jsdom globals are installed below: chai 6
 // subclasses the global `Event` at module-evaluation time for its plugin events, so it must
 // capture Node's native Event. Everything evaluated after the globals block (components,

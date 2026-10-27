@@ -1,10 +1,11 @@
-// Auth context owns cookie identity and invalidates native voice before account reload or logout.
+// Owns cookie identity, page-bound frontend preparation, and account reload/logout transitions.
 
-import { createContext, createSignal, useContext, onMount, type ParentComponent } from "solid-js";
+import { batch, createContext, createSignal, useContext, onCleanup, onMount, type ParentComponent } from "solid-js";
 
 import type { AuthBootstrapResp, Config, UserResp } from "@sdk/types.gen";
 import { APIError } from "@sdk/api.gen";
 import { api } from "./api";
+import { createFrontendPreparationClient, type FrontendPreparation } from "@maruel/gomode/web/FrontendVoiceTools";
 
 interface AuthState {
   /** True once the initial auth check has completed. */
@@ -13,6 +14,7 @@ interface AuthState {
   providers: () => string[];
   /** The currently logged-in user, or null. */
   user: () => UserResp | null;
+  frontendPreparation: () => FrontendPreparation | null;
   /** Sign out and clear the session cookie. */
   logout: () => Promise<void>;
   /** Settle as signed out after /auth/me confirms the session is missing. */
@@ -25,29 +27,42 @@ declare global {
   interface Window {
     /** Auth state injected into the SPA document by the backend. */
     __CAIC_BOOTSTRAP__?: AuthBootstrapResp;
-    /** Origin-scoped Android WebMessage listener, absent in ordinary browsers. */
-    gomodeAuth?: { postMessage(message: string): void };
   }
 }
 
 const AuthContext = createContext<AuthState>();
-
-function notifyNativeAuthChanged(nativeAccess: boolean): void {
-  window.gomodeAuth?.postMessage(JSON.stringify({ authChanged: true, nativeAccess }));
-}
-
-function notifyNativeAuthChanging(): void {
-  window.gomodeAuth?.postMessage(JSON.stringify({ authChanging: true }));
-}
 
 function isConfirmedLoggedOut(error: unknown): boolean {
   return error instanceof APIError && (error.status === 401 || error.status === 404);
 }
 
 export const AuthProvider: ParentComponent = (props) => {
+  const nativeFrontend = createFrontendPreparationClient();
   const [ready, setReady] = createSignal(false);
   const [providers, setProviders] = createSignal<string[]>([]);
   const [user, setUser] = createSignal<UserResp | null>(null);
+  const [frontendPreparation, setFrontendPreparation] = createSignal<FrontendPreparation | null>(null);
+  let disposed = false;
+
+  function publishAuth(message: Record<string, unknown>) {
+    if (disposed) return;
+    frontendPreparation()?.dispose();
+    setFrontendPreparation(nativeFrontend.publishAuth(message));
+  }
+
+  function settleIdentity(currentUser: UserResp | null, nativeAccess: boolean) {
+    if (disposed) return;
+    batch(() => {
+      publishAuth({ authChanged: true, nativeAccess });
+      setUser(currentUser);
+      setReady(true);
+    });
+  }
+
+  onCleanup(() => {
+    disposed = true;
+    frontendPreparation()?.dispose();
+  });
 
   onMount(async () => {
     // The backend injects auth state into the served document so the logged-in
@@ -56,9 +71,7 @@ export const AuthProvider: ParentComponent = (props) => {
     if (boot) {
       const authProviders = boot.authProviders ?? [];
       setProviders(authProviders);
-      setUser(boot.user ?? null);
-      setReady(true);
-      notifyNativeAuthChanged(authProviders.length === 0 || (boot.user !== undefined && boot.user !== null));
+      settleIdentity(boot.user ?? null, authProviders.length === 0 || (boot.user !== undefined && boot.user !== null));
       return;
     }
     // Fallback for documents served without injection (e.g. the Vite dev
@@ -89,37 +102,36 @@ export const AuthProvider: ParentComponent = (props) => {
     } catch {
       // Server unreachable; auth state stays null.
     } finally {
-      setReady(settled);
-      if (settled) notifyNativeAuthChanged(nativeAccess);
+      if (settled) settleIdentity(user(), nativeAccess);
     }
   });
 
   const logout = async () => {
+    if (disposed) return;
     const previousUser = user();
     const sessionID = previousUser?.sessionID;
     if (!sessionID) {
       reloadIdentity();
       return;
     }
-    setReady(false);
-    notifyNativeAuthChanging();
+    batch(() => {
+      publishAuth({ authChanging: true });
+      setReady(false);
+    });
     try {
       await api.logout(sessionID);
     } catch (error) {
+      if (disposed) return;
       if (error instanceof APIError && error.status === 401) {
         reloadIdentity();
         return;
       }
       try {
         const confirmedUser = await api.getMe();
-        setUser(confirmedUser);
-        setReady(true);
-        notifyNativeAuthChanged(true);
+        settleIdentity(confirmedUser, true);
       } catch (identityError) {
         if (isConfirmedLoggedOut(identityError)) {
-          setUser(null);
-          setReady(true);
-          notifyNativeAuthChanged(false);
+          settleIdentity(null, false);
           return;
         }
         setUser(previousUser);
@@ -128,26 +140,25 @@ export const AuthProvider: ParentComponent = (props) => {
       }
       return;
     }
-    setUser(null);
-    setReady(true);
-    notifyNativeAuthChanged(false);
+    settleIdentity(null, false);
   };
 
   const confirmLoggedOut = () => {
-    setUser(null);
-    setReady(true);
-    notifyNativeAuthChanged(false);
+    settleIdentity(null, false);
   };
 
   const reloadIdentity = (destination?: "/") => {
-    if (ready()) notifyNativeAuthChanging();
+    if (disposed) return;
+    if (ready()) publishAuth({ authChanging: true });
     setReady(false);
     if (destination) window.location.assign(destination);
     else window.location.reload();
   };
 
   return (
-    <AuthContext.Provider value={{ ready, providers, user, logout, confirmLoggedOut, reloadIdentity }}>
+    <AuthContext.Provider
+      value={{ ready, providers, user, frontendPreparation, logout, confirmLoggedOut, reloadIdentity }}
+    >
       {props.children}
     </AuthContext.Provider>
   );

@@ -3066,7 +3066,7 @@ func TestGoModeSettings(t *testing.T) {
 	if got.APIVersion != 1 {
 		t.Fatalf("APIVersion = %d, want 1", got.APIVersion)
 	}
-	if got.WebShell.BridgeVersion != 1 {
+	if got.WebShell.BridgeVersion != 2 {
 		t.Fatalf("WebShell = %+v", got.WebShell)
 	}
 	if len(got.WebShell.ToolGroups) != 1 {
@@ -3451,7 +3451,7 @@ func TestBuildHandler(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
-		if resp.Service != "caic" || resp.APIVersion != 1 {
+		if resp.Service != "caic" || resp.APIVersion != 1 || resp.WebShell.BridgeVersion != 2 {
 			t.Fatalf("settings = %+v", resp)
 		}
 		if err := resp.Validate(); err != nil {

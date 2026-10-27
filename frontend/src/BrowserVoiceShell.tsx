@@ -92,7 +92,7 @@ export default function BrowserVoiceShell() {
 
   return (
     <>
-      <Show when={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && voiceReady()}>
+      <Show when={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && voiceReady() && s.initialTasksReady()}>
         <VoiceTaskUpdates tasks={s.tasks} />
         <VoiceOverlay />
       </Show>

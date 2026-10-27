@@ -1,4 +1,4 @@
-// Application state for task membership, connection liveness, retained server health, settings, actions, caches, and drafts.
+// Account-owned task membership, initial voice data readiness, connection state, settings, actions, caches, and drafts.
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 
 import { batch, createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
@@ -95,6 +95,7 @@ function createAppStore() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
+  const frontendPreparation = auth.frontendPreparation();
   const hostMode = useHostMode();
   const initialTaskId = taskIdFromPath(location.pathname);
   let initialTaskFocusClaimed = false;
@@ -119,6 +120,10 @@ function createAppStore() {
   const [detailTask, setDetailTask] = createSignal<Task | null>(null);
   const [taskStreamReady, setTaskStreamReady] = createSignal(false);
   const [taskSnapshotComplete, setTaskSnapshotComplete] = createSignal(false);
+  // One authoritative complete snapshot establishes the initial tool data for
+  // this account, including an empty list. Reconnects retain usable cached
+  // tasks; ordinary deltas and partial reconnect snapshots do not revoke it.
+  const [initialTasksReady, setInitialTasksReady] = createSignal(false);
   let taskStreamGeneration = 0;
   let taskMembership = new Set<string>();
   const [tasksLoading, setTasksLoading] = createSignal(true);
@@ -794,6 +799,9 @@ function createAppStore() {
     /** Probe whether the session is gone. EventSource doesn't expose status codes. */
     async function checkUnauthorized(probeGeneration: number): Promise<boolean> {
       if (!active || generation !== probeGeneration) return true;
+      // Auth-disabled services have no missing session to probe: /auth/me can
+      // legitimately return 404 while cached frontend task tools remain usable.
+      if (auth.ready() && auth.providers().length === 0) return false;
       try {
         const res = await fetch("/auth/me", {
           signal: AbortSignal.timeout(5000),
@@ -871,6 +879,7 @@ function createAppStore() {
               if (detailTask() && snapshotByID.has(detailTask()?.id ?? "")) setDetailTask(null);
               setTasksLoading(false);
               setTaskSnapshotComplete(complete);
+              if (complete) setInitialTasksReady(true);
               setTaskStreamReady(true);
               notifyQuotaRecoveries(reconciled);
             });
@@ -1628,9 +1637,11 @@ function createAppStore() {
   return {
     navigate,
     auth,
+    frontendPreparation,
     // task data + selection
     tasks,
     tasksLoading,
+    initialTasksReady,
     settledLoading,
     settledError,
     repos,

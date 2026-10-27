@@ -196,7 +196,7 @@ function Shell(props: { children?: JSX.Element }) {
           <KeyboardShortcuts
             open={shortcutsOpen()}
             onOpenChange={setShortcutsOpen}
-            voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}
+            voiceAvailable={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable() && s.initialTasksReady()}
           />
           <VoiceTaskFocus mobile={mobile} />
           <div
@@ -217,8 +217,8 @@ function Shell(props: { children?: JSX.Element }) {
 export default function App(props: { children?: JSX.Element }) {
   const auth = useAuth();
   const accountScope = () => {
-    if (auth.providers().length === 0) return "auth-disabled";
     if (!auth.ready()) return null;
+    if (auth.providers().length === 0) return "auth-disabled";
     const user = auth.user();
     return user ? `${user.provider}:${user.id}` : null;
   };

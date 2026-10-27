@@ -1,4 +1,4 @@
-// Frontend task selection for service and voice tools, and native voice task numbering.
+// Registers frontend task tools and publishes their account-owned initial data readiness.
 
 import { createEffect, on, onCleanup, type Accessor } from "solid-js";
 import { registerFrontendVoiceTool } from "@maruel/gomode/web/FrontendVoiceTools";
@@ -85,6 +85,10 @@ export default function VoiceTaskFocus(props: { mobile: Accessor<boolean> }) {
   });
 
   createEffect(() => {
+    s.frontendPreparation?.setReady(s.initialTasksReady());
+  });
+
+  createEffect(() => {
     // A service focus event may precede its task's upsert. Membership removals
     // clear focus in AppState; absence from the current list is not a removal.
     if (!voiceConnected()) {
@@ -93,6 +97,7 @@ export default function VoiceTaskFocus(props: { mobile: Accessor<boolean> }) {
   });
 
   onCleanup(() => {
+    s.frontendPreparation?.setReady(false);
     unregister();
     setFocusedVoiceTask(null);
   });

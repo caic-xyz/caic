@@ -10,6 +10,7 @@ import { api } from "./api";
 import { AuthProvider, useAuth } from "./AuthContext";
 
 let auth: ReturnType<typeof useAuth> | null = null;
+const authMessages = vi.fn((message: string) => message);
 
 function currentAuth(): ReturnType<typeof useAuth> {
   if (auth === null) throw new Error("Auth context did not render");
@@ -27,7 +28,7 @@ function renderAuth() {
       <AuthActions />
     </AuthProvider>
   ));
-  return window.gomodeAuth?.postMessage;
+  return authMessages;
 }
 
 beforeEach(() => {
@@ -35,7 +36,16 @@ beforeEach(() => {
     authProviders: ["github"],
     user: { id: "a", sessionID: "session-a", provider: "github", username: "account-a" },
   };
-  window.gomodeAuth = { postMessage: vi.fn() };
+  authMessages.mockClear();
+  window.goModeFrontendDocument = Promise.resolve("auth-document");
+  window.gomodeAuth = {
+    postMessage(message) {
+      const { frontendDocument, frontendRequest, ...authFields } = JSON.parse(message) as Record<string, unknown>;
+      expect(frontendDocument).toBe("auth-document");
+      expect(typeof frontendRequest).toBe("string");
+      authMessages(JSON.stringify(authFields));
+    },
+  };
   vi.spyOn(api, "logout").mockResolvedValue({ status: "ok" });
   vi.spyOn(api, "getMe").mockResolvedValue({
     id: "a",
@@ -50,6 +60,7 @@ afterEach(() => {
   auth = null;
   delete window.__CAIC_BOOTSTRAP__;
   delete window.gomodeAuth;
+  delete window.goModeFrontendDocument;
   vi.restoreAllMocks();
 });
 
@@ -93,6 +104,7 @@ it("keeps native monitoring paused until logout settles", async () => {
   const result = currentAuth().logout();
   expect(api.logout).toHaveBeenCalledWith("session-a");
   expect(currentAuth().ready()).toBe(false);
+  await Promise.resolve();
   expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanging":true}');
   expect(postMessage).toHaveBeenCalledTimes(2);
 
@@ -163,8 +175,40 @@ it("settles logged out after /auth/me confirms the session is missing", async ()
   await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
 
   currentAuth().confirmLoggedOut();
+  await Promise.resolve();
   expect(currentAuth().ready()).toBe(true);
   expect(currentAuth().user()).toBeNull();
   expect(postMessage).toHaveBeenCalledTimes(2);
   expect(postMessage).toHaveBeenNthCalledWith(2, '{"authChanged":true,"nativeAccess":false}');
+});
+
+it("cannot publish a late authentication result after its provider is disposed", async () => {
+  delete window.__CAIC_BOOTSTRAP__;
+  const config = Promise.withResolvers<Response>();
+  vi.spyOn(globalThis, "fetch").mockReturnValue(config.promise);
+  renderAuth();
+  cleanup();
+  config.resolve(
+    new Response(JSON.stringify({ authProviders: [] }), { headers: { "Content-Type": "application/json" } }),
+  );
+  await config.promise;
+  await Promise.resolve();
+  expect(authMessages).not.toHaveBeenCalled();
+});
+
+it("keeps pending authentication bound to the page that started it", async () => {
+  delete window.__CAIC_BOOTSTRAP__;
+  const config = Promise.withResolvers<Response>();
+  vi.spyOn(globalThis, "fetch").mockReturnValue(config.promise);
+  renderAuth();
+  const replacementPost = vi.fn();
+  window.goModeFrontendDocument = Promise.resolve("replacement-document");
+  window.gomodeAuth = { postMessage: replacementPost };
+  config.resolve(
+    new Response(JSON.stringify({ authProviders: [] }), { headers: { "Content-Type": "application/json" } }),
+  );
+  await waitFor(() => expect(currentAuth().ready()).toBe(true));
+  await Promise.resolve();
+  expect(replacementPost).not.toHaveBeenCalled();
+  expect(authMessages).toHaveBeenCalledWith('{"authChanged":true,"nativeAccess":true}');
 });
