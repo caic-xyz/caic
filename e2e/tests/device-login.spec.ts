@@ -132,15 +132,6 @@ test("device approval, normal permissions, logout, and network protection", asyn
         ).status(),
       ).toBe(404);
     });
-    await test.step("denial never issues a session", async () => {
-      await screen.goto("/device-login");
-      const code = await screen.getByLabel("Device code", { exact: true }).innerText();
-      await approval.goto("/device");
-      await approval.getByRole("textbox", { name: "Device code" }).fill(code);
-      await approval.getByRole("button", { name: "Deny sign-in" }).click();
-      await expect(screen.getByRole("status")).toHaveText("Sign-in denied.", { timeout: 15_000 });
-      expect((await display.request.get("/auth/me")).status()).toBe(404);
-    });
     await test.step("approver identifies and revokes the display session without ending its own session", async () => {
       await screen.goto("/device-login");
       const code = await screen.getByLabel("Device code", { exact: true }).innerText();
@@ -268,7 +259,7 @@ test("shared pairing views fit narrow screens, wide screens, and native 200% zoo
         expect(box.height).toBeGreaterThanOrEqual(44);
       }
       await page.screenshot({ path: testInfo.outputPath(`approval-${width / 2}-200-percent.png`) });
-      await page.getByRole("button", { name: "Deny sign-in" }).scrollIntoViewIfNeeded();
+      await page.getByRole("button", { name: "Approve sign-in" }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath(`approval-${width / 2}-200-percent-actions.png`) });
     }
     // Full-page captures at native zoom crop inconsistently in Chromium;
@@ -411,7 +402,7 @@ test("pairing errors offer recovery without silently repeating an approval or ex
     for (const [error, message] of [
       ["expired_token", "This code expired. Create a new code on the device you want to sign in."],
       ["rate_limited", "Too many attempts. Wait 60 seconds before checking the code again."],
-      ["audit_failed", "Your decision could not be recorded. Check the code again before approving or denying."],
+      ["audit_failed", "Your approval could not be recorded. Check the code again before approving."],
       ["csrf_failed", "Your account or request changed. Check the code again."],
       ["already_decided", "This code is being processed or already used. Check the other device."],
       ["network", "Your decision could not be confirmed. Check the code again, and check the other device."],
